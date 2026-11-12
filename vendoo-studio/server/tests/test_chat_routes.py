@@ -86,7 +86,6 @@ class SendMessageStreamTest(unittest.TestCase):
         app.dependency_overrides[get_db] = override_get_db
         try:
             with patch("vendoo_studio.routes.chat.get_listing_provider", return_value=provider), \
-                 patch("vendoo_studio.routes.chat.SessionLocal", self.Session), \
                  patch("vendoo_studio.database.SessionLocal", self.Session), \
                  patch("vendoo_studio.routes.chat.build_chat_messages", new=build), \
                  patch("vendoo_studio.routes.chat.persist_chat_result", new=AsyncMock(return_value=(None, False))):
@@ -107,7 +106,7 @@ class SendMessageStreamTest(unittest.TestCase):
             async def chat(self, messages, stream=True):
                 yield "Done."
 
-        async def build(conv_id, db, text, option_catalog=None):
+        async def build(conv_id, text, option_catalog=None):
             return [{"role": "user", "content": text}]
 
         response = self.send(build, Provider())
@@ -128,7 +127,7 @@ class SendMessageStreamTest(unittest.TestCase):
             async def chat(self, messages, stream=True):
                 yield "Done."
 
-        async def build(conv_id, db, text, option_catalog=None):
+        async def build(conv_id, text, option_catalog=None):
             await asyncio.sleep(0.5)
             return [{"role": "user", "content": text}]
 
@@ -141,7 +140,7 @@ class SendMessageStreamTest(unittest.TestCase):
     def test_a_failed_photo_analysis_ends_the_stream_with_an_error(self):
         from vendoo_studio.services.listing_generate import PhotoAnalysisError
 
-        async def build(conv_id, db, text, option_catalog=None):
+        async def build(conv_id, text, option_catalog=None):
             raise PhotoAnalysisError("Photo analysis failed. Retry to analyze the photos again.")
 
         response = self.send(build, object())
@@ -178,7 +177,7 @@ class StoppedChatAnswerIsKeptTest(SendMessageStreamTest):
                 activity.cancel(conv_id)
                 yield "ue\"}\n```"
 
-        async def build(conv_id, db, text, option_catalog=None):
+        async def build(conv_id, text, option_catalog=None):
             return [{"role": "user", "content": text}]
 
         response = self.send(build, Provider())

@@ -11,8 +11,12 @@ from vendoo_studio.services import direct_preflight
 from vendoo_studio.services.native_marketplaces import NativeMarketplaceError
 
 
-async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, db: Session, *, refresh: bool = False) -> dict:
-    """Never start a job or save a draft just to display the form."""
+def form_snapshot(db: Session, conv_id: str, marketplace: str, revision_id: str | None) -> tuple[dict, dict]:
+    """The plain data a form is built from: the marketplace snapshot and the saved listing.
+
+    Rolls back before returning, so no connection is held while eBay, Chrome
+    or Mercari answer.
+    """
     conv = ConversationRepo(db).get(conv_id)
     if not conv:
         raise NativeMarketplaceError(404, "Conversation not found")
@@ -23,9 +27,12 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
     # A draft nobody has generated yet still opens every form, empty, for the seller to fill in.
     listing_json = revision.listing_json if revision else {}
     snapshot = direct_preflight.prepare(db, conv, listing_json, marketplace)
-    # Snapshot is plain data. Release before eBay/Chrome/Mercari waits so two
-    # concurrent generates cannot pin the hosted pool on form refreshes.
     db.rollback()
+    return snapshot, listing_json
+
+
+async def build_form(snapshot: dict, listing_json: dict, marketplace: str, *, refresh: bool = False) -> dict:
+    """Never start a job or save a draft just to display the form."""
     if marketplace == "poshmark":
         from vendoo_studio.services.poshmark_form import form
 
@@ -55,12 +62,30 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, d
     raise NativeMarketplaceError(404, "This marketplace has no native editor form.")
 
 
-async def refresh_form(conv_id: str, marketplace: str, revision_id: str, db: Session) -> dict:
-    """Rebuild one form and fence its saved definition against concurrent edits."""
+async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, *, refresh: bool = False) -> dict:
+    """One marketplace's form, read in a short session of its own on a worker thread."""
+    from vendoo_studio.database import in_worker_session
+
+    snapshot, listing_json = await in_worker_session(form_snapshot, conv_id, marketplace, revision_id)
+    return await build_form(snapshot, listing_json, marketplace, refresh=refresh)
+
+
+def read_form(db: Session, conv_id: str, marketplace: str, revision_id: str | None, *, refresh: bool = False) -> dict:
+    """``editor_form`` for a plain route, in its worker thread, with the request's session."""
+    snapshot, listing_json = form_snapshot(db, conv_id, marketplace, revision_id)
+    return asyncio.run(build_form(snapshot, listing_json, marketplace, refresh=refresh))
+
+
+def refresh_form(db: Session, conv_id: str, marketplace: str, revision_id: str) -> dict:
+    """Rebuild one form and fence its saved definition against concurrent edits. For a plain route."""
+    form = read_form(db, conv_id, marketplace, revision_id, refresh=True)
+    return save_refreshed_form(db, conv_id, marketplace, revision_id, form)
+
+
+def save_refreshed_form(db: Session, conv_id: str, marketplace: str, revision_id: str, form: dict) -> dict:
     from vendoo_studio.repositories.queries import RevisionConflict
     from vendoo_studio.services import listing_persistence, native_contract
 
-    form = await editor_form(conv_id, marketplace, revision_id, db, refresh=True)
     if form.get("known") is False or not form.get("fields"):
         raise NativeMarketplaceError(502, "The marketplace fields could not be loaded. Your saved listing is unchanged.")
     db.expire_all()

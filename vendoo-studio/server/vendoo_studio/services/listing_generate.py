@@ -1481,8 +1481,23 @@ def persist_generated_listing(
     return listing
 
 
+def _check_photos(db, conv_id: str, expected_photo_fingerprint: str | None) -> None:
+    if expected_photo_fingerprint is not None:
+        if photo_fingerprint(ConversationRepo(db).get_photos(conv_id)) != expected_photo_fingerprint:
+            raise RuntimeError("Photos changed during generation. Generate again to read the current photos.")
+
+
+def _ready_message(db, conv_id: str, *, repaired: bool, finalized: bool, listing: dict) -> None:
+    ConversationRepo(db).add_message(
+        conv_id,
+        "system",
+        _ready_note(repaired=repaired, finalized=finalized, blockers=_validation_blockers(listing)),
+        provider="system",
+        model="",
+    )
+
+
 async def persist_generated_listing_with_repair(
-    db,
     conv_id: str,
     full_text: str,
     provider,
@@ -1492,65 +1507,64 @@ async def persist_generated_listing_with_repair(
     expected_revision_id: str | None = None,
     expected_photo_fingerprint: str | None = None,
 ) -> dict | None:
-    """Persist listing JSON, repairing parse errors and clearing Send validation gaps."""
+    """Persist listing JSON, repairing parse errors and clearing Send validation gaps.
+
+    Each database step runs in a short session on a worker thread, so no
+    connection is held while a model repairs the JSON or fills the gaps.
+    """
+    from vendoo_studio.database import in_worker_session
+
     provider_name = getattr(provider, "name", "xiaomi-mimo")
     model_name = getattr(provider, "listing_model", "mimo-v2.5-pro")
     if expected_revision_id is None:
-        expected_revision_id = ConversationRepo(db).current_revision_id(conv_id) or ""
+        expected_revision_id = await in_worker_session(
+            lambda db: ConversationRepo(db).current_revision_id(conv_id)) or ""
     parsed = extract_listing_json(full_text)
     repaired = False
     if not parsed:
-        # Release the pooled connection while a model repairs the JSON.
-        db.rollback()
         repaired_json = await repair_listing_json(provider, full_text)
         if repaired_json:
             log.info("repaired malformed listing JSON for %s", conv_id)
             parsed = repaired_json
             repaired = True
 
-    def check_photos() -> None:
-        if expected_photo_fingerprint is not None:
-            db.expire_all()
-            if photo_fingerprint(ConversationRepo(db).get_photos(conv_id)) != expected_photo_fingerprint:
-                raise RuntimeError("Photos changed during generation. Generate again to read the current photos.")
+    def save(db):
+        _check_photos(db, conv_id, expected_photo_fingerprint)
+        listing = persist_generated_listing(
+            db,
+            conv_id,
+            full_text,
+            source=source,
+            parsed=parsed,
+            repaired=repaired,
+            provider_name=provider_name,
+            model_name=model_name,
+            announce=False,
+            expected_revision_id=expected_revision_id,
+        )
+        if not listing:
+            return None
+        repo = ConversationRepo(db)
+        conv = repo.get(conv_id)
+        return (listing, repo.current_revision_id(conv_id), current_photo_analysis(repo, conv_id) or "",
+                str(getattr(conv, "notes", "") or ""))
 
-    check_photos()
-    listing = persist_generated_listing(
-        db,
-        conv_id,
-        full_text,
-        source=source,
-        parsed=parsed,
-        repaired=repaired,
-        provider_name=provider_name,
-        model_name=model_name,
-        announce=False,
-        expected_revision_id=expected_revision_id,
-    )
-    if not listing:
+    saved = await in_worker_session(save)
+    if saved is None:
         return None
-
-    expected_revision_id = ConversationRepo(db).current_revision_id(conv_id)
-    conv = ConversationRepo(db).get(conv_id)
-    analysis = current_photo_analysis(ConversationRepo(db), conv_id) or ""
-    notes = str(getattr(conv, "notes", "") or "")
+    listing, expected_revision_id, analysis, notes = saved
     finalized = False
     if _validation_blockers(listing):
-        # The listing is saved; release the connection while a model fills the gaps.
-        db.rollback()
         updated = await fill_validation_gaps(provider, listing, analysis=analysis, notes=notes)
         if isinstance(updated, dict) and updated:
-            check_photos()
+            def finalize(db):
+                _check_photos(db, conv_id, expected_photo_fingerprint)
+                listing_persistence.save_revision(db, conv_id, updated, source="generation_finalize", expected_revision_id=expected_revision_id)
+
+            await in_worker_session(finalize)
             listing = updated
-            listing_persistence.save_revision(db, conv_id, listing, source="generation_finalize", expected_revision_id=expected_revision_id)
             finalized = True
 
     if final_announce:
-        ConversationRepo(db).add_message(
-            conv_id,
-            "system",
-            _ready_note(repaired=repaired, finalized=finalized, blockers=_validation_blockers(listing)),
-            provider="system",
-            model="",
-        )
+        await in_worker_session(lambda db: _ready_message(db, conv_id, repaired=repaired, finalized=finalized, listing=listing))
     return listing

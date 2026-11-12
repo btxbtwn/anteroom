@@ -22,6 +22,7 @@ from vendoo_studio.services.catalog_index import (
 )
 from vendoo_studio.services.category_selection import select_categories, _candidate_query
 from vendoo_studio.services.category_lookup import condense_category_search_query
+from worker_sessions import memory_engine, worker_sessions
 
 
 class CandidateQueryTest(unittest.TestCase):
@@ -52,8 +53,9 @@ class CategorySelectionTest(unittest.IsolatedAsyncioTestCase):
         self._data = os.environ.get("VENDOO_STUDIO_DATA_DIR")
         os.environ["VENDOO_STUDIO_DATA_DIR"] = self.tmp.name
         reset_catalog_index_cache()
-        self.engine = create_engine("sqlite://")
+        self.engine = memory_engine()
         Base.metadata.create_all(self.engine)
+        self.enterContext(worker_sessions(self.engine))
         self.db = Session(self.engine)
         for mp, root, leaf in [("general", "Clothing", "Women's Tops"), ("ebay", "Fashion", "Shirts")]:
             self.db.add(CategoryTree(marketplace=mp, status="complete", roots_loaded=True))
@@ -79,7 +81,7 @@ class CategorySelectionTest(unittest.IsolatedAsyncioTestCase):
             async def chat(self, messages, stream=True):
                 choices = json.loads(messages[-1]["content"])["choices"]
                 yield json.dumps({"categories": {mp: rows[0]["id"] for mp, rows in choices.items()}})
-        result = await select_categories(self.db, Provider(), "Women's cotton tops shirts", "", ["ebay"])
+        result = await select_categories(Provider(), "Women's cotton tops shirts", "", ["ebay"])
         self.assertEqual(result, {"general": "Clothing > Women's Tops", "ebay": "Fashion > Shirts"})
 
     async def test_ask_model_timeout_falls_back_to_catalog_ranking(self):
@@ -98,7 +100,7 @@ class CategorySelectionTest(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(cs.asyncio, "timeout", short_timeout):
             result = await select_categories(
-                self.db, SlowProvider(), "Women's cotton tops shirts", "", ["ebay"],
+                SlowProvider(), "Women's cotton tops shirts", "", ["ebay"],
             )
         self.assertEqual(result["general"], "Clothing > Women's Tops")
         self.assertEqual(result["ebay"], "Fashion > Shirts")
@@ -108,7 +110,7 @@ class CategorySelectionTest(unittest.IsolatedAsyncioTestCase):
             async def chat(self, messages, stream=True):
                 yield '{"categories": {"general": "invented", "ebay": "ebay-leaf"}}'
         # Invented ids fall back to the top catalog hit instead of asking the seller.
-        result = await select_categories(self.db, Provider(), "Women's Tops Shirts", "", ["ebay"])
+        result = await select_categories(Provider(), "Women's Tops Shirts", "", ["ebay"])
         self.assertEqual(result["general"], "Clothing > Women's Tops")
         self.assertEqual(result["ebay"], "Fashion > Shirts")
 
@@ -130,7 +132,7 @@ class CategorySelectionTest(unittest.IsolatedAsyncioTestCase):
                 choices = json.loads(messages[-1]["content"])["choices"]
                 yield json.dumps({"categories": {mp: rows[0]["id"] for mp, rows in choices.items()}})
 
-        result = await select_categories(self.db, Provider(), "Women's cotton tops shirts", "", ["ebay"])
+        result = await select_categories(Provider(), "Women's cotton tops shirts", "", ["ebay"])
         self.assertEqual(result["general"], "Clothing > Women's Tops")
         self.assertEqual(result["ebay"], "Fashion > Shirts")
         # Seller interview text must not trigger extra model loops — catalog ranking finishes it.
@@ -154,7 +156,7 @@ class CategorySelectionTest(unittest.IsolatedAsyncioTestCase):
                     return
                 yield json.dumps({"categories": {"ebay": "ebay-tee"}})
 
-        result = await select_categories(self.db, Provider(), "Women's tops", "", ["ebay"])
+        result = await select_categories(Provider(), "Women's tops", "", ["ebay"])
         self.assertEqual(result, {"general": "Clothing > Women's Tops", "ebay": "Fashion > T-Shirts"})
         # The confirmed General pick is not asked about again.
         self.assertEqual(list(seen[1]), ["ebay"])
@@ -194,7 +196,7 @@ class CategorySelectionTest(unittest.IsolatedAsyncioTestCase):
                 yield json.dumps({"categories": {}, "question": "marketplaces do not include women's top"})
 
         result = await select_categories(
-            self.db, Provider(), "women's top", "women's top",
+            Provider(), "women's top", "women's top",
             ["ebay", "poshmark", "mercari", "depop", "etsy"],
         )
         self.assertEqual(result["general"], WOMEN_TOPS_PATH)
@@ -216,7 +218,7 @@ class CategorySelectionTest(unittest.IsolatedAsyncioTestCase):
             return_value=[],
         ):
             result = await select_categories(
-                self.db, Provider(), "Women's Tops Shirts", "", ["ebay"],
+                Provider(), "Women's Tops Shirts", "", ["ebay"],
             )
         self.assertEqual(result["general"], "Clothing > Women's Tops")
         self.assertEqual(result["ebay"], "Fashion > Shirts")
@@ -233,7 +235,7 @@ class CategorySelectionTest(unittest.IsolatedAsyncioTestCase):
                 yield json.dumps({"categories": {mp: rows[0]["id"] for mp, rows in choices.items()}})
 
         result = await select_categories(
-            self.db, Provider(), "Women's Tops Shirts", "", ["ebay"], override="Clothing",
+            Provider(), "Women's Tops Shirts", "", ["ebay"], override="Clothing",
         )
         self.assertEqual(result, {"general": "Clothing > Women's Tops", "ebay": "Fashion > Shirts"})
 
@@ -241,7 +243,7 @@ class CategorySelectionTest(unittest.IsolatedAsyncioTestCase):
         self.db.get(CategoryTree, "ebay").status = "paused"
         self.db.commit()
         with self.assertRaisesRegex(RuntimeError, "Finish category-tree extraction.*ebay"):
-            await select_categories(self.db, None, "tee", "", ["ebay"])
+            await select_categories(None, "tee", "", ["ebay"])
 
     async def test_noisy_photo_analysis_still_surfaces_jeans_choices(self):
         for mp, path, cid in (
@@ -280,7 +282,7 @@ class CategorySelectionTest(unittest.IsolatedAsyncioTestCase):
             "photographed flat on a white background. Women's straight-leg jeans."
         )
         result = await select_categories(
-            self.db, Provider(), analysis, '{"size":"28"}', ["poshmark", "depop"],
+            Provider(), analysis, '{"size":"28"}', ["poshmark", "depop"],
         )
         self.assertEqual(result["poshmark"], "Women > Jeans > Straight Leg")
         self.assertEqual(result["depop"], "Women > Bottoms > Jeans")

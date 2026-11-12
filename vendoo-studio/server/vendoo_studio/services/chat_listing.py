@@ -336,37 +336,42 @@ def apply_listing_payload(
     return None, False
 
 
+def _system_note(db: Session, conv_id: str, text: str) -> None:
+    ConversationRepo(db).add_message(conv_id, "system", text, provider="system", model="")
+
+
+def _save_repaired_listing(db: Session, conv_id: str, repaired: dict) -> None:
+    save_listing_revision(db, conv_id, repaired)
+    _system_note(db, conv_id, "Repaired malformed listing JSON and saved it for review.")
+
+
 async def apply_listing_payload_with_repair(
-    db: Session,
     conv_id: str,
     full_text: str,
     provider,
     *,
     user_message: str = "",
 ) -> tuple[list[dict] | None, bool]:
+    from vendoo_studio.database import in_worker_session
     from vendoo_studio.services.fill_log import (
         is_missing_fields_request,
         looks_like_missing_fields_attempt,
         repair_missing_fields,
     )
 
-    operations, saved = apply_listing_payload(db, conv_id, full_text, user_message=user_message)
+    operations, saved = await in_worker_session(
+        lambda db: apply_listing_payload(db, conv_id, full_text, user_message=user_message))
     if saved:
         return operations, True
 
     ask_fields = is_missing_fields_request(user_message)
     if ask_fields or looks_like_missing_fields_attempt(full_text):
         repaired_fields = await repair_missing_fields(provider, full_text, user_message)
-        if repaired_fields and _save_missing_fields(db, conv_id, repaired_fields, user_message=user_message):
+        if repaired_fields and await in_worker_session(
+                lambda db: _save_missing_fields(db, conv_id, repaired_fields, user_message=user_message)):
             return None, True
         if ask_fields:
-            ConversationRepo(db).add_message(
-                conv_id,
-                "system",
-                "Could not save field values into the listing JSON. Retry Ask chat.",
-                provider="system",
-                model="",
-            )
+            await in_worker_session(_system_note, conv_id, "Could not save field values into the listing JSON. Retry Ask chat.")
         return None, False
 
     if extract_listing_json(full_text):
@@ -379,59 +384,18 @@ async def apply_listing_payload_with_repair(
     repaired = await repair_listing_json(provider, full_text)
     if not repaired:
         return None, False
-    save_listing_revision(db, conv_id, repaired)
-    ConversationRepo(db).add_message(
-        conv_id,
-        "system",
-        "Repaired malformed listing JSON and saved it for review.",
-        provider="system",
-        model="",
-    )
+    await in_worker_session(_save_repaired_listing, conv_id, repaired)
     return None, True
 
 
-async def persist_chat_result(
-    db: Session,
-    conv_id: str,
-    full_text: str,
-    provider,
-    *,
-    provider_name: str,
-    provider_model: str,
-    stream_error: str,
-    user_message: str,
-) -> tuple[list[dict] | None, bool]:
-    stream_repo = ConversationRepo(db)
-    usable = full_text.strip() and not full_text.lstrip().lower().startswith("error:")
-    saved = False
-    operations: list[dict] | None = None
-    if usable and not stream_error:
-        stream_repo.add_message(conv_id, "assistant", full_text, provider=provider_name, model=provider_model)
-        operations, saved = await apply_listing_payload_with_repair(
-            db, conv_id, full_text, provider, user_message=user_message
-        )
-        from vendoo_studio.services import activity
-
-        scope = activity.edit_fields.get()
-        if saved and (scope is None or any("categor" in path.casefold() for path in scope)):
-            from vendoo_studio.services.agent_categories import apply_saved_agent_category
-
-            await apply_saved_agent_category(db, conv_id, operations=operations, source_text=full_text)
-    elif stream_error or not full_text.strip():
-        stream_repo.add_message(
-            conv_id,
-            "system",
-            stream_error or "The listing assistant returned an empty response. Retry this prompt.",
-            provider="system",
-            model="",
-        )
-
+def _settle_chat_status(db: Session, conv_id: str) -> None:
     from vendoo_studio.repositories.queries import (
         LISTING_STATUSES,
         JobRepo,
     )
     from vendoo_studio.services.vendoo_import import parse_notes
 
+    stream_repo = ConversationRepo(db)
     active = any(job.conversation_id == conv_id for job in JobRepo(db).get_active())
     if active:
         stream_repo.update_status(conv_id, "listing")
@@ -443,4 +407,38 @@ async def persist_chat_result(
         if imported_status not in LISTING_STATUSES:
             imported_status = "draft"
         stream_repo.update_status(conv_id, imported_status)
+
+
+async def persist_chat_result(
+    conv_id: str,
+    full_text: str,
+    provider,
+    *,
+    provider_name: str,
+    provider_model: str,
+    stream_error: str,
+    user_message: str,
+) -> tuple[list[dict] | None, bool]:
+    from vendoo_studio.database import in_worker_session
+
+    usable = full_text.strip() and not full_text.lstrip().lower().startswith("error:")
+    saved = False
+    operations: list[dict] | None = None
+    if usable and not stream_error:
+        await in_worker_session(lambda db: ConversationRepo(db).add_message(
+            conv_id, "assistant", full_text, provider=provider_name, model=provider_model))
+        operations, saved = await apply_listing_payload_with_repair(
+            conv_id, full_text, provider, user_message=user_message
+        )
+        from vendoo_studio.services import activity
+
+        scope = activity.edit_fields.get()
+        if saved and (scope is None or any("categor" in path.casefold() for path in scope)):
+            from vendoo_studio.services.agent_categories import apply_saved_agent_category
+
+            await apply_saved_agent_category(conv_id, operations=operations, source_text=full_text)
+    elif stream_error or not full_text.strip():
+        await in_worker_session(
+            _system_note, conv_id, stream_error or "The listing assistant returned an empty response. Retry this prompt.")
+    await in_worker_session(_settle_chat_status, conv_id)
     return operations, saved

@@ -34,8 +34,15 @@ def seed_general_fields(snapshot: dict, notes: str | None = None) -> dict:
     return out
 
 
+def _schema_inputs(db: Session, conv_id: str, notes: str) -> tuple[dict, str, str | None]:
+    revisions = ListingRepo(db).get_revisions(conv_id)
+    seed = deepcopy(revisions[0].listing_json) if revisions else {}
+    revision_id = revisions[0].id if revisions else ""
+    conv = ConversationRepo(db).get(conv_id)
+    return seed, revision_id, conv.notes if conv else notes
+
+
 async def prepare_generation_schema(
-    db: Session,
     conv_id: str,
     provider,
     analysis: str,
@@ -44,28 +51,24 @@ async def prepare_generation_schema(
     on_status=None,
 ) -> dict:
     """Choose the shared category; native form builders own marketplace fields."""
+    from vendoo_studio.database import in_worker_session
     from vendoo_studio.services.category_selection import select_categories
     from vendoo_studio.services.direct_categories import attach_direct_categories
 
     if on_status:
         on_status("Choosing a category…")
     override = str(parse_notes(notes).get("categoryOverride") or "").strip()
-    revisions = ListingRepo(db).get_revisions(conv_id)
-    seed = deepcopy(revisions[0].listing_json) if revisions else {}
-    revision_id = revisions[0].id if revisions else ""
-    conv = ConversationRepo(db).get(conv_id)
-    saved_notes = conv.notes if conv else notes
-    db.close()
-    paths = await select_categories(db, provider, analysis, notes, [], override)
+    seed, revision_id, saved_notes = await in_worker_session(_schema_inputs, conv_id, notes)
+    paths = await select_categories(provider, analysis, notes, [], override)
     seed["category_path"] = paths["general"]
     seed_general_fields(seed, saved_notes)
     if on_status:
         on_status("Loading marketplace categories and fields…")
-    await attach_direct_categories(db, seed, f"{analysis}\n{notes}")
-    listing_persistence.save_revision(db,
-        conv_id, seed, source="category_analysis",
+    await attach_direct_categories(seed, f"{analysis}\n{notes}")
+    await in_worker_session(lambda db: listing_persistence.save_revision(
+        db, conv_id, seed, source="category_analysis",
         parent_revision_id=revision_id or None,
         expected_revision_id=revision_id,
-    )
+    ))
     seed["_schema_source"] = "native"
     return seed

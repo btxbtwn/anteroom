@@ -8,6 +8,8 @@ from unittest.mock import AsyncMock, patch
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+from worker_sessions import worker_sessions
 from sqlalchemy.pool import StaticPool
 
 from vendoo_studio.services import listing_persistence
@@ -302,6 +304,7 @@ class PersistListingTest(unittest.TestCase):
         )
         Base.metadata.create_all(engine)
         self.Session = sessionmaker(bind=engine)
+        self.enterContext(worker_sessions(engine))
         self.db = self.Session()
         repo = ConversationRepo(self.db)
         self.conv = repo.create(title="New Listing")
@@ -598,7 +601,7 @@ class PersistListingTest(unittest.TestCase):
 
         async def run():
             return await persist_generated_listing_with_repair(
-                self.db, self.conv.id, broken, provider
+                self.conv.id, broken, provider
             )
 
         parsed = asyncio.run(run())
@@ -1152,7 +1155,6 @@ class PersistListingTest(unittest.TestCase):
                 return_value=["ebay", "depop", "etsy"],
             ):
                 return await persist_generated_listing_with_repair(
-                    self.db,
                     self.conv.id,
                     "```json\n" + json.dumps(incomplete) + "\n```",
                     provider,
@@ -1350,7 +1352,6 @@ class PersistListingTest(unittest.TestCase):
 
         async def run():
             return await chat_listing.apply_listing_payload_with_repair(
-                self.db,
                 self.conv.id,
                 "Pattern should be Solid for this tee.",
                 RepairProvider(),
@@ -1377,9 +1378,6 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         Base.metadata.create_all(engine)
         self.Session = sessionmaker(bind=engine)
         self.provider = FakeProvider(analyze_delay=0.25)
-        self._orig_session = chat_routes.SessionLocal
-        chat_routes.SessionLocal = self.Session
-        listing_generation.SessionLocal = self.Session
 
         def override_get_db():
             db = self.Session()
@@ -1416,8 +1414,6 @@ class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
         for p in self.patches:
             p.stop()
         app.dependency_overrides.pop(get_db, None)
-        chat_routes.SessionLocal = self._orig_session
-        listing_generation.SessionLocal = self._orig_session
 
     async def test_skill_retrieval_keeps_the_api_responsive(self):
         import threading
