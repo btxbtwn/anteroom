@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.941 — 2026-11-12
+
+- The website only updates once every change since the last update has passed its tests, and a queued update is no longer dropped.
+
 ## 0.1.940 — 2026-11-11
 
 - Asking chat to set a SKU now saves it. Chat still can't make up a SKU on its own.
