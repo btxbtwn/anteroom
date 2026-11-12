@@ -1,1 +1,0 @@
-- Add each item's size tag when creating bulk listings on Mac, web and iPhone.
