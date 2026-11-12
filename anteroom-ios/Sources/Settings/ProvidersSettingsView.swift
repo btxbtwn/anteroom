@@ -40,7 +40,7 @@ struct ProvidersSettingsView: View {
                         Text("Listing AI")
                     } footer: {
                         Text(configured.isEmpty
-                             ? "Connect a subscription on your Mac or add an API key below, then choose it here."
+                             ? "Connect a subscription on your computer or add an API key below, then choose it here."
                              : "The primary writes your listings; the fallback takes over if it fails. Photos can use a different provider.")
                     }
                     .disabled(saving)
@@ -48,9 +48,9 @@ struct ProvidersSettingsView: View {
                         subscriptionRow("ChatGPT", ready: order?.chatgpt?.signedIn == true)
                         subscriptionRow("Claude", ready: order?.claude?.signedIn == true)
                     } header: {
-                        Text("Subscriptions on your Mac")
+                        Text("Subscriptions on your computer")
                     } footer: {
-                        Text("On your Mac, choose Account → This Mac’s Listings → Settings → Providers to sign into ChatGPT or Claude. Return to Account → My Account and sign into this Anteroom account. Keep the Mac awake, online, and Anteroom running while generating. Subscription credentials stay on your Mac. Pull to refresh connection status.")
+                        Text("In Anteroom on your computer, choose Account → This Mac’s Listings → Settings → Providers to sign into ChatGPT or Claude. Return to Account → My Account and sign into this Anteroom account. Keep the computer awake, online, and Anteroom running while generating. Subscription credentials stay on your computer. Pull to refresh connection status.")
                     }
                     Section {
                         NavigationLink {

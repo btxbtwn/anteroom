@@ -23,14 +23,14 @@ export function chromeNotice(connection: CloudConnection | null, attempted: bool
     if (!connection.supportedActions?.includes("marketplace.actions")) {
       return { button: "Update Bridge", message: [
         `${version} is out of date and can’t list, update or delist from the web.`,
-        "Open Anteroom on your Mac, choose Connect Chrome there to update it, then reload this page.",
+        "Open Anteroom on your computer, choose Connect Chrome there to update it, then reload this page.",
       ] };
     }
     // Bridge fixes reach Chrome only when its copy is updated and reloaded, so an older copy keeps old bugs.
     if (bridgeIsOlder(connection.extensionVersion)) {
       return { button: "Update Bridge", message: [
         `${version} is older than this site’s ${BRIDGE_VERSION}, so fixes made since then aren’t running in Chrome yet.`,
-        "Open Anteroom on your Mac and choose Connect Chrome there to update it, then reload this page.",
+        "Open Anteroom on your computer and choose Connect Chrome there to update it, then reload this page.",
       ] };
     }
     return { button: "Chrome connected", message: [`This account stays connected in Chrome until you disconnect or sign out. ${version}.`,
@@ -44,6 +44,6 @@ export function chromeNotice(connection: CloudConnection | null, attempted: bool
   }
   return { button: "Connect Anteroom Extension", message: [
     "Anteroom Bridge isn’t answering in this Chrome.",
-    "Open Anteroom on your Mac and choose Connect Chrome there to install it, then reload this page. Chrome on iPhone can’t run the Bridge.",
+    "Open Anteroom on your computer and choose Connect Chrome there to install it, then reload this page. Chrome on iPhone can’t run the Bridge.",
   ] };
 }

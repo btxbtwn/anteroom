@@ -24,13 +24,13 @@ INVOKE_DEADLINE_SEC = CALL_DEADLINE_SEC + 30
 # Why a call failed on the Mac. The Mac sends only one of these words, never
 # the provider's own error text, so nothing private crosses to the server.
 _FAILURES = {
-    'rate_limited': '{label} on your Mac hit its usage limit. Wait a few minutes, then retry, or choose another provider.',
-    'stalled': '{label} on your Mac stopped responding. Retry, or choose another provider.',
-    'signed_out': '{label} on your Mac is signed out. Sign in again in Anteroom on your Mac, then retry.',
-    'rejected': '{label} on your Mac rejected the request. Retry, or choose another provider.',
-    'unavailable': 'Your Mac could not reach {label}. Check that the Mac is online, then retry.',
-    'paused': 'AI requests are paused in Anteroom on your Mac. Resume them there, then retry.',
-    'failed': '{label} on your Mac could not complete the request. Retry, or choose another provider.',
+    'rate_limited': '{label} on your computer hit its usage limit. Wait a few minutes, then retry, or choose another provider.',
+    'stalled': '{label} on your computer stopped responding. Retry, or choose another provider.',
+    'signed_out': '{label} on your computer is signed out. Sign in again in Anteroom on your computer, then retry.',
+    'rejected': '{label} on your computer rejected the request. Retry, or choose another provider.',
+    'unavailable': 'Your computer could not reach {label}. Check that the computer is online, then retry.',
+    'paused': 'AI requests are paused in Anteroom on your computer. Resume them there, then retry.',
+    'failed': '{label} on your computer could not complete the request. Retry, or choose another provider.',
 }
 ErrorKind = Literal['rate_limited', 'stalled', 'signed_out', 'rejected', 'unavailable', 'paused', 'failed']
 # Why a forwarded call failed before the Mac answered.
@@ -39,7 +39,7 @@ NOT_TAKEN, NO_REPLY = 'not_taken', 'no_reply'
 
 class MacUnavailable(RuntimeError):
     def __init__(self):
-        super().__init__('Open Anteroom on your Mac, sign into this account, and connect the selected subscription there. Keep the Mac awake and online, then retry.')
+        super().__init__('Open Anteroom on your computer, sign into this account, and connect the selected subscription there. Keep the computer awake and online, then retry.')
 
 
 class MacCallFailed(RuntimeError):
@@ -62,7 +62,7 @@ def _failure(kind, provider=''):
 
 
 def _mac_label(provider):
-    return f'{provider_label(provider)} on your Mac'
+    return f'{provider_label(provider)} on your computer'
 
 
 class MacInference:

@@ -39,7 +39,7 @@ def subscription_models(provider: str):
         'models': [{'value': slug, 'label': slug, 'efforts': []} for slug in slugs] if provider == 'claude' else slugs,
         'vision_model': vision, 'listing_model': listing,
         'reasoning_efforts': [], 'efforts': [],
-        'error': None if models else 'Connect this subscription in Anteroom on your Mac and keep it awake and online.',
+        'error': None if models else 'Connect this subscription in Anteroom on your computer and keep it awake and online.',
     }
 
 
