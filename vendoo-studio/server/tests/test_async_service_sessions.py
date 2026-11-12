@@ -7,7 +7,6 @@ from loop_checkouts import loop_session_functions
 STILL_ON_THE_LOOP = {
     "services/automation_scheduler.py:_loop",
     "services/automation_scheduler.py:tick",
-    "services/background_worker.py:_execute",
     "services/extension_connection.py:_reconnect_work_after_settle",
     "services/extension_connection.py:extension_websocket",
     "services/hosted_automation_scheduler.py:run_owner",
