@@ -3,16 +3,22 @@ Anteroom
 1. Unzip with Archive Utility or:
      ditto -xk Anteroom-macos.zip ~/Downloads/Anteroom
    (Prefer ditto over the unzip command — it keeps code signatures intact.)
-2. Drag "Anteroom.app" into Applications.
-3. Control-click the app and choose Open. Click Open again if macOS asks.
-   You only do this the first time (the build is signed for local use, not Apple notarized).
-4. In Settings, sign in with ChatGPT or paste a Xiaomi MiMo API key.
-5. Click Connect Chrome. Anteroom opens Vendoo in your everyday Chrome.
-6. Load the listing extension once:
+2. Drag "Anteroom.app" into Applications and open it.
+   Anteroom is signed with a Developer ID and notarized by Apple, so it opens
+   like any other app. macOS asks once to confirm you want to open an app
+   downloaded from the internet.
+3. In Settings, sign in with ChatGPT or paste a Xiaomi MiMo API key.
+4. Click Connect Chrome. Anteroom opens Vendoo in your everyday Chrome.
+5. Load the listing extension once:
    Copy the exact folder path from Settings → Connections in Anteroom.
    In Chrome open chrome://extensions, turn on Developer mode, and click Load unpacked.
    Press Control-Shift-G (⌘⇧G) to search for the folder, paste the path, click Go, then Open.
-7. Sign in to Vendoo in that Chrome window, then create a listing.
+6. Sign in to Vendoo in that Chrome window, then create a listing.
+
+Already used an earlier Anteroom? The first time this version starts, macOS
+may ask once for your Mac login password so Anteroom can keep reading your
+saved sign-ins. Enter it and choose Always Allow. Earlier versions were signed
+with a different certificate; after this one, updates no longer ask.
 
 Needs macOS 13+ and Google Chrome. Photos, listings, drafts, hidden fields,
 settings, fill logs, and app logs stay on this Mac in:

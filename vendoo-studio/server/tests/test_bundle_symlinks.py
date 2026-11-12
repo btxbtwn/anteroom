@@ -76,12 +76,14 @@ class BundleSymlinkTest(unittest.TestCase):
 
 
 class PackageMacosScriptTest(unittest.TestCase):
-    def test_package_script_deep_signs_without_flatten(self):
-        """Keep framework symlinks and deep-sign the bundle with one identity."""
-        script = (
-            Path(__file__).resolve().parents[2] / "scripts" / "package-macos-app.sh"
-        )
-        text = script.read_text(encoding="utf-8")
-        self.assertNotIn("flatten_symlinks", text)
-        self.assertIn("codesign --force --deep --sign", text)
-        self.assertIn("_validate_zip_members", text)
+    def test_package_script_signs_inside_out_without_flatten(self):
+        """Keep framework symlinks and sign every binary with one identity, inside-out."""
+        scripts = Path(__file__).resolve().parents[2] / "scripts"
+        for name in ("package-macos-app.sh", "package-connector.sh"):
+            text = (scripts / name).read_text(encoding="utf-8")
+            self.assertNotIn("flatten_symlinks", text)
+            # Apple discourages --deep for signing; it is only used to verify.
+            self.assertNotIn("codesign --force --deep", text)
+            self.assertIn("scripts/sign_macos_bundle.py", text)
+            self.assertIn("notarize-macos-app.sh", text)
+        self.assertIn("_validate_zip_members", (scripts / "package-macos-app.sh").read_text(encoding="utf-8"))

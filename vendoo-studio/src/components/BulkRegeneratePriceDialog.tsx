@@ -22,6 +22,7 @@ function suggestionFromPreview(preview: PriceDropPreview): BulkPriceSuggestion {
         ? "percent"
         : "custom";
   return {
+    expected_revision_id: preview.revision_id,
     price: preview.suggested_price,
     percent: preview.suggested_effective_percent,
     mode,
@@ -44,35 +45,38 @@ export function BulkRegeneratePriceDialog({
 }) {
   const [choice, setChoice] = useState<BulkPriceChoice>({ kind: "keep" });
   const [suggestions, setSuggestions] = useState<Map<string, BulkPriceSuggestion | null>>(new Map());
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [previews, setPreviews] = useState<Map<string, PriceDropPreview>>(new Map());
   const [loadError, setLoadError] = useState("");
-  const pricedIds = useMemo(
-    () => listings.filter((listing) => listing.price != null && listing.price > 0).map((listing) => listing.id),
+  const reviewIds = useMemo(
+    () => listings.map((listing) => listing.id),
     [listings],
   );
 
   useEffect(() => {
-    if (choice.kind !== "suggested" || pricedIds.length === 0) return;
     let cancelled = false;
-    void mapWithConcurrency(pricedIds, BULK_READ_CONCURRENCY, async (id) => {
+    void mapWithConcurrency(reviewIds, BULK_READ_CONCURRENCY, async (id) => {
       try {
         const preview = await api.listings.priceDropPreview(id);
-        return [id, suggestionFromPreview(preview)] as const;
+        return [id, preview] as const;
       } catch {
         return [id, null] as const;
       }
     }).then((results) => {
       if (cancelled) return;
       const next = new Map<string, BulkPriceSuggestion | null>();
+      const reviewed = new Map<string, PriceDropPreview>();
       let failed = 0;
-      for (const [id, suggestion] of results) {
-        next.set(id, suggestion);
-        if (!suggestion) failed += 1;
+      for (const [id, preview] of results) {
+        next.set(id, preview ? suggestionFromPreview(preview) : null);
+        if (preview) reviewed.set(id, preview);
+        else failed += 1;
       }
+      setPreviews(reviewed);
       setSuggestions(next);
       setLoadError(
         failed
-          ? `${failed} ${failed === 1 ? "listing" : "listings"} could not load a suggestion and will keep ${failed === 1 ? "its" : "their"} price.`
+          ? `${failed} ${failed === 1 ? "listing" : "listings"} could not load a current price and will keep ${failed === 1 ? "its" : "their"} price.`
           : "",
       );
       setLoading(false);
@@ -80,11 +84,16 @@ export function BulkRegeneratePriceDialog({
     return () => {
       cancelled = true;
     };
-  }, [choice.kind, pricedIds]);
+  }, [reviewIds]);
+
+  const reviewedListings = useMemo(() => listings.map((listing) => {
+    const preview = previews.get(listing.id);
+    return { ...listing, price: preview?.current_price ?? listing.price, revision_id: preview?.revision_id };
+  }), [listings, previews]);
 
   const drops = useMemo(
-    () => bulkPriceDrops(listings, choice, suggestions),
-    [choice, listings, suggestions],
+    () => bulkPriceDrops(reviewedListings, choice, suggestions),
+    [choice, reviewedListings, suggestions],
   );
   const warning = bulkRegenerateWarning(listings.length);
   const [title, description] = warning.split("\n");
@@ -102,7 +111,7 @@ export function BulkRegeneratePriceDialog({
           </Button>
           <Button
             variant="destructive"
-            disabled={choice.kind === "suggested" && loading}
+            disabled={choice.kind !== "keep" && loading}
             onClick={() => onConfirm(drops)}
           >
             {dropping ? "Drop and rewrite" : "Rewrite"}
@@ -128,25 +137,20 @@ export function BulkRegeneratePriceDialog({
             wide
             active={choice.kind === "suggested"}
             note="The same suggestion Regenerate offers on one listing, from its own sales and prior drops."
-            onClick={() => {
-              if (choice.kind === "suggested") return;
-              setChoice({ kind: "suggested" });
-              setLoadError("");
-              setLoading(pricedIds.length > 0);
-            }}
+            onClick={() => setChoice({ kind: "suggested" })}
           >
             Each listing's suggestion
           </PriceChip>
         </div>
       </PriceSection>
 
-      {choice.kind === "suggested" && loadError ? <PriceStatus error>{loadError}</PriceStatus> : null}
-      {choice.kind === "suggested" && loading ? (
-        <PriceStatus>Loading a suggestion for each priced listing…</PriceStatus>
+      {choice.kind !== "keep" && loadError ? <PriceStatus error>{loadError}</PriceStatus> : null}
+      {choice.kind !== "keep" && loading ? (
+        <PriceStatus>Loading current prices and suggestions…</PriceStatus>
       ) : null}
 
       <PriceRows>
-        {listings.map((listing) => (
+        {reviewedListings.map((listing) => (
           <PriceRow key={listing.id} title={listing.title}>
             {rowPrice(listing, choice, drops, loading)}
           </PriceRow>
@@ -164,7 +168,7 @@ function rowPrice(
 ): string {
   const current = listing.price;
   if (current == null || !(current > 0)) return "No price";
-  if (choice.kind === "suggested" && loading) return `${money(current)} → …`;
+  if (choice.kind !== "keep" && loading) return `${money(current)} → …`;
   const drop = drops.get(listing.id);
   if (!drop) return `${money(current)} · kept`;
   return `${money(current)} → ${money(drop.price)}`;

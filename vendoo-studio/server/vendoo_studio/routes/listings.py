@@ -148,6 +148,7 @@ def restore_revision(conv_id: str, revision_id: str, body: RevisionRestoreReques
 
 class PriceDropApply(BaseModel):
     price: float = Field(..., gt=0)
+    expected_revision_id: str = Field(min_length=1)
     percent: float | None = None
     mode: Literal["percent", "comps", "custom"] = "custom"
 
@@ -181,7 +182,8 @@ def preview_price_drop(conv_id: str, db: Session = Depends(get_db)):
     """
     listing, revisions, _analysis, outcomes, age_days = _preview_inputs(conv_id, db)
     try:
-        return build_preview(listing, revisions, sold_outcomes=outcomes, age_days=age_days)
+        return {**build_preview(listing, revisions, sold_outcomes=outcomes, age_days=age_days),
+                "revision_id": revisions[0].id}
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -205,9 +207,9 @@ def stream_price_drop_comps(conv_id: str, db: Session = Depends(get_db)):
     db.close()
 
     def preview(comps_text: str) -> str:
-        return json.dumps(build_preview(
+        return json.dumps({**build_preview(
             listing, revisions, comps_text=comps_text, sold_outcomes=outcomes, age_days=age_days,
-        ))
+        ), "revision_id": revisions[0].id})
 
     async def events():
         queue: asyncio.Queue[str | None] = asyncio.Queue()
@@ -267,7 +269,9 @@ def stream_price_drop_comps(conv_id: str, db: Session = Depends(get_db)):
 def apply_price_drop(conv_id: str, body: PriceDropApply, db: Session = Depends(get_db)):
     """Apply a confirmed whole-dollar price; records a ``price_drop`` revision."""
     try:
-        result = price_markdown.apply_price_drop(conv_id, body.price, db)
+        result = price_markdown.apply_price_drop(
+            conv_id, body.price, db, expected_revision_id=body.expected_revision_id,
+        )
     except PriceDropError as exc:
         raise HTTPException(exc.status, str(exc)) from exc
     return {
@@ -288,7 +292,7 @@ class MarkdownPreviewRequest(BaseModel):
 class MarkdownDrop(BaseModel):
     conversation_id: str
     price: float = Field(..., gt=0)
-    expected_revision_id: str | None = None
+    expected_revision_id: str = Field(min_length=1)
 
 
 class MarkdownApply(BaseModel):

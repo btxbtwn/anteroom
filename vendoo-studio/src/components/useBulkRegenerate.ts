@@ -95,6 +95,7 @@ export function useBulkRegenerate(chatOpen: (id: string) => boolean) {
           if (!drop) return;
           await api.listings.applyPriceDrop(id, {
             price: drop.price,
+            expected_revision_id: drop.expected_revision_id,
             percent: drop.percent,
             mode: drop.mode,
           });
@@ -128,16 +129,16 @@ export function useBulkRegenerate(chatOpen: (id: string) => boolean) {
           return !marked.has(id) || isChatResetting(id);
         },
         async generate(id) {
-          let started = false;
+          const generation = { started: false };
           try {
             await followListingGeneration(id, {
               onStarted: () => {
-                started = true;
+                generation.started = true;
                 markChatGenerating(id);
               },
             });
           } finally {
-            if (!started) {
+            if (!generation.started) {
               // The wipe was already on screen and the rewrite never began.
               markChatResetting(id, false);
             } else if (!chatOwnsGeneration(id)) {

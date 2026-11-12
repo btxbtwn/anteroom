@@ -1,6 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
 """The connector contains the native bridge and providers, not the listing app."""
-import os
 from pathlib import Path
 
 from PyInstaller.building.api import COLLECT, EXE, PYZ
@@ -9,7 +8,6 @@ from PyInstaller.building.osx import BUNDLE
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 STUDIO = Path(SPECPATH).parent
-IDENTITY = os.environ.get('MACOS_SIGNING_IDENTITY') or None
 VERSION = (STUDIO / 'VERSION').read_text().strip()
 
 a = Analysis(
@@ -28,8 +26,8 @@ a = Analysis(
     noarchive=False,
 )
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='Anteroom Connector', console=False,
-          codesign_identity=IDENTITY if IDENTITY != '-' else None)
+# Signed afterwards by scripts/sign_macos_bundle.py (see package-connector.sh).
+exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='Anteroom Connector', console=False)
 coll = COLLECT(exe, a.binaries, a.datas, name='Anteroom Connector')
 app = BUNDLE(
     coll, name='Anteroom Connector.app', bundle_identifier='com.myanteroom.connector',

@@ -104,9 +104,12 @@ describe("toggleListingSelection", () => {
 });
 
 describe("bulkPriceDrops", () => {
+  it("never marks down an unreviewed sidebar price", () => {
+    expect(bulkPriceDrops([{ id: "stale", price: 40 }], { kind: "percent", percent: 10 }).size).toBe(0);
+  });
   const listings = [
-    { id: "priced", price: 40 },
-    { id: "small", price: 14 },
+    { id: "priced", price: 40, revision_id: "priced-r1" },
+    { id: "small", price: 14, revision_id: "small-r1" },
     { id: "bare", price: null },
   ];
 
@@ -118,23 +121,28 @@ describe("bulkPriceDrops", () => {
     expect(priceAfterPercent(14, 10)).toBe(12);
     expect(effectiveDropPercent(14, 12)).toBe(14.3);
     const drops = bulkPriceDrops(listings, { kind: "percent", percent: 10 });
-    expect(drops.get("priced")).toEqual({ price: 36, percent: 10, mode: "percent" });
-    expect(drops.get("small")).toEqual({ price: 12, percent: 14.3, mode: "percent" });
+    expect(drops.get("priced")).toEqual({ price: 36, percent: 10, mode: "percent", expected_revision_id: "priced-r1" });
+    expect(drops.get("small")).toEqual({ price: 12, percent: 14.3, mode: "percent", expected_revision_id: "small-r1" });
     expect(drops.has("bare")).toBe(false);
   });
 
   it("skips a cut that cannot move a whole-dollar price", () => {
-    expect(bulkPriceDrops([{ id: "one", price: 1 }], { kind: "percent", percent: 10 }).size).toBe(0);
+    expect(bulkPriceDrops([{ id: "one", price: 1, revision_id: "r1" }], { kind: "percent", percent: 10 }).size).toBe(0);
   });
 
   it("uses each listing's own suggestion and skips one that would not fall", () => {
     const suggestions = new Map([
-      ["priced", { price: 33, percent: 17.5, mode: "percent" as const }],
-      ["small", { price: 14, percent: 0, mode: "comps" as const }],
+      ["priced", { price: 33, percent: 17.5, mode: "percent" as const, expected_revision_id: "priced-r1" }],
+      ["small", { price: 14, percent: 0, mode: "comps" as const, expected_revision_id: "small-r1" }],
     ]);
     const drops = bulkPriceDrops(listings, { kind: "suggested" }, suggestions);
     expect([...drops.keys()]).toEqual(["priced"]);
     expect(drops.get("priced")?.price).toBe(33);
+  });
+
+  it("never combines a suggestion with a different reviewed revision", () => {
+    const suggestions = new Map([["priced", { price: 33, percent: 17.5, mode: "percent" as const, expected_revision_id: "old" }]]);
+    expect(bulkPriceDrops(listings, { kind: "suggested" }, suggestions).size).toBe(0);
   });
 });
 

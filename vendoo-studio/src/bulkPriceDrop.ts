@@ -39,6 +39,7 @@ export function draftsFromPreview(rows: readonly MarkdownPreviewRow[]): Markdown
 /** Why the typed price cannot be applied, or null when it can (or the row is skipped). */
 export function draftError(draft: MarkdownDraft): string | null {
   if (draft.skip || draft.unavailable) return null;
+  if (!draft.revisionId) return "Reload this listing before changing its price";
   const text = draft.priceText.trim();
   if (!text) return "Enter a price or skip";
   const price = Number(text);
@@ -53,7 +54,7 @@ export function markdownDrops(drafts: readonly MarkdownDraft[]): MarkdownDropReq
     .map((draft) => ({
       conversation_id: draft.id,
       price: Number(draft.priceText.trim()),
-      expected_revision_id: draft.revisionId,
+      expected_revision_id: draft.revisionId!,
     }));
 }
 

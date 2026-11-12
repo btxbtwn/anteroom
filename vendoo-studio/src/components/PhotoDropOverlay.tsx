@@ -21,18 +21,17 @@ export function PhotoDropOverlay({ title, hint, busy, busyLabel, onFiles }: Prop
   useEffect(() => {
     // dragenter/dragleave fire per element, so count them to know when the
     // drag has really left the window.
-    let depth = 0;
-    let dropSeq = 0;
+    const drops = { depth: 0, sequence: 0 };
 
     const onDragEnter = (event: DragEvent) => {
       if (!dragHasFiles(event.dataTransfer)) return;
-      depth += 1;
+      drops.depth += 1;
       setDragging(true);
     };
     const onDragLeave = (event: DragEvent) => {
       if (!dragHasFiles(event.dataTransfer)) return;
-      depth = Math.max(0, depth - 1);
-      if (depth === 0) setDragging(false);
+      drops.depth = Math.max(0, drops.depth - 1);
+      if (drops.depth === 0) setDragging(false);
     };
     const onDragOver = (event: DragEvent) => {
       if (!dragHasFiles(event.dataTransfer)) return;
@@ -43,7 +42,7 @@ export function PhotoDropOverlay({ title, hint, busy, busyLabel, onFiles }: Prop
       setDragging(!(event.target instanceof Element && event.target.closest("[data-marketplace-media]")));
     };
     const onDropCapture = () => {
-      depth = 0;
+      drops.depth = 0;
       setDragging(false);
     };
     const onDrop = (event: DragEvent) => {
@@ -53,9 +52,9 @@ export function PhotoDropOverlay({ title, hint, busy, busyLabel, onFiles }: Prop
       event.preventDefault();
       // dataTransfer is cleared after the handler returns; read entries now.
       const transfer = event.dataTransfer;
-      const seq = ++dropSeq;
+      const seq = ++drops.sequence;
       void imageFilesFromTransfer(transfer).then((files) => {
-        if (seq !== dropSeq) return;
+        if (seq !== drops.sequence) return;
         if (files.length) {
           onFilesRef.current(files);
           return;
@@ -74,7 +73,7 @@ export function PhotoDropOverlay({ title, hint, busy, busyLabel, onFiles }: Prop
     window.addEventListener("drop", onDropCapture, true);
     window.addEventListener("drop", onDrop);
     return () => {
-      dropSeq += 1;
+      drops.sequence += 1;
       window.removeEventListener("dragenter", onDragEnter, true);
       window.removeEventListener("dragleave", onDragLeave, true);
       window.removeEventListener("dragover", onDragOver, true);

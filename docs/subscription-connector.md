@@ -35,8 +35,13 @@ files. Automatic generation still stops at a saved draft.
 ## Build and verify
 
 Run `vendoo-studio/scripts/package-connector.sh` with the same persistent
-`MACOS_SIGNING_IDENTITY` used by the existing macOS release. The macOS workflow
-builds both apps and publishes the connector as a separate release asset.
+`MACOS_SIGNING_IDENTITY` used by the existing macOS release. It signs the
+connector inside-out with the hardened runtime and, when an App Store Connect
+API key is set (`NOTARY_API_KEY_PATH`, `NOTARY_API_KEY_ID`,
+`NOTARY_API_ISSUER_ID`), notarizes and staples it, so a downloaded copy opens
+without the Control-click workaround. The macOS workflow builds both apps,
+requires notarization on `main`, and publishes the connector as a separate
+release asset.
 The connector build excludes the full listing backend and the SDK's bundled
 Claude binary; it uses the seller's Claude Code install.
 

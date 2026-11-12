@@ -119,12 +119,10 @@ function HostedWorkspace({ session }: { session: Session }) {
   const [runtime, setRuntime] = useState<HostedRuntime | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
-    let active = true;
-    let fresh = false;
-    let shown = false;
+    const refresh = { active: true, fresh: false, shown: false };
     // Open on the workspace saved from the last visit while the server confirms it.
     void savedRuntime<HostedRuntime>(session.user.id).then(saved => {
-      if (active && saved && !fresh) { shown = true; setRuntime(saved); }
+      if (refresh.active && saved && !refresh.fresh) { refresh.shown = true; setRuntime(saved); }
     });
     const remove = installHostedApiSession({
       origin: window.location.origin,
@@ -139,12 +137,12 @@ function HostedWorkspace({ session }: { session: Session }) {
     void studioFetch("/api/runtime").then(async response => {
       if (!response.ok) throw new Error("Could not open your workspace. Reload to try again.");
       const value = await response.json();
-      fresh = true;
-      if (active) setRuntime(value);
+      refresh.fresh = true;
+      if (refresh.active) setRuntime(value);
       void saveRuntime(session.user.id, value);
     // Once the saved workspace is open, each screen reports its own failed refresh.
-    }).catch(error => { if (active && !shown) setError(error.message); });
-    return () => { active = false; remove(); queryClient.clear(); };
+    }).catch(error => { if (refresh.active && !refresh.shown) setError(error.message); });
+    return () => { refresh.active = false; remove(); queryClient.clear(); };
   }, [session.user.id, session.user.email, queryClient]);
   // Changes from the seller's other devices arrive live; polling covers any gap.
   // supabase-js refreshes the Realtime token itself, so a refresh need not resubscribe.

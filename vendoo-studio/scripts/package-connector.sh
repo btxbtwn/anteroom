@@ -20,8 +20,8 @@ cd "$ROOT"
 "$PYTHON" desktop/make_icon.py desktop/AppIcon.icns
 "$PYTHON" -m PyInstaller --noconfirm --distpath "$ROOT/release" --workpath "$ROOT/build/connector" desktop/Connector.spec
 APP="$ROOT/release/Anteroom Connector.app"
-codesign --force --deep --sign "$MACOS_SIGNING_IDENTITY" "$APP"
-codesign --verify --deep --strict "$APP"
+# Inside-out, with the hardened runtime and a secure timestamp, like the app.
+"$PYTHON" scripts/sign_macos_bundle.py "$APP" "$MACOS_SIGNING_IDENTITY"
 if [[ "$DEVELOPMENT" == 0 ]]; then
   DETAILS="$(codesign -dv "$APP" 2>&1)"
   if [[ "$DETAILS" == *'Signature=adhoc'* || "$DETAILS" == *'not signed at all'* ]]; then
@@ -29,8 +29,15 @@ if [[ "$DEVELOPMENT" == 0 ]]; then
     exit 1
   fi
 fi
-# The smoke mode always makes its own temporary data folder and never reads credentials.
+# The smoke mode always makes its own temporary data folder and never reads
+# credentials. Run under the hardened runtime, it also proves the signature's
+# entitlements are enough for the bundled Python.
 "$APP/Contents/MacOS/Anteroom Connector" --smoke
+if [[ "$DEVELOPMENT" == 0 ]]; then
+  # Sellers download the connector directly, so Gatekeeper must accept it.
+  # Skipped (with a log line) without an App Store Connect key.
+  ./scripts/notarize-macos-app.sh "$APP"
+fi
 SUFFIX=""
 if [[ "$DEVELOPMENT" == 1 ]]; then SUFFIX=-dev; fi
 ZIP="$ROOT/release/Anteroom-Connector-macos$SUFFIX.zip"

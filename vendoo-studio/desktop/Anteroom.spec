@@ -1,5 +1,4 @@
 # -*- mode: python ; coding: utf-8 -*-
-import os
 from pathlib import Path
 
 from PyInstaller.building.api import COLLECT, EXE, PYZ
@@ -143,9 +142,8 @@ exe = EXE(
     upx=False,
     console=False,
     disable_windowed_traceback=False,
-    # PyInstaller signs every binary and the bundle with this identity; see
-    # scripts/package-macos-app.sh, which requires a persistent certificate.
-    codesign_identity=os.environ.get("MACOS_SIGNING_IDENTITY") or None,
+    # Not signed here: scripts/sign_macos_bundle.py signs every binary
+    # inside-out with the hardened runtime once the bundle is complete.
 )
 coll = COLLECT(
     exe,
