@@ -511,3 +511,49 @@ def test_mac_worker_sends_the_failure_kind(monkeypatch):
     assert replies[0]['failed'] is True
     assert replies[0]['error'] == 'rate_limited'
     assert 'secret' not in str(replies[0])
+
+
+def test_account_window_signs_this_mac_into_chatgpt_through_the_local_server(monkeypatch):
+    import httpx
+    from vendoo_studio.config import HOSTED_URL, PORT
+
+    url = HOSTED_URL + '/'
+    bridge = MacAIAPI(lambda: SimpleNamespace(get_current_url=lambda: url))
+    calls = []
+    pending = {'authorize_url': 'https://auth.openai.com/authorize?state=x'}
+
+    def request(method, target, timeout):
+        calls.append((method, target))
+        if method == 'POST':
+            return httpx.Response(200, json=pending)
+        if method == 'DELETE':
+            return httpx.Response(200, json={'ok': True})
+        return httpx.Response(200, json={'chatgpt': {'signed_in': False, 'pending': pending, 'error': None}})
+
+    monkeypatch.setattr(httpx, 'request', request)
+    assert bridge.chatgpt_sign_in() == {'ok': True}
+    assert bridge.chatgpt_sign_in_status() == {'ok': True, 'signed_in': False, 'pending': True, 'error': None}
+    assert bridge.chatgpt_sign_in_cancel() == {'ok': True}
+    base = f'http://127.0.0.1:{PORT}/api/settings'
+    assert calls == [('POST', base + '/chatgpt/login'), ('GET', base + '/provider'), ('DELETE', base + '/chatgpt/login')]
+
+    url = HOSTED_URL + '.evil.test'
+    calls.clear()
+    assert bridge.chatgpt_sign_in() == {'ok': False}
+    assert bridge.chatgpt_sign_in_status() == {'ok': False}
+    assert bridge.chatgpt_sign_in_cancel() == {'ok': False}
+    assert calls == []
+
+
+def test_account_window_sees_why_chatgpt_sign_in_could_not_start(monkeypatch):
+    import httpx
+    from vendoo_studio.config import HOSTED_URL
+
+    bridge = MacAIAPI(lambda: SimpleNamespace(get_current_url=lambda: HOSTED_URL + '/'))
+    monkeypatch.setattr(httpx, 'request', lambda *a, **k: httpx.Response(400, json={'detail': 'ChatGPT sign-in is unavailable.'}))
+    assert bridge.chatgpt_sign_in() == {'ok': False, 'error': 'ChatGPT sign-in is unavailable.'}
+
+    def offline(*a, **k):
+        raise httpx.ConnectError('refused')
+    monkeypatch.setattr(httpx, 'request', offline)
+    assert bridge.chatgpt_sign_in() == {'ok': False, 'error': 'Anteroom on this Mac did not answer. Quit and reopen Anteroom, then try again.'}

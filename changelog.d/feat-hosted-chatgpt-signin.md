@@ -1,0 +1,1 @@
+- Sign this Mac into ChatGPT from My Account → Settings → Providers in the Mac app, without switching to This Mac's Listings.

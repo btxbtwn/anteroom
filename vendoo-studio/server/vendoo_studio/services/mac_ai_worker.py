@@ -292,3 +292,51 @@ class MacAIAPI:
                 return {'ok': False}
         self._worker.session(token, owner)
         return {'ok': True}
+
+    # The account window signs this Mac into ChatGPT through the Mac's own
+    # server, which owns the sign-in and its loopback callback. The tokens stay
+    # in this Mac's Keychain; the account only learns that the worker is ready.
+    _MAC_OFFLINE = 'Anteroom on this Mac did not answer. Quit and reopen Anteroom, then try again.'
+
+    def _local(self, method, path, timeout):
+        from vendoo_studio.config import PORT
+        return httpx.request(method, f'http://127.0.0.1:{PORT}/api/settings{path}', timeout=timeout)
+
+    def chatgpt_sign_in(self):
+        if not self._trusted_origin():
+            return {'ok': False}
+        try:
+            # Sign-in first discovers ChatGPT's endpoints; give that its own deadline.
+            response = self._local('POST', '/chatgpt/login', 30)
+        except httpx.HTTPError:
+            return {'ok': False, 'error': self._MAC_OFFLINE}
+        if response.status_code != 200:
+            try:
+                detail = response.json().get('detail')
+            except ValueError:
+                detail = None
+            return {'ok': False, 'error': detail if isinstance(detail, str) and detail else 'ChatGPT sign-in could not start.'}
+        return {'ok': True}
+
+    def chatgpt_sign_in_status(self):
+        if not self._trusted_origin():
+            return {'ok': False}
+        try:
+            response = self._local('GET', '/provider', 5)
+            chatgpt = response.json().get('chatgpt') if response.status_code == 200 else None
+        except (httpx.HTTPError, ValueError):
+            chatgpt = None
+        if not isinstance(chatgpt, dict):
+            return {'ok': False, 'error': self._MAC_OFFLINE}
+        error = chatgpt.get('error')
+        return {'ok': True, 'signed_in': bool(chatgpt.get('signed_in')), 'pending': bool(chatgpt.get('pending')),
+                'error': error if isinstance(error, str) else None}
+
+    def chatgpt_sign_in_cancel(self):
+        if not self._trusted_origin():
+            return {'ok': False}
+        try:
+            self._local('DELETE', '/chatgpt/login', 5)
+        except httpx.HTTPError:
+            return {'ok': False, 'error': self._MAC_OFFLINE}
+        return {'ok': True}
