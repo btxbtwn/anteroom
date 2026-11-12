@@ -88,19 +88,23 @@ def propose(db: Session, block: str) -> dict[str, Any] | None:
     conversations = {
         conv.id: conv for conv in db.query(Conversation).filter(Conversation.id.in_(wanted)).all()
     }
-    listings = dict(
-        db.query(Listing.conversation_id, ListingRevision.listing_json)
+    # Each listing as the seller reviews it, with the revision that is: Apply refuses a listing edited since.
+    listings = {
+        listing_id: (revision_id, listing_json)
+        for listing_id, revision_id, listing_json in db.query(
+            Listing.conversation_id, ListingRevision.id, ListingRevision.listing_json,
+        )
         .join(ListingRevision, ListingRevision.id == Listing.current_revision_id)
         .filter(Listing.conversation_id.in_(wanted))
         .all()
-    )
+    }
     boxes = {box.id: box for box in db.query(SourceBox).all()}
     items = []
     for listing_id, values in wanted.items():
         conv = conversations.get(listing_id)
         if conv is None:
             continue
-        listing = listings.get(listing_id)
+        revision_id, listing = listings.get(listing_id, (None, None))
         to_set: dict[str, Any] = {}
         fields: list[dict[str, Any]] = []
         if isinstance(listing, dict):
@@ -120,9 +124,10 @@ def propose(db: Session, block: str) -> dict[str, Any] | None:
                 "field": "box", "old": _box_name(boxes.get(cast(str, conv.box_id))), "new": _box_name(boxes.get(cast(str, box_id))),
             })
         if fields:
-            items.append({
-                "listing_id": listing_id, "title": conv.title or "Untitled", "set": to_set, "fields": fields,
-            })
+            item = {"listing_id": listing_id, "title": conv.title or "Untitled", "set": to_set, "fields": fields}
+            if any(field != "box" for field in to_set):
+                item["revision_id"] = revision_id
+            items.append(item)
         if len(items) == MAX_CHANGES:
             break
     return {"status": "proposed", "items": items} if items else None

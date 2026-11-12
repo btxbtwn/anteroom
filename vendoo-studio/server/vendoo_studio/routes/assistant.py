@@ -565,6 +565,9 @@ def _proposal(message_id: str, db: Session) -> AssistantMessage:
     return row
 
 
+STALE_PROPOSAL = "It changed since this was proposed. Ask again."
+
+
 def _apply_to_listing(item: dict, db: Session) -> str | None:
     """Write one listing's proposed values. Returns why it was skipped, or None once it is saved."""
     from vendoo_studio.models.listing_evidence import ListingCorrection
@@ -596,9 +599,13 @@ def _apply_to_listing(item: dict, db: Session) -> str | None:
         revisions = ListingRepo(db).get_revisions(conv_id)
         if not revisions or not isinstance(revisions[0].listing_json, dict):
             return "It has no listing to change yet."
+        # The seller reviewed the listing as it was when the change was proposed; never overwrite a later edit.
+        reviewed = item.get("revision_id")
+        if revisions[0].id != reviewed:
+            return STALE_PROPOSAL
         updated = assistant_changes.apply_fields(revisions[0].listing_json, to_set)
         try:
-            saved = save_listing_edit(conv_id, updated, db, expected_revision_id=revisions[0].id)
+            saved = save_listing_edit(conv_id, updated, db, expected_revision_id=reviewed)
         except RevisionConflict as refused:
             return str(refused)
         except HTTPException as refused:
