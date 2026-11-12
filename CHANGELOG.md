@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.957 — 2026-11-12
+
+- Add a load test that measures how quickly pages open and edits save while several sellers generate drafts, run against the local sandbox only.
+
 ## 0.1.956 — 2026-11-12
 
 - Keep newer price edits when an older markdown is confirmed. Review the listing again before lowering a price that changed on another screen.
