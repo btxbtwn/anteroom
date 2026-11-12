@@ -1,0 +1,1 @@
+- Generation timings now include each ChatGPT or Claude call made through your computer, so slow steps can be found and fixed.

@@ -117,6 +117,22 @@ def test_forwarded_inference_does_not_queue_on_the_wrong_process(monkeypatch, su
     assert not relay.pending
 
 
+def test_a_forwarded_call_is_recorded_with_the_model_the_mac_reported(monkeypatch):
+    from vendoo_studio.services import model_usage
+
+    # The worker process holds no Mac connection, so only the peer knows its models.
+    relay = MacInference(OWNER)
+
+    async def answer(url, path, body, timeout):
+        return {'ok': True, 'result': 7, 'model': 'peer-listing'}
+
+    monkeypatch.setattr(device_routes, 'forward_target', _forward_to_peer)
+    monkeypatch.setattr(device_routes, 'post', answer)
+    with model_usage.capture() as calls:
+        assert asyncio.run(relay.invoke('quick_chat', [1], {}, 'chatgpt')) == 7
+    assert [(call['provider'], call['model'], call['outcome']) for call in calls] == [('chatgpt', 'peer-listing', 'done')]
+
+
 @pytest.mark.parametrize('subscription', ['chatgpt', 'claude'])
 def test_internal_invoke_reaches_only_that_sellers_mac(monkeypatch, subscription):
     monkeypatch.setenv('ANTEROOM_PROCESS_TOKEN', 'process-token')
@@ -154,7 +170,7 @@ def test_internal_invoke_reaches_only_that_sellers_mac(monkeypatch, subscription
             assert relay.reply('a' * 32, command['id'], 7, False)
             response = await task
             assert response.status_code == 200
-            assert response.json() == {'ok': True, 'result': 7}
+            assert response.json() == {'ok': True, 'result': 7, 'model': 'l'}
             task.cancel()
 
     asyncio.run(run())

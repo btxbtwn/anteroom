@@ -557,3 +557,38 @@ def test_account_window_sees_why_chatgpt_sign_in_could_not_start(monkeypatch):
         raise httpx.ConnectError('refused')
     monkeypatch.setattr(httpx, 'request', offline)
     assert bridge.chatgpt_sign_in() == {'ok': False, 'error': 'Anteroom on this computer did not answer. Quit and reopen Anteroom, then try again.'}
+
+
+def test_relayed_calls_are_recorded_with_their_model_time_and_outcome():
+    """Generation timings list every model call; subscription calls on the Mac were missing."""
+    from vendoo_studio.services import model_usage
+    from vendoo_studio.services.mac_inference import MacCallFailed
+
+    relay = MacInference()
+    relay.poll('mac', MODELS, timeout=0)
+    provider = MacSubscriptionProvider(relay, 'chatgpt')
+
+    async def answer(work, result=None, error=None):
+        await asyncio.sleep(0)
+        command = relay.poll('mac', MODELS, timeout=0)
+        relay.reply('mac', command['id'], result, error is not None, error)
+        return await work
+
+    async def run():
+        with model_usage.capture() as calls:
+            chunks = await answer(asyncio.create_task(
+                _collect(provider.chat([{'role': 'user', 'content': 'hi'}]))), [{'text': 'ok', 'kind': 'content'}])
+            assert [chunk.text for chunk in chunks] == ['ok']
+            await answer(asyncio.create_task(_collect(provider.vision_chat([]))), [])
+            with pytest.raises(MacCallFailed):
+                await answer(asyncio.create_task(provider.web_search([])), error='rate_limited')
+        return calls
+
+    calls = asyncio.run(run())
+    assert [(call['provider'], call['model'], call['outcome']) for call in calls] == [
+        ('chatgpt', 'local-listing', 'done'), ('chatgpt', 'local-vision', 'done'), ('chatgpt', 'local-listing', 'failed')]
+    assert all(call['latency_ms'] is not None for call in calls)
+
+
+async def _collect(stream):
+    return [chunk async for chunk in stream]
