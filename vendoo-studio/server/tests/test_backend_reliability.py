@@ -2,15 +2,14 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
 
-from vendoo_studio.services import automations, catalog_index, listing_generate, marketplace_recording, skill_formulas
+from vendoo_studio.services import automations, catalog_index, listing_generate, skill_formulas
 
 
 class _Rows:
@@ -48,15 +47,6 @@ def test_the_hosted_catalog_build_has_a_deadline(tmp_path, monkeypatch):
         with pytest.raises(catalog_index.subprocess.TimeoutExpired):
             catalog_index.build_catalog_index(catalog_index.CatalogSnapshot({"trees": {}}, [], []))
     assert seen["timeout"] == catalog_index.HOSTED_BUILD_TIMEOUT_SEC
-
-
-def test_a_recording_that_fails_unexpectedly_saves_the_error(tmp_path):
-    with patch("vendoo_studio.services.browser_bridge.request", new=AsyncMock(side_effect=RuntimeError("socket closed"))), \
-            patch.object(marketplace_recording, "RECORDINGS_DIR", tmp_path):
-        asyncio.run(marketplace_recording._run("mercari", "offers"))
-    saved = json.loads((tmp_path / "mercari-offers.json").read_text())
-    assert saved["ok"] is False
-    assert saved["error"]
 
 
 def test_formula_rules_need_the_list_this_skill(tmp_path, monkeypatch):

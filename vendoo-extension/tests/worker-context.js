@@ -54,7 +54,6 @@ function loadWorker({ apiOrigin } = {}) {
       windows: { getAll: async () => [{ id: 1, focused: true }] },
       declarativeNetRequest: { updateSessionRules: async () => {} },
       scripting: stubApi(),
-      debugger: stubApi(),
       system: { display: stubApi() },
     },
     // Timers never fire: tests only call pure helpers, and the worker's

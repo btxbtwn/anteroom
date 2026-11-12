@@ -6,7 +6,6 @@ import logging
 import os
 import time
 import uuid
-from typing import Literal
 
 from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 
@@ -522,31 +521,6 @@ async def connect_marketplace(marketplace: str):
     except browser_bridge.BrowserBridgeError as exc:
         raise HTTPException(502, "Finish signing in in Chrome, then reconnect.") from exc
     return _public_connect(raw)
-
-
-async def record_marketplace_requests(marketplace: str, goal: Literal["draft", "offers"] = "draft"):
-    """Start recording the shape of a marketplace's own requests while the seller acts by hand.
-
-    ``draft`` records a draft save; ``offers`` records the likers list and an offer
-    sent to likers, reads included. Opens one tab for the seller; the result, request
-    shapes only (operation names, GraphQL query text, paths, header names, value
-    types), is saved when the tab closes and read with GET.
-    """
-    from vendoo_studio.services import marketplace_recording
-
-    if marketplace not in marketplace_recording.RECORDABLE[goal]:
-        raise HTTPException(404, "Recording is not set up for this marketplace.")
-    if not marketplace_recording.start(marketplace, goal):
-        raise HTTPException(409, "A recording is already running. Close its tab first.")
-    return {"recording": True}
-
-
-def recorded_marketplace_requests(marketplace: str, goal: Literal["draft", "offers"] = "draft"):
-    from vendoo_studio.services import marketplace_recording
-
-    if marketplace not in marketplace_recording.RECORDABLE[goal]:
-        raise HTTPException(404, "Recording is not set up for this marketplace.")
-    return marketplace_recording.status(marketplace, goal)
 
 
 async def extension_websocket(ws: WebSocket):
