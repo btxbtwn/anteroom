@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.952 — 2026-11-12
+
+- Generation timings now include each ChatGPT or Claude call made through your computer, so slow steps can be found and fixed.
+
 ## 0.1.951 — 2026-11-12
 
 - Add each item's size tag when creating bulk listings on Mac, web and iPhone.
