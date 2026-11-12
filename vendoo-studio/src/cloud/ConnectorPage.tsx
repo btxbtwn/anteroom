@@ -33,14 +33,13 @@ export function ConnectorPage({ email, onSignOut }: { email: string; onSignOut: 
     if (request === version.current) setStatus(next);
   }, [bridge]);
   useEffect(() => {
-    let active = true;
-    let timer: ReturnType<typeof setTimeout>;
+    const polling: { active: boolean; timer?: ReturnType<typeof setTimeout> } = { active: true };
     const poll = async () => {
-      try { await refresh(); } catch { if (active) setError("Could not read the connector. Reopen its connection window to try again."); }
-      if (active) timer = setTimeout(() => { void poll(); }, 3000);
+      try { await refresh(); } catch { if (polling.active) setError("Could not read the connector. Reopen its connection window to try again."); }
+      if (polling.active) polling.timer = setTimeout(() => { void poll(); }, 3000);
     };
     if (bridge) void poll();
-    return () => { active = false; version.current++; clearTimeout(timer); };
+    return () => { polling.active = false; version.current++; clearTimeout(polling.timer); };
   }, [bridge, refresh]);
   const run = async (name: string, action: () => Promise<unknown>) => {
     setBusy(current => ({ ...current, [name]: true })); setError("");
