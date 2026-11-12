@@ -111,6 +111,9 @@ jobs:
           }
           test_certificate() {
             # Exercise certificate signing on PRs without a production key.
+            # The .p12 gets a random password: macOS cannot reliably verify
+            # the MAC of one exported with an empty password.
+            TEST_P12_PASSWORD="$(openssl rand -hex 16)"
             openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
               -subj "/CN=$1/" \
               -addext "extendedKeyUsage=codeSigning" \
@@ -118,7 +121,7 @@ jobs:
               -keyout "$RUNNER_TEMP/signing.key" -out "$RUNNER_TEMP/signing.crt"
             openssl pkcs12 -export -inkey "$RUNNER_TEMP/signing.key" \
               -in "$RUNNER_TEMP/signing.crt" -out "$RUNNER_TEMP/signing.p12" \
-              -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 -passout pass:
+              -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 -passout "pass:$TEST_P12_PASSWORD"
             rm -f "$RUNNER_TEMP/signing.key" "$RUNNER_TEMP/signing.crt"
           }
           # Imports one .p12 and prints the hash of the identity it added.
@@ -142,7 +145,7 @@ jobs:
               exit 1
             fi
             test_certificate "Anteroom Test Signing"
-            CERT_PASSWORD=""
+            CERT_PASSWORD="$TEST_P12_PASSWORD"
           else
             echo "$CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/signing.p12"
           fi
@@ -157,7 +160,7 @@ jobs:
           elif [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
             # Exercise the second signing pass too.
             test_certificate "Anteroom Test Legacy Signing"
-            LEGACY_IDENTITY="$(import_certificate "" "The legacy test certificate")"
+            LEGACY_IDENTITY="$(import_certificate "$TEST_P12_PASSWORD" "The legacy test certificate")"
           fi
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" >/dev/null
           # One argument per keychain already in the search list.
