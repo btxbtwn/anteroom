@@ -2,6 +2,16 @@
 
 Run through scripts/hosted-sandbox.sh. This entry point is never imported by
 production: its local credentials and signing keys exist only for this process.
+
+Load tests (``scripts/hosted-load-test.py``) shape it closer to production with
+environment variables, all off by default:
+
+- ``ANTEROOM_SANDBOX_SELLERS``: how many sellers can sign in (``alice``, ``bob``,
+  then ``seller3@sandbox.test`` onwards, all with the password ``sandbox``);
+- ``ANTEROOM_SANDBOX_DB_RTT_MS``: route the database through a loopback proxy
+  that adds this round-trip time, half each way;
+- ``ANTEROOM_SANDBOX_WORKER_PROCESS=1``: serve sellers from a ``web`` process
+  and run drafts in a separate ``worker`` process, as the Fly groups do.
 """
 from __future__ import annotations
 
@@ -9,6 +19,8 @@ import asyncio
 import os
 import secrets
 import signal
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -27,8 +39,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from vendoo_studio.services.seller_sessions import InvalidSession, SessionVerifier
 
 ISSUER = 'https://sandbox.invalid/auth/v1'
+SELLER_NAMES = ('alice', 'bob', *(f'seller{number}' for number in range(3, int(os.environ.get('ANTEROOM_SANDBOX_SELLERS') or 2) + 1)))
 ACCOUNTS = {name + '@sandbox.test': str(uuid.uuid5(uuid.NAMESPACE_DNS, 'anteroom-sandbox-' + name))
-            for name in ('alice', 'bob')}
+            for name in SELLER_NAMES}
 
 
 class HostedSandboxServer(uvicorn.Server):
@@ -169,6 +182,123 @@ class LocalSupabase:
         return []
 
 
+class DelayedDatabase:
+    """Loopback TCP proxy to the sandbox Postgres that delays every chunk each way.
+
+    Production's database is about 24 ms away (Fly San Jose to Supabase
+    Oregon); the sandbox's is a local socket. Each direction delivers a chunk
+    ``one_way`` seconds after it arrived, in order, so a round trip costs about
+    twice that without limiting throughput.
+    """
+
+    def __init__(self, socket_path: str, one_way: float):
+        self.socket_path, self.one_way = socket_path, one_way
+        self.loop = asyncio.new_event_loop()
+        self.ready = threading.Event()
+        self.port = 0
+        self.thread = threading.Thread(target=self.run, name='anteroom-db-delay', daemon=True)
+        self.thread.start()
+        if not self.ready.wait(10):
+            raise RuntimeError('The database delay proxy did not start')
+
+    def run(self):
+        asyncio.set_event_loop(self.loop)
+        server = self.loop.run_until_complete(asyncio.start_server(self.connect, '127.0.0.1', 0))
+        self.port = server.sockets[0].getsockname()[1]
+        self.ready.set()
+        try:
+            self.loop.run_forever()
+        finally:
+            server.close()
+            self.loop.close()
+
+    def stop(self):
+        async def close():
+            tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            self.loop.stop()
+        asyncio.run_coroutine_threadsafe(close(), self.loop)
+        self.thread.join(10)
+
+    async def connect(self, client_reader, client_writer):
+        try:
+            server_reader, server_writer = await asyncio.open_unix_connection(self.socket_path)
+        except OSError:
+            client_writer.close()
+            return
+        await asyncio.gather(self.pipe(client_reader, server_writer), self.pipe(server_reader, client_writer),
+                             return_exceptions=True)
+        for writer in (client_writer, server_writer):
+            writer.close()
+
+    async def pipe(self, reader, writer):
+        chunks: asyncio.Queue[tuple[float, bytes]] = asyncio.Queue()
+
+        async def deliver():
+            while True:
+                due, data = await chunks.get()
+                await asyncio.sleep(max(0.0, due - self.loop.time()))
+                if not data:
+                    writer.close()
+                    return
+                writer.write(data)
+                await writer.drain()
+
+        delivering = asyncio.ensure_future(deliver())
+        try:
+            while data := await reader.read(65536):
+                chunks.put_nowait((self.loop.time() + self.one_way, data))
+        except OSError:
+            pass
+        chunks.put_nowait((self.loop.time() + self.one_way, b''))
+        await asyncio.gather(delivering, return_exceptions=True)
+
+
+def database_url(postgres) -> tuple[str, DelayedDatabase | None]:
+    """The sandbox database's URL, through the delay proxy when one is asked for."""
+    rtt_ms = float(os.environ.get('ANTEROOM_SANDBOX_DB_RTT_MS') or 0)
+    if rtt_ms <= 0:
+        return postgres.get_uri(), None
+    info = postgres.get_postmaster_info()
+    proxy = DelayedDatabase(f'{info.socket_dir}/.s.PGSQL.{info.port}', rtt_ms / 2000)
+    return f'postgresql://postgres:@127.0.0.1:{proxy.port}/postgres', proxy
+
+
+def start_worker_process(root: Path, port: int) -> subprocess.Popen | None:
+    """Run drafts in a second process, as Fly's worker group does, when asked to."""
+    if os.environ.get('ANTEROOM_SANDBOX_WORKER_PROCESS') != '1':
+        return None
+    os.environ['ANTEROOM_PROCESS_ROLE'] = 'web'
+    return subprocess.Popen([sys.executable, '-m', 'vendoo_studio.hosted_sandbox', '--worker'], env={
+        **os.environ, 'ANTEROOM_PROCESS_ROLE': 'worker', 'VENDOO_STUDIO_DATA_DIR': str(root / 'worker-data'),
+        'VENDOO_STUDIO_PORT': str(port + 2),
+    })
+
+
+def stop_worker_process(worker: subprocess.Popen | None):
+    if worker is None:
+        return
+    worker.terminate()
+    try:
+        worker.wait(30)
+    except subprocess.TimeoutExpired:
+        worker.kill()
+        worker.wait()
+
+
+def serve_worker(port: int):
+    """The worker half of a split sandbox: drafts and schedulers, no sellers."""
+    from vendoo_studio import sandbox
+    if os.environ.get('ANTEROOM_SANDBOX') != '1' or os.environ.get('ANTEROOM_PROCESS_ROLE') != 'worker':
+        raise SystemExit('The sandbox worker starts only from a split hosted sandbox')
+    sandbox.install()
+    from vendoo_studio.hosted import create_app
+    # It verifies no seller sessions; the web process does, against LocalSupabase.
+    uvicorn.run(create_app('https://sandbox.invalid'), host='127.0.0.1', port=port, access_log=False, log_level='warning')
+
+
 async def serve(port: int):
     from pgserver.postgres_server import get_server
     from vendoo_studio import sandbox
@@ -187,10 +317,12 @@ async def serve(port: int):
             root = Path(directory)
             postgres = get_server(root / 'postgres', cleanup_mode='delete')
             database_engine = None
+            proxy = worker = None
             try:
                 if server.should_exit:
                     return
-                os.environ.update(ANTEROOM_DATABASE_URL=postgres.get_uri(), VENDOO_STUDIO_DATA_DIR=str(root / 'data'),
+                url, proxy = database_url(postgres)
+                os.environ.update(ANTEROOM_DATABASE_URL=url, VENDOO_STUDIO_DATA_DIR=str(root / 'data'),
                                   ANTEROOM_SANDBOX='1', ANTEROOM_BACKGROUND_WORKER='1',
                                   SUPABASE_URL=f'http://127.0.0.1:{port}/local', SUPABASE_PUBLISHABLE_KEY='sandbox-public')
                 sandbox.install()
@@ -201,6 +333,7 @@ async def serve(port: int):
                 import_seed(engine)
                 local = LocalSupabase()
                 os.environ["SUPABASE_SERVER_SECRET_KEY"] = local.server_key
+                worker = start_worker_process(root, port)
                 from vendoo_studio.hosted import create_app
                 hosted = create_app('https://sandbox.invalid', session_verifier=local.verifier)
                 web_port = int(os.environ.get('VENDOO_STUDIO_WEB_PORT', '5175'))
@@ -229,6 +362,9 @@ async def serve(port: int):
                             await asyncio.sleep(.05)
                         await asyncio.to_thread(seed_hosted, f'http://127.0.0.1:{port}')
                         print(f'Hosted sandbox ready: http://127.0.0.1:{port}', flush=True)
+                        # For scripts/hosted-load-test.py's --database-url and --pid.
+                        print(f'Sandbox database: {postgres.get_uri()}; API process {os.getpid()}'
+                              + (f', worker process {worker.pid}' if worker else ''), flush=True)
 
                     seed_task = asyncio.create_task(seed_when_ready())
                     serving = asyncio.create_task(server.serve())
@@ -244,9 +380,12 @@ async def serve(port: int):
                         await serving
             finally:
                 try:
+                    stop_worker_process(worker)
                     if database_engine is not None:
                         database_engine.dispose()
                 finally:
+                    if proxy is not None:
+                        proxy.stop()
                     postgres.cleanup()
 
 
@@ -256,6 +395,9 @@ def main():
     port = int(os.environ.get('VENDOO_STUDIO_PORT', '4320'))
     if port == 4318:
         raise SystemExit('The hosted sandbox cannot use the real desktop port 4318')
+    if sys.argv[1:] == ['--worker']:
+        serve_worker(port)
+        return
     asyncio.run(serve(port))
 
 

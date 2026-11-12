@@ -8,12 +8,18 @@ end; it says nothing about the quality of a real model's listing.
 A call whose photo notes or prompt contain ``STALL_MARKER`` never answers, the
 way a provider that stopped responding behaves. Tests and agents use it to
 check that every long action ends in a named error instead of spinning.
+
+``ANTEROOM_SANDBOX_MODEL_SECONDS`` makes every photo analysis and chat call
+wait that many seconds before answering, so a load test
+(``scripts/hosted-load-test.py``) holds generations open about as long as a
+real model would. It is unset, and calls answer at once, everywhere else.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import AsyncIterator
 
 LISTING = {
@@ -59,6 +65,14 @@ SLOW_REPLY = (
     + "\n\n- A list item arrives\n- Then another one\n\nThe end."
 )
 SLOW_WORD_SECONDS = 0.05
+MODEL_SECONDS_ENV = "ANTEROOM_SANDBOX_MODEL_SECONDS"
+
+
+async def _model_wait() -> None:
+    """Stand in for a model's response time when a load test asks for one."""
+    seconds = float(os.environ.get(MODEL_SECONDS_ENV) or 0)
+    if seconds > 0:
+        await asyncio.sleep(seconds)
 
 
 async def _stall() -> None:
@@ -85,12 +99,14 @@ class SandboxProvider:
     async def analyze_photos(self, photo_paths, notes="", listing_rules="", **_kwargs) -> dict:
         if STALL_MARKER in (notes or ""):
             await _stall()
+        await _model_wait()
         return {"evidence": json.loads(json.dumps(EVIDENCE))}
 
     async def chat(self, messages, stream=True) -> AsyncIterator[str]:
         prompt = _prompt_text(messages)
         if STALL_MARKER in prompt:
             await _stall()
+        await _model_wait()
         if SLOW_MARKER in prompt:
             for word in SLOW_REPLY.split(" "):
                 await asyncio.sleep(SLOW_WORD_SECONDS)

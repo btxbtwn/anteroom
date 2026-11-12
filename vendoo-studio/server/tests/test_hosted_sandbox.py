@@ -42,3 +42,49 @@ def test_local_accounts_cover_sign_up_and_password_reset():
         headers = {'Authorization': 'Bearer ' + recovered.json()['access_token']}
         assert client.put('/auth/v1/user', json={'password': 'short'}, headers=headers).json()['error_code'] == 'weak_password'
         assert client.put('/auth/v1/user', json={'password': 'a new password'}, headers=headers).status_code == 200
+
+
+def test_load_tests_can_sign_in_more_sellers(monkeypatch):
+    import importlib
+    from vendoo_studio import hosted_sandbox
+    monkeypatch.setenv('ANTEROOM_SANDBOX_SELLERS', '4')
+    try:
+        reloaded = importlib.reload(hosted_sandbox)
+        assert list(reloaded.ACCOUNTS) == ['alice@sandbox.test', 'bob@sandbox.test',
+                                           'seller3@sandbox.test', 'seller4@sandbox.test']
+        assert len(set(reloaded.ACCOUNTS.values())) == 4
+    finally:
+        monkeypatch.delenv('ANTEROOM_SANDBOX_SELLERS')
+        importlib.reload(hosted_sandbox)
+    assert list(hosted_sandbox.ACCOUNTS) == ['alice@sandbox.test', 'bob@sandbox.test']
+
+
+def test_database_delay_proxy_adds_the_round_trip_each_way(tmp_path):
+    import asyncio
+    import socket
+    import threading
+    import time
+    from vendoo_studio.hosted_sandbox import DelayedDatabase
+
+    path = str(tmp_path / 'echo.sock')
+
+    async def echo(reader, writer):
+        while data := await reader.read(1024):
+            writer.write(data)
+            await writer.drain()
+        writer.close()
+
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(asyncio.start_unix_server(echo, path))
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    proxy = DelayedDatabase(path, 0.05)
+    try:
+        with socket.create_connection(('127.0.0.1', proxy.port), timeout=5) as client:
+            for message in (b'one', b'two'):
+                started = time.perf_counter()
+                client.sendall(message)
+                assert client.recv(1024) == message
+                assert 0.1 <= time.perf_counter() - started < 1
+    finally:
+        proxy.stop()
+        loop.call_soon_threadsafe(loop.stop)
