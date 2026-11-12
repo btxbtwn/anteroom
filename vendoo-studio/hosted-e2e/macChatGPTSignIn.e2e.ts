@@ -36,8 +36,8 @@ test("the Mac app's account window signs this Mac into ChatGPT", async ({ page }
   await page.getByRole("button", { name: "Select ChatGPT", exact: true }).click();
 
   const row = page.locator('[data-slot="settings-row"]', { hasText: "Sign in with ChatGPT" });
-  await expect(page.getByText("the sign-in stays on this Mac")).toBeVisible();
-  await expect(page.getByText("Open Anteroom on your Mac")).toHaveCount(0);
+  await expect(page.getByText("the sign-in stays on this computer")).toBeVisible();
+  await expect(page.getByText("Open Anteroom on your computer")).toHaveCount(0);
   await row.scrollIntoViewIfNeeded();
   await page.screenshot({ path: `e2e/results/hosted/mac-chatgpt-sign-in-${info.project.name}.png` });
 

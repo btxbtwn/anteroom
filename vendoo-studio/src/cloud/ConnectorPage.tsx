@@ -71,7 +71,7 @@ export function ConnectorPage({ email, onSignOut }: { email: string; onSignOut: 
         const state = status?.[provider];
         const installed = provider !== "claude" || state?.installed;
         return <div className="grid gap-3" key={provider}>
-          <SettingsRow title={label} description={state?.signed_in ? "Signed in with your subscription" : !installed ? "Install Claude Code, then connect your subscription." : state?.pending ? "Finish signing in in your browser." : "Connect your subscription on this Mac."}
+          <SettingsRow title={label} description={state?.signed_in ? "Signed in with your subscription" : !installed ? "Install Claude Code, then connect your subscription." : state?.pending ? "Finish signing in in your browser." : "Connect your subscription on this computer."}
             control={state?.signed_in ? provider === "chatgpt" ? <Button size="sm" variant="ghost" disabled={busy.chatgpt} onClick={() => { void run(provider, bridge.connector_chatgpt_logout); }}>Sign out</Button> : null
               : <Button size="sm" variant="outline" disabled={!status || busy[provider] || claudeOpen && provider === "claude"} onClick={() => {
                 if (provider === "claude" && installed) setClaudeOpen(true);
@@ -93,7 +93,7 @@ export function ConnectorPage({ email, onSignOut }: { email: string; onSignOut: 
         <ClaudeLoginTerminal openTerminal={terminal} onClose={() => { setClaudeOpen(false); void refresh(); }} />
       </Suspense></div>}
     </SettingsSection>
-    <SettingsNote>Keep this Mac awake, online, and the connector running. Closing this window keeps it in the menu bar. Subscription credentials stay on this Mac.</SettingsNote>
+    <SettingsNote>Keep this computer awake, online, and the connector running. Closing this window keeps it in the menu bar. Subscription credentials stay on this computer.</SettingsNote>
     {error && <p role="alert" className="text-sm text-destructive-foreground">{error}</p>}
     <Button variant="ghost" size="sm" disabled={busy.account} onClick={() => { void run("account", onSignOut); }}>Disconnect Anteroom account</Button>
   </main>;

@@ -22,7 +22,7 @@ export function MacChatGPTSignIn({ bridge }: { bridge: MacChatGPTBridge }) {
   const queryClient = useQueryClient();
   const { data: local, error: statusError } = useQuery({
     queryKey: ["mac-chatgpt-sign-in"],
-    queryFn: async () => checked(await bridge.chatgpt_sign_in_status(), "Anteroom on this Mac did not answer."),
+    queryFn: async () => checked(await bridge.chatgpt_sign_in_status(), "Anteroom on this computer did not answer."),
     refetchInterval: (query) => (query.state.data?.pending || query.state.data?.signed_in ? WATCH_MS : false),
   });
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["mac-chatgpt-sign-in"] });
@@ -31,7 +31,7 @@ export function MacChatGPTSignIn({ bridge }: { bridge: MacChatGPTBridge }) {
     onSettled: refresh,
   });
   const cancel = useMutation({
-    mutationFn: async () => checked(await bridge.chatgpt_sign_in_cancel(), "Anteroom on this Mac did not answer."),
+    mutationFn: async () => checked(await bridge.chatgpt_sign_in_cancel(), "Anteroom on this computer did not answer."),
     onSettled: refresh,
   });
 
@@ -56,8 +56,8 @@ export function MacChatGPTSignIn({ bridge }: { bridge: MacChatGPTBridge }) {
           title="Sign in with ChatGPT"
           description={
             signedIn
-              ? "Signed in on this Mac. Connecting it to your account…"
-              : "Uses your ChatGPT plan on this Mac to write listings here, on the web and on iPhone. You approve Anteroom in your browser, and the sign-in stays on this Mac."
+              ? "Signed in on this computer. Connecting it to your account…"
+              : "Uses your ChatGPT plan on this computer to write listings here, on the web and on iPhone. You approve Anteroom in your browser, and the sign-in stays on this computer."
           }
           control={
             signedIn ? (
@@ -84,7 +84,7 @@ export function MacChatGPTSignIn({ bridge }: { bridge: MacChatGPTBridge }) {
           ) : null}
         </SettingsRow>
       </SettingsSection>
-      <SettingsNote>Keep this Mac awake and Anteroom open while generating from the web or iPhone.</SettingsNote>
+      <SettingsNote>Keep this computer awake and Anteroom open while generating from the web or iPhone.</SettingsNote>
     </>
   );
 }

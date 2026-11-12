@@ -21,14 +21,14 @@ for (const connected of [false, true]) test(`desktop subscriptions ${connected ?
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Providers", exact: true }).click();
   for (const name of ["ChatGPT", "Claude"]) {
     await page.getByRole("group", { name: "Providers", exact: true }).getByRole("button", { name: new RegExp(name) }).click();
-    await expect(page.getByText(connected ? `${name} on your Mac is connected.` : `Open Anteroom on your Mac, sign into your ${name} subscription`, { exact: false })).toBeVisible();
-    await expect(page.getByText(connected ? "Keep the Mac awake and Anteroom open" : "Subscription credentials stay on your Mac.", { exact: false })).toBeVisible();
+    await expect(page.getByText(connected ? `${name} on your computer is connected.` : `Open Anteroom on your computer, sign into your ${name} subscription`, { exact: false })).toBeVisible();
+    await expect(page.getByText(connected ? "Keep the computer awake and Anteroom open" : "Subscription credentials stay on your computer.", { exact: false })).toBeVisible();
     if (connected) {
       await page.getByRole("combobox", { name: "Primary listing AI" }).click();
       await expect(page.getByRole("option", { name, exact: true })).toBeEnabled();
       await page.keyboard.press("Escape");
     }
-    await page.getByText(connected ? `${name} on your Mac is connected.` : `Open Anteroom on your Mac, sign into your ${name} subscription`, { exact: false }).scrollIntoViewIfNeeded();
+    await page.getByText(connected ? `${name} on your computer is connected.` : `Open Anteroom on your computer, sign into your ${name} subscription`, { exact: false }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: `e2e/results/hosted/subscription-${name}-${info.project.name}-${connected}.png` });
   }
   expect(errors).toEqual([]);

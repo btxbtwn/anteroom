@@ -56,7 +56,7 @@ def error_kind(exc):
 
 async def execute(command, provider):
     if provider is None:
-        raise RuntimeError('Not signed in to this subscription on this Mac')
+        raise RuntimeError('Not signed in to this subscription on this computer')
     operation = command.get('operation')
     if operation not in OPERATIONS:
         raise ValueError('Unsupported inference operation')
@@ -296,7 +296,7 @@ class MacAIAPI:
     # The account window signs this Mac into ChatGPT through the Mac's own
     # server, which owns the sign-in and its loopback callback. The tokens stay
     # in this Mac's Keychain; the account only learns that the worker is ready.
-    _MAC_OFFLINE = 'Anteroom on this Mac did not answer. Quit and reopen Anteroom, then try again.'
+    _MAC_OFFLINE = 'Anteroom on this computer did not answer. Quit and reopen Anteroom, then try again.'
 
     def _local(self, method, path, timeout):
         from vendoo_studio.config import PORT

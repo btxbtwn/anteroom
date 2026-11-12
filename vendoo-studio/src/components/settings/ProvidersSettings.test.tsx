@@ -26,8 +26,8 @@ it("uses the private account vault for hosted keys and omits local sign-in contr
 
 it("preserves a desktop provider preference without offering a local sign-in on the server", () => {
   const html = render(true, "chatgpt");
-  expect(html).toContain("Open Anteroom on your Mac");
-  expect(html).toContain("Keep the Mac awake");
+  expect(html).toContain("Open Anteroom on your computer");
+  expect(html).toContain("Keep the computer awake");
   expect(html).not.toContain("Retry sign-in");
 });
 
@@ -48,6 +48,6 @@ it("lets the Mac app's account window sign this Mac into ChatGPT", () => {
   });
   const html = render(true, "chatgpt");
   expect(html).toContain("Sign in with ChatGPT");
-  expect(html).toContain("the sign-in stays on this Mac");
-  expect(html).not.toContain("Open Anteroom on your Mac");
+  expect(html).toContain("the sign-in stays on this computer");
+  expect(html).not.toContain("Open Anteroom on your computer");
 });

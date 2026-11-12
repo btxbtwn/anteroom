@@ -424,10 +424,10 @@ def test_a_failed_mac_call_names_the_provider_and_the_reason():
         await asyncio.sleep(0)
         command = relay.poll('mac', MODELS, timeout=0)
         assert relay.reply('mac', command['id'], None, True, 'rate_limited')
-        with pytest.raises(MacCallFailed, match='ChatGPT on your Mac hit its usage limit') as failure:
+        with pytest.raises(MacCallFailed, match='ChatGPT on your computer hit its usage limit') as failure:
             await work
         assert failure.value.kind == 'rate_limited'
-        assert 'keep the Mac awake' not in str(failure.value).lower()
+        assert 'keep the computer awake' not in str(failure.value).lower()
 
     asyncio.run(run())
 
@@ -460,7 +460,7 @@ def test_a_call_the_mac_took_and_never_answered_is_a_stall_not_an_offline_mac(mo
         work = asyncio.create_task(MacSubscriptionProvider(relay, 'chatgpt').web_search([]))
         await asyncio.sleep(0)
         assert relay.poll('mac', MODELS, timeout=0) is not None
-        with pytest.raises(ProviderStalled, match='ChatGPT on your Mac stopped responding while searching the web'):
+        with pytest.raises(ProviderStalled, match='ChatGPT on your computer stopped responding while searching the web'):
             await work
         # A call the Mac never picked up still says to open the Mac.
         with pytest.raises(MacUnavailable):
@@ -556,4 +556,4 @@ def test_account_window_sees_why_chatgpt_sign_in_could_not_start(monkeypatch):
     def offline(*a, **k):
         raise httpx.ConnectError('refused')
     monkeypatch.setattr(httpx, 'request', offline)
-    assert bridge.chatgpt_sign_in() == {'ok': False, 'error': 'Anteroom on this Mac did not answer. Quit and reopen Anteroom, then try again.'}
+    assert bridge.chatgpt_sign_in() == {'ok': False, 'error': 'Anteroom on this computer did not answer. Quit and reopen Anteroom, then try again.'}
