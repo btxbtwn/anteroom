@@ -56,7 +56,7 @@ async def serve(engine) -> None:
                 owners = []
             for owner in owners:
                 if owner in running:
-                    continue  # Still on its last tick, which picks up anything newly due.
+                    continue  # Still on its last tick; a later loop picks up anything newly due.
                 task = asyncio.create_task(run_owner(owner))
                 running[owner] = task
                 task.add_done_callback(lambda done, owner=owner: settled(owner, done))
