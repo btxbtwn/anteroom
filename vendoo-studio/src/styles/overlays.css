@@ -248,6 +248,17 @@
   min-width: 0;
 }
 
+.bulk-measure-size {
+  display: flex;
+  flex: 0 0 9rem;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bulk-measure-size .input {
+  min-width: 0;
+}
+
 .bulk-measure-fields {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
