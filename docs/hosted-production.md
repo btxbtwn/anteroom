@@ -272,6 +272,19 @@ the photo" without Supabase's status in any log, and the operator error emails
 failed with `SMTPDataError` during this incident, so the pool-timeout holder
 snapshot was not delivered.
 
+Session verification ran on that same pool, so every async request's sign-in
+check queued behind database steps waiting up to the pool timeout and behind
+photo copies, the Mac's and Chrome's heartbeats included. It now has four
+threads of its own (`hosted.AUTH_THREADS`); `tests/test_auth_threads.py`
+signs a seller in while every loop thread is blocked. The loop pool stays at
+40 rather than the 12 pooled connections plus a few: its threads also wait on
+Storage, Chrome replies and providers, which hold no connection, and a smaller
+pool brought back the 0.1.910 stall. FastAPI's 40-thread limiter for plain
+`def` routes is left as is for the same reason, and because `/api/health` and
+`/api/ready` are plain routes that must answer while page reads wait for a
+connection. Not yet measured after deploy: sign-in latency while the pool is
+exhausted.
+
 Machines reach each other's `/internal/` routes at
 `http://[FLY_PRIVATE_IP]:8080` on the private network
 (`device_routes.local_base_url`), which does not pass through Fly's proxy. The

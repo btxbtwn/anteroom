@@ -1,0 +1,1 @@
+- The online account keeps checking sign-ins quickly while other work is busy, so the Mac and Chrome stay connected.
