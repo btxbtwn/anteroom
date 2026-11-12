@@ -269,3 +269,70 @@ def test_a_move_announces_one_change_when_it_finishes(cloud, signing_keys):  # n
     before = feed(engine)['listings']
     client.post('/api/conversations', headers=alice, json={'title': 'New after the move'})
     assert feed(engine)['listings'] > before
+
+
+def _imported_photo(client, alice):
+    rows = [{'id': 'lockcoat0001', 'title': 'Coat'}]
+    assert client.post('/api/account-import/rows', headers=alice, json={'table': 'conversations', 'rows': rows}).status_code == 200
+    photo = {'id': 'lockphoto001', 'conversation_id': 'lockcoat0001', 'original_filename': 'coat.png',
+             'stored_filename': 'coat.png', 'mime_type': 'image/png', 'size_bytes': 10}
+    assert client.post('/api/account-import/rows', headers=alice, json={'table': 'photos', 'rows': [photo]}).status_code == 200
+
+
+def _fake_storage(monkeypatch, on_upload=lambda: None):
+    stored = {}
+
+    def call(method, key, token, data=None):
+        if method == 'POST':
+            on_upload()
+            stored[key] = data
+        elif method == 'DELETE':
+            stored.pop(key, None)
+        return stored.get(key, b'')
+    monkeypatch.setattr(hosted_photos, 'storage_call', call)
+    return stored
+
+
+def test_a_photo_upload_holds_no_row_lock_while_storage_answers(cloud, signing_keys, monkeypatch):  # noqa: F811
+    """Storage can be slow. The photo row is locked only to save its key, after the upload."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import OperationalError
+
+    client, engine = cloud
+    alice = headers(signing_keys)
+    _imported_photo(client, alice)
+    locked = []
+
+    def check_lock():
+        with engine.connect() as other:
+            try:
+                other.execute(text("SELECT id FROM photos WHERE id = 'lockphoto001' FOR UPDATE NOWAIT"))
+                locked.append(False)
+            except OperationalError:
+                locked.append(True)
+    stored = _fake_storage(monkeypatch, check_lock)
+
+    reply = client.post('/api/account-import/photos/lockphoto001/stored', headers=alice, content=png())
+    assert reply.status_code == 200 and reply.json() == {'copied': True}
+    assert locked == [False]
+    with engine.connect() as connection:
+        key = connection.execute(text("SELECT stored_filename FROM photos WHERE id = 'lockphoto001'")).scalar_one()
+    assert set(stored) == {key}
+    # Already in the account: nothing is uploaded again.
+    again = client.post('/api/account-import/photos/lockphoto001/stored', headers=alice, content=png())
+    assert again.json() == {'copied': False} and len(locked) == 1
+
+
+def test_a_refused_photo_save_deletes_the_uploaded_object(cloud, signing_keys, monkeypatch):  # noqa: F811
+    client, _engine = cloud
+    alice = headers(signing_keys)
+    _imported_photo(client, alice)
+    stored = _fake_storage(monkeypatch)
+
+    def refuse(db, photo_id, field, key, data, width, height):
+        raise RuntimeError('refused')
+    monkeypatch.setattr(account_import, 'save_imported_photo', refuse)
+
+    with pytest.raises(RuntimeError, match='refused'):
+        client.post('/api/account-import/photos/lockphoto001/stored', headers=alice, content=png())
+    assert stored == {}
