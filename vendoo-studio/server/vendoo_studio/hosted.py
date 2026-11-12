@@ -14,6 +14,7 @@ import traceback
 import uuid
 from pathlib import Path
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -46,6 +47,11 @@ def from_public_edge(scope) -> bool:
 
 access_log = logging.getLogger("vendoo_studio.access")
 http_log = logging.getLogger("vendoo_studio.http")
+
+# Session verification's own threads. A check is a signature check, and at
+# most a JWKS read with a 5 s timeout once the cached key set expires, so a
+# few threads keep up with every request the Machine serves.
+AUTH_THREADS = 4
 
 
 class AccessLogMiddleware:
@@ -170,11 +176,14 @@ class SellerSessionMiddleware:
             scheme, _, token = values[0].partition(" ")
             if scheme.lower() != "bearer" or not token or len(token) > 16384:
                 raise InvalidSession
-            verifier = scope["app"].state.session_verifier
-            # JWKS retrieval is synchronous. Keep it off the event loop and
-            # the request thread limiter: slow inventory endpoints must not
-            # prevent the Mac from authenticating its heartbeats and replies.
-            identity = await asyncio.to_thread(verifier.verify, token)
+            state = scope["app"].state
+            # JWKS retrieval is synchronous. Keep it off the event loop, the
+            # request thread limiter and the loop's shared pool: database steps
+            # waiting for a connection and photo copies to Storage fill that
+            # pool, and must not stop the Mac and Chrome authenticating their
+            # heartbeats and replies.
+            identity = await asyncio.get_running_loop().run_in_executor(
+                state.auth_threads, state.session_verifier.verify, token)
         except InvalidSession:
             response = JSONResponse(
                 {"detail": "A valid seller session is required"}, status_code=401,
@@ -351,6 +360,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         docs_url=None, redoc_url=None, openapi_url=None,
     )
     app.state.web_dir = web_dir
+    # Threads start on first use and idle between requests; they need no shutdown.
+    app.state.auth_threads = ThreadPoolExecutor(max_workers=AUTH_THREADS, thread_name_prefix="anteroom-auth")
     app.state.process_role = os.environ.get('ANTEROOM_PROCESS_ROLE', 'all')
     # On Fly, `web` Machines serve sellers and device connections, and `worker`
     # Machines run drafts and the schedulers (deploy/fly/fly.toml). The Mac, the
