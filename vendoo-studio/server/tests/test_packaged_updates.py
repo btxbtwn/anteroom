@@ -94,6 +94,17 @@ class PackagedUpdateTest(unittest.TestCase):
         self.assertEqual(info["zip_sha256"], "bb" * 32)
         self.assertIsNone(packaged_updates._normalize_build_info({"sha": "b", "zip_sha256": "aa" * 32})["zip_sha256"])
 
+    def test_version_list_leaves_out_the_bridge_for_older_installs(self):
+        releases = [
+            {"tag_name": "studio-macos-v0.1.953-oldcert1793526", "published_at": "2026-11-12T05:00:00Z"},
+            {"tag_name": "studio-macos-v0.1.953-1793526", "published_at": "2026-11-12T05:00:00Z"},
+            {"tag_name": "studio-macos", "published_at": "2026-11-12T05:00:00Z"},
+        ]
+        response = httpx.Response(200, json=releases, request=httpx.Request("GET", "https://api.github.com/x"))
+        client = type("Client", (), {"get": lambda self, *a, **k: response})()
+        versions = packaged_updates.list_published_versions(client=client)
+        self.assertEqual([item["tag"] for item in versions], ["studio-macos-v0.1.953-1793526"])
+
     def test_api_headers_include_optional_token(self):
         with patch.dict(os.environ, {"GITHUB_TOKEN": "secret-token"}, clear=False):
             headers = packaged_updates._headers(api=True)
@@ -315,9 +326,6 @@ class PackagedUpdateTest(unittest.TestCase):
             calls.append(args)
             if args[:2] == ["/usr/bin/codesign", "-dv"]:
                 return type("Result", (), {"returncode": 0, "stdout": "", "stderr": display})()
-            if args[:2] == ["/usr/bin/codesign", "-dr"]:
-                return type("Result", (), {"returncode": 0, "stdout": "",
-                    "stderr": 'designated => anchor apple generic and certificate leaf[subject.OU] = "TRUSTEDTEAM"'})()
             self.assertEqual(args[:4], ["/usr/bin/codesign", "--verify", "--deep", "--strict"])
             self.assertTrue(args[4].startswith("-R="), args[4])
             return type(
@@ -330,19 +338,46 @@ class PackagedUpdateTest(unittest.TestCase):
         app = Path(self.tmp.name) / "Anteroom.app"
         app.mkdir()
         fake_run, calls = self._fake_codesign(
-            "Identifier=local.listthis.studio\nAuthority=List This Studio Signing\n"
+            "Identifier=local.listthis.studio\nAuthority=Developer ID Application: Cristian Canizares (JWN57LH9PU)\n"
         )
         with patch.object(packaged_updates.subprocess, "run", side_effect=fake_run):
             packaged_updates._verify_app_signature(app)
-        self.assertEqual(len(calls), 3)
-        self.assertIn('certificate leaf[subject.OU] = "TRUSTEDTEAM"', calls[-1][4])
+        self.assertEqual(len(calls), 2)
         # Passed through verbatim and attached with =, the only form codesign
-        # reads as the requirement rather than as a path. The requirement
-        # already names the app's identifier; it is not appended again.
-        self.assertEqual(
-            calls[-1][4],
-            '-R=anchor apple generic and certificate leaf[subject.OU] = "TRUSTEDTEAM"',
-        )
+        # reads as the requirement rather than as a path.
+        self.assertEqual(calls[-1][4], f"-R={packaged_updates.UPDATE_REQUIREMENT}")
+        self.assertEqual(calls[-1][5], str(app))
+
+    def test_update_requirement_accepts_developer_id_and_the_old_certificate(self):
+        """Installs signed with either certificate accept a build signed with the other.
+
+        Releases through 0.1.947 were signed with a self-signed certificate and
+        their updater only accepts that certificate. The copy signed with it
+        carries this updater, which must then accept the Developer ID build,
+        and a Developer ID install must still be able to go back to an older
+        self-signed build during the transition.
+        """
+        requirement = packaged_updates.UPDATE_REQUIREMENT
+        self.assertTrue(requirement.startswith('identifier "local.listthis.studio" and ('))
+        self.assertIn("anchor apple generic", requirement)
+        self.assertIn('certificate leaf[subject.OU] = "JWN57LH9PU"', requirement)
+        # The Developer ID Application marker, so another certificate type from
+        # the same team (an App Store or development one) is not enough.
+        self.assertIn("certificate leaf[field.1.2.840.113635.100.6.1.13] exists", requirement)
+        self.assertIn('certificate leaf = H"bf5bb813af4efd5e4d73209a2ee50f669ee28bbb"', requirement)
+        self.assertIn(") or (", requirement)
+        self.assertEqual(requirement.count("("), requirement.count(")"))
+
+    def test_verify_app_signature_does_not_depend_on_the_installed_app(self):
+        # An install signed with the old certificate would otherwise demand that
+        # certificate and refuse every Developer ID build.
+        app = Path(self.tmp.name) / "Anteroom.app"
+        app.mkdir()
+        os.environ["VENDOO_STUDIO_APP_PATH"] = str(Path(self.tmp.name) / "missing" / "Anteroom.app")
+        fake_run, calls = self._fake_codesign("Authority=Developer ID Application\n")
+        with patch.object(packaged_updates.subprocess, "run", side_effect=fake_run):
+            packaged_updates._verify_app_signature(app)
+        self.assertFalse(any(str(Path(self.tmp.name) / "missing") in " ".join(call) for call in calls))
 
     def test_verify_app_signature_rejects_adhoc(self):
         app = Path(self.tmp.name) / "Anteroom.app"
@@ -363,39 +398,17 @@ class PackagedUpdateTest(unittest.TestCase):
         with patch.object(packaged_updates.subprocess, "run", side_effect=fake_run):
             with self.assertRaisesRegex(packaged_updates.PackagedUpdateError, "signing identity"):
                 packaged_updates._verify_app_signature(app)
-        self.assertIn('"TRUSTEDTEAM"', calls[-1][4])
-
-    def test_verify_app_signature_requires_installed_signing_identity(self):
-        from subprocess import CompletedProcess
-
-        app = Path(self.tmp.name) / "Anteroom.app"
-        for status, requirement in [(1, "not signed"), (0, "")]:
-            with self.subTest(status=status), patch.object(packaged_updates.subprocess, "run", side_effect=[
-                CompletedProcess([], 0, "", "Authority=Developer ID Application\n"),
-                CompletedProcess([], status, "", requirement),
-            ]) as run:
-                with self.assertRaisesRegex(packaged_updates.PackagedUpdateError, "installed app"):
-                    packaged_updates._verify_app_signature(app)
-                self.assertEqual(run.call_count, 2)
-
-    def test_verify_app_signature_accepts_implicit_designated_requirement(self):
-        from subprocess import CompletedProcess
-
-        with patch.object(packaged_updates.subprocess, "run", side_effect=[
-            CompletedProcess([], 0, "", "Authority=Developer ID Application\n"),
-            CompletedProcess([], 0, "", '# designated => identifier "local.listthis.studio" and anchor apple'),
-            CompletedProcess([], 0, "", ""),
-        ]) as run:
-            packaged_updates._verify_app_signature(Path(self.tmp.name) / "Anteroom.app")
-        self.assertEqual(
-            run.call_args.args[0][4],
-            '-R=identifier "local.listthis.studio" and anchor apple',
-        )
+        self.assertIn('"JWN57LH9PU"', calls[-1][4])
 
     @unittest.skipUnless(sys.platform == "darwin", "codesign is macOS only")
-    def test_verify_app_signature_passes_a_requirement_codesign_can_parse(self):
-        """Guard the exact regression: a wrapped requirement is rejected by codesign."""
+    def test_update_requirement_is_one_codesign_can_parse(self):
+        """Guard the exact regression: a requirement codesign cannot read refuses every update."""
         with tempfile.TemporaryDirectory() as tmp:
+            compiled = subprocess.run(
+                ["/usr/bin/csreq", f"-r={packaged_updates.UPDATE_REQUIREMENT}", "-b", str(Path(tmp) / "req.bin")],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
             app = Path(tmp) / "Anteroom.app"
             (app / "Contents" / "MacOS").mkdir(parents=True)
             launcher = app / "Contents" / "MacOS" / "Anteroom"
@@ -404,20 +417,13 @@ class PackagedUpdateTest(unittest.TestCase):
             signed = subprocess.run(["/usr/bin/codesign", "--force", "-s", "-", str(app)],
                                     capture_output=True, text=True)
             self.assertEqual(signed.returncode, 0, signed.stderr)
-            designated = subprocess.run(["/usr/bin/codesign", "-dr", "-", str(app)],
-                                        capture_output=True, text=True)
-            requirement = next(line.split("designated =>", 1)[1].strip()
-                               for line in (designated.stdout + designated.stderr).splitlines()
-                               if line.lstrip("# ").startswith("designated =>"))
-            self.assertFalse(requirement.startswith("("))
+            # An ad-hoc signature is read, and refused for the requirement, not
+            # for a malformed one.
             verify = subprocess.run(["/usr/bin/codesign", "--verify", "--deep", "--strict",
-                                     f"-R={requirement}", str(app)], capture_output=True, text=True)
-            self.assertEqual(verify.returncode, 0, verify.stderr)
-            # The form the updater shipped with: codesign reads "-R <req> <app>"
-            # as a requirement naming a file and refuses every update.
-            separate = subprocess.run(["/usr/bin/codesign", "--verify", "--deep", "--strict",
-                                       "-R", requirement, str(app)], capture_output=True, text=True)
-            self.assertNotEqual(separate.returncode, 0, "codesign must not accept '-R <req>'")
+                                     f"-R={packaged_updates.UPDATE_REQUIREMENT}", str(app)],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(verify.returncode, 0)
+            self.assertIn("failed to satisfy", verify.stderr)
 
     def test_verify_app_signature_rejects_broken_seal(self):
         app = Path(self.tmp.name) / "Anteroom.app"

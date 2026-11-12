@@ -876,7 +876,7 @@ export const api = {
     },
     applyPriceDrop: (
       convId: string,
-      body: { price: number; percent?: number | null; mode: "percent" | "comps" | "custom" },
+      body: { price: number; expected_revision_id: string; percent?: number | null; mode: "percent" | "comps" | "custom" },
     ) =>
       requestWithTimeout<PriceDropApplyResult>(`/conversations/${convId}/price-drop`, {
         method: "POST",

@@ -53,7 +53,7 @@ class PriceDropRouteTest(unittest.TestCase):
 
         apply = self.client.post(
             f"/api/conversations/{self.conv.id}/price-drop",
-            json={"price": 41, "percent": 15, "mode": "percent"},
+            json={"price": 41, "percent": 15, "mode": "percent", "expected_revision_id": body["revision_id"]},
         )
         self.assertEqual(apply.status_code, 200, apply.text)
         payload = apply.json()
@@ -71,11 +71,47 @@ class PriceDropRouteTest(unittest.TestCase):
         revision = ListingRepo(self.db).get_revisions(self.conv.id)[0]
         snapshot = {**revision.listing_json, "_native_video": {"id": "clip", "checksum": "original"}}
         job = JobRepo(self.db).create(self.conv.id, revision.id, snapshot, status="failed", current_step="native_poshmark_save_draft")
-        response = self.client.post(f"/api/conversations/{self.conv.id}/price-drop", json={"price": 41, "mode": "percent", "percent": 15})
+        response = self.client.post(f"/api/conversations/{self.conv.id}/price-drop", json={"price": 41, "mode": "percent", "percent": 15, "expected_revision_id": revision.id})
         self.assertEqual(response.status_code, 200, response.text)
         self.db.refresh(job)
         self.assertEqual(job.listing_snapshot, snapshot)
         self.assertEqual(ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json["price"], 41)
+
+    def test_stale_price_drop_preserves_a_newer_edit(self):
+        old = ListingRepo(self.db).get_revisions(self.conv.id)[0]
+        listing_persistence.save_revision(self.db, self.conv.id,
+            {**old.listing_json, "price": 60}, source="edit")
+        response = self.client.post(f"/api/conversations/{self.conv.id}/price-drop",
+            json={"price": 43, "percent": 10, "mode": "percent", "expected_revision_id": old.id})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(self.client.get(f"/api/conversations/{self.conv.id}/listing").json()["listing"]["price"], 60)
+
+    def test_every_price_drop_requires_a_nonempty_review_revision(self):
+        for revision in (None, ""):
+            body = {"price": 5}
+            if revision is not None:
+                body["expected_revision_id"] = revision
+            single = self.client.post(f"/api/conversations/{self.conv.id}/price-drop", json=body)
+            batch = self.client.post("/api/price-drop/batch", json={"drops": [
+                {**body, "conversation_id": self.conv.id}]})
+            self.assertEqual(single.status_code, 422, single.text)
+            self.assertEqual(batch.status_code, 422, batch.text)
+        self.assertEqual(self.client.get(f"/api/conversations/{self.conv.id}/listing").json()["listing"]["price"], 48)
+
+    def test_price_drop_fences_the_final_save_not_only_the_initial_read(self):
+        old = ListingRepo(self.db).get_revisions(self.conv.id)[0]
+        save = listing_persistence.save_revision
+
+        def another_edit_before_save(db, **kwargs):
+            save(db, self.conv.id, {**old.listing_json, "price": 60}, source="edit")
+            return save(db, **kwargs)
+
+        with patch.object(listing_persistence, "save_revision", side_effect=another_edit_before_save):
+            response = self.client.post(f"/api/conversations/{self.conv.id}/price-drop",
+                json={"price": 43, "expected_revision_id": old.id})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(self.client.get(f"/api/conversations/{self.conv.id}/listing").json()["listing"]["price"], 60)
+        self.assertFalse(any(row.source == PRICE_DROP_SOURCE for row in ListingRepo(self.db).get_revisions(self.conv.id)))
 
     def test_comps_stream_reports_sources_then_the_preview(self):
         comps = (
@@ -113,6 +149,7 @@ class PriceDropRouteTest(unittest.TestCase):
         self.assertEqual(json.loads(events[1][1])["state"], "searching")
         self.assertEqual(json.loads(events[2][1])["sold"], 3)
         preview = json.loads(events[-1][1])
+        self.assertEqual(preview["revision_id"], ListingRepo(self.db).get_revisions(self.conv.id)[0].id)
         self.assertEqual(events[-1][0], "preview")
         self.assertEqual(preview["comps"]["target_price"], 27)
         self.assertEqual(preview["suggested_mode"], "comps")
@@ -147,7 +184,7 @@ class PriceDropRouteTest(unittest.TestCase):
     def test_rejects_raise_or_missing_price(self):
         bad = self.client.post(
             f"/api/conversations/{self.conv.id}/price-drop",
-            json={"price": 60, "mode": "custom"},
+            json={"price": 60, "mode": "custom", "expected_revision_id": ListingRepo(self.db).get_revisions(self.conv.id)[0].id},
         )
         self.assertEqual(bad.status_code, 400)
 
@@ -212,7 +249,7 @@ class BatchMarkdownRouteTest(unittest.TestCase):
         rows = self._preview(self.tee.id, self.coat.id)
         res = self.client.post("/api/price-drop/batch", json={"drops": [
             {"conversation_id": self.tee.id, "price": 40, "expected_revision_id": rows[self.tee.id]["revision_id"]},
-            {"conversation_id": self.coat.id, "price": 99.6},
+            {"conversation_id": self.coat.id, "price": 99.6, "expected_revision_id": rows[self.coat.id]["revision_id"]},
         ]})
         self.assertEqual(res.status_code, 200, res.text)
         body = res.json()
@@ -236,14 +273,14 @@ class BatchMarkdownRouteTest(unittest.TestCase):
     def test_apply_skips_what_cannot_drop_and_saves_the_rest(self):
         rows = self._preview(self.tee.id, self.coat.id)
         stale_revision = rows[self.coat.id]["revision_id"]
-        self.client.post(f"/api/conversations/{self.coat.id}/price-drop", json={"price": 110})
+        self.client.post(f"/api/conversations/{self.coat.id}/price-drop", json={"price": 110, "expected_revision_id": stale_revision})
         empty = self._listing("No price", None)
 
         res = self.client.post("/api/price-drop/batch", json={"drops": [
-            {"conversation_id": self.tee.id, "price": 48},
+            {"conversation_id": self.tee.id, "price": 48, "expected_revision_id": rows[self.tee.id]["revision_id"]},
             {"conversation_id": self.coat.id, "price": 90, "expected_revision_id": stale_revision},
-            {"conversation_id": empty.id, "price": 5},
-            {"conversation_id": "missing", "price": 5},
+            {"conversation_id": empty.id, "price": 5, "expected_revision_id": self.listings.get_revisions(empty.id)[0].id},
+            {"conversation_id": "missing", "price": 5, "expected_revision_id": "missing"},
         ]})
         self.assertEqual(res.status_code, 200, res.text)
         body = res.json()
@@ -261,8 +298,8 @@ class BatchMarkdownRouteTest(unittest.TestCase):
         revision = self.listings.get_revisions(self.tee.id)[0]
         JobRepo(self.db).create(self.tee.id, revision.id, revision.listing_json, status="queued")
         res = self.client.post("/api/price-drop/batch", json={"drops": [
-            {"conversation_id": self.tee.id, "price": 40},
-            {"conversation_id": self.coat.id, "price": 100},
+            {"conversation_id": self.tee.id, "price": 40, "expected_revision_id": revision.id},
+            {"conversation_id": self.coat.id, "price": 100, "expected_revision_id": self.listings.get_revisions(self.coat.id)[0].id},
         ]})
         body = res.json()
         self.assertEqual([row["conversation_id"] for row in body["applied"]], [self.coat.id])

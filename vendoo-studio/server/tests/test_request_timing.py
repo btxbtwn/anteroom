@@ -56,3 +56,31 @@ def test_slow_save_reaches_persistent_logs(tmp_path, monkeypatch):
     assert "/api/conversations/{listing_id}/price-drop 200" in entries[0]["message"]
     assert "private" not in entries[0]["message"]
     assert "secret" not in entries[0]["message"]
+
+
+def test_empty_relay_poll_allows_the_route_wait_but_not_excess_delay(caplog):
+    from vendoo_studio.services.hosted_browser_relay import WAIT_S
+
+    async def send(message):
+        pass
+
+    for method, path, status, duration, warns in [
+        ('GET', '/api/browser-relay/next', 204, WAIT_S + 0.079, False),
+        ('GET', '/api/browser-relay/next', 204, WAIT_S + 4.999, False),
+        ('GET', '/api/browser-relay/next', 204, WAIT_S + 5, True),
+        ('GET', '/api/browser-relay/next', 204, WAIT_S + 6, True),
+        ('GET', '/api/browser-relay/next', 503, 6, True),
+        ('GET', '/api/browser-relay/next', 200, 6, True),
+        ('POST', '/api/browser-relay/next', 204, 6, True),
+        ('GET', '/api/other', 204, 6, True),
+        ('GET', '/api/browser-relay/next/other', 204, 6, True),
+    ]:
+        caplog.clear()
+
+        async def route(scope, receive, send, path=path, status=status):
+            scope['route'] = type('Route', (), {'path': path})()
+            await send({'type': 'http.response.start', 'status': status})
+
+        with patch('vendoo_studio.services.request_timing.time.perf_counter', side_effect=[0, duration]):
+            asyncio.run(RequestTimingMiddleware(route)({'type': 'http', 'method': method}, None, send))
+        assert bool(caplog.records) is warns, (method, path, status, duration)

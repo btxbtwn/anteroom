@@ -35,6 +35,21 @@ final class AnteroomAPITests: XCTestCase {
         XCTAssertEqual((sent.json?["listing"] as? [String: Any])?["title"] as? String, "New")
     }
 
+    func testMarkdownSendsTheReviewedRevisionAndReportsAStalePrice() async throws {
+        StubProtocol.answer(.init(status: 200, body: #"{"applied":[],"skipped":[{"conversation_id":"a","reason":"This listing changed since you reviewed it"}]}"#))
+        let result = try await api.applyMarkdowns([
+            MarkdownDrop(conversationID: "a", price: 32, expectedRevisionID: "reviewed")
+        ])
+        let sent = try XCTUnwrap(StubProtocol.requests.first)
+        XCTAssertEqual(sent.httpMethod, "POST")
+        XCTAssertEqual(sent.url?.path, "/api/price-drop/batch")
+        let drops = try XCTUnwrap(sent.json?["drops"] as? [[String: Any]])
+        XCTAssertEqual(drops.first?["expected_revision_id"] as? String, "reviewed")
+        XCTAssertEqual(drops.first?["price"] as? Double, 32)
+        XCTAssertTrue(result.applied.isEmpty)
+        XCTAssertEqual(result.skipped.first?.reason, "This listing changed since you reviewed it")
+    }
+
     func testCreateListingSendsNoTitleAndOptionalNotes() async throws {
         StubProtocol.answer(.init(status: 200, body: #"{"id":"n","title":"New Listing","status":"draft","created_at":"2026-11-01T10:00:00","updated_at":"2026-11-01T10:00:00","notes":""}"#))
         _ = try await api.createListing()
