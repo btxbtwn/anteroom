@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.956 — 2026-11-12
+
+- Keep newer price edits when an older markdown is confirmed. Review the listing again before lowering a price that changed on another screen.
+
 ## 0.1.955 — 2026-11-12
 
 - Send each new Anteroom Bridge version to the Chrome Web Store for review automatically, so Chrome can update it without a Mac app release.
