@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.950 — 2026-11-12
+
+- Generating a listing, chatting about it and filling marketplace fields no longer freeze the rest of the app while they save, so other drafts, pages and Chrome stay responsive.
+
 ## 0.1.949 — 2026-11-12
 
 - Drafts no longer fail with a database timeout while looking up your past items of the same brand.

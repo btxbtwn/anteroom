@@ -1,1 +1,0 @@
-- Generating a listing, chatting about it and filling marketplace fields no longer freeze the rest of the app while they save, so other drafts, pages and Chrome stay responsive.
