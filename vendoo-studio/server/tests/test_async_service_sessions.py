@@ -24,7 +24,6 @@ STILL_ON_THE_LOOP = {
     "services/promotion_automations.py:run_round",
     "services/promotion_automations.py:tick",
     "services/relay_sales.py:handle_event",
-    "services/scout.py:run_check",
     "services/vendoo_drafts.py:_ops",
     "services/vendoo_drafts.py:run",
 }
