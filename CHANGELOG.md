@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.968 — 2026-11-14
+
+- On the web, the send queue and listing activity checks skip loading full listing copies they do not use.
+
 ## 0.1.967 — 2026-11-14
 
 - Anteroom stays responsive while it checks how many are left on eBay or Etsy after a sale.
