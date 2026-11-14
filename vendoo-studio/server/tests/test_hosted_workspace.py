@@ -644,3 +644,37 @@ def test_discard_blank_removes_only_an_untouched_new_listing(cloud, signing_keys
     assert client.get('/api/conversations/' + blank, headers=alice).status_code == 404
     assert client.post(f'/api/conversations/{typed}/discard-blank', headers=alice).json() == {'discarded': False}
     assert client.get('/api/conversations/' + typed, headers=alice).status_code == 200
+
+
+def test_active_job_polls_skip_the_listing_snapshot(cloud, signing_keys):  # noqa: F811
+    # The queue and a listing's activity poll every second or two while a job
+    # runs. They show status only; a job's listing copy can be megabytes.
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    from vendoo_studio.models.job import Job
+
+    client, engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'Coat'}).json()['id']
+    with Session(engine) as db:
+        db.add(Job(id='job-1', conversation_id=identity, approved_revision_id='rev', user_id=USER_ID,
+            listing_snapshot={'title': 'Coat', 'description': 'x' * 50000}, status='queued',
+            current_step='native_ebay_publish'))
+        db.commit()
+    statements = []
+    def record(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+    event.listen(Engine, 'before_cursor_execute', record)
+    try:
+        queue = client.get('/api/jobs/queue', headers=alice)
+        activity = client.get(f'/api/conversations/{identity}/activity', headers=alice)
+    finally:
+        event.remove(Engine, 'before_cursor_execute', record)
+    assert queue.status_code == 200, queue.text
+    assert [row['id'] for row in queue.json()['jobs']] == ['job-1']
+    assert activity.status_code == 200, activity.text
+    assert activity.json()['busy'] is True
+    job_reads = [statement for statement in statements if 'FROM jobs' in statement]
+    assert job_reads
+    assert not any('listing_snapshot' in statement for statement in job_reads), job_reads

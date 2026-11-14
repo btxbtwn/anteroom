@@ -322,7 +322,9 @@ def activity(identity: str, db=Depends(get_seller_db, scope="function")):
 
 
 def activity_response(db, identity, count, last):
-    jobs = db.scalars(select(Job).where(Job.conversation_id == identity, Job.status.in_(ACTIVE_JOB_STATUSES))).all()
+    # Status only: each job's listing copy can be megabytes, and this polls every second while busy.
+    jobs = db.scalars(select(Job).options(defer(Job.listing_snapshot, raiseload=True)).where(
+        Job.conversation_id == identity, Job.status.in_(ACTIVE_JOB_STATUSES))).all()
     from vendoo_studio.models.background_task import BackgroundTask
     tasks = db.scalars(select(BackgroundTask).where(
         BackgroundTask.conversation_id == identity, BackgroundTask.status.in_(('queued', 'running')))).all()
@@ -380,7 +382,8 @@ def jobs(conversation_id: str | None = None, db=Depends(get_seller_db, scope="fu
 
 @router.get('/jobs/queue')
 def queue(db=Depends(get_seller_db, scope="function")):
-    rows = db.scalars(select(Job).where(Job.status.in_(ACTIVE_JOB_STATUSES)).order_by(Job.created_at)).all()
+    rows = db.scalars(select(Job).options(defer(Job.listing_snapshot, raiseload=True)).where(
+        Job.status.in_(ACTIVE_JOB_STATUSES)).order_by(Job.created_at)).all()
     return {'work': [], 'jobs': [job_response(row) for row in rows]}
 
 

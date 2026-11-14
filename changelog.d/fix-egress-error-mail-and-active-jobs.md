@@ -1,0 +1,1 @@
+- On the web, the send queue and listing activity checks skip loading full listing copies they do not use.
