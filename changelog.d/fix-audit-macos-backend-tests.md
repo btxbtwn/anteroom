@@ -1,1 +1,0 @@
-- Fix two app checks that failed when run on a Mac.

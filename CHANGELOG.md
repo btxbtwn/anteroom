@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.961 — 2026-11-14
+
+- Keep an item photo as the listing's cover after you add a photo on one marketplace's form.
+
+## 0.1.960 — 2026-11-14
+
+- Fix two app checks that failed when run on a Mac.
+
 ## 0.1.959 — 2026-11-14
 
 - Reduce database data transferred when refreshing inventory while keeping quantity corrections, restocks and sold status intact.
