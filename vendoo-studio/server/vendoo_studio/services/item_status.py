@@ -22,6 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from sqlalchemy import DateTime, String, case, column, func, literal, select, values
 from sqlalchemy.orm import Session
 
 from vendoo_studio.models.listing import ListingRevision
@@ -61,7 +62,7 @@ def _time(value) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def _quantities(db: Session, conv_ids: set[str] | None, first_sales: dict[str, datetime] | None = None) -> dict[str, int]:
+def _quantities(db: Session, conv_ids: set[str], first_sales: dict[str, datetime] | None = None) -> dict[str, int]:
     """Use the last correction before sales, then retain the established stock.
 
     Before the first recorded sale, quantity edits correct the stock baseline.
@@ -69,32 +70,44 @@ def _quantities(db: Session, conv_ids: set[str] | None, first_sales: dict[str, d
     for; an increase can raise the total. Marketplace stock observations remain
     separate and can establish that the remaining units have actually sold out.
     """
-    first_sales = first_sales or {}
-    best: dict[str, int] = {}
-
-    def add(conv_id: str, value: int | None, created_at: datetime | None):
-        if value is None:
-            return
-        try:
-            number = int(value)
-        except (TypeError, ValueError):
-            return
-        if number < 1:
-            return
-        first_sale = first_sales.get(conv_id)
-        when = _time(created_at)
-        if first_sale is None or (when is not None and when <= first_sale) or number > best.get(conv_id, 0):
-            best[conv_id] = number
-
-    # This scalar is recorded on each immutable revision. JSON extraction here
-    # made each poll parse every historical marketplace form in the database.
-    every = db.query(ListingRevision.conversation_id, ListingRevision.inventory_quantity,
-                     ListingRevision.created_at).order_by(ListingRevision.created_at)
-    if conv_ids is not None:
-        every = every.filter(ListingRevision.conversation_id.in_(conv_ids))
-    for conv_id, quantity, created_at in every.all():
-        add(conv_id, quantity, created_at)
-    return best
+    if not conv_ids:
+        return {}
+    first_sales = {identity: moment for identity, moment in (first_sales or {}).items() if identity in conv_ids}
+    revision = ListingRevision
+    # Keep the historical replay's ordering, including the database's ordering
+    # of undated revisions. Only positive quantities can correct the baseline.
+    # Include unsold items with a null cutoff so an inner join can start from
+    # the requested IDs and probe the revision index. A left join instead
+    # makes SQLite scan every cutoff once per historical revision.
+    cutoffs = values(column("conversation_id", String), column("first_sale", DateTime)).data(
+        # Revision timestamps are UTC without a zone; bind cutoffs the same
+        # way so PostgreSQL's session timezone cannot move the sale boundary.
+        [(identity, first_sales[identity].astimezone(UTC).replace(tzinfo=None) if identity in first_sales else None)
+         for identity in conv_ids]
+    ).cte("first_sales") if first_sales else None
+    correction = ((cutoffs.c.first_sale.is_(None) | (revision.created_at <= cutoffs.c.first_sale))
+                  if cutoffs is not None else literal(True))
+    ordered = select(
+        revision.conversation_id.label("conversation_id"),
+        revision.inventory_quantity.label("quantity"),
+        correction.label("correction"),
+        func.row_number().over(partition_by=revision.conversation_id,
+                               order_by=revision.created_at).label("position"),
+    ).where(revision.inventory_quantity > 0)
+    if cutoffs is not None:
+        ordered = ordered.select_from(cutoffs).join(revision, revision.conversation_id == cutoffs.c.conversation_id)
+    else:
+        ordered = ordered.where(revision.conversation_id.in_(conv_ids))
+    history = ordered.subquery()
+    baseline = select(history, func.max(case((history.c.correction, history.c.position))).over(
+        partition_by=history.c.conversation_id).label("last_correction")).subquery()
+    # The final correction replaces everything before it. From there onward,
+    # only an increase raises established stock. Aggregate before transferring
+    # results: history depth must not increase the number of returned rows.
+    query = select(baseline.c.conversation_id, func.max(baseline.c.quantity)).where(
+        baseline.c.last_correction.is_(None) | (baseline.c.position >= baseline.c.last_correction)
+    ).group_by(baseline.c.conversation_id)
+    return dict(db.execute(query).all())
 
 
 
@@ -200,8 +213,12 @@ def statuses(db: Session, conversations: list[tuple[str, dict]]) -> dict[str, It
     ids = {conv_id for conv_id, _notes in conversations}
     if not ids:
         return {}
-    scoped = ids if len(ids) <= 500 else None
-    lines = paid_lines(db, scoped)
+    if len(ids) > 500:
+        result = {}
+        for start in range(0, len(conversations), 500):
+            result.update(statuses(db, conversations[start:start + 500]))
+        return result
+    lines = paid_lines(db, ids)
     first_sales = {}
     for conv_id, notes in conversations:
         own_lines = lines.get(conv_id, [])
@@ -216,11 +233,10 @@ def statuses(db: Session, conversations: list[tuple[str, dict]]) -> dict[str, It
         first = min(filter(None, moments), default=None)
         if first:
             first_sales[conv_id] = first
-    quantities = _quantities(db, scoped, first_sales)
+    quantities = _quantities(db, ids, first_sales)
     live_query = db.query(MarketplaceListing.conversation_id, MarketplaceListing.marketplace, MarketplaceListing.listing_url).filter(
         MarketplaceListing.state.in_(LIVE_STATES))
-    if scoped is not None:
-        live_query = live_query.filter(MarketplaceListing.conversation_id.in_(scoped))
+    live_query = live_query.filter(MarketplaceListing.conversation_id.in_(ids))
     direct: dict[str, dict[str, str]] = {}
     observations: dict[str, dict[str, dict]] = {}
     observed = db.query(MarketplaceListing.conversation_id, MarketplaceListing.marketplace, MarketplaceListing.inventory_observation).filter(
@@ -285,5 +301,9 @@ def sold_units(db: Session, conversations: list) -> dict[str, ItemStatus]:
     """Status for the items with a sale on Anteroom's ledger, so a row can say "1 of 3 sold"."""
     from vendoo_studio.services.vendoo_import import parse_notes
 
-    with_sales = set(paid_lines(db, {conv.id for conv in conversations} if len(conversations) <= 500 else None))
-    return statuses(db, [(conv.id, parse_notes(conv.notes)) for conv in conversations if conv.id in with_sales])
+    result = {}
+    for start in range(0, len(conversations), 500):
+        batch = conversations[start:start + 500]
+        with_sales = set(paid_lines(db, {conv.id for conv in batch}))
+        result.update(statuses(db, [(conv.id, parse_notes(conv.notes)) for conv in batch if conv.id in with_sales]))
+    return result

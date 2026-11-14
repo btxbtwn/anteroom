@@ -418,3 +418,66 @@ credit rejections are not replayed, and evidence validation still rejects
 unsupported field values. Deterministic tests cover recovery through the
 field-fill collector and validator plus bounded failure. Production validation
 of this recovery remains pending.
+
+## Inventory quantity read volume, 2026-11-14
+
+The November 13 quota investigation identified a still-current read in
+`services/item_status.py`: every historical quantity was returned to Python,
+and status/sold-unit reads discarded the requested ID scope above 500 items.
+The production `pg_stat_statements` observation (14,617 calls and 85,569,373
+returned revision rows since the October 29 reset) is cumulative, not a rate
+or proof of which service caused billed egress. Main already has scalar
+inventory projections, first-photo selection and shared hosted inventory reads;
+this change retains those, the complete-list API, filters and pagination.
+
+`server/tests/test_inventory_egress.py` uses disposable databases: two sellers,
+600 items each, 30 revisions per item, one paid sale and one live listing per
+item. It requests 501 items from one seller. Baseline is `d9c16317`; after is the
+SQL quantity summary and scoped batches in this change. The same fixture runs
+on SQLite and local Postgres 16; the hosted row uses the real restricted seller
+session and RLS. ORM result rows are counted after SQL execution, including
+empty queries in query counts (not connection setup or RLS setup statements).
+
+| Read | Before rows / queries | After rows / queries |
+| --- | ---: | ---: |
+| Quantities for 501 explicit IDs | 15,030 / 1 | 501 / 1 |
+| Statuses, privileged multi-seller fixture | 38,400 / 4 | 1,503 / 8 |
+| Statuses, hosted seller role / RLS | 19,200 / 4 | 1,503 / 8 |
+
+The quantity result's UTF-8 Python tuple representation falls from 761,226 to
+5,902 bytes. This is a reproducible logical representation, **not** PostgreSQL
+wire bytes, HTTP bytes or Supabase billed egress. SQL still examines scoped
+quantity history; returned rows are not scanned pages or CPU consumption.
+Batching trades more round trips for retaining the requested scope.
+
+Instrumented single-run observations on this Linux host: SQLite quantity read
+127.9 ms before / 137.1 ms after, complete status calculation 417.6 / 172.4 ms;
+Postgres quantity read 132.8 / 161.7 ms, complete status calculation 570.8 /
+198.4 ms. These include result materialization, instrumentation and new query
+compilation. They are not reliable p50/p95 or cold/warm production benchmarks.
+The standalone quantity query does more database aggregation; the observed
+complete status path improves while transferring much less history.
+
+Sale cutoffs are joined through a small VALUES CTE using the existing
+SQLAlchemy dependency. All requested IDs, including unsold items with null
+cutoffs, drive an inner join into the revision index. SQLite EXPLAIN confirmed
+this removes a cutoff scan repeated for every revision. The regression's
+5-million-instruction SQLite budget fails on the earlier left join
+(approximately 32,053,000 VM steps) and passes on the indexed join (1,793,000).
+This is a database-work proxy, not billed bytes or production CPU measurement.
+
+Regression coverage compares six cutoff scenarios across 60 synthetic item
+histories with the previous chronological replay, including corrections,
+restocks, invalid/missing quantities, no sales and undated revisions. It also
+checks 1,001-item status/sold-unit scopes, partial-sale quantities and cross-seller
+RLS. Reproduce the SQLite volume observation with
+`.venv/bin/python -m pytest -q -s server/tests/test_inventory_egress.py` from
+`vendoo-studio`; use `ANTEROOM_TEST_DATABASE_URL` pointing only to a disposable
+local Postgres server for that dialect (the suite creates its test databases).
+
+No production load test or configuration/schema change was performed. Actual
+organization usage, per-service bytes and spend-cap state remain unavailable;
+this draft code does not clear accumulated quota. Concurrent generation
+interaction latency, production sustained CPU/p95 and native iOS latency remain
+unmeasured by this focused read-volume test. Phone browser checks, when run,
+are browser coverage, not native-device coverage.

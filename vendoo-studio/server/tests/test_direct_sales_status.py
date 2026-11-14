@@ -230,7 +230,7 @@ def test_inventory_quantities_do_not_decode_historical_listing_bodies(env):
 
     event.listen(env.db, "do_orm_execute", scalar_only)
     try:
-        assert _quantities(env.db, None) == {"tees": 1, "coat": 2}
+        assert _quantities(env.db, {"tees", "coat"}) == {"tees": 1, "coat": 2}
         assert _quantities(env.db, {"tees"}) == {"tees": 1}
         assert _quantities(env.db, set()) == {}
     finally:
