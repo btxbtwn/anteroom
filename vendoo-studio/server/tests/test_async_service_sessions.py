@@ -13,8 +13,6 @@ STILL_ON_THE_LOOP = {
     "services/hosted_promotion_scheduler.py:check_seller",
     "services/listing_promotions.py:review",
     "services/marketplace_accounts.py:autodelist_for_sales",
-    "services/marketplace_inventory.py:observe",
-    "services/marketplace_inventory.py:read_after_sales",
     "services/native_marketplaces.py:_execute_step",
     "services/native_marketplaces.py:_wait_for_chrome",
     "services/native_marketplaces.py:run_job",
