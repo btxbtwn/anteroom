@@ -6,6 +6,22 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.967 — 2026-11-14
+
+- Anteroom stays responsive while it checks how many are left on eBay or Etsy after a sale.
+
+## 0.1.966 — 2026-11-14
+
+- On the web, one seller's long automation, such as regenerating many drafts, no longer delays other sellers' scheduled automations.
+
+## 0.1.965 — 2026-11-14
+
+- Applying changes the assistant suggested no longer overwrites edits you made to a listing after it suggested them; that listing is skipped and you can ask again.
+
+## 0.1.964 — 2026-11-14
+
+- Asking the assistant to change one part of an automation, like its time or its price drop, now keeps the rest of it (which listings it touches, its marketplaces), and a paused automation stays paused.
+
 ## 0.1.963 — 2026-11-14
 
 - Keep concurrent draft generation from tying up database connections with repeated category work, so progress and draft saves can keep moving.

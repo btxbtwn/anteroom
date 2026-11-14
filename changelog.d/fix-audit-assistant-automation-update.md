@@ -1,1 +1,0 @@
-- Asking the assistant to change one part of an automation, like its time or its price drop, now keeps the rest of it (which listings it touches, its marketplaces), and a paused automation stays paused.
