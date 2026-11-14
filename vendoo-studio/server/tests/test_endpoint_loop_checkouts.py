@@ -1,5 +1,6 @@
 """Async handlers keep database work off the event loop and hold no connection across slow waits."""
 import asyncio
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,14 +18,18 @@ from vendoo_studio.database import claim_in_worker_session, in_worker_session
 SLOW_EXTERNAL_S = 0.3
 
 
-def _one_connection_pool(tmp_path):
+def _one_connection_pool(tmp_path, *, pool_timeout=0.2):
     # A pool of one, failing fast like the hosted pool: any connection held across
     # a slow wait leaves the next request nothing.
     return create_engine(f"sqlite:///{tmp_path / 'pool.db'}", poolclass=QueuePool, pool_size=1, max_overflow=0,
-                         pool_timeout=0.2, connect_args={"check_same_thread": False})
+                         pool_timeout=pool_timeout, connect_args={"check_same_thread": False})
 
 
-def _app(sessions) -> FastAPI:
+async def _external_pause():
+    await asyncio.sleep(SLOW_EXTERNAL_S)
+
+
+def _app(sessions, external_wait=_external_pause) -> FastAPI:
     app = FastAPI()
 
     def read(db):
@@ -33,7 +38,7 @@ def _app(sessions) -> FastAPI:
     @app.get("/released")
     async def released():
         before = await in_worker_session(read)
-        await asyncio.sleep(SLOW_EXTERNAL_S)  # Chrome, a marketplace or a model
+        await external_wait()  # Chrome, a marketplace or a model
         after = await in_worker_session(read)
         return {"ok": before == after == 1}
 
@@ -41,7 +46,7 @@ def _app(sessions) -> FastAPI:
     async def held():
         with sessions() as db:
             db.execute(text("SELECT 1"))
-            await asyncio.sleep(SLOW_EXTERNAL_S)
+            await external_wait()
             return {"ok": True}
 
     return app
@@ -53,23 +58,58 @@ async def _concurrently(app, path, count):
         return await asyncio.gather(*(client.get(path) for _ in range(count)), return_exceptions=True)
 
 
-def test_slow_waits_do_not_exhaust_a_small_pool(tmp_path):
-    engine = _one_connection_pool(tmp_path)
+@pytest.mark.parametrize("checkout_pause", [0, 0.25])
+def test_slow_waits_do_not_exhaust_a_small_pool(tmp_path, checkout_pause):
+    # Give finite worker work scheduling room. Connection release is checked
+    # directly below, rather than inferred from beating a 200 ms pool timeout.
+    engine = _one_connection_pool(tmp_path, pool_timeout=1)
     sessions = sessionmaker(bind=engine)
-    with patch("vendoo_studio.database.SessionLocal", sessions):
-        replies = asyncio.run(_concurrently(_app(sessions), "/released", 8))
-    assert [reply.json() for reply in replies] == [{"ok": True}] * 8
-    engine.dispose()
+    if checkout_pause:
+        # Reproduce a worker descheduled after it acquires the only slot.
+        event.listen(engine, "checkout", lambda *_: time.sleep(checkout_pause), once=True)
+
+    async def scenario():
+        arrived = 0
+        all_waiting, release = asyncio.Event(), asyncio.Event()
+
+        async def external_wait():
+            nonlocal arrived
+            arrived += 1
+            if arrived == 8:
+                all_waiting.set()
+            await release.wait()
+
+        requests = asyncio.create_task(_concurrently(_app(sessions, external_wait), "/released", 8))
+        try:
+            await asyncio.wait_for(all_waiting.wait(), timeout=5)
+            # Every request is parked outside its database step. A session
+            # retained across that await cannot be hidden by a longer timeout.
+            assert engine.pool.checkedout() == 0, engine.pool.status()
+        finally:
+            release.set()
+            replies = await asyncio.wait_for(requests, timeout=5)
+            failures = [repr(reply) for reply in replies if isinstance(reply, BaseException)]
+            assert not failures, failures
+        assert [reply.json() for reply in replies] == [{"ok": True}] * 8
+        assert engine.pool.checkedout() == 0
+
+    try:
+        with patch("vendoo_studio.database.SessionLocal", sessions):
+            asyncio.run(scenario())
+    finally:
+        engine.dispose()
 
 
 def test_holding_a_session_across_a_slow_wait_does_exhaust_it(tmp_path):
     """The failure the hosted API saw, reproduced so the test above means something."""
     engine = _one_connection_pool(tmp_path)
     sessions = sessionmaker(bind=engine)
-    with patch("vendoo_studio.database.SessionLocal", sessions):
-        replies = asyncio.run(_concurrently(_app(sessions), "/held", 4))
-    assert any(isinstance(reply, PoolTimeout) for reply in replies)
-    engine.dispose()
+    try:
+        with patch("vendoo_studio.database.SessionLocal", sessions):
+            replies = asyncio.run(_concurrently(_app(sessions), "/held", 4))
+        assert any(isinstance(reply, PoolTimeout) for reply in replies)
+    finally:
+        engine.dispose()
 
 
 @pytest.mark.parametrize(("path", "flagged"), [("/released", False), ("/held", True)])
