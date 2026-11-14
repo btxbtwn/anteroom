@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.962 — 2026-11-14
+
+- Keep starting generations and sending draft messages from tying up database connections while checking your AI provider.
+
 ## 0.1.961 — 2026-11-14
 
 - Keep an item photo as the listing's cover after you add a photo on one marketplace's form.
