@@ -526,16 +526,19 @@ def test_a_reply_with_changes_becomes_a_proposal_and_changes_nothing(workspace, 
 
     assert "changes" not in response.text and "asking" not in response.text
     assert saved["text"].strip() == "Ready to review."
+    # Each item keeps the revision the seller reviews, so Apply can refuse a listing edited since.
+    reviewed = {listing: ListingRepo(db).get_revisions(listing)[0].id for listing in (coat, jeans)}
     assert saved["changes"] == {"status": "proposed", "items": [
         # The brand it already has and a field the assistant may not set are left out.
-        {"listing_id": coat, "title": "Carhartt | Chore Coat",
+        {"listing_id": coat, "title": "Carhartt | Chore Coat", "revision_id": reviewed[coat],
          "set": {"asking": 100, "brand": "Carhartt", "labels": ["Sale", "Bin 2"]},
          "fields": [
              {"field": "asking", "old": 120, "new": 100},
              {"field": "labels", "old": [], "new": ["Sale", "Bin 2"]},
          ]},
         # Saving the jeans also puts their size in the title and on the eBay form, so those are shown too.
-        {"listing_id": jeans, "title": "Levi's 501 Jeans", "set": {"cost": 4.0, "box": None}, "fields": [
+        {"listing_id": jeans, "title": "Levi's 501 Jeans", "revision_id": reviewed[jeans],
+         "set": {"cost": 4.0, "box": None}, "fields": [
             {"field": "cost", "old": None, "new": 4.0},
             {"field": "title", "old": "Levi's 501 Jeans", "new": "Levi's 34 501 Jeans"},
             {"field": "ebay_size", "old": None, "new": "34"},
