@@ -1,6 +1,8 @@
 """An assistant update changes only what the seller asked for: the rest of the task stays, and a paused task stays paused."""
 import json
 
+import pytest
+
 from vendoo_studio.services import automations
 
 from test_automations import NOW, client, db  # noqa: F401
@@ -54,3 +56,19 @@ def test_assistant_moving_the_time_keeps_which_items_it_touches(db, client):  # 
     saved = next(row for row in client.get("/api/automations").json() if row["id"] == task["id"])
     # Moving the time must not widen a T-Shirts/60-day price drop to every listing.
     assert saved["filters"] == task["filters"]
+
+
+def test_confirming_an_old_card_does_not_undo_a_later_edit(db, client):  # noqa: F811
+    task = _task(client)
+    block = json.dumps({"op": "update", "id": task["id"], "schedule": {"kind": "daily", "time": "10:00"}})
+    proposal = automations.proposal_from_block(db, block, now=NOW)
+    # After the card appeared, the seller narrowed the task on the Automations page.
+    edited = client.patch(f"/api/automations/{task['id']}", json={"filters": {"category": "T-Shirts", "min_age_days": 90}})
+    assert edited.status_code == 200, edited.text
+    with pytest.raises(automations.AutomationError) as error:
+        automations.confirm_proposal(db, proposal, now=NOW)
+    assert error.value.status_code == 409
+    saved = next(row for row in client.get("/api/automations").json() if row["id"] == task["id"])
+    # The card was built from the task before that edit; confirming it must not revert the edit.
+    assert saved["filters"] == edited.json()["filters"]
+    assert saved["filters"]["min_age_days"] == 90
