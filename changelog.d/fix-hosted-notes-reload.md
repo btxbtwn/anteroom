@@ -1,0 +1,1 @@
+- Check that saved notes finish reloading while other drafts generate, including when the editor read is slow.
