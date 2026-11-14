@@ -143,6 +143,11 @@ class _Path(NamedTuple):
 
 
 @lru_cache(maxsize=65536)
+def _match_key(path: str) -> str:
+    return " > ".join(" ".join(words(step)) for step in segments(path))
+
+
+@lru_cache(maxsize=65536)
 def _parsed(path: str) -> _Path:
     steps = segments(path)
     while steps and not _alternatives(steps[-1]):
@@ -151,7 +156,7 @@ def _parsed(path: str) -> _Path:
     named = [step for step in steps[-2:] if _alternatives(step)] if steps else []
     last = segments(path)[-1] if segments(path) else ""
     return _Path(
-        key=" > ".join(" ".join(words(step)) for step in segments(path)),
+        key=_match_key(path),
         department=department(path),
         words=frozenset(words(path)),
         steps=tuple(reversed(named)) if named and named[-1] == steps[-1] else (),
@@ -240,11 +245,14 @@ def match_row(rows: list[dict], path: str, evidence: str = "") -> dict | None:
     """
     if not _text(path):
         return None
-    want = _parsed(_text(path))
-    parsed = [(row, _parsed(str(row.get("path") or ""))) for row in rows]
-    exact = [row for row, found in parsed if found.key == want.key]
+    # Most synced eBay paths match exactly. Do not build the expensive ranking
+    # descriptors for every leaf unless the normalized key is absent or ambiguous.
+    key = _match_key(_text(path))
+    exact = [row for row in rows if _match_key(str(row.get("path") or "")) == key]
     if len(exact) == 1:
         return exact[0]
+    want = _parsed(_text(path))
+    parsed = [(row, _parsed(str(row.get("path") or ""))) for row in rows]
     # The item itself first, then the step above it ("Shirts" for "T-Shirts").
     ranked = _rank(parsed, want, want.steps, frozenset(words(evidence)), want.department)
     if not ranked or (len(ranked) > 1 and ranked[0][0] == ranked[1][0]):

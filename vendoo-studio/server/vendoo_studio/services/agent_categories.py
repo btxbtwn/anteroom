@@ -17,6 +17,8 @@ import logging
 import re
 from typing import Any
 
+from sqlalchemy import or_
+
 from vendoo_studio.services.direct_categories import direct_category_id, pick_etsy_leaf
 from vendoo_studio.services.native_category_match import closest_row, evidence, match_row, native_rows
 from vendoo_studio.services.seller_overrides import is_locked
@@ -367,12 +369,14 @@ def tree_leaves(db, marketplace: str) -> list[dict]:
 
     if db.get(CategoryTree, marketplace) is None:
         return []
-    rows = db.query(CategoryTreeNode).filter_by(marketplace=marketplace).all()
-    return [
-        {"id": row.category_id, "path": row.path}
-        for row in rows
-        if row.is_leaf or not row.has_children
-    ]
+    # Concurrent drafts need only these values. Hydrating every node before
+    # filtering held the worker's pooled connections for seconds and starved
+    # progress writes and lease checks.
+    rows = db.query(CategoryTreeNode.category_id, CategoryTreeNode.path).filter(
+        CategoryTreeNode.marketplace == marketplace,
+        or_(CategoryTreeNode.is_leaf.is_(True), CategoryTreeNode.has_children.is_(False)),
+    ).all()
+    return [{"id": row.category_id, "path": row.path} for row in rows]
 
 
 def _changed_market(field: str) -> str:

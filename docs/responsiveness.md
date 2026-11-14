@@ -256,6 +256,129 @@ cached navigation; this run establishes neither the 100/200-ms interaction
 targets nor a general latency improvement. Worker failures and first-progress
 delay remain, and some read p95s increased.
 
+### Worker contention fix: checkout evidence and matched rerun, 2026-11-12
+
+This follows the submission fix above, using `8bf58756` as the worker baseline.
+The root cause was repeated category CPU work delaying connection returns:
+full-tree ORM hydration, repeated whole-word normalization during cold catalog
+search, and full ranking-descriptor construction even for an exact native
+category match. Progress writes, lease checks and saves then competed for the
+same twelve worker connections. This finding comes from checkout and live
+Python stacks with measured hold ages, not from category-table presence in
+`pg_stat_activity` alone.
+
+Temporary sandbox-only instrumentation recorded each successful checkout's
+code stack, thread, monotonic duration and cursor timing, and sampled current
+holder stacks every 250 ms while the pool was busy. Each actual pool exception
+recorded its waiter and holders once. It recorded code locations and timings,
+never SQL parameters, frame locals or seller data; the instrumentation and raw
+logs are not shipped. Cursor timing includes client scheduling and simulated
+RTT, so it is not a measurement of Postgres execution alone.
+
+The baseline reproduced four generation error events and **five distinct
+worker pool checkout failures**: four in `append_events` → `check_write_lease`
+and one in revision persistence. There were no web pool failures. At the first
+three worker failures, five `tree_leaves` checkouts had been held for
+3.00–3.08 seconds; four fenced writes, two progress writes and a save occupied
+the other seven slots. At the later failures, four leaf readers had been held
+for 3.37–3.47 seconds. Live stacks also caught repeated
+`_whole_word_score`/`_singular_token` work during category selection.
+
+An intermediate projection-only run still failed: its timeout snapshots had
+seven category-selection readers held for 3.5–3.9 seconds plus snapshot reads.
+After caching lexical normalization, a short diagnostic run caught native
+`match_row` → `_parsed`/`_alternatives` work on the event loop while leaf-reader
+connections were held for 2.64–2.65 seconds. An isolated exact eBay match built
+18,186 ranking descriptors before returning its unique exact match. These
+observations explain why reducing returned database rows alone was insufficient.
+
+The focused changes select only terminal category IDs/paths, reuse pure
+immutable word normalization in bounded caches, and check the existing exact
+normalized key before constructing fallback ranking descriptors. The public
+seed has 42,720 leaves but 27,606 distinct paths; an 8,192-entry normalization
+cache churned on each large-market traversal. A 32,768-entry cache retained the
+working set. An isolated three-traversal probe retained about 28.7 MiB under
+`tracemalloc`; this is not total worker RSS. No seller rows, sessions, category
+results or settings are cached. Existing matching, ambiguous ties, seller
+ownership, fenced saves, leases, cancellation and progress semantics are
+preserved. Pool sizes/timeouts and concurrency controls are unchanged.
+
+Both matched runs used fresh, unique temporary data paths and checked-unused
+private loopback ports before launcher setup. They ran sequentially on the same
+shared 6-vCPU/11-GB Linux VM, with no heavy test suite during either load:
+split web/worker, default hosted 8+4 pools and three-second waits, 24-ms simulated
+DB RTT, five sellers, three generating drafts and two browsing tabs per seller,
+one follower stream per generation, 40 extra inventory drafts per seller,
+0.5-second think time, five-second fake provider calls and 150 seconds per
+idle/load phase. The harness command is the README's hosted load example with
+`--sellers 5 --seconds 150 --inventory 40`; only the private port, data paths and
+PID/database sampler arguments differ between runs. No live services, real AI,
+credentials or production configuration were used.
+
+| Generation / pool result | Before (`8bf58756`) | After worker fix |
+| --- | --- | --- |
+| Accepted / completed / error event / cancelled at end | 31 / 12 / 4 / 15 | 30 / 15 / 0 / 15 |
+| Submission failures | 0 | 0 |
+| Distinct worker / web pool checkout failures | 5 / 0 | 0 / 0 |
+| Submission acknowledgement p50/p95/max, ms | 997/2,706/3,168 | 1,002/2,433/2,472 |
+| First progress p50/p95, ms | 9,374/12,772 | 7,720/16,508 |
+| Completed generation p50/p95, s | 141.9/142.9 | 130.3/132.0 |
+
+Both runs had 1,512 idle requests and 1,350 load requests with **zero browsing
+or save errors**. The replacement generation jobs still running at the timed
+end were cancelled by the harness, not counted as generation failures.
+Full-response p50/p95 milliseconds under load (150 samples per request):
+
+| Request | Before | After |
+| --- | --- | --- |
+| Status | 194/284 | 192/264 |
+| Open a draft | 421/608 | 407/578 |
+| Open a generating draft | 550/720 | 553/743 |
+| Save notes | 441/605 | 454/658 |
+| Save a field | 637/920 | 643/834 |
+| Inventory | 1,091/3,566 | 1,048/2,831 |
+| Suggestions | 739/1,140 | 758/1,131 |
+| Analytics | 721/1,124 | 727/1,062 |
+| Sales | 561/936 | 542/1,015 |
+
+Completed worker checkouts lasting **at least 0.5 seconds**, mean/max seconds
+and count, over the complete capture including cancellation/drain:
+
+| Checkout site | Before | After |
+| --- | --- | --- |
+| `tree_leaves` | 3.155/6.202 (25) | 1.670/4.587 (26) |
+| `_first_choices` | 4.768/10.778 (31) | 3.136/6.678 (30) |
+| Catalog fingerprint/snapshot | 3.970/4.285 (5) | 1.879/2.187 (5) |
+
+These thresholded durations are not percentiles of all checkouts. Long holds
+remain, including form recording (after mean/max 2.688/5.740 seconds for 47
+checkouts above the threshold). Zero pool failures in one run does not prove
+headroom for other items or larger/longer loads. First-progress p95, notes p95,
+generating-screen p95 and sales p95 increased.
+
+Under load, mean/max CPU cores were web 0.47/0.71 and worker 0.79/1.38 before,
+web 0.47/0.71 and worker 0.75/1.75 after. Total DB connections peaked at 26 in
+both runs; mean/max transactions/s were 40.01/121.70 before and 40.84/163.50
+after. Host one-minute load mean/max was 2.33/3.51 before and 1.95/3.18 after.
+The after run's busy-period sampler observed main-worker RSS as high as
+1,817,584 KiB (about 1.73 GiB); it did not sample continuously or measure a
+matched baseline RSS. Memory under a production resource cap remains unproven.
+The final sampled lexical cache had 418,226 hits, 18,190 misses and 18,184
+entries, showing reuse rather than storing a category result per seller.
+
+The regressions fail on the original code: leaf reads hydrate 1,004 ORM nodes,
+three taxonomy searches tokenize 60,000 paths instead of 20,000, and an exact
+1,001-row native match builds 1,002 ranking descriptors instead of zero. The
+same tests pass with the fix, including distinct-market filtering, terminal
+flag semantics, inflection/whole-word matching and ambiguous exact ties.
+
+These are single-run sandbox observations. Shared-host scheduling, no Fly CPU
+cap, local Postgres without TLS/Supabase pooling, small inventory, repeated
+fake item/provider output and no real device/network limit their scope. API
+response latency does not establish visible acknowledgement within 100 ms or
+cached navigation within 200 ms. Native iPhone validation requires macOS;
+browser suites exercise phone-sized Chromium and iPhone WebKit instead.
+
 ## Remaining latency work
 
 After transaction pooling was deployed in web release 0.1.683, three sequential

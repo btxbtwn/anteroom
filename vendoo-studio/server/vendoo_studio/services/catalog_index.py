@@ -14,6 +14,7 @@ import threading
 import time
 from dataclasses import asdict, dataclass
 from contextvars import copy_context
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -910,11 +911,23 @@ def _singular_token(word: str) -> str:
     return word
 
 
+# The bundled taxonomy has about 28k distinct leaf paths. Keep one traversal
+# reusable across drafts, with a fixed memory bound rather than an unbounded cache.
+@lru_cache(maxsize=32768)
+def _path_words(path: str) -> frozenset[str]:
+    # Pure text, shared across searches: concurrent cold-index drafts used to
+    # tokenize the same taxonomy repeatedly while holding pooled connections.
+    return frozenset(_singular_token(word) for word in re.findall(r"[a-z0-9']+", path.casefold()))
+
+
+@lru_cache(maxsize=256)
+def _query_words(tokens: tuple[str, ...]) -> frozenset[str]:
+    return frozenset(_singular_token(token) for token in tokens)
+
+
 def _whole_word_score(path: str, tokens: list[str]) -> int:
     """Score by whole path words only — substring \"tee\" must not hit Teepees."""
-    words = {_singular_token(word) for word in re.findall(r"[a-z0-9']+", (path or "").casefold())}
-    wanted = {_singular_token(token) for token in tokens}
-    return len(wanted & words)
+    return len(_query_words(tuple(tokens)) & _path_words(path or ""))
 
 
 def _lexical_fallback(
