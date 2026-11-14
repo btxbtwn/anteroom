@@ -152,9 +152,22 @@ test("two editors generate while a third saves without preloading unused marketp
       if (/\/native-marketplaces\/[^/]+\/form(?:\?|$)/.test(request.url())) unusedForms.push(new URL(request.url()).pathname);
     });
   }
+  // Document load does not await the editor's asynchronous data. Keep the
+  // network deadline separate from the five-second rendered-value assertions.
+  const openEditor = async (editor: typeof page, draft: { id: string }) => {
+    const loaded = editor.waitForResponse(response =>
+      new URL(response.url()).pathname === `/api/conversations/${draft.id}/screen`
+      && response.request().method() === "GET", { timeout: 30_000 });
+    await editor.goto(`/?listing=${draft.id}`);
+    const response = await loaded;
+    expect(response.status()).toBe(200);
+    const screen = await response.json();
+    expect(screen.conversation.id).toBe(draft.id);
+    return screen;
+  };
   try {
     await Promise.all(editors.map(async (editor, index) => {
-      await editor.goto(`/?listing=${drafts[index].id}`);
+      await openEditor(editor, drafts[index]);
       await expect(editor.locator(`#item-notes-${drafts[index].id}`)).toBeVisible();
     }));
     await Promise.all(editors.slice(0, 2).map(editor => editor.getByRole("button", { name: "Generate listing", exact: true }).click()));
@@ -166,13 +179,19 @@ test("two editors generate while a third saves without preloading unused marketp
       && response.request().method() === "PATCH");
     await editors[2].locator(`#item-notes-${drafts[2].id}`).fill(marker);
     expect((await saved).status()).toBe(200);
-    await editors[2].goto(`/?listing=${drafts[2].id}`);
+    await editors[2].route(`**/api/conversations/${drafts[2].id}/screen`, async route => {
+      // Reproduce a core read finishing after the default five-second UI assertion.
+      await new Promise(resolve => setTimeout(resolve, 7000));
+      await route.continue();
+    }, { times: 1 });
+    const reloaded = await openEditor(editors[2], drafts[2]);
+    expect(JSON.parse(reloaded.conversation.notes).sellerNotes).toBe(marker);
     await expect(editors[2].locator(`#item-notes-${drafts[2].id}`)).toHaveValue(marker);
     for (let index = 0; index < 2; index++) {
       await expect(editors[index].getByRole("textbox", { name: "Title", exact: true }).first()).toHaveValue(/Sandbox Levi's/, { timeout: 150_000 });
       await expect.poll(async () => (await (await request.get(`${api}/api/conversations/${drafts[index].id}/activity`, { headers })).json()).busy,
         { timeout: 150_000 }).toBe(false);
-      await editors[index].goto(`/?listing=${drafts[index].id}`);
+      await openEditor(editors[index], drafts[index]);
       await expect(editors[index].getByRole("textbox", { name: "Title", exact: true }).first()).toHaveValue(/Sandbox Levi's/);
     }
     expect(unusedForms).toEqual([]);
