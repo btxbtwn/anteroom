@@ -51,7 +51,11 @@ class Lines(logging.Handler):
         self.lines.append(record.getMessage())
 
 
-def test_access_log_names_the_route_but_never_the_url_query_or_headers(jwks, signing_keys):  # noqa: F811
+def test_access_log_names_the_route_but_never_the_url_query_or_headers(jwks, signing_keys, request):  # noqa: F811
+    # As in a fresh process: a handler attached before the first request must
+    # still receive the INFO lines, whichever tests ran earlier.
+    request.addfinalizer(lambda level=access_log.level: access_log.setLevel(level))
+    access_log.setLevel(logging.NOTSET)
     app = create_app()
     app.state.session_verifier = SessionVerifier(PROJECT_URL)
     lines = Lines()
