@@ -172,6 +172,90 @@ output. The default `./sandbox.sh --hosted` does not set `ANTEROOM_HOSTED=1`
 and therefore opens a new connection per checkout, so its browser tests
 cannot show pool exhaustion.
 
+### Submission nesting fix: matched rerun, 2026-11-12
+
+Before: `d9c16317` (0.1.958). After: that commit plus the focused
+`hosted_tasks.submit` change: finish the ownership-read transaction before
+resolving the provider, whose settings and credential reads use their own
+seller sessions. The existing submission lock and ownership checks still guard
+the enqueue. No pool, worker, deployment, schema or production settings changed.
+
+Both runs used fresh local hosted sandboxes, in sequence on the same shared
+6-vCPU/11-GB Linux VM: split web/worker, the unchanged 8+4 pools with 3-second
+waits, 24-ms simulated DB RTT, five sellers, three generating drafts each,
+two browsing tabs each, 40 extra inventory drafts each, 0.5-second think time,
+5-second fake model calls and 150 seconds per idle/load phase. The command and
+environment are the "Hosted load test" example in `vendoo-studio/README.md`,
+using API port 4340. No live services, real AI, seller data or credentials were
+used. Heavy suites ran only after both loads. The narrow regression finished
+before baseline idle; code-health checks overlapped its first 29 seconds.
+Temporary browser-library preparation overlapped setup/idle phases. Neither
+load phase ran alongside a test suite.
+
+Full-response p50/p95 milliseconds (170 samples per request in each idle
+phase; 154 before and 152 after per request under load):
+
+| Request | Before idle | After idle | Before load | After load |
+| --- | --- | --- | --- | --- |
+| Status | 178/194 | 177/196 | 190/306 | 196/257 |
+| Open a draft | 389/540 | 385/427 | 415/557 | 418/646 |
+| Open a generating draft | 390/419 | 386/425 | 529/690 | 515/687 |
+| Save notes | 413/442 | 412/453 | 450/677 | 446/593 |
+| Save a field | 591/637 | 591/632 | 645/1,127 | 632/808 |
+| Inventory | 974/1,781 | 966/1,968 | 1,073/2,951 | 1,084/3,308 |
+| Suggestions | 665/775 | 674/818 | 722/962 | 729/1,043 |
+| Analytics | 615/844 | 617/869 | 651/941 | 668/1,123 |
+| Sales | 479/675 | 472/776 | 529/762 | 553/860 |
+
+Before: 1,530 idle requests without errors; 1,386 load requests with two
+inventory 503s. After: 1,530 idle and 1,368 load requests, all successful.
+
+| Generation result | Before | After |
+| --- | --- | --- |
+| Submission attempts / HTTP 500 | 41 / 10 | 31 / 0 |
+| Accepted / completed / error event / cancelled at end | 31 / 15 / 1 / 15 | 31 / 12 / 4 / 15 |
+| Submission headers p50/p95/max, ms | 1,207/4,508/4,802 | 984/2,519/2,838 |
+| First progress p50/p95, ms | 7,953/13,085 | 9,158/13,475 |
+| Completed duration p50/p95, s | 131.9/139.6 | 138.2/139.2 |
+| Logged web pool-timeout tracebacks (include duplicate reports) | 22 | 0 |
+
+**Remaining worker bottleneck:** the rerun is not clean end to end. Four worker
+tasks failed with pool timeouts in `append_events` → `check_write_lease`; one
+listing-generation log also reported a QueuePool timeout (not necessarily a
+different task). The baseline had one worker generation error. Its 22 web
+pool-timeout tracebacks comprise 14 nested provider-settings reports, six
+ownership-read reports and two inventory-snapshot settings reports. Each
+generation failure was logged twice (application and ASGI server): these are
+seven distinct nested-provider failures, three distinct ownership-read failures
+and two inventory failures, not 22 distinct exceptions. After: zero of these
+web failures. The fix removes web nesting, not
+worker contention. The DB sampler still observed category-tree transactions
+(mean 0.75 connections before, 0.72 after), but it records last statements,
+not the holders' Python stacks or transaction durations. It does not establish
+which category-selection function held the connections during these worker
+failures. The earlier category-selection finding remains a separate follow-up;
+no worker optimization was folded into this fix.
+
+Under load, mean/max CPU cores were web 0.44/0.74 and worker 0.78/1.53 before,
+web 0.45/0.74 and worker 0.80/1.81 after. Total DB connections peaked at 26 in
+both runs; mean/max transactions/s were 39.54/120.60 before, 40.08/106.80 after.
+Host one-minute load mean/max was 2.33/3.54 before and 2.01/3.12 after.
+
+The regression uses a real one-connection Postgres pool and real settings
+lookup for both generate and chat submissions, with different provider choices
+for two sellers and a foreign-draft denial. Both cases failed before the fix
+with the expected nested checkout timeout and passed after it. Provider
+construction also opens a seller session, covering the additional checkout an
+API-key provider can need. The full hosted-task file passed (7 tests).
+
+These are single-run observations with fresh data and a warmed idle phase,
+not production capacity benchmarks. The same TLS/pooler, CPU-cap, inventory
+size, device/network and real-model gaps above remain. Query counts were not
+remeasured. API headers/full responses do not measure visible feedback or
+cached navigation; this run establishes neither the 100/200-ms interaction
+targets nor a general latency improvement. Worker failures and first-progress
+delay remain, and some read p95s increased.
+
 ## Remaining latency work
 
 After transaction pooling was deployed in web release 0.1.683, three sequential

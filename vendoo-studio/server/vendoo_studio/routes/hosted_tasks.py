@@ -104,6 +104,10 @@ def task_stream(task_id):
 
 def submit(db, conv_id, kind, text='', uploads=None, request=None):
     owned_conversation(db, conv_id)
+    # Provider selection reads seller settings and may read Vault in sessions
+    # of its own. Return the ownership-read connection before requesting those;
+    # require_idle/enqueue below recheck ownership under the submission lock.
+    db.rollback()
     if get_listing_provider() is None:
         raise HTTPException(400, 'Connect an AI provider in Settings first.')
     repo = ConversationRepo(db)

@@ -3,6 +3,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -15,6 +16,62 @@ from vendoo_studio.hosted import create_app
 from vendoo_studio.models.background_task import BackgroundTask, BackgroundTaskEvent
 from vendoo_studio.models.conversation import Message, Photo
 from vendoo_studio.services import schema_migrations
+
+
+@pytest.mark.parametrize('kind', ['generate', 'chat'])
+def test_submission_releases_connection_before_resolving_seller_provider(
+        kind, migration_engine, monkeypatch):  # noqa: F811
+    from sqlalchemy import create_engine
+
+    from vendoo_studio.models.conversation import Conversation
+    from vendoo_studio.models.user_preference import UserPreference
+    from vendoo_studio.routes import hosted_tasks
+    from vendoo_studio.services.hosted_context import for_seller
+    from vendoo_studio.services.service_context import use
+
+    if migration_engine.dialect.name != 'postgresql':
+        pytest.skip('Hosted work requires Postgres')
+    schema_migrations.ensure_schema(migration_engine)
+    # Even one submission used to deadlock when its ownership read took the
+    # last connection and provider selection requested another for settings.
+    engine = create_engine(migration_engine.url, pool_size=1, max_overflow=0, pool_timeout=.2)
+    monkeypatch.setattr('vendoo_studio.database.engine', engine)
+    with Session(migration_engine) as db:
+        for owner, primary in [(USER_ID, 'chatgpt'), (BOB, 'mimo')]:
+            db.add(Conversation(id=owner, user_id=owner, title='Coat'))
+            db.add(Photo(user_id=owner, conversation_id=owner, original_filename='coat.jpg',
+                         stored_filename=f'{owner}/{owner}/{"a" * 32}.jpg', size_bytes=1, mime_type='image/jpeg'))
+            db.add(UserPreference(user_id=owner, key='settings', value={
+                'listing_provider': {'primary': primary, 'fallback': 'none'},
+            }))
+        db.commit()
+    selected = []
+
+    def provider_for(choice):
+        from vendoo_studio.services.service_context import current
+        selected.append((current().seller_id, choice))
+        # API-key providers may read Vault through their own session too.
+        with current().session_factory() as db:
+            assert db.scalar(select(Conversation.id)) == current().seller_id
+        return object()
+
+    monkeypatch.setattr('vendoo_studio.services.hosted_provider.provider_for', provider_for)
+    try:
+        for owner in (USER_ID, BOB):
+            with use(for_seller(owner)) as context, context.session_factory() as db:
+                task_id = hosted_tasks.submit(db, owner, kind, 'Please revise the description')
+                assert engine.pool.checkedout() == 0
+                task = db.get(BackgroundTask, task_id)
+                assert (task.user_id, task.conversation_id, task.kind, task.status) == (owner, owner, kind, 'queued')
+        # A fresh execution must never reuse another seller's snapshot.
+        assert selected == [(USER_ID, 'chatgpt'), (BOB, 'mimo')]
+        with use(for_seller(USER_ID)) as context, context.session_factory() as db:
+            with pytest.raises(HTTPException) as error:
+                hosted_tasks.submit(db, BOB, kind)
+            assert error.value.status_code == 404
+        assert len(selected) == 2
+    finally:
+        engine.dispose()
 
 
 def test_three_drafts_overlap_across_sellers_while_reads_and_cancellation_work(
