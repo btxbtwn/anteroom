@@ -47,6 +47,16 @@ def test_quantity_history_returns_one_row_per_requested_item(migration_engine): 
         ids = {f'0-{number}' for number in range(501)}
         cutoff = {identity: now + timedelta(minutes=26) for identity in ids}
         reads = []
+        sqlite_steps = 0
+
+        def count_steps():
+            nonlocal sqlite_steps
+            sqlite_steps += 1000
+            return 0
+
+        sqlite_connection = db.connection().connection.driver_connection if engine.dialect.name == 'sqlite' else None
+        if sqlite_connection is not None:
+            sqlite_connection.set_progress_handler(count_steps, 1000)
 
         def measure(state):
             result = state.invoke_statement()
@@ -61,12 +71,19 @@ def test_quantity_history_returns_one_row_per_requested_item(migration_engine): 
             quantity_seconds = perf_counter() - started
         finally:
             event.remove(db, 'do_orm_execute', measure)
+            if sqlite_connection is not None:
+                sqlite_connection.set_progress_handler(None, 0)
         # Last correction is 3; later restock 5 survives the final reduction 1.
         assert quantities == dict.fromkeys(ids, 5)
         print(f'quantity reads: queries={len(reads)} rows={sum(r for r, _ in reads)} '
-              f'python_repr_bytes={sum(b for _, b in reads)} elapsed_ms={quantity_seconds * 1000:.1f}')
+              f'python_repr_bytes={sum(b for _, b in reads)} elapsed_ms={quantity_seconds * 1000:.1f} '
+              f'sqlite_vm_steps={sqlite_steps}')
         assert sum(rows for rows, _ in reads) <= len(ids)
         assert len(reads) <= 2
+        # Bound database work independently of shared-host timing. A left join
+        # that rescans all 501 cutoffs per revision takes >30 million steps.
+        if sqlite_connection is not None:
+            assert sqlite_steps < 5_000_000
         reads.clear()
         event.listen(db, 'do_orm_execute', measure, retval=True)
         try:

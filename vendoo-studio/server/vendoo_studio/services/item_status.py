@@ -76,12 +76,14 @@ def _quantities(db: Session, conv_ids: set[str], first_sales: dict[str, datetime
     revision = ListingRevision
     # Keep the historical replay's ordering, including the database's ordering
     # of undated revisions. Only positive quantities can correct the baseline.
-    # Join cutoffs once, rather than evaluating a CASE with hundreds of IDs
-    # for every revision. Every supplied cutoff is a real first-sale moment.
+    # Include unsold items with a null cutoff so an inner join can start from
+    # the requested IDs and probe the revision index. A left join instead
+    # makes SQLite scan every cutoff once per historical revision.
     cutoffs = values(column("conversation_id", String), column("first_sale", DateTime)).data(
-        # Revision timestamps are UTC without a zone. Bind cutoffs the same
+        # Revision timestamps are UTC without a zone; bind cutoffs the same
         # way so PostgreSQL's session timezone cannot move the sale boundary.
-        [(identity, moment.astimezone(UTC).replace(tzinfo=None)) for identity, moment in first_sales.items()]
+        [(identity, first_sales[identity].astimezone(UTC).replace(tzinfo=None) if identity in first_sales else None)
+         for identity in conv_ids]
     ).cte("first_sales") if first_sales else None
     correction = ((cutoffs.c.first_sale.is_(None) | (revision.created_at <= cutoffs.c.first_sale))
                   if cutoffs is not None else literal(True))
@@ -91,9 +93,11 @@ def _quantities(db: Session, conv_ids: set[str], first_sales: dict[str, datetime
         correction.label("correction"),
         func.row_number().over(partition_by=revision.conversation_id,
                                order_by=revision.created_at).label("position"),
-    ).where(revision.inventory_quantity > 0, revision.conversation_id.in_(conv_ids))
+    ).where(revision.inventory_quantity > 0)
     if cutoffs is not None:
-        ordered = ordered.outerjoin(cutoffs, revision.conversation_id == cutoffs.c.conversation_id)
+        ordered = ordered.select_from(cutoffs).join(revision, revision.conversation_id == cutoffs.c.conversation_id)
+    else:
+        ordered = ordered.where(revision.conversation_id.in_(conv_ids))
     history = ordered.subquery()
     baseline = select(history, func.max(case((history.c.correction, history.c.position))).over(
         partition_by=history.c.conversation_id).label("last_correction")).subquery()

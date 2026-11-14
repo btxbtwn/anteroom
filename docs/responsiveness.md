@@ -450,14 +450,21 @@ wire bytes, HTTP bytes or Supabase billed egress. SQL still examines scoped
 quantity history; returned rows are not scanned pages or CPU consumption.
 Batching trades more round trips for retaining the requested scope.
 
-Instrumented local Postgres single-run observations: explicit quantity read
-132.8 ms before / 185.8 ms after; complete status calculation 570.8 ms before /
-350.9 ms after. These include result materialization and instrumentation, with
-new query compilation, on this Linux development host. They are not reliable
-p50/p95 or cold/warm production benchmarks. The standalone quantity query does
-more database aggregation; the observed complete status path improves while
-transferring much less history. Sale cutoffs are joined through a small VALUES CTE using the existing
-SQLAlchemy dependency.
+Instrumented single-run observations on this Linux host: SQLite quantity read
+127.9 ms before / 137.1 ms after, complete status calculation 417.6 / 172.4 ms;
+Postgres quantity read 132.8 / 161.7 ms, complete status calculation 570.8 /
+198.4 ms. These include result materialization, instrumentation and new query
+compilation. They are not reliable p50/p95 or cold/warm production benchmarks.
+The standalone quantity query does more database aggregation; the observed
+complete status path improves while transferring much less history.
+
+Sale cutoffs are joined through a small VALUES CTE using the existing
+SQLAlchemy dependency. All requested IDs, including unsold items with null
+cutoffs, drive an inner join into the revision index. SQLite EXPLAIN confirmed
+this removes a cutoff scan repeated for every revision. The regression's
+5-million-instruction SQLite budget fails on the earlier left join
+(approximately 32,053,000 VM steps) and passes on the indexed join (1,793,000).
+This is a database-work proxy, not billed bytes or production CPU measurement.
 
 Regression coverage compares six cutoff scenarios across 60 synthetic item
 histories with the previous chronological replay, including corrections,
