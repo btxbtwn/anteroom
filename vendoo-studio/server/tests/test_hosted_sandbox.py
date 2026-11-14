@@ -59,14 +59,19 @@ def test_load_tests_can_sign_in_more_sellers(monkeypatch):
     assert list(hosted_sandbox.ACCOUNTS) == ['alice@sandbox.test', 'bob@sandbox.test']
 
 
-def test_database_delay_proxy_adds_the_round_trip_each_way(tmp_path):
+def test_database_delay_proxy_adds_the_round_trip_each_way():
     import asyncio
+    import os
+    import shutil
     import socket
+    import tempfile
     import threading
     import time
     from vendoo_studio.hosted_sandbox import DelayedDatabase
 
-    path = str(tmp_path / 'echo.sock')
+    # Unix socket paths are capped at 104 bytes on macOS, which pytest's tmp_path there exceeds.
+    short = tempfile.mkdtemp(dir='/tmp')
+    path = os.path.join(short, 'echo.sock')
 
     async def echo(reader, writer):
         while data := await reader.read(1024):
@@ -88,3 +93,4 @@ def test_database_delay_proxy_adds_the_round_trip_each_way(tmp_path):
     finally:
         proxy.stop()
         loop.call_soon_threadsafe(loop.stop)
+        shutil.rmtree(short, ignore_errors=True)

@@ -46,8 +46,10 @@ def test_connect_response_cannot_carry_a_token():
 
 def test_marketplace_request_recording_is_not_offered():
     # The recorder needed Chrome's debugger permission, which the Bridge no longer asks for.
+    assert not [route for route in app.routes if getattr(route, "path", "").endswith("/record")]
     with patch("vendoo_studio.services.browser_bridge.request", new=AsyncMock()) as request, TestClient(app) as client:
-        assert client.post("/api/marketplaces/mercari/record?goal=offers").status_code == 404
+        # With the web app built, its catch-all answers a POST with 405 rather than 404.
+        assert client.post("/api/marketplaces/mercari/record?goal=offers").status_code in {404, 405}
         assert client.get("/api/marketplaces/mercari/record?goal=offers").status_code == 404
     request.assert_not_awaited()
 
