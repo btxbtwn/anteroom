@@ -222,8 +222,8 @@ def latest_answer(db, thread_id):
     ).order_by(BackgroundTask.created_at.desc(), BackgroundTask.id.desc()).limit(1))
 
 
-def complete_in(db, task_id, token, frames=()):
-    """Write the last events and complete the task in the caller's transaction.
+def complete_in(db, task_id, token, frames=(), *, error=None):
+    """Write the last events and settle the task in the caller's transaction.
 
     The caller commits its own save with this, so a saved answer is never also
     left running to be marked interrupted. The task row stays locked until
@@ -232,7 +232,8 @@ def complete_in(db, task_id, token, frames=()):
     check_write_lease(db, task_id, token)
     _add_events(db, task_id, frames)
     db.execute(update(BackgroundTask).where(BackgroundTask.id == task_id).values(
-        status='completed', lease_token=None, leased_until=None, updated_at=func.now()))
+        status='failed' if error else 'completed', error=error,
+        lease_token=None, leased_until=None, updated_at=func.now()))
     # Later flushes in this transaction belong to the completed task.
     db.info.pop('background_lease', None)
 

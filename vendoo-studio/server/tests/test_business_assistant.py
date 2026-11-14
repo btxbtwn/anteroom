@@ -111,6 +111,42 @@ def test_the_brief_summarizes_the_shop_and_points_to_the_rows(workspace):
     shop.lookups.close()
 
 
+def test_snapshot_size_audits_release_the_database_before_calculating(workspace, monkeypatch):
+    from vendoo_studio.services import size_audit
+
+    db, _client = workspace
+    add_listing(db, 'Coat M', {'price': 40, 'size': 'M', 'title': 'Coat M'})
+    original = size_audit.size_problems
+    audited = []
+
+    def audit(listing, photo):
+        assert not db.in_transaction(), 'Snapshot calculations must not idle a database transaction'
+        audited.append(listing['title'])
+        return original(listing, photo)
+
+    monkeypatch.setattr(size_audit, 'size_problems', audit)
+    shop = business_assistant.read_shop(db, now=NOW)
+    assert audited == ['Coat M']
+    assert 'Coat M' in business_assistant.run_lookup(shop.lookups, 'SELECT title FROM listings')
+    shop.lookups.close()
+
+
+def test_price_history_releases_the_database_before_calculating(workspace, monkeypatch):
+    from vendoo_studio.services import inventory_analytics
+
+    db, _client = workspace
+    seed(db)
+    original = inventory_analytics._number
+
+    def number(raw):
+        assert not db.in_transaction(), 'Price history calculations must not idle a database transaction'
+        return original(raw)
+
+    monkeypatch.setattr(inventory_analytics, '_number', number)
+    changes = business_assistant._price_changes(db)
+    assert [(row['old_price'], row['new_price']) for row in changes] == [(150, 120)]
+
+
 def test_the_breakdowns_behind_the_summary_can_be_looked_up(workspace):
     db, _client = workspace
     seed(db)
@@ -398,8 +434,25 @@ def test_a_failed_answer_reports_the_error_and_keeps_what_arrived(workspace, mon
     _db, client = workspace
     monkeypatch.setattr(assistant_route, "get_listing_provider", lambda: Provider(("Half an",), fail=True))
     response = client.post("/api/assistant/messages", json={"text": "Anything stale?"})
-    assert "event: error\ndata: provider went away" in response.text
+    assert "could not finish the assistant answer. Try again." in response.text
     assert [row["text"] for row in client.get("/api/assistant/messages").json()] == ["Anything stale?", "Half an"]
+
+
+@pytest.mark.parametrize('stopped', [False, True])
+def test_a_lost_or_stopped_answer_lease_is_not_reported_as_a_provider_error(monkeypatch, caplog, stopped):
+    from vendoo_studio.services import background_tasks
+
+    failure = background_tasks.TaskStopped() if stopped else background_tasks.TaskLeaseExpired()
+
+    def prepare(*_args):
+        raise failure
+
+    monkeypatch.setattr(assistant_route, '_prepare', prepare)
+    run = assistant_route._Journal()
+    with pytest.raises(type(failure)):
+        asyncio.run(assistant_route._answer(run, Provider(), 'What sold?'))
+    assert all(not frame.startswith('event: error') for frame in run.take())
+    assert not [record for record in caplog.records if record.name == 'vendoo_studio.assistant']
 
 
 def test_an_unanswered_question_is_retried_once_without_asking_it_again(workspace, monkeypatch):
