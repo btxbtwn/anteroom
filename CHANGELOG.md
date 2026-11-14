@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.969 — 2026-11-14
+
+- Check that saved notes finish reloading while other drafts generate, including when the editor read is slow.
+
 ## 0.1.968 — 2026-11-14
 
 - On the web, the send queue and listing activity checks skip loading full listing copies they do not use.
