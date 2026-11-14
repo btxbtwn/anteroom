@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.970 — 2026-11-14
+
+- Show why an Assistant answer stopped when you return to the conversation, while keeping any answer already written.
+- Keep Assistant questions from failing while checking a large shop's listing sizes and price history.
+
 ## 0.1.969 — 2026-11-14
 
 - Check that saved notes finish reloading while other drafts generate, including when the editor read is slow.
