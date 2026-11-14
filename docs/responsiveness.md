@@ -713,17 +713,21 @@ A disposable local Postgres fixture contains two sellers, 80 listings each,
 20 revisions per listing (3,200 total), and 1,468,725-byte synthetic marketplace
 form payloads. Queries execute as `anteroom_seller` without BYPASSRLS. Exact
 expected histories and cross-seller exclusion are asserted. EXPLAIN ANALYZE
-BUFFERS measured the former query at 309.3 ms / 10,491 shared buffer accesses,
-and the compact query at 3.6 ms / 67 accesses. The regression gates physical
+BUFFERS measured the former query at 312.3 ms / 10,489 shared buffer accesses,
+and the compact query at 5.6 ms / 65 accesses. The regression gates physical
 work (at least fourfold reduction), not timing on shared hardware. Before the
 fix it failed this gate and the query-input assertion; afterward both pass.
 
 With four concurrent history readers across two sellers and a fifth task
-performing 20 seller-scoped reads/writes, history p50/p95 was 64.5/77.6 ms
-(20 samples), normal read/write p50/p95 15.1/62.9 ms (20 samples), errors zero.
+performing 20 seller-scoped reads/writes, history p50/p95 was 71.2/102.2 ms
+(20 samples), normal read/write p50/p95 19.4/101.2 ms (20 samples), errors zero.
 Each history result contained all 240 expected changes for its seller, and each
 read released its transaction. The first application history read after seeding
-was 28.9 ms. These are local, warm-cache observations, not production or cold
+was 32.5 ms. These were measured with an en_US Postgres locale. Expected rows are checked
+independently of ID collation; exact old/current list equality verifies that
+ordering remains unchanged. An initial CI test expectation assumed Python
+string ordering; its failure was reproduced locally under en_US and corrected.
+These are local, warm-cache observations, not production or cold
 storage benchmarks. They do not reproduce the hosted 15-second deadline or
 measure full Assistant/provider latency, browser interactions, sustained CPU,
 production data cardinality or native iPhone behavior. No additional live

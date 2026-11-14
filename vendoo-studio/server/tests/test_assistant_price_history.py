@@ -133,9 +133,15 @@ def test_postgres_price_history_avoids_toast_work_and_remains_seller_scoped(migr
         assert len(statements) == 1
         expected = [
             {'listing_id': f'0-{n}', 'changed_on': '2026-11-14', 'old_price': old, 'new_price': old + 1}
-            for old in (42, 41, 40) for n in sorted(range(1, 81), key=lambda n: f'0-{n}-{(old - 39) * 5}', reverse=True)
+            for old in (42, 41, 40) for n in range(1, 81)
         ]
-        assert changes == expected
+        # PostgreSQL's ID collation can differ from Python's string ordering.
+        # Check every expected row here; the old/current comparison below also
+        # pins exact ordering under the database's actual collation.
+        def order(row):
+            return row['listing_id'], row['old_price']
+
+        assert sorted(changes, key=order) == sorted(expected, key=order)
         with monkeypatch.context() as patch:
             patch.setattr(business_assistant, 'json_value', lambda _column, key: json_value(ListingRevision.listing_json, key))
             assert business_assistant._price_changes(db) == changes
