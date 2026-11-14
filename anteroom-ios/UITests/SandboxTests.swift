@@ -597,7 +597,9 @@ fileprivate extension XCTestCase {
         guard let tab else { return }
         // A tap that lands while the tab bar is still settling can be dropped,
         // which left the app on Assistant; tap until the tab is selected.
-        let button = app.tabBars.buttons[tab]
+        // Two buttons can match while the bar settles ("Multiple matching
+        // elements found"), so take the first.
+        let button = app.tabBars.buttons[tab].firstMatch
         for _ in 0..<3 where !button.isSelected {
             button.tap()
             let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: button)
