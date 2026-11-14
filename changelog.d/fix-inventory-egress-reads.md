@@ -1,1 +1,0 @@
-- Reduce database data transferred when refreshing inventory while keeping quantity corrections, restocks and sold status intact.

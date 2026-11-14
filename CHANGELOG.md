@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.959 — 2026-11-14
+
+- Reduce database data transferred when refreshing inventory while keeping quantity corrections, restocks and sold status intact.
+
 ## 0.1.958 — 2026-11-12
 
 - Group repeated marketplace offer-preview refusals across listings so one problem does not flood error emails. Keep the listing details and failure reason in each report.
