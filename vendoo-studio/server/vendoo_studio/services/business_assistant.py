@@ -1112,7 +1112,9 @@ def _price_changes(db: Session) -> list[dict[str, Any]]:
     revisions = (
         db.query(
             ListingRevision.conversation_id,
-            json_value(ListingRevision.listing_json, "price"),
+            # This stored projection carries every revision's original price;
+            # extracting it from listing_json decompresses all archived forms.
+            json_value(ListingRevision.inventory_fields, "price"),
             ListingRevision.created_at,
         )
         .order_by(ListingRevision.created_at, ListingRevision.id)

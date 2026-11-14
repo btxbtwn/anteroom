@@ -688,3 +688,43 @@ this draft code does not clear accumulated quota. Concurrent generation
 interaction latency, production sustained CPU/p95 and native iOS latency remain
 unmeasured by this focused read-volume test. Phone browser checks, when run,
 are browser coverage, not native-device coverage.
+
+### Assistant asking-price history: compact revision projection (2026-11-14)
+
+The hosted post-deploy Assistant attempt failed before a model call with
+SQLSTATE 57014 (statement timeout), in `_price_changes` at 19:19:26.652 UTC.
+The query extracted price from every full archived `listing_json`. It now reads
+that same JSON value from the existing database-generated `inventory_fields`
+column. Every revision remains included, ordered by creation time and ID;
+chronological replay and invalid-price handling are unchanged. No pagination,
+latest-revision filter, timeout increase, migration or production setting change
+is involved.
+
+`test_assistant_price_history.py` compares old/current semantics, including
+changed and unchanged multi-revision listings, invalid/missing/zero/negative,
+boolean and numeric-string prices, and history exceeding the prompt summary.
+Existing `test_inventory_projection.py::test_upgrade_computes_existing_fields_and_sql_writes_keep_them_current`
+covers legacy-row backfill, direct SQL updates and imported generated-value
+removal; new history fixtures exercise ORM inserts. The stored generated column
+computes price at the database boundary for every insert/update, independent of
+which application write route was used.
+
+A disposable local Postgres fixture contains two sellers, 80 listings each,
+20 revisions per listing (3,200 total), and 1,468,725-byte synthetic marketplace
+form payloads. Queries execute as `anteroom_seller` without BYPASSRLS. Exact
+expected histories and cross-seller exclusion are asserted. EXPLAIN ANALYZE
+BUFFERS measured the former query at 309.3 ms / 10,491 shared buffer accesses,
+and the compact query at 3.6 ms / 67 accesses. The regression gates physical
+work (at least fourfold reduction), not timing on shared hardware. Before the
+fix it failed this gate and the query-input assertion; afterward both pass.
+
+With four concurrent history readers across two sellers and a fifth task
+performing 20 seller-scoped reads/writes, history p50/p95 was 64.5/77.6 ms
+(20 samples), normal read/write p50/p95 15.1/62.9 ms (20 samples), errors zero.
+Each history result contained all 240 expected changes for its seller, and each
+read released its transaction. The first application history read after seeding
+was 28.9 ms. These are local, warm-cache observations, not production or cold
+storage benchmarks. They do not reproduce the hosted 15-second deadline or
+measure full Assistant/provider latency, browser interactions, sustained CPU,
+production data cardinality or native iPhone behavior. No additional live
+question was submitted; hosted resolution remains unverified.
