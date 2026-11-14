@@ -156,6 +156,7 @@ class ConversationRepo:
                 order_by=(Photo.display_order, Photo.created_at, Photo.id),
             ).label("position"),
         )
+        ranked = ranked.filter(Photo.marketplace.is_(None))
         if conv_ids is not None:
             ranked = ranked.filter(Photo.conversation_id.in_(conv_ids))
         ranked = ranked.subquery()
@@ -167,7 +168,7 @@ class ConversationRepo:
     def cover_photo(self, conv_id: str) -> tuple[str, str | None] | None:
         row = (
             self.db.query(Photo.id, Photo.checksum)
-            .filter(Photo.conversation_id == conv_id)
+            .filter(Photo.conversation_id == conv_id, Photo.marketplace.is_(None))
             .order_by(Photo.display_order, Photo.created_at, Photo.id)
             .first()
         )

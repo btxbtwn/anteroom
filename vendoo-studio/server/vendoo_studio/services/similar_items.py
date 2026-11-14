@@ -135,14 +135,15 @@ def _load(db: Session) -> dict[str, _Item]:
             price=amount,
             sku=str(notes.get("sku") or "").strip(),
         )
-    rows = db.query(Photo.id, Photo.conversation_id, Photo.checksum, Photo.stored_filename).order_by(
+    rows = db.query(Photo.id, Photo.conversation_id, Photo.checksum, Photo.marketplace).order_by(
         Photo.conversation_id, Photo.display_order, Photo.created_at
     )
-    for photo_id, conv_id, checksum, _stored in rows:
+    for photo_id, conv_id, checksum, marketplace in rows:
         item = items.get(conv_id)
         if item is None or not checksum:
             continue
-        if item.cover_id is None:
+        # A marketplace's own photos are numbered apart from the item's; the cover is an item photo.
+        if item.cover_id is None and marketplace is None:
             item.cover_id, item.cover_checksum = photo_id, checksum
         item.checksums.add(checksum)
     return items
