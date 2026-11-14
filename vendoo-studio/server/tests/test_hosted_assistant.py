@@ -149,6 +149,185 @@ def test_web_answers_run_in_the_durable_queue_and_complete_with_their_save(migra
         assert _tasks(migration_engine, thread) == []
 
 
+@pytest.mark.parametrize('failure,partial', [
+    ('provider', ''), ('empty', ''), ('lookups', ''), ('provider', 'Half an answer.'),
+    ('lookups', 'Half an answer.'), ('stalled', ''), ('prepare', ''),
+])
+def test_failed_answers_keep_a_safe_reason_on_resume_and_retry_without_duplicate_questions(
+    migration_engine, jwks, signing_keys, monkeypatch, caplog, failure, partial,  # noqa: F811
+):  # noqa: F811
+    from vendoo_studio.services import business_assistant
+    from vendoo_studio.services.provider_deadlines import ProviderStalled
+
+    secret = 'private-provider-response-and-shop-data'
+    reason = {
+        'provider': 'ChatGPT could not finish the assistant answer. Try again.',
+        'empty': 'The assistant returned an empty answer. Ask again.',
+        'lookups': 'The assistant kept looking things up without answering. Ask again, or ask something narrower.',
+        'stalled': 'ChatGPT stopped responding while writing its answer: nothing came back for 5 minutes.',
+        'prepare': 'Anteroom could not read your shop for this answer. Try again.',
+    }[failure]
+
+    async def answer(_provider, _messages, _shop):
+        if partial:
+            yield 'text', partial
+        if failure == 'provider':
+            raise RuntimeError(secret)
+        if failure == 'stalled':
+            raise ProviderStalled(reason)
+        if failure == 'lookups':
+            yield 'error', reason
+
+    monkeypatch.setattr(assistant_route, 'get_listing_provider', lambda: Provider())
+    monkeypatch.setattr(business_assistant, 'answer', answer)
+    prepare = assistant_route._prepare
+    if failure == 'prepare':
+        from sqlalchemy.exc import InternalError
+
+        class IdleTransaction(Exception):
+            sqlstate = '25P03'
+
+        def broken_prepare(*_args):
+            raise InternalError('SELECT private_shop_data', {'secret': secret}, IdleTransaction(secret))
+        monkeypatch.setattr(assistant_route, '_prepare', broken_prepare)
+    with _worker_client(migration_engine, monkeypatch) as client:
+        alice, bob = headers(signing_keys), headers(signing_keys, BOB)
+        thread = client.post('/api/assistant/threads', headers=alice).json()['id']
+        response = client.post('/api/assistant/messages', headers=alice,
+                               json={'text': 'What should I buy today?', 'thread_id': thread})
+        assert response.status_code == 200 and f'event: error\ndata: {reason}' in response.text
+        if failure == 'lookups':
+            assert 'returned an empty answer' not in response.text
+        [(_task, status, error, lease)] = _tasks(migration_engine, thread)
+        assert (status, error, lease) == ('failed', reason, None)
+        resumed = client.post('/api/assistant/messages/resume?thread_id=' + thread, headers=alice).text
+        assert resumed == f'event: error\ndata: {reason}\n\ndata: [DONE]\n\n'
+        assert client.post('/api/assistant/messages/resume?thread_id=' + thread, headers=bob).text == 'data: [DONE]\n\n'
+        turns = client.get('/api/assistant/messages?thread_id=' + thread, headers=alice).json()
+        assert [row['text'] for row in turns] == ['What should I buy today?'] + ([partial] if partial else [])
+        assert secret not in response.text + resumed + caplog.text
+        assert 'SELECT private_shop_data' not in response.text + resumed + caplog.text
+        if failure == 'prepare':
+            assert 'SQLSTATE 25P03' in caplog.text
+        assert all(record.exc_info is None for record in caplog.records if record.name == 'vendoo_studio.assistant')
+        if partial:
+            # Existing semantics: a saved partial answer is not silently replaced by Retry.
+            assert client.post('/api/assistant/messages/retry?thread_id=' + thread, headers=alice).status_code == 409
+        else:
+            monkeypatch.setattr(assistant_route, '_prepare', prepare)
+            async def recovered(_provider, _messages, _shop):
+                yield 'text', 'Buy coats.'
+            monkeypatch.setattr(business_assistant, 'answer', recovered)
+            assert 'Buy coats.' in client.post('/api/assistant/messages/retry?thread_id=' + thread, headers=alice).text
+            turns = client.get('/api/assistant/messages?thread_id=' + thread, headers=alice).json()
+            assert [row['text'] for row in turns] == ['What should I buy today?', 'Buy coats.']
+            assert [row[1] for row in _tasks(migration_engine, thread)] == ['failed', 'completed']
+            assert client.post('/api/assistant/messages/resume?thread_id=' + thread, headers=alice).text == 'data: [DONE]\n\n'
+
+
+def test_shop_snapshot_survives_calculation_longer_than_the_idle_transaction_deadline(
+    migration_engine, jwks, monkeypatch,  # noqa: F811
+):
+    import time
+    from test_business_assistant import NOW, add_listing
+    from vendoo_studio.database import SessionLocal
+    from vendoo_studio.services import business_assistant, hosted_database, size_audit
+    from vendoo_studio.services.hosted_context import for_seller
+    from vendoo_studio.services.service_context import use
+
+    with _worker_client(migration_engine, monkeypatch):
+        with use(for_seller(USER_ID)), SessionLocal() as db:
+            add_listing(db, 'Coat M', {'title': 'Coat M', 'size': 'M', 'price': 40})
+            monkeypatch.setattr(hosted_database, 'IDLE_IN_TRANSACTION_TIMEOUT', '150ms')
+            original = size_audit.size_problems
+            audited = []
+
+            def slow_audit(listing, photo):
+                # Stand in for a large shop's size calculations; the next history
+                # read must use a fresh transaction, not a server-killed connection.
+                time.sleep(.25)
+                audited.append(listing['title'])
+                return original(listing, photo)
+
+            monkeypatch.setattr(size_audit, 'size_problems', slow_audit)
+            shop = business_assistant.read_shop(db, now=NOW)
+            assert audited == ['Coat M']
+            assert 'Coat M' in business_assistant.run_lookup(shop.lookups, 'SELECT title FROM listings')
+            shop.lookups.close()
+
+
+def test_four_snapshots_for_two_sellers_release_connections_during_other_reads_and_writes(
+    migration_engine, jwks, signing_keys, monkeypatch,  # noqa: F811
+):
+    import threading
+    import time
+    from collections import defaultdict
+    from concurrent.futures import ThreadPoolExecutor
+    from sqlalchemy import event
+    from test_business_assistant import NOW, add_listing
+    from vendoo_studio.database import SessionLocal
+    from vendoo_studio.services import business_assistant, size_audit
+    from vendoo_studio.services.hosted_context import for_seller
+    from vendoo_studio.services.service_context import use
+
+    active, guard = defaultdict(int), threading.Lock()
+    ready, release = threading.Barrier(5), threading.Event()
+
+    def checkout(*_args):
+        with guard:
+            active[threading.get_ident()] += 1
+
+    def checkin(*_args):
+        with guard:
+            active[threading.get_ident()] -= 1
+
+    def audit(_listing, _photo):
+        with guard:
+            assert active[threading.get_ident()] == 0, 'Snapshot calculations held a pooled connection'
+        ready.wait(timeout=15)
+        assert release.wait(timeout=15)
+
+    def snapshot(owner):
+        with use(for_seller(owner)), SessionLocal() as db:
+            shop = business_assistant.read_shop(db, now=NOW)
+            try:
+                return business_assistant.run_lookup(shop.lookups, 'SELECT title FROM listings')
+            finally:
+                shop.lookups.close()
+
+    with _worker_client(migration_engine, monkeypatch) as client:
+        for owner in (USER_ID, BOB):
+            with use(for_seller(owner)), SessionLocal() as db:
+                add_listing(db, owner + ' Coat M', {'title': owner + ' Coat M', 'size': 'M', 'price': 40})
+        monkeypatch.setattr(size_audit, 'size_problems', audit)
+        event.listen(migration_engine, 'checkout', checkout)
+        event.listen(migration_engine, 'checkin', checkin)
+        times = []
+        try:
+            with ThreadPoolExecutor(max_workers=4) as workers:
+                owners = [USER_ID, USER_ID, BOB, BOB]
+                futures = [workers.submit(snapshot, owner) for owner in owners]
+                try:
+                    ready.wait(timeout=15)
+                    for owner in (USER_ID, BOB) * 5:
+                        for method in ('get', 'post'):
+                            started = time.monotonic()
+                            response = getattr(client, method)('/api/assistant/threads', headers=headers(signing_keys, owner))
+                            times.append((time.monotonic() - started) * 1000)
+                            assert response.status_code == 200
+                finally:
+                    release.set()
+                for owner, future in zip(owners, futures, strict=True):
+                    result = future.result()
+                    assert owner in result and (BOB if owner == USER_ID else USER_ID) not in result
+        finally:
+            event.remove(migration_engine, 'checkout', checkout)
+            event.remove(migration_engine, 'checkin', checkin)
+        times.sort()
+        print(f'Four snapshots / two sellers; {len(times)} reads and writes: '
+              f'p50={times[len(times) // 2]:.1f}ms p95={times[int(len(times) * .95) - 1]:.1f}ms; errors=0')
+
+
 def test_an_answer_a_restart_cut_off_is_marked_interrupted_and_retried_once(migration_engine, jwks, signing_keys, monkeypatch):  # noqa: F811
     import time
 
@@ -212,7 +391,7 @@ def test_stop_keeps_what_was_written_and_fences_the_workers_late_save(migration_
             with pytest.raises(background_tasks.TaskLeaseExpired):
                 assistant_route._save_answer(
                     Provider(), 'You sold two things.', None, None, None, thread,
-                    lambda db: background_tasks.complete_in(db, task_id, token))
+                    lambda db, error: background_tasks.complete_in(db, task_id, token, error=error))
         turns = client.get('/api/assistant/messages?thread_id=' + thread, headers=alice).json()
         assert [(row['role'], row['text']) for row in turns] == expected
 

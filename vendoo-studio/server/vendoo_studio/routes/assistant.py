@@ -8,15 +8,15 @@ delists or publishes.
 from __future__ import annotations
 
 import asyncio
-import functools
 import logging
+import traceback
 from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import SessionLocal, get_db, in_worker_session
@@ -25,6 +25,7 @@ from vendoo_studio.routes.attachments import AttachmentUpload, store_uploads
 from vendoo_studio.services import assistant_changes, assistant_memory, background_tasks, business_assistant
 from vendoo_studio.services.chat_attachments import attach_to_last_user_turn
 from vendoo_studio.services.listing_provider import get_listing_provider
+from vendoo_studio.services.provider_deadlines import ProviderStalled, provider_label
 from vendoo_studio.services.streaming import (
     KEEPALIVE,
     SSE_HEADERS,
@@ -167,8 +168,8 @@ def _prepare(question: str, attachments: list[dict] | None = None, thread_id: st
 
 async def _answer(
     run: GenerationRun, provider, question: str, attachments: list[dict] | None = None,
-    thread_id: str | None = None, settle: Callable[[Session], None] | None = None,
-) -> None:
+    thread_id: str | None = None, settle: Callable[[Session, str | None], None] | None = None,
+) -> str | None:
     """Answer in the background and publish each piece to whoever is following.
 
     The answer belongs to Studio, not to the connection that asked: a phone
@@ -179,11 +180,14 @@ async def _answer(
     memory_block = None
     automation_block = None
     shop = None
+    error = None
+    preparing = True
     try:
         run.publish(sse_event("status", "Reading your shop…"))
         messages, shop = await await_with_pulses(
             run, asyncio.to_thread(_prepare, question, attachments, thread_id), [],
         )
+        preparing = False
         async for item in iter_with_keepalives(business_assistant.answer(provider, messages, shop)):
             if item is None:
                 # A comment alone does not keep some mobile connections open; pulse repeats the status too.
@@ -212,13 +216,28 @@ async def _answer(
                 note = f"\n\n{note}" if answer.strip() else note
                 answer += note
                 run.publish(sse_data(note))
+            elif kind == "error":
+                error = text
+                run.publish(sse_event("error", error))
+                break
             else:
                 run.publish(sse_event(kind, text))
-        if not answer.strip():
-            run.publish(sse_event("error", "The assistant returned an empty answer. Ask again."))
+        if not answer.strip() and error is None:
+            error = "The assistant returned an empty answer. Ask again."
+            run.publish(sse_event("error", error))
+    except background_tasks.TaskLeaseExpired:
+        raise
     except Exception as exc:
-        log.exception("business assistant failed")
-        run.publish(sse_event("error", str(exc).strip() or type(exc).__name__))
+        _log_answer_failure(exc)
+        # Provider/SQL exception bodies can include credentials and private shop
+        # data. Only our deadline error has a controlled seller-facing message.
+        if preparing:
+            error = "Anteroom could not read your shop for this answer. Try again."
+        elif isinstance(exc, ProviderStalled):
+            error = str(exc)
+        else:
+            error = f"{provider_label(getattr(provider, 'name', None))} could not finish the assistant answer. Try again."
+        run.publish(sse_event("error", error))
     finally:
         if shop is not None:
             shop.lookups.close()
@@ -228,12 +247,25 @@ async def _answer(
         if answer.strip():
             await asyncio.to_thread(
                 _save_answer, provider, answer, changes, memory_block, automation_block, thread_id, settle,
+                error,
             )
+    return error
+
+
+def _log_answer_failure(exc: Exception) -> None:
+    # Keep exception identity and code locations, never exception text or SQL parameters.
+    locations = " > ".join(f"{frame.filename.rsplit('/', 1)[-1]}:{frame.lineno}:{frame.name}"
+                           for frame in traceback.extract_tb(exc.__traceback__))
+    sqlstate = getattr(exc.orig, 'sqlstate', None) if isinstance(exc, DBAPIError) else None
+    # SQLSTATE is a five-character diagnostic code, never a query or parameter.
+    code = sqlstate if isinstance(sqlstate, str) and len(sqlstate) == 5 and sqlstate.isalnum() else '-'
+    log.error("business assistant failed (%s at %s; SQLSTATE %s)", type(exc).__name__, locations, code)
 
 
 def _save_answer(
     provider, answer: str, changes: dict | None, memory_block: str | None,
-    automation_block: str | None, thread_id: str | None, settle: Callable[[Session], None] | None = None,
+    automation_block: str | None, thread_id: str | None, settle: Callable[[Session, str | None], None] | None = None,
+    error: str | None = None,
 ) -> None:
     save_db = SessionLocal()
     try:
@@ -254,7 +286,7 @@ def _save_answer(
                 automation = {"status": "proposed", "proposal": {"ready": False, "issues": ["That automation could not be read."], "actions": []}}
         if settle is not None:
             # A queued answer completes in the same commit that saves it.
-            settle(save_db)
+            settle(save_db, error)
         business_assistant.add_message(
             save_db, "assistant", answer,
             provider=getattr(provider, "name", None),
@@ -296,10 +328,11 @@ def _save_question(db: Session, question: str, body: AssistantQuestion) -> tuple
 
 async def _start_answer(key: str, provider, question: str, attachments: list[dict] | None, thread_id: str):
     _answering_thread_ids[key] = thread_id
-    run = start_generation(
-        key,
-        functools.partial(_answer, provider=provider, question=question, attachments=attachments, thread_id=thread_id),
-    )
+
+    async def answer(run: GenerationRun) -> None:
+        await _answer(run, provider, question, attachments, thread_id)
+
+    run = start_generation(key, answer)
     await asyncio.sleep(0)
     return stream_generation(run)
 
@@ -448,9 +481,8 @@ def _follow_queued(db: Session, thread_id: str | None):
         return _follow_task(db, task.id)
     if thread_id:
         latest = background_tasks.latest_answer(db, thread_id)
-        turns = business_assistant.list_messages(db, thread_id)
-        if latest is not None and latest.status == "failed" and turns and turns[-1].role == "user":
-            # Say why the last question has no answer, so the seller can retry it.
+        if latest is not None and latest.status == "failed":
+            # Partial answers stay saved too; explain why they stopped on reconnect.
             return _said(sse_event("error", latest.error or "This answer did not finish. Retry to ask again."))
     db.rollback()
     return stream_finished()
@@ -513,12 +545,12 @@ async def answer_task(task_id: str, token: str, task) -> bool:
     journal = _Journal()
     settled = shutting_down = False
 
-    def settle(db: Session) -> None:
+    def settle(db: Session, error: str | None) -> None:
         nonlocal settled
         if shutting_down:
             # A restart cut the answer off: save nothing, so it reads as interrupted.
             raise RuntimeError("The API is stopping")
-        background_tasks.complete_in(db, task_id, token, journal.take())
+        background_tasks.complete_in(db, task_id, token, journal.take(), error=error)
         settled = True
 
     payload = task.payload or {}
@@ -534,16 +566,16 @@ async def answer_task(task_id: str, token: str, task) -> bool:
             if not settled and (frames := journal.take()):
                 # Fails once the seller stops the answer, which ends the work below.
                 await asyncio.to_thread(background_tasks.append_events, task_id, token, frames)
-        await work
+        error = await work
         if not settled:
             await asyncio.to_thread(background_tasks.append_events, task_id, token, journal.take())
-            await asyncio.to_thread(background_tasks.finish, task_id, token)
+            await asyncio.to_thread(background_tasks.finish, task_id, token, error=error)
     except asyncio.CancelledError:
         shutting_down = True
         raise
     except Exception as exc:
         if not isinstance(exc, background_tasks.TaskLeaseExpired):
-            log.exception("queued assistant answer failed")
+            _log_answer_failure(exc)
         try:
             await asyncio.to_thread(background_tasks.finish, task_id, token,
                                     error="The assistant stopped before it finished. Retry to ask again.")

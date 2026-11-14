@@ -938,6 +938,10 @@ def _records(db: Session, rows: list[AnalyticsItem], now: datetime) -> list[dict
     )
     notes = {conv_id: parse_notes(raw) for conv_id, raw in db.query(Conversation.id, Conversation.notes).all()}
     photo_sizes = _photo_sizes(db)
+    # These inputs are plain values. A large shop's size audits can take longer
+    # than Postgres permits an idle transaction; return the connection before
+    # calculating, so the following price-history read starts a fresh transaction.
+    db.rollback()
     records = []
     for item in _ordered(rows):
         listing = listings.get(item.conversation_id)
@@ -1114,6 +1118,8 @@ def _price_changes(db: Session) -> list[dict[str, Any]]:
         .order_by(ListingRevision.created_at, ListingRevision.id)
         .all()
     )
+    # History is materialized too: grouping it must not keep a pooled connection.
+    db.rollback()
     for conv_id, raw, created_at in revisions:
         price = _number(raw)
         if not price:
