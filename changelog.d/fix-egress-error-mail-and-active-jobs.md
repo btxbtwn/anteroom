@@ -1,0 +1,1 @@
+- On the web, error reports and the send queue read far less data, which keeps Anteroom within its database bandwidth.

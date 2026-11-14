@@ -227,3 +227,18 @@ def test_transient_delivery_recovers_without_another_error_arriving(store):
     assert delivery.status()['state'] == 'ready'
     assert delivery.status()['used'] == 2
     assert delivery.status()['pending'] == 0
+
+
+def test_an_unsent_outbox_stays_small_so_each_report_moves_little_data(store):
+    """Each report rereads the whole outbox; unsent groups must not pile up without bound."""
+    from vendoo_studio.services.error_email_delivery import MAX_STORED_GROUPS
+
+    delivery = EmailDelivery(store, lambda *args: None, daily_limit=0)
+    for line in range(MAX_STORED_GROUPS + 30):
+        delivery.add(report(level=logging.WARNING, line=line))
+    delivery.add(report(line=9999))
+    groups = store.read()['groups']
+    assert len(groups) == MAX_STORED_GROUPS
+    # The newest report is always kept, and errors outlive older warnings.
+    assert any(group['report']['severity'] == 'ERROR' for group in groups.values())
+    assert delivery.status()['state'] == 'needs_budget'

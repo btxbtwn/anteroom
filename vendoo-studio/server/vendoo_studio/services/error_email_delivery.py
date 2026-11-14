@@ -8,6 +8,21 @@ DIGEST_INTERVAL = 3600
 REPEAT_WINDOW = 900
 HOURLY_CAP = 60
 MAX_GROUPS_PER_EMAIL = 20
+# Every report rereads and rewrites the whole stored outbox, so its size is
+# what each logged warning costs in database traffic. While nothing sends
+# (no daily budget) groups never drain; keep only the newest ones.
+MAX_STORED_GROUPS = 50
+
+
+def _trim(groups: dict, *, keep: str) -> None:
+    """Drop the oldest warnings first, then the oldest errors, down to MAX_STORED_GROUPS."""
+    excess = len(groups) - MAX_STORED_GROUPS
+    if excess <= 0:
+        return
+    oldest = sorted((key for key in groups if key != keep),
+                    key=lambda key: (groups[key]['report']['severity'] != 'WARNING', str(groups[key]['first'])))
+    for key in oldest[:excess]:
+        del groups[key]
 
 
 class EmailDelivery:
@@ -30,6 +45,7 @@ class EmailDelivery:
                 due = (max(now, state.setdefault('digest_after', now + DIGEST_INTERVAL)) if warning
                        else max(now, last + REPEAT_WINDOW) if last is not None else now)
                 groups[fingerprint] = {'report': report, 'count': 1, 'first': report['occurred_at'], 'due': due}
+            _trim(groups, keep=fingerprint)
 
     def tick(self):
         if not self.daily_limit:
