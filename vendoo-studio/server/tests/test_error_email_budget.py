@@ -229,16 +229,43 @@ def test_transient_delivery_recovers_without_another_error_arriving(store):
     assert delivery.status()['pending'] == 0
 
 
-def test_an_unsent_outbox_stays_small_so_each_report_moves_little_data(store):
-    """Each report rereads the whole outbox; unsent groups must not pile up without bound."""
-    from vendoo_studio.services.error_email_delivery import MAX_STORED_GROUPS
-
+@pytest.mark.parametrize('level', [logging.ERROR, logging.WARNING])
+def test_unconfigured_budget_preserves_every_unsent_group(store, level):
     delivery = EmailDelivery(store, lambda *args: None, daily_limit=0)
-    for line in range(MAX_STORED_GROUPS + 30):
-        delivery.add(report(level=logging.WARNING, line=line))
-    delivery.add(report(line=9999))
+    reports = [report(level, line=line) for line in range(80)]
+    reports.append(report(logging.WARNING if level == logging.ERROR else logging.ERROR, line=9999))
+    for item in reports:
+        delivery.add(item)
+    delivery.tick()
     groups = store.read()['groups']
-    assert len(groups) == MAX_STORED_GROUPS
-    # The newest report is always kept, and errors outlive older warnings.
-    assert any(group['report']['severity'] == 'ERROR' for group in groups.values())
+    assert set(groups) == {item['severity'] + ':' + item['fingerprint'] for item in reports}
+    assert delivery.status()['pending'] == len(reports)
     assert delivery.status()['state'] == 'needs_budget'
+
+
+@pytest.mark.parametrize('fail_send', [False, True])
+def test_add_during_send_preserves_backlog_and_occurrence_counts(store, fail_send):
+    sent = []
+    initial = [report(line=line) for line in range(50)]
+    added = [report(line=line) for line in range(50, 70)]
+
+    def send(*args):
+        sent.append(args)
+        for item in added:
+            delivery.add(item)
+        delivery.add(initial[0])
+        if fail_send:
+            raise OSError('temporary network failure')
+
+    delivery = EmailDelivery(store, send, daily_limit=10, clock=lambda: 100.0)
+    for item in initial:
+        delivery.add(item)
+    delivery.tick()
+    groups = store.read()['groups']
+    expected = initial + added if fail_send else [initial[0], *initial[20:], *added]
+    assert set(groups) == {item['severity'] + ':' + item['fingerprint'] for item in expected}
+    first_key = initial[0]['severity'] + ':' + initial[0]['fingerprint']
+    assert groups[first_key]['count'] == (2 if fail_send else 1)
+    assert delivery.status()['pending'] == (71 if fail_send else 51)
+    assert len(sent) == 1
+    assert store.read()['lease_until'] == 0

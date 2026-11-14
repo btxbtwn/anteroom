@@ -1,1 +1,1 @@
-- On the web, error reports and the send queue read far less data, which keeps Anteroom within its database bandwidth.
+- On the web, the send queue and listing activity checks skip loading full listing copies they do not use.
