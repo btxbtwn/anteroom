@@ -1,0 +1,1 @@
+- Keep the hosted server's request log working when another log handler is attached first.

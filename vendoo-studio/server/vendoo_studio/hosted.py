@@ -64,12 +64,15 @@ class AccessLogMiddleware:
 
     def __init__(self, app):
         self.app = app
+        # Hosted logging is otherwise unconfigured; INFO would be dropped. Set
+        # the level even when a handler is already attached, or that handler
+        # receives nothing.
+        if access_log.level == logging.NOTSET:
+            access_log.setLevel(logging.INFO)
         if not access_log.handlers:
-            # Hosted logging is otherwise unconfigured; INFO would be dropped.
             handler = logging.StreamHandler()
             handler.setFormatter(logging.Formatter("%(message)s"))
             access_log.addHandler(handler)
-            access_log.setLevel(logging.INFO)
             access_log.propagate = False
 
     async def __call__(self, scope, receive, send):
