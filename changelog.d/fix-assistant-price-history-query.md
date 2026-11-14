@@ -1,1 +1,0 @@
-- Read Assistant price history without loading the large saved marketplace forms for every revision.

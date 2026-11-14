@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.971 — 2026-11-14
+
+- Read Assistant price history without loading the large saved marketplace forms for every revision.
+
 ## 0.1.970 — 2026-11-14
 
 - Show why an Assistant answer stopped when you return to the conversation, while keeping any answer already written.
