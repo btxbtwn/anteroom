@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.972 — 2026-11-15
+
+- Keep all queued error reports while reading only the groups needed for reporting and email delivery, instead of downloading the whole backlog each time.
+
 ## 0.1.971 — 2026-11-14
 
 - Read Assistant price history without loading the large saved marketplace forms for every revision.

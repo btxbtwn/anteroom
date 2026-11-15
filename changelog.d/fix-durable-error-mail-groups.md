@@ -1,1 +1,0 @@
-- Keep all queued error reports while reading only the groups needed for reporting and email delivery, instead of downloading the whole backlog each time.
