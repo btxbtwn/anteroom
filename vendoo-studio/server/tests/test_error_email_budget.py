@@ -17,12 +17,14 @@ def store(tmp_path):
     if configured.dialect.name == 'postgresql':
         store = EmailStore(configured)
         with configured.begin() as connection:
+            connection.execute(store.groups.delete())
             connection.execute(store.table.update().values(payload={}))
         yield store
         return
     engine = create_engine(f"sqlite:///{tmp_path / 'mail.db'}", connect_args={'timeout': 30})
     table = EmailStore(engine).table
     table.create(engine)
+    EmailStore(engine).groups.create(engine)
     with engine.begin() as connection:
         connection.execute(table.insert().values(id=1, payload={}))
     yield EmailStore(engine)
@@ -269,3 +271,26 @@ def test_add_during_send_preserves_backlog_and_occurrence_counts(store, fail_sen
     assert delivery.status()['pending'] == (71 if fail_send else 51)
     assert len(sent) == 1
     assert store.read()['lease_until'] == 0
+
+
+def test_report_and_status_do_not_select_the_shared_backlog(store):
+    from sqlalchemy import event
+
+    delivery = EmailDelivery(store, lambda *args: None, daily_limit=0)
+    for line in range(100):
+        delivery.add(report(logging.WARNING, line=line))
+    statements = []
+
+    def record_query(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith('SELECT'):
+            statements.append(statement)
+
+    event.listen(store.engine, 'before_cursor_execute', record_query)
+    try:
+        delivery.add(report(logging.WARNING, line=1))
+        assert delivery.status()['pending'] == 101
+        delivery.tick()
+    finally:
+        event.remove(store.engine, 'before_cursor_execute', record_query)
+    assert statements
+    assert not any('SELECT error_email_state.payload ' in statement for statement in statements), statements

@@ -21,6 +21,7 @@ def email_store(tmp_path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path / 'email.db'}")
     store = error_email.EmailStore(engine)
     store.table.create(engine)
+    store.groups.create(engine)
     with engine.begin() as connection:
         connection.execute(store.table.insert().values(id=1, payload={}))
     monkeypatch.setattr(error_email, 'EmailStore', lambda _engine: store)
