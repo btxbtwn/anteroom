@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 const settle = () => act(() => new Promise<void>(resolve => setTimeout(resolve, 10)));
-const editor = (autoFocus: boolean) => <ComposerPromptEditor value="" onChange={() => {}} onSubmit={() => {}} placeholder="Ask" autoFocus={autoFocus}/>;
+const editor = (autoFocus: boolean) => <ComposerPromptEditor value="" onChange={() => {}} onSubmit={() => {}} placeholder="Ask" handleRef={{ current: null }} autoFocus={autoFocus}/>;
 
 it("takes focus when it opens and nothing else has it", async () => {
   act(() => root.render(editor(true)));
