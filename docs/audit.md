@@ -85,8 +85,8 @@ Every run, in this order:
    `./anteroom-ios/test-sandbox.sh`, so steps 2 to 4 need no separate run
    when it covered them. The whole run takes about 40 minutes on the
    seller's Mac. `hosted-e2e/signin.e2e.ts` "in the Mac app, password resets
-   open in the browser" fails about one run in three at its Account menu step
-   (the menu is not open); rerun it alone before reporting it.
+   open in the browser" failed about one run in 30 at its Account menu step
+   until #1542; once that has merged, report any failure there.
    On macOS, **Anteroom types** fails on PyObjC symbols
    in `desktop.py`, `macos_keychain.py` and `photo_edits.py` that CI's Linux
    job never sees; report any other type error. Do not run `basedpyright` on
@@ -108,7 +108,11 @@ Every run, in this order:
    `~/Library/Application Support/Anteroom/logs/Anteroom.log` was not created
    or updated (sandbox must keep logs under `VENDOO_STUDIO_DATA_DIR`). The
    seller's own app may be running and writing that log, so compare its size
-   and time with `stat` and look for sandbox paths in any new lines. Unset
+   and time with `stat` and look for sandbox paths in any new lines. Also
+   read that log's `ERROR` lines since the last audit, read only: they show
+   live marketplace failures no sandbox can reproduce (on 2026-11-15 a
+   Mercari HTTP 400 on every delist, #1539). Quote only the error, never
+   buyer or listing details. Unset
    any leftover `VENDOO_STUDIO_PORT` / `ANTEROOM_SANDBOX` from that run before
    starting `./sandbox.sh --hosted` (hosted defaults to 4320; an inherited
    `4321` makes it fail to bind).
@@ -189,7 +193,7 @@ list remembers.
 | Thursday | Assistant and listing chat, automations, suggestions, similar items, previous versions and history | `src/components/Assistant*`, `Automations*`, `ListingHistory.tsx`, `anteroom-ios/Sources/Assistant/`, `Automations/`, `History/` |
 | Friday | Settings, providers, labels, sign-in, sign-up, password reset, account menu, analytics, sales records, mark sold; Mac app first run, backups and restore, migration of a database from the previous release | `src/components/SettingsPage.tsx`, `src/components/settings/`, `src/cloud/`, `anteroom-ios/Sources/Settings/`, `Session/`, `Analytics/`, `services/backups.py` |
 | Saturday | Concurrency and speed: several sellers generating several drafts at once while navigating and typing. Record p50/p95 input and navigation latency and errors against the targets in `docs/responsiveness.md` | `e2e/concurrentGeneration.e2e.ts`, `docs/responsiveness.md` |
-| Sunday | Safety sweep: every publish, delist, update and save-draft route without `confirm` and without named marketplaces must be refused; search for any code path where automation, retries, queues or bulk actions could reach them. Seller isolation: Alice and Bob never see each other's drafts or photos. Live updates and stale-edit protection between web and iPhone on the same draft | `routes/native_marketplaces.py`, `routes/marketplace_listings.py`, `routes/listing_commands.py` (set-price push), `cli/catalog.py` and `cli/execute.py` (the CLI's confirm gate), `docs/seller-isolation.md` |
+| Sunday | Safety sweep: every publish, delist, update, set-price push, bulk marketplace and automation-approval route without `confirm` and without named marketplaces must be refused. Saving a marketplace draft takes no `confirm` by design (`services/native_marketplaces.py`, `save_draft`): check instead that it names one draft-capable marketplace and can never publish. The sandbox answers 403 before any route checks `confirm`, so the confirm gate is proven by the pytest suite and by reading the code, not by sandbox calls; search for any code path where automation, retries, queues or bulk actions could reach them. Seller isolation: Alice and Bob never see each other's drafts or photos. Live updates and stale-edit protection between web and iPhone on the same draft | `routes/native_marketplaces.py`, `routes/marketplace_listings.py`, `routes/listing_commands.py` (set-price push), `cli/catalog.py` and `cli/execute.py` (the CLI's confirm gate), `docs/seller-isolation.md` |
 
 ## Feature checks
 
@@ -204,7 +208,11 @@ test in CI covers it.
 Tests that fail some runs and pass on rerun. Each line says the test, how it
 fails and the likely cause. Fix one per run (see **Each run**), then delete
 its line. Before calling a failure flaky, rerun it alone and check it fails in
-code the PR didn't change.
+code the PR didn't change. Reproduce a flaky Playwright test with
+`--repeat-each 30` (one project with `--project desktop`), and record the
+failure rate before and after the fix in its PR. For a focus or popover
+flake, an init script that logs `focusin`/`focusout` with `new Error().stack`
+names the code that moved focus.
 
 - `server/tests/test_hosted_edge.py`
   `test_access_log_names_the_route_but_never_the_url_query_or_headers`
@@ -217,11 +225,6 @@ code the PR didn't change.
   Query a narrower element.
 - `PolishScreenshotTests.testPolishedScreensInLightAndDark`: the Inventory
   list didn't appear within 30 s after a theme change, on CI (2026-11-11).
-- `hosted-e2e/signin.e2e.ts` "in the Mac app, password resets open in the
-  browser": the Account menu isn't open when the test looks for Sign out,
-  about one run in two (2026-11-11). Likely the Assistant composer's
-  `autoFocus` (`AssistantPage.tsx`) takes focus after the click and closes the
-  popover; unproven.
 
 ## Fixing bugs
 
