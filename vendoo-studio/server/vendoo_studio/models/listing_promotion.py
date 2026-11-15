@@ -15,6 +15,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     String,
     UniqueConstraint,
@@ -29,6 +30,7 @@ from vendoo_studio.models.ownership import SellerOwned
 class ListingPromotion(SellerOwned, Base):
     __tablename__ = "listing_promotions"
     __table_args__ = (
+        Index("ix_listing_promotions_rule_recent", "automation_id", "marketplace", "action", "created_at"),
         ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
             name="fk_listing_promotions_seller_conversation_id", deferrable=True, initially="DEFERRED"),
         ForeignKeyConstraint(["user_id", "automation_id"], ["promotion_automations.user_id", "promotion_automations.id"],

@@ -11,6 +11,41 @@ and accounts must overlap; long work must leave navigation, input and unrelated
 drafts usable. This is a product requirement, not a promise of infinite hardware
 capacity or zero model/network latency.
 
+## Recent promotion history index, 2026-11-15
+
+The waiting-for-likes lookup filters by automation, marketplace, action and
+creation time, then orders by creation time. An isolated 30,000-row synthetic
+journal (two rules/sellers, 6,753 recent results per rule, remaining rows 30 days
+old) compared the existing single-column indexes with an additional index on
+`(automation_id, marketplace, action, created_at)`. The unchanged lookup was
+fully fetched 32 times per phase; the first two samples were excluded. Warm
+local full-fetch p50/p95 milliseconds on this shared Linux host were SQLite
+20.47/22.36 before and 11.65/16.58 after; Postgres 16 10.75/14.31 before and
+9.72/13.22 after. SQLite replaced its temporary sort with an ordered range
+scan. Postgres used the composite index for its bitmap scan, retaining the
+sort of the 6,753 results. Neither planner was forced to use an index.
+
+These sequential fixture measurements establish a narrower history scan,
+not production latency, concurrent seller capacity or the cause of the single
+2026-11-15 hosted statement cancellation (fingerprint `04ed9d63841c`). Its
+parameters, timeout threshold and wait state were unavailable. Completed
+production statements supplied separately averaged 16.6 ms; their statistics
+do not include the canceled call. The lookup still returns every recent check
+and reads prior successful offers; no history is capped or discarded. Both
+queries and their existing timestamp-only ordering remain unchanged, including
+the lack of a defined winner between conflicting rows with equal timestamps.
+The migration regression covers an existing journal on SQLite and Postgres,
+waiting results, cutoff boundaries, null likes, unknown sends and ties with
+the same waiting outcome. A separate regression runs 40 conflicting-tie cases
+through the real waiting lookup, blocking lookup and offer round: unknown or
+sending rows tied with skipped (below/above the minimum), done (expired
+cooldown), failed or preview rows, in both insertion orders, with and without
+the index. Every case must keep both journal rows and avoid marketplace review
+and send entirely. The all-history blocking lookup checks for any unknown or
+sending row independently of which tied row the waiting lookup encounters
+first. Live concurrency and interaction latency remain unmeasured for this
+change.
+
 ## Desktop subscription relay verification
 
 The subscription relay test holds 48 simulated model calls open across two
