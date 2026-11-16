@@ -19,7 +19,6 @@ from sqlalchemy.engine import CursorResult
 import asyncio
 import contextlib
 import logging
-import re
 import time
 from datetime import UTC, datetime, timedelta
 from functools import partial
@@ -33,7 +32,7 @@ from vendoo_studio.models.conversation import Conversation, new_id
 from vendoo_studio.models.listing_promotion import ListingPromotion, MarketplaceOfferFloor
 from vendoo_studio.models.promotion_automation import PromotionAutomation
 from vendoo_studio.repositories.queries import JobRepo, ListingRepo
-from vendoo_studio.services import browser_bridge, listing_mode
+from vendoo_studio.services import browser_bridge, listing_mode, mercari_offer_cooldown
 from vendoo_studio.services.api_job_lock import claim_api_job, release_api_job
 from vendoo_studio.services.ebay_api import dollars, money_cents
 from vendoo_studio.services.listing_result import scrub
@@ -63,21 +62,6 @@ UNKNOWN_NOTE = "Chrome did not confirm this. Check the listing on the marketplac
 STOP_CODES = frozenset({"rate_limited", "challenge", "signed_out"})
 NAMES = {"poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop"}
 
-
-def _mercari_preview_wait(message: object) -> timedelta | None:
-    """Only the observed eligibility refusal; never infer send eligibility from text.
-
-    Mercari provides whole hours, without a rounding contract. The extra
-    hour before reading again is conservative, not proven API rounding.
-    The explicit three-day clause bounds the hint;
-    it is not a universal cooldown for Mercari or any other marketplace.
-    """
-    if not isinstance(message, str):
-        return None
-    match = re.fullmatch(r"You can make an offer again in ([1-9][0-9]?) hours\. \(once every 3 days\)", message)
-    if match and 1 <= int(match[1]) <= 72:
-        return timedelta(hours=int(match[1]) + 1)
-    return None
 
 
 class PromotionError(RuntimeError):
@@ -159,7 +143,7 @@ def blocking(db: Session, marketplace: str, listing_id: str, action: str, *, new
             # note. Keep unknown/sending above this gate; new likes cannot waive it.
             if (row.state == "skipped" and row.note
                     and row.note in (MERCARI_COOLDOWN_NOTE, f"{MERCARI_COOLDOWN_NOTE.rstrip('.')}: {row.marketplace_message}")
-                    and (wait := _mercari_preview_wait(row.marketplace_message)) is not None
+                    and (wait := mercari_offer_cooldown.message_wait(row.marketplace_message)) is not None
                     and isinstance(row.finished_at, datetime) and row.finished_at.tzinfo is None
                     and timedelta(0) <= now - row.finished_at < wait):
                 return MERCARI_COOLDOWN_NOTE
@@ -302,10 +286,8 @@ async def _review_remote(row: ListingPromotion, listing_id: str) -> None:
         # A refusal can still say how many likers could get an offer (Depop's "nobody to offer to").
         if isinstance(facts.get("like_count"), int):
             row.like_count = facts["like_count"]
-        cooldown = (row.marketplace == "mercari" and row.action == "offer"
-                    and facts.get("error_code") == "rejected" and facts.get("safe_to_retry") is True
-                    and facts.get("error") == "Mercari refused the request."
-                    and _mercari_preview_wait(row.marketplace_message) is not None)
+        cooldown = mercari_offer_cooldown.preview_wait(
+            row.marketplace, "marketplace.promotion_check", row.action, facts) is not None
         report = log.info if cooldown else log.error
         report("%s %s preview rejected for listing %s, automation %s: %s; %s",
                   row.marketplace, row.action, listing_id, row.automation_id,

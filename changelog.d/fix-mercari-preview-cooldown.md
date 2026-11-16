@@ -1,1 +1,2 @@
 - Mercari offer checks now wait out its explicit eligibility cooldown before reading the same listing again, while keeping the refusal in activity.
+- Expected Mercari cooldowns no longer trigger error alerts from the Chrome transport while remaining visible in activity and logs.

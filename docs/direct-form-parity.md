@@ -236,7 +236,10 @@ fingerprint `45ba8ce0227a`) reported "You can make an offer again in 47 hours.
 (once every 3 days)" after a previously confirmed send. The backend recognizes
 only that exact whole-hour message form (1–72 hours), in a safe, rejected
 Mercari offer preview with the connector's generic refusal text. It journals
-the refusal and logs it at info level. The saved classification note, original
+the refusal and logs it at info level in both transport reporting and promotion
+review, using one shared classifier. Only a direct preview envelope qualifies;
+nested failures and conflicting state/error/status indicators remain errors.
+The saved classification note, original
 message and completion timestamp gate later previews for that seller/listing,
 including across rules and restarts, for the stated hours plus one conservative hour for
 unknown rounding (not a proven API rounding rule). Future, timezone-mismatched

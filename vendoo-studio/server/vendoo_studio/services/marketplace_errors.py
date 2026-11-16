@@ -7,6 +7,7 @@ import logging
 from typing import Any, ParamSpec, TypeVar
 
 from vendoo_studio.services.listing_result import scrub
+from vendoo_studio.services.mercari_offer_cooldown import preview_wait
 
 log = logging.getLogger("vendoo_studio.marketplaces")
 P = ParamSpec("P")
@@ -29,7 +30,11 @@ def report_result(marketplace: str, operation: str, result: Any, *, depth: int =
             or isinstance(status, int) and status >= 400):
         messages = [str(error.get("message") or error.get("longMessage") or "Marketplace error")
                     for error in errors if isinstance(error, dict)] if isinstance(errors, list) else []
-        log.error("%s %s failed (%s): %s; %s", scrub(marketplace), scrub(operation),
+        # Only a direct reply can use the operation/action supplied by the
+        # caller. Nested envelopes may represent another action or marketplace.
+        expected_wait = depth == 0 and preview_wait(marketplace, operation, context.get("action"), result) is not None
+        report = log.info if expected_wait else log.error
+        report("%s %s failed (%s): %s; %s", scrub(marketplace), scrub(operation),
                   scrub(result.get("error_code") or status or result.get("state") or "rejected"),
                   scrub(result.get("error") or "; ".join(messages) or "Unconfirmed or failed marketplace result"),
                   scrub(result.get("marketplace_message")) or "-", extra={"marketplace_context": context or {}})

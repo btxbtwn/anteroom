@@ -27,6 +27,15 @@ checks the wait through 47 hours 59 minutes, and permits a fresh preview at
 The added lookup only considers skipped reviews completed within 73 hours;
 existing all-history unknown/sending guards remain intact.
 
+A later email on release 0.1.974 exposed another reporting layer: the Bridge
+reported the same explicit cooldown at ERROR before promotion review classified
+it. A focused regression now runs the real Bridge reporter and promotion review
+with only the underlying transport stubbed. Both layers retain the refusal at
+INFO, below the actual alert handler's threshold. One shared classifier handles
+only direct Mercari offer-preview refusals; nested replies do not inherit that
+classification from a parent's operation/action or retry-safety context. This
+changes reporting severity for the recognized wait, not requests or sends.
+
 These are deterministic fixture request counts, not live Mercari validation
 or latency/capacity measurements. The regressions cover listing/action/market
 scope, new-like non-bypass, malformed refusals and unknown/sending precedence;
