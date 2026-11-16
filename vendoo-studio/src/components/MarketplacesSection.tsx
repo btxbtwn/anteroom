@@ -63,7 +63,7 @@ function recoveryFields(marketplace: Marketplace, draft: NativeDraft) {
 function shippingRecovery(marketplace: Marketplace, draft: NativeDraft): string | null {
   return marketplace === "depop" && draft.error_code === "missing_fields"
     && recoveryFields(marketplace, draft).some(item => item.field === "depop_specifics.parcelSize")
-    ? "Check Package size here. If it is already correct, check your default shipping address in Depop. Anteroom cannot edit that account address."
+    ? "Check Package size here. Manage your default shipping address in Depop."
     : null;
 }
 
@@ -79,7 +79,7 @@ export function askChatPrompt(marketplace: Marketplace, draft: NativeDraft): str
   const fields = recoveryFields(marketplace, draft);
   if (fields.length) lines.push(`Fields: ${fields.map((item) => `${item.field} (${item.message})`).join("; ")}`);
   const shipping = shippingRecovery(marketplace, draft);
-  if (shipping) lines.push(shipping);
+  if (shipping) lines.push(`${shipping} Anteroom cannot edit that account address.`);
   lines.push(`Fill or fix those fields in this listing so ${name} accepts it. Do not list it; I will press List again.`);
   lines.push("Then tell me in plain words what you changed, naming fields as the form labels them. No codes or field keys.");
   return lines.join("\n");
