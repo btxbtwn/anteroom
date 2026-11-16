@@ -21,6 +21,11 @@ def _postgres_database(worker: str) -> None:
     name = f"anteroom_test_{worker}"
     admin = base.set(drivername="postgresql").render_as_string(hide_password=False)
     with psycopg.connect(admin, autocommit=True) as connection:
+        # Roles are cluster-wide. Create the operator role before any worker's
+        # migrations install grants, rather than from a later per-test fixture.
+        connection.execute("""DO $$ BEGIN
+            CREATE ROLE anteroom_api NOLOGIN;
+            EXCEPTION WHEN duplicate_object THEN NULL; END $$""")
         connection.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
         connection.execute(f'CREATE DATABASE "{name}"')
     os.environ["ANTEROOM_DATABASE_URL"] = base.set(database=name).render_as_string(hide_password=False)

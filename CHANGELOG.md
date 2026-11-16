@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.986 — 2026-11-16
+
+- Older Depop shipping errors now open Package size and explain when to check your shipping address in Depop.
+
 ## 0.1.985 — 2026-11-16
 
 - Offer-check error reports now identify which marketplace read failed, helping diagnose refusals without changing prices or sending offers.

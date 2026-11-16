@@ -1,0 +1,1 @@
+- Improved automated checks that keep operator error reports private.
