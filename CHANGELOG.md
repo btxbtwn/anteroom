@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.974 — 2026-11-16
+
+- Keep connection-release checks reliable on busy test runners without changing the app’s connection limits.
+
 ## 0.1.973 — 2026-11-16
 
 - Keep successful Chrome relay polls within the expected wait out of slow-response alerts, while still warning on excessive waits and failures.

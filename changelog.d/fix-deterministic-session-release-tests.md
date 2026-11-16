@@ -1,1 +1,0 @@
-- Keep connection-release checks reliable on busy test runners without changing the app’s connection limits.
