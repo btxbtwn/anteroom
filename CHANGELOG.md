@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.983 — 2026-11-16
+
+- Keep new error alerts prompt and combine repeated errors into hourly emails, while preserving every queued occurrence and giving warning summaries a turn.
+
 ## 0.1.982 — 2026-11-16
 
 - Keep safe diagnostic details when eBay category fields fail to load, so the failure can be investigated.
