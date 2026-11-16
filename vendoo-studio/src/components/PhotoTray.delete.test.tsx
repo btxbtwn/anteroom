@@ -47,3 +47,30 @@ it("shows a refused photo removal and clears that error on a successful retry", 
     client.clear(); host.remove(); read.mockRestore(); remove.mockRestore();
   }
 });
+
+it("shows a refused reorder inside the open viewer and rolls back its order", async () => {
+  const photos = ["first", "second"].map(id => ({ id, conversation_id: "fixture", original_filename: `${id}.jpg`, mime_type: "image/jpeg", size_bytes: 10, display_order: id === "first" ? 0 : 1, width: 80, height: 100, url: `/api/photos/${id}`, created_at: "2026-11-16T00:00:00" }));
+  const read = vi.spyOn(api.conversations, "photos").mockResolvedValue(photos);
+  const reorder = vi.spyOn(api.conversations, "reorderPhotos").mockRejectedValue(new Error("Photo order was not saved. Try again."));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } });
+  client.setQueryData(["photos", "fixture"], photos);
+  client.setQueryData(["conversation", "fixture"], { id: "fixture", status: "draft" });
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(<WorkspaceRuntimeProvider value={desktopRuntime}><QueryClientProvider client={client}><PhotoTray convId="fixture" /></QueryClientProvider></WorkspaceRuntimeProvider>));
+    await act(async () => host.querySelector<HTMLElement>('[aria-label="View photo 1 enlarged"]')!.click());
+    await act(async () => {
+      [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(button => button.textContent?.includes("Later"))!.click();
+    });
+    await vi.waitFor(async () => {
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+      expect(document.querySelector('[role="dialog"]')?.textContent).toContain("Photo order was not saved. Try again.");
+    });
+    expect(reorder).toHaveBeenCalledWith("fixture", ["second", "first"]);
+    expect(client.getQueryData(["photos", "fixture"])).toEqual(photos);
+  } finally {
+    await act(async () => root.unmount());
+    client.clear(); host.remove(); read.mockRestore(); reorder.mockRestore();
+  }
+});
