@@ -61,6 +61,7 @@ def test_load_tests_can_sign_in_more_sellers(monkeypatch):
 
 def test_database_delay_proxy_adds_the_round_trip_each_way():
     import asyncio
+    import gc
     import os
     import shutil
     import socket
@@ -74,23 +75,48 @@ def test_database_delay_proxy_adds_the_round_trip_each_way():
     path = os.path.join(short, 'echo.sock')
 
     async def echo(reader, writer):
-        while data := await reader.read(1024):
-            writer.write(data)
-            await writer.drain()
-        writer.close()
+        try:
+            while data := await reader.read(1024):
+                writer.write(data)
+                await writer.drain()
+        finally:
+            writer.close()
 
     loop = asyncio.new_event_loop()
-    loop.run_until_complete(asyncio.start_unix_server(echo, path))
-    threading.Thread(target=loop.run_forever, daemon=True).start()
+    server = loop.run_until_complete(asyncio.start_unix_server(echo, path))
+    running = threading.Thread(target=loop.run_forever, daemon=True)
+    running.start()
     proxy = DelayedDatabase(path, 0.05)
+    trips = []
+    # A full garbage collection late in a long test process paused every
+    # thread for over a second (CI run 43781664867 measured 1.63 s for one
+    # trip), so it stays off while timing. Any other pause can only lengthen a
+    # trip, so every trip must include the delay and the fastest bounds what
+    # the proxy itself adds.
+    collecting = gc.isenabled()
+    gc.disable()
     try:
         with socket.create_connection(('127.0.0.1', proxy.port), timeout=5) as client:
-            for message in (b'one', b'two'):
+            for message in (b'one', b'two', b'three', b'four'):
                 started = time.perf_counter()
                 client.sendall(message)
                 assert client.recv(1024) == message
-                assert 0.1 <= time.perf_counter() - started < 1
+                trips.append(time.perf_counter() - started)
     finally:
+        if collecting:
+            gc.enable()
         proxy.stop()
-        loop.call_soon_threadsafe(loop.stop)
+
+        async def close():
+            server.close()
+            tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            loop.stop()
+        asyncio.run_coroutine_threadsafe(close(), loop)
+        running.join(5)
+        loop.close()
         shutil.rmtree(short, ignore_errors=True)
+    assert min(trips) >= 0.1, trips
+    assert min(trips) < 0.5, trips
