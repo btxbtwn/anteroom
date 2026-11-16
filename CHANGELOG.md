@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.981 — 2026-11-16
+
+- Mercari offer checks now wait out its explicit eligibility cooldown before reading the same listing again, while keeping the refusal in activity.
+- Expected Mercari cooldowns no longer trigger error alerts from the Chrome transport while remaining visible in activity and logs.
+
 ## 0.1.980 — 2026-11-16
 
 - Speed up recent-activity lookups used by scheduled offers.
