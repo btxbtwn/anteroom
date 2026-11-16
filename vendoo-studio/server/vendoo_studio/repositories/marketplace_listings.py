@@ -15,6 +15,11 @@ from vendoo_studio.models.marketplace_listing import (
 )
 
 
+def _read_state(marketplace: str, state: str, listing_url: str | None) -> str:
+    # Older Depop publish replies could lack the product reference needed to check or delist.
+    return "unknown" if marketplace == "depop" and state == "published" and not listing_url else state
+
+
 def as_dict(row: MarketplaceListing | None) -> dict:
     """The record as services and the API see it: set fields only, times in ISO form."""
     if row is None:
@@ -27,6 +32,10 @@ def as_dict(row: MarketplaceListing | None) -> dict:
         if isinstance(value, datetime):
             value = (value if value.tzinfo else value.replace(tzinfo=UTC)).isoformat()
         out[name] = value
+    state = _read_state(row.marketplace, row.state, row.listing_url)
+    if state != row.state:
+        out.update(state=state, error_code="uncertain",
+                   error="Anteroom has no product link for this action. Check result before trying again.")
     return out
 
 
@@ -78,9 +87,9 @@ class MarketplaceListingRepo:
         grouped: dict[str, dict[str, dict]] = {}
         for conversation_id, marketplace, state, url, error, fields, price, listed_at in self.db.execute(query):
             grouped.setdefault(conversation_id, {})[marketplace] = {
-                "state": state,
+                "state": _read_state(marketplace, state, url),
                 "listing_url": url,
-                "failed": bool(error),
+                "failed": bool(error) or _read_state(marketplace, state, url) != state,
                 "fields": len(fields) if isinstance(fields, list) else 0,
                 "price": price,
                 "listed_at": (listed_at if listed_at.tzinfo else listed_at.replace(tzinfo=UTC)).isoformat()
@@ -94,7 +103,9 @@ class MarketplaceListingRepo:
         An item live on a marketplace has a key even when no revision is known.
         """
         query = self.db.query(MarketplaceListing.conversation_id, MarketplaceListing.revision_id).filter(
-            MarketplaceListing.state.in_(LIVE_STATES))
+            MarketplaceListing.state.in_(LIVE_STATES),
+            (MarketplaceListing.marketplace != "depop") | (MarketplaceListing.state != "published") | (
+                MarketplaceListing.listing_url.isnot(None) & (MarketplaceListing.listing_url != "")))
         if conv_id:
             query = query.filter(MarketplaceListing.conversation_id == conv_id)
         grouped: dict[str, set[str]] = {}

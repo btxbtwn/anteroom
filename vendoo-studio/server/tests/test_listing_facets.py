@@ -95,7 +95,7 @@ class ListingFacetsTest(unittest.TestCase):
         conv.notes = json.dumps({"vendooStatus": "draft", "vendooMarketplaces": []})
         self.db.commit()
         records = MarketplaceListingRepo(self.db)
-        records.save(conv.id, "depop", {"state": "published"})
+        records.save(conv.id, "depop", {"state": "published", "listing_url": "https://www.depop.com/products/fixture-shirt-123/"})
         records.save(conv.id, "etsy", {"state": "not_saved"})
         records.save(conv.id, "mercari", {"state": "pending_review"})
         direct = records.summaries()
@@ -103,6 +103,27 @@ class ListingFacetsTest(unittest.TestCase):
         self.assertEqual(sorted(response.direct_marketplaces), ["depop", "mercari"])
         self.assertEqual(response.vendoo_marketplaces, [])
         self.assertEqual(response.status, "draft")
+
+    def test_no_link_publication_is_not_counted_as_a_live_inventory_marketplace(self):
+        from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+
+        conv = self.convs.create(title="Unconfirmed fixture")
+        records = MarketplaceListingRepo(self.db)
+        records.save(conv.id, "depop", {"state": "published"})
+        response = _conv_response(conv, _extras(None, None, None, False, records.summaries()[conv.id]))
+        self.assertEqual(response.direct_records["depop"].state, "unknown")
+        self.assertTrue(response.direct_records["depop"].failed)
+        self.assertEqual(response.direct_marketplaces, [])
+
+    def test_ebay_identity_record_is_not_reclassified_by_depop_recovery(self):
+        from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
+
+        conv = self.convs.create(title="eBay fixture")
+        records = MarketplaceListingRepo(self.db)
+        saved = records.save(conv.id, "ebay", {"state": "published", "ebay_listing_id": "123456789012"})
+        self.assertEqual(saved["state"], "published")
+        self.assertEqual(records.summaries()[conv.id]["ebay"]["state"], "published")
+        self.assertIn(conv.id, records.live_revisions())
 
     def test_response_carries_each_marketplace_record_for_the_inventory_table(self):
         from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo

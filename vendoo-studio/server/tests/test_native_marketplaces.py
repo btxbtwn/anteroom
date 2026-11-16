@@ -249,6 +249,41 @@ class NativeMarketplacesTest(unittest.TestCase):
 
         independent_reader = TestClient(simulated_marketplace)
 
+        def read_in_new_process():
+            import os
+            from pathlib import Path
+            import sqlite3
+            import subprocess
+            import sys
+
+            folder = Path(self.enterContext(TemporaryDirectory()))
+            database = folder / "vendoo_studio.db"
+            raw = self.db.get_bind().raw_connection()
+            try:
+                with sqlite3.connect(database) as destination:
+                    raw.driver_connection.backup(destination)
+            finally:
+                raw.close()
+            env = {**os.environ, "VENDOO_STUDIO_DATA_DIR": str(folder),
+                   "ANTEROOM_DATABASE_URL": f"sqlite:///{database}", "ANTEROOM_SANDBOX": "1",
+                   "VENDOO_STUDIO_PORT": "4599", "PYTHONPATH": str(Path(__file__).resolve().parents[1])}
+            env.pop("ANTEROOM_TEST_DATABASE_URL", None)
+            script = """
+import json, socket, sys
+socket.socket.connect = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("offline fixture"))
+from fastapi.testclient import TestClient
+from vendoo_studio.main import app
+with TestClient(app, base_url="http://127.0.0.1:4599") as client:
+    response = client.get(sys.argv[1])
+    assert response.status_code == 200, response.text
+    print("FIXTURE_JSON=" + json.dumps(response.json()))
+"""
+            read = subprocess.run([sys.executable, "-c", script, base], env=env,
+                                  capture_output=True, text=True, timeout=30)
+            self.assertEqual(read.returncode, 0, read.stderr)
+            return json.loads(next(line.removeprefix("FIXTURE_JSON=") for line in read.stdout.splitlines()
+                                   if line.startswith("FIXTURE_JSON=")))
+
         async def adapter(_job, kind, payload, **_kwargs):
             if kind == "marketplace.delete":
                 self.assertEqual(payload, {"marketplace": "depop", "listing_id": product, "confirm": True})
@@ -272,6 +307,8 @@ class NativeMarketplacesTest(unittest.TestCase):
         base = f"/api/conversations/{self.conv.id}/marketplace-listings"
         persisted = reopened.get(base).json()["depop"]
         self.assertEqual((persisted["listing_id"], persisted["url"]), (product, url))
+        restarted = read_in_new_process()["depop"]
+        self.assertEqual((restarted["listing_id"], restarted["url"], restarted["state"]), (product, url, "live"))
         # Independent read from the simulated marketplace, not Anteroom's mark.
         self.assertEqual(independent_reader.get(f"/products/{product}").json(), {"id": product, "listed": True})
         deleted = reopened.post(f"{base}/delist", json={"marketplaces": ["depop"], "confirm": True})
@@ -279,7 +316,41 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual(deleted.json()["depop"]["state"], "deleted")
         self.db.expire_all()
         self.assertEqual(TestClient(app).get(base).json()["depop"]["state"], "deleted")
+        self.assertEqual(read_in_new_process()["depop"]["state"], "deleted")
         self.assertEqual(independent_reader.get(f"/products/{product}").json(), {"id": product, "listed": False})
+
+    def test_legacy_published_without_link_is_unconfirmed_on_read_and_recovers_without_republish(self):
+        self.enterContext(patch("socket.socket.connect", side_effect=AssertionError("offline fixture")))
+
+        async def publish(_job, _kind, payload, **_kwargs):
+            if payload["action"] == "save_draft":
+                return {"ok": True, "state": "draft", "draft_url": URLS["depop"]}
+            return self.published("depop")
+
+        self.bridge.side_effect = publish
+        self.assertEqual(self.list("depop")["state"], "published")
+        records = MarketplaceListingRepo(self.db)
+        # A disposable fixture represents the old stored shape, not a data repair.
+        records.save(self.conv.id, "depop", {"listing_url": None})
+        before = records.row(self.conv.id, "depop").updated_at
+        self.assertEqual(self.status()["depop"]["state"], "unknown")
+        self.assertEqual(records.summaries(self.conv.id)[self.conv.id]["depop"]["state"], "unknown")
+        self.assertNotIn(self.conv.id, records.live_revisions(self.conv.id))
+        raw = records.row(self.conv.id, "depop")
+        self.assertEqual((raw.state, raw.updated_at), ("published", before))
+        retry = self.client.post(f"{self.base}/depop/list", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(retry.status_code, 409, retry.text)
+        self.assertEqual(self.actions(), ["save_draft", "publish"])
+        self.bridge.side_effect = None
+        self.bridge.return_value = {"finished": True, "result": {
+            "ok": True, "state": "published", "draft_url": URLS["depop"], "listing_url": LIVE["depop"],
+        }}
+        response = self.client.post(f"{self.base}/depop/check")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["state"], "published")
+        self.assertEqual(self.bridge.call_args.args[1], "marketplace.result")
+        self.assertEqual(self.actions(), ["save_draft", "publish"])
+        self.assertEqual(TestClient(app).get(self.base).json()["depop"]["listing_url"], LIVE["depop"])
 
     def test_missing_and_contradictory_adapter_states_never_verify_success(self):
         for market, action, draft_url, live_url in [
