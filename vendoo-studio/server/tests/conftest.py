@@ -34,6 +34,10 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "sqlite_only(reason): needs the Mac's SQLite database file")
     worker = os.environ.get("PYTEST_XDIST_WORKER")
     if os.environ.get("ANTEROOM_TEST_DATABASE_URL"):
+        # Timestamps are stored as UTC without a zone, and Supabase sessions run
+        # in UTC. A local server (pgserver on the Mac) defaults to the host's
+        # zone, which shifts every aware datetime written into those columns.
+        os.environ["PGTZ"] = "UTC"
         _postgres_database(worker or "main")
         # Workers migrate fresh databases at once and queue on the shared
         # seller role; the deploy's lock timeout is tested on its own.
