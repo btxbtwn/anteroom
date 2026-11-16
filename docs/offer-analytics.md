@@ -228,3 +228,60 @@ writes preferences or cleans rows on a server rejected as non-sandbox. This
 final guard was added after the four passing local browser cases; corrected-head
 CI must validate the final test source. Native refetch still needs API-log
 verification in addition to the preserved-filter UI assertion.
+
+## Full local verification and native evidence, 2026-11-16
+
+The frozen product/test head `e1fdd35da790a565ddd71884f463bcd565bb5384` has
+[successful exact-head GitHub CI43817341707](https://github.com/btxbtwn/anteroom/actions/runs/43817341707).
+It remains a draft; CI success does not waive the separate required local gate.
+One full `./check.sh` was run in the explicitly reserved resource slot, with
+four pytest workers, owned disposable data and all configured browser projects.
+Only local browser ports/output paths and the installed WebKit executable were
+overridden; no tests or assertions were filtered out and no validation flags
+were disabled.
+
+- SQLite: 4,411 passed, 221 skipped, one xfailed, 1,559 subtests passed.
+- Postgres: 4,576 passed, 55 skipped, one xfailed, 1,559 subtests passed;
+  **one failure** at `test_error_email_budget.py:167`: API-role SELECT denied
+  on operator storage. The seller-denial assertion passed. The separate shipping
+  worker's role-order reproduction identifies test bootstrap ordering: the API
+  role can appear after a database's migrations have already conditionally
+  granted access. No grants, production permissions or assertions were changed
+  to make this pass. The independently owned fixture correction and a green
+  subsequent local gate remain outstanding.
+- Full sandbox browser suite: 175 passed, 23 skipped, including all six offer
+  cases on desktop Chromium, phone Chromium and phone WebKit. Desktop/phone
+  light/dark screenshots were inspected. Full hosted suite: 63 passed, nine
+  skipped. Ruff, layers, dead code, design, locked-baseline types, changelog and
+  all three gitleaks scans passed.
+- The initial frontend/build stages failed because an external node_modules
+  symlink's target had been removed. An owned `npm ci --offline` restored locked
+  dependencies without source/lock changes. The exact frontend commands then
+  passed: lint, knip, 178 Vitest files / 1,197 tests, desktop build and hosted
+  build. These are explicit stage reruns, not an uninterrupted green full check.
+  The original `./check.sh` exit remains 1.
+
+Mac evidence is also kept separate by source head. At product head `48204cdc`,
+23 standalone Swift programs (including Gregorian/POSIX dates under ar_SA,
+fa_IR, th_TH and en_US), arm64+x86_64 simulator build, 69 unit tests, default
+offer UI and accessibility offer UI passed. `3b90f149` passed the refresh UI
+regression: custom dates were preserved and API access logs showed the identical
+period/timezone GET200 both before and after the actual collection-view pull.
+Only UITest helpers differ between that product head and `e1fdd35d`.
+The exact-e1 iPad split-view/saved-and-unsaved recovery test passed on its one
+whole-test retry. Its first run dropped the New listing tap and made no create
+request; that failure was retained and no duplicate creation tap was introduced.
+Other startup/tab input flakiness is recorded in the Mac report. This was
+simulator execution; physical-device and native latency measurements were not
+performed. The Mac's report is
+`/tmp/anteroom-pr1560-native-e1fdd35d/validation-report.txt` on that executor.
+
+The required bounded concurrent-work measurements and their target misses are
+recorded in [responsiveness.md](responsiveness.md#offer-activity-under-concurrent-work-2026-11-16).
+Local full-check log: `/tmp/offer-full-check-e1fdd35d.log`; frontend recovery log:
+`/tmp/offer-frontend-rerun-e1fdd35d.log`. The resource slot was explicitly released
+after complete cleanup, first to shipping fixture validation, then reserved for
+the photo repro and retrospective. No production or marketplace settings were
+changed, no live offers/auth refresh/sales tests were performed, and no merge or
+draft-ready action was taken. The original Library screenshot remains unavailable
+on this executor; these visual checks use actual local sandbox captures.
