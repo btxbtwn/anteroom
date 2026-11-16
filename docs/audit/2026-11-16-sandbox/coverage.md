@@ -158,3 +158,16 @@ Current canonical counts: **38 PASS / 0 FAIL / 11 BLOCKED / 48 NOT RUN**,97 name
 Native source caveat: BulkEditView currently prints raw field paths and renders object values as an ellipsis, not the web's raw JSON. It needs its own native fixture inspection; the web fix is not native proof. This remains within the existing native BLOCKED scenario and is added to native-follow-up.md.
 
 Next browser slot: verify these three fixed copy paths at desktop/phone (including dark where feasible), then current browser repricing/history restore/templates. Production conditions remain unchanged: no genuine item selected, marketplace/account/fees unresolved, relevant deployment unverified, independent post-delist readback still required. No production mutation.
+
+## Historical verification lead — 2026-09-14 report, queued only
+
+Cristian supplied [historical T3 source](https://app.t3.codes/threads/e76002be-581a-4294-afd4-0611f3ab299d/92bd770e-35f5-47b6-85d2-2d28327ebcf9): an earlier Vendoo Studio audit allegedly counted absent navigation/live-listing status as draft success and observed blank Mercari fields until load/reopen. **Not a confirmed current defect; do not assume the same state model.** The current T3 reader returned `thread_not_found`, “Thread … is no longer available.” Only the user-supplied summary is available; no claim that the historical report itself was read.
+
+Source inspection before queuing cases:
+- `services/native_marketplaces.py:_outcome` compares an explicit successful state against draft/published according to the action; mismatches become unknown/uncertain. Non-Depop publication requires a listing link. These branches are useful guardrails, not proof of browser verification.
+- `ListingEditor.tsx:formStatus` distinguishes a first form fetch from a failed load and offers reopen/reload recovery. This does not prove delayed Mercari values display correctly; an empty initial render is not evidence that saved values are gone.
+- Existing missing/unknown/cut-off adapter cases exist in test_native_marketplaces.py; none were rerun just for this lead. New cases will reuse that isolated fake-adapter fixture and actual browser delayed responses after the agreed handover, with no live accounts.
+
+Added 3 NOT RUN scenarios to scenarios.tsv: missing explicit adapter state, stale/ambiguous status, and Mercari delayed-load/reopen. Required fixture evidence: absent/contradictory states never show verified draft/listed success; explicit draft/not-listed remains distinct from unknown; held form fetch shows loading, then populated values; navigation/reopen/reload preserves values and does not save blank placeholders. Exercise empty and error responses too.
+
+Canonical inventory is now 100 named scenarios: **38 PASS / 0 FAIL / 11 BLOCKED / 51 NOT RUN**. No new execution is claimed. Queue remains eBay→#1563 full check→audit, subject to coordinator handover. No audit browser/Postgres reservation or production action.

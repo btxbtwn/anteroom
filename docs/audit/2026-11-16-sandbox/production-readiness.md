@@ -26,3 +26,7 @@ Cristian's later intent is preserved: “I’m fine with you listing a test item
 - Confirmed browser/API sandbox list and delist remain refused (403). Browser List on disconnected hosted Chrome opens the account connection panel; it cannot demonstrate successful publication.
 - Isolated test-only adapter journey uses real create/photo/generate/edit/validate/list routes and persistence, fake provider and fake bridge, and forbids sockets. Simulated rejection → explicit retry → simulated published state survives a fresh API client. Cancellation coverage proves no publish follows a cancelled draft-save. **This is simulated state, not a real marketplace listing.**
 - Two targeted workflow/cancellation cases passed. Broader native, live-service, form-sweep, concurrent-load and production tests remain outstanding. No full sandbox sign-off or deployment sign-off is claimed.
+
+## Historical false-positive safeguard
+
+The 2026-09-14 lead does not establish a current defect, but reinforces the evidence rule: missing navigation, missing live-listing state, a blank form during load, unknown status, or stale cached status is **unverified**, never a successful draft/list/delist. An explicit draft/not-listed result is distinct from an unknown result. Eventual production success requires the marketplace's own current state for the exact item after listing and independently again after delisting; clicks, queued jobs, and local marks are insufficient. No live test may run before the existing prerequisites are resolved.
