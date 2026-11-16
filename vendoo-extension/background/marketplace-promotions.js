@@ -254,25 +254,31 @@ function mercariPersisted(request, variables) {
   return { operationName: request.operationName, variables, extensions: { persistedQuery: { version: 1, sha256Hash: request.sha256Hash } } };
 }
 
+// Fixed read labels only; never export URLs, account documents or request bodies.
+async function promotionRead(step, read) {
+  try { return await read(); }
+  catch (error) { error.preview_step = step; throw error; }
+}
+
 // The item, its likers and Mercari's own offer range, all read before anything is sent.
 async function mercariOfferState(requests, id, deadline) {
-  const session = await mercariCurrentSession(deadline, true);
-  const data = await mercariRequest({ operationName: 'sellFetchItemsDetails', variables: { itemId: id }, query: MERCARI_ITEM_DETAILS_QUERY },
-    { deadline, retry: true });
+  const session = await promotionRead('mercari-account', () => mercariCurrentSession(deadline, true));
+  const data = await promotionRead('mercari-item', () => mercariRequest({ operationName: 'sellFetchItemsDetails', variables: { itemId: id }, query: MERCARI_ITEM_DETAILS_QUERY },
+    { deadline, retry: true }));
   const item = data?.item;
   if (String(item?.itemId ?? '') !== id) throw marketplaceError('Mercari did not return this listing.', { code: 'schema_drift' });
   if (String(item.seller?.id) !== String(session.user.userId)) throw marketplaceError('This Mercari listing belongs to another account.');
   if (item.status !== 'on_sale') throw marketplaceError('This Mercari listing has sold or is not on sale.');
   const price = Number(item.price);
   if (!(price > 0)) throw marketplaceError('Mercari did not return this listing’s price.', { code: 'schema_drift' });
-  const likers = requests.likers.read(await mercariRequest(mercariPersisted(requests.likers, requests.likers.variables(id)),
-    { deadline, retry: true }));
+  const likers = requests.likers.read(await promotionRead('mercari-eligibility', () => mercariRequest(mercariPersisted(requests.likers, requests.likers.variables(id)),
+    { deadline, retry: true })));
   if (typeof likers.eligible !== 'boolean' || Number(likers.price_cents) !== price || !Number.isInteger(likers.like_count)) {
     throw marketplaceError('Mercari’s offer screen changed. Anteroom needs an update before sending offers.', { code: 'schema_drift' });
   }
   if (!likers.eligible) throw marketplaceError('Mercari says this listing cannot get an offer to likers right now.');
-  const bounds = requests.bounds.read(await mercariRequest(mercariPersisted(requests.bounds, requests.bounds.variables(id)),
-    { deadline, retry: true }));
+  const bounds = requests.bounds.read(await promotionRead('mercari-bounds', () => mercariRequest(mercariPersisted(requests.bounds, requests.bounds.variables(id)),
+    { deadline, retry: true })));
   const lower = Number(bounds.lowest_cents), higher = Number(bounds.highest_cents);
   // Cents below the price; anything else means the units or the rule changed.
   if (!Number.isInteger(lower) || !Number.isInteger(higher) || lower < 100 || higher < lower || higher >= price) {
@@ -369,8 +375,8 @@ function depopOfferPreview(body, product) {
 }
 
 async function depopOfferState(requests, slug, deadline) {
-  const { data: me } = await depopOfferCall('GET', '/presentation/api/v1/users/me/', deadline, 'account');
-  const { data: product } = await depopOfferCall('GET', `/presentation/api/v1/products/by-slug/${encodeURIComponent(slug)}/`, deadline, 'read');
+  const { data: me } = await promotionRead('depop-account', () => depopOfferCall('GET', '/presentation/api/v1/users/me/', deadline, 'account'));
+  const { data: product } = await promotionRead('depop-product', () => depopOfferCall('GET', `/presentation/api/v1/products/by-slug/${encodeURIComponent(slug)}/`, deadline, 'read'));
   if (String(product?.slug ?? '') !== slug) throw marketplaceError('Depop did not return this listing.', { code: 'schema_drift' });
   if (!/^\d{1,15}$/.test(String(product.id ?? ''))) throw marketplaceError('Depop did not return this listing’s ID.', { code: 'schema_drift' });
   const owner = product.user_id ?? product.seller?.id ?? product.user?.id;
@@ -379,7 +385,7 @@ async function depopOfferState(requests, slug, deadline) {
   if (depopImportVariants(product).length > 1) throw marketplaceError('Depop does not send offers on listings with several sizes.');
   let reply;
   try {
-    reply = await depopOfferCall('GET', requests.preview.path(product), deadline, 'offer-preview');
+    reply = await promotionRead('depop-offer-preview', () => depopOfferCall('GET', requests.preview.path(product), deadline, 'offer-preview'));
   } catch (error) {
     if (error?.status === 400 && error.response_data?.code === 1003) {
       // Zero likers to offer to: Anteroom then waits for a new like before checking again.
@@ -462,7 +468,8 @@ async function checkMarketplacePromotion(payload) {
     return marketplaceFailure(marketplaceError('Name a marketplace listing and an action to check.'), true);
   }
   try { return await entry.check(payload, Date.now() + PROMOTION_DEADLINE_MS); }
-  catch (error) { return marketplaceFailure(error, true, Number.isInteger(error?.like_count) ? { like_count: error.like_count } : {}); }
+  catch (error) { return marketplaceFailure(error, true, { ...(Number.isInteger(error?.like_count) ? { like_count: error.like_count } : {}),
+    ...(error?.preview_step ? { preview_step: error.preview_step } : {}) }); }
 }
 
 async function runMarketplacePromotion(payload) {

@@ -294,3 +294,222 @@ def test_report_and_status_do_not_select_the_shared_backlog(store):
         event.remove(store.engine, 'before_cursor_execute', record_query)
     assert statements
     assert not any('SELECT error_email_state.payload ' in statement for statement in statements), statements
+
+
+def test_staggered_repeats_share_one_hourly_digest_across_workers(store):
+    now, sent = [100.0], []
+    workers = [EmailDelivery(store, lambda *args: sent.append(args), daily_limit=100,
+                             clock=lambda: now[0]) for _ in range(8)]
+    for line in range(3):
+        workers[0].add(report(line=line))
+    workers[0].tick()
+    for line in range(3):
+        now[0] += 300
+        workers[0].add(report(line=line))
+        workers[0].tick()
+    assert len(sent) == 1
+    now[0] = 3700
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(lambda worker: worker.tick(), workers))
+    assert len(sent) == 2
+    assert '3 occurrences in 3 groups' in sent[-1][1]
+    workers[0].add(report())
+    now[0] += 901
+    workers[-1].tick()
+    assert len(sent) == 2
+    assert workers[-1].status()['pending'] == 1
+
+
+def test_new_critical_bypasses_repeat_backlog_without_postponing_digest(store):
+    now, sent = [100.0], []
+    delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=100, clock=lambda: now[0])
+    for line in range(21):
+        delivery.add(report(line=line))
+    delivery.tick()
+    delivery.tick()
+    for line in range(21):
+        delivery.add(report(line=line))
+    now[0] = 3700
+    critical = report(logging.CRITICAL, line=999)
+    delivery.add(critical)
+    delivery.tick()
+    assert critical['location'] in sent[-1][1]
+    assert '1 occurrences in 1 groups' in sent[-1][1]
+    delivery.tick()
+    assert '20 occurrences in 20 groups' in sent[-1][1]
+    delivery.tick()
+    assert len(sent) == 4
+    assert delivery.status()['pending'] == 1
+    # New first alerts do not slide the shared repeat deadline forward.
+    now[0] = 7000
+    another = report(logging.CRITICAL, line=1000)
+    delivery.add(another)
+    delivery.tick()
+    assert another['location'] in sent[-1][1]
+    now[0] = 7300
+    delivery.tick()
+    assert delivery.status()['pending'] == 0
+
+
+def test_staggered_first_sends_cannot_start_separate_repeat_timers(store):
+    now, sent = [100.0], []
+    delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=100, clock=lambda: now[0])
+    for line in range(3):
+        now[0] = 100.0 + line * 300
+        delivery.add(report(line=line))
+        delivery.tick()
+    assert len(sent) == 3  # New fingerprints remain prompt.
+    for line in range(3):
+        delivery.add(report(line=line))
+    now[0] = 3700
+    delivery.tick()
+    assert len(sent) == 4
+    for at in (4000, 4300):
+        now[0] = at
+        delivery.tick()
+        assert len(sent) == 4
+    delivery.add(report(line=0))
+    now[0] = 7300
+    delivery.tick()
+    assert len(sent) == 5
+    assert '3 occurrences in 3 groups' in sent[-1][1]
+    assert delivery.status()['pending'] == 0
+
+
+def test_due_warnings_are_not_starved_by_repeats_but_keep_error_reserve(store):
+    now, sent = [100.0], []
+    delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=4, clock=lambda: now[0])
+    delivery.add(report())
+    delivery.tick()
+    delivery.add(report())
+    delivery.add(report(logging.WARNING))
+    now[0] += 3600
+    delivery.tick()
+    assert 'Warnings' in sent[-1][0]
+    delivery.tick()
+    assert delivery.status()['pending'] == 0
+    delivery.add(report(logging.WARNING))
+    now[0] += 3600
+    delivery.tick()
+    assert len(sent) == 3  # The last slot belongs to errors.
+    delivery.add(report(logging.CRITICAL, line=2))
+    delivery.tick()
+    assert len(sent) == 4
+    assert delivery.status()['pending'] == 1
+
+
+@pytest.mark.parametrize('fail_send', [False, True])
+def test_repeat_digest_preserves_arrivals_latest_trace_and_attempts(store, fail_send):
+    now, sent = [100.0], []
+    delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=100, clock=lambda: now[0])
+    original = report(logging.CRITICAL)
+    delivery.add(original)
+    delivery.tick()
+    delivery.add(original)
+    latest = {**original, 'message': 'latest diagnostic', 'stack': 'latest trace'}
+
+    def send(*args):
+        sent.append(args)
+        delivery.add(latest)
+        if fail_send:
+            raise OSError('temporary network failure')
+
+    delivery.send = send
+    now[0] += 3600
+    delivery.tick()
+    state = store.read()
+    group = state['groups']['CRITICAL:' + original['fingerprint']]
+    assert group['count'] == (2 if fail_send else 1)
+    assert group['report'] == latest
+    assert len(state['attempts']) == 2
+    assert state['lease_until'] == 0
+    delivery.send = lambda *args: sent.append(args)
+    now[0] += 301 if fail_send else 3600
+    delivery.tick()
+    assert 'latest diagnostic' in sent[-1][1]
+    assert 'latest trace' in sent[-1][1]
+    assert delivery.status()['pending'] == 0
+
+
+def test_pending_repeats_do_not_become_first_alerts_after_day_long_pause(store):
+    now, sent = [100.0], []
+    delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=100, clock=lambda: now[0])
+    delivery.add(report())
+    delivery.tick()
+    delivery.add(report())
+    now[0] += 86401
+    with store.transaction() as transaction:
+        transaction.state['error_digest_after'] = now[0] + 300
+    delivery.tick()
+    assert len(sent) == 1
+    now[0] += 300
+    delivery.tick()
+    assert len(sent) == 2
+
+
+def test_legacy_fifteen_minute_due_time_cannot_bypass_hourly_repeat_policy(store):
+    now, sent = [100.0], []
+    delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=100, clock=lambda: now[0])
+    original = report()
+    delivery.add(original)
+    delivery.tick()
+    delivery.add(original)
+    with store.transaction() as transaction:
+        transaction.state.pop('error_digest_after')
+        key = 'ERROR:' + original['fingerprint']
+        group, last = transaction.get_group(key)
+        group['due'] = 1000.0  # Already-queued data from the previous release.
+        transaction.put_group(key, group, last)
+    now[0] = 1001
+    delivery.tick()
+    assert len(sent) == 1
+    now[0] = 3700
+    delivery.tick()
+    assert len(sent) == 2
+
+
+def test_continuous_recurrences_preserve_every_count_with_bounded_mail_volume(store):
+    now, sent = [100.0], []
+    delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=100, clock=lambda: now[0])
+    for line in range(3):
+        delivery.add(report(line=line))
+    delivery.tick()
+    for minute in range(1, 181):
+        now[0] = 100.0 + minute * 60
+        for line in range(3):
+            delivery.add(report(line=line))
+            delivery.tick()
+    assert len(sent) == 4  # First alert plus three shared hourly digests.
+    assert delivery.status()['pending'] == 2  # Arrivals after the final reservation stay queued.
+    assert sum(int(body.split()[0]) for _, body in sent) + delivery.status()['pending'] == 543
+
+
+def test_crashed_repeat_reservation_preserves_lease_metadata_and_recovery(store):
+    class ProcessStopped(BaseException):
+        pass
+
+    now, sent = [100.0], []
+    delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=100, clock=lambda: now[0])
+    delivery.add(report())
+    delivery.tick()
+    delivery.add(report())
+    with store.transaction() as transaction:
+        transaction.state['local_archive_discards'] = {'existing-operation': {'removed': 7}}
+
+    def crash(*args):
+        raise ProcessStopped()
+
+    delivery.send = crash
+    now[0] += 3600
+    with pytest.raises(ProcessStopped):
+        delivery.tick()
+    restarted = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=100, clock=lambda: now[0])
+    restarted.tick()
+    assert len(sent) == 1
+    assert restarted.status()['used'] == 2
+    now[0] += 121
+    restarted.tick()
+    assert len(sent) == 2
+    assert restarted.status()['pending'] == 0
+    assert restarted.status()['used'] == 3
+    assert store.read()['local_archive_discards'] == {'existing-operation': {'removed': 7}}

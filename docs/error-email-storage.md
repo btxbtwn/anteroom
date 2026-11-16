@@ -10,7 +10,9 @@ control attempts, not diagnostic retention.
 report, count, first occurrence and due time; scalar count/due/warning columns
 support aggregate status and bounded due selection without returning reports.
 A delivered fingerprint keeps only its last-send timestamp until the rolling
-24-hour history expires. Re-enqueuing joins the end of the pending queue.
+24-hour history expires. Pending repeats retain that timestamp through long
+pauses so they cannot bypass the repeat digest as first alerts. Re-enqueuing
+joins the end of the pending queue.
 
 All writers first lock the singleton `error_email_state` row (SQLite uses
 `BEGIN IMMEDIATE`). This preserves the existing shared lease and budget
@@ -108,9 +110,48 @@ and pass afterward. Additional regressions pin legacy queue order across new
 writes and old-worker re-enqueues. Final independent review found no remaining
 blocking issue and reiterated the mirror/query-count tradeoffs above.
 
-Existing policy is unchanged: due errors take precedence over warnings; each
-severity queue drains in insertion order. A large error backlog can delay a
-newly arriving error, and continuous due errors can delay warning digests. This
-fairness concern is reported for separate policy work, not changed by storage
-normalization. The alert-budget and any explicitly approved one-off clear are
-separate work; neither authorizes automatic eviction here.
+## First alerts and repeat digests
+
+Error/critical fingerprints without retained send history are eligible
+immediately, ahead of notified repeats. They still obey the shared daily/hourly
+attempt budgets, SMTP pause and lease; continuous distinct errors can exhaust
+those budgets. There is no artificial batching delay for a new critical error.
+
+Previously notified errors wait at least one hour after their last reservation
+that completed successfully. They share one durable `error_digest_after` gate:
+successful repeat reservations are at least one hour apart across processes and
+restarts, with up to 20 due groups in insertion order. Staggered first alerts can
+make a repeat miss a digest and wait for the following hour. Extra groups remain
+queued for later digests. New first-alert successes initialize, but never slide, the shared
+deadline. Warning digests keep their own hourly gate and run before repeats when
+due and below the existing warning budget (daily limit minus one quarter of the
+limit rounded down, with at least one attempt reserved for errors). First alerts
+still precede both digest types, so warning delivery cannot be guaranteed during
+a novel-error flood.
+
+For three stable, staggered fingerprints, the old per-fingerprint 15-minute
+policy could use 12 repeat messages/hour. The shared gate allows one repeat
+message/hour; warning digests and first alerts are additional. This is a policy
+bound, not a measurement of production mail volume or Google's actual quota.
+Warning and repeat gates are independent, so both digests can send back-to-back;
+new first alerts can also send in a burst within the existing attempt ceilings.
+The 60/hour ceiling and configured rolling-24-hour budget still count every
+reserved SMTP attempt, including failures and uncertain crash outcomes.
+
+No durable outbox occurrence is evicted, sampled or suppressed. Each group
+retains its unsent count, first timestamp and latest full report/trace. This
+preserves the existing aggregate representation; it does not introduce
+individual historical reports.
+Arrivals during SMTP survive exact reserved-count subtraction. Failures retain
+the whole batch and existing backoff/quota pause; they do not advance a successful
+digest deadline. A failed digest can retry after backoff, consuming another
+budgeted attempt. An expired lease after a process stall can also cause an
+uncertain retry; SMTP delivery is not exactly once. Unknown control metadata and
+the rolling JSON mirror remain intact. All sending processes must be updated
+before relying on the new digest bound; old binaries do not honor the new gate.
+No schema migration or production configuration change is part of this policy update.
+
+The existing logging handler still has a 500-report in-memory ingress buffer;
+overflow or a crash before durable insertion can lose those unstored events.
+This delivery policy does not change ingress durability or claim that every
+logging event is already in the durable outbox.

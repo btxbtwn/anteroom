@@ -29,6 +29,30 @@ beforeEach(() => {
 });
 
 describe("Connections settings", () => {
+  it("keeps cached sign-in unconfirmed while a retry is pending", () => {
+    useMutation.mockReturnValue({ mutate: vi.fn(), isPending: true, error: null });
+    const html = renderToStaticMarkup(<ConnectionsSettings />);
+    expect(html).toContain("Sign-in not confirmed");
+    expect(html).not.toContain("Signed in as ada");
+  });
+  it("identifies a sale-check timeout separately from a saved sign-in", () => {
+    const query = useQuery.getMockImplementation()!;
+    useQuery.mockImplementation((options) => options.queryKey[0] === "sale-detection"
+      ? { data: { checks: { depop: "Chrome did not answer in time. Try again." } } }
+      : query(options));
+    const html = renderToStaticMarkup(<ConnectionsSettings />);
+    expect(html).toContain("Sale check failed: Chrome did not answer in time. Try again.");
+    expect(html).toContain("Signed in as ada");
+  });
+  it("does not show a cached green sign-in after reconnect times out", () => {
+    useMutation.mockReturnValue({ mutate: vi.fn(), isPending: false, error: new Error("Chrome did not answer in time. Try again.") });
+    const html = renderToStaticMarkup(<ConnectionsSettings />);
+    const depop = html.slice(html.indexOf('id="chrome-depop"'), html.indexOf('id="connections"'));
+    expect(depop).toContain("Sign-in not confirmed");
+    expect(depop).toContain("Chrome did not answer in time. Try again.");
+    expect(depop).not.toContain("Signed in as ada");
+  });
+
   it("groups every marketplace at the top with a sale detection switch", () => {
     const html = renderToStaticMarkup(<ConnectionsSettings />);
     const accounts = html.indexOf('id="accounts"');

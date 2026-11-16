@@ -50,18 +50,24 @@ class EmailTransaction:
             self.connection.execute(self.groups.insert().values(fingerprint=key, **values))
         self.dirty = True
 
-    def due_groups(self, now, *, warning, limit):
-        rows = self.connection.execute(select(self.groups.c.fingerprint, self.groups.c.payload).where(
-            self.groups.c.warning == warning, self.groups.c.due <= now).order_by(self.groups.c.id).limit(limit))
+    def due_groups(self, now, *, warning, limit, first_alert=False, sent_before=None):
+        query = select(self.groups.c.fingerprint, self.groups.c.payload).where(
+            self.groups.c.warning == warning, self.groups.c.due <= now)
+        if first_alert:
+            query = query.where(self.groups.c.last_sent.is_(None))
+        if sent_before is not None:
+            query = query.where(self.groups.c.last_sent <= sent_before)
+        rows = self.connection.execute(query.order_by(self.groups.c.id).limit(limit))
         return {key: group for key, group in rows}
 
     def expire_sent(self, before):
-        expired = self.groups.c.last_sent <= before
+        # Pending repeats must not turn into first alerts after a long pause.
+        # Only completed fingerprints need their bounded history removed.
+        expired = (self.groups.c.last_sent <= before) & self.groups.c.payload.is_(None)
         keys = self.connection.scalars(select(self.groups.c.fingerprint).where(expired)).all()
         if not keys:
             return
         self.connection.execute(delete(self.groups).where(expired, self.groups.c.payload.is_(None)))
-        self.connection.execute(update(self.groups).where(expired).values(last_sent=None))
         self.dirty = True
 
     def finish(self):
