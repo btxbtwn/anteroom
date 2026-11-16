@@ -1,1 +1,0 @@
-- Backend tests on a Mac's local Postgres now run in UTC, like the hosted database.

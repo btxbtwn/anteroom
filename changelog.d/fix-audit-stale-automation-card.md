@@ -1,1 +1,0 @@
-- Confirming an older assistant suggestion for an automation no longer undoes changes you made to that automation since; you're asked to ask again instead.

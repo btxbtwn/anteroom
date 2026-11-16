@@ -6,6 +6,18 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.977 — 2026-11-16
+
+- Backend tests on a Mac's local Postgres now run in UTC, like the hosted database.
+
+## 0.1.976 — 2026-11-16
+
+- Confirming an older assistant suggestion for an automation no longer undoes changes you made to that automation since; you're asked to ask again instead.
+
+## 0.1.975 — 2026-11-16
+
+- Keep the hosted server's request log working when another log handler is attached first.
+
 ## 0.1.974 — 2026-11-16
 
 - Keep connection-release checks reliable on busy test runners without changing the app’s connection limits.
