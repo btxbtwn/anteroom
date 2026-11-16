@@ -11,6 +11,23 @@ and accounts must overlap; long work must leave navigation, input and unrelated
 drafts usable. This is a product requirement, not a promise of infinite hardware
 capacity or zero model/network latency.
 
+## eBay refused sign-in status, 2026-11-16
+
+An isolated saved-account fixture reproduces Settings reporting connected after
+an explicit refresh refusal. The fix remembers the refusal on that exact grant:
+two subsequent token requests make one mocked refresh call rather than two.
+Status remains a local read; opening Settings does not validate or refresh the
+grant. Expiry alone does not mark a refreshable account invalid. A new sign-in
+replaces the record, and a late refusal cannot invalidate that newer connection.
+Relay authentication failures and temporary outages do not mark a seller grant
+invalid. This changes the shared eBay/Etsy account service, not marketplace
+write receipts, revision fences or unknown-send handling.
+
+These are deterministic fixture counts, not production latency measurements.
+Desktop and phone browser checks use intercepted account status in the offline
+sandbox. Concurrent seller generation and input/navigation p50/p95 are not
+measured for this fix; no capacity claim is made.
+
 ## Mercari explicit preview cooldown, 2026-11-16
 
 An isolated two-listing scheduled-offer fixture reproduces the refusal reported
@@ -801,22 +818,93 @@ measure full Assistant/provider latency, browser interactions, sustained CPU,
 production data cardinality or native iPhone behavior. No additional live
 question was submitted; hosted resolution remains unverified.
 
-## eBay refused sign-in status, 2026-11-16
+## Offer activity under concurrent work, 2026-11-16
 
-An isolated saved-account fixture reproduces Settings reporting connected after
-an explicit refresh refusal. The fix remembers the refusal on that exact grant:
-two subsequent token requests make one mocked refresh call rather than two.
-Status remains a local read; opening Settings does not validate or refresh the
-grant. Expiry alone does not mark a refreshable account invalid. A new sign-in
-replaces the record, and a late refusal cannot invalidate that newer connection.
-Relay authentication failures and temporary outages do not mark a seller grant
-invalid. This changes the shared eBay/Etsy account service, not marketplace
-write receipts, revision fences or unknown-send handling.
+Measured product source `e1fdd35da790a565ddd71884f463bcd565bb5384` on the
+shared Linux VM (6 Haswell vCPU, 11 GiB RAM), using the hosted sandbox's
+throwaway Postgres, separate web/worker processes, unchanged production pools
+(8 plus 4 per process), 24 ms simulated database RTT and a fake model with a
+1-second delay per call. No other heavy worker suite ran concurrently. This
+was the Vite development build, Chromium 1254, desktop 1440x900 and iPhone 15
+browser emulation; it was not a physical phone or native latency measurement.
 
-These are deterministic fixture counts, not production latency measurements.
-Desktop and phone browser checks use intercepted account status in the offline
-sandbox. Concurrent seller generation and input/navigation p50/p95 are not
-measured for this fix; no capacity claim is made.
+The existing `vendoo-studio/scripts/hosted-load-test.py` supplied authentication,
+independent draft setup, normal reads/writes, generation/follower streams,
+cancellation and system sampling. A local adapter added one real
+`GET /api/analytics/offers` per browsing cycle: seven inclusive UTC days,
+40,000 synthetic terminal journal rows (20,000 per seller), four response rows.
+It seeded no enabled offer rules and dispatched no marketplace actions.
+Two sellers each had two independent API browsing tabs, two generating drafts
+in the load phase and 20 extra inventory drafts; two additional authenticated
+browser contexts repeatedly selected periods and navigated. There were four
+generations plus four follower streams during load. Each phase lasted 60 seconds,
+with 0.2-second mean API think time. This is a bounded concurrency observation,
+not a capacity limit or a sustained-load benchmark.
+
+The corrected run reused the first run's synthetic drafts and journal. Its
+700 normal/offer HTTP samples had no errors or timeouts. Client full-response
+p50/p95 milliseconds (36 samples per request idle, 34 under load):
+
+| Request | Idle | Four drafts generating |
+| --- | --- | --- |
+| Offer activity | 138/166 | 142/189 |
+| Inventory | 982/1,208 | 1,081/2,040 |
+| Open a draft | 400/454 | 407/500 |
+| Save a listing field | 607/674 | 630/713 |
+| Save notes | 450/870 | 438/546 |
+| Status | 177/199 | 194/232 |
+
+Eight generations started, four finished and four were intentionally cancelled
+at phase end; none ended in an error event or failed submission. Submission
+acknowledgement p50/p95 was 787/1,005 ms and first progress 7,728/9,305 ms;
+these are separate from input feedback. All four edited drafts retained price
+and notes on a fresh read, and each seller's attempt to read the other's draft
+returned 404 (ten post-load checks passed). Sandbox logs retained disconnected
+marketplace schema refusals and fake-provider parsing warnings; no pool timeout
+was found. These are not marketplace/model quality results.
+
+Browser timings start at the DOM click and finish on the next animation frame
+that contains the selected period label or cached offer rows. They exclude
+Playwright command transport and do not time an uncached server response.
+Every measured period selection changed Today to This week. The corrected
+driver recorded 554 observations, no page errors or driver failures; first
+page/sign-in and phase-end observations are excluded from these percentiles:
+
+| Journey | Desktop idle p50/p95 (n) | Desktop load p50/p95 (n) | Phone idle p50/p95 (n) | Phone load p50/p95 (n) |
+| --- | --- | --- | --- | --- |
+| Period input to frame | 28/49 (57) | 30/45 (65) | 54/83 (29) | 59/75 (33) |
+| Cached Analytics → Automations | 99/141 (57) | 99/136 (64) | 91/144 (28) | 99/122 (33) |
+| Reference: Automations → existing Analytics tabs | 150/227 (57) | 152/225 (64) | 118/161 (28) | 122/157 (33) |
+
+The feature journeys met the shared 100 ms input / 200 ms cached-navigation
+targets at these observed p95s. The existing Analytics reference journey missed
+200 ms on desktop; its implementation is outside this diff, and this measurement
+does not establish the cause or waive that gap. The first driver attempted to
+return through Settings, which replaces desktop Pages navigation, and timed out
+before desktop timing. Its valid phone Settings → Automations observations
+also missed 200 ms (idle/load p95 251/265 ms). Those results are retained, not
+combined with the corrected Analytics journey or described as a product fix.
+That first API run separately had 760 error-free samples, including 76 offer
+reads (idle/load offer p50/p95 128/143 and 142/165 ms).
+
+Offer JSON bodies were 770 bytes, excluding headers/transport overhead. Actual
+seller-role `EXPLAIN (ANALYZE, BUFFERS)` with the API's `period_bounds` UTC
+timestamp arguments confirmed two grouped repository SELECTs using both new
+seller/send-date indexes with seller and lower/upper date index conditions.
+They returned two/four aggregate rows in 2.1/2.7 ms execution time, with warm
+buffers; the endpoint did not hydrate journal history. This measures local
+database execution separately from authenticated API latency and billed egress.
+
+Raw samples, corrected and failed driver results, query plans and logs were
+retained locally in `/tmp/offer-responsiveness-e1fdd35d/` (`attempt-1/` preserves
+the first run). First API reads were already database-warm; single first-page
+observations included sign-in/dev module loading and are not cold-cache p95s.
+There is no pre-feature build baseline, slower-device/network benchmark, native
+input p50/p95, production performance result or proof of unlimited concurrency.
+Idle versus load compares concurrent work, not a before/after feature speedup.
+The explicit measured target misses above remain follow-up gaps. All owned
+browser/server/worker/Postgres processes were stopped and the disposable database
+removed before releasing the slot to the next worker.
 
 ## Offer-preview read diagnostics, 2026-11-16
 
