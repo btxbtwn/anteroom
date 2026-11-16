@@ -36,11 +36,15 @@ if curl -fsS --max-time 2 "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1;
   exit 69
 fi
 
-STAGED="${DATABASE}.restoring"
+# A fresh file cannot be a leftover symlink or hardlink to the current database.
+STAGED="$(mktemp "${DATABASE}.restoring.XXXXXX")"
+trap 'rm -f "$STAGED"' EXIT
 echo "Checking $SNAPSHOT ..."
 PYTHONPATH="$ROOT/server" "$PYTHON" - "$SNAPSHOT" "$STAGED" <<'PY'
+import gzip
 import sqlite3
 import sys
+import zlib
 from pathlib import Path
 
 from vendoo_studio.services.backups import decompress_snapshot
@@ -48,15 +52,25 @@ from vendoo_studio.services.backups import decompress_snapshot
 snapshot, staged = Path(sys.argv[1]), Path(sys.argv[2])
 # Unpack before checking: a snapshot is gzipped, and a gzip of a damaged
 # database unpacks perfectly well. The check has to run on the database.
-decompress_snapshot(snapshot, staged)
-
-connection = sqlite3.connect(f"file:{staged}?mode=ro", uri=True)
-result = connection.execute("PRAGMA integrity_check").fetchone()
-connection.close()
-if not result or result[0] != "ok":
-    staged.unlink(missing_ok=True)
-    print(f"  {snapshot} is damaged: {result[0] if result else 'unreadable'}", file=sys.stderr)
-    raise SystemExit(65)
+try:
+    decompress_snapshot(snapshot, staged)
+    connection = sqlite3.connect(f"file:{staged}?mode=ro", uri=True)
+    try:
+        result = connection.execute("PRAGMA integrity_check").fetchone()
+    finally:
+        connection.close()
+    if not result or result[0] != "ok":
+        raise sqlite3.DatabaseError(result[0] if result else "unreadable database")
+except (OSError, EOFError, sqlite3.DatabaseError, zlib.error) as exc:
+    try:
+        staged.unlink(missing_ok=True)
+    except OSError:
+        print("The staging file could not be removed. Check its folder permissions.", file=sys.stderr)
+    damaged = isinstance(exc, (gzip.BadGzipFile, EOFError, zlib.error)) or (
+        isinstance(exc, sqlite3.DatabaseError) and not isinstance(exc, sqlite3.OperationalError))
+    recovery = "Choose another snapshot" if damaged else "Check file permissions, the snapshot path and free disk space, then retry"
+    print(f"Cannot restore this snapshot: {exc}. {recovery}; the current database was not changed.", file=sys.stderr)
+    raise SystemExit(65 if damaged else 74) from None
 print("  integrity_check ok")
 PY
 
