@@ -1,0 +1,204 @@
+surface	control	type	disabled	evidence
+editor-depop	General		False	browser DOM control observation; not necessarily exercised
+editor-depop	eBay / 1 to fill		False	browser DOM control observation; not necessarily exercised
+editor-depop	eBay actions		False	browser DOM control observation; not necessarily exercised
+editor-depop	Poshmark / 2 to fill		False	browser DOM control observation; not necessarily exercised
+editor-depop	Poshmark actions		False	browser DOM control observation; not necessarily exercised
+editor-depop	Mercari / 5 to fill		False	browser DOM control observation; not necessarily exercised
+editor-depop	Mercari actions		False	browser DOM control observation; not necessarily exercised
+editor-depop	Depop / 3 to fill		False	browser DOM control observation; not necessarily exercised
+editor-depop	Depop actions		False	browser DOM control observation; not necessarily exercised
+editor-depop	Etsy / May not qualify		False	browser DOM control observation; not necessarily exercised
+editor-depop	Etsy actions		False	browser DOM control observation; not necessarily exercised
+editor-depop	List everywhere…		False	browser DOM control observation; not necessarily exercised
+editor-depop	Regenerate…		False	browser DOM control observation; not necessarily exercised
+editor-depop	More listing actions		False	browser DOM control observation; not necessarily exercised
+editor-depop	Record a sale…		False	browser DOM control observation; not necessarily exercised
+editor-depop	Save draft		False	browser DOM control observation; not necessarily exercised
+editor-depop	List…		False	browser DOM control observation; not necessarily exercised
+editor-depop	Edit Package size		False	browser DOM control observation; not necessarily exercised
+editor-depop	Edit Depop		False	browser DOM control observation; not necessarily exercised
+editor-depop	Edit Condition		False	browser DOM control observation; not necessarily exercised
+editor-depop	Ask chat		False	browser DOM control observation; not necessarily exercised
+editor-depop	Reload fields		False	browser DOM control observation; not necessarily exercised
+editor-depop	History		False	browser DOM control observation; not necessarily exercised
+editor-depop	Minimize chat		False	browser DOM control observation; not necessarily exercised
+editor-depop	Copy message		False	browser DOM control observation; not necessarily exercised
+editor-depop	mimo-v2.5-pro		False	browser DOM control observation; not necessarily exercised
+editor-depop	Attach images		False	browser DOM control observation; not necessarily exercised
+editor-depop	Send message		True	browser DOM control observation; not necessarily exercised
+editor-ebay	General		False	browser DOM control observation; not necessarily exercised
+editor-ebay	eBay / 1 to fill		False	browser DOM control observation; not necessarily exercised
+editor-ebay	eBay actions		False	browser DOM control observation; not necessarily exercised
+editor-ebay	Poshmark / 2 to fill		False	browser DOM control observation; not necessarily exercised
+editor-ebay	Poshmark actions		False	browser DOM control observation; not necessarily exercised
+editor-ebay	Mercari / 5 to fill		False	browser DOM control observation; not necessarily exercised
+editor-ebay	Mercari actions		False	browser DOM control observation; not necessarily exercised
+editor-ebay	Depop / 3 to fill		False	browser DOM control observation; not necessarily exercised
+editor-ebay	Depop actions		False	browser DOM control observation; not necessarily exercised
+editor-ebay	Etsy / May not qualify		False	browser DOM control observation; not necessarily exercised
+editor-ebay	Etsy actions		False	browser DOM control observation; not necessarily exercised
+editor-ebay	List everywhere…		False	browser DOM control observation; not necessarily exercised
+editor-ebay	Regenerate…		False	browser DOM control observation; not necessarily exercised
+editor-ebay	More listing actions		False	browser DOM control observation; not necessarily exercised
+editor-ebay	Record a sale…		False	browser DOM control observation; not necessarily exercised
+editor-ebay	Save draft		False	browser DOM control observation; not necessarily exercised
+editor-ebay	List…		False	browser DOM control observation; not necessarily exercised
+editor-ebay	Edit Ebay specifics		False	browser DOM control observation; not necessarily exercised
+editor-ebay	Ask chat		False	browser DOM control observation; not necessarily exercised
+editor-ebay	Reload fields		False	browser DOM control observation; not necessarily exercised
+editor-ebay	History		False	browser DOM control observation; not necessarily exercised
+editor-ebay	Minimize chat		False	browser DOM control observation; not necessarily exercised
+editor-ebay	Copy message		False	browser DOM control observation; not necessarily exercised
+editor-ebay	mimo-v2.5-pro		False	browser DOM control observation; not necessarily exercised
+editor-ebay	Attach images		False	browser DOM control observation; not necessarily exercised
+editor-ebay	Send message		True	browser DOM control observation; not necessarily exercised
+editor-etsy	General		False	browser DOM control observation; not necessarily exercised
+editor-etsy	eBay / 1 to fill		False	browser DOM control observation; not necessarily exercised
+editor-etsy	eBay actions		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Poshmark / 2 to fill		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Poshmark actions		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Mercari / 5 to fill		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Mercari actions		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Depop / 3 to fill		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Depop actions		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Etsy / May not qualify		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Etsy actions		False	browser DOM control observation; not necessarily exercised
+editor-etsy	List everywhere…		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Regenerate…		False	browser DOM control observation; not necessarily exercised
+editor-etsy	More listing actions		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Record a sale…		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Save draft		False	browser DOM control observation; not necessarily exercised
+editor-etsy	List…		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Edit When made		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Ask chat		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Reload fields		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Leave photo 1 off Etsy		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Leave photo 2 off Etsy		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Add photos or a video to Etsy		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Ask chat to fill This field		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Ask chat to fill Category		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Choose a category		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Show options		True	browser DOM control observation; not necessarily exercised
+editor-etsy	Ask chat to fill When was it made?		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Show options		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Ask chat to fill Title		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Ask chat to fill Description		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Ask chat to fill Materials		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Ask chat to fill Tags		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Ask chat to fill Price		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Ask chat to fill Quantity		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Ask chat to fill Who made it?		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Show options		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Ask chat to fill What is it?		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Show options		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Show options		True	browser DOM control observation; not necessarily exercised
+editor-etsy	History		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Minimize chat		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Copy message		False	browser DOM control observation; not necessarily exercised
+editor-etsy	mimo-v2.5-pro		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Attach images		False	browser DOM control observation; not necessarily exercised
+editor-etsy	Send message		True	browser DOM control observation; not necessarily exercised
+editor-mercari	General		False	browser DOM control observation; not necessarily exercised
+editor-mercari	eBay / 1 to fill		False	browser DOM control observation; not necessarily exercised
+editor-mercari	eBay actions		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Poshmark / 2 to fill		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Poshmark actions		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Mercari / 5 to fill		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Mercari actions		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Depop / 3 to fill		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Depop actions		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Etsy / May not qualify		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Etsy actions		False	browser DOM control observation; not necessarily exercised
+editor-mercari	List everywhere…		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Regenerate…		False	browser DOM control observation; not necessarily exercised
+editor-mercari	More listing actions		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Record a sale…		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Save draft		False	browser DOM control observation; not necessarily exercised
+editor-mercari	List…		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Edit Mercari		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Edit Ships From		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Edit Fits Shoebox		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Edit Pounds		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Edit Shipping Class Id		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Ask chat		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Reload fields		False	browser DOM control observation; not necessarily exercised
+editor-mercari	History		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Minimize chat		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Copy message		False	browser DOM control observation; not necessarily exercised
+editor-mercari	mimo-v2.5-pro		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Attach images		False	browser DOM control observation; not necessarily exercised
+editor-mercari	Send message		True	browser DOM control observation; not necessarily exercised
+settings-agents-observed	Test connection		False	browser DOM control observation; not necessarily exercised
+settings-agents-observed	Copy install command		False	browser DOM control observation; not necessarily exercised
+settings-agents-observed	Copy local address		False	browser DOM control observation; not necessarily exercised
+settings-agents-observed	Copy login command		False	browser DOM control observation; not necessarily exercised
+settings-agents-observed	Copy Cursor config		False	browser DOM control observation; not necessarily exercised
+settings-agents-observed	Copy Claude Desktop config		False	browser DOM control observation; not necessarily exercised
+settings-agents-observed	Copy Claude Code command		False	browser DOM control observation; not necessarily exercised
+settings-agents-observed	Copy Claude Code config		False	browser DOM control observation; not necessarily exercised
+settings-assistant-observed	About your business		False	browser DOM control observation; not necessarily exercised
+settings-assistant-observed	Save		True	browser DOM control observation; not necessarily exercised
+settings-connections-observed	Connect		False	browser DOM control observation; not necessarily exercised
+settings-connections-observed	Connect		False	browser DOM control observation; not necessarily exercised
+settings-connections-observed	Sign in		True	browser DOM control observation; not necessarily exercised
+settings-connections-observed	Sign in		True	browser DOM control observation; not necessarily exercised
+settings-connections-observed	Sign in		True	browser DOM control observation; not necessarily exercised
+settings-connections-observed	Connect Chrome		False	browser DOM control observation; not necessarily exercised
+settings-connections-observed	Copy path		False	browser DOM control observation; not necessarily exercised
+settings-connections-observed	Enable		True	browser DOM control observation; not necessarily exercised
+settings-data-observed	Back up now		False	browser DOM control observation; not necessarily exercised
+settings-data-observed	Backup folder		False	browser DOM control observation; not necessarily exercised
+settings-data-observed	Save		False	browser DOM control observation; not necessarily exercised
+settings-data-observed	Copy path		False	browser DOM control observation; not necessarily exercised
+settings-data-observed	Prune leftover events		True	browser DOM control observation; not necessarily exercised
+settings-listings-observed	All		True	browser DOM control observation; not necessarily exercised
+settings-listings-observed	None		False	browser DOM control observation; not necessarily exercised
+settings-listings-observed	Days before a listing is stale		False	browser DOM control observation; not necessarily exercised
+settings-listings-observed	New label		False	browser DOM control observation; not necessarily exercised
+settings-listings-observed	Add label		True	browser DOM control observation; not necessarily exercised
+settings-listings-observed	Save dimensions		True	browser DOM control observation; not necessarily exercised
+settings-listings-observed	Ships from ZIP		False	browser DOM control observation; not necessarily exercised
+settings-listings-observed	Save ZIP		True	browser DOM control observation; not necessarily exercised
+settings-listings-observed	Title formula		False	browser DOM control observation; not necessarily exercised
+settings-listings-observed	Description formula		False	browser DOM control observation; not necessarily exercised
+settings-listings-observed	Save formulas		True	browser DOM control observation; not necessarily exercised
+settings-listings-observed	Reset to defaults		True	browser DOM control observation; not necessarily exercised
+settings-listings-observed	Find similar items		False	browser DOM control observation; not necessarily exercised
+settings-logs-observed	Clear		False	browser DOM control observation; not necessarily exercised
+settings-logs-observed	etsy etsy_api failed: Etsy isn't connected.		False	browser DOM control observation; not necessarily exercised
+settings-logs-observed	etsy etsy_api failed: Etsy isn't connected.		False	browser DOM control observation; not necessarily exercised
+settings-logs-observed	etsy etsy_api failed: Etsy isn't connected.		False	browser DOM control observation; not necessarily exercised
+settings-providers-observed	Primary listing AI		False	browser DOM control observation; not necessarily exercised
+settings-providers-observed	Fallback listing AI		False	browser DOM control observation; not necessarily exercised
+settings-providers-observed	Photo analysis AI		False	browser DOM control observation; not necessarily exercised
+settings-providers-observed	Select ChatGPT		False	browser DOM control observation; not necessarily exercised
+settings-providers-observed	Select Claude		False	browser DOM control observation; not necessarily exercised
+settings-providers-observed	Select OpenAI		False	browser DOM control observation; not necessarily exercised
+settings-providers-observed	Select Anthropic		False	browser DOM control observation; not necessarily exercised
+settings-providers-observed	Select Google Gemini		False	browser DOM control observation; not necessarily exercised
+settings-providers-observed	Select xAI Grok		False	browser DOM control observation; not necessarily exercised
+settings-providers-observed	Select Mistral		False	browser DOM control observation; not necessarily exercised
+settings-providers-observed	Select OpenRouter		False	browser DOM control observation; not necessarily exercised
+settings-providers-observed	Select Cursor		False	browser DOM control observation; not necessarily exercised
+settings-providers-observed	Select Xiaomi MiMo		False	browser DOM control observation; not necessarily exercised
+settings-providers-observed	Sign in		False	browser DOM control observation; not necessarily exercised
+settings-providers-observed	Brave Search API key		False	browser DOM control observation; not necessarily exercised
+settings-providers-observed	Save		True	browser DOM control observation; not necessarily exercised
+sourcing-box-form	Wholesale boxes	button	False	browser DOM control observation; not necessarily exercised
+sourcing-box-form	Scout an item	button	False	browser DOM control observation; not necessarily exercised
+sourcing-box-form	Update now	button	False	browser DOM control observation; not necessarily exercised
+sourcing-box-form	Most to spend on boxes and inbound shipping before tax	text	False	browser DOM control observation; not necessarily exercised
+sourcing-box-form	ZIP code the boxes ship to	text	False	browser DOM control observation; not necessarily exercised
+sourcing-box-form	Minimum estimated profit as a percentage of purchase cost	text	False	browser DOM control observation; not necessarily exercised
+sourcing-box-form	Weeks for shipping, preparation and listing	text	False	browser DOM control observation; not necessarily exercised
+sourcing-box-form	Length of the target selling window in weeks	text	False	browser DOM control observation; not necessarily exercised
+sourcing-box-form	Percentage of usable pieces you plan to sell	text	False	browser DOM control observation; not necessarily exercised
+sourcing-box-form	Effective marketplace and payment fees as a percentage of item revenue	text	False	browser DOM control observation; not necessarily exercised
+sourcing-box-form	Operating allowance per usable piece	text	False	browser DOM control observation; not necessarily exercised
+sourcing-box-form	All suppliers / 0 boxes / No recommendations yet	button	False	browser DOM control observation; not necessarily exercised
+sourcing-box-form	Raghouse / Store unavailable / No recommendations yet	button	False	browser DOM control observation; not necessarily exercised
+sourcing-box-form	Thrift Vintage Fashion / Store unavailable / No recommendations yet	button	False	browser DOM control observation; not necessarily exercised
+sourcing-box-form	PaperCrane / Store unavailable / No recommendations yet	button	False	browser DOM control observation; not necessarily exercised
+sourcing-box-form	Cancel	button	False	browser DOM control observation; not necessarily exercised
+sourcing-box-form	Add box	submit	True	browser DOM control observation; not necessarily exercised
