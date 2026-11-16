@@ -888,3 +888,20 @@ Idle versus load compares concurrent work, not a before/after feature speedup.
 The explicit measured target misses above remain follow-up gaps. All owned
 browser/server/worker/Postgres processes were stopped and the disposable database
 removed before releasing the slot to the next worker.
+
+## Offer-preview read diagnostics, 2026-11-16
+
+Mercari minimum-price and unavailable emails and Depop product-not-found emails
+on 0.1.972–0.1.974 identified the overall preview but omitted its failed read.
+Local refusal fixtures now retain one fixed read-step label through the Bridge,
+promotion review and email sanitizer. Mercari fixtures inject each observed
+message at item, eligibility and bounds reads; every GraphQL body contains only
+`itemId` variables and no create-offer operation occurs. Depop fixtures place a
+404 at account, product and send-all-preview reads; all requests remain GETs.
+No request, retry, price computation, listing state or send guard changes.
+
+These bounded fixtures establish diagnostic retention and unchanged request
+counts, not the underlying live marketplace cause, sale status, production
+latency or concurrent seller capacity. No production, credentials or marketplace
+were accessed. Browser/native interaction p50/p95 and concurrent generation
+remain unmeasured for this diagnostics-only change.

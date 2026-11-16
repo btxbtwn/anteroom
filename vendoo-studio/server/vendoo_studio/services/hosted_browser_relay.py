@@ -231,6 +231,7 @@ class BrowserRelay(ReplyWaits):
             raise ChromeReadError("Chrome did not answer in time. Try again.") from None
         finally:
             self.cancel_wait(request_id)
+            self._outbox = deque(item for item in self._outbox if item.get('message_id') != request_id)
         return reply if isinstance(reply, dict) else {"ok": False}
 
     async def request_local(self, message: dict, timeout: float) -> dict:
