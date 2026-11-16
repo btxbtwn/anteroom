@@ -117,3 +117,10 @@ export function markdownSummary(outcomes: readonly MarkdownOutcome[]): string {
 export function staleSuggestionIds(suggestions: readonly Pick<Suggestion, "conversation_id" | "kind">[]): string[] {
   return suggestions.filter((item) => item.kind === "stale_active").map((item) => item.conversation_id);
 }
+
+/** Refused rows must never be described as saved edits. */
+export function markdownOutcomeDescription(outcomes: readonly MarkdownOutcome[]): string {
+  return outcomes.some((outcome) => outcome.reason === null)
+    ? "Saved prices have unsent edits. Open each changed listing and update its marketplace listing when you want buyers to see the new price."
+    : "No prices were changed. Review the reasons below, then reopen Mark down to review the latest prices.";
+}

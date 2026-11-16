@@ -1,0 +1,2 @@
+- Bulk marketplace instructions explain which actions can run together and what Stop leaves unfinished. A refused markdown no longer claims a price was saved.
+- Clearing recent errors now describes the empty list accurately; earlier problems remain in the log file.

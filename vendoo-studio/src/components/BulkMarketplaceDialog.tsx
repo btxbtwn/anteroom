@@ -79,9 +79,9 @@ export function BulkMarketplaceDialog({ conversationIds, onClose }: { conversati
     <Button variant="outline" disabled={busy} onClick={onClose}>Cancel</Button>
     <Button disabled={busy || !chosen.length} onClick={() => preview.mutate(conversationIds)}>{preview.isPending ? "Checking…" : "Review items"}</Button>
   </>;
-  return <PriceDialog title={tasks ? `${verb.label} results` : review ? `Review ${verb.label.toLowerCase()}` : `Marketplace actions for ${conversationIds.length} items`}
+  return <PriceDialog title={tasks ? `${verb.label} results` : review ? `Review ${verb.label.toLowerCase()}` : `Marketplace actions for ${conversationIds.length} ${conversationIds.length === 1 ? "item" : "items"}`}
     className="max-w-3xl" busy={busy} onClose={onClose} footer={footer}
-    description="Nothing is sent until you review each item and confirm. Items run one at a time, each marketplace once; a failed item is not retried.">
+    description="Nothing is sent until you review each item and confirm. List and Update can run together; other actions run one item at a time. Stop lets running items finish and leaves the rest untouched; failures require a new review.">
     {preview.error || run.error ? <PageError message={preview.error?.message || run.error?.message || "Could not review these items"} /> : null}
     {tasks ? <div className="space-y-3" aria-live="polite">
       <PageNote>{tasks.filter((task) => task.state === "done").length} done · {tasks.filter((task) => task.state === "failed" || task.state === "unconfirmed").length} need attention · {tasks.filter((task) => task.state === "pending").length} not started</PageNote>
