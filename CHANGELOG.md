@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.982 — 2026-11-16
+
+- Keep safe diagnostic details when eBay category fields fail to load, so the failure can be investigated.
+
 ## 0.1.981 — 2026-11-16
 
 - Mercari offer checks now wait out its explicit eligibility cooldown before reading the same listing again, while keeping the refusal in activity.
