@@ -22,6 +22,8 @@ def report_result(marketplace: str, operation: str, result: Any, *, depth: int =
     # Safety belongs to this envelope, not an outer batch or a sibling reply.
     context = dict(context or {})
     context.pop("safe_to_retry", None)
+    if depth > 0:
+        context.pop("preview_step", None)
     if type(result.get("safe_to_retry")) is bool:
         context["safe_to_retry"] = result["safe_to_retry"]
     errors = result.get("errors")
