@@ -4,6 +4,15 @@ The required `CI` check aggregates the jobs in `.github/workflows/ci.yml`.
 All selected jobs must succeed. Jobs for unchanged inputs may skip; a failed
 selector, failed job or cancelled job prevents `CI` from passing.
 
+`hosted-image-validation.yml` separately builds the exact PR head's hosted
+Dockerfile on a GitHub-hosted AMD64 runner. It checks native dependencies,
+nonroot execution, packaged assets and actual server startup against a private
+throwaway Postgres database. It uses synthetic public configuration, a read-only
+token and no production environment, host mounts, published ports, image push
+or deployment. Build/runtime logs and source/image identifiers are retained as
+the `hosted-image-validation` artifact. Its check is reviewed alongside `CI`;
+it is not included in the existing aggregate or production deploy triggers.
+
 `.github/scripts/changed-components.py` selects jobs from the actual merge's
 first parent on PRs and from the push's previous commit on `main`. `check.sh`
 uses the same selector for committed and local changes. Renames count both
