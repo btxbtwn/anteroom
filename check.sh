@@ -91,13 +91,20 @@ if component backend; then
   else
     # pgserver (a dev dependency) runs a private Postgres 16 for the run.
     run "Anteroom backend on Postgres" bash -c "cd vendoo-studio && '$PY' - <<'PY'
-import os, subprocess, sys, tempfile
+import os, signal, subprocess, sys, tempfile
 from pathlib import Path
 from pgserver.postgres_server import get_server
+def terminate(signum, frame):
+    raise SystemExit(128 + signum)
+signal.signal(signal.SIGTERM, terminate)
 with tempfile.TemporaryDirectory(prefix='anteroom-check-postgres-') as root:
     server = get_server(Path(root) / 'postgres', cleanup_mode='delete')
-    env = {**os.environ, 'ANTEROOM_TEST_DATABASE_URL': server.get_uri(), 'VENDOO_STUDIO_DATA_DIR': str(Path(root) / 'data')}
-    sys.exit(subprocess.call([sys.executable, '-m', 'pytest', '-q', '-n', 'auto'], env=env))
+    try:
+        env = {**os.environ, 'ANTEROOM_TEST_DATABASE_URL': server.get_uri(), 'VENDOO_STUDIO_DATA_DIR': str(Path(root) / 'data')}
+        sys.exit(subprocess.call([sys.executable, '-m', 'pytest', '-q', '-n', 'auto'], env=env))
+    finally:
+        # pgserver's atexit hook runs too late: stop/wait before removing root.
+        server.cleanup()
 PY"
   fi
 fi
