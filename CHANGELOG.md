@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.993 — 2026-11-16
+
+- Local checks now stop their temporary Postgres server before removing its files, including when tests fail or are interrupted.
+
 ## 0.1.992 — 2026-11-16
 
 - Keep box and sales pages from reserving an extra database connection while checking imported sales.

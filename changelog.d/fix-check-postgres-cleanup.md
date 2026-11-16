@@ -1,1 +1,0 @@
-- Local checks now stop their temporary Postgres server before removing its files, including when tests fail or are interrupted.
