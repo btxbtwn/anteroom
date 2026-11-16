@@ -68,6 +68,10 @@ function mercari(item, statusReply = { status: 'cancel' }) {
     const body = JSON.parse(options.body);
     operations.push(body.operationName);
     bodies.push(body);
+    // Mercari's schema requires the item ID; a nullable declaration is refused (2026-11-14).
+    if (body.operationName === 'sellFetchItemsDetails' && !/\$itemId:\s*String!/.test(body.query)) {
+      return [400, { errors: [{ message: 'Variable "$itemId" of type "String" used in position expecting type "String!".' }] }];
+    }
     return [200, body.operationName === 'sellFetchItemsDetails' ? item : { data: { updateItemStatus: statusReply } }];
   } });
   return { c, operations, bodies, run: () => c.runMarketplaceDelete({ marketplace: 'mercari', listing_id: MERCARI_ID, confirm: true }) };
@@ -82,6 +86,13 @@ test('Mercari delete reads the item, then sends its own Delete status and checks
   const refused = await mercari(mercariItem(), { status: 'trading' }).run();
   assert.equal(refused.ok, false);
   assert.equal(refused.marketplace_message, 'status trading');
+});
+
+test('Mercari delete declares the required item ID as non-null, so Mercari accepts the read', async () => {
+  const s = mercari(mercariItem());
+  const result = await s.run();
+  assert.equal(result.ok, true, result.error);
+  assert.match(s.bodies[0].query, /\$itemId:\s*String!/);
 });
 
 test('Mercari never deletes a sold or foreign listing, and a cancelled one is already deleted', async () => {

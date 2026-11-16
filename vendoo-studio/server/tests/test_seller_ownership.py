@@ -21,7 +21,7 @@ CURRENT_REVISION = schema_migrations.head_revision()
 SHARED_TABLES = {"category_trees", "category_tree_nodes"}
 # Global operator accounting is not public taxonomy. Its migration denies
 # seller access; test_error_email_budget exercises those Postgres permissions.
-OPERATOR_TABLES = {"error_email_state"}
+OPERATOR_TABLES = {"error_email_state", "error_email_groups"}
 
 
 @pytest.fixture

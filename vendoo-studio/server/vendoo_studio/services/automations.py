@@ -250,7 +250,8 @@ def proposal_from_block(db: Session, block: str, *, now: datetime | None = None)
                         marketplaces=task.marketplaces, price_repeat=task.price_repeat)
             body.update({key: data[key] for key in named})
         spec = compile_spec(body, now=now, allow_incomplete=True)
-        spec.update(op="update", id=task.id)
+        # The card is the whole task as of now; confirming it later must not undo an edit made since.
+        spec.update(op="update", id=task.id, base_updated_at=task.updated_at.isoformat())
         return spec
     body = dict(data)
     body.setdefault("op", "create")
@@ -265,7 +266,10 @@ def confirm_proposal(db: Session, proposal: dict, *, now: datetime | None = None
     body = {key: proposal.get(key) for key in ("name", "prompt", "timezone", "schedule", "filters", "actions", "marketplaces", "price_repeat")}
     if op == "update":
         # Saves the task as the card showed it; a paused task stays paused.
-        return update_automation(db, str(proposal["id"]), body, now=now)
+        task = get_automation(db, str(proposal["id"]))
+        if proposal.get("base_updated_at") != task.updated_at.isoformat():
+            raise AutomationError("This automation changed after the assistant suggested this. Ask again.", 409)
+        return update_automation(db, task.id, body, now=now)
     body["activate"] = True
     return create_automation(db, body, now=now)
 

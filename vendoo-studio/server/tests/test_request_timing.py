@@ -1,5 +1,8 @@
 import asyncio
+from types import SimpleNamespace
 from unittest.mock import patch
+
+import pytest
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -58,7 +61,7 @@ def test_slow_save_reaches_persistent_logs(tmp_path, monkeypatch):
     assert "secret" not in entries[0]["message"]
 
 
-def test_empty_relay_poll_allows_the_route_wait_but_not_excess_delay(caplog):
+def test_relay_poll_allows_the_route_wait_but_not_excess_delay(caplog):
     from vendoo_studio.services.hosted_browser_relay import WAIT_S
 
     async def send(message):
@@ -70,7 +73,14 @@ def test_empty_relay_poll_allows_the_route_wait_but_not_excess_delay(caplog):
         ('GET', '/api/browser-relay/next', 204, WAIT_S + 5, True),
         ('GET', '/api/browser-relay/next', 204, WAIT_S + 6, True),
         ('GET', '/api/browser-relay/next', 503, 6, True),
-        ('GET', '/api/browser-relay/next', 200, 6, True),
+        ('GET', '/api/browser-relay/next', 200, 12.223, False),
+        ('GET', '/api/browser-relay/next', 200, WAIT_S + 4.999, False),
+        ('GET', '/api/browser-relay/next', 200, WAIT_S + 5, True),
+        ('GET', '/api/browser-relay/next', 200, WAIT_S + 6, True),
+        ('GET', '/api/browser-relay/next', 401, 6, True),
+        ('GET', '/api/browser-relay/next', 409, 6, True),
+        ('POST', '/api/browser-relay/next', 200, 6, True),
+        ('GET', '/api/other', 200, 6, True),
         ('POST', '/api/browser-relay/next', 204, 6, True),
         ('GET', '/api/other', 204, 6, True),
         ('GET', '/api/browser-relay/next/other', 204, 6, True),
@@ -84,3 +94,41 @@ def test_empty_relay_poll_allows_the_route_wait_but_not_excess_delay(caplog):
         with patch('vendoo_studio.services.request_timing.time.perf_counter', side_effect=[0, duration]):
             asyncio.run(RequestTimingMiddleware(route)({'type': 'http', 'method': method}, None, send))
         assert bool(caplog.records) is warns, (method, path, status, duration)
+
+
+@pytest.mark.parametrize("has_command", [True, False])
+def test_poll_response_after_wait_keeps_its_shape_without_warning(monkeypatch, caplog, has_command):
+    from vendoo_studio.routes import hosted_browser_relay as routes
+    from vendoo_studio.services import hosted_browser_relay, request_timing
+
+    relay = hosted_browser_relay.BrowserRelay()
+    clock = [0.0]
+    command = {"type": "marketplace.sessions", "job_id": None, "message_id": "a" * 32, "payload": {}}
+    waited = []
+
+    async def wait_for_command():
+        # Exercise next_message's empty-outbox wait without a wall-clock sleep.
+        waited.append(True)
+        clock[0] = 12.223 if has_command else hosted_browser_relay.WAIT_S
+        if has_command:
+            assert await relay.deliver_local(command)
+        else:
+            raise TimeoutError
+
+    monkeypatch.setattr(relay._ready, "wait", wait_for_command)
+    monkeypatch.setattr(routes, "_pinned", lambda **kwargs: None)
+    monkeypatch.setattr(routes, "_relay", lambda: relay)
+    monkeypatch.setattr(request_timing, "time", SimpleNamespace(perf_counter=lambda: clock[0]))
+    app = FastAPI()
+    app.add_middleware(RequestTimingMiddleware)
+    app.include_router(routes.router)
+    with TestClient(app) as client:
+        response = client.get("/api/browser-relay/next?capabilities=marketplace.sessions")
+    assert waited == [True]
+    if has_command:
+        assert response.status_code == 200
+        assert response.json() == command
+    else:
+        assert response.status_code == 204
+        assert response.content == b""
+    assert not [record for record in caplog.records if record.name == request_timing.__name__]

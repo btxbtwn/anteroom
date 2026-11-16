@@ -6,6 +6,34 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.978 — 2026-11-16
+
+- Stopping a listing while it finishes its marketplace fields no longer reports an error or asks you to retry.
+
+## 0.1.977 — 2026-11-16
+
+- Backend tests on a Mac's local Postgres now run in UTC, like the hosted database.
+
+## 0.1.976 — 2026-11-16
+
+- Confirming an older assistant suggestion for an automation no longer undoes changes you made to that automation since; you're asked to ask again instead.
+
+## 0.1.975 — 2026-11-16
+
+- Keep the hosted server's request log working when another log handler is attached first.
+
+## 0.1.974 — 2026-11-16
+
+- Keep connection-release checks reliable on busy test runners without changing the app’s connection limits.
+
+## 0.1.973 — 2026-11-16
+
+- Keep successful Chrome relay polls within the expected wait out of slow-response alerts, while still warning on excessive waits and failures.
+
+## 0.1.972 — 2026-11-15
+
+- Keep all queued error reports while reading only the groups needed for reporting and email delivery, instead of downloading the whole backlog each time.
+
 ## 0.1.971 — 2026-11-14
 
 - Read Assistant price history without loading the large saved marketplace forms for every revision.

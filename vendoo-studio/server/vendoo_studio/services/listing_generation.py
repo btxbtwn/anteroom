@@ -10,7 +10,7 @@ import time
 from vendoo_studio.database import in_worker_session
 from vendoo_studio.repositories.queries import ConversationRepo, RevisionConflict
 from vendoo_studio.services import activity, generation_timing, live_trace, model_slots, model_usage
-from vendoo_studio.services.background_tasks import TaskLeaseExpired
+from vendoo_studio.services.background_tasks import TaskLeaseExpired, TaskStopped
 from vendoo_studio.services.brave_search import item_fields
 from vendoo_studio.services.chat_prompts import (
     listing_generation_messages,
@@ -536,6 +536,13 @@ async def _finish_generation_background(
         await in_worker_session(_finish_summary, conv_id, copy.deepcopy(current), repaired)
     except RevisionConflict:
         log.info("discarding stale generation finish for %s", conv_id)
+    except TaskStopped:
+        # The seller cancelled: an expected end. The draft keeps its saved state,
+        # and this task may no longer write to it.
+        outcome = "cancelled"
+        log.info("generation finish for %s stopped by a cancel", conv_id)
+    except TaskLeaseExpired:
+        log.warning("generation finish for %s lost its task lease; leaving the draft as saved", conv_id)
     except Exception:
         outcome = "failed"
         log.exception("post-generate finish failed for %s", conv_id)
