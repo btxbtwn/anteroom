@@ -1,0 +1,1 @@
+- Stopping a listing while it finishes its marketplace fields no longer reports an error or asks you to retry.
