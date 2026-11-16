@@ -34,6 +34,12 @@ describe("automation rows", () => {
     for (const kind of AUTOMATION_KINDS) expect(kind.description).not.toContain("\n");
   });
 
+  it("distinguishes scheduled saves from marketplace actions that need approval", () => {
+    const scheduled = AUTOMATION_KINDS.find((kind) => kind.kind === "scheduled")!;
+    expect(scheduled.description).toBe("Changes save on schedule; listing, relisting and delisting need approval.");
+    expect(scheduled.description).not.toContain("each item waits for your approval");
+  });
+
   it("names a scheduled task by what it does", () => {
     expect(scheduledType([{ type: "price" }, { type: "relist" }, { type: "price" }])).toBe("Price drop, Relist");
     expect(scheduledType([{ type: "regenerate" }])).toBe("Regenerate");
