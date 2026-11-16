@@ -33,6 +33,7 @@ from vendoo_studio.models.listing_promotion import ListingPromotion, Marketplace
 from vendoo_studio.models.promotion_automation import PromotionAutomation
 from vendoo_studio.repositories.queries import JobRepo, ListingRepo
 from vendoo_studio.services import browser_bridge, listing_mode, mercari_offer_cooldown
+from vendoo_studio.services.depop_offer_eligibility import expected_multisize
 from vendoo_studio.services.api_job_lock import claim_api_job, release_api_job
 from vendoo_studio.services.ebay_api import dollars, money_cents
 from vendoo_studio.services.listing_result import scrub
@@ -288,7 +289,8 @@ async def _review_remote(row: ListingPromotion, listing_id: str) -> None:
             row.like_count = facts["like_count"]
         cooldown = mercari_offer_cooldown.preview_wait(
             row.marketplace, "marketplace.promotion_check", row.action, facts) is not None
-        report = log.info if cooldown else log.error
+        expected_skip = expected_multisize(row.marketplace, "marketplace.promotion_check", row.action, facts)
+        report = log.info if cooldown or expected_skip else log.error
         report("%s %s preview rejected for listing %s, automation %s: %s; %s",
                   row.marketplace, row.action, listing_id, row.automation_id,
                   scrub(str(facts.get("error") or "The marketplace did not answer.")), row.marketplace_message or "-",

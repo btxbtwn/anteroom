@@ -95,6 +95,24 @@ class ListingPromotionsTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["rows"][0]
 
+    def test_depop_multisize_preview_stays_skipped_and_rechecks_after_size_changes(self):
+        message = "Depop does not send offers on listings with several sizes."
+        self.conv.notes = merge_notes(self.conv.notes, {"vendooListingUrls": {"depop": "https://www.depop.com/products/fixture-tee/"}})
+        self.db.commit()
+        self.check = {"ok": False, "error": message, "error_code": "rejected", "safe_to_retry": True}
+        first = self.preview(marketplace="depop", action="offer", discount_percent=10,
+                             floors={self.conv.id: "10"})
+        self.assertEqual((first["state"], first["note"]), ("skipped", message))
+        self.assertIsNone(first["like_count"])
+        self.assertEqual(self.client.post(f"/api/promotions/{first['id']}/perform", json={"confirm": True}).status_code, 409)
+        # A fresh marketplace read can observe sizes changed by the seller.
+        self.check = {"ok": True, "price_cents": 5000, "like_count": 3, "minimum_discount_percent": 5,
+                      "maximum_discount_percent": 80, "offer_price_cents": 4500}
+        second = self.preview(marketplace="depop", action="offer", discount_percent=10)
+        self.assertEqual(second["state"], "preview")
+        self.assertEqual(len(self.calls("marketplace.promotion_check")), 2)
+        self.assertEqual(self.calls("marketplace.promote"), [])
+
     def test_share_is_reviewed_then_sent_once(self):
         row = self.preview(action="share")
         self.assertEqual((row["state"], row["listing_id"], row["price"]), ("preview", POST, "50.00"))
