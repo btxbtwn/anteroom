@@ -244,3 +244,12 @@ Process persistence upgraded from same-process/new-client checks: SQLite backup 
 Validation: legacy RED1→GREEN1; intermediate affected-file run108 PASS/2 FAIL (new subprocess Host setup and an old positive fixture missing identity), then corrected affected files **111 PASS/18 subtests** with six existing SQLite datetime deprecations. Actual app lifespan version of the process case then passed independently. Final narrowed-scope run **34 PASS** (legacy/process/facets/eBay-accounting selection); Ruff/diff checks passed. Postgres/full suites remain remote CI or separately queued, not local pass claims.
 
 Current canonical totals **51 PASS / 0 FAIL / 8 BLOCKED / 48 NOT RUN**,107 named cases. Full UI matrix, stale/interrupted browser saves, templates/bulk/photos/assistant/settings work remains pending explicit interactive handover; native Mac/iOS still blocked on parent routing. No production action or merge.
+
+
+## Missing historical action recovery — 15:53 UTC
+
+Added a disposable legacy Depop published/no-URL record without a saved job. Initial regression failed because Check result only said “No marketplace action to check.” The scoped shared error now directs the seller to verify that item directly on the named marketplace before another marketplace change. It does not promise a native control absent from the build. No automatic repair or external action was added.
+
+Isolated real API regression: unknown status; Check409 with actionable instruction; Mark listed without URL400; separate fake-marketplace HTTP read confirms the fixture exists; explicit local mark with URL reconstructs the durable slug without publishing; named confirmed simulated delist targets that slug; fresh ORM/API read returns deleted and independent fake endpoint returns absent. An intermediate test read used its retained ORM fixture identity and appeared stale; a fresh session and returned delist result prove persisted state. This was fixture setup, not a claimed product defect. Two targeted legacy tests passed (72 deselected) with sockets prohibited. Browser/native manual recovery and live ownership/status verification remain untested.
+
+Canonical totals: **52 PASS / 0 FAIL / 8 BLOCKED / 48 NOT RUN**,108 named scenarios on this Depop branch. Restore child adds its separately recorded corruption-safety case. Current eBay hosted browser/Postgres still owns shared resources; audit started none. Exact-head backend/PG/hosted CI green on4f5d9657; local-sandbox browser CI still pending at this read. All drafts remain unmerged.

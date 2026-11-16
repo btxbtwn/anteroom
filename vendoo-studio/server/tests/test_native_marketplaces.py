@@ -352,6 +352,52 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         self.assertEqual(self.actions(), ["save_draft", "publish"])
         self.assertEqual(TestClient(app).get(self.base).json()["depop"]["listing_url"], LIVE["depop"])
 
+    def test_legacy_without_saved_job_requires_external_verification_before_manual_recovery(self):
+        from fastapi import FastAPI
+
+        self.enterContext(patch("socket.socket.connect", side_effect=AssertionError("offline fixture")))
+        product = "fixture-historical-shirt-123"
+        url = f"https://www.depop.com/products/{product}/"
+        marketplace = {product: True}
+        remote = FastAPI()
+
+        @remote.get("/products/{slug}")
+        def independently_read(slug: str):
+            return {"listed": marketplace[slug]}
+
+        reader = TestClient(remote)
+        records = MarketplaceListingRepo(self.db)
+        records.save(self.conv.id, "depop", {"state": "published"})
+        self.assertEqual(self.status()["depop"]["state"], "unknown")
+        check = self.client.post(f"{self.base}/depop/check")
+        self.assertEqual(check.status_code, 409, check.text)
+        self.assertIn("Verify the item's status directly on Depop", check.json()["detail"])
+        self.bridge.assert_not_awaited()
+        base = f"/api/conversations/{self.conv.id}/marketplace-listings"
+        unverified = self.client.post(f"{base}/depop/mark", json={"state": "listed"})
+        self.assertEqual(unverified.status_code, 400, unverified.text)
+        self.assertEqual(reader.get(f"/products/{product}").json(), {"listed": True})
+        marked = self.client.post(f"{base}/depop/mark", json={"state": "listed", "url": url})
+        self.assertEqual(marked.status_code, 200, marked.text)
+        self.assertEqual(marked.json()["depop"]["listing_id"], product)
+        self.bridge.assert_not_awaited()
+
+        async def delete(_job, kind, payload, **_kwargs):
+            self.assertEqual(kind, "marketplace.delete")
+            self.assertEqual(payload, {"marketplace": "depop", "listing_id": product, "confirm": True})
+            marketplace[product] = False
+            return {"ok": True, "state": "deleted"}
+
+        self.bridge.side_effect = delete
+        removed = self.client.post(f"{base}/delist", json={"marketplaces": ["depop"], "confirm": True})
+        self.assertEqual(removed.status_code, 200, removed.text)
+        self.assertEqual(removed.json()["depop"]["state"], "deleted", removed.text)
+        with self.sessions() as read_session:
+            app.dependency_overrides[get_db] = lambda: read_session
+            self.assertEqual(TestClient(app).get(base).json()["depop"]["state"], "deleted")
+        self.assertEqual(reader.get(f"/products/{product}").json(), {"listed": False})
+        self.assertEqual(self.actions(), [])
+
     def test_missing_and_contradictory_adapter_states_never_verify_success(self):
         for market, action, draft_url, live_url in [
             ("depop", "publish", URLS["depop"], LIVE["depop"]),
