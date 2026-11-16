@@ -1,0 +1,1 @@
+- A Depop listing stays unconfirmed until its product link is known, so Anteroom can check it and delist the right item. Check result can recover the link without listing it again.

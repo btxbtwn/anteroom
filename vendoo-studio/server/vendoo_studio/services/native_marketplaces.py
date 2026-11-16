@@ -276,8 +276,8 @@ def _outcome(marketplace: str, action: str, record: dict, result: dict) -> dict:
         if state in {"published", "pending_review"}:
             if result.get("listing_url"):
                 values["listing_url"] = listing_url(marketplace, result["listing_url"])
-            elif marketplace != "depop":
-                # Depop's publish answers without the public link; every other one has it.
+            else:
+                # A confirmed listing must remain identifiable for checks and delisting.
                 raise NativeMarketplaceError(502, f"{NAMES[marketplace]} did not return the listing link.")
         if action == "update":
             from vendoo_studio.services.marketplace_delist import listing_id

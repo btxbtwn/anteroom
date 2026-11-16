@@ -29,7 +29,7 @@ from vendoo_studio.services.vendoo_import import merge_notes, parse_notes
 
 URLS = {"mercari": "https://www.mercari.com/sell/draft/testNativeDraft/",
         "depop": "https://www.depop.com/sellinghub/drafts/edit/123456/"}
-LIVE = {"mercari": "https://www.mercari.com/us/item/m123456789/", "depop": None}
+LIVE = {"mercari": "https://www.mercari.com/us/item/m123456789/", "depop": "https://www.depop.com/products/fixture-shirt-durable-123/"}
 POSH_URL = "https://poshmark.com/listing/6adc371572e62463d992ffef"
 LISTING = {"title": "ANTEROOM DRAFT CHECK - DO NOT PUBLISH", "description": "Private test draft.", "price": 12,
            "size": "M",
@@ -202,6 +202,104 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.bridge.assert_not_awaited()
         self.assertFalse(self.launched)
 
+    def test_depop_publish_without_identity_stays_unconfirmed_and_cannot_republish(self):
+        self.enterContext(patch("socket.socket.connect", side_effect=AssertionError("offline fixture")))
+
+        async def answer(_job, kind, payload, **_kwargs):
+            self.assertEqual(kind, "marketplace.execute")
+            if payload["action"] == "save_draft":
+                return {"ok": True, "state": "draft", "draft_url": URLS["depop"]}
+            return {"ok": True, "state": "published", "draft_url": URLS["depop"]}
+
+        self.bridge.side_effect = answer
+        result = self.list("depop")
+        self.assertEqual(result["state"], "unknown", result)
+        self.assertEqual(result["error_code"], "uncertain")
+        retry = self.client.post(f"{self.base}/depop/list", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(retry.status_code, 409, retry.text)
+        self.assertEqual(self.actions(), ["save_draft", "publish"])
+        delist = self.client.post(f"/api/conversations/{self.conv.id}/marketplace-listings/delist",
+                                 json={"marketplaces": ["depop"], "confirm": True})
+        self.assertEqual(delist.status_code, 409, delist.text)
+
+        self.bridge.side_effect = None
+        self.bridge.return_value = {"finished": True, "result": {
+            "ok": True, "state": "published", "draft_url": URLS["depop"], "listing_url": LIVE["depop"],
+        }}
+        checked = self.client.post(f"{self.base}/depop/check")
+        self.assertEqual(checked.status_code, 200, checked.text)
+        self.assertEqual(checked.json()["state"], "published")
+        self.assertEqual(self.bridge.call_args.args[1], "marketplace.result")
+        self.assertEqual(self.actions(), ["save_draft", "publish"])
+        fresh = TestClient(app).get(f"/api/conversations/{self.conv.id}/marketplace-listings").json()["depop"]
+        self.assertEqual(fresh["listing_id"], "fixture-shirt-durable-123")
+
+    def test_depop_simulated_publish_identity_reload_delist_and_independent_readback(self):
+        self.enterContext(patch("socket.socket.connect", side_effect=AssertionError("offline fixture")))
+        product = "fixture-shirt-durable-123"
+        url = f"https://www.depop.com/products/{product}/"
+        marketplace_state = {}
+        from fastapi import FastAPI
+
+        simulated_marketplace = FastAPI()
+
+        @simulated_marketplace.get("/products/{slug}")
+        def read_marketplace(slug: str):
+            return {"id": slug, "listed": marketplace_state.get(slug, False)}
+
+        independent_reader = TestClient(simulated_marketplace)
+
+        async def adapter(_job, kind, payload, **_kwargs):
+            if kind == "marketplace.delete":
+                self.assertEqual(payload, {"marketplace": "depop", "listing_id": product, "confirm": True})
+                self.assertTrue(marketplace_state[product])
+                marketplace_state[product] = False
+                return {"ok": True, "state": "deleted"}
+            self.assertEqual(kind, "marketplace.execute")
+            if payload["action"] == "save_draft":
+                return {"ok": True, "state": "draft", "draft_url": URLS["depop"]}
+            self.assertEqual((payload["action"], payload["confirm"]), ("publish", True))
+            marketplace_state[product] = True
+            return {"ok": True, "state": "published", "draft_url": URLS["depop"], "listing_url": url}
+
+        self.bridge.side_effect = adapter
+        self.assertEqual(self.list("depop")["state"], "published")
+        self.db.expire_all()
+        fresh_session = self.sessions()
+        self.addCleanup(fresh_session.close)
+        app.dependency_overrides[get_db] = lambda: fresh_session
+        reopened = TestClient(app)
+        base = f"/api/conversations/{self.conv.id}/marketplace-listings"
+        persisted = reopened.get(base).json()["depop"]
+        self.assertEqual((persisted["listing_id"], persisted["url"]), (product, url))
+        # Independent read from the simulated marketplace, not Anteroom's mark.
+        self.assertEqual(independent_reader.get(f"/products/{product}").json(), {"id": product, "listed": True})
+        deleted = reopened.post(f"{base}/delist", json={"marketplaces": ["depop"], "confirm": True})
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(deleted.json()["depop"]["state"], "deleted")
+        self.db.expire_all()
+        self.assertEqual(TestClient(app).get(base).json()["depop"]["state"], "deleted")
+        self.assertEqual(independent_reader.get(f"/products/{product}").json(), {"id": product, "listed": False})
+
+    def test_missing_and_contradictory_adapter_states_never_verify_success(self):
+        for market, action, draft_url, live_url in [
+            ("depop", "publish", URLS["depop"], LIVE["depop"]),
+            ("mercari", "publish", URLS["mercari"], LIVE["mercari"]),
+            ("poshmark", "list", None, POSH_URL),
+        ]:
+            for state in (None, "draft", "unknown", "not_listed"):
+                with self.subTest(market=market, state=state):
+                    reply = {"ok": True, "listing_url": live_url, "draft_url": draft_url}
+                    if state is not None:
+                        reply["state"] = state
+                    result = native._outcome(market, action, {}, reply)
+                    self.assertEqual((result["state"], result["error_code"]), ("unknown", "uncertain"))
+        saved = native._outcome("depop", "save_draft", {}, {
+            "ok": True, "state": "draft", "draft_url": URLS["depop"],
+        })
+        self.assertEqual(saved["state"], "draft")
+        self.assertNotIn("listing_url", saved)
+
     # --- helpers ---------------------------------------------------------------
 
     def test_form_preparation_copies_the_listing_once_and_keeps_input_independent(self):
@@ -368,6 +466,8 @@ class NativeMarketplacesTest(unittest.TestCase):
                    "marketplace_categories": {}, "direct_category_ids": {}}
         revision = listing_persistence.save_revision(self.db, self.conv.id, listing, "user_form")
         self.bridge.reset_mock()
+        self.bridge.return_value = {"ok": False, "safe_to_retry": True,
+                                    "error": "Fixture: choose a category.", "error_code": "missing_fields"}
         response = self.client.post(f"{self.base}/mercari/list", json={"revision_id": revision.id, "confirm": True})
         self.assertEqual(response.status_code, 200, response.text)
         self.assertTrue(response.json()["running"])
@@ -869,7 +969,7 @@ class NativeMarketplacesTest(unittest.TestCase):
             {"ok": False, "safe_to_retry": True, "error": "Depop refused the request (HTTP 404).",
              "marketplace_message": "Could not find draft with id: [hidden]", "error_code": "rejected"},
             {"ok": True, "state": "draft", "draft_url": new},
-            {"ok": True, "state": "published", "draft_url": new},
+            {"ok": True, "state": "published", "draft_url": new, "listing_url": LIVE["depop"]},
         ]
         record = self.list("depop")
         self.assertEqual(record["state"], "published")
