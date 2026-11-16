@@ -77,20 +77,33 @@ passing when it did not run.
 Every run, in this order:
 
 1. `./check.sh --all` in the audit worktree after setup
-   (`cd vendoo-studio && python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]" && npm ci`).
+   (`cd vendoo-studio && python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]" && npm ci && npx playwright install chromium webkit`).
+   Phone browser tests run in WebKit. After a Playwright bump, a Mac without
+   that version's WebKit fails every `phone-webkit` test in 0 ms ("Executable
+   doesn't exist"), and the failed `npm run e2e` then skips `npm run e2e:hosted`
+   (2026-11-16).
    Use Python 3.12, CI's version: a newer `python3` (3.14 on the seller's Mac)
    cannot install `pgserver`. Put `vendoo-studio/.venv/bin` first on `PATH`.
    This also runs `npm run e2e` (local web, desktop and phone),
    `npm run e2e:hosted` (hosted web, two sellers) and, on macOS,
    `./anteroom-ios/test-sandbox.sh`, so steps 2 to 4 need no separate run
    when it covered them. The whole run takes about 40 minutes on the
-   seller's Mac. `hosted-e2e/signin.e2e.ts` "in the Mac app, password resets
-   open in the browser" failed about one run in 30 at its Account menu step
-   until #1542; once that has merged, report any failure there.
+   seller's Mac.
    On macOS, **Anteroom types** fails on PyObjC symbols
    in `desktop.py`, `macos_keychain.py` and `photo_edits.py` that CI's Linux
    job never sees; report any other type error. Do not run `basedpyright` on
    single files: it rewrites `.basedpyright/baseline.json`.
+   For Postgres test runs, include #1574's bootstrap fix: the cluster-wide
+   `anteroom_api` role must exist before any worker database migrates, so the
+   migrations install its operator-storage grants. Creating it later in a
+   test fixture caused `test_operator_storage_is_inaccessible_to_seller_role`
+   to fail in a full run while passing alone (2026-11-16). The cause was
+   verified with private test clusters. Preserve the API access and
+   seller-denial assertions when diagnosing a recurrence.
+   Then check the hosted deploy: `gh run list --workflow deploy-hosted.yml --branch main --limit 5`.
+   CI never builds the hosted image, so a base-image bump can pass CI and
+   fail every deploy (2026-11-16: Python 3.15 from Dependabot's #1547 broke
+   deploys for five hours). Report a failed latest run with its log line.
 2. `cd vendoo-studio && npm run e2e` (local web, desktop and phone sizes).
 3. `cd vendoo-studio && npm run e2e:hosted` (hosted web, two sellers).
 4. `./anteroom-ios/test-sandbox.sh` (iPhone XCUITests in the Simulator). Run
@@ -187,7 +200,7 @@ list remembers.
 
 | Day | Area | Where to look |
 |---|---|---|
-| Monday | Listing editor, every marketplace tab (the list is `FORM_ORDER` in `src/components/editorTabs.ts`), category selection, item details, variations. Neither sandbox can load eBay's category fields once a listing has a category (they come from eBay's API), so the eBay tab shows "could not be loaded" there; record eBay item specifics and variations as **not run** until the sandbox seeds them | `src/components/ListingEditor.tsx`, `NativeInventoryEditor.tsx`, `editorTabs.ts`, `anteroom-ios/Sources/Editor/` |
+| Monday | Listing editor, every marketplace tab (the list is `FORM_ORDER` in `src/components/editorTabs.ts`), category selection, item details, variations. Neither sandbox can load eBay's category fields once a listing has a category (they come from eBay's API), so the eBay tab shows "could not be loaded" there; record eBay item specifics and variations as **not run** until the sandbox seeds them. Mercari's Shipping label shows "Choices unavailable" in both sandboxes: its choices come from Mercari's live shipping quote | `src/components/ListingEditor.tsx`, `NativeInventoryEditor.tsx`, `editorTabs.ts`, `anteroom-ios/Sources/Editor/` |
 | Tuesday | Bulk actions (edit, copy, delete, price drop, regenerate, upload), templates, inventory filters and search, import. Closing any bulk dialog, Cancel included, leaves selection mode, so select again before the next dialog. Hosted web has no bulk Marketplaces button | `src/components/Bulk*`, `ListingTemplatesDialog.tsx`, `anteroom-ios/Sources/Bulk/`, `Templates/`, `Inventory/` |
 | Wednesday | Photos: upload, drop, reorder, crop and edit, thumbnails, camera on iPhone, measurements from ruler photos | `src/components/Photo*`, `anteroom-ios/Sources/Photos/` |
 | Thursday | Assistant and listing chat, automations, suggestions, similar items, previous versions and history | `src/components/Assistant*`, `Automations*`, `ListingHistory.tsx`, `anteroom-ios/Sources/Assistant/`, `Automations/`, `History/` |
