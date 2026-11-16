@@ -12,7 +12,9 @@ const data: { automations: Automation[]; approvals: AutomationApproval[]; promot
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: ({ queryKey }: { queryKey: string[] }) => ({
-    data: queryKey[0] === "ebay-offers"
+    data: queryKey[0] === "offer-analytics"
+      ? { start: "2026-11-16", end: "2026-11-16", timezone: "UTC", confirmed_conversions: null, marketplaces: [] }
+      : queryKey[0] === "ebay-offers"
       ? { connected: data.ebayConnected, listings: [], history: [], lastCheck: null, lastError: null, checkIntervalMinutes: 15,
         allListings: { enabled: false, discountPercent: 10, minimumPrice: "" } }
       : queryKey[0] === "promotion-automations"

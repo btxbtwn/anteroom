@@ -370,6 +370,7 @@ def _reserve(db: Session, attempt_id: str, token: str, live_price: int, automati
         db.rollback()
         raise OfferConflict("Another offer was already sent or started for this listing.")
     attempt.state = "sending"
+    attempt.sent_at = now()
     offer_price = attempt.offer_price_cents
     # Crash or cancellation after this commit leaves a durable unresolved send.
     db.commit()

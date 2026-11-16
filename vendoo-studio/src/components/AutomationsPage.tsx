@@ -8,6 +8,7 @@ import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, EllipsisIcon, PlusIcon } from "lucide-react";
 
+import { OfferAnalytics } from "./OfferAnalytics";
 import { api } from "../api/client";
 import { automationApprovalsQuery, automationGapsQuery, automationsQuery, ebayOffersQuery, promotionAutomationsQuery } from "../api/pageQueries";
 import type { Automation, AutomationApproval, AutomationDraft, AutomationPreview, AutomationRun, RelistGap } from "../api/automations";
@@ -248,6 +249,8 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
           </Button>
         )}
       />
+
+      <OfferAnalytics />
 
       {error ? <PageError message={error} /> : null}
 

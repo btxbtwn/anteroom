@@ -1101,6 +1101,109 @@
         "title": "ListingValidation",
         "type": "object"
       },
+      "OfferAnalyticsMarketplace": {
+        "properties": {
+          "accepted_requests": {
+            "title": "Accepted Requests",
+            "type": "integer"
+          },
+          "completed_jobs": {
+            "title": "Completed Jobs",
+            "type": "integer"
+          },
+          "confirmed_recipients": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed Recipients"
+          },
+          "confirmed_sends": {
+            "title": "Confirmed Sends",
+            "type": "integer"
+          },
+          "failed": {
+            "title": "Failed",
+            "type": "integer"
+          },
+          "marketplace": {
+            "title": "Marketplace",
+            "type": "string"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "integer"
+          },
+          "unknown": {
+            "title": "Unknown",
+            "type": "integer"
+          },
+          "unverified": {
+            "title": "Unverified",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "marketplace",
+          "confirmed_recipients",
+          "confirmed_sends",
+          "accepted_requests",
+          "completed_jobs",
+          "unverified",
+          "unknown",
+          "failed",
+          "pending"
+        ],
+        "title": "OfferAnalyticsMarketplace",
+        "type": "object"
+      },
+      "OfferAnalyticsResponse": {
+        "properties": {
+          "confirmed_conversions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmed Conversions"
+          },
+          "end": {
+            "title": "End",
+            "type": "string"
+          },
+          "marketplaces": {
+            "items": {
+              "$ref": "#/components/schemas/OfferAnalyticsMarketplace"
+            },
+            "title": "Marketplaces",
+            "type": "array"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "timezone",
+          "confirmed_conversions",
+          "marketplaces"
+        ],
+        "title": "OfferAnalyticsResponse",
+        "type": "object"
+      },
       "PhotoEdits": {
         "additionalProperties": false,
         "properties": {
@@ -1290,6 +1393,66 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/analytics/offers": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Start",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "End",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "timezone",
+            "required": false,
+            "schema": {
+              "default": "UTC",
+              "maxLength": 100,
+              "title": "Timezone",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfferAnalyticsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Offer Analytics"
+      }
+    },
     "/api/conversations": {
       "get": {
         "responses": {

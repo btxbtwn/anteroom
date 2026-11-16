@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Integer,
+    Index,
     String,
     UniqueConstraint,
 )
@@ -57,6 +58,7 @@ class EbayOfferRule(SellerOwned, Base):
 class EbayOfferAttempt(SellerOwned, Base):
     __tablename__ = "ebay_offer_attempts"
     __table_args__ = (
+        Index("ix_ebay_offer_attempts_seller_sent", "user_id", "sent_at"),
         ForeignKeyConstraint(["user_id", "rule_id"], ["ebay_offer_rules.user_id", "ebay_offer_rules.id"],
             name="fk_ebay_offer_attempts_seller_rule_id", deferrable=True, initially="DEFERRED"),
     )
@@ -69,6 +71,7 @@ class EbayOfferAttempt(SellerOwned, Base):
     minimum_price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     state: Mapped[str] = mapped_column(String, nullable=False, default="preview")
     note: Mapped[str | None] = mapped_column(String, nullable=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     recipient_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

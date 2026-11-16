@@ -29,6 +29,7 @@ from vendoo_studio.services.photo_edits import PhotoEdits
 # ``/api/runtime``, which only the hosted app has) with the same models.
 CONTRACT_OPERATIONS: tuple[tuple[str, str], ...] = (
     ("get", "/api/runtime"),
+    ("get", "/api/analytics/offers"),
     ("get", "/api/conversations"),
     ("post", "/api/conversations"),
     ("get", "/api/conversations/{identity}"),
@@ -242,3 +243,23 @@ class ListingSaveResult(ContractModel):
     listing: dict
     etsy_eligible: bool
     validation: ListingValidation
+
+
+class OfferAnalyticsMarketplace(ContractModel):
+    marketplace: str
+    confirmed_recipients: int | None
+    confirmed_sends: int
+    accepted_requests: int
+    completed_jobs: int
+    unverified: int
+    unknown: int
+    failed: int
+    pending: int
+
+
+class OfferAnalyticsResponse(ContractModel):
+    start: str
+    end: str
+    timezone: str
+    confirmed_conversions: int | None
+    marketplaces: list[OfferAnalyticsMarketplace]

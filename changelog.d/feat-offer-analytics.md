@@ -1,0 +1,2 @@
+- See recorded offer activity for today, this week, this month or custom dates, with confirmed recipient offers kept separate from requests, bulk jobs and unknown outcomes.
+- See when offer-to-sale conversion data is unavailable instead of an unsupported conversion rate.
