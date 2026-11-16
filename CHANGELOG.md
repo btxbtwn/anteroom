@@ -6,6 +6,31 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1002 — 2026-11-16
+
+- An unfinished automation now says its price-drop amount is not set instead of showing “null” as a price or percentage.
+
+## 0.1.1001 — 2026-11-16
+
+- Setup instructions now name the supported Chrome marketplaces and the New listing control you can use to start a draft.
+
+## 0.1.1000 — 2026-11-16
+
+- Bulk marketplace instructions explain which actions can run together and what Stop leaves unfinished. A refused markdown no longer claims a price was saved.
+- Clearing recent errors now describes the empty list accurately; earlier problems remain in the log file.
+
+## 0.1.999 — 2026-11-16
+
+- Photo errors stay visible inside the enlarged viewer, so a refused reorder no longer hides its recovery instruction behind the photo.
+
+## 0.1.998 — 2026-11-16
+
+- If removing a photo fails, the error now appears beside your photos. The photo stays available to try again, and retry clears the old error.
+
+## 0.1.997 — 2026-11-16
+
+- Damaged backup restores show recovery instructions instead of a traceback, and use a fresh staging file so an old staging link cannot overwrite the current database.
+
 ## 0.1.996 — 2026-11-16
 
 - A Depop listing stays unconfirmed until its product link is known, so Anteroom can check it and delist the right item. Check result can recover the link without listing it again.

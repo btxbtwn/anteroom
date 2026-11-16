@@ -1,1 +1,0 @@
-- If removing a photo fails, the error now appears beside your photos. The photo stays available to try again, and retry clears the old error.
