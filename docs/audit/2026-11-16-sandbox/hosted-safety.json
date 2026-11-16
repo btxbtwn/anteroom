@@ -1,0 +1,13 @@
+{
+  "health_sandbox": true,
+  "bob_draft_read": 200,
+  "alice_reads_bobs_draft": 404,
+  "native-marketplaces/poshmark/list": {
+    "status": 403,
+    "detail": "Sandbox mode never publishes, delists, updates or deletes a marketplace listing."
+  },
+  "marketplace-listings/delist": {
+    "status": 403,
+    "detail": "Sandbox mode never publishes, delists, updates or deletes a marketplace listing."
+  }
+}

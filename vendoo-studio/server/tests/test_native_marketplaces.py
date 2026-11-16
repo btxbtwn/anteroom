@@ -73,6 +73,131 @@ class NativeMarketplacesTest(unittest.TestCase):
         app.dependency_overrides.clear()
         self.db.close()
 
+    def test_fixture_create_generate_edit_confirm_list_failure_retry_and_reload(self):
+        """Simulated publication only: real routes/storage, fake AI and bridge, no sockets."""
+        import io
+        from contextlib import ExitStack
+
+        from httpx import ASGITransport, AsyncClient
+        from PIL import Image
+
+        from test_listing_generate import FakeProvider
+        from vendoo_studio.services import streaming
+
+        self.enterContext(patch("socket.socket.connect", side_effect=AssertionError("Fixture workflow cannot open a socket")))
+        created = self.client.post("/api/conversations", json={"title": "Disposable audit item"})
+        self.assertEqual(created.status_code, 200, created.text)
+        self.conv = ConversationRepo(self.db).get(created.json()["id"])
+        self.base = f"/api/conversations/{self.conv.id}/native-marketplaces"
+        image = io.BytesIO()
+        Image.new("RGB", (80, 80), "blue").save(image, format="JPEG")
+        uploaded = self.client.post(f"/api/conversations/{self.conv.id}/photos", files={
+            "files": ("fixture.jpg", image.getvalue(), "image/jpeg"),
+        })
+        self.assertEqual(uploaded.status_code, 200, uploaded.text)
+        self.assertEqual(len(ConversationRepo(self.db).get_photos(self.conv.id)), 1)
+        provider = FakeProvider(chunks=[json.dumps({**LISTING, "brand": "Fixture", "condition": "Good"})])
+
+        async def generate():
+            finishing = []
+            spawn = streaming.spawn
+
+            def finish(coro):
+                task = spawn(coro)
+                finishing.append(task)
+                return task
+
+            with ExitStack() as fixtures:
+                for target, value in (
+                    ("routes.chat.get_listing_provider", provider),
+                    ("routes.chat.get_photo_provider", provider),
+                    ("services.listing_generation.load_skill_rules", "Fixture listing rules"),
+                    ("services.listing_generation.comps_search_available", False),
+                ):
+                    fixtures.enter_context(patch(f"vendoo_studio.{target}", return_value=value))
+                fixtures.enter_context(patch("vendoo_studio.services.listing_generation.research_sold_comps", new=AsyncMock(return_value="")))
+                fixtures.enter_context(patch("vendoo_studio.services.listing_generation.prepare_generation_schema", new=AsyncMock(return_value={})))
+                fixtures.enter_context(patch("vendoo_studio.services.listing_generation.spawn", side_effect=finish))
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:4329") as client:
+                    response = await client.post(f"/api/conversations/{self.conv.id}/generate")
+                    self.assertEqual(response.status_code, 200, response.text)
+                    self.assertIn("[DONE]", response.text)
+                await asyncio.wait_for(asyncio.gather(*finishing), timeout=30)
+            await streaming.reset_generations()
+
+        asyncio.run(generate())
+        self.db.expire_all()
+        saved = self.client.get(f"/api/conversations/{self.conv.id}/listing").json()
+        edited = {**saved["listing"], "title": "Edited disposable audit shirt"}
+        response = self.client.put(f"/api/conversations/{self.conv.id}/listing", json={
+            "listing": edited, "expected_revision_id": saved["current_revision_id"],
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        validation = self.client.post(f"/api/conversations/{self.conv.id}/listing/validate")
+        self.assertEqual(validation.status_code, 200, validation.text)
+        self.assertIn("can_send", validation.json())
+        self.db.expire_all()
+        self.rev = ListingRepo(self.db).latest_revision(self.conv.id)
+        body = {"revision_id": self.rev.id}
+        self.assertEqual(self.client.post(f"{self.base}/poshmark/list", json=body).status_code, 400)
+        self.assertEqual(self.client.post(f"{self.base}/all/list", json={**body, "confirm": True}).status_code, 422)
+        self.bridge.assert_not_awaited()
+        self.bridge.return_value = {"ok": False, "safe_to_retry": True, "error": "Fixture: choose a size.", "error_code": "rejected"}
+        self.assertEqual(self.list("poshmark")["state"], "not_saved")
+        self.assertIn("choose a size", self.status()["poshmark"]["error"])
+        self.bridge.return_value = {"ok": True, "state": "published", "listing_url": POSH_URL}
+        self.assertEqual(self.list("poshmark")["state"], "published")
+        payload = self.bridge.call_args.args[2]
+        self.assertEqual((payload["action"], payload["confirm"]), ("list", True))
+        self.assertEqual(payload["listing"]["title"], "Edited disposable audit shirt")
+        self.assertEqual(len(payload["photos"]), 1)
+        self.assertEqual(self.actions(), ["list", "list"])
+        reopened = TestClient(app)
+        status = reopened.get(self.base).json()["poshmark"]
+        self.assertEqual((status["state"], status["listing_url"]), ("published", POSH_URL))
+        self.db.expire_all()
+        from vendoo_studio.services.item_status import status_for
+
+        self.assertEqual(status_for(self.db, self.conv.id, parse_notes(self.conv.notes)).status, "active")
+
+    def test_current_reprice_saves_reloads_and_recovers_from_invalid_and_stale_edits(self):
+        """Historical 0.1.492 lead: current local API, two independent editor reads."""
+        other_editor = TestClient(app)
+        url = f"/api/conversations/{self.conv.id}/listing"
+        first = self.client.get(url).json()
+        stale = other_editor.get(url).json()
+        saved = self.client.put(url, json={
+            "listing": {**first["listing"], "price": 37},
+            "expected_revision_id": first["current_revision_id"],
+        })
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertEqual(other_editor.get(url).json()["listing"]["price"], 37)
+        conflict = other_editor.put(url, json={
+            "listing": {**stale["listing"], "price": 45},
+            "expected_revision_id": stale["current_revision_id"],
+        })
+        self.assertEqual(conflict.status_code, 409, conflict.text)
+        self.assertIn("Reload", conflict.json()["detail"])
+        current = other_editor.get(url).json()
+        self.assertEqual(current["listing"]["price"], 37)
+        invalid = other_editor.put(url, json={
+            "listing": {**current["listing"], "price": -5},
+            "expected_revision_id": current["current_revision_id"],
+        })
+        # Incomplete drafts remain saveable; validation prevents silent readiness.
+        self.assertEqual(invalid.status_code, 200, invalid.text)
+        self.assertTrue(any(error["field"] == "price" for error in invalid.json()["validation"]["errors"]))
+        current = other_editor.get(url).json()
+        recovered = other_editor.put(url, json={
+            "listing": {**current["listing"], "price": 39},
+            "expected_revision_id": current["current_revision_id"],
+        })
+        self.assertEqual(recovered.status_code, 200, recovered.text)
+        self.assertFalse(any(error["field"] == "price" for error in recovered.json()["validation"]["errors"]))
+        self.assertEqual(TestClient(app).get(url).json()["listing"]["price"], 39)
+        self.bridge.assert_not_awaited()
+        self.assertFalse(self.launched)
+
     # --- helpers ---------------------------------------------------------------
 
     def test_form_preparation_copies_the_listing_once_and_keeps_input_independent(self):

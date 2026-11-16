@@ -1,0 +1,167 @@
+{
+  "text": "Wholesale boxes\nScout an item\nSource with sales evidence\nUpdated 5:01 AM · next 11:01 AM\nUpdate now\n\nWholesale boxes ranked by recent sales, competition and your costs; a mixed box’s contents are never certain.\n\nBudget\n$\nShip to\nMinimum return\n%\nMore options: selling in 4 weeks for 4 weeks · 50% sells · 20% fees · $2 per piece\n\nRaghouse did not return its catalog: <urlopen error Sandbox mode blocks outbound connections: 23.227.38.65> Its boxes are left out until the next update.\n\nThrift Vintage Fashion did not return its catalog: <urlopen error Sandbox mode blocks outbound connections: 23.227.38.65> Its boxes are left out until the next update.\n\nPaperCrane did not return its catalog: <urlopen error Sandbox mode blocks outbound connections: 66.33.60.66> Its boxes are left out until the next update.\n\nBuying now for Dec 14, 2026 – Jan 10, 2027\n\nMatching themes rank higher among qualifying boxes but never raise estimated prices or sales.\n\n0 recorded sales in these windows over three years; personal context needs 5 in one category.\n\n0 boxes in this check · 0 with enough recent sold evidence.\nEnough evidence means 3 distinct sales in 30 days, from your own sales, then eBay, then Poshmark, checked weekly.\nChrome isn’t connected, so eBay sold listings can’t be read. Connect Chrome and update to add them.\nBrowse by supplier\n\nRecommendations appear once a box passes the evidence and cost checks.\n\nAll suppliers\n0 boxes\nNo recommendations yet\nRaghouse\nStore unavailable\nNo recommendations yet\nThrift Vintage Fashion\nStore unavailable\nNo recommendations yet\nPaperCrane\nStore unavailable\nNo recommendations yet\nNo boxes available in this check\nThis check returned no available boxes for the selected suppliers. Review any supplier errors above.\nNext automatic check around 11:01 AM.\nBoxes you bought\n\nWhat each box cost and what its sales have earned after fees. Pick the box when you upload its photos, and record pieces you didn’t list so their cost counts toward the ones that sell.\n\nStore\nBox\nPrice\nShipping\nPieces\nCancel\nAdd box\nHow Anteroom picks boxes",
+  "controls": [
+    {
+      "name": "Wholesale boxes",
+      "type": "button",
+      "value": "",
+      "disabled": false
+    },
+    {
+      "name": "Scout an item",
+      "type": "button",
+      "value": "",
+      "disabled": false
+    },
+    {
+      "name": "Update now",
+      "type": "button",
+      "value": "",
+      "disabled": false
+    },
+    {
+      "name": "Most to spend on boxes and inbound shipping before tax",
+      "type": "text",
+      "value": "300",
+      "disabled": false
+    },
+    {
+      "name": "ZIP code the boxes ship to",
+      "type": "text",
+      "value": "70115",
+      "disabled": false
+    },
+    {
+      "name": "Minimum estimated profit as a percentage of purchase cost",
+      "type": "text",
+      "value": "100",
+      "disabled": false
+    },
+    {
+      "name": "Weeks for shipping, preparation and listing",
+      "type": "text",
+      "value": "4",
+      "disabled": false
+    },
+    {
+      "name": "Length of the target selling window in weeks",
+      "type": "text",
+      "value": "4",
+      "disabled": false
+    },
+    {
+      "name": "",
+      "type": "checkbox",
+      "value": "on",
+      "disabled": true
+    },
+    {
+      "name": "Percentage of usable pieces you plan to sell",
+      "type": "text",
+      "value": "50",
+      "disabled": false
+    },
+    {
+      "name": "",
+      "type": "checkbox",
+      "value": "on",
+      "disabled": true
+    },
+    {
+      "name": "Effective marketplace and payment fees as a percentage of item revenue",
+      "type": "text",
+      "value": "20",
+      "disabled": false
+    },
+    {
+      "name": "",
+      "type": "checkbox",
+      "value": "on",
+      "disabled": true
+    },
+    {
+      "name": "Operating allowance per usable piece",
+      "type": "text",
+      "value": "2",
+      "disabled": false
+    },
+    {
+      "name": "",
+      "type": "checkbox",
+      "value": "on",
+      "disabled": true
+    },
+    {
+      "name": "",
+      "type": "checkbox",
+      "value": "on",
+      "disabled": false
+    },
+    {
+      "name": "All suppliers\n0 boxes\nNo recommendations yet",
+      "type": "button",
+      "value": "",
+      "disabled": false
+    },
+    {
+      "name": "Raghouse\nStore unavailable\nNo recommendations yet",
+      "type": "button",
+      "value": "",
+      "disabled": false
+    },
+    {
+      "name": "Thrift Vintage Fashion\nStore unavailable\nNo recommendations yet",
+      "type": "button",
+      "value": "",
+      "disabled": false
+    },
+    {
+      "name": "PaperCrane\nStore unavailable\nNo recommendations yet",
+      "type": "button",
+      "value": "",
+      "disabled": false
+    },
+    {
+      "name": "",
+      "type": "text",
+      "value": "Raghouse",
+      "disabled": false
+    },
+    {
+      "name": "",
+      "type": "text",
+      "value": "",
+      "disabled": false
+    },
+    {
+      "name": "",
+      "type": "text",
+      "value": "",
+      "disabled": false
+    },
+    {
+      "name": "",
+      "type": "text",
+      "value": "",
+      "disabled": false
+    },
+    {
+      "name": "",
+      "type": "text",
+      "value": "",
+      "disabled": false
+    },
+    {
+      "name": "Cancel",
+      "type": "button",
+      "value": "",
+      "disabled": false
+    },
+    {
+      "name": "Add box",
+      "type": "submit",
+      "value": "",
+      "disabled": true
+    }
+  ]
+}
