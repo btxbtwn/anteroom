@@ -1,0 +1,1 @@
+- Older Depop shipping errors now open Package size and explain when to check your shipping address in Depop.
