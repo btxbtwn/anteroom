@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.992 — 2026-11-16
+
+- Keep box and sales pages from reserving an extra database connection while checking imported sales.
+
 ## 0.1.991 — 2026-11-16
 
 - Depop offer checks still skip listings with several sizes, while recording that expected skip without raising an operator error.

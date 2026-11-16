@@ -1,1 +1,0 @@
-- Keep box and sales pages from reserving an extra database connection while checking imported sales.
