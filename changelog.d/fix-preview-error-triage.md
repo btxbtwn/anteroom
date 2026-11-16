@@ -1,0 +1,1 @@
+- Offer-check error reports now identify which marketplace read failed, helping diagnose refusals without changing prices or sending offers.
