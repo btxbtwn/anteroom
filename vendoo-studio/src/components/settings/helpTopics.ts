@@ -47,7 +47,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "One listing: press **Regenerate**. The dialog suggests a new price from live comps and your past drops. Pick one and press **Confirm**.",
       "Many at once: press **Select**, tick them, choose **More** → **Regenerate…**, choose −10%, −15% or −20% each, or **Each listing's suggestion**, then **Drop and rewrite**.",
       "Open each listing and update it on the marketplace to carry the new price live.",
-      "For an eBay sale plan, open **Marketplaces** → **eBay** → **Marketing** and use **Plan a sale** in the **Sale calendar**.",
+      "For an eBay sale plan, open **Marketplaces** → **eBay** and find **Sale calendar**. Connected accounts show it under **Marketing**. Choose **Plan a sale**.",
     ],
   },
   {

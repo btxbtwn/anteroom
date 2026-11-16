@@ -1,0 +1,98 @@
+id	feature_scenario	intended_source	surface	status	expected_actual_or_blocker	evidence	related_pr
+isolation-status	Sandbox status/temp root	sandbox.py; scripts/sandbox.sh	local API	PASS	sandbox true and isolated temp root	isolation-status.json	
+isolation-list-refusal	Confirmed eBay List refusal	sandbox.py	local API	PASS	403 with explicit sandbox refusal	coverage.md	
+bulk-list-confirm-cancel	List everywhere explicit selection and Cancel	ListingReviewActions	desktop browser	PASS	zero marketplaces selected; cancel sends nothing	coverage.md	
+local-generation	Generate from two fixture photos	listing_generation; spec Generation	desktop browser	PASS	saved draft; native field gaps visible	coverage.md	
+local-title-reload	Edit title/save/reload	listing_editor	desktop browser	PASS	edited title and two photos retained	coverage.md	
+history-compare	History compare current/earlier	ListingHistory	desktop browser	PASS	shows before/after; photos excluded from restore promise	coverage.md	
+inventory-search	No-match search and clear	ListingSidebar	desktop browser	PASS	empty state; clear restores four open fixtures	coverage.md	
+inventory-table	Table populated fixture rendering	InventoryTablePage	desktop browser	PASS	four open fixtures, prices and marketplace states	controls.tsv	
+bulk-brand-edit	Select one/replace Brand/review/save	BulkEdit	desktop browser	PASS	1 saved; API new brand with original price/title	coverage.md	
+copy-create	Copy item/create local draft	listing_copy	desktop browser	PASS	new draft/photos without external writes	coverage.md	
+record-sale	Copy fixture/record $40 in-person sale	marketplace_listings sold route	desktop browser + API	PASS	copied fixture sold; no marketplace action	coverage.md	
+sale-amount-validation	Negative buyer-paid shipping/Cancel	sales_ledger	desktop browser	PASS	validation retained form; cancel closes	coverage.md	
+analytics-unknown	Missing cost/list date and unknown values	AnalyticsPage	desktop browser	PASS	unknown distinct from zero and partial metrics disclosed	coverage.md	
+marketplace-tab-errors	Inspect five native tabs/errors	native_editor; editorTabs	desktop browser	PASS	gaps/recovery visible; offline eBay fields excluded	controls.tsv	
+automation-copy	Scheduled approval instructions at two widths	automation_scheduler; automationRows	desktop/phone Chromium CSS	PASS	automatic local saves distinguished from external approvals	screenshots/automation-desktop.png	1562
+help-copy	Current tabs/actions in Help	helpTopics; current components	desktop browser + focused unit	PASS	create topic rendered; other corrected paths source/test only	coverage.md	1562
+generation-summary	Saved listing summary names current controls	listing_generate	hosted phone Chromium CSS	PASS	General/marketplace/List/Update; missing fields disclosed	coverage.md	1562
+sourcing-cost-copy	Operating allowance sold-piece wording	box-scout/scout.py	rendered component + browser label inspection	PASS	label/help match existing sold-piece calculation	coverage.md	1562
+sourcing-failed-zip	Failed refresh/stale ZIP cart blocked	SourcingPage; spec Sourcing	desktop/phone browser with sourcing-only response fixture	PASS	old URL absent; Update needed + recovery	screenshots/sourcing-after-phone.png	1562
+sourcing-failed-budget	Budget mismatch/matching-prefs failure/in-flight	SourcingPage	rendered component unit	PASS	stale blocked, matching failure retained, refresh blocked	coverage.md	1562
+claude-isolation	Uncached/cached machine account status isolation	claude_auth; sandbox.py	API after restart + focused tests	PASS	signed out; no machine identity/CLI probe	coverage.md	1561
+chrome-refusal	Connect Chrome offline recovery	sandbox.py; ConnectChromeButton	desktop browser	PASS	refused with actionable sandbox explanation; no program launch	coverage.md	
+onboarding-partial	Welcome/AI/Brave skip/Chrome skip	FirstRunGuide	desktop browser	PASS	inspected navigation only; no credentials/settings changed	coverage.md	
+hosted-wrong-password	Wrong fixture password	cloud/SignIn	hosted desktop browser	PASS	mismatch with reset action; 127.0.0.1 origin	coverage.md	
+hosted-reset	Request reset/manual recovery code/save	cloud/SignIn; LocalSupabase	hosted desktop browser	PASS	password screen then workspace; no email/live auth claim	coverage.md	
+hosted-signout-switch	Alice signout/Bob signin empty cache	AccountMenu	hosted desktop/phone browser sequential context	PASS	Bob zero inventory/chats; no Alice rows visible	coverage.md	
+hosted-create-photo-generate	Bob create/photo-tray upload/fake generate	drafts/photos; listing_generation	hosted phone Chromium CSS	PASS	draft and one photo saved; native gaps visible	coverage.md	
+hosted-title-reload	Hosted phone edit/save/reload	listing_editor	hosted phone Chromium CSS	PASS	edited title and one photo retained	coverage.md	
+hosted-list-prerequisite	Poshmark List without connected Chrome	chromeNotice; ListingEditor	hosted phone Chromium CSS	PASS	opens account/extension panel; does not publish	screenshots/hosted-phone-connection.png	
+hosted-ownership	Bob owns draft/Alice denied	hosted draft routes	local hosted API two fixture sellers	PASS	Bob200/Alice404	hosted-safety.json	
+hosted-list-delist-refusal	Named confirmed List/Delist refusal	sandbox.py	local hosted API	PASS	both403; guards unchanged	hosted-safety.json	
+simulated-list-journey	Real routes/fake AI+adapter/no sockets	test_native_marketplaces	isolated API integration test	PASS	rejection then explicit retry/persisted simulated published; validation incomplete	coverage.md	1562
+simulated-cancel	Cancel while draft saves	native_marketplaces	isolated API adapter test	PASS	only save_draft; no publish; cancelled job	coverage.md	
+historical-reprice-api	Current price save/reload/stale/error/correct	listing_editor	two independent local API clients	PASS	37 saved; stale45 rejected; invalid feedback;39 restored	coverage.md	1562
+assistant-reply-transport	Starter/send/kept response	AssistantPage; fake provider	phone browser	PASS	fake answer kept; quality excluded	coverage.md	
+assistant-stop	Stalled fake answer/Stop	AssistantPage; streaming	phone browser	PASS	stopped; unanswered + Retry; no live model	coverage.md	
+settings-render	Ten settings sections and controls	SettingsPage; settingsNav	desktop browser	PASS	render/copy inventory only; mutation coverage excluded	controls.tsv	
+sourcing-offline-empty	Suppliers refused/no recommendations	box-scout; SourcingPage	desktop browser	PASS	zero boxes; errors visible; no fabricated research	coverage.md	
+live-publication	Actual marketplace publication success	sandbox.py	all running sandboxes	BLOCKED	guards intentionally403; simulated adapter only	coverage.md	
+native-ios	Native SwiftUI build and hand journey	docs/agent-sandboxes.md	native iOS	BLOCKED	VPS Linux; Mac fixture/runtime not yet verified	coverage.md	
+packaged-mac	Installed packaged Mac fixture smoke	smoke-packaged-sandbox.py	native Mac	BLOCKED	Linux; installed bundle/version not available here	coverage.md	
+ebay-specifics	eBay category-specific fields/variations	native_editor; docs/audit.md	local/hosted browser	BLOCKED	sandbox has no real API category schema fixture	coverage.md	
+live-sold-research	Supplier/marketplace sold evidence quality	box-scout	all fixture surfaces	BLOCKED	outbound blocked; fixture evidence not real research	coverage.md	
+live-provider-auth	Real provider/marketplace OAuth recovery	sandbox.py	all fixture surfaces	BLOCKED	offline guard/live credentials prohibited	coverage.md	
+assistant-quality	Business answer correctness	Business assistant spec	browser fake provider	BLOCKED	fake provider returns listing JSON; transport only verified	coverage.md	
+production-readiness	Real designated item/list+confirmed-delist	production-readiness.md	production	BLOCKED	sandbox signoff/deployment/genuine item/marketplace/fees unresolved	coverage.md	
+history-restore	Restore version/confirm/reload	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+browser-reprice	Browser price/save/reload/invalid recovery	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+browser-two-contexts	Concurrent independent browser stale edits	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+hosted-two-seller-reprice	Hosted price edits with seller isolation	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+filter-sort-persist	Filter/sort/search/scroll/selection after navigation	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+navigation-back-forward	Back/forward and interrupted unsaved edit	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+templates-save	Save selected template fields	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+templates-apply	Apply template/review/save/reload	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+templates-stale	Template stale approval and recovery	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+bulk-upload	Folder grouping/create drafts	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+bulk-upload-cancel	Bulk upload interrupted/cancel/retry	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+bulk-markdown	Local markdown/review/confirm/persistence	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+bulk-copy	Bulk copy scoped fields/photos/quantity	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+bulk-delete	Disposable bulk delete and Undo	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+bulk-regenerate	Regenerate preview/price choice/cancel/rewrite	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+bulk-marketplaces	Bulk explicit marketplace selection/refusal	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+photo-reorder	Photo drag order/reload	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+photo-remove-undo	Remove disposable photo/Undo/reload	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+photo-edit	Rotate/crop/save/reset/reload	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+photo-background	Background removal/no-provider failure	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+photo-video	Marketplace video validation/upload/remove	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+measure-read	Ruler-photo suggestion/Fill in/blank-only guard	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+similar-items	Duplicate search/merge/different decision	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+scout-item	Scout photos/start/failure/retry/buy/pass	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+sourcing-box-record	Add/edit purchased box/shipping/unlisted pieces	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+sourcing-preferences	ZIP/budget invalid/commit/reload/retry	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+assistant-proposals	Apply/Dismiss/stale proposal/reload	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+assistant-followups	Queue/remove follow-ups/reconnect	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+assistant-history	New/history/search/delete chats	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+assistant-memory	Business note/memory save/remove	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+assistant-attachments	Attachment upload/remove/error/recovery	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+automations-editor	Prompt/manual/preview/save draft/confirm	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+automations-lifecycle	Pause/resume/dry run/run now/history/delete	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+offer-sharing-controls	Offer/share enable confirmation/limits/errors	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+sale-edit-persist	Record amounts/save/reload/cancel/stale save	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+sale-delete	Disposable sale delete/undo and status	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+calendar-plan	Create/edit/cancel local plan	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+calendar-record	Record run/persist/delete/comparison	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+settings-listings-write	Labels/dimensions/ZIP/formulas/hidden field restore	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+settings-appearance	Light/dark/system/naming persistence	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+backup-create	Temporary data backup/snapshot listing	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+backup-restore	Restore disposable previous-release database	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+settings-log-controls	Log clear/filter/export without secrets	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+onboarding-finish	Remaining tour/create/close/back steps	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+phone-chat-photos-1517	Known phone composer attachment ownership regression	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	1517
+webkit-ui	Separate WebKit browser checks	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+dark-ui	Dark-mode interaction and screenshots	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+multi-seller-latency	Concurrent sellers/drafts input/nav p50/p95/error rate	See coverage.md remaining surface and component source	not yet exercised	NOT RUN	No current execution evidence; not counted as failure	coverage.md	
+bulk-review-internal-copy	Bulk edit review exposes internal JSON/field names	DESIGN.md actionable seller copy; BulkEdit review	desktop browser	FAIL	Low severity: observed raw marketplace objects and seller fields in review; no redesign/fix yet	coverage.md	
+sourcing-error-internal-copy	Supplier failure exposes socket/IP exception text	DESIGN.md error copy; SourcingPage StoreProblems	desktop browser	FAIL	Low severity: offline errors include urlopen/socket/IP details; recovery exists but technical detail remains	coverage.md	
+sale-validation-internal-copy	Sale amount validation begins with Value error	DESIGN.md error copy; sales ledger	desktop browser	FAIL	Low severity: actionable amount rule follows an unnecessary implementation prefix; no fix yet	coverage.md	

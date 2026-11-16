@@ -135,7 +135,11 @@ class NativeMarketplacesTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         validation = self.client.post(f"/api/conversations/{self.conv.id}/listing/validate")
         self.assertEqual(validation.status_code, 200, validation.text)
-        self.assertIn("can_send", validation.json())
+        # Fake generation intentionally leaves marketplace fields unresolved.
+        # Validation must expose those gaps; the adapter result below is simulated,
+        # not evidence that this incomplete draft is ready for a real marketplace.
+        self.assertFalse(validation.json()["can_send"])
+        self.assertTrue(validation.json()["errors"])
         self.db.expire_all()
         self.rev = ListingRepo(self.db).latest_revision(self.conv.id)
         body = {"revision_id": self.rev.id}

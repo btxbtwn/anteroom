@@ -1,3 +1,5 @@
+> Current status counts come only from [scenarios.tsv](scenarios.tsv). Earlier checkpoints below are historical and superseded where later evidence exists. PASS is limited to each named scenario and surface; it is not a full-feature or release sign-off.
+
 # Hands-on sandbox audit — 2026-11-16
 
 Owner: sandbox-feature-behavior-copy. Baseline: `894241be30091dc615a97db8b0bb77933b34bef1` (also origin/main at start). This is a coverage record, not a replacement instruction framework. Follow [daily audit](../../audit.md), [design](../../../DESIGN.md), [performance](../../performance.md) and [responsiveness](../../responsiveness.md).
@@ -123,3 +125,20 @@ Native follow-up requested through the parent thread. Mac hub now lists devices,
 ### Applied design research
 
 Applied clear control names and actionable failed-state instructions from [W3C labels/instructions](https://www.w3.org/WAI/WCAG22/Understanding/labels-or-instructions) and [Apple writing guidance](https://developer.apple.com/design/human-interface-guidelines/writing). Kept existing components and styling; no layout/color/type-system redesign was warranted. Sources consulted 2026-11-16; this is not an accessibility conformance audit.
+
+## Checkpoint 05:50 UTC — resumed audit and independent review
+
+Canonical current inventory: **97 named scenarios: 38 PASS, 3 FAIL, 8 BLOCKED, 48 NOT RUN**. This is a scenario count, not a button/route denominator or test count. Some PASS rows cover rendering/API/unit fixtures only; their surface and excluded behavior are explicit in scenarios.tsv. Historical failed regressions fixed in the draft stack are not counted as currently failing. The three current FAIL rows are low-severity seller-copy/usability issues already observed: raw bulk-review JSON, supplier socket exception text, and the Value error prefix in sale validation. None is evidence of unsafe publishing.
+
+PR state checked at resume:
+- #1561 exact head `8d4e6e87e0d4d0b8dff85225bd9fd193f03ca5b9`: CI green; draft/open; no GitHub reviews/comments.
+- #1562 exact head `715376208304b9571491d5a2183adf7d20b3ff17`: frontend/code health/SQLite/Postgres/hosted browser passed; sandbox browser still running at latest observation. Draft/open, stacked on1561; no GitHub reviews/comments. No red job to reproduce or restart.
+- Independent read-only reviewer examined both exact heads and found one P2 copy error introduced in Help: it required eBay→Marketing even for a disconnected account, whose calendar renders directly. Corrected to find Sale calendar under eBay and mention Marketing only for connected accounts. Focused Help check RED1 failed/6 passed → GREEN7 passed. Browser recheck of this wording awaits the reserved interactive slot; no runtime behavior changed.
+- Reviewer found no other production-code blocker in the Claude guard or Sourcing stale-cart gate. Advisory validation weakness fixed: the simulated journey now explicitly asserts `can_send == false` and nonempty errors for its intentionally incomplete generated fixture. Targeted rerun:1 passed/68 deselected in9.69s. This tests gap reporting and simulated listing plumbing; **it does not establish real marketplace readiness**.
+- Reviewer advised canonical counts to avoid mixing old checkpoint states; scenarios.tsv now owns those current counts. Independent review is local agent review, not a GitHub approval.
+
+Resource agreement: disk4.8GB free/96% at resume; no installs/full suites. Shipping retains its full browser invocation, then #1560 has a reserved short real-Postgres/desktop-phone/light-dark slot, then eBay. Audit has no browser/Postgres reservations and will wait for an explicit release, with no polling or process interference. Only the changed Help check and one strengthened workflow case ran, each single-worker, under10s; unchanged scenarios were not rerun.
+
+Concrete native requirements and narrowed existing test cases are in [native-follow-up.md](native-follow-up.md). VPS cannot execute them. Parent routing still requires a verified sandbox Debug app/API and device session; hosted release identity and installed desktop identity remain separate.
+
+Next interactive priority once released: browser repricing and stale second editor; History restore/confirm/reload; template save/apply; then bulk upload/markdown/delete undo and remaining cancellation/permission states. Do not repeat the verified generation/title workflow unless changed code warrants it. Production remains blocked as recorded in production-readiness.md.

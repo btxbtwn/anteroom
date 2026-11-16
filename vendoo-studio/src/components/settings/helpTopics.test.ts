@@ -40,9 +40,11 @@ describe("help topics", () => {
     for (const removed of ["**Sold**", "**Sell-through rate**", "**Median time to sell**"]) expect(text).not.toContain(removed);
   });
 
-  it("routes sale plans through eBay Marketing and bulk rewriting through More", () => {
+  it("locates eBay sale plans with or without a connected account and bulk rewriting through More", () => {
     const price = helpTopicMarkdown(HELP_TOPICS.find((topic) => topic.id === "help-price-drops")!);
-    expect(price).toContain("**Marketplaces** → **eBay** → **Marketing**");
+    expect(price).toContain("**Marketplaces** → **eBay** and find **Sale calendar**");
+    expect(price).toContain("Connected accounts show it under **Marketing**");
+    expect(price).not.toContain("**eBay** → **Marketing**");
     expect(price).toContain("**More** → **Regenerate…**");
     const regenerate = helpTopicMarkdown(HELP_TOPICS.find((topic) => topic.id === "help-regenerate")!);
     expect(regenerate).toContain("**More** → **Regenerate…**");
