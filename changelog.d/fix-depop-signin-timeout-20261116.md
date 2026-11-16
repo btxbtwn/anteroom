@@ -1,0 +1,1 @@
+- Depop sign-in checks no longer wait on page JavaScript, and a failed reconnect says the sign-in was not confirmed. Timed-out sign-in requests are removed before a retry. Sales-check errors say what failed separately from your sign-in status.

@@ -99,23 +99,32 @@ async function handleMarketplaceSessions(msg) {
   }
 }
 
-// Runs only during an explicit sign-in/reconnect. Session values stay inside
-// Chrome; the API receives only readiness and diagnostic field names.
-async function readMarketplaceSignIn(marketplace) {
-  if (marketplace === 'depop') {
-    const cookie = document.cookie.split(';').map(value => value.trim()).find(value => value.startsWith('access_token='));
-    const token = cookie ? decodeURIComponent(cookie.slice(13)) : null;
-    let status = null;
-    if (token) {
+async function checkDepopSignIn() {
+  const signal = AbortSignal.timeout(8000);
+  const context = ensureMarketplaceRequestContext();
+  let onAbort;
+  const aborted = new Promise((_, reject) => {
+    onAbort = () => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([aborted, (async () => {
+      await context;
+      signal.throwIfAborted();
+      const authorization = await depopBearer();
+      signal.throwIfAborted();
       const response = await fetch('https://webapi.depop.com/presentation/api/v1/drafts/?limit=24&sort_by=createdAt', {
-        headers: { Accept: 'application/json', Authorization: `Bearer ${token}` }, credentials: 'omit', signal: AbortSignal.timeout(10000),
+        headers: { Accept: 'application/json', Authorization: authorization }, credentials: 'omit', signal,
       });
-      status = response.status;
-      await response.body?.cancel();
-    }
-    return { access_token: token, page_read_status: status };
+      void response.body?.cancel().catch(() => {});
+      return response;
+    })()]);
+  } catch (error) {
+    if (signal.aborted && marketplaceNetworkReady === context) marketplaceNetworkReady = null;
+    throw error;
+  } finally {
+    signal.removeEventListener('abort', onAbort);
   }
-  return {};
 }
 
 async function handleMarketplaceConnect(msg, reply = result => sendBrowserResult(msg, result)) {
@@ -131,12 +140,17 @@ async function handleMarketplaceConnect(msg, reply = result => sendBrowserResult
     const tab = existing || await openMarketplaceTab(url);
     await chrome.tabs.update(tab.id, { active: true });
     await nativeWait(tab.id, value => value.status === 'complete' && String(value.url || '').startsWith(`${origin}/`), Date.now() + 30000);
-    const result = marketplace === 'depop'
-      ? ((await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: readMarketplaceSignIn, args: [marketplace] }))?.[0]?.result || {})
-      : {};
     let summary = await readExtensionSession(marketplace);
-    if (marketplace === 'depop' && (result.page_read_status === 401 || result.page_read_status === 403) && summary.state === 'signed_in') {
-      summary = { ...summary, state: 'expired', expiring: false };
+    if (marketplace === 'depop' && summary.state === 'signed_in') {
+      let response;
+      try {
+        response = await checkDepopSignIn();
+      } catch {
+        reply({ ok: false, error: 'Depop did not answer the sign-in check. Open Depop in Chrome, then try again.' });
+        return;
+      }
+      if (response.status === 401 || response.status === 403) summary = { ...summary, state: 'expired', expiring: false };
+      else if (!response.ok) summary = unknownExtensionSession();
     }
     reply({ ok: true, signed_in: summary.state === 'signed_in', ...summary });
   } catch { reply({ ok: false, error: 'Finish signing in in Chrome, then reconnect. Listing actions will not open tabs.' }); }
