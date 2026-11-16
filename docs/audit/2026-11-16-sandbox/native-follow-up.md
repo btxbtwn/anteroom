@@ -31,4 +31,6 @@ The web bulk-edit review now flattens whole marketplace objects into individual 
 
 Sale amount validation wording is shared server-side. In native Record amounts, verify a negative buyer shipping amount shows the seller instruction without “Value error,” then correct it and save/reopen. Supplier error copy is currently a web Sourcing surface; native Sourcing is a documented parity gap.
 
+Native-specific current follow-up: fixture a legacy Depop published/no-product-link response and require Unconfirmed plus read-only recovery; verify current iPhone controls rather than assuming web parity. Shared API fixture now covers persisted ID/deleted state through separate Python app startup/shutdown processes, not installed Mac/iPhone execution. The restore CLI fix also needs a macOS-only stopped/disposable-data smoke; never point it at the installed seller data folder.
+
 Daily audit reuse: issue #1573 recorded source075f557b/0.1.986 and installed Mac0.1.969; scripted core native cases passed but its manual native journey was not run. Rollup #1544 covers older source2a257afb/0.1.971. These are prior evidence only; neither verifies the current audit stack or its manual native controls. Device availability has since improved, so parent can route the concrete remaining pass after checking current Mac resource ownership.

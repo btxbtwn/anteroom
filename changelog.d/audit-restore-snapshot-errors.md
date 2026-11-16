@@ -1,0 +1,1 @@
+- Damaged backup restores show recovery instructions instead of a traceback, and use a fresh staging file so an old staging link cannot overwrite the current database.
