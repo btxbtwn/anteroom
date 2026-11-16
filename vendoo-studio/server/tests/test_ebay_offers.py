@@ -199,6 +199,7 @@ def test_preview_then_explicit_send_uses_live_price_and_fixed_dollar_floor(offer
     assert response.status_code == 200
     assert response.json()["offers"][0]["state"] == "sent"
     assert response.json()["offers"][0]["recipientCount"] == 2
+    assert offers.db.get(EbayOfferAttempt, row["id"]).sent_at is not None
     assert offers.remote.sends == [{"allowCounterOffer": False, "offeredItems": [
         {"listingId": ITEM_ID, "quantity": 1, "price": {"value": "45.00", "currency": "USD"}},
     ]}]

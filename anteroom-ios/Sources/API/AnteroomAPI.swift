@@ -662,6 +662,13 @@ final class AnteroomAPI: Sendable {
 
     // MARK: Analytics
 
+    func offerActivity(start: String, end: String, timezone: String) async throws -> OfferAnalyticsResponse {
+        try await decode(request("GET", "api/analytics/offers", query: [
+            URLQueryItem(name: "start", value: start), URLQueryItem(name: "end", value: end),
+            URLQueryItem(name: "timezone", value: timezone),
+        ]))
+    }
+
     func analytics(range: String, start: Date? = nil, end: Date? = nil) async throws -> InventoryAnalytics {
         var query = [URLQueryItem(name: "range", value: range)]
         let day = Date.ISO8601FormatStyle().year().month().day()

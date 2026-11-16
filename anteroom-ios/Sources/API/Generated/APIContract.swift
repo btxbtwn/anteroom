@@ -438,6 +438,39 @@ struct ListingValidation: Codable, Hashable, Sendable {
     }
 }
 
+struct OfferAnalyticsMarketplace: Codable, Hashable, Sendable {
+    var marketplace: String
+    var confirmedRecipients: Int?
+    var confirmedSends: Int
+    var acceptedRequests: Int
+    var completedJobs: Int
+    var unverified: Int
+    var unknown: Int
+    var failed: Int
+    var pending: Int
+
+    enum CodingKeys: String, CodingKey {
+        case marketplace, unverified, unknown, failed, pending
+        case confirmedRecipients = "confirmed_recipients"
+        case confirmedSends = "confirmed_sends"
+        case acceptedRequests = "accepted_requests"
+        case completedJobs = "completed_jobs"
+    }
+}
+
+struct OfferAnalyticsResponse: Codable, Hashable, Sendable {
+    var start: String
+    var end: String
+    var timezone: String
+    var confirmedConversions: Int?
+    var marketplaces: [OfferAnalyticsMarketplace]
+
+    enum CodingKeys: String, CodingKey {
+        case start, end, timezone, marketplaces
+        case confirmedConversions = "confirmed_conversions"
+    }
+}
+
 struct PhotoEdits: Codable, Hashable, Sendable {
     /// One of: 0, 90, 180, 270.
     var rotate: Int = 0

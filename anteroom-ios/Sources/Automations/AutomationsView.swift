@@ -53,6 +53,7 @@ struct AutomationsView: View {
         Group {
             List {
                 Group {
+                    OfferActivitySection(api: api)
                     if !approvals.isEmpty {
                         Section {
                             ForEach(approvals) { row in

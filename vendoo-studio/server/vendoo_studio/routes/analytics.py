@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
+from vendoo_studio.routes.api_contract import OfferAnalyticsResponse
 from vendoo_studio.services.inventory_analytics import inventory_analytics
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
@@ -244,3 +245,20 @@ def get_generation_timings(limit: int = Query(50, ge=1, le=500), db: Session = D
     from vendoo_studio.services.generation_timing import recent_summary
 
     return recent_summary(db, limit=limit)
+
+
+@router.get("/offers", response_model=OfferAnalyticsResponse)
+def get_offer_analytics(
+    start: date, end: date, response: Response,
+    timezone: str = Query("UTC", max_length=100),
+    db: Session = Depends(get_db),
+):
+    from zoneinfo import ZoneInfoNotFoundError
+    from vendoo_studio.services.offer_analytics import offer_analytics
+
+    try:
+        payload = offer_analytics(db, start=start, end=end, timezone=timezone)
+    except (ValueError, ZoneInfoNotFoundError, OverflowError) as exc:
+        raise HTTPException(status_code=400, detail="Choose valid dates within 366 days and a valid time zone.") from exc
+    response.headers["Cache-Control"] = "no-store"
+    return OfferAnalyticsResponse.model_validate(payload)

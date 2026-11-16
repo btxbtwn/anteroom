@@ -30,6 +30,7 @@ from vendoo_studio.models.ownership import SellerOwned
 class ListingPromotion(SellerOwned, Base):
     __tablename__ = "listing_promotions"
     __table_args__ = (
+        Index("ix_listing_promotions_seller_sent", "user_id", "sent_at"),
         Index("ix_listing_promotions_rule_recent", "automation_id", "marketplace", "action", "created_at"),
         ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
             name="fk_listing_promotions_seller_conversation_id", deferrable=True, initially="DEFERRED"),

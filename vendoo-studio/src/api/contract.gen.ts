@@ -238,6 +238,26 @@ export interface ListingValidation {
   can_send: boolean;
 }
 
+export interface OfferAnalyticsMarketplace {
+  marketplace: string;
+  confirmed_recipients: number | null;
+  confirmed_sends: number;
+  accepted_requests: number;
+  completed_jobs: number;
+  unverified: number;
+  unknown: number;
+  failed: number;
+  pending: number;
+}
+
+export interface OfferAnalyticsResponse {
+  start: string;
+  end: string;
+  timezone: string;
+  confirmed_conversions: number | null;
+  marketplaces: OfferAnalyticsMarketplace[];
+}
+
 export interface PhotoEdits {
   rotate?: 0 | 90 | 180 | 270;
   straighten?: number;
