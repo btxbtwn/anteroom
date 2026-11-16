@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.979 — 2026-11-16
+
+- Opening the Account menu, or clicking into another field, while the Assistant is still loading no longer has the Assistant's message box take focus and close the menu.
+
 ## 0.1.978 — 2026-11-16
 
 - Stopping a listing while it finishes its marketplace fields no longer reports an error or asks you to retry.

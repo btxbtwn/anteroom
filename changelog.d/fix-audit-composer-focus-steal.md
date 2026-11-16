@@ -1,1 +1,0 @@
-- Opening the Account menu, or clicking into another field, while the Assistant is still loading no longer has the Assistant's message box take focus and close the menu.
