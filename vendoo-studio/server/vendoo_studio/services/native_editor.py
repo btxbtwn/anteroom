@@ -3,12 +3,42 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import logging
+import re
 
+import httpx
 from sqlalchemy.orm import Session
 
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
 from vendoo_studio.services import direct_preflight
 from vendoo_studio.services.native_marketplaces import NativeMarketplaceError
+
+
+_log = logging.getLogger(__name__)
+
+
+def _category_failure_types(exc: BaseException) -> str:
+    """Fixed type vocabulary only: messages, custom type names and stacks can contain secrets."""
+    from sqlalchemy.exc import SQLAlchemyError, TimeoutError as PoolTimeout
+    from vendoo_studio.services.ebay_client import EbayFailure
+    from vendoo_studio.services.marketplace_accounts import SignInRequired
+
+    known = (EbayFailure, SignInRequired, PoolTimeout, SQLAlchemyError,
+             httpx.ReadTimeout, httpx.ConnectTimeout, httpx.WriteTimeout, httpx.PoolTimeout,
+             httpx.HTTPStatusError, httpx.TimeoutException, httpx.NetworkError, httpx.RequestError,
+             TimeoutError, ValueError, KeyError, TypeError, RuntimeError, OSError, Exception)
+    labels = []
+    seen = set()
+    for _ in range(4):
+        if id(exc) in seen:
+            break
+        seen.add(id(exc))
+        labels.append(next((kind.__name__ for kind in known if isinstance(exc, kind)), "BaseException"))
+        cause = exc.__cause__ or (None if exc.__suppress_context__ else exc.__context__)
+        if cause is None:
+            break
+        exc = cause
+    return " > ".join(labels)
 
 
 def form_snapshot(db: Session, conv_id: str, marketplace: str, revision_id: str | None) -> tuple[dict, dict]:
@@ -223,7 +253,13 @@ async def ebay_form(snapshot: dict) -> dict:
         try:
             schema = await marketplace_schemas.fields("ebay", category) if category else []
         except Exception as exc:  # noqa: BLE001 - never substitute a different form
-            raise NativeMarketplaceError(502, "eBay’s category fields could not be loaded. Check its connection and refresh choices.") from exc
+            # Record before routes replace the cause with a safe HTTP response.
+            # Never attach exc_info: even nested exception messages/URLs may carry credentials.
+            # Suppress the raw chain too, in case another caller logs our safe wrapper.
+            safe_category = category if re.fullmatch(r"[1-9][0-9]{0,14}", category) else "invalid"
+            _log.error("eBay category schema load failed (category_id=%s; exception_types=%s)",
+                       safe_category, _category_failure_types(exc))
+            raise NativeMarketplaceError(502, "eBay’s category fields could not be loaded. Check its connection and refresh choices.") from None
         return schema, await _ebay_variations_field(snapshot, category, schema)
 
     details = snapshot.get("ebay_specifics") or {}
