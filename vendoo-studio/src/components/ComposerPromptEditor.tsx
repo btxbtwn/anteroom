@@ -1,5 +1,6 @@
 import { Extension, Node, type JSONContent } from "@tiptap/core";
 import Placeholder from "@tiptap/extension-placeholder";
+import { Selection } from "@tiptap/pm/state";
 import {
   EditorContent,
   NodeViewWrapper,
@@ -194,7 +195,17 @@ export function ComposerPromptEditor({ value, onChange, onSubmit, onEscape, plac
     {
       extensions,
       content: asContent(promptToDoc(value)),
-      autofocus: autoFocus ? "end" : false,
+      // Tiptap's own autofocus focuses a frame after mount whatever has focus
+      // by then. The Assistant mounts this after its messages load, when the
+      // seller may already be in a menu or another field, so focus only when
+      // nothing else has it, checked at the moment of focusing.
+      autofocus: false,
+      onCreate: ({ editor: instance }) => {
+        const active = document.activeElement;
+        if (!autoFocus || (active && active !== document.body)) return;
+        instance.view.dispatch(instance.state.tr.setSelection(Selection.atEnd(instance.state.doc)));
+        instance.view.focus();
+      },
       editorProps: {
         // T3 Code's composer editor classes.
         attributes: {
