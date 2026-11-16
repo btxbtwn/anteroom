@@ -180,3 +180,53 @@ def test_other_preview_refusals_stay_error_at_transport_and_review(monkeypatch, 
     assert all(build_report(record)['severity'] == 'ERROR' for record in records)
     request.assert_awaited_once()
     assert row.sent_at is None and row.offer_price_cents is None and row.confirmation is None
+
+
+@pytest.mark.parametrize('step', ['mercari-account', 'mercari-item', 'mercari-eligibility', 'mercari-bounds',
+                                  'depop-account', 'depop-product', 'depop-offer-preview'])
+def test_preview_read_step_reaches_both_reporting_layers(monkeypatch, caplog, step):
+    marketplace = step.split('-')[0]
+    result = {'ok': False, 'error': 'Read refused', 'error_code': 'rejected', 'safe_to_retry': True,
+              'preview_step': step, 'response_data': {'token': 'private-token'}}
+    request = AsyncMock(return_value=result)
+    monkeypatch.setattr(browser_bridge, '_request', request)
+    row = ListingPromotion(marketplace=marketplace, action='offer', batch_id='fixture', discount_percent=10)
+    with caplog.at_level(logging.ERROR), pytest.raises(listing_promotions.PromotionError):
+        asyncio.run(listing_promotions._review_remote(row, 'fixture-listing'))
+    records = [r for r in caplog.records if r.name in ('vendoo_studio.marketplaces', 'vendoo_studio.listing_promotions')]
+    assert len(records) == 2
+    for record in records:
+        report = build_report(record)
+        assert report['marketplace_context']['preview_step'] == step
+        assert 'private-token' not in str(report)
+        assert step in render_email(report, 0, None)[1]
+    request.assert_awaited_once()
+
+
+@pytest.mark.parametrize('step', ['https://private/item', 'private-token', {}, ['mercari-item'], None])
+def test_preview_read_step_rejects_arbitrary_values(step):
+    from vendoo_studio.services.marketplace_diagnostics import failure_context, sanitize_context
+    assert sanitize_context({'preview_step': step}) == {}
+    assert 'preview_step' not in failure_context('marketplace.promotion_check', {'action': 'offer'},
+                                               {'preview_step': step}, 1, 90)
+
+
+def test_nested_unknown_does_not_inherit_preview_read_step(caplog):
+    from vendoo_studio.services.marketplace_errors import report_result
+    with caplog.at_level(logging.ERROR):
+        report_result('depop', 'marketplace.promotion_check', {'result': {'state': 'unknown'}},
+                      context={'action': 'offer', 'preview_step': 'depop-product'})
+    assert 'preview_step' not in build_report(caplog.records[-1])['marketplace_context']
+
+
+def test_hosted_preview_preserves_allowlisted_read_step(monkeypatch, caplog):
+    from vendoo_studio.services.hosted_browser_relay import BrowserRelay
+    relay = BrowserRelay()
+    result = {'ok': False, 'error': 'Depop refused the request (HTTP 404).', 'safe_to_retry': True,
+              'marketplace_message': 'Product not found', 'preview_step': 'depop-product'}
+    request = AsyncMock(return_value=result)
+    monkeypatch.setattr(relay, '_read', request)
+    with caplog.at_level(logging.ERROR):
+        assert asyncio.run(relay.read('marketplace.promotion_check', {'marketplace': 'depop', 'action': 'offer'}, 90)) is result
+    assert build_report(caplog.records[-1])['marketplace_context']['preview_step'] == 'depop-product'
+    request.assert_awaited_once()

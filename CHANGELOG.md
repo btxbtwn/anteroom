@@ -6,6 +6,18 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.986 — 2026-11-16
+
+- Older Depop shipping errors now open Package size and explain when to check your shipping address in Depop.
+
+## 0.1.985 — 2026-11-16
+
+- Offer-check error reports now identify which marketplace read failed, helping diagnose refusals without changing prices or sending offers.
+
+## 0.1.984 — 2026-11-16
+
+- Depop sign-in checks no longer wait on page JavaScript, and a failed reconnect says the sign-in was not confirmed. Timed-out sign-in requests are removed before a retry. Sales-check errors say what failed separately from your sign-in status.
+
 ## 0.1.983 — 2026-11-16
 
 - Keep new error alerts prompt and combine repeated errors into hourly emails, while preserving every queued occurrence and giving warning summaries a turn.
