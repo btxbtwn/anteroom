@@ -30,3 +30,12 @@ Cristian's later intent is preserved: “I’m fine with you listing a test item
 ## Historical false-positive safeguard
 
 The 2026-09-14 lead does not establish a current defect, but reinforces the evidence rule: missing navigation, missing live-listing state, a blank form during load, unknown status, or stale cached status is **unverified**, never a successful draft/list/delist. An explicit draft/not-listed result is distinct from an unknown result. Eventual production success requires the marketplace's own current state for the exact item after listing and independently again after delisting; clicks, queued jobs, and local marks are insufficient. No live test may run before the existing prerequisites are resolved.
+
+
+## Historical Depop cleanup lead (2026-10-25; current live state unverified)
+
+User source: https://app.t3.codes/threads/b5e12513-0433-4698-aa8e-ab05715755e3/b27ecec3-d827-4858-a3d8-c9ad0aa7ee49 . Thread exists; only introductory context was read here, not the entire historical audit. User reports that direct Depop publication then lacked a link and Studio could not delist it. Treat this as a historical lead, not a proven present marketplace failure.
+
+Current source inspection: depop-native.js attempts status/draft/shop lookup for a product URL, but its completed publish responses still include listing_url only when available (around1700/1721). native_marketplaces._outcome permits Depop publication without that URL. marketplace_identity derives Depop identity from a validated product slug URL; a syntactically valid URL does not verify ownership or live state. marketplace_delist._open_delist refuses409 when no listing_id is known. Existing tests cover slug recovery/manual marks, but were not rerun for this lead and do not establish this audit's complete publish→persistent identifier→delist journey.
+
+Before choosing ANY production item/path: prove in isolated test-only adapters that publish returns a usable durable marketplace identifier, save it, read it through a fresh client/restart, explicitly delist the same identifier with confirmation, and independently read marketplace-own absent/delisted state. Also test missing identifier refusal and recovery without duplicate publication. Do not count local marks, queued jobs or clicks as verification. No live publish may be used to discover whether cleanup works. Depop is not a production-ready candidate on this evidence alone; marketplace/item/account/fees and verified deployment remain unresolved.
