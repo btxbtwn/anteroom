@@ -60,7 +60,7 @@ def test_load_tests_can_sign_in_more_sellers(monkeypatch):
 
 
 def test_database_delay_proxy_adds_the_round_trip_each_way():
-    import asyncio
+    import gc
     import os
     import shutil
     import socket
@@ -72,25 +72,43 @@ def test_database_delay_proxy_adds_the_round_trip_each_way():
     # Unix socket paths are capped at 104 bytes on macOS, which pytest's tmp_path there exceeds.
     short = tempfile.mkdtemp(dir='/tmp')
     path = os.path.join(short, 'echo.sock')
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(path)
+    listener.listen(1)
+    listener.settimeout(10)
 
-    async def echo(reader, writer):
-        while data := await reader.read(1024):
-            writer.write(data)
-            await writer.drain()
-        writer.close()
+    def echo():
+        # One connection, the proxy's; it ends when the proxy closes it.
+        conn, _ = listener.accept()
+        with conn:
+            while data := conn.recv(1024):
+                conn.sendall(data)
 
-    loop = asyncio.new_event_loop()
-    loop.run_until_complete(asyncio.start_unix_server(echo, path))
-    threading.Thread(target=loop.run_forever, daemon=True).start()
+    serving = threading.Thread(target=echo, daemon=True)
+    serving.start()
     proxy = DelayedDatabase(path, 0.05)
+    trips = []
+    # A process-wide stall late in a long test process (a full garbage
+    # collection, or CPU starvation on a busy runner) paused every thread for
+    # over a second: CI run 43781664867 measured 1.63 s for one trip. Automatic
+    # collection stays off while timing. A stall can only lengthen a trip, so
+    # every trip must include the delay, and all but one must stay near it: a
+    # proxy that adds delay, always or every other trip, still fails.
+    collecting = gc.isenabled()
+    gc.disable()
     try:
         with socket.create_connection(('127.0.0.1', proxy.port), timeout=5) as client:
-            for message in (b'one', b'two'):
+            for message in (b'one', b'two', b'three', b'four'):
                 started = time.perf_counter()
                 client.sendall(message)
                 assert client.recv(1024) == message
-                assert 0.1 <= time.perf_counter() - started < 1
+                trips.append(time.perf_counter() - started)
     finally:
+        if collecting:
+            gc.enable()
         proxy.stop()
-        loop.call_soon_threadsafe(loop.stop)
+        serving.join(5)
+        listener.close()
         shutil.rmtree(short, ignore_errors=True)
+    assert min(trips) >= 0.1, trips
+    assert sorted(trips)[-2] < 0.5, trips

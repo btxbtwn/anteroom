@@ -228,10 +228,13 @@ class DelayedDatabase:
         except OSError:
             client_writer.close()
             return
-        await asyncio.gather(self.pipe(client_reader, server_writer), self.pipe(server_reader, client_writer),
-                             return_exceptions=True)
-        for writer in (client_writer, server_writer):
-            writer.close()
+        try:
+            await asyncio.gather(self.pipe(client_reader, server_writer), self.pipe(server_reader, client_writer),
+                                 return_exceptions=True)
+        finally:
+            # stop() cancels this task; close both ends either way.
+            for writer in (client_writer, server_writer):
+                writer.close()
 
     async def pipe(self, reader, writer):
         chunks: asyncio.Queue[tuple[float, bytes]] = asyncio.Queue()
