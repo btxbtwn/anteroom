@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.978 — 2026-11-16
+
+- Stopping a listing while it finishes its marketplace fields no longer reports an error or asks you to retry.
+
 ## 0.1.977 — 2026-11-16
 
 - Backend tests on a Mac's local Postgres now run in UTC, like the hosted database.
