@@ -845,6 +845,8 @@ class RefreshTest(unittest.TestCase):
         with self._models():
             snapshot = box_scout.refresh()
         self.assertIn("Raghouse did not return its catalog", snapshot["stores"]["raghouse"]["error"])
+        self.assertIn("Update now", snapshot["stores"]["raghouse"]["error"])
+        self.assertNotIn("HTTP Error", snapshot["stores"]["raghouse"]["error"])
         self.assertIsNone(snapshot["stores"]["tvf"]["error"])
         self.assertEqual({lot["store"] for lot in snapshot["lots"]}, {"tvf", "papercrane"})
         self.assertEqual((snapshot["stores"]["papercrane"]["zone"], snapshot["stores"]["papercrane"]["origins"]), (None, 2))

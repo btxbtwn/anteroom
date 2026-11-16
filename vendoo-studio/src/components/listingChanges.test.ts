@@ -1,5 +1,8 @@
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { ListingChangeList } from "./ListingChangeList";
 import { describe, expect, it } from "vitest";
-import { blockerTarget, changeValue, listingChanges, matchingEditorField } from "./listingChanges";
+import { blockerTarget, changeValue, listingChanges, matchingEditorField, fieldLabel } from "./listingChanges";
 
 describe("listing review", () => {
   it("compares additions, removals, arrays and nested edits while hiding preparation metadata", () => {
@@ -10,6 +13,24 @@ describe("listing review", () => {
       { field: "price", before: 30, after: 20 },
       { field: "tags", before: ["old"], after: ["new"] },
     ]);
+  });
+  it("keeps lock-only revisions restorable and describes them in seller terms", () => {
+    const changes = listingChanges({ seller_fields: ["price"] },
+      { seller_fields: ["price", "mercari_specifics.title"] });
+    expect(changes).toHaveLength(1);
+    expect(fieldLabel(changes[0].field)).toBe("Fields protected from automatic edits");
+    expect(changeValue(changes[0].after, changes[0].field)).toBe("price, Mercari · title");
+    expect(changeValue([], "seller_fields")).toBe("None");
+  });
+  it("renders protected field changes without internal paths or JSON", () => {
+    const html = renderToStaticMarkup(createElement(ListingChangeList, { changes: listingChanges(
+      { seller_fields: [] }, { seller_fields: ["price", "mercari_specifics.title"] },
+    ) }));
+    expect(html).toContain("Fields protected from automatic edits");
+    expect(html).toContain("price, Mercari · title");
+    expect(html).toContain("None");
+    expect(html).not.toContain("seller_fields");
+    expect(html).not.toContain("mercari_specifics");
   });
   it("does not hide zero and false", () => {
     expect(changeValue(0)).toBe("0");

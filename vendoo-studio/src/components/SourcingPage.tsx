@@ -116,6 +116,7 @@ function BoxSourcing({ onOpenListing }: Props) {
   const refreshing = !!data && (data.refreshing || refresh.isPending);
   const failed = !!data?.refresh_error && !refreshing && !savePrefs.isPending;
   const updating = !!data && !failed && (refreshing || savePrefs.isPending || planNeedsUpdate(data));
+  const outdated = !!data && failed && planNeedsUpdate(data);
 
   return (
     <>
@@ -189,7 +190,7 @@ function BoxSourcing({ onOpenListing }: Props) {
             </p>
           ) : null}
           {selectedSnapshot ? <>
-            <BuyList snapshot={selectedSnapshot} choice={choice} updating={updating} onOpenListing={onOpenListing} />
+            <BuyList snapshot={selectedSnapshot} choice={choice} updating={updating} outdated={outdated} onOpenListing={onOpenListing} />
             <SupplierPicks snapshot={selectedSnapshot} onOpenListing={onOpenListing} />
             <AvailableBoxes snapshot={selectedSnapshot} onOpenListing={onOpenListing} />
           </> : null}
@@ -344,7 +345,7 @@ function Settings({
           </div>
           <div className="flex flex-col gap-1.5">
             <SourcingSetting label="Cost per sold piece">
-              <DraftInput value={String(prefs.cost_per_piece)} label="Operating allowance per usable piece" prefix="$" width="5rem" inputMode="decimal" disabled={saving}
+              <DraftInput value={String(prefs.cost_per_piece)} label="Operating allowance per sold piece" prefix="$" width="5rem" inputMode="decimal" disabled={saving}
                 clean={(text) => text.replace(/[^\d.]/g, "")} accept={(text) => text !== "" && Number.isFinite(Number(text)) && Number(text) >= 0}
                 onCommit={(text) => onSave({ cost_per_piece: Number(text) })} />
             </SourcingSetting>
@@ -445,11 +446,13 @@ function BuyList({
   snapshot,
   choice,
   updating,
+  outdated,
   onOpenListing,
 }: {
   snapshot: SourcingSnapshot;
   choice: string;
   updating: boolean;
+  outdated: boolean;
   onOpenListing: (convId: string) => void;
 }) {
   const plan = snapshot.buy_list;
@@ -509,14 +512,14 @@ function BuyList({
       </section>
       <PageNote>{formatMoney(Math.max(0, plan.budget - plan.total))} of your purchase budget remains before tax. Keep another {formatMoney(metrics.operating)} for operating costs. The lower-sales test assumes only half your planned sales, at each theme’s lowest retained sale price, with operating costs on those pieces. It is a sensitivity test, not a guaranteed minimum profit.</PageNote>
       {plan.carts.map((cart, index) => (
-        <Cart key={cart.store} cart={cart} updating={updating} step={plan.carts.length > 1 ? index + 1 : null} of={plan.carts.length} onOpenListing={onOpenListing} />
+        <Cart key={cart.store} cart={cart} updating={updating} outdated={outdated} step={plan.carts.length > 1 ? index + 1 : null} of={plan.carts.length} onOpenListing={onOpenListing} />
       ))}
     </>
   );
 }
 
-function Cart({ cart, step, of, updating, onOpenListing }: {
-  cart: SourcingCart; step: number | null; of: number; updating: boolean; onOpenListing: (convId: string) => void;
+function Cart({ cart, step, of, updating, outdated, onOpenListing }: {
+  cart: SourcingCart; step: number | null; of: number; updating: boolean; outdated: boolean; onOpenListing: (convId: string) => void;
 }) {
   const gap = freeShippingGap(cart);
   return (
@@ -544,17 +547,19 @@ function Cart({ cart, step, of, updating, onOpenListing }: {
             <PageNote>Free shipping starts at {formatMoney(cart.free_shipping_over!)} in boxes ({formatMoney(gap)} more).</PageNote>
           ) : null}
           <div className="flex flex-col gap-2 @xl/page:flex-row @xl/page:items-center">
-            {updating ? (
+            {updating || outdated ? (
               <Button disabled>
-                <Spinner size="sm" aria-hidden role={undefined} />
-                Updating cart…
+                {updating ? <Spinner size="sm" aria-hidden role={undefined} /> : null}
+                {outdated ? "Update needed" : "Updating cart…"}
               </Button>
             ) : (
               <Button render={<a href={cart.cart_url} target="_blank" rel="noopener noreferrer" />}>
                 {cart.cart_fills ? `Open ${cart.name} cart` : `Open on ${cart.name}`}
               </Button>
             )}
-            <PageNote>{cart.cart_fills
+            <PageNote>{outdated
+              ? "Update now to rebuild the carts with your saved settings."
+              : cart.cart_fills
               ? "The cart opens with these boxes already in it. Check it, then pay."
               : `Each ${cart.name} lot is bought from its own page after signing in; shipping and card processing are itemised at checkout. Open each box above.`}</PageNote>
           </div>
@@ -774,7 +779,7 @@ function HowItWorks({ snapshot }: { snapshot: SourcingSnapshot }) {
         </li>
         <li>
           Profit uses your {Math.round(a.sell_through * 100)}% sales assumption, {Math.round(a.fees * 100)}% effective fees,
-          {" "}{formatMoney(a.cost_per_piece)} operating allowance per usable piece, and purchase cost with shipping. Usable-piece shares are planning estimates based on grade, not inspected counts.
+          {" "}{formatMoney(a.cost_per_piece)} operating allowance per sold piece, and purchase cost with shipping. Usable-piece shares are planning estimates based on grade, not inspected counts.
         </li>
         <li>Each recommended box must meet your ROI target and avoid a loss when only half your planned pieces sell, at the lower of its lowest retained sold price and resale estimate, after operating costs on those pieces.</li>
         <li>It prefers researched selling-window matches among qualifying boxes, then incremental return, and takes another box of a kind only while what you sell of it over the selling window can absorb it. It checks the whole cart’s shipping. It also tests pairs that unlock free shipping. This is a greedy selection; it doesn’t guarantee the best possible combination.</li>

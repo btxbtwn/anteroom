@@ -910,7 +910,7 @@ struct AutomationRowModel: Equatable, Sendable {
 
     /// What New offers, in the web's order.
     static let kinds: [(kind: String, label: String, description: String)] = [
-        ("scheduled", "Price drop, relist or regenerate", "On a schedule; each item waits for your approval."),
+        ("scheduled", "Price drop, relist or regenerate", "Changes save on schedule; listing, relisting and delisting need approval."),
         ("ebay_offers", "eBay offers", "Offers to buyers watching your eBay listings."),
         ("share", "Poshmark sharing", "Shares your Poshmark closet at the times you pick."),
         ("offer", "Offers to likers", "Offers to new likers on Poshmark, Mercari or Depop."),

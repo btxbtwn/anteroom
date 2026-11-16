@@ -21,13 +21,17 @@ export function listingChanges(before: ListingData, after: ListingData): Listing
   return changes;
 }
 
-export function changeValue(value: unknown): string {
+export function changeValue(value: unknown, field?: string): string {
+  if (field === "seller_fields" && Array.isArray(value) && value.every((key) => typeof key === "string")) {
+    return value.map(fieldLabel).join(", ") || "None";
+  }
   if (value === undefined || value === null || value === "") return "Empty";
   if (typeof value === "string") return value;
   return JSON.stringify(value, null, 2);
 }
 
 export function fieldLabel(path: string): string {
+  if (path === "seller_fields") return "Fields protected from automatic edits";
   return path.split(".").filter((key) => !["generalDetails", "overrides", "marketplaceSpecifics", "categorySpecifics", "category_specifics", "listings"].includes(key))
     .map((key) => key.endsWith("_specifics") ? marketplaceName(key.replace("_specifics", "")) : key.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/_/g, " "))
     .join(" · ");

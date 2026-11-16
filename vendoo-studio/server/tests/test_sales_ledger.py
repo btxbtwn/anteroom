@@ -529,3 +529,18 @@ def test_listing_cost_is_known_before_sale_financials_are_recorded(ledger, cost)
     assert "fees" in row["missing_sale_data"]
     missing = ledger.client.get("/api/conversations/coat").json()["missing_sale_data"]
     assert ("cost of goods" in missing) == (cost is None)
+
+
+@pytest.mark.parametrize("value,message", [
+    ("-5", "Use a decimal amount with up to four decimal places. Only net fees may be negative."),
+    (5, "Enter money as a decimal string."),
+])
+def test_invalid_money_reports_seller_instruction_without_validator_prefix(value, message):
+    from pydantic import ValidationError
+    from vendoo_studio.services.sales_ledger import FinancialEntry
+
+    valid = FinancialEntry(currency="USD", shipping_credit="5.1250", fees="-1.50")
+    assert (valid.shipping_credit, valid.fees) == ("5.1250", "-1.50")
+    with pytest.raises(ValidationError) as failed:
+        FinancialEntry(currency="USD", shipping_credit=value)
+    assert failed.value.errors()[0]["msg"] == message

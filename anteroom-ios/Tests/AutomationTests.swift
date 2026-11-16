@@ -77,6 +77,7 @@ struct AutomationTests {
         precondition(AutomationRowModel.type([AutomationAction(type: "price"), AutomationAction(type: "relist"), AutomationAction(type: "price")])
                      == "Price drop, Relist")
         precondition(AutomationRowModel.kinds.map(\.label) == ["Price drop, relist or regenerate", "eBay offers", "Poshmark sharing", "Offers to likers"])
+        precondition(AutomationRowModel.kinds.first?.description == "Changes save on schedule; listing, relisting and delisting need approval.")
         let ebay = try JSONDecoder().decode(EbayOffersStatus.self, from: Data(#"""
         {"connected":true,"allListings":{"enabled":true,"discountPercent":15,"minimumPrice":"20"},"listings":[],"history":[],
          "checkIntervalMinutes":15,"lastCheck":null,"lastError":null}

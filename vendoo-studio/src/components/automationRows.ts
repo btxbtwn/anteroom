@@ -14,7 +14,7 @@ import { marketplaceName } from "./marketplaceNames";
 export type AutomationKind = "scheduled" | "ebay_offers" | "share" | "offer";
 
 export const AUTOMATION_KINDS: readonly { kind: AutomationKind; label: string; description: string }[] = [
-  { kind: "scheduled", label: "Price drop, relist or regenerate", description: "On a schedule; each item waits for your approval." },
+  { kind: "scheduled", label: "Price drop, relist or regenerate", description: "Changes save on schedule; listing, relisting and delisting need approval." },
   { kind: "ebay_offers", label: "eBay offers", description: "Offers to buyers watching your eBay listings." },
   { kind: "share", label: "Poshmark sharing", description: "Shares your Poshmark closet at the times you pick." },
   { kind: "offer", label: "Offers to likers", description: "Offers to new likers on Poshmark, Mercari or Depop." },

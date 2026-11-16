@@ -729,7 +729,7 @@ function AutomationEditor({ task, onSaved, onBack }: { task: Automation | null; 
         </CollapsiblePanel>
       </Collapsible>
 
-      <PageNote>Scheduling never publishes or delists on its own. Each item and marketplace waits for your approval.</PageNote>
+      <PageNote>Scheduled price changes and regeneration save in Anteroom automatically. Listing, relisting and delisting need your approval for each item and marketplace.</PageNote>
 
       {issues.length ? (
         <ul className="list-disc pl-5 text-sm text-muted-foreground">
