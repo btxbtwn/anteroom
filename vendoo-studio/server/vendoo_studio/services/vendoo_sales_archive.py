@@ -51,9 +51,16 @@ def archived() -> bool:
 
 def ensure_archived(db: Session) -> None:
     """Copy Vendoo's sales into the ledger the first time; afterwards do nothing."""
+    from vendoo_studio.services.service_context import current
     from vendoo_studio.services.user_settings import update_settings
 
     with _archive_lock:
+        if (context := current()) is not None:
+            # Boxes can already hold this session's connection. Read the marker
+            # through it instead of reserving a second settings connection, and
+            # leave any caller edits pending until the caller chooses to save.
+            with db.no_autoflush:
+                context.settings.load(db)
         if archived():
             return
         count = archive(db)
