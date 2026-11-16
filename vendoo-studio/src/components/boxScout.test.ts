@@ -1,5 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { describe, expect, it, vi } from "vitest";
 import type { SourcingCart, SourcingLot, SourcingSnapshot, SourcingState } from "../api/types";
+import { SourcingPage } from "./SourcingPage";
 import {
   cartTotal,
   clockTime,
@@ -17,6 +20,17 @@ import {
   whyNotPicked,
   exclusionSummary,
 } from "./boxScout";
+
+let queriedState: SourcingState | null = null;
+
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: ({ queryKey }: { queryKey: readonly string[] }) => ({
+    data: queryKey[0] === "sourcing" ? queriedState ?? state() : { boxes: [], stores: [] },
+    isLoading: false, isError: false,
+  }),
+  useMutation: () => ({ mutate: vi.fn(), isPending: false }),
+  useQueryClient: () => ({ setQueryData: vi.fn() }),
+}));
 
 function lot(overrides: Partial<SourcingLot> = {}): SourcingLot {
   return {
@@ -121,6 +135,46 @@ function state(): SourcingState {
   };
 }
 
+function renderSourcing(data: SourcingState): string {
+  queriedState = data;
+  vi.stubGlobal("localStorage", { getItem: () => null });
+  try {
+    return renderToStaticMarkup(createElement(SourcingPage, { onOpenListing: vi.fn() }));
+  } finally {
+    queriedState = null;
+    vi.unstubAllGlobals();
+  }
+}
+
+describe("sourcing cart safety after refresh failures", () => {
+  const cartLink = 'href="https://thriftvintagefashion.com/cart/1:1"';
+
+  it.each([{ budget: 200 }, { zip: "10001" }])("blocks an old cart after changed settings and a failed refresh: %j", (changes) => {
+    const original = state();
+    const html = renderSourcing({ ...original, prefs: { ...original.prefs, ...changes }, refresh_error: "Fixture refresh failed." });
+    expect(html).not.toContain(cartLink);
+    expect(html).toContain("Update needed");
+    expect(html).toContain("Update now to rebuild the carts with your saved settings.");
+    expect(html).not.toContain("Updating cart…");
+    expect(html).not.toContain("Updating your options.");
+  });
+
+  it("keeps the previous cart available after a failed refresh when its settings still match", () => {
+    const html = renderSourcing({ ...state(), refresh_error: "Fixture refresh failed." });
+    expect(html).toContain(cartLink);
+    expect(html).toContain("Fixture refresh failed.");
+    expect(html).not.toContain("Update needed");
+  });
+
+  it("keeps carts unavailable while a refresh is in flight even if an earlier failure remains", () => {
+    const html = renderSourcing({ ...state(), refreshing: true, refresh_error: "Previous failure." });
+    expect(html).not.toContain(cartLink);
+    expect(html).toContain("Updating cart…");
+    expect(html).toContain("Updating your options.");
+    expect(html).not.toContain("Update needed");
+  });
+});
+
 describe("exclusions", () => {
   it("sums up what ruled the boxes out, most common first", () => {
     const plan = { budget: 75, total: 0, expected_profit: 0, carts: [], exclusions: {
@@ -132,6 +186,18 @@ describe("exclusions", () => {
 });
 
 describe("planning settings", () => {
+  it("describes the operating allowance as a cost per sold piece throughout the page", () => {
+    vi.stubGlobal("localStorage", { getItem: () => null });
+    try {
+      const html = renderToStaticMarkup(createElement(SourcingPage, { onOpenListing: vi.fn() }));
+      expect(html).toContain('aria-label="Operating allowance per sold piece"');
+      expect(html).toContain("operating allowance per sold piece, and purchase cost with shipping");
+      expect(html).not.toContain("operating allowance per usable piece");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("keeps cart links unavailable until every saved planning input is reflected", () => {
     const original = state();
     expect(planNeedsUpdate(original)).toBe(false);
