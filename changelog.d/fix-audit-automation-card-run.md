@@ -1,1 +1,0 @@
-- Confirming an automation change the assistant suggested no longer fails just because the automation ran or was paused in the meantime.

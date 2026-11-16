@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.989 — 2026-11-16
+
+- Confirming an automation change the assistant suggested no longer fails just because the automation ran or was paused in the meantime.
+
 ## 0.1.988 — 2026-11-16
 
 - See recorded offer activity for today, this week, this month or custom dates, with confirmed recipient offers kept separate from requests, bulk jobs and unknown outcomes.
