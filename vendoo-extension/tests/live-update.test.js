@@ -44,6 +44,10 @@ function mercari({ item = mercariItem(), keep = true, edit } = {}) {
     if (url === 'https://www.mercari.com/v1/initialize') return reply(200, MERCARI_SESSION);
     const body = JSON.parse(options.body);
     requests.push(body);
+    // Mercari's schema requires the item ID; a nullable declaration is refused (2026-11-14).
+    if (body.operationName === 'sellFetchItemsDetails' && !/\$itemId:\s*String!/.test(body.query)) {
+      return reply(400, { errors: [{ message: 'Variable "$itemId" of type "String" used in position expecting type "String!".' }] });
+    }
     if (body.operationName === 'sellFetchItemsDetails') return reply(200, { data: { item: live } });
     if (body.operationName === 'editListing') {
       if (edit) return edit(body);

@@ -838,7 +838,7 @@ async function publishMercariDraft(payload, storeReceipt, recovery) {
 // left out is cleared: every value starts from the live item and only what
 // this revision changes replaces it. photoIds are the item's own image URLs,
 // which keeps the photos already on the listing.
-const MERCARI_LIVE_ITEM_QUERY = `query sellFetchItemsDetails($itemId: String) {
+const MERCARI_LIVE_ITEM_QUERY = `query sellFetchItemsDetails($itemId: String!) {
   item(id: $itemId) {
     itemId: id
     name
