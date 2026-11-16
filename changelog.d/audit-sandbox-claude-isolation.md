@@ -1,0 +1,1 @@
+- Sandbox setup no longer checks or displays the Claude account signed in on your machine.

@@ -91,6 +91,28 @@ def test_sandbox_mode_uses_the_sandbox_provider(monkeypatch):
     assert listing_provider.provider_is_configured() is True
 
 
+@pytest.mark.parametrize("cached", [False, True])
+def test_sandbox_never_probes_or_exposes_the_machines_claude_account(monkeypatch, cached):
+    from vendoo_studio.services import claude_auth
+
+    monkeypatch.setenv(sandbox.ENV_VAR, "1")
+    monkeypatch.setattr(
+        claude_auth, "_status",
+        claude_auth._Status(installed=True, signed_in=True, email="private@example.test", plan="max")
+        if cached else None,
+    )
+
+    def forbidden_probe():
+        raise AssertionError("Sandbox must not invoke the machine's Claude CLI")
+
+    monkeypatch.setattr(claude_auth, "_read_status", forbidden_probe)
+    assert claude_auth.claude_signed_in() is False
+    status = claude_auth.status()
+    assert status["signed_in"] is False
+    assert status["email"] is None
+    assert status["plan"] is None
+
+
 def test_sandbox_provider_answers_the_same_way_every_time():
     provider = SandboxProvider()
 
