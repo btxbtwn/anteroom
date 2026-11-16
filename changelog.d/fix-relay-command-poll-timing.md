@@ -1,1 +1,0 @@
-- Keep successful Chrome relay polls within the expected wait out of slow-response alerts, while still warning on excessive waits and failures.
