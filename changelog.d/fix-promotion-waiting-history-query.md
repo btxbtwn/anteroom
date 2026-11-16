@@ -1,1 +1,0 @@
-- Speed up recent-activity lookups used by scheduled offers.
