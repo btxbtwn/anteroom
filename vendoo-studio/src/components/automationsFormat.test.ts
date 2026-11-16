@@ -94,3 +94,12 @@ describe("automation rows", () => {
     expect(formatRunTime("2026-11-05T15:00:00+00:00", "Not/AZone")).not.toBe("—");
   });
 });
+
+it.each(["amount", "percent"] as const)("explains an incomplete %s price action in a saved draft", mode => {
+  expect(describeActions([{ type: "price", mode, value: null, floor: 5, repeat: "step" }, { type: "regenerate" }]))
+    .toBe("price drop amount not set, regenerate");
+});
+
+it("explains a price action without a value property", () => {
+  expect(describeActions([{ type: "price", mode: "percent" }])).toBe("price drop amount not set");
+});

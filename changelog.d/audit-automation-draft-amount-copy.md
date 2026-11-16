@@ -1,0 +1,1 @@
+- An unfinished automation now says its price-drop amount is not set instead of showing “null” as a price or percentage.
