@@ -12,7 +12,6 @@ def test_abandoned_signin_is_not_delivered_when_chrome_resumes(cancelled):
         relay = BrowserRelay()
         relay.note_seen({MARKETPLACE_SESSIONS})
         abandoned = asyncio.create_task(relay.read_local('marketplace.connect', {'marketplace': 'depop'}, 0.01))
-        # Let the command enqueue without polling Chrome.
         await asyncio.sleep(0)
         stale_id = relay._outbox[0]['message_id']
         if cancelled:

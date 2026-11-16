@@ -130,7 +130,6 @@ test('Depop reconnect cannot report readiness when its verification read fails',
       options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
     }),
   });
-  // Accelerate only the fixture's clock; production still requests an 8s deadline.
   c.AbortSignal = { timeout: ms => { timeoutMs = ms; return AbortSignal.timeout(10); } };
   c.chrome.tabs = { query: async () => [{ id: 7, url: 'https://www.depop.com/sellinghub/drafts/' }], update: async () => {} };
   c.nativeWait = async () => {};
