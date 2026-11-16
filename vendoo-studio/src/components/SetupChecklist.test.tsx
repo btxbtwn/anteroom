@@ -12,6 +12,8 @@ describe("setup without Chrome", () => {
     expect(html).toContain("Create and generate listings without Chrome");
     expect(html).toContain("Optional: connect desktop Chrome");
     expect(html).toContain("eBay and Etsy use connected accounts");
+    expect(html).not.toContain("Vinted");
+    expect(html).not.toContain("Sellwild");
     expect(html).not.toMatch(/<button[^>]* disabled=""[^>]*>Create a listing/);
   });
 });

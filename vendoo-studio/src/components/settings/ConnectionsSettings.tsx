@@ -533,7 +533,7 @@ export function ConnectionsSettings() {
         <ExtensionConnectionRow />
         <SettingsRow
           title="Chrome"
-          description="Optional for creating drafts and eBay or Etsy. Connect desktop Chrome with Bridge for Poshmark, Mercari, Depop, Vinted and Sellwild actions."
+          description="Optional for creating drafts and eBay or Etsy. Connect desktop Chrome with Bridge for Poshmark, Mercari and Depop actions."
           control={<ConnectChromeButton className={buttonVariants({ size: "xs", variant: "outline" })} />}
         />
         <SettingsRow

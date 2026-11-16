@@ -56,6 +56,8 @@ describe("Connections settings", () => {
   it("groups every marketplace at the top with a sale detection switch", () => {
     const html = renderToStaticMarkup(<ConnectionsSettings />);
     const accounts = html.indexOf('id="accounts"');
+    expect(html).not.toContain("Vinted");
+    expect(html).not.toContain("Sellwild");
     const vendoo = html.indexOf('id="connections"');
     expect(accounts).toBeGreaterThanOrEqual(0);
     expect(accounts).toBeLessThan(vendoo);

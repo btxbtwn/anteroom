@@ -64,7 +64,7 @@ export function SignIn({ client, notice, sandbox }: { client: SupabaseClient; no
       <h1>{title}</h1>
       <p>{mode === "reset" ? "Enter your account’s email. We’ll send a link to choose a new password." : SIGN_IN_INTRO}</p>
       {sandbox && <p>Local sandbox: use alice@sandbox.test or bob@sandbox.test with the password <code>sandbox</code>.</p>}
-      {mode === "create_account" && <p className="hint">Create drafts without Chrome. eBay and Etsy use connected accounts; Poshmark, Mercari, Depop, Vinted and Sellwild require desktop Chrome with the Bridge extension for marketplace actions.</p>}
+      {mode === "create_account" && <p className="hint">Create drafts without Chrome. eBay and Etsy use connected accounts; Poshmark, Mercari and Depop require desktop Chrome with the Bridge extension for marketplace actions.</p>}
       {notice && <p role="status">{notice}</p>}
       <form onSubmit={submit}>
         <label htmlFor="email">Email address</label>
