@@ -9,6 +9,7 @@ import {
   dropPercentLabel,
   markdownDrops,
   markdownOutcomes,
+  markdownOutcomeDescription,
   markdownSummary,
   type MarkdownDraft,
   type MarkdownOutcome,
@@ -79,7 +80,7 @@ export function BulkPriceDropDialog({
       className="max-w-2xl"
       title={outcomes ? markdownSummary(outcomes) : "Mark down listings"}
       description={outcomes
-        ? "Each listing now has unsent edits. Open it and update the live listing when you want the new price on the marketplace."
+        ? markdownOutcomeDescription(outcomes)
         : "Each price starts on the listing's suggestion from your own sales and prior drops. Edit any price or skip a listing. Applying saves the prices in Anteroom only."}
       busy={apply.isPending}
       onClose={onClose}

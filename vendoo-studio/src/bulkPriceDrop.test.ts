@@ -8,6 +8,7 @@ import {
   dropPercentLabel,
   markdownDrops,
   markdownOutcomes,
+  markdownOutcomeDescription,
   markdownSummary,
   staleSuggestionIds,
   type MarkdownDraft,
@@ -120,4 +121,12 @@ describe("staleSuggestionIds", () => {
       { conversation_id: "c", kind: "stale_active" },
     ])).toEqual(["a", "c"]);
   });
+});
+
+it("does not promise saved edits when all reviewed markdowns were refused", () => {
+  const refused = markdownOutcomes([draft()], { applied: [], skipped: [{ conversation_id: "a", reason: "This listing changed since you reviewed it" }] });
+  expect(markdownOutcomeDescription(refused)).toContain("No prices were changed");
+  expect(markdownOutcomeDescription(refused)).not.toContain("unsent edits");
+  const mixed = markdownOutcomes([draft(), draft({ id: "b" })], { applied: [{ conversation_id: "b", revision_id: "r", price: 40, previous_price: 48, valid: true }], skipped: [{ conversation_id: "a", reason: "This listing changed since you reviewed it" }] });
+  expect(markdownOutcomeDescription(mixed)).toContain("Saved prices have unsent edits");
 });

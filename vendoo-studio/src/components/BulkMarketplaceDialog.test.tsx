@@ -6,7 +6,7 @@ import { BulkMarketplaceDialog } from "./BulkMarketplaceDialog";
 const { useMutation, invalidateQueries } = vi.hoisted(() => ({ useMutation: vi.fn(), invalidateQueries: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({ useMutation, useQueryClient: () => ({ invalidateQueries }) }));
 vi.mock("./PriceDropParts", () => ({
-  PriceDialog: ({ title, children, footer }: { title: string; children: React.ReactNode; footer: React.ReactNode }) => <div><h2>{title}</h2>{children}{footer}</div>,
+  PriceDialog: ({ title, description, children, footer }: { title: string; description: string; children: React.ReactNode; footer: React.ReactNode }) => <div><h2>{title}</h2><p>{description}</p>{children}{footer}</div>,
 }));
 
 beforeEach(() => {
@@ -20,7 +20,12 @@ describe("bulk marketplace dialog", () => {
     const preview = vi.spyOn(api.bulkMarketplace, "preview");
     const html = renderToStaticMarkup(<BulkMarketplaceDialog conversationIds={["a", "b"]} onClose={vi.fn()} />);
     expect(html).toContain("Marketplace actions for 2 items");
+    const single = renderToStaticMarkup(<BulkMarketplaceDialog conversationIds={["a"]} onClose={vi.fn()} />);
+    expect(single).toContain("Marketplace actions for 1 item</h2>");
     expect(html).toContain(">Update<");
+    expect(html).not.toContain("Items run one at a time");
+    expect(html).toContain("List and Update can run together");
+    expect(html).toContain("other actions run one item at a time");
     expect(html).toContain("Mark as not listed");
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Review items<\/button>/);
     expect(html.match(/role="checkbox"[^>]*aria-checked="(?:true|false)"/g)).toHaveLength(5);
