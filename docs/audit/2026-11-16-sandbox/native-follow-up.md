@@ -1,10 +1,10 @@
 # Native and Mac follow-up for the parent
 
-Status: NOT RUN. The VPS is Linux; it cannot build or run SwiftUI or the packaged Mac app. A CSS phone viewport is not iOS and Chromium is not WebKit. Device discovery previously listed a Mac hub, but discovery is not fixture/runtime verification.
+Status: NOT RUN. The VPS is Linux; it cannot build or run SwiftUI or the packaged Mac app. A CSS phone viewport is not iOS and Chromium is not WebKit. Latest device discovery lists the Mac Mini host as ready and the dedicated audit iPhone as iOS26.5/not booted. This is availability only; exact-head build, fixture endpoint/identity and device ownership remain unverified. No native app was opened in this audit.
 
 ## Exact prerequisites
 
-- Sync/review the audit stack commits. Base PR1561: `8d4e6e87e0d4d0b8dff85225bd9fd193f03ca5b9`; PR1562 source head: `2f9b662fc006d68e7b4a26ce7a37d684ce33fa20`; Depop follow-up PR1577 source head: `4f5d9657`. Use the final reviewed head for execution and record it. All audit layers remain drafts, unmerged. Resolve their final exact heads before execution.
+- Sync/review the final audit stack: #1561 (`8d4e6e87`), #1562 (`2f9b662f`), #1577 (Depop identity/recovery) and #1578 (restore safety). Obtain the current final head before executing; record the exact source and built bundle identity. All remain drafts, unmerged.
 - Have macOS, Xcode, XcodeGen, and the existing locked developer dependencies available. Coordinate the Mac's own heavy-validation queue; no automatic installs or all-suite run is requested.
 - Reserve a disposable sandbox/API. `anteroom-ios/test-sandbox.sh` owns port4320 and refuses to run if another process holds it. Do not stop another owner's process. It starts throwaway Postgres and the actual hosted API with protocol stand-ins, fake provider and sandbox guards. Verify `/api/health` has `sandbox:true` and record its temp root before any UI mutation.
 - Native Debug build must explicitly use `ANTEROOM_SANDBOX_URL=http://localhost:4320`; confirm the fixture Alice identity and no production endpoint/account. Never open the installed release app as a test shortcut.
@@ -32,3 +32,5 @@ The web bulk-edit review now flattens whole marketplace objects into individual 
 Sale amount validation wording is shared server-side. In native Record amounts, verify a negative buyer shipping amount shows the seller instruction without “Value error,” then correct it and save/reopen. Supplier error copy is currently a web Sourcing surface; native Sourcing is a documented parity gap.
 
 Native-specific current follow-up: fixture a legacy Depop published/no-product-link response and require Unconfirmed plus read-only recovery; verify current iPhone controls rather than assuming web parity. Shared API fixture now covers persisted ID/deleted state through separate Python app startup/shutdown processes, not installed Mac/iPhone execution. The restore CLI fix also needs a macOS-only stopped/disposable-data smoke; never point it at the installed seller data folder.
+
+Daily audit reuse: issue #1573 recorded source075f557b/0.1.986 and installed Mac0.1.969; scripted core native cases passed but its manual native journey was not run. Rollup #1544 covers older source2a257afb/0.1.971. These are prior evidence only; neither verifies the current audit stack or its manual native controls. Device availability has since improved, so parent can route the concrete remaining pass after checking current Mac resource ownership.
