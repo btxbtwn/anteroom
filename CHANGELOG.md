@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.987 — 2026-11-16
+
+- Improved automated checks that keep operator error reports private.
+
 ## 0.1.986 — 2026-11-16
 
 - Older Depop shipping errors now open Package size and explain when to check your shipping address in Depop.
