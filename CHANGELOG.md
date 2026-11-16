@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.988 — 2026-11-16
+
+- See recorded offer activity for today, this week, this month or custom dates, with confirmed recipient offers kept separate from requests, bulk jobs and unknown outcomes.
+- See when offer-to-sale conversion data is unavailable instead of an unsupported conversion rate.
+
 ## 0.1.987 — 2026-11-16
 
 - Improved automated checks that keep operator error reports private.
