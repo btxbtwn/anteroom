@@ -1,4 +1,6 @@
 # Base images are pinned by digest so a rebuild gets the same system packages.
+# Python stays on the minor version CI tests and basedpyright targets (3.12);
+# moving it is a deliberate change to all three (tests/test_hosted_image_runtime.py).
 FROM node:25-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370 AS web
 WORKDIR /src/vendoo-studio
 COPY vendoo-studio/package.json vendoo-studio/package-lock.json ./
@@ -15,14 +17,14 @@ RUN node -e 'if (!process.env.VITE_SUPABASE_URL || !process.env.VITE_SUPABASE_PU
 FROM ghcr.io/astral-sh/uv:0.13.8@sha256:5cc1805e2426484abca4ad46ea783bab281fdb225fd82d8ce6d66a81254bac85 AS uv
 
 # The hosted packages exactly as uv.lock pins them, with their hashes.
-FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928 AS requirements
+FROM python:3.12-slim@sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54 AS requirements
 COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /src
 COPY vendoo-studio/pyproject.toml vendoo-studio/uv.lock ./
 RUN uv export --frozen --no-emit-project --extra hosted --format requirements-txt --hashes \
     --output-file /requirements.txt
 
-FROM python:3.15-slim@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
+FROM python:3.12-slim@sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     ANTEROOM_HOSTED=1 \
