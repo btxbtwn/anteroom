@@ -694,6 +694,42 @@ unsupported field values. Deterministic tests cover recovery through the
 field-fill collector and validator plus bounded failure. Production validation
 of this recovery remains pending.
 
+## Imported-sales archive marker connection ownership, 2026-11-16
+
+A bounded local hosted replay on `075f557b` ran 58 reads against disposable
+Postgres with signed synthetic seller sessions and the unchanged 8 + 4 pool,
+3-second checkout wait. Two sellers had 40, then 600 items each, one revision,
+sale and live record per item, small settings and the bundled category tree.
+At most four requests overlapped. All reads succeeded in the 26.79-second run,
+with a maximum of five connections checked out. This did not reproduce the
+production preflight timeout or identify the cause of its twelve holders.
+The replay was in-process ASGI, without Supabase/TLS, added RTT, generation,
+schedulers or a CPU cap; client JSON parsing shared the Python process.
+
+It did identify a concrete extra checkout: boxes first reads its source boxes,
+then checks the imported-sales archive marker. Shared `get_db` routes do not
+preload settings like `seller_session` does, so the marker's settings read
+opened another session while the boxes transaction still held its connection.
+Every one of the eight boxes samples entered that settings load with an
+existing same-request holder. Deterministic real-database regressions on
+unchanged code observed two simultaneous checkouts without changing pool
+capacity or forcing saturation. Both autoflush modes reproduced it; hosted
+Postgres reproduced it for saved markers and first-run archival.
+
+The archive helper now loads the execution's settings snapshot through its
+supplied session. The marker read suppresses autoflush so pending edits remain
+the caller's responsibility. The regression checks one simultaneous connection,
+settings memoization, unchanged transaction identity and rollbackable pending
+inserts/updates, plus two sellers' actual hosted boxes responses and durable
+first-run markers. Archive commit and marker-write ordering remain unchanged.
+
+The earlier replay separately observed connections retained during pure
+overview/ledger calculations. That transaction-boundary work is not changed
+here. Cursor execution, ORM materialization, pure CPU, checkout and transaction
+spans are different measurements, not interchangeable explanations for a slow
+query. No production timeout resolution, p50/p95 interaction improvement or
+concurrent-generation capacity is established by this narrow fix.
+
 ## Inventory quantity read volume, 2026-11-14
 
 The November 13 quota investigation identified a still-current read in
@@ -800,42 +836,6 @@ storage benchmarks. They do not reproduce the hosted 15-second deadline or
 measure full Assistant/provider latency, browser interactions, sustained CPU,
 production data cardinality or native iPhone behavior. No additional live
 question was submitted; hosted resolution remains unverified.
-
-## Imported-sales archive marker connection ownership, 2026-11-16
-
-A bounded local hosted replay on `075f557b` ran 58 reads against disposable
-Postgres with signed synthetic seller sessions and the unchanged 8 + 4 pool,
-3-second checkout wait. Two sellers had 40, then 600 items each, one revision,
-sale and live record per item, small settings and the bundled category tree.
-At most four requests overlapped. All reads succeeded in the 26.79-second run,
-with a maximum of five connections checked out. This did not reproduce the
-production preflight timeout or identify the cause of its twelve holders.
-The replay was in-process ASGI, without Supabase/TLS, added RTT, generation,
-schedulers or a CPU cap; client JSON parsing shared the Python process.
-
-It did identify a concrete extra checkout: boxes first reads its source boxes,
-then checks the imported-sales archive marker. Shared `get_db` routes do not
-preload settings like `seller_session` does, so the marker's settings read
-opened another session while the boxes transaction still held its connection.
-Every one of the eight boxes samples entered that settings load with an
-existing same-request holder. Deterministic real-database regressions on
-unchanged code observed two simultaneous checkouts without changing pool
-capacity or forcing saturation. Both autoflush modes reproduced it; hosted
-Postgres reproduced it for saved markers and first-run archival.
-
-The archive helper now loads the execution's settings snapshot through its
-supplied session. The marker read suppresses autoflush so pending edits remain
-the caller's responsibility. The regression checks one simultaneous connection,
-settings memoization, unchanged transaction identity and rollbackable pending
-inserts/updates, plus two sellers' actual hosted boxes responses and durable
-first-run markers. Archive commit and marker-write ordering remain unchanged.
-
-The earlier replay separately observed connections retained during pure
-overview/ledger calculations. That transaction-boundary work is not changed
-here. Cursor execution, ORM materialization, pure CPU, checkout and transaction
-spans are different measurements, not interchangeable explanations for a slow
-query. No production timeout resolution, p50/p95 interaction improvement or
-concurrent-generation capacity is established by this narrow fix.
 
 ## Offer-preview read diagnostics, 2026-11-16
 
