@@ -1,0 +1,1 @@
+- Settings now shows when eBay has refused its saved sign-in, and the listing editor keeps the reason you need to reconnect.

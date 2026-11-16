@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 import httpx
+import pytest
 
 from vendoo_studio.services import marketplace_accounts as accounts
 from vendoo_studio.services.relay_client import RelayError
@@ -111,3 +112,58 @@ def test_refreshes_on_separate_event_loops_send_the_rotating_token_once(monkeypa
     assert tokens == ["a1", "a1"]
     saved = keychain.get_marketplace_accounts()["etsy"]
     assert saved["refreshToken"] == "r2" and "refreshClaim" not in saved
+
+
+class EbayConnectionStatusTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        TokenRefreshTest.setUp(self)
+        self.store["ebay"] = dict(self.store["etsy"])
+
+    async def test_refused_refresh_is_visible_in_status_and_stops_repeated_refreshes(self):
+        with patch.object(accounts, "relay_request", return_value=httpx.Response(401, json={"error": "invalid_grant"})) as relay:
+            for _ in range(2):
+                with self.assertRaises(accounts.SignInRequired):
+                    await accounts.access_token("ebay")
+            state = accounts.status()["accounts"]["ebay"]
+        self.assertFalse(state["connected"])
+        self.assertIn("Reconnect eBay", state["error"])
+        self.assertEqual(relay.call_count, 1)
+        self.assertEqual(self.store["ebay"]["refreshToken"], "r1")
+
+    async def test_relay_refusal_and_outage_do_not_sign_the_seller_out(self):
+        for status, body in [(401, {"error": "unauthorized"}), (503, {})]:
+            with patch.object(accounts, "relay_request", return_value=httpx.Response(status, json=body)):
+                with self.assertRaises(RelayError):
+                    await accounts.access_token("ebay")
+            self.assertTrue(accounts.status()["accounts"]["ebay"]["connected"])
+
+    async def test_refusal_for_old_connection_does_not_mark_new_sign_in(self):
+        async def relay(*args, **kwargs):
+            self.store["ebay"] = {**self.store["ebay"], "connectedAt": 2, "accessToken": "new"}
+            return httpx.Response(401, json={"error": "invalid_grant"})
+
+        with patch.object(accounts, "relay_request", side_effect=relay):
+            with self.assertRaises(accounts.SignInRequired):
+                await accounts.access_token("ebay")
+        self.assertTrue(accounts.status()["accounts"]["ebay"]["connected"])
+        self.assertNotIn("authError", self.store["ebay"])
+
+
+def test_editor_preserves_sign_in_failure_reason(monkeypatch):
+    from vendoo_studio.services.ebay_client import EbayClient
+    from vendoo_studio.services import native_marketplaces
+
+    async def refused():
+        raise accounts.SignInRequired("Reconnect eBay in Settings → Connections. Its sign-in is no longer valid.")
+
+    monkeypatch.setattr(EbayClient, "connect", refused)
+    with pytest.raises(native_marketplaces.NativeMarketplaceError, match="Reconnect eBay"):
+        asyncio.run(native_marketplaces._require_ebay())
+
+
+def test_expired_access_token_with_refresh_grant_is_not_assumed_signed_out(monkeypatch):
+    saved = {"ebay": {"accessToken": "fixture", "refreshToken": "fixture-refresh", "expiresAt": 1}}
+    monkeypatch.setattr(accounts, "get_marketplace_accounts", lambda: saved)
+    state = accounts.status()["accounts"]["ebay"]
+    assert state["connected"] is True
+    assert state["error"] is None
