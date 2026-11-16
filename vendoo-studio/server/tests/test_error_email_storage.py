@@ -43,10 +43,6 @@ def previous_engine(tmp_path):
         connection.execute(text(f'CREATE DATABASE "{name}"'))
     engine = create_engine(configured.url.set(database=name))
     try:
-        with engine.begin() as connection:
-            connection.execute(text("""DO $$ BEGIN
-                CREATE ROLE anteroom_api NOLOGIN;
-                EXCEPTION WHEN duplicate_object THEN NULL; END $$"""))
         command.upgrade(alembic_config(engine.url.render_as_string(hide_password=False)), 'c3f1a9d27e64')
         yield engine
     finally:
