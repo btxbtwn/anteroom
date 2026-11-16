@@ -433,8 +433,10 @@ final class AutomationOffersSandboxTests: XCTestCase {
         XCTAssertTrue(period.waitForExistence(timeout: 20))
         period.tap()
         app.buttons["Custom dates"].tap()
-        let from = app.datePickers["From"]
-        let through = app.datePickers["Through"]
+        // Compact DatePicker labels are sibling text in the cell; the
+        // displayed date value belongs to the picker's child button.
+        let from = app.cells.containing(.staticText, identifier: "From").datePickers.buttons.firstMatch
+        let through = app.cells.containing(.staticText, identifier: "Through").datePickers.buttons.firstMatch
         XCTAssertTrue(from.waitForExistence(timeout: 10))
         XCTAssertTrue(through.exists)
         let fromValue = from.value as? String
