@@ -195,3 +195,9 @@ Infrastructure interruption: initial shell session exited143, backend logged cle
 Canonical totals: **46 PASS / 0 FAIL / 8 BLOCKED / 49 NOT RUN**, 103 named scenarios. No comprehensive signoff. Next reserved audit phase should finish missing-state/draft/unknown matrix, browser stale/invalid/interrupted saves, templates and bulk workflows; native checks remain with parent/Mac. No production mutation.
 
 Historical cleanup lead added after release: see production-readiness.md. Current Depop source attempts URL recovery but still allows a completed publication without a URL; delist requires a durable identifier. This is a readiness blocker/lead, not proof that the historical marketplace failure persists. No tests or live actions executed for it. Canonical totals after this addition: **46 PASS / 0 FAIL / 8 BLOCKED / 50 NOT RUN**,104 scenarios.
+
+## Exact-head CI checkpoint — 2f9b662f
+
+PR1562 remains OPEN/DRAFT on `2f9b662fc006d68e7b4a26ce7a37d684ce33fa20`, stacked on audit/sandbox-claude-isolation. Read-only GitHub verification confirmed required CI SUCCESS: frontend, local and hosted sandbox browser jobs, code health, SQLite/backend and Postgres shards, repository/changelog checks. Sixteen checks are complete: twelve SUCCESS and four intentionally SKIPPED (dependency audit, extension, webhook relay, Supabase preview). No GitHub review submissions; prior independent static reviews remain separate evidence. No branch update or CI rerun needed.
+
+Ledger remains 46 PASS / 0 FAIL / 8 BLOCKED / 50 NOT RUN. CI does not advance manual/native coverage or establish live publish/delist readiness. No resource reservation held; sign-in owns its retrospective PG/browser stage, followed by1559→bounded replay→1560 full check/benchmark→1557 retrospective. Await new explicit audit browser handover; no overlap, production action or merge.
