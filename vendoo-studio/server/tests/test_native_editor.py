@@ -22,6 +22,118 @@ from vendoo_studio.services.vendoo_import import merge_notes
 
 
 class NativeEditorTest(unittest.TestCase):
+    def test_category_failure_diagnosis_is_safe_in_logs_and_email(self):
+        import json
+        import httpx
+
+        from fastapi import FastAPI
+        from vendoo_studio.routes.hosted_workspace import router
+        from vendoo_studio.services import error_alerts, error_log
+        from vendoo_studio.services.hosted_database import get_seller_db
+
+        hosted = FastAPI()
+        hosted.include_router(router)
+        hosted.dependency_overrides[get_seller_db] = lambda: self.db
+        clients = (self.client, TestClient(hosted))
+        secret = "PRIVATE-SENTINEL unlabelled-credential seller@example.test listing text"
+        request = httpx.Request("GET", "https://example.test/schema?private=" + secret,
+                                headers={"Authorization": "Bearer " + secret})
+        cause = httpx.ReadTimeout(secret, request=request)
+        failure = RuntimeError(secret)
+        failure.__cause__ = cause
+        cause.__context__ = failure  # A cycle must not make diagnostics unbounded.
+        for client in clients:
+            with patch.object(marketplace_schemas, "fields", new=AsyncMock(side_effect=failure)), \
+                    patch.object(native_editor, "_ebay_format_fields", new=AsyncMock(return_value=[])), \
+                    patch.object(native_editor, "_ebay_choices", new=AsyncMock(return_value=[{}, {}, {}, {}])), \
+                    self.assertLogs(native_editor.__name__, level="ERROR") as logs:
+                answer = client.get(f"{self.url}/ebay/form?revision_id={self.rev.id}")
+            self.assertEqual(answer.status_code, 502)
+            self.assertEqual(answer.json(), {"detail": "eBay’s category fields could not be loaded. Check its connection and refresh choices."})
+            self.assertEqual(len(logs.records), 1)
+            record = logs.records[0]
+            self.assertIn("category_id=15687", record.getMessage())
+            self.assertIn("RuntimeError > ReadTimeout", record.getMessage())
+            self.assertIsNone(record.exc_info)
+            report = error_alerts.build_report(record)
+            subject, email = error_alerts.render_email(report, 1, None)
+            rendered = error_log.RedactingFormatter().format(record)
+            for output in (answer.text, rendered, json.dumps(report), subject, email):
+                for private in ("PRIVATE-SENTINEL", "unlabelled-credential", "seller@example.test", "listing text", "https://"):
+                    self.assertNotIn(private, output)
+            self.assertEqual(ListingRepo(self.db).get_current(self.conv.id).current_revision_id, self.rev.id)
+            self.bridge.assert_not_called()
+
+    def test_category_diagnostics_omit_untrusted_type_names_and_category_text(self):
+        import asyncio
+        import logging
+        from vendoo_studio.services import error_alerts, error_log
+
+        failure = type("PRIVATE-SENTINEL", (Exception,), {})("PRIVATE-SENTINEL")
+        with patch.object(ebay_listings, "ebay_category_id", return_value="PRIVATE-SENTINEL"), \
+                patch.object(marketplace_schemas, "fields", new=AsyncMock(side_effect=failure)), \
+                patch.object(native_editor, "_ebay_format_fields", new=AsyncMock(return_value=[])), \
+                patch.object(native_editor, "_ebay_choices", new=AsyncMock(return_value=[{}, {}, {}, {}])), \
+                self.assertLogs(native_editor.__name__, level="ERROR") as logs:
+            with self.assertRaises(native_editor.NativeMarketplaceError) as raised:
+                asyncio.run(native_editor.ebay_form(self.listing))
+        self.assertEqual(raised.exception.status_code, 502)
+        self.assertIn("category_id=invalid", logs.output[0])
+        self.assertIn("exception_types=Exception", logs.output[0])
+        self.assertNotIn("PRIVATE-SENTINEL", str(logs.output))
+        # Other server callers may log the safe wrapper itself. Its chain must
+        # not reintroduce the discarded provider message or custom type name.
+        error = raised.exception
+        wrapper_record = logging.LogRecord("vendoo_studio.test", logging.ERROR, __file__, 1,
+                                           "Form failed", (), (type(error), error, error.__traceback__))
+        report = error_alerts.build_report(wrapper_record)
+        subject, email = error_alerts.render_email(report, 1, None)
+        rendered = error_log.RedactingFormatter().format(wrapper_record)
+        self.assertNotIn("PRIVATE-SENTINEL", str(report) + subject + email + rendered)
+
+    def test_category_success_does_not_emit_error_diagnostics(self):
+        import asyncio
+
+        with patch.object(marketplace_schemas, "fields", new=AsyncMock(return_value=[])), \
+                patch.object(native_editor, "_ebay_variations_field", new=AsyncMock(return_value=[])), \
+                patch.object(native_editor, "_ebay_format_fields", new=AsyncMock(return_value=[])), \
+                patch.object(native_editor, "_ebay_choices", new=AsyncMock(return_value=[{}, {}, {}, {}])), \
+                self.assertNoLogs(native_editor.__name__, level="ERROR"):
+            form = asyncio.run(native_editor.ebay_form(self.listing))
+        self.assertEqual(form["marketplace"], "ebay")
+        self.assertTrue(form["fields"])
+        self.bridge.assert_not_called()
+
+    def test_category_failure_types_distinguish_known_api_and_database_failures(self):
+        from sqlalchemy.exc import SQLAlchemyError
+        from vendoo_studio.services.ebay_client import EbayFailure
+        from vendoo_studio.services.marketplace_accounts import SignInRequired
+
+        for failure in (EbayFailure("private", marketplace_message="private"),
+                        SignInRequired("private"), SQLAlchemyError("private")):
+            with self.subTest(kind=type(failure).__name__):
+                self.assertEqual(native_editor._category_failure_types(failure), type(failure).__name__)
+        hidden = RuntimeError("private")
+        hidden.__context__ = ValueError("private")
+        hidden.__suppress_context__ = True
+        self.assertEqual(native_editor._category_failure_types(hidden), "RuntimeError")
+
+    def test_category_failure_type_chain_is_bounded(self):
+        failure = RuntimeError("private")
+        for _ in range(20):
+            wrapper = ValueError("private")
+            wrapper.__cause__ = failure
+            failure = wrapper
+        self.assertEqual(native_editor._category_failure_types(failure), " > ".join(["ValueError"] * 4))
+
+    def test_category_diagnostics_preserve_stale_revision_guard(self):
+        with patch.object(marketplace_schemas, "fields", new=AsyncMock()) as fields, \
+                self.assertNoLogs(native_editor.__name__, level="ERROR"):
+            answer = self.client.get(f"{self.url}/ebay/form?revision_id=old")
+        self.assertEqual(answer.status_code, 409)
+        self.assertEqual(answer.json(), {"detail": "The listing changed. Refresh its category choices."})
+        fields.assert_not_awaited()
+
     def test_every_marketplace_can_reload_and_save_its_stale_definition(self):
         from vendoo_studio.services import native_contract
 

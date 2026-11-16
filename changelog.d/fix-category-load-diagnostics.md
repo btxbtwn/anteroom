@@ -1,0 +1,1 @@
+- Keep safe diagnostic details when eBay category fields fail to load, so the failure can be investigated.
