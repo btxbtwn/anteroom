@@ -38,12 +38,12 @@ def offer_analytics(db: Session, *, start: date, end: date, timezone: str) -> di
     rows: dict[str, OfferCounts] = {market: OfferCounts(marketplace=market, confirmed_recipients=None, confirmed_sends=0,
         accepted_requests=0, completed_jobs=0, unverified=0, unknown=0, failed=0, pending=0)
         for market in ('ebay', 'poshmark', 'mercari', 'depop')}
-    for market, state, evidence, count, recipients in promotion_counts(db, seller, lower, upper):
+    for market, state, evidence, has_receipt, count, recipients in promotion_counts(db, seller, lower, upper):
         if market not in rows:
             continue
         row = rows[market]
         if state == 'done':
-            if market == 'mercari' and evidence == 'recipients_created' and recipients and recipients > 0:
+            if market == 'mercari' and evidence == 'recipients_created' and has_receipt:
                 row['confirmed_recipients'] = (row['confirmed_recipients'] or 0) + recipients
                 row['confirmed_sends'] += count
             elif market == 'poshmark' and evidence == 'request_accepted':
@@ -58,9 +58,9 @@ def offer_analytics(db: Session, *, start: date, end: date, timezone: str) -> di
             row['failed'] += count
         elif state == 'sending':
             row['pending'] += count
-    for state, count, recipients in ebay_counts(db, seller, lower, upper):
+    for state, has_receipt, count, recipients in ebay_counts(db, seller, lower, upper):
         row = rows['ebay']
-        if state == 'sent' and recipients and recipients > 0:
+        if state == 'sent' and has_receipt:
             row['confirmed_recipients'] = (row['confirmed_recipients'] or 0) + recipients
             row['confirmed_sends'] += count
         elif state in ('unknown', 'checked'):

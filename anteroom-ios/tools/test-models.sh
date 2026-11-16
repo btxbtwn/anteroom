@@ -94,3 +94,8 @@ xcrun swiftc Sources/Session/MarketplaceSignInReturn.swift Tests/MarketplaceSign
 echo "Test marketplace readiness and List everywhere choices"
 xcrun swiftc Sources/API/MarketplaceReadiness.swift Tests/MarketplaceReadinessTests.swift -o "$RUNNER_TEMP/readiness-tests"
 "$RUNNER_TEMP/readiness-tests"
+
+
+echo "Test offer activity API dates under non-Latin locales"
+xcrun swiftc Sources/Automations/OfferActivityDates.swift Tests/OfferActivityDatesTests.swift -o "$RUNNER_TEMP/offer-date-tests"
+"$RUNNER_TEMP/offer-date-tests"

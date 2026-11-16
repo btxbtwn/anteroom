@@ -22,11 +22,8 @@ struct OfferActivitySection: View {
         } else {
             first = period == "custom" ? start : today
         }
-        let format = DateFormatter()
-        format.calendar = calendar
-        format.timeZone = .current
-        format.dateFormat = "yyyy-MM-dd"
-        return (format.string(from: first), format.string(from: period == "custom" ? end : today))
+        return (OfferActivityDates.day(first, calendar: calendar),
+                OfferActivityDates.day(period == "custom" ? end : today, calendar: calendar))
     }
 
     var body: some View {

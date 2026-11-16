@@ -130,3 +130,58 @@ def test_endpoint_validates_dates_and_returns_no_store():
         for query in ['start=2026-11-17&end=2026-11-16', 'start=2026-11-16&end=2026-11-16&timezone=invalid',
                       'start=2024-01-01&end=2026-11-16']:
             assert client.get('/api/analytics/offers?' + query).status_code == 400
+
+
+def test_mixed_receipts_are_classified_per_send_before_aggregation():
+    from vendoo_studio.models.ebay_offer import EbayOfferAttempt, EbayOfferRule
+    engine = create_engine('sqlite://')
+    Base.metadata.create_all(engine)
+    now = datetime(2026, 11, 16, 12)
+    with Session(engine) as db:
+        rule = EbayOfferRule(account_id='account', listing_id='listing', discount_percent=10, minimum_price_cents=100)
+        db.add(rule)
+        db.flush()
+        for recipients in (2, 5, 0, -100):
+            db.add(EbayOfferAttempt(rule_id=rule.id, current_price_cents=1000, offer_price_cents=900,
+                discount_percent=10, minimum_price_cents=100, state='sent', recipient_count=recipients,
+                created_at=now, sent_at=now, expires_at=now))
+        # eBay's recipient column is NOT NULL; Mercari also permits absent counts.
+        for recipients in (2, 5, None, 0, -100):
+            db.add(ListingPromotion(batch_id='batch', marketplace='mercari', action='offer',
+                listing_id='listing', state='done', confirmation='recipients_created', recipient_count=recipients,
+                created_at=now, sent_at=now, expires_at=now))
+        db.commit()
+        statements = []
+        event.listen(engine, 'before_cursor_execute', lambda *args: statements.append(args[2]))
+        result = offer_analytics(db, start=now.date(), end=now.date(), timezone='UTC')
+        rows = {row['marketplace']: row for row in result['marketplaces']}
+        for market, unverified in [('ebay', 2), ('mercari', 3)]:
+            assert rows[market]['confirmed_recipients'] == 7
+            assert rows[market]['confirmed_sends'] == 2
+            assert rows[market]['unverified'] == unverified
+        assert len(statements) == 2
+
+
+def test_missing_receipt_does_not_inherit_positive_receipt_confirmation():
+    from vendoo_studio.models.ebay_offer import EbayOfferAttempt, EbayOfferRule
+    engine = create_engine('sqlite://')
+    Base.metadata.create_all(engine)
+    now = datetime(2026, 11, 16, 12)
+    with Session(engine) as db:
+        rule = EbayOfferRule(account_id='account', listing_id='listing', discount_percent=10, minimum_price_cents=100)
+        db.add(rule)
+        db.flush()
+        for recipients in (2, 0):
+            db.add(EbayOfferAttempt(rule_id=rule.id, current_price_cents=1000, offer_price_cents=900,
+                discount_percent=10, minimum_price_cents=100, state='sent', recipient_count=recipients,
+                created_at=now, sent_at=now, expires_at=now))
+        for recipients in (2, None, 0):
+            db.add(ListingPromotion(batch_id='batch', marketplace='mercari', action='offer',
+                listing_id='listing', state='done', confirmation='recipients_created', recipient_count=recipients,
+                created_at=now, sent_at=now, expires_at=now))
+        db.commit()
+        rows = {row['marketplace']: row for row in offer_analytics(db, start=now.date(), end=now.date(), timezone='UTC')['marketplaces']}
+        for market, unverified in [('ebay', 1), ('mercari', 2)]:
+            assert rows[market]['confirmed_recipients'] == 2
+            assert rows[market]['confirmed_sends'] == 1
+            assert rows[market]['unverified'] == unverified

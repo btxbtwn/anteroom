@@ -36,6 +36,28 @@ Mac web UI and native iPhone. No offer eligibility or automation changes.
   retain existing seller RLS, explicit owner predicates, and matching indexes.
   Changelog checked; no Supabase client/API/auth changes are involved.
 
+## Review correction (2026-11-16)
+
+Independent review found that classifying an entire state/evidence group from
+its recipient sum could verify rows with no receipt, or allow a negative count
+to erase valid receipts. Regressions reproduced both failures before the fix.
+SQL now groups by a per-row positive-receipt `CASE` as well as state/evidence,
+and sums only positive receipt values. Missing, zero and negative receipt rows
+remain unverified even alongside valid receipts. The eBay column is NOT NULL;
+its missing-receipt representation is zero, while Mercari can also store null.
+No schema or send-path change is needed for this correction. Two bounded
+seller/time aggregate queries and the four-row response are preserved.
+
+This follows PostgreSQL's documented [CASE semantics](https://www.postgresql.org/docs/16/functions-conditional.html)
+and [aggregate semantics](https://www.postgresql.org/docs/16/functions-aggregate.html),
+which do not make a group's row count conditional on a positive sum. Native
+API day strings now use `en_US_POSIX` and a Gregorian calendar per
+[Apple QA1480](https://developer.apple.com/library/archive/qa/qa1480/_index.html).
+A standalone Foundation regression covers Arabic, Persian, Thai and English
+calendar locales and checks ASCII dates on both sides of a local-day boundary;
+it is included in `tools/test-models.sh`. This Linux host has neither Swift nor
+xcrun, so this native regression has been authored but not executed here.
+
 ## Persisted evidence and counting contract
 
 `ListingPromotion` is one action on one listing, with state, confirmation,
