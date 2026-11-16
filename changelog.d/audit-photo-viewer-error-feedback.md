@@ -1,0 +1,1 @@
+- Photo errors stay visible inside the enlarged viewer, so a refused reorder no longer hides its recovery instruction behind the photo.

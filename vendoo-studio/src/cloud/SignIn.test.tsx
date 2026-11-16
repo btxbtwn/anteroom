@@ -24,3 +24,15 @@ it("asks for a new password without an eyebrow", () => {
   expect(html).toContain("Choose a new password");
   expect(html).not.toContain("eyebrow");
 });
+
+it("signup instructions name only the supported browser marketplaces", () => {
+  const before = window.location.href;
+  window.history.replaceState(null, "", "?create-account");
+  try {
+    const html = renderToStaticMarkup(<SignIn client={client} sandbox />);
+    expect(html).toContain("Create your account");
+    for (const name of ["Poshmark", "Mercari", "Depop"]) expect(html).toContain(name);
+    expect(html).not.toContain("Vinted");
+    expect(html).not.toContain("Sellwild");
+  } finally { window.history.replaceState(null, "", before); }
+});

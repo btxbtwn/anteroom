@@ -60,7 +60,7 @@ function ErrorLogSection() {
       <SettingsRow
         id="error-logs"
         title="Warnings and errors"
-        description="Problems since Anteroom opened, with keys masked; the list clears on restart but the log file keeps them."
+        description="Recent problems, with keys masked. Clear or restart empties this list; the log file keeps them."
         status={entries.length ? `${entries.length} ${entries.length === 1 ? "entry" : "entries"}` : undefined}
         control={
           <Button
@@ -79,7 +79,7 @@ function ErrorLogSection() {
       >
         {error ? <SettingsNote tone="error">{error.message}</SettingsNote> : null}
         {entries.length === 0 ? (
-          <SettingsNote>No warnings or errors since Anteroom started.</SettingsNote>
+          <SettingsNote>No warnings or errors in this list.</SettingsNote>
         ) : (
           <div className={LOG_SCROLL}>
             <table className={LOG_TABLE} aria-label="Anteroom warnings and errors">

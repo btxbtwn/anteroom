@@ -11,10 +11,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     id: "help-create-listing",
     title: "Create a listing from photos",
     steps: [
-      "Drop photos anywhere in the window, or press **+** (New listing) beside the listings search and use **Add Photos** on the **Input** tab.",
-      "Type the measurements and anything else you know into Item details on **Input**.",
-      "Press **Generate Listing** in the chat.",
-      "Check the result on the **Forms** tab. Ask in the chat for any change you want.",
+      "Drop photos anywhere in the window, or press **+** (New listing) beside the listings search and use **Add Photos** on the **General** tab.",
+      "On **General**, fill in **Measurements (in)** and **Notes & Labels** with what you know about the item.",
+      "Open **Chat** and press **Generate listing**.",
+      "Check the result on **General** and each marketplace tab. Ask in the chat for any change you want.",
     ],
   },
   {
@@ -33,10 +33,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     title: "Regenerate or rewrite listings",
     steps: [
       "One listing: press **Regenerate** in the listing header. If it has a price, pick the new price and press **Confirm**; if not, press **Rewrite**.",
-      "Several listings: press **Select** above the sidebar list, tick the listings (each needs photos), then press **Regenerate** in the bar at the bottom.",
+      "Several listings: press **Select** above the sidebar list, tick the listings (each needs photos), then choose **More** → **Regenerate…** in the bar at the bottom.",
       "If any have a price, choose **Keep prices**, a drop for each, or **Each listing's suggestion**.",
       "In **Review … listings before rewriting**, check the photos, SKU, COG, labels and measurements, then press **Rewrite**.",
-      "The new copy stays in Anteroom until you update it on the marketplace. To go back, press **History** in the listing header and **Restore this version**.",
+      "The new copy stays in Anteroom until you update it on the marketplace. To go back, press **History** at the bottom of the listing editor, then **Restore this version** and **Confirm restore**.",
     ],
   },
   {
@@ -45,9 +45,9 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     steps: [
       "Find what is sitting: open **Filters** in the sidebar and choose a **Stale since listed** age, or sort by **Stalest**. **Suggestions** also lists listings up past your stale threshold (60 days unless you change it in Settings → Listings → Inventory) as **Refresh or consider price drop**.",
       "One listing: press **Regenerate**. The dialog suggests a new price from live comps and your past drops. Pick one and press **Confirm**.",
-      "Many at once: press **Select**, tick them, press **Regenerate**, choose −10%, −15% or −20% each, or **Each listing's suggestion**, then **Drop and rewrite**.",
+      "Many at once: press **Select**, tick them, choose **More** → **Regenerate…**, choose −10%, −15% or −20% each, or **Each listing's suggestion**, then **Drop and rewrite**.",
       "Open each listing and update it on the marketplace to carry the new price live.",
-      "For a timed sale instead, open **Marketplaces**, choose the marketplace, and use **Plan a sale** in the Sale calendar.",
+      "For an eBay sale plan, open **Marketplaces** → **eBay** and find **Sale calendar**. Connected accounts show it under **Marketing**. Choose **Plan a sale**.",
     ],
   },
   {
@@ -66,10 +66,10 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     id: "help-analytics",
     title: "Read Analytics",
     steps: [
-      "Open **Analytics** in the sidebar.",
-      "Pick a range at the top, from **This week** to **All time**, or **Custom** with your own From and To dates.",
-      "The top row shows **Revenue**, **Sold**, **Sell-through rate**, **Profit**, **Profit margin** and **Median time to sell**. The chart switches between revenue, profit and sales.",
-      "**Marketplaces**, **Categories** and **Brands** rank what sells. **Inventory today** and **Review your oldest listings** show what is still sitting.",
+      "Open **Analytics** in the sidebar. It starts on **Sales records**, where **Record amounts** lets you fill in a sale's totals.",
+      "Switch to **Inventory analytics** for inventory metrics and breakdowns. Pick a range at the top, from **This week** to **All time**, or **Custom** with your own From and To dates.",
+      "The top row shows **Revenue**, **Profit**, **Items sold**, **Median days to sell**, **Sell-through** and **Profit margin**. The chart switches between **Revenue**, **Profit** and **Items sold**.",
+      "**Marketplaces**, **Categories**, **Brands** and **Labels** rank what sells. **Inventory today** and **Review your oldest listings** show what is still sitting.",
       "Missing a recent sale? Open the listing and record it, or wait for sale detection on a connected marketplace.",
     ],
   },
@@ -100,7 +100,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     steps: [
       "Anteroom backs itself up when it starts, every six hours, and before any update. To make one now, go to Settings → Data and press **Back up now**.",
       "Set a **Backup folder** that is not on this Mac, such as an external drive or a synced folder, and press **Save**. Every backup and photo is copied there.",
-      "To undo changes on one listing, press **History** in its header, then **Restore this version** and **Confirm restore**. This changes Anteroom only.",
+      "To undo changes on one listing, press **History** at the bottom of its editor, then **Restore this version** and **Confirm restore**. This changes Anteroom only.",
     ],
   },
 ];

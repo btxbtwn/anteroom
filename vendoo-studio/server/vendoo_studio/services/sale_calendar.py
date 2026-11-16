@@ -9,6 +9,7 @@ from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic_core import PydanticCustomError
 
 from vendoo_studio.models.conversation import Conversation
 from vendoo_studio.models.sale_event import SaleEvent
@@ -25,7 +26,7 @@ def zone(name: str) -> ZoneInfo:
     try:
         return ZoneInfo(name)
     except (ZoneInfoNotFoundError, ValueError) as exc:
-        raise ValueError("Choose a valid time zone.") from exc
+        raise PydanticCustomError("time_zone", "Choose a valid time zone.") from exc
 
 
 class SaleRecord(BaseModel):

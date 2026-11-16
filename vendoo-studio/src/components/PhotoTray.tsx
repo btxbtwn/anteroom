@@ -46,6 +46,8 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
 
   const deleteMutation = useMutation({
     mutationFn: (photoId: string) => api.conversations.deletePhoto(convId, photoId),
+    onMutate: () => setUploadError(null),
+    onError: (err: Error) => setUploadError(err.message || "Could not remove the photo. Try again."),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["photos", convId] });
       // The sidebar thumbnail comes from the conversation list's cover photo.
@@ -267,6 +269,7 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
         <PhotoLightbox
           urls={photos.map((photo) => photo.url)}
           index={previewIndex}
+          error={uploadError}
           rotating={rotateMutation.isPending}
           onRotate={runtime.features.has("photo_edits") ? (degrees) => rotate(previewPhoto.id, degrees) : undefined}
           edited={Boolean(previewPhoto.edits)}

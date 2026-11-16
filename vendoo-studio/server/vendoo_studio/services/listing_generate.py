@@ -1273,25 +1273,28 @@ def listing_save_summary(
             return (
                 f"{lead} with questions outstanding. "
                 + " — ".join(parts)
-                + ". Finish them in Forms before Send."
+                + ". Resolve the questions in chat and review the General and marketplace tabs before choosing List or Update."
             )
-        return f"{lead} with questions outstanding. Answer them in chat before Send."
+        return (
+            f"{lead} with questions outstanding. Answer them in chat and review the General and marketplace tabs "
+            "before choosing List or Update."
+        )
     if missing or discovered:
         parts = []
         if missing:
             parts.append(f"{missing} required field(s) still missing in Anteroom")
         if discovered:
-            # No count: Forms and chat would otherwise quote two different
+            # No count: the editor and chat would otherwise quote two different
             # numbers for "empty fields" and read as contradicting each other.
             parts.append("some discovered fields are still empty")
         return (
             f"{lead}. "
             + " — ".join(parts)
-            + ". Review Forms for what still needs chat, then Send when ready."
+            + ". Complete missing fields in the General and marketplace tabs, or ask in chat, before choosing List or Update."
         )
     return (
         f"{lead}. Required and discovered Anteroom fields are filled. "
-        "Review Forms, then Send when the draft looks right."
+        "Review the General and marketplace tabs before choosing List or Update."
     )
 
 

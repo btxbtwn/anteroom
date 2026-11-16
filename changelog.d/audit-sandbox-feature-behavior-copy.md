@@ -1,0 +1,5 @@
+- Help and generated-listing instructions now point to the tabs and actions you can use, and scheduled automations explain which changes save automatically.
+- Sourcing keeps outdated cart links disabled after an update fails and explains how to rebuild them.
+- Sourcing describes its operating allowance consistently as a cost per sold piece.
+- Bulk edit reviews show individual changed fields, and supplier and sale-amount errors give clearer instructions.
+- Listing history explains which fields are protected from automatic edits without exposing internal field names.

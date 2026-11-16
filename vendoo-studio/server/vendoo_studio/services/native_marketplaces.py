@@ -276,8 +276,8 @@ def _outcome(marketplace: str, action: str, record: dict, result: dict) -> dict:
         if state in {"published", "pending_review"}:
             if result.get("listing_url"):
                 values["listing_url"] = listing_url(marketplace, result["listing_url"])
-            elif marketplace != "depop":
-                # Depop's publish answers without the public link; every other one has it.
+            else:
+                # A confirmed listing must remain identifiable for checks and delisting.
                 raise NativeMarketplaceError(502, f"{NAMES[marketplace]} did not return the listing link.")
         if action == "update":
             from vendoo_studio.services.marketplace_delist import listing_id
@@ -917,7 +917,10 @@ def _open_check(db: Session, conv_id: str, marketplace: str, body: CheckRequest 
     _conversation(db, conv_id)
     record = _record(db, conv_id, marketplace)
     if not record.get("job_id"):
-        raise NativeMarketplaceError(409, "No marketplace action to check.")
+        raise NativeMarketplaceError(409, (
+            "Anteroom has no saved action to check. "
+            f"Verify the item's status directly on {NAMES[marketplace]} before making another marketplace change."
+        ))
     if _running(db, record):
         raise NativeMarketplaceError(409, f"The {NAMES[marketplace]} action is still running. Wait for it to finish.")
     if marketplace not in API_MARKETPLACES and not current_extension().connected:

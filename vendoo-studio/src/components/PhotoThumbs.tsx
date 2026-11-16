@@ -194,6 +194,7 @@ export function PhotoLightbox({
   onRotate,
   onEdit,
   edited = false,
+  error,
   onStep,
   onMove,
   onRemove,
@@ -210,6 +211,8 @@ export function PhotoLightbox({
   onEdit?: () => void;
   /** The photo shown is an edit of a kept original. */
   edited?: boolean;
+  /** Keep operation failures visible while the modal hides the photo tray. */
+  error?: string | null;
   onStep: (index: number) => void;
   /** Moves the photo without dragging it (WCAG 2.2, 2.5.7 Dragging Movements). */
   onMove?: (delta: -1 | 1) => void;
@@ -294,6 +297,7 @@ export function PhotoLightbox({
               </Button>
             ) : null}
           </div>
+          {error && <p role="alert" className="mt-2 max-w-full rounded-lg bg-background px-3 py-2 text-center text-destructive-foreground text-sm">{error}</p>}
           {onMove || onRemove ? (
             // Earlier and Later show everywhere: dragging is never the only way to reorder.
             // Remove is for touch only; the desktop uses the tiles' own buttons.

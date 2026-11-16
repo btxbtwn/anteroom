@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { bulkEditChanges } from "./bulkEditReview";
+import { changeValue, fieldLabel } from "./listingChanges";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { BULK_FIELDS, CHOICE_FIELDS, bulkEditsFromInputs, bulkReviewTokens, type BulkCategories, type BulkEdits, type BulkField, type BulkReviewRow, type ListMode } from "../api/bulkEdit";
@@ -29,7 +31,6 @@ function ListModeSelect({ label, value, onChange, disabled }: { label: string; v
     <SelectPopup><SelectItem value="keep">Keep {noun}</SelectItem><SelectItem value="add">Add {noun}</SelectItem><SelectItem value="remove">Remove {noun}</SelectItem><SelectItem value="replace">Replace all {noun}</SelectItem></SelectPopup>
   </Select>;
 }
-function show(value: unknown): string { return value == null ? "Not set" : typeof value === "string" ? value || "Empty" : JSON.stringify(value); }
 
 export function BulkEditDialog({ conversationIds, onClose }: { conversationIds: string[]; onClose: () => void }) {
   const { features } = useWorkspaceRuntime();
@@ -97,7 +98,7 @@ export function BulkEditDialog({ conversationIds, onClose }: { conversationIds: 
       {apply.data.skipped.map((row) => <p key={row.conversation_id}>{review?.rows.find((item) => item.conversation_id === row.conversation_id)?.title || row.conversation_id}: {row.reason}</p>)}
     </div> : review ? <ul className="space-y-4">{review.rows.map((row) => <li key={row.conversation_id} className="min-w-0 space-y-2 rounded-lg border p-3">
       <label className="flex items-center gap-2 font-medium"><Checkbox disabled={Boolean(row.skip_reason) || busy} checked={!row.skip_reason && !skips.has(row.conversation_id)} onCheckedChange={(checked) => setSkips((previous) => { const next = new Set(previous); if (checked) next.delete(row.conversation_id); else next.add(row.conversation_id); return next; })} />{row.title}</label>
-      {row.skip_reason ? <p className="text-muted-foreground">{row.skip_reason}</p> : row.changes.map((change) => <div key={change.field} className="break-words text-xs"><p className="font-medium">{change.field.replace(/_/g, " ")}</p><pre className="whitespace-pre-wrap break-words font-sans">{show(change.old)} → {show(change.new)}</pre></div>)}
+      {row.skip_reason ? <p className="text-muted-foreground">{row.skip_reason}</p> : bulkEditChanges(row).map((change) => <div key={change.field} className="break-words text-xs"><p className="font-medium">{fieldLabel(change.field)}</p><pre className="whitespace-pre-wrap break-words font-sans">{changeValue(change.before, change.field)} → {changeValue(change.after, change.field)}</pre></div>)}
     </li>)}</ul> : <div className="space-y-4">
       <PageNote>Check only the fields to replace on every selected item. Unchecked fields stay as they are. Blank description, brand or SKU clears that field; blank cost means unknown. {features.has("catalog_categories") ? "Categories must be picked from the search. " : null}Prices and quantities are whole numbers. Size and price changes include the editor’s dependent fields in the review.</PageNote>
       {BULK_FIELDS.map((field) => <div key={field} className="space-y-1"><label className="flex items-center gap-2"><Checkbox checked={fields[field] !== undefined} disabled={busy} onCheckedChange={(checked) => setFields((previous) => { const next = { ...previous }; if (checked) next[field] = ""; else delete next[field]; return next; })} />Replace {LABELS[field]}</label>

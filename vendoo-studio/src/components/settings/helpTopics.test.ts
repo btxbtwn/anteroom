@@ -20,4 +20,37 @@ describe("help topics", () => {
     const text = HELP_TOPICS.map(helpTopicMarkdown).join("\n").replace(/vendoo-studio/g, "");
     expect(text).not.toMatch(/Vendoo/i);
   });
+
+  it("names the current editor sections and generation control", () => {
+    const text = helpTopicMarkdown(HELP_TOPICS.find((topic) => topic.id === "help-create-listing")!);
+    for (const label of ["General", "Measurements (in)", "Notes & Labels", "Generate listing"]) {
+      expect(text).toContain(`**${label}**`);
+    }
+    for (const removed of ["**Input**", "**Forms**", "**Generate Listing**"]) expect(text).not.toContain(removed);
+  });
+
+  it("explains the default Sales records view and names current inventory analytics metrics", () => {
+    const text = helpTopicMarkdown(HELP_TOPICS.find((topic) => topic.id === "help-analytics")!);
+    expect(text).toContain("**Sales records**");
+    expect(text).toContain("**Record amounts**");
+    expect(text).toContain("**Inventory analytics**");
+    for (const label of ["Revenue", "Profit", "Items sold", "Median days to sell", "Sell-through", "Profit margin"]) {
+      expect(text).toContain(`**${label}**`);
+    }
+    for (const removed of ["**Sold**", "**Sell-through rate**", "**Median time to sell**"]) expect(text).not.toContain(removed);
+  });
+
+  it("locates eBay sale plans with or without a connected account and bulk rewriting through More", () => {
+    const price = helpTopicMarkdown(HELP_TOPICS.find((topic) => topic.id === "help-price-drops")!);
+    expect(price).toContain("**Marketplaces** → **eBay** and find **Sale calendar**");
+    expect(price).toContain("Connected accounts show it under **Marketing**");
+    expect(price).not.toContain("**eBay** → **Marketing**");
+    expect(price).toContain("**More** → **Regenerate…**");
+    const regenerate = helpTopicMarkdown(HELP_TOPICS.find((topic) => topic.id === "help-regenerate")!);
+    expect(regenerate).toContain("**More** → **Regenerate…**");
+    expect(regenerate).toContain("press **History**");
+    expect(regenerate).not.toContain("**History** in the listing header");
+    const backups = helpTopicMarkdown(HELP_TOPICS.find((topic) => topic.id === "help-backups")!);
+    expect(backups).not.toContain("**History** in its header");
+  });
 });

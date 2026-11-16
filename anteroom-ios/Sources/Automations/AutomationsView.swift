@@ -569,7 +569,7 @@ private struct AutomationEditorView: View {
                     } header: {
                         Text("Describe it")
                     } footer: {
-                        Text("Scheduling never publishes or delists on its own. Each item and marketplace waits for your approval.")
+                        Text("Scheduled price changes and regeneration save in Anteroom automatically. Listing, relisting and delisting need your approval for each item and marketplace.")
                     }
                     if manual { manualSections }
                     if !issues.isEmpty {
