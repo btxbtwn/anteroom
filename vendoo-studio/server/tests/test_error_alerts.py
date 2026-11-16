@@ -205,6 +205,24 @@ def handler(send, clock=lambda: 0.0):
     return AlertHandler(send, clock=clock)
 
 
+def test_overdue_timestamps_and_ids_keep_one_group_per_marketplace():
+    def overdue(marketplace, identity, due, last):
+        return build_report(logging.LogRecord('vendoo_studio.promotion_automations', logging.ERROR,
+            '/promotion_automations.py', 497,
+            '%s offer automation %s is overdue (seller %s, due %s, last run %s). Check the scheduler and Chrome connection.',
+            (marketplace, identity, identity, due, last), None))
+
+    first = overdue('poshmark', 'a9b19dd3-7616-473a-b68f-123456789012',
+                    '2026-11-15 02:20:44.123456', '2026-11-14 01:12:30.654321')
+    later = overdue('poshmark', 'b8c28ee4-8727-484b-c79a-234567890123',
+                    '2026-11-16 22:44:34.932766', '2026-11-15 03:45:03.012345')
+    distinct = overdue('depop', 'b8c28ee4-8727-484b-c79a-234567890123',
+                       '2026-11-16 22:44:34.932766', '2026-11-15 03:45:03.012345')
+    assert first['fingerprint'] == later['fingerprint']
+    assert first['fingerprint'] != distinct['fingerprint']
+    assert first['message'] != later['message']  # Full latest diagnostics remain visible.
+
+
 def test_repeats_are_grouped_then_counted_in_the_next_email():
     sent, now = [], [0.0]
     h = handler(lambda s, b: sent.append((s, b)), clock=lambda: now[0])
@@ -212,7 +230,7 @@ def test_repeats_are_grouped_then_counted_in_the_next_email():
         h.delivery.add(build_report(record_with_exception()))
         h.delivery.tick()
     assert len(sent) == 1
-    now[0] = 901
+    now[0] = 3601
     h.delivery.add(build_report(record_with_exception()))
     h.delivery.tick()
     assert len(sent) == 2 and "(+4 more)" in sent[1][0]

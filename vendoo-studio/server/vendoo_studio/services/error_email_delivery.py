@@ -5,7 +5,6 @@ import uuid
 
 DAY = 86400
 DIGEST_INTERVAL = 3600
-REPEAT_WINDOW = 900
 HOURLY_CAP = 60
 MAX_GROUPS_PER_EMAIL = 20
 
@@ -27,7 +26,7 @@ class EmailDelivery:
             else:
                 warning = report['severity'] == 'WARNING'
                 due = (max(now, state.setdefault('digest_after', now + DIGEST_INTERVAL)) if warning
-                       else max(now, last + REPEAT_WINDOW) if last is not None else now)
+                       else max(now, last + DIGEST_INTERVAL) if last is not None else now)
                 group = {'report': report, 'count': 1, 'first': report['occurred_at'], 'due': due}
             transaction.put_group(fingerprint, group, last)
 
@@ -45,12 +44,19 @@ class EmailDelivery:
                     or sum(t > now - 3600 for t in attempts) >= HOURLY_CAP
                     or state.get('paused_until', 0) > now or state.get('lease_until', 0) > now):
                 return
-            errors = transaction.due_groups(now, warning=False, limit=MAX_GROUPS_PER_EMAIL)
+            # A first alert never waits behind already-notified fingerprints.
+            errors = transaction.due_groups(now, warning=False, limit=MAX_GROUPS_PER_EMAIL,
+                                            first_alert=True)
             # Reserve at least one slot for errors whenever the budget permits.
             reserve = max(1, self.daily_limit // 4)
             selected = errors
             if not errors and len(attempts) < self.daily_limit - reserve and state.get('digest_after', 0) <= now:
                 selected = transaction.due_groups(now, warning=True, limit=MAX_GROUPS_PER_EMAIL)
+            repeats = not selected and state.get('error_digest_after', 0) <= now
+            if repeats:
+                errors = transaction.due_groups(now, warning=False, limit=MAX_GROUPS_PER_EMAIL,
+                                                sent_before=now - DIGEST_INTERVAL)
+                selected = errors
             if not selected:
                 return
             # Reserve before SMTP, including failures and uncertain crash outcomes.
@@ -95,10 +101,15 @@ class EmailDelivery:
                     remaining = current['count'] - sent['count']
                     if remaining:
                         current['count'] = remaining
-                        current['due'] = now + (REPEAT_WINDOW if errors else DIGEST_INTERVAL)
+                        current['due'] = now + DIGEST_INTERVAL
                     transaction.put_group(key, current if remaining else None, now)
                 if not errors:
                     state['digest_after'] = now + DIGEST_INTERVAL
+                elif repeats:
+                    state['error_digest_after'] = now + DIGEST_INTERVAL
+                else:
+                    # New fingerprints must not keep sliding the repeat deadline.
+                    state.setdefault('error_digest_after', now + DIGEST_INTERVAL)
 
     def status(self):
         state, pending = self.store.summary()
