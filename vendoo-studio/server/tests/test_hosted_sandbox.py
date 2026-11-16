@@ -60,7 +60,6 @@ def test_load_tests_can_sign_in_more_sellers(monkeypatch):
 
 
 def test_database_delay_proxy_adds_the_round_trip_each_way():
-    import asyncio
     import gc
     import os
     import shutil
@@ -73,26 +72,28 @@ def test_database_delay_proxy_adds_the_round_trip_each_way():
     # Unix socket paths are capped at 104 bytes on macOS, which pytest's tmp_path there exceeds.
     short = tempfile.mkdtemp(dir='/tmp')
     path = os.path.join(short, 'echo.sock')
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(path)
+    listener.listen(1)
+    listener.settimeout(10)
 
-    async def echo(reader, writer):
-        try:
-            while data := await reader.read(1024):
-                writer.write(data)
-                await writer.drain()
-        finally:
-            writer.close()
+    def echo():
+        # One connection, the proxy's; it ends when the proxy closes it.
+        conn, _ = listener.accept()
+        with conn:
+            while data := conn.recv(1024):
+                conn.sendall(data)
 
-    loop = asyncio.new_event_loop()
-    server = loop.run_until_complete(asyncio.start_unix_server(echo, path))
-    running = threading.Thread(target=loop.run_forever, daemon=True)
-    running.start()
+    serving = threading.Thread(target=echo, daemon=True)
+    serving.start()
     proxy = DelayedDatabase(path, 0.05)
     trips = []
-    # A full garbage collection late in a long test process paused every
-    # thread for over a second (CI run 43781664867 measured 1.63 s for one
-    # trip), so it stays off while timing. Any other pause can only lengthen a
-    # trip, so every trip must include the delay and the fastest bounds what
-    # the proxy itself adds.
+    # A process-wide stall late in a long test process (a full garbage
+    # collection, or CPU starvation on a busy runner) paused every thread for
+    # over a second: CI run 43781664867 measured 1.63 s for one trip. Automatic
+    # collection stays off while timing. A stall can only lengthen a trip, so
+    # every trip must include the delay, and all but one must stay near it: a
+    # proxy that adds delay, always or every other trip, still fails.
     collecting = gc.isenabled()
     gc.disable()
     try:
@@ -106,17 +107,8 @@ def test_database_delay_proxy_adds_the_round_trip_each_way():
         if collecting:
             gc.enable()
         proxy.stop()
-
-        async def close():
-            server.close()
-            tasks = [task for task in asyncio.all_tasks() if task is not asyncio.current_task()]
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            loop.stop()
-        asyncio.run_coroutine_threadsafe(close(), loop)
-        running.join(5)
-        loop.close()
+        serving.join(5)
+        listener.close()
         shutil.rmtree(short, ignore_errors=True)
     assert min(trips) >= 0.1, trips
-    assert min(trips) < 0.5, trips
+    assert sorted(trips)[-2] < 0.5, trips
