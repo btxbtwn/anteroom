@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.991 — 2026-11-16
+
+- Depop offer checks still skip listings with several sizes, while recording that expected skip without raising an operator error.
+
+## 0.1.990 — 2026-11-16
+
+- Settings now shows when eBay has refused its saved sign-in, and the listing editor keeps the reason you need to reconnect.
+
 ## 0.1.989 — 2026-11-16
 
 - Confirming an automation change the assistant suggested no longer fails just because the automation ran or was paused in the meantime.

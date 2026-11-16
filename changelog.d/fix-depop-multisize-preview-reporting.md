@@ -1,1 +1,0 @@
-- Depop offer checks still skip listings with several sizes, while recording that expected skip without raising an operator error.
