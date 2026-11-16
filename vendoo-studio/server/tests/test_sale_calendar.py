@@ -286,3 +286,16 @@ def test_unknown_sale_prices_are_not_used_to_estimate_fees():
     from vendoo_studio.services import box_scout
     missing = replace(sale(NOW - timedelta(days=1)), sold_price=None)
     assert box_scout.measured_fees([missing] * box_scout.MEASURED_MIN_SALES, NOW) is None
+
+@pytest.mark.parametrize("record", [False, True])
+def test_invalid_time_zone_gives_actionable_copy_without_validation_prefix(workspace, record):
+    db, client = workspace
+    body = plan(timezone="Mars/Fixture")
+    path = "/api/analytics/calendar"
+    if record:
+        path += "/records"
+        body = {key: body[key] for key in ["title", "marketplace", "start_date", "end_date", "timezone", "discount_percent", "notes"]}
+    response = client.post(path, json=body)
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["msg"] == "Choose a valid time zone."
+    assert db.query(SaleEvent).count() == 0
