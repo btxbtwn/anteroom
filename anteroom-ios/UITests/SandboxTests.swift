@@ -423,6 +423,44 @@ final class EbayFormSandboxTests: XCTestCase {
 /// never toggle a rule, send an offer, or check a live marketplace result.
 @MainActor
 final class AutomationOffersSandboxTests: XCTestCase {
+    func testOfferActivityRefreshPreservesCustomDates() {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
+        launchSandbox(app)
+        openMorePage("Automations", app: app)
+        let period = app.buttons["offer-activity-period"]
+        XCTAssertTrue(period.waitForExistence(timeout: 20))
+        period.tap()
+        app.buttons["Custom dates"].tap()
+        let from = app.datePickers["From"]
+        let through = app.datePickers["Through"]
+        XCTAssertTrue(from.waitForExistence(timeout: 10))
+        XCTAssertTrue(through.exists)
+        let fromValue = from.value as? String
+        let throughValue = through.value as? String
+        XCTAssertNotNil(fromValue)
+        XCTAssertNotNil(throughValue)
+        let before = XCTAttachment(screenshot: app.screenshot())
+        before.name = "Offer activity custom dates before refresh"
+        before.lifetime = .keepAlways
+        add(before)
+        // Drag from the top of the list to trigger the page's actual refresh.
+        let list = app.collectionViews.firstMatch
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
+        list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.15))
+            .press(forDuration: 0.05, thenDragTo:
+                list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.85)))
+        XCTAssertTrue(from.waitForExistence(timeout: 20), "Refreshing must keep the selected custom period")
+        XCTAssertEqual(from.value as? String, fromValue)
+        XCTAssertEqual(through.value as? String, throughValue)
+        XCTAssertTrue(period.exists)
+        let after = XCTAttachment(screenshot: app.screenshot())
+        after.name = "Offer activity custom dates after refresh"
+        after.lifetime = .keepAlways
+        add(after)
+    }
+
     func testOfferOverviewAndEvidence() {
         reviewOffers(accessibilityText: false)
     }
@@ -484,15 +522,18 @@ final class AutomationOffersSandboxTests: XCTestCase {
         if tabBar.exists, tabBar.isHittable {
             viewport.size.height = min(viewport.maxY, tabBar.frame.minY - 8) - viewport.minY
         }
-        for _ in 0..<20 {
+        for _ in 0..<40 {
             if element.waitForExistence(timeout: 1), element.isHittable,
                viewport.contains(element.frame) { return }
-            // Small drags avoid skipping a tall label. Reverse only when the
-            // target has moved above the unobscured content area.
-            let scrollDown = element.exists && !element.frame.isEmpty
+            // Dynamic Type and the offer-activity section can place the target
+            // beyond the lazy list's materialized rows. Move farther while it
+            // is absent; keep overlapping viewports so a row cannot be skipped.
+            // Once present, small drags fit the entire label into the viewport.
+            let absent = !element.exists
+            let scrollDown = !absent && !element.frame.isEmpty
                 && element.frame.minY < viewport.minY
-            let startY = scrollDown ? 0.45 : 0.75
-            let endY = scrollDown ? 0.70 : 0.50
+            let startY = scrollDown ? 0.45 : (absent ? 0.80 : 0.75)
+            let endY = scrollDown ? 0.70 : (absent ? 0.25 : 0.50)
             app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: startY))
                 .press(forDuration: 0.05, thenDragTo:
                     app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: endY)))

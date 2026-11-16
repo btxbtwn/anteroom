@@ -3,6 +3,7 @@ import SwiftUI
 /// Read-only evidence; no marketplace calls or timer.
 struct OfferActivitySection: View {
     let api: AnteroomAPI
+    let refreshToken: UUID
     @State private var period = "today"
     @State private var start = Date()
     @State private var end = Date()
@@ -34,6 +35,7 @@ struct OfferActivitySection: View {
                 Text("This month").tag("month")
                 Text("Custom dates").tag("custom")
             }
+            .accessibilityIdentifier("offer-activity-period")
             if period == "custom" {
                 DatePicker("From", selection: $start, displayedComponents: .date)
                 DatePicker("Through", selection: $end, displayedComponents: .date)
@@ -63,7 +65,7 @@ struct OfferActivitySection: View {
         } footer: {
             Text("Partial history: only recorded sends are included; previews, cooldown checks and skips are excluded. eBay history before send-date tracking is excluded. Counts are recipient offers, not unique buyers; repeat offers count again.")
         }
-        .task(id: "\(dates.0)/\(dates.1)/\(TimeZone.current.identifier)") {
+        .task(id: "\(dates.0)/\(dates.1)/\(TimeZone.current.identifier)/\(refreshToken)") {
             data = nil
             error = nil
             do {

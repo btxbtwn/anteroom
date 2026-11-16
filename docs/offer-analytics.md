@@ -124,8 +124,107 @@ upgrade. Shared generated contract covers desktop and hosted responses.
 Library materialization/prepare_materialize tools and a Library skill are not
 available in this session. IMG_1345.jpeg was not downloaded or inspected; no
 storage URL was guessed. Design is based on repository components and contracts.
-Full/browser suites are reserved by other active workers; desktop/phone,
-light/dark screenshots and native runtime verification remain outstanding.
-Postgres migration/RLS execution and concurrent multi-seller generation latency
-(p50/p95, errors, load), payload benchmarks and input-feedback measurements are
-also outstanding. Query-count checks are not production performance evidence.
+Full local suites remain reserved by other active workers. The short slot was
+used for three real Postgres regressions and four desktop/phone light/dark
+browser cases; all passed, and the four screenshots were inspected. Final-head
+native reruns and CI remain outstanding. Concurrent multi-seller generation
+latency (p50/p95, errors, load), payload benchmarks and input-feedback
+measurements remain gaps. Query-count checks are not production performance
+evidence.
+
+
+## Bounded Poshmark acceptance feasibility check (2026-11-16)
+
+Read-only code inspection only; no mailbox ingestion or live marketplace read.
+`vendoo-extension/background/marketplace-order-history.js:167` projects
+`order.id`, `line_items[].id`, `line_items[].product_id`, line `price_amount`,
+`state`, `cancelled_on`, `inventory_booked_at`, total/fee/commission/shipping
+amounts and the summary's `display_status`. Non-cancelled orders become paid;
+`Order Complete` controls finality. Neither state is an offer-acceptance flag.
+`alt_ids` is explicitly empty. The captured fixture uses
+`seller_confirm_initiated` with order/line/product IDs; it provides no stable
+offer ID or explicit offer-acceptance indicator.
+
+`services/order_history.py:61` / `:70` parse only line identity, listing identity,
+amounts and order status/finality/date/currency. `save_orders` persists those
+into `MarketplaceSale` and financial totals. There is no accepted-offer flag
+or offer-ID field. Any additional upstream indicator, **if supplied**, would
+be discarded by the current projection; these code paths/fixtures cannot prove
+whether Poshmark actually supplies one in the raw order payload.
+`marketplace-promotions.js:152` also discards the outgoing POST result and
+returns only `request_accepted`, without a stable offer/recipient identifier.
+
+An explicit marketplace acceptance notice can establish an offer-based sale,
+but cannot identify which offer or prove Anteroom attribution. Titles, buyers,
+prices and nearby timestamps do not supply that missing identity bridge. This
+check does not change the first version's unavailable conversion metric and
+does not authorize mail ingestion or speculative attribution implementation.
+
+
+## Full-diff review and readiness follow-up
+
+Independent full review of `63eca866` identified two further correctness gaps:
+concurrent-index partial failure was not retryable, and same-day native
+pull-to-refresh did not refetch offer activity. The migration correction
+reuses valid completed indexes and drops/rebuilds invalid leftovers in an
+autocommit block before retrying concurrent construction. This follows
+[PostgreSQL's concurrent-index recovery guidance](https://www.postgresql.org/docs/16/sql-createindex.html).
+The nullable expansion supports old worker inserts during rollout; such rows
+remain undated, and must not be counted using their preview dates.
+
+New Postgres-only regressions use a private migrated Postgres database, exercise
+real partially committed and invalid indexes, run the production aggregate
+queries under `anteroom_seller`, and test RLS even with a deliberately wrong
+explicit owner predicate. They skip on SQLite; existing tests that explicitly
+create SQLite engines are not Postgres coverage. The original migration was
+restored temporarily for a before/fix comparison: two migration regressions
+failed with DuplicateTable while the RLS/query case passed (11.84 seconds).
+After restoring the correction, all three passed on a new private Postgres
+cluster (10.46 seconds). The invalid-index test also proves old-column inserts
+by a running older worker still succeed and leave sent_at null.
+
+The native refresh correction passes a new refresh token to the section's task
+without resetting its selected period/custom dates. A focused XCUITest records
+custom dates across an actual pull; API access logs must separately establish
+same-period refetch. An accessibility layout test at `63eca866` failed because
+20 small drags did not reach a lazy unmaterialized row below the new section.
+The Mac's inspected frame/hierarchy showed vertical scrolling rather than
+clipping. Its reveal helper now moves farther only while the target is absent,
+then uses small drags and retains the full-viewport assertion.
+
+At `63eca866`, GitHub CI43809405742 passed all required jobs, including backend
+Postgres and existing hosted/sandbox browser suites. Mac validation reported
+23 standalone Swift programs (including non-Latin dates), 69 unit tests,
+simulator build and default offer UI passing; accessibility test failed as
+above. Those are exact-head results, not validation of this follow-up.
+
+The focused Playwright regression now passes four cases (41.5 seconds): desktop
+1440x900 and iPhone-15-sized Chromium, each light/dark. It seeds terminal receipts
+only in the throwaway sandbox, exercises Today/week/month/custom periods and
+invalid-date recovery against the actual endpoint, verifies no horizontal
+page overflow, and saves four screenshots. It cleans up its journal rows/rule
+and restores the sandbox's theme. Browser QA exposed raw period IDs in the
+selected control; a regression failed on `today` versus `Today` before the
+control was corrected to display labels. Initial harness runs also exposed an
+older dependency symlink requesting absent Chromium1248, an incorrect mobile
+navigation locator, and a theme override that server preferences superseded.
+Reusing already-installed locked-version dependencies, using Open navigation,
+and setting/restoring the sandbox theme resolved those harness failures; no
+install or product theme/navigation change was made.
+
+Screenshot filenames are `offer-analytics-{desktop|phone}-{light|dark}.png` in
+the test output. CI's always-uploaded `studio-browser-report-sandbox` artifact
+retains them. The short resource slot was explicitly returned to the next
+worker after both private Postgres and browser/server processes stopped.
+No duplicate full suite was started. Native refresh/accessibility checks must
+still be rerun on the correction commit before readiness.
+
+
+A second independent readiness review found no remaining migration/aggregation/
+refresh blockers, but identified that Playwright teardown runs even after a
+setup safety assertion fails. The fixture now returns from teardown unless
+both sandbox verification and successful fixture seeding completed; it never
+writes preferences or cleans rows on a server rejected as non-sandbox. This
+final guard was added after the four passing local browser cases; corrected-head
+CI must validate the final test source. Native refetch still needs API-log
+verification in addition to the preserved-filter UI assertion.

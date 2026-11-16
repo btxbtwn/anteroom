@@ -18,7 +18,7 @@ export function offerDates(period: string, now = new Date()) {
 
 export function OfferEvidence({ data }: { data: OfferAnalyticsResponse }) {
   return <Panel>
-    {data.marketplaces.map((row) => <div key={row.marketplace} className="border-b border-border/60 p-3 last:border-0 sm:p-4">
+    {data.marketplaces.map((row) => <div key={row.marketplace} role="group" aria-label={`${marketplaceName(row.marketplace)} offer activity`} className="border-b border-border/60 p-3 last:border-0 sm:p-4">
       <div className="flex items-baseline justify-between gap-4 text-sm">
         <span className="font-medium">{marketplaceName(row.marketplace)}</span>
         <span className="tabular-nums">{row.confirmed_recipients == null ? "Not available" : `${row.confirmed_recipients} confirmed recipient offers`}</span>
@@ -35,6 +35,11 @@ export function OfferEvidence({ data }: { data: OfferAnalyticsResponse }) {
   </Panel>;
 }
 
+const OFFER_PERIODS = [
+  { value: "today", label: "Today" }, { value: "week", label: "This week" },
+  { value: "month", label: "This month" }, { value: "custom", label: "Custom dates" },
+];
+
 export function OfferAnalytics() {
   const [period, setPeriod] = useState("today");
   const [custom, setCustom] = useState(offerDates("today"));
@@ -44,12 +49,12 @@ export function OfferAnalytics() {
     queryFn: () => api.analytics.offers({ ...dates, timezone }),
     enabled: !!dates.start && !!dates.end && dates.start <= dates.end,
     staleTime: 60_000 });
-  return <PageSection title="Offer activity" description="Marketplace evidence recorded by Anteroom, separate from automation runs.">
+  return <PageSection aria-label="Offer activity" title="Offer activity" description="Marketplace evidence recorded by Anteroom, separate from automation runs.">
     <div className="mb-3 flex flex-wrap items-end gap-3">
       <FormField label="Period">
         <Select value={period} onValueChange={(value) => value && setPeriod(value)}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectPopup>{[["today", "Today"], ["week", "This week"], ["month", "This month"], ["custom", "Custom dates"]].map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectPopup>
+          <SelectTrigger><SelectValue>{OFFER_PERIODS.find(item => item.value === period)?.label}</SelectValue></SelectTrigger>
+          <SelectPopup>{OFFER_PERIODS.map(({ value, label }) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectPopup>
         </Select>
       </FormField>
       {period === "custom" ? <>

@@ -15,6 +15,7 @@ struct AutomationsView: View {
     /// The workspace runs sharing and offers to likers (`marketplace_sessions`).
     var showsPromotions = false
 
+    @State private var offerRefreshToken = UUID()
     @State private var automations: [Automation]?
     @State private var approvals: [AutomationApproval] = []
     @State private var gaps: [RelistGap] = []
@@ -53,7 +54,7 @@ struct AutomationsView: View {
         Group {
             List {
                 Group {
-                    OfferActivitySection(api: api)
+                    OfferActivitySection(api: api, refreshToken: offerRefreshToken)
                     if !approvals.isEmpty {
                         Section {
                             ForEach(approvals) { row in
@@ -124,7 +125,10 @@ struct AutomationsView: View {
                         .labelStyle(.titleAndIcon)
                 }
             }
-            .refreshable { await load() }
+            .refreshable {
+                offerRefreshToken = UUID()
+                await load()
+            }
             .task { await load() }
             .navigationDestination(for: ConversationSummary.self) { listing in
                 ListingEditorView(api: api, listing: listing) {}

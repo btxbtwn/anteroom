@@ -29,6 +29,17 @@ def upgrade() -> None:
         if not postgres and name in {i['name'] for i in sa.inspect(op.get_bind()).get_indexes(table)}:
             continue
         with op.get_context().autocommit_block() if postgres else nullcontext():
+            if postgres:
+                # Each concurrent build commits independently. A retry after a
+                # later failure must reuse completed indexes and repair invalid
+                # leftovers, which CREATE INDEX IF NOT EXISTS would preserve.
+                valid = op.get_bind().execute(sa.text(
+                    "SELECT indisvalid FROM pg_index WHERE indexrelid = to_regclass(:name)"
+                ), {"name": name}).scalar_one_or_none()
+                if valid is True:
+                    continue
+                if valid is False:
+                    op.drop_index(name, table_name=table, postgresql_concurrently=True)
             op.create_index(name, table, ['user_id', 'sent_at'], postgresql_concurrently=True)
 
 
