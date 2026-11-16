@@ -24,6 +24,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from vendoo_studio import sandbox
+
 log = logging.getLogger("vendoo_studio.claude_auth")
 
 STATUS_TTL_S = 60
@@ -98,6 +100,10 @@ def _read_status() -> _Status:
 
 def _current_status() -> _Status:
     """`claude auth status` takes a few hundred ms, so health polls read a cached answer."""
+    # The CLI is a separate process: the sandbox's socket guard cannot fence it.
+    # Do not probe the real account or expose a previously cached identity.
+    if sandbox.enabled():
+        return _Status(installed=False, signed_in=False)
     global _status
     with _status_guard:
         if _status is None or time.monotonic() - _status.checked_at > STATUS_TTL_S:
