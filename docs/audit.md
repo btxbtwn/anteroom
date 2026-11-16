@@ -231,6 +231,10 @@ names the code that moved focus.
   on two of four fix-branch `./check.sh` runs that did not touch photos;
   passed 6 of 6 alone (2026-11-14). Cause unknown; read the trace in
   `e2e/results` the next time it fails.
+- `server/tests/test_error_email_budget.py::test_operator_storage_is_inaccessible_to_seller_role`
+  on Postgres: failed once in a full `-n auto` run on a fix branch that
+  didn't touch error mail; passed 26/26 three times alone (2026-11-16).
+  Cause unknown; likely shared-role grants between workers.
 
 ## Fixing bugs
 
