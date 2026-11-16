@@ -800,3 +800,22 @@ storage benchmarks. They do not reproduce the hosted 15-second deadline or
 measure full Assistant/provider latency, browser interactions, sustained CPU,
 production data cardinality or native iPhone behavior. No additional live
 question was submitted; hosted resolution remains unverified.
+
+## Depop multi-size preview reporting, 2026-11-16
+
+The supplied Nov 16 emails repeat the local guard refusing offers on listings
+with several sizes at both transport and review layers. A fixture reproduces
+both ERROR records, then verifies both become INFO for only the exact direct
+Depop offer-preview refusal with `ok=false`, `error_code=rejected` and
+`safe_to_retry=true`, without conflicting failure indicators. The visible
+refusal, result, request count and eligibility checks remain unchanged.
+Unknown sends, other actions, other marketplaces and nested replies retain
+ERROR reporting. The hosted relay runs through the same classifier.
+
+No durable gating is added: a seller can change a listing's sizes, and the
+existing preview journal does not establish when that change invalidates a
+multi-size refusal. Future checks therefore still read fresh facts. This
+change does not claim reduced marketplace calls or fix minimum-price/404
+refusals. There were no production/credential/marketplace reads or mutations.
+Browser/native p50/p95 and concurrent seller latency remain unmeasured; these
+bounded fixtures measure severity and unchanged request counts only.
