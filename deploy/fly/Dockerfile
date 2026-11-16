@@ -17,14 +17,14 @@ RUN node -e 'if (!process.env.VITE_SUPABASE_URL || !process.env.VITE_SUPABASE_PU
 FROM ghcr.io/astral-sh/uv:0.13.8@sha256:5cc1805e2426484abca4ad46ea783bab281fdb225fd82d8ce6d66a81254bac85 AS uv
 
 # The hosted packages exactly as uv.lock pins them, with their hashes.
-FROM python:3.12-slim@sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54 AS requirements
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS requirements
 COPY --from=uv /uv /usr/local/bin/uv
 WORKDIR /src
 COPY vendoo-studio/pyproject.toml vendoo-studio/uv.lock ./
 RUN uv export --frozen --no-emit-project --extra hosted --format requirements-txt --hashes \
     --output-file /requirements.txt
 
-FROM python:3.12-slim@sha256:4840d514c583a4d3d8cad3940e68dee6f0f6f3635c12fcd0a3d74c21a5b93a54
+FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     ANTEROOM_HOSTED=1 \
