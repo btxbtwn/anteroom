@@ -434,3 +434,40 @@ def test_promotion_preview_refusals_group_across_listings_but_keep_the_failure(e
     assert restarted.status()['pending'] == 1
     [group] = email_store.read()['groups'].values()
     assert group['report']['message'] == second['message']
+
+
+@pytest.mark.parametrize('hours', [46, 47])
+def test_mercari_cooldown_review_is_info_at_both_layers_and_does_not_queue_email(email_store, monkeypatch, caplog, hours):
+    import asyncio
+    from unittest.mock import AsyncMock, Mock
+    from vendoo_studio.models.listing_promotion import ListingPromotion
+    from vendoo_studio.services import browser_bridge, listing_promotions
+
+    result = {'ok': False, 'error': 'Mercari refused the request.', 'error_code': 'rejected', 'safe_to_retry': True,
+              'marketplace_message': f'You can make an offer again in {hours} hours. (once every 3 days)'}
+    request = AsyncMock(return_value=result)
+    monkeypatch.setattr(browser_bridge, '_request', request)
+    row = ListingPromotion(marketplace='mercari', action='offer', batch_id='fixture', discount_percent=12, floor_cents=1)
+    send = Mock()
+    alerts = AlertHandler(send=send, store=email_store)
+    queued = []
+    monkeypatch.setattr(alerts, 'emit', lambda record: queued.append(build_report(record)))
+    logger = logging.getLogger('vendoo_studio')
+    logger.addHandler(alerts)
+    try:
+        with caplog.at_level(logging.INFO, logger='vendoo_studio'), pytest.raises(listing_promotions.PromotionError) as raised:
+            asyncio.run(listing_promotions._review_remote(row, 'fixture-listing'))
+        assert raised.value.code == 'eligibility_cooldown'
+        records = [record for record in caplog.records if record.name in
+                   ('vendoo_studio.marketplaces', 'vendoo_studio.listing_promotions')]
+        assert [(record.name, record.levelname) for record in records] == [
+            ('vendoo_studio.marketplaces', 'INFO'), ('vendoo_studio.listing_promotions', 'INFO')]
+        assert all(result['marketplace_message'] in record.getMessage() for record in records)
+        assert queued == []  # The real AlertHandler's severity threshold must filter both records.
+        send.assert_not_called()
+        assert row.marketplace_message == result['marketplace_message']
+        assert row.sent_at is None and row.offer_price_cents is None and row.confirmation is None
+        request.assert_awaited_once()
+    finally:
+        logger.removeHandler(alerts)
+        alerts.close()

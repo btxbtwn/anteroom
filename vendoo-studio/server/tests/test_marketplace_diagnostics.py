@@ -151,3 +151,32 @@ def test_promotion_preview_transport_failure_keeps_context_without_retry(monkeyp
     request.assert_awaited_once_with(SimpleNamespace(id="promotion-private-batch"), "marketplace.promotion_check", {
         "marketplace": "poshmark", "action": "share", "listing_id": "private-listing",
     }, timeout=90)
+
+
+@pytest.mark.parametrize('override', [
+    {'error_code': code} for code in ('uncertain', 'network', 'rate_limited', 'challenge', 'signed_out', 'schema_drift')
+] + [
+    {'safe_to_retry': value} for value in (None, False, 'true')
+] + [
+    {'marketplace_message': value} for value in ('You can make an offer again',
+        'You can make an offer again in 73 hours. (once every 3 days)', 'Minimum offer price not met', None)
+] + [
+    {'state': state} for state in ('unknown', 'sending', 'failed')
+] + [{'ok': None}, {'ok': 0}, {'errors': [{'message': 'Another failure'}]}, {'statusCode': 429},
+     {'marketplace': 'depop'}, {'operation': 'marketplace.promote'}, {'action': 'share'}])
+def test_other_preview_refusals_stay_error_at_transport_and_review(monkeypatch, caplog, override):
+    result = {'ok': False, 'error': 'Mercari refused the request.', 'error_code': 'rejected', 'safe_to_retry': True,
+              'marketplace_message': 'You can make an offer again in 46 hours. (once every 3 days)', **override}
+    request = AsyncMock(return_value=result)
+    monkeypatch.setattr(browser_bridge, '_request', request)
+    row = ListingPromotion(marketplace='mercari', action='offer', batch_id='fixture', discount_percent=12, floor_cents=1)
+    with caplog.at_level(logging.INFO, logger='vendoo_studio'), pytest.raises(listing_promotions.PromotionError) as raised:
+        asyncio.run(listing_promotions._review_remote(row, 'fixture-listing'))
+    assert raised.value.code != 'eligibility_cooldown'
+    records = [record for record in caplog.records if record.name in
+               ('vendoo_studio.marketplaces', 'vendoo_studio.listing_promotions')]
+    assert [(record.name, record.levelname) for record in records] == [
+        ('vendoo_studio.marketplaces', 'ERROR'), ('vendoo_studio.listing_promotions', 'ERROR')]
+    assert all(build_report(record)['severity'] == 'ERROR' for record in records)
+    request.assert_awaited_once()
+    assert row.sent_at is None and row.offer_price_cents is None and row.confirmation is None

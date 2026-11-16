@@ -24,7 +24,7 @@ from datetime import UTC, datetime, timedelta
 from functools import partial
 from types import SimpleNamespace
 
-from sqlalchemy import or_, update
+from sqlalchemy import and_, or_, update
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import claim_in_worker_session, in_worker_session
@@ -32,7 +32,7 @@ from vendoo_studio.models.conversation import Conversation, new_id
 from vendoo_studio.models.listing_promotion import ListingPromotion, MarketplaceOfferFloor
 from vendoo_studio.models.promotion_automation import PromotionAutomation
 from vendoo_studio.repositories.queries import JobRepo, ListingRepo
-from vendoo_studio.services import browser_bridge, listing_mode
+from vendoo_studio.services import browser_bridge, listing_mode, mercari_offer_cooldown
 from vendoo_studio.services.api_job_lock import claim_api_job, release_api_job
 from vendoo_studio.services.ebay_api import dollars, money_cents
 from vendoo_studio.services.listing_result import scrub
@@ -54,11 +54,14 @@ SHIPPING_DISCOUNTS = frozenset({"poshmark"})
 MAX_ITEMS = 100
 PREVIEW_TTL = timedelta(minutes=15)
 OFFER_COOLDOWN = timedelta(hours=24)
+MERCARI_COOLDOWN_NOTE = "Mercari's offer eligibility cooldown is still active."
+
 STEP = "native_promote"
 UNKNOWN_NOTE = "Chrome did not confirm this. Check the listing on the marketplace, then mark it checked. It will not be sent again."
 # A refusal that applies to every item that follows: stop the batch.
 STOP_CODES = frozenset({"rate_limited", "challenge", "signed_out"})
 NAMES = {"poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop"}
+
 
 
 class PromotionError(RuntimeError):
@@ -120,12 +123,30 @@ def live_entry(entry: dict, marketplace: str) -> tuple[str | None, str | None]:
 
 def blocking(db: Session, marketplace: str, listing_id: str, action: str, *, new_like_at: datetime | None = None) -> str | None:
     """Why this action may not be sent on this listing now, if anything stops it."""
+    now = _now()
+    eligible = ListingPromotion.state.in_(("sending", "unknown", "done"))
+    if (marketplace, action) == ("mercari", "offer"):
+        # Do not load the listing's lifetime of skipped previews. Recognized
+        # hints last at most 72 hours plus the rounding allowance.
+        eligible = or_(eligible, and_(ListingPromotion.state == "skipped",
+                                      ListingPromotion.finished_at > now - timedelta(hours=73),
+                                      ListingPromotion.finished_at <= now))
     rows = db.query(ListingPromotion).filter(
         ListingPromotion.marketplace == marketplace, ListingPromotion.listing_id == listing_id,
-        ListingPromotion.action == action, ListingPromotion.state.in_(("sending", "unknown", "done")),
+        ListingPromotion.action == action, eligible,
     ).all()
     if any(row.state in ("sending", "unknown") for row in rows):
         return f"An earlier {action} on this listing is unconfirmed. Check it first."
+    if marketplace == "mercari" and action == "offer":
+        for row in rows:
+            # Only refusals classified by the read-only preview path carry this
+            # note. Keep unknown/sending above this gate; new likes cannot waive it.
+            if (row.state == "skipped" and row.note
+                    and row.note in (MERCARI_COOLDOWN_NOTE, f"{MERCARI_COOLDOWN_NOTE.rstrip('.')}: {row.marketplace_message}")
+                    and (wait := mercari_offer_cooldown.message_wait(row.marketplace_message)) is not None
+                    and isinstance(row.finished_at, datetime) and row.finished_at.tzinfo is None
+                    and timedelta(0) <= now - row.finished_at < wait):
+                return MERCARI_COOLDOWN_NOTE
     if action == "offer" and any(row.sent_at and row.sent_at > _now() - OFFER_COOLDOWN
                                  and (new_like_at is None or row.sent_at >= new_like_at) for row in rows):
         return "An offer was sent on this listing in the last 24 hours."
@@ -265,11 +286,17 @@ async def _review_remote(row: ListingPromotion, listing_id: str) -> None:
         # A refusal can still say how many likers could get an offer (Depop's "nobody to offer to").
         if isinstance(facts.get("like_count"), int):
             row.like_count = facts["like_count"]
-        log.error("%s %s preview rejected for listing %s, automation %s: %s; %s",
+        cooldown = mercari_offer_cooldown.preview_wait(
+            row.marketplace, "marketplace.promotion_check", row.action, facts) is not None
+        report = log.info if cooldown else log.error
+        report("%s %s preview rejected for listing %s, automation %s: %s; %s",
                   row.marketplace, row.action, listing_id, row.automation_id,
                   scrub(str(facts.get("error") or "The marketplace did not answer.")), row.marketplace_message or "-",
                   extra={"marketplace_context": failure_context("marketplace.promotion_check", diagnostic_inputs, facts,
                                                                time.monotonic() - started, 90)})
+        if cooldown:
+            row.finished_at = _now()
+            raise PromotionError(409, MERCARI_COOLDOWN_NOTE, "eligibility_cooldown")
         raise PromotionError(409, str(facts.get("error") or "The marketplace did not answer."), facts.get("error_code"))
     row.price_cents = int(facts["price_cents"])
     row.like_count = int(facts.get("like_count") or 0)

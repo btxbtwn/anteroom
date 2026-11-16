@@ -275,6 +275,36 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.db.commit()
         return items
 
+    def test_mercari_cooldown_skips_later_rounds_without_likes_and_other_items_continue(self):
+        (first, item), (second, other) = self.mercari_items(2)
+        saved = self.create({**OFFER, "marketplace": "mercari", "shipping_label": None, "scope": "items",
+                             "conversation_ids": [first.id, second.id]})
+        self.enable(saved["id"])
+        original = self.answer
+
+        async def refuse(job, message_type, payload, timeout=0):
+            if message_type == "marketplace.promotion_check" and payload["listing_id"] == item:
+                return {"ok": False, "error": "Mercari refused the request.", "error_code": "rejected", "safe_to_retry": True,
+                        "marketplace_message": "You can make an offer again in 47 hours. (once every 3 days)"}
+            return await original(job, message_type, payload, timeout)
+
+        self.bridge.side_effect = refuse
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(sorted(self.checked()), sorted([item, other]))
+        self.assertEqual([sent["listing_id"] for sent in self.promoted()], [other])
+        refusal = self.db.query(ListingPromotion).filter_by(listing_id=item).one()
+        self.assertIsNone(refusal.like_count)
+        self.assertIsNone(refusal.sent_at)
+        self.assertIn("47 hours", refusal.marketplace_message)
+        self.db.expire_all()
+        self.bridge.reset_mock()
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(self.checked(), [])
+        self.assertEqual(self.promoted(), [])
+        self.assertTrue(self.db.get(PromotionAutomation, saved["id"]).enabled)
+
     def test_a_mercari_offer_rule_starts_off_and_pauses_on_an_unknown_result(self):
         (first, first_item), (second, second_item) = self.mercari_items(2)
         saved = self.create({**OFFER, "marketplace": "mercari", "shipping_label": None, "scope": "items",

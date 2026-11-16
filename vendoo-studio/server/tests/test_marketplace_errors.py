@@ -105,3 +105,74 @@ def test_etsy_caught_api_failure_reaches_alert_report(monkeypatch, caplog):
     assert "etsy etsy_api" in report["message"]
     assert "private-token" not in str(report)
     token.assert_awaited_once()
+
+
+def _cooldown_reply(**overrides):
+    return {'ok': False, 'error': 'Mercari refused the request.', 'error_code': 'rejected', 'safe_to_retry': True,
+            'marketplace_message': 'You can make an offer again in 46 hours. (once every 3 days)', **overrides}
+
+
+@pytest.mark.parametrize('marketplace,operation,action', [
+    ('mercari', 'marketplace.promote', 'offer'), ('mercari', 'marketplace.promotion_result', 'offer'),
+    ('mercari', 'marketplace.execute', 'offer'), ('mercari', 'marketplace.orders', 'offer'),
+    ('mercari', 'marketplace.promotion_check', 'share'), ('mercari', 'marketplace.promotion_check', 'publish'),
+    ('mercari', 'marketplace.promotion_check', 'delist'), ('mercari', 'marketplace.promotion_check', None),
+    *[(market, 'marketplace.promotion_check', 'offer') for market in ('poshmark', 'depop', 'ebay', 'etsy', 'sellwild')],
+])
+def test_cooldown_words_in_other_contexts_remain_transport_errors(monkeypatch, caplog, marketplace, operation, action):
+    from vendoo_studio.services import browser_bridge
+    result = _cooldown_reply()
+    request = AsyncMock(return_value=result)
+    monkeypatch.setattr(browser_bridge, '_request', request)
+    with caplog.at_level(logging.INFO, logger='vendoo_studio.marketplaces'):
+        assert asyncio.run(browser_bridge.request(SimpleNamespace(id='fixture'), operation,
+                         {'marketplace': marketplace, 'action': action})) is result
+    assert [record.levelname for record in caplog.records] == ['ERROR']
+    request.assert_awaited_once()
+
+
+@pytest.mark.parametrize('result,levels', [
+    ({'safe_to_retry': True, 'result': _cooldown_reply()}, ['ERROR']),
+    ({'safe_to_retry': True, 'result': _cooldown_reply(safe_to_retry=None)}, ['ERROR']),
+    ({'ok': True, 'safe_to_retry': True, 'responses': [_cooldown_reply(),
+      {'ok': False, 'error_code': 'signed_out', 'error': 'Sign in again'}]}, ['ERROR', 'ERROR']),
+    (_cooldown_reply(result={'state': 'unknown', 'error': 'Unconfirmed send'}), ['INFO', 'ERROR']),
+    (_cooldown_reply(results=[{'ok': False, 'error': 'Other listing refused', 'safe_to_retry': False},
+                             {'state': 'unknown'}]), ['INFO', 'ERROR', 'ERROR']),
+])
+def test_cooldown_transport_classification_does_not_leak_into_nested_envelopes(monkeypatch, caplog, result, levels):
+    from copy import deepcopy
+    from vendoo_studio.services import browser_bridge
+    before = deepcopy(result)
+    request = AsyncMock(return_value=result)
+    monkeypatch.setattr(browser_bridge, '_request', request)
+    with caplog.at_level(logging.INFO, logger='vendoo_studio.marketplaces'):
+        assert asyncio.run(browser_bridge.request(SimpleNamespace(id='fixture'), 'marketplace.promotion_check',
+                         {'marketplace': 'mercari', 'action': 'offer'})) is result
+    assert [record.levelname for record in caplog.records] == levels
+    assert result == before
+    request.assert_awaited_once()
+    if result.get('result', {}).get('state') == 'unknown':
+        assert 'safe_to_retry' not in caplog.records[-1].marketplace_context
+
+
+def test_cooldown_transport_classifier_does_not_trust_spoofed_outer_context(caplog):
+    with caplog.at_level(logging.INFO, logger='vendoo_studio.marketplaces'):
+        report_result('mercari', 'marketplace.promote', _cooldown_reply(), context={
+            'operation': 'marketplace.promotion_check', 'action': 'offer', 'safe_to_retry': True})
+        report_result('mercari', 'marketplace.promotion_check', _cooldown_reply(safe_to_retry=None), context={
+            'operation': 'marketplace.promotion_check', 'action': 'offer', 'safe_to_retry': True})
+    assert [record.levelname for record in caplog.records] == ['ERROR', 'ERROR']
+
+
+def test_hosted_cooldown_read_preserves_evidence_at_info(monkeypatch, caplog):
+    from vendoo_studio.services.hosted_browser_relay import BrowserRelay
+    relay = BrowserRelay()
+    result = _cooldown_reply()
+    request = AsyncMock(return_value=result)
+    monkeypatch.setattr(relay, '_read', request)
+    with caplog.at_level(logging.INFO, logger='vendoo_studio.marketplaces'):
+        assert asyncio.run(relay.read('marketplace.promotion_check', {'marketplace': 'mercari', 'action': 'offer'}, 90)) is result
+    assert [record.levelname for record in caplog.records] == ['INFO']
+    assert result['marketplace_message'] in caplog.text
+    request.assert_awaited_once()
