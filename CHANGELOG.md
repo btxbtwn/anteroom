@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.994 — 2026-11-16
+
+- Sandbox setup no longer checks or displays the Claude account signed in on your machine.
+
 ## 0.1.993 — 2026-11-16
 
 - Local checks now stop their temporary Postgres server before removing its files, including when tests fail or are interrupted.
