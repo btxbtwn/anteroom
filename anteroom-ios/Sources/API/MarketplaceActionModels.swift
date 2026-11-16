@@ -96,6 +96,10 @@ enum MarketplaceActions {
     /// The words chat gets for a refused List, as the web's askChatPrompt; nil when chat cannot fix it.
     static func chatPrompt(_ marketplace: String, draft: NativeDraftState) -> String? {
         guard draft.error != nil, !notForChat.contains(draft.errorCode ?? "") else { return nil }
+        // Depop's ship-from address is in the seller's Depop account, not the listing (the web's chatCanFix).
+        let accountAddress = marketplace == "depop" && draft.errorCode == "rejected"
+            && draft.error?.hasPrefix("Depop has no ship-from address Anteroom can use.") == true
+        guard !accountAddress else { return nil }
         let name = Marketplaces.name(marketplace)
         var lines = ["Listing this item on \(name) failed. Anteroom said: \(draft.error ?? "the listing was refused.")"]
         if let said = draft.marketplaceMessage { lines.append("\(name) said: \(said)") }
