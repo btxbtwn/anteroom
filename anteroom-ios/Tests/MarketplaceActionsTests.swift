@@ -49,6 +49,11 @@ struct MarketplaceActionsTests {
         {"state":"not_saved","error":"Etsy is having trouble right now.","error_code":"network"}
         """#.utf8))
         precondition(MarketplaceActions.status("etsy", live: nil, draft: outage, revisionID: nil).chatPrompt == nil)
+        // Depop's ship-from address lives in the seller's Depop account, which chat cannot change (as the web's chatCanFix).
+        let address = try JSONDecoder().decode(NativeDraftState.self, from: Data(#"""
+        {"state":"draft","error":"Depop has no ship-from address Anteroom can use. Add or choose one in Depop.","error_code":"rejected"}
+        """#.utf8))
+        precondition(MarketplaceActions.status("depop", live: nil, draft: address, revisionID: nil).chatPrompt == nil)
         precondition(rows["etsy"]!.label == "Not listed" && rows["etsy"]!.canList && !rows["etsy"]!.canDelist)
         precondition(rows["etsy"]!.canSaveDraft && !rows["etsy"]!.canUpdate)
         precondition(!poshmark.canUpdate && !poshmark.canSaveDraft && !mercari.canUpdate)
