@@ -167,3 +167,37 @@ def test_expired_access_token_with_refresh_grant_is_not_assumed_signed_out(monke
     state = accounts.status()["accounts"]["ebay"]
     assert state["connected"] is True
     assert state["error"] is None
+
+
+class MarketplaceReconnectRecoveryTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        TokenRefreshTest.setUp(self)
+
+    async def test_each_refused_grant_recovers_only_after_a_new_sign_in(self):
+        for marketplace in accounts.MARKETPLACES:
+            with self.subTest(marketplace=marketplace):
+                self.store[marketplace] = {"accountId": "fixture-seller", "connectedAt": 1,
+                                           "accessToken": "fixture-old", "refreshToken": "fixture-refresh",
+                                           "expiresAt": 1}
+                with patch.object(accounts, "relay_request", return_value=httpx.Response(401, json={"error": "invalid_grant"})):
+                    with self.assertRaises(accounts.SignInRequired):
+                        await accounts.access_token(marketplace)
+                state = accounts.status()["accounts"][marketplace]
+                self.assertFalse(state["connected"])
+                self.assertIn(f"Reconnect {accounts.NAMES[marketplace]}", state["error"])
+                self.assertNotIn("fixture-refresh", str(state))
+                self.assertNotIn("fixture-old", str(state))
+                key = (accounts._seller(), marketplace)
+                pending = accounts.PendingSignIn(marketplace, "fixture-state", "https://fixture.invalid")
+                self.enterContext(patch.dict(accounts._pending, {key: pending}))
+                response = httpx.Response(200, json={"accountId": "fixture-seller", "username": "Fixture seller",
+                                                       "tokens": {"accessToken": "fixture-new", "refreshToken": "fixture-new-refresh",
+                                                                  "expiresIn": 3600}})
+                with patch.object(accounts, "relay_request", return_value=response), patch.object(accounts, "start_listening"):
+                    await accounts.finish_sign_in(marketplace, "fixture-state", "fixture-claim")
+                state = accounts.status()["accounts"][marketplace]
+                self.assertTrue(state["connected"])
+                self.assertIsNone(state["error"])
+                self.assertNotIn("authError", self.store[marketplace])
+                with patch.object(accounts, "relay_request", side_effect=AssertionError("Fresh sign-in must not refresh")):
+                    self.assertEqual(await accounts.access_token(marketplace), "fixture-new")
