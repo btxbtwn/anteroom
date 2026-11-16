@@ -1,0 +1,1 @@
+- Keep new error alerts prompt and combine repeated errors into hourly emails, while preserving every queued occurrence and giving warning summaries a turn.
