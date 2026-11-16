@@ -568,9 +568,16 @@ final class IPadSandboxTests: XCTestCase {
         let inventoryTab = app.buttons["Inventory"].firstMatch
         XCTAssertTrue(inventoryTab.waitForExistence(timeout: 90),
                       "Sandbox sign-in must finish before interacting with the workspace")
-        inventoryTab.tap()
+        // Match launchSandbox's bounded selection wait: a startup tap can
+        // arrive before the adaptive tab bar has finished settling.
+        for _ in 0..<3 where !inventoryTab.isSelected {
+            inventoryTab.tap()
+            let selected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "selected == true"), object: inventoryTab)
+            _ = XCTWaiter().wait(for: [selected], timeout: 3)
+        }
+        XCTAssertTrue(inventoryTab.isSelected, "The Inventory tab opens before looking for its controls")
         XCTAssertTrue(app.buttons["New listing"].firstMatch.waitForExistence(timeout: 30),
-                      "Sandbox sign-in must finish before interacting with the workspace")
+                      "The selected Inventory tab must show New listing")
         XCTAssertTrue(app.staticTexts["No listing open"].waitForExistence(timeout: 15),
                       "With nothing open, the editor column says so")
 
