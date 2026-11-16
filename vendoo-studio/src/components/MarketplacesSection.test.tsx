@@ -298,6 +298,38 @@ describe("marketplaces section", () => {
     expect(/<button[^>]*disabled=""[^>]*>Retry in \d+s<\/button>/.test(limited)).toBe(true);
   });
 
+  it("does not offer listing-field chat for a confirmed Depop account address refusal", () => {
+    const message = "Depop has no ship-from address Anteroom can use. Add or choose a default shipping address in Depop (Settings → Shipping), then List again.";
+    const html = render({ depop: { state: "draft", error: message, error_code: "rejected" } },
+      {}, { selected: "depop", onAskChat: vi.fn(), onEditField: vi.fn() });
+    expect(html).toContain("shipping address in Depop");
+    expect(enabledButton(html, "Ask chat")).toBe(false);
+    expect(html).not.toContain("Edit Package size");
+  });
+
+  it("recovers persisted Depop shipping names through one reachable Package size action", () => {
+    const html = render({ depop: { state: "draft", error: "Depop needs shipping.", error_code: "missing_fields",
+      marketplace_message: "missing_fields: national_shipping",
+      error_fields: ["national_shipping", "national_shipping_cost", "shipping", "shipping_methods", "parcel_size"].map(field => ({ field, message: "Depop needs shipping." })) } },
+    {}, { selected: "depop", onEditField: vi.fn() });
+    expect(enabledButton(html, "Edit Package size")).toBe(true);
+    expect(html.match(/Edit Package size/g)).toHaveLength(1);
+    expect(html).not.toContain("Edit National shipping");
+    expect(html).toContain("Check Package size here");
+    expect(html).toContain("shipping address in Depop");
+    expect(html).toContain("Depop said: missing_fields: national_shipping");
+  });
+
+  it("keeps shipping aliases scoped to Depop and gives chat the reachable field", () => {
+    const draft: NativeDraft = { state: "draft", error_code: "missing_fields", error: "Depop needs shipping.",
+      error_fields: [{ field: "national_shipping", message: "Depop needs shipping." }] };
+    expect(askChatPrompt("depop", draft)).toContain("Fields: depop_specifics.parcelSize");
+    expect(askChatPrompt("depop", draft)).toContain("Anteroom cannot edit that account address");
+    const html = render({ mercari: draft }, {}, { selected: "mercari", onEditField: vi.fn() });
+    expect(enabledButton(html, "Edit National shipping")).toBe(true);
+    expect(html).not.toContain("Check Package size here");
+  });
+
   it("keeps the marketplace's raw words under Details and offers chat only for what chat can fix", () => {
     const refused = render({ etsy: { state: "not_saved", error: "Etsy needs to know who made this item.", error_code: "missing_fields",
       error_fields: [{ field: "etsy_specifics.who_made", message: "Etsy needs to know who made this item." }],

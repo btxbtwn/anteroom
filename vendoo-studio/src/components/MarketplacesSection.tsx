@@ -50,6 +50,23 @@ export function reconnectText(name: string, session: ExtensionSessionConnect | u
   return `${name} still needs a sign-in. Finish signing in in the Chrome tab, then choose Reconnect ${name} again.`;
 }
 
+// Errors are durable: drafts written by an older Bridge still carry Depop's
+// wire names after Chrome and the web app update. Normalize at the recovery UI,
+// without rewriting the saved refusal or claiming shipping is now valid.
+const DEPOP_SHIPPING_FIELDS = new Set(["national_shipping", "national_shipping_cost", "shipping", "shipping_methods", "parcel_size"]);
+function recoveryFields(marketplace: Marketplace, draft: NativeDraft) {
+  const fields = (draft.error_fields ?? []).map(item => marketplace === "depop" && DEPOP_SHIPPING_FIELDS.has(item.field)
+    ? { ...item, field: "depop_specifics.parcelSize" } : item);
+  return fields.filter((item, index) => fields.findIndex(other => other.field === item.field) === index);
+}
+
+function shippingRecovery(marketplace: Marketplace, draft: NativeDraft): string | null {
+  return marketplace === "depop" && draft.error_code === "missing_fields"
+    && recoveryFields(marketplace, draft).some(item => item.field === "depop_specifics.parcelSize")
+    ? "Check Package size here. If it is already correct, check your default shipping address in Depop. Anteroom cannot edit that account address."
+    : null;
+}
+
 /** The words chat gets for a refused List: which marketplace, both explanations, and the fields to fix. */
 export function askChatPrompt(marketplace: Marketplace, draft: NativeDraft): string {
   const name = marketplaceName(marketplace);
@@ -59,7 +76,10 @@ export function askChatPrompt(marketplace: Marketplace, draft: NativeDraft): str
     lines.push(`The saved ${name} draft was deleted. Leave the listing fields as they are. I will press List again so Anteroom starts a new draft.`);
     return lines.join("\n");
   }
-  if (draft.error_fields?.length) lines.push(`Fields: ${draft.error_fields.map((item) => `${item.field} (${item.message})`).join("; ")}`);
+  const fields = recoveryFields(marketplace, draft);
+  if (fields.length) lines.push(`Fields: ${fields.map((item) => `${item.field} (${item.message})`).join("; ")}`);
+  const shipping = shippingRecovery(marketplace, draft);
+  if (shipping) lines.push(shipping);
   lines.push(`Fill or fix those fields in this listing so ${name} accepts it. Do not list it; I will press List again.`);
   lines.push("Then tell me in plain words what you changed, naming fields as the form labels them. No codes or field keys.");
   return lines.join("\n");
@@ -69,8 +89,10 @@ export function askChatPrompt(marketplace: Marketplace, draft: NativeDraft): str
 const NOT_FOR_CHAT = new Set(["signed_out", "challenge", "rate_limited", "network", "uncertain"]);
 
 /** Whether chat can fix this refusal by changing the listing. */
-export function chatCanFix(draft: NativeDraft): boolean {
-  return !NOT_FOR_CHAT.has(draft.error_code ?? "");
+export function chatCanFix(draft: NativeDraft, marketplace: Marketplace): boolean {
+  const accountAddress = marketplace === "depop" && draft.error_code === "rejected"
+    && draft.error?.startsWith("Depop has no ship-from address Anteroom can use.");
+  return !accountAddress && !NOT_FOR_CHAT.has(draft.error_code ?? "");
 }
 
 function fieldLabel(field: string): string {
@@ -630,17 +652,21 @@ export function MarketplacesLayout({
         onClick={() => action.mutate({ marketplace: m, kind: "reconnect" })}>Open {name}</Button>);
     }
     if (code === "missing_fields" && onEditField) {
-      for (const item of draft.error_fields ?? []) {
+      for (const item of recoveryFields(marketplace, draft)) {
         buttons.push(<Button key={`edit-${item.field}`} size="xs" variant="ghost" title={item.message}
           onClick={() => onEditField(item.field, marketplace)}>Edit {fieldLabel(item.field)}</Button>);
       }
     }
-    if (chatCanFix(draft) && onAskChat) {
+    if (chatCanFix(draft, marketplace) && onAskChat) {
       buttons.push(<Button key="ask" size="xs" variant="outline"
         title="Chat fixes the fields in this listing. It does not list it; press List again after."
         onClick={() => onAskChat(askChatPrompt(marketplace, draft))}>Ask chat</Button>);
     }
-    return buttons.length ? <div className="flex flex-wrap items-center gap-1.5">{buttons}</div> : null;
+    const shipping = shippingRecovery(marketplace, draft);
+    return buttons.length || shipping ? <div className="space-y-2">
+      {shipping && <p className="text-xs text-muted-foreground">{shipping}</p>}
+      {buttons.length > 0 && <div className="flex flex-wrap items-center gap-1.5">{buttons}</div>}
+    </div> : null;
   }
 
   function reconnectNotice(marketplace: Marketplace): ReactNode {
