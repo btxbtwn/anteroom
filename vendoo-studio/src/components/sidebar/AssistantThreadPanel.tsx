@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PlusIcon, SearchIcon, Trash2Icon, XIcon } from "lucide-react";
 import { api } from "../../api/client";
+import { ApiRequestError } from "../../api/transport";
+import { PageError } from "../WorkspacePage";
 import type { AssistantThread } from "../../api/assistant";
 import { confirmDialog } from "../../ui/confirmDialog";
 import { cn } from "../../lib/utils";
@@ -121,6 +123,9 @@ export function AssistantThreadPanel({
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-(--sidebar-content-inset) pb-2 max-[900px]:touch-pan-y max-[900px]:pb-[calc(16px+env(safe-area-inset-bottom,0px))]"
         aria-label="Assistant threads"
       >
+        {remove.error ? <PageError message={remove.error instanceof ApiRequestError && remove.error.status === 409
+          ? `${remove.error.message} Stop answering or wait for the answer to finish, then try deleting again.`
+          : remove.error.message} /> : null}
         {threads.isPending ? (
           <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">Loading chats</p>
         ) : threads.isError ? (
