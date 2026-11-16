@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import unittest
-from datetime import timedelta
+import asyncio
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -137,6 +138,106 @@ class ListingPromotionsTest(unittest.TestCase):
         payload = self.calls("marketplace.promote")[0].args[2]
         self.assertEqual((payload["marketplace"], payload["offer_price_cents"], payload["floor_cents"]), ("depop", 4250, 4000))
         self.assertEqual(len(self.calls("marketplace.promote")), 1)
+
+    def test_mercari_cooldown_survives_session_reload_and_only_expires_to_preview(self):
+        item = "m82647727742"
+        self.conv.notes = merge_notes(self.conv.notes, {"vendooListingUrls": {"mercari": f"https://www.mercari.com/us/item/{item}/"}})
+        self.db.commit()
+        body = {"conversation_ids": [self.conv.id], "marketplace": "mercari", "action": "offer",
+                "discount_percent": 12, "floors": {self.conv.id: "1"}}
+        self.check = {"ok": False, "error": "Mercari refused the request.", "error_code": "rejected", "safe_to_retry": True,
+                      "marketplace_message": "You can make an offer again in 47 hours. (once every 3 days)"}
+        with self.assertLogs(listing_promotions.log, level="INFO") as logs:
+            first = self.client.post("/api/promotions/preview", json=body).json()["rows"][0]
+        self.assertTrue(all(entry.levelname == "INFO" for entry in logs.records))
+        self.assertEqual(first["marketplace_message"], self.check["marketplace_message"])
+        self.assertEqual(first["state"], "skipped")
+        refused_send = self.client.post(f"/api/promotions/{first['id']}/perform", json={"confirm": True})
+        self.assertEqual(refused_send.status_code, 409)
+        saved = self.db.get(ListingPromotion, first["id"])
+        self.assertIsNone(saved.sent_at)
+        self.assertIsNone(saved.offer_price_cents)
+        self.assertIsNone(saved.confirmation)
+        created = saved.finished_at
+        self.db.expunge_all()  # Force the next request to use durable journal evidence.
+        self.check = {"ok": True, "price_cents": 1000, "like_count": 2, "offer_price_cents": 800}
+        with patch.object(listing_promotions, "_now", return_value=created + timedelta(hours=47, minutes=59)):
+            again = self.client.post("/api/promotions/preview", json=body).json()["rows"][0]
+        self.assertEqual(again["state"], "skipped")
+        self.assertEqual(len(self.calls("marketplace.promotion_check")), 1)
+        with patch.object(listing_promotions, "_now", return_value=created + timedelta(hours=48)):
+            expired = self.client.post("/api/promotions/preview", json=body).json()["rows"][0]
+        self.assertEqual(expired["state"], "preview")
+        self.assertEqual(len(self.calls("marketplace.promotion_check")), 2)
+        self.assertEqual(self.calls("marketplace.promote"), [])
+
+    def test_cooldown_recognition_is_narrow_and_other_refusals_stay_errors(self):
+        valid = "You can make an offer again in 47 hours. (once every 3 days)"
+        base = {"ok": False, "error": "Mercari refused the request.", "error_code": "rejected",
+                "safe_to_retry": True, "marketplace_message": valid}
+        variants = [
+            {"marketplace_message": message} for message in (
+                "You can make an offer again", valid + " extra", valid.replace("47", "0"),
+                valid.replace("47", "73"), valid.replace("47", "-1"), valid.replace("47", "1.5"),
+                valid.replace("47", "999999999"), valid.replace("3 days", "2 days"),
+                "You must lower your offer price.", None,
+            )
+        ] + [{"error_code": code} for code in ("signed_out", "challenge", "rate_limited", "uncertain", "network")] + [
+            {"safe_to_retry": False}, {"safe_to_retry": None}, {"error": "Other refusal"}]
+        for variant in variants:
+            with self.subTest(variant=variant):
+                row = listing_promotions.new_row(self.conv, "mercari", "offer", "test", 12)
+                self.check = {**base, **variant}
+                with self.assertLogs(listing_promotions.log, level="ERROR"):
+                    with self.assertRaises(listing_promotions.PromotionError) as error:
+                        asyncio.run(listing_promotions._review_remote(row, "m12345678901"))
+                self.assertNotEqual(error.exception.code, "eligibility_cooldown")
+        for marketplace, action in (("poshmark", "offer"), ("depop", "offer"), ("mercari", "share")):
+            row = listing_promotions.new_row(self.conv, marketplace, action, "test", 12)
+            self.check = base
+            with self.assertLogs(listing_promotions.log, level="ERROR"):
+                with self.assertRaises(listing_promotions.PromotionError):
+                    asyncio.run(listing_promotions._review_remote(row, "m12345678901"))
+
+    def test_cooldown_timestamps_cannot_create_an_indefinite_wait(self):
+        now = listing_promotions._now()
+        row = listing_promotions.new_row(self.conv, "mercari", "offer", "test", 12)
+        row.listing_id, row.state = "m12345678901", "skipped"
+        row.note = listing_promotions.MERCARI_COOLDOWN_NOTE
+        row.marketplace_message = "You can make an offer again in 47 hours. (once every 3 days)"
+        # Exercise validation independently of the ORM's DateTime decoder: an
+        # invalid legacy value must never become an indefinite eligibility gate.
+        db = Mock()
+        db.query.return_value.filter.return_value.all.return_value = [row]
+        for timestamp in (None, "tomorrow", float("nan"), now.replace(tzinfo=UTC),
+                          now + timedelta(seconds=1), datetime.max, now - timedelta(hours=48)):
+            with self.subTest(timestamp=timestamp):
+                row.finished_at = timestamp
+                self.assertIsNone(listing_promotions.blocking(db, "mercari", row.listing_id, "offer"))
+        row.finished_at = now
+        self.assertIsNotNone(listing_promotions.blocking(db, "mercari", row.listing_id, "offer"))
+
+    def test_cooldown_scope_and_unconfirmed_send_precedence(self):
+        now = listing_promotions._now()
+        row = listing_promotions.new_row(self.conv, "mercari", "offer", "test", 12)
+        row.listing_id, row.state = "m12345678901", "skipped"
+        row.note = listing_promotions.MERCARI_COOLDOWN_NOTE
+        row.marketplace_message = "You can make an offer again in 47 hours. (once every 3 days)"
+        row.finished_at = now
+        self.db.add(row)
+        self.db.commit()
+        self.assertIsNotNone(listing_promotions.blocking(self.db, "mercari", row.listing_id, "offer", new_like_at=now))
+        for marketplace, item, action in (("mercari", "m99999999999", "offer"), ("poshmark", row.listing_id, "offer"),
+                                          ("depop", row.listing_id, "offer"), ("mercari", row.listing_id, "share")):
+            self.assertIsNone(listing_promotions.blocking(self.db, marketplace, item, action))
+        for state in ("sending", "unknown"):
+            uncertain = listing_promotions.new_row(self.conv, "mercari", "offer", state, 12)
+            uncertain.listing_id, uncertain.state = row.listing_id, state
+            self.db.add(uncertain)
+            self.db.commit()
+            self.assertIn("unconfirmed", listing_promotions.blocking(self.db, "mercari", row.listing_id, "offer"))
+            self.db.delete(uncertain)
+            self.db.commit()
 
     def test_mercari_offer_has_no_shipping_choice(self):
         item = "m12345678901"

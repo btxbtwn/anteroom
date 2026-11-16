@@ -230,6 +230,23 @@ if Mercari starts refusing offers without it, they fail as refusals and nothing
 is resent. *Verify:* send one offer from Anteroom on a real listing and check
 the amount and recipients on Mercari.
 
+Mercari offer previews can refuse with an explicit eligibility wait longer
+than the local completed-offer guard: the 2026-11-16 incident (release 0.1.974,
+fingerprint `45ba8ce0227a`) reported "You can make an offer again in 47 hours.
+(once every 3 days)" after a previously confirmed send. The backend recognizes
+only that exact whole-hour message form (1–72 hours), in a safe, rejected
+Mercari offer preview with the connector's generic refusal text. It journals
+the refusal and logs it at info level. The saved classification note, original
+message and completion timestamp gate later previews for that seller/listing,
+including across rules and restarts, for the stated hours plus one conservative hour for
+unknown rounding (not a proven API rounding rule). Future, timezone-mismatched
+or invalid completion values cannot hold this gate open. Expiry permits a fresh preview, never a blind send. Unknown
+messages, other error codes and unconfirmed sends retain their existing guards
+and error visibility. Older unclassified journal rows are not reinterpreted;
+they need one fresh classified refusal before this gate applies. The explicit
+three-day clause bounds this message parser; it does not establish a universal
+Mercari cooldown. No live marketplace verification was performed for this fix.
+
 Depop's captured `POST /presentation/api/v1/products/{id}/offers/` sent to only
 one buyer, confirmed by the seller. The bulk flow was then verified read-only
 in public client build `32efdfd/40383035456-1`, chunks `1j50bfzgf582l.js`

@@ -11,6 +11,30 @@ and accounts must overlap; long work must leave navigation, input and unrelated
 drafts usable. This is a product requirement, not a promise of infinite hardware
 capacity or zero model/network latency.
 
+## Mercari explicit preview cooldown, 2026-11-16
+
+An isolated two-listing scheduled-offer fixture reproduces the refusal reported
+in fingerprint `45ba8ce0227a`: the first listing returns the explicit 47-hour
+eligibility wait with no like count; the second remains eligible. Against the
+original implementation, the first round reads both listings and the second
+round reads the refused listing again, logging the same refusal twice at error
+level. With the fix, the first round still reads both and the second reads
+neither: the refused listing has a durable preview wait, while the completed
+listing retains its existing send guard. The other listing's normal path is
+unchanged. A separate manual-preview fixture discards ORM identity state,
+checks the wait through 47 hours 59 minutes, and permits a fresh preview at
+48 hours (the reported 47 hours plus a rounding allowance), without sending.
+The added lookup only considers skipped reviews completed within 73 hours;
+existing all-history unknown/sending guards remain intact.
+
+These are deterministic fixture request counts, not live Mercari validation
+or latency/capacity measurements. The regressions cover listing/action/market
+scope, new-like non-bypass, malformed refusals and unknown/sending precedence;
+the hosted regression uses the same remote item ID for two local test sellers.
+Browser input/navigation p50/p95 and concurrent generation under seller load
+remain unmeasured for this focused backend change. No production access,
+marketplace requests or configuration changes were made.
+
 ## Recent promotion history index, 2026-11-15
 
 The waiting-for-likes lookup filters by automation, marketplace, action and

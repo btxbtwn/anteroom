@@ -391,9 +391,10 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                     counts["skipped"] += 1
                     reasons[WAITING_FOR_LIKES] += 1
                     continue
-                if promotions.blocking(db, row.marketplace, listing_id, "offer", new_like_at=new_like_at):
+                if blocked := promotions.blocking(db, row.marketplace, listing_id, "offer", new_like_at=new_like_at):
                     counts["skipped"] += 1
-                    reasons["offered in the last 24 hours or unconfirmed"] += 1
+                    reason = blocked if blocked == promotions.MERCARI_COOLDOWN_NOTE else "offered in the last 24 hours or unconfirmed"
+                    reasons[reason] += 1
                     continue
                 if reads >= OFFER_READS:
                     stop_note = f"Checked {OFFER_READS} listings; the rest are checked next time."
@@ -417,7 +418,8 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                 db.rollback()
                 counts["skipped"] += 1
                 # Review only reads, but its refusal still belongs in the
-                # per-listing activity journal. No send timestamp or retry gate.
+                # per-listing activity journal. No send timestamp; a recognized
+                # Mercari eligibility refusal gates previews only.
                 send.listing_id = send.listing_id or listing_id
                 send.state, send.note = "skipped", _skip_reason(exc, send)
                 send.marketplace_message = scrub(send.marketplace_message)

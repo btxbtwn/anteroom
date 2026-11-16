@@ -159,3 +159,35 @@ def test_generic_read_cannot_send_a_promotion():
     with pytest.raises(ValueError, match='not a relayed read'):
         asyncio.run(relay.read('marketplace.promote', {'confirm': True}, 1))
 
+
+
+def test_mercari_preview_cooldown_is_seller_scoped(cloud, signing_keys, monkeypatch):  # noqa: F811
+    client, _ = cloud
+    hosted_browser_relay._relays.clear()
+    alice, bob = headers(signing_keys), headers(signing_keys, BOB)
+    monkeypatch.setattr('vendoo_studio.routes.hosted_browser_relay.WAIT_S', 0.1)
+    bodies = []
+    for seller in (alice, bob):
+        client.get('/api/browser-relay/next?capabilities=' + CAPABLE, headers=seller)
+        identity = client.post('/api/conversations', headers=seller, json={'title': 'Coat'}).json()['id']
+        marked = client.post(f'/api/conversations/{identity}/marketplace-listings/mercari/mark', headers=seller,
+                            json={'state': 'listed', 'url': 'https://www.mercari.com/us/item/m82647727742/'})
+        assert marked.status_code == 200, marked.text
+        bodies.append({'conversation_ids': [identity], 'marketplace': 'mercari', 'action': 'offer',
+                       'discount_percent': 12, 'floors': {identity: '1'}})
+    thread, first = _in_background(lambda: client.post('/api/promotions/preview', headers=alice, json=bodies[0]))
+    _answer(client, alice, {'ok': False, 'error': 'Mercari refused the request.', 'error_code': 'rejected',
+                           'safe_to_retry': True,
+                           'marketplace_message': 'You can make an offer again in 47 hours. (once every 3 days)'}, CAPABLE)
+    thread.join(10)
+    assert not thread.is_alive() and first['response'].status_code == 200
+    assert first['response'].json()['rows'][0]['state'] == 'skipped'
+    again = client.post('/api/promotions/preview', headers=alice, json=bodies[0])
+    assert again.status_code == 200 and again.json()['rows'][0]['state'] == 'skipped'
+    # The same remote item ID in another seller's account must still be reviewed.
+    thread, second = _in_background(lambda: client.post('/api/promotions/preview', headers=bob, json=bodies[1]))
+    command = _answer(client, bob, {'ok': True, 'price_cents': 1000, 'like_count': 2, 'offer_price_cents': 800}, CAPABLE)
+    thread.join(10)
+    assert command['type'] == 'marketplace.promotion_check'
+    assert not thread.is_alive() and second['response'].status_code == 200
+    assert second['response'].json()['rows'][0]['state'] == 'preview'
