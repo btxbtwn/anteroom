@@ -1,0 +1,1 @@
+- Setup instructions now name the supported Chrome marketplaces and the New listing control you can use to start a draft.

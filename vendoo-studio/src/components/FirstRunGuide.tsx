@@ -614,7 +614,7 @@ export function FirstRunGuide({
               <>
                 <h2 id="setup-guide-title" className="setup-guide-title">Connect Chrome (optional)</h2>
                 <p className="setup-guide-copy">
-                  {"Create and generate drafts without Chrome. eBay and Etsy use connected accounts. Poshmark, Mercari, Depop, Vinted and Sellwild require desktop Chrome with Bridge connected. You can skip this step."}
+                  {"Create and generate drafts without Chrome. eBay and Etsy use connected accounts. Poshmark, Mercari and Depop require desktop Chrome with Bridge connected. You can skip this step."}
                 </p>
                 {!chromeAvailable ? (
                   <p className="setup-guide-copy">
@@ -640,7 +640,7 @@ export function FirstRunGuide({
                 <h2 id="setup-guide-title" className="setup-guide-title">How the app is laid out</h2>
                 <ul className="setup-guide-points">
                   <li>
-                    <strong>Sidebar</strong> — your listings. Compose starts a new one. Settings is ChatGPT, MiMo, Brave, and Chrome.
+                    <strong>Sidebar</strong> — your listings. Use New listing to start a draft. Set up AI and connections in Settings.
                   </li>
                   <li>
                     <strong>Photos</strong> — drag product pictures into the tray. Order matters; the first photo is the hero.

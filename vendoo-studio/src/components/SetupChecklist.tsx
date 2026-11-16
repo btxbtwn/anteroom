@@ -90,7 +90,7 @@ export function SetupChecklist({
           <Step
             index={2}
             done={extensionConnected}
-            label="Optional: connect desktop Chrome with the Bridge extension for Poshmark, Mercari, Depop, Vinted and Sellwild."
+            label="Optional: connect desktop Chrome with the Bridge extension for Poshmark, Mercari and Depop."
           >
             <Note>eBay and Etsy use connected accounts and do not need the extension.</Note>
             {!chromeAvailable ? (
