@@ -231,6 +231,7 @@ export function describeActions(actions: AutomationAction[]): string {
   if (!actions.length) return "No actions";
   return actions.map((action) => {
     if (action.type !== "price") return action.type.replace("_", " ");
+    if (action.value == null) return "price drop amount not set";
     const amount = action.mode === "amount" ? `$${action.value}` : `${action.value}%`;
     const cadence = action.repeat === "step" ? " each cycle" : action.repeat === "once" ? " once" : "";
     const floor = action.floor != null ? `, floor $${action.floor}` : "";
