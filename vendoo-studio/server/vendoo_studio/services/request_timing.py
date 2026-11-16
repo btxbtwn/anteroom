@@ -23,7 +23,8 @@ class RequestTimingMiddleware:
                 elapsed = time.perf_counter() - started
                 route = getattr(scope.get("route"), "path", "unmatched")
                 allowance = SLOW_SECONDS
-                if scope["method"] == "GET" and route == "/api/browser-relay/next" and message["status"] == 204:
+                # A command arriving during the poll wait returns 200; an empty wait returns 204.
+                if scope["method"] == "GET" and route == "/api/browser-relay/next" and message["status"] in (200, 204):
                     allowance += WAIT_S
                 if elapsed >= allowance:
                     log.warning("Slow response: %s %s %s %dms", scope["method"], route,
