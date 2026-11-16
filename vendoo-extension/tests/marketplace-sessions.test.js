@@ -94,3 +94,72 @@ test('relayed sign-in checks report every marketplace without cookie values, and
     payload: { request_id: id, marketplace: 'depop' } }, []);
   assert.deepEqual(JSON.parse(JSON.stringify(busy)), { ok: false, error: 'Wait for the current listing action to finish.' });
 });
+
+test('Depop reconnect verifies in the worker without waiting for page JavaScript', async () => {
+  for (const [status, state] of [[200, 'signed_in'], [401, 'expired'], [403, 'expired'], [429, 'unknown'], [503, 'unknown']]) {
+    const secret = 'fixture-depop-token';
+    const { c } = worker({
+      cookies: { 'https://www.depop.com/ access_token': { value: secret, expirationDate: Date.now() / 1000 + 86400 } },
+      fetch: async (url, options) => {
+        assert.equal(url, 'https://webapi.depop.com/presentation/api/v1/drafts/?limit=24&sort_by=createdAt');
+        assert.equal(options.headers.Authorization, `Bearer ${secret}`);
+        assert.equal(options.credentials, 'omit');
+        assert.ok(options.signal instanceof AbortSignal);
+        return new Response(null, { status });
+      },
+    });
+    let contextReady = false;
+    c.ensureMarketplaceRequestContext = async () => { contextReady = true; };
+    c.chrome.tabs = { query: async () => [{ id: 7, url: 'https://www.depop.com/sellinghub/drafts/' }], update: async () => {} };
+    c.nativeWait = async () => {};
+    c.chrome.scripting = { executeScript: () => { throw new Error('Page JavaScript is unavailable'); } };
+    const result = await c.runCloudMarketplaceCommand({ type: 'marketplace.connect', payload: { marketplace: 'depop' } }, []);
+    assert.equal(result.ok, true);
+    assert.equal(contextReady, true);
+    assert.equal(result.state, state, String(status));
+    assert.equal(result.signed_in, state === 'signed_in');
+    assert.equal(JSON.stringify(result).includes(secret), false);
+  }
+});
+
+test('Depop reconnect cannot report readiness when its verification read fails', async () => {
+  let timeoutMs;
+  const { c } = worker({
+    cookies: { 'https://www.depop.com/ access_token': { value: 'fixture-token' } },
+    fetch: async (_url, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+    }),
+  });
+  // Accelerate only the fixture's clock; production still requests an 8s deadline.
+  c.AbortSignal = { timeout: ms => { timeoutMs = ms; return AbortSignal.timeout(10); } };
+  c.chrome.tabs = { query: async () => [{ id: 7, url: 'https://www.depop.com/sellinghub/drafts/' }], update: async () => {} };
+  c.nativeWait = async () => {};
+  c.chrome.scripting = { executeScript: async () => [{ result: { page_read_status: 200 } }] };
+  const keepAlive = setTimeout(() => {}, 1000);
+  let result;
+  try {
+    result = await c.runCloudMarketplaceCommand({ type: 'marketplace.connect', payload: { marketplace: 'depop' } }, []);
+  } finally { clearTimeout(keepAlive); }
+  assert.equal(timeoutMs, 8000);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /Depop.*sign-in check.*try again/i);
+});
+
+test('a stalled Depop request setup times out and a retry prepares it again', async () => {
+  const { c } = worker({ fetch: async () => new Response(null, { status: 200 }) });
+  let setups = 0;
+  let finishSetup;
+  c.chrome.declarativeNetRequest.updateSessionRules = () => {
+    setups += 1;
+    return setups === 1 ? new Promise(resolve => { finishSetup = resolve; }) : Promise.resolve();
+  };
+  c.depopBearer = async () => 'Bearer fixture-token';
+  c.AbortSignal = { timeout: () => AbortSignal.timeout(10) };
+  const keepAlive = setTimeout(() => {}, 1000);
+  try {
+    await assert.rejects(c.checkDepopSignIn(), { name: 'TimeoutError' });
+    assert.equal((await c.checkDepopSignIn()).status, 200);
+    assert.equal(setups, 2);
+    finishSetup();
+  } finally { clearTimeout(keepAlive); }
+});

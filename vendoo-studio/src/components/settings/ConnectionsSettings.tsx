@@ -315,7 +315,11 @@ function ChromeSessionRow({
     refetchInterval: chromeReady ? () => pollMs(60_000) : false,
   });
   const connect = useMutation({
-    mutationFn: () => api.marketplaceSessions.connect(marketplace),
+    mutationFn: async () => {
+      const result = await api.marketplaceSessions.connect(marketplace);
+      if (!result.ok) throw new Error(result.error || "Chrome could not confirm the sign-in. Try again.");
+      return result;
+    },
     onSuccess: (result) => {
       setHint(result.signed_in ? null : "Finish signing in in the Chrome tab, then choose Sign in again.");
       void queryClient.invalidateQueries({ queryKey: ["marketplace-sessions"] });
@@ -323,7 +327,9 @@ function ChromeSessionRow({
     onError: () => setHint(null),
   });
   const session = sessions.data?.sessions[marketplace];
-  const state = chromeSessionPresentation(session, chromeReady, undefined, unavailable);
+  const state = connect.isPending || connect.error || (connect.data && !connect.data.signed_in)
+    ? { tone: "warning" as const, label: "Sign-in not confirmed" }
+    : chromeSessionPresentation(session, chromeReady, undefined, unavailable);
   const name = EXTENSION_SESSION_NAMES[marketplace];
   const error = connect.error?.message || null;
 
@@ -355,7 +361,7 @@ function ChromeSessionRow({
     >
       {hint ? <SettingsNote>{hint}</SettingsNote> : null}
       {error ? <SettingsNote tone="error">{error}</SettingsNote> : null}
-      {session?.state === "signed_in" && checkError ? <SettingsNote tone="error">{checkError}</SettingsNote> : null}
+      {session?.state === "signed_in" && checkError ? <SettingsNote tone="error">Sale check failed: {checkError}</SettingsNote> : null}
     </SettingsRow>
   );
 }
