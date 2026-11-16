@@ -10,6 +10,7 @@ import json
 import re
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic_core import PydanticCustomError
 from sqlalchemy import delete, update
 from sqlalchemy.orm import Session
 
@@ -47,11 +48,11 @@ class FinancialEntry(BaseModel):
         if value is None or value == "":
             return None
         if not isinstance(value, str):
-            raise ValueError("Enter money as a decimal string.")
+            raise PydanticCustomError("money_amount", "Enter money as a decimal string.")
         value = value.strip()
         pattern = r"-?[0-9]{1,12}(?:\.[0-9]{1,4})?" if info.field_name == "fees" else r"[0-9]{1,12}(?:\.[0-9]{1,4})?"
         if not re.fullmatch(pattern, value):
-            raise ValueError("Use a decimal amount with up to four decimal places. Only net fees may be negative.")
+            raise PydanticCustomError("money_amount", "Use a decimal amount with up to four decimal places. Only net fees may be negative.")
         return format(Decimal(value), "f")
 
 

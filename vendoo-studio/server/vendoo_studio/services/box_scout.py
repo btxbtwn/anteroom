@@ -456,8 +456,9 @@ def _crawl(errors: dict[str, str], *, recrawl: bool) -> dict[str, list[dict]]:
         try:
             catalogs[store] = _catalogs[store] = scout().fetch_catalog(store)
         except FETCH_ERRORS as exc:
-            errors[store] = f"{scout().STORES[store]['name']} did not return its catalog: {exc}"
-            log.warning(errors[store])
+            name = scout().STORES[store]["name"]
+            errors[store] = f"{name} did not return its catalog. Try again later with Update now."
+            log.warning("%s did not return its catalog: %s", name, exc)
     return catalogs
 
 

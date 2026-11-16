@@ -24,3 +24,9 @@ Status: NOT RUN. The VPS is Linux; it cannot build or run SwiftUI or the package
 Report each check PASS/FAIL/BLOCKED/NOT RUN with exact source/build/version, device/OS, screenshots, test command/result and fixture identity. Export xcresult attachments for evidence. If the hub fails, quote the error, follow its advice once, and stop manual device driving; do not silently substitute SSH input. The test runner can be reported separately if it still works.
 
 Consult `docs/iphone-parity.md`: Sourcing, portions of Settings/connections/help and lifecycle behavior are documented parity gaps. Test what the native build actually supports and record absent features honestly. Do not mark an existing missing feature a new regression or count web screenshots as native completion.
+
+## Additional scoped copy follow-up
+
+The web bulk-edit review now flattens whole marketplace objects into individual changed fields using its existing revision-history diff and hides internal preparation metadata. Native `Sources/Bulk/BulkEditView.swift:117` instead loops raw field paths and `JSONValue.reviewText` renders objects as an ellipsis (`Sources/API/BulkModels.swift:120`). Inspect a fixture brand/size edit with nested form changes and `_seller_fields` on the native build before claiming review parity; retain original apply tokens. This source lead has not been observed on a device or fixed speculatively.
+
+Sale amount validation wording is shared server-side. In native Record amounts, verify a negative buyer shipping amount shows the seller instruction without “Value error,” then correct it and save/reopen. Supplier error copy is currently a web Sourcing surface; native Sourcing is a documented parity gap.
