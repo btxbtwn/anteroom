@@ -57,7 +57,8 @@ const DEPOP_SHIPPING_FIELDS = new Set(["national_shipping", "national_shipping_c
 function recoveryFields(marketplace: Marketplace, draft: NativeDraft) {
   const fields = (draft.error_fields ?? []).map(item => marketplace === "depop" && DEPOP_SHIPPING_FIELDS.has(item.field)
     ? { ...item, field: "depop_specifics.parcelSize" } : item);
-  return fields.filter((item, index) => fields.findIndex(other => other.field === item.field) === index);
+  return fields.filter((item, index) => marketplace !== "depop" || item.field !== "depop_specifics.parcelSize"
+    || fields.findIndex(other => other.field === item.field) === index);
 }
 
 function shippingRecovery(marketplace: Marketplace, draft: NativeDraft): string | null {

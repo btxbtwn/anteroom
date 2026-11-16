@@ -320,6 +320,13 @@ describe("marketplaces section", () => {
     expect(html).toContain("Depop said: missing_fields: national_shipping");
   });
 
+  it("preserves distinct validation messages for another marketplace's field", () => {
+    const prompt = askChatPrompt("mercari", { state: "draft", error_code: "missing_fields", error: "Mercari needs a size.",
+      error_fields: [{ field: "size", message: "Choose a size group." }, { field: "size", message: "Choose a size in that group." }] });
+    expect(prompt).toContain("Choose a size group.");
+    expect(prompt).toContain("Choose a size in that group.");
+  });
+
   it("keeps shipping aliases scoped to Depop and gives chat the reachable field", () => {
     const draft: NativeDraft = { state: "draft", error_code: "missing_fields", error: "Depop needs shipping.",
       error_fields: [{ field: "national_shipping", message: "Depop needs shipping." }] };
