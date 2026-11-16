@@ -403,7 +403,7 @@ async def _require_ebay() -> None:
     try:
         await EbayClient.connect()
     except SignInRequired as exc:
-        raise NativeMarketplaceError(409, "Connect eBay in Settings → Connections before listing.") from exc
+        raise NativeMarketplaceError(409, str(exc)) from exc
 
 
 def _photos(db: Session, conv_id: str, snapshot: dict, marketplace: str) -> tuple[list, str]:

@@ -11,6 +11,23 @@ and accounts must overlap; long work must leave navigation, input and unrelated
 drafts usable. This is a product requirement, not a promise of infinite hardware
 capacity or zero model/network latency.
 
+## eBay refused sign-in status, 2026-11-16
+
+An isolated saved-account fixture reproduces Settings reporting connected after
+an explicit refresh refusal. The fix remembers the refusal on that exact grant:
+two subsequent token requests make one mocked refresh call rather than two.
+Status remains a local read; opening Settings does not validate or refresh the
+grant. Expiry alone does not mark a refreshable account invalid. A new sign-in
+replaces the record, and a late refusal cannot invalidate that newer connection.
+Relay authentication failures and temporary outages do not mark a seller grant
+invalid. This changes the shared eBay/Etsy account service, not marketplace
+write receipts, revision fences or unknown-send handling.
+
+These are deterministic fixture counts, not production latency measurements.
+Desktop and phone browser checks use intercepted account status in the offline
+sandbox. Concurrent seller generation and input/navigation p50/p95 are not
+measured for this fix; no capacity claim is made.
+
 ## Mercari explicit preview cooldown, 2026-11-16
 
 An isolated two-listing scheduled-offer fixture reproduces the refusal reported

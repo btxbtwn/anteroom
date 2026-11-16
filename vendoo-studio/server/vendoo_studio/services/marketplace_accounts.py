@@ -260,7 +260,7 @@ def _claim_refresh(marketplace: str, claim: str, rejected: str | None) -> tuple[
 
     def take(accounts):
         account = outcome["account"] = accounts.get(marketplace)
-        if (not account or not account.get("accessToken") or not account.get("refreshToken")
+        if (not account or account.get("authError") or not account.get("accessToken") or not account.get("refreshToken")
                 or _fresh(account, rejected)
                 or (account.get("refreshClaim") or {}).get("until", 0) > time.time()):
             return
@@ -315,6 +315,17 @@ def _fresh(account: dict, rejected: str | None) -> bool:
     return bool(expires_at and expires_at - REFRESH_MARGIN_S > time.time() and account.get("accessToken") != rejected)
 
 
+def _mark_sign_in_required(marketplace: str, used: dict, message: str) -> None:
+    """Remember a refused grant without invalidating a newer connection or its reviews."""
+    def mark(accounts):
+        current = accounts.get(marketplace)
+        if current and all(current.get(key) == used.get(key) for key in
+                           ("accountId", "connectedAt", "accessToken", "refreshToken")):
+            accounts[marketplace] = {**current, "authError": message}
+
+    update_marketplace_accounts(mark)
+
+
 async def access_token(marketplace: str, *, rejected: str | None = None) -> str:
     """A current access token, refreshed through the relay when it is about to expire.
 
@@ -324,6 +335,8 @@ async def access_token(marketplace: str, *, rejected: str | None = None) -> str:
     account = (await _accounts()).get(_check(marketplace))
     if not account or not account.get("accessToken"):
         raise SignInRequired(f"{NAMES[marketplace]} isn't connected.")
+    if account.get("authError"):
+        raise SignInRequired(account["authError"])
     if _fresh(account, rejected):
         return account["accessToken"]
     claim = secrets.token_hex(16)
@@ -334,6 +347,8 @@ async def access_token(marketplace: str, *, rejected: str | None = None) -> str:
         account, claimed = await asyncio.to_thread(_claim_refresh, marketplace, claim, rejected)
         if not account or not account.get("accessToken"):
             raise SignInRequired(f"{NAMES[marketplace]} isn't connected.")
+        if account.get("authError"):
+            raise SignInRequired(account["authError"])
         if _fresh(account, rejected):
             return account["accessToken"]
         if not account.get("refreshToken"):
@@ -351,7 +366,9 @@ async def access_token(marketplace: str, *, rejected: str | None = None) -> str:
         if relay_refused(resp):
             raise RelayError(RELAY_REFUSED, 401)
         if resp.status_code == 401:
-            raise SignInRequired(f"Sign in to {NAMES[marketplace]} again.")
+            message = f"Reconnect {NAMES[marketplace]} in Settings → Connections. Its sign-in is no longer valid."
+            await asyncio.to_thread(_mark_sign_in_required, marketplace, account, message)
+            raise SignInRequired(message)
         if resp.status_code != 200:
             raise RelayError(f"Could not refresh the {NAMES[marketplace]} sign-in ({resp.status_code}).", resp.status_code)
         tokens = resp.json().get("tokens") or {}
@@ -583,12 +600,12 @@ def status() -> dict:
         account = accounts.get(marketplace)
         pending = _pending.get((_seller(), marketplace))
         out[marketplace] = {
-            "connected": bool(account),
+            "connected": bool(account and not account.get("authError")),
             "label": account.get("label") if account else None,
             "connectedAt": account.get("connectedAt") if account else None,
             "pending": bool(pending and not pending.done),
             "authorizeUrl": pending.authorize_url if pending and not pending.done else None,
-            "error": pending.error if pending and pending.done else None,
+            "error": (pending.error if pending and pending.done else None) or (account.get("authError") if account else None),
         }
     relay = relay_client.stream_state() if not _on_web() else {"running": False, "connected": False, "lastError": None, "lastEventAt": None}
     return {"accounts": out, "relay": relay}
