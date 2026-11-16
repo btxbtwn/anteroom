@@ -706,3 +706,32 @@ test('Depop preview diagnostics expose only sanitized message fields, never the 
   assert.doesNotMatch(JSON.stringify(run.results[0]), /buyer@example|short-secret|private-secret|987654321|private-buyer|private-session/);
   assert.ok(run.requests.every(r => r.key.startsWith('GET')));
 });
+
+test('preview diagnostics identify each refused Mercari read without sending a price or offer', async () => {
+  for (const [operation, step] of [['sellFetchItemsDetails', 'mercari-item'], ['offerToLikerable', 'mercari-eligibility'], ['offerToLikerInit', 'mercari-bounds']]) {
+    for (const message of ["Oops! Your offer can't be less than $1.00.", 'Item is no longer available']) {
+      const run = offerWorker('mercari', mercariAnswers({ [`POST www.mercari.com/v1/api ${operation}`]:
+        [200, { errors: [{ message }] }] }));
+      await run.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: {
+        marketplace: 'mercari', action: 'offer', listing_id: ITEM, discount_percent: 12, floor_cents: 1 } });
+      assert.equal(run.results[0].preview_step, step);
+      assert.equal(run.results[0].safe_to_retry, true);
+      assert.equal(run.results[0].marketplace_message, message);
+      assert.ok(!run.requests.some(r => r.key === OFFER_SEND));
+      for (const request of run.requests.filter(r => r.body)) assert.deepEqual(request.body.variables, { itemId: ITEM });
+    }
+  }
+});
+
+test('Depop preview 404 diagnostics distinguish account, product and offer-preview reads', async () => {
+  for (const [path, step] of [[`GET ${DEPOP}/users/me/`, 'depop-account'],
+    [`GET ${DEPOP}/products/by-slug/${SLUG}/`, 'depop-product'], [DEPOP_PREVIEW, 'depop-offer-preview']]) {
+    const run = offerWorker('depop', depopAnswers({ [path]: [404, { message: 'Product not found' }] }));
+    await run.c.handleMarketplacePromotion({ type: 'marketplace.promotion_check', payload: {
+      marketplace: 'depop', action: 'offer', listing_id: SLUG, discount_percent: 10 } });
+    assert.equal(run.results[0].preview_step, step);
+    assert.equal(run.results[0].safe_to_retry, true);
+    assert.equal(run.results[0].marketplace_message, 'Product not found');
+    assert.ok(run.requests.every(r => r.key.startsWith('GET')));
+  }
+});
