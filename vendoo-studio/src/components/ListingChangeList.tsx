@@ -20,7 +20,7 @@ export function ListingChangeList({ changes, beforeLabel = "Before", afterLabel 
             {([[beforeLabel, change.before], [afterLabel, change.after]] as const).map(([label, value]) => (
               <div key={label} className="min-w-0">
                 <span className="mb-1 block font-medium text-muted-foreground text-xs">{label}</span>
-                <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted px-2 py-1.5 font-mono text-xs">{changeValue(value)}</pre>
+                <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted px-2 py-1.5 font-mono text-xs">{changeValue(value, change.field)}</pre>
               </div>
             ))}
           </div>

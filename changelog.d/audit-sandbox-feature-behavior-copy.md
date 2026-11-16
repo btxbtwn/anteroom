@@ -2,3 +2,4 @@
 - Sourcing keeps outdated cart links disabled after an update fails and explains how to rebuild them.
 - Sourcing describes its operating allowance consistently as a cost per sold piece.
 - Bulk edit reviews show individual changed fields, and supplier and sale-amount errors give clearer instructions.
+- Listing history explains which fields are protected from automatic edits without exposing internal field names.
