@@ -188,7 +188,7 @@ list remembers.
 | Wednesday | Photos: upload, drop, reorder, crop and edit, thumbnails, camera on iPhone, measurements from ruler photos | `src/components/Photo*`, `anteroom-ios/Sources/Photos/` |
 | Thursday | Assistant and listing chat, automations, suggestions, similar items, previous versions and history | `src/components/Assistant*`, `Automations*`, `ListingHistory.tsx`, `anteroom-ios/Sources/Assistant/`, `Automations/`, `History/` |
 | Friday | Settings, providers, labels, sign-in, sign-up, password reset, account menu, analytics, sales records, mark sold; Mac app first run, backups and restore, migration of a database from the previous release | `src/components/SettingsPage.tsx`, `src/components/settings/`, `src/cloud/`, `anteroom-ios/Sources/Settings/`, `Session/`, `Analytics/`, `services/backups.py` |
-| Saturday | Concurrency and speed: several sellers generating several drafts at once while navigating and typing. Record p50/p95 input and navigation latency and errors against the targets in `docs/responsiveness.md` | `e2e/concurrentGeneration.e2e.ts`, `docs/responsiveness.md` |
+| Saturday | Concurrency and speed: several sellers generating several drafts at once while navigating and typing. Record p50/p95 input and navigation latency and errors against the targets in `docs/responsiveness.md`. Run the hosted load test (`vendoo-studio/README.md`, **Hosted load test**) with the sandbox log redirected to a file, then search that log for `QueuePool`, `Traceback` and `TaskStopped`. "Etsy isn't connected" tracebacks are expected there; lease-ended lines are expected only after the harness starts cancelling (`generate/cancel` in the log) | `e2e/concurrentGeneration.e2e.ts`, `scripts/hosted-load-test.py`, `docs/responsiveness.md` |
 | Sunday | Safety sweep: every publish, delist, update and save-draft route without `confirm` and without named marketplaces must be refused; search for any code path where automation, retries, queues or bulk actions could reach them. Seller isolation: Alice and Bob never see each other's drafts or photos. Live updates and stale-edit protection between web and iPhone on the same draft | `routes/native_marketplaces.py`, `routes/marketplace_listings.py`, `routes/listing_commands.py` (set-price push), `cli/catalog.py` and `cli/execute.py` (the CLI's confirm gate), `docs/seller-isolation.md` |
 
 ## Feature checks
@@ -206,17 +206,17 @@ fails and the likely cause. Fix one per run (see **Each run**), then delete
 its line. Before calling a failure flaky, rerun it alone and check it fails in
 code the PR didn't change.
 
-- `server/tests/test_hosted_edge.py`
-  `test_access_log_names_the_route_but_never_the_url_query_or_headers`
-  fails when run alone (`IndexError` on `lines.lines[0]`: no access log
-  lines) and passes in the full suite (2026-11-12). Likely the access
-  logger's level is only set by another test; set it in the test.
 - `CoreFlowSandboxTests.testGenerateFromTheEditorShowsASummary` at the
   `staticTexts.matching(...)` check after the reply: "Timed out while
   evaluating UI query" on GitHub's macOS runners (2026-11-10, 2026-11-11).
   Query a narrower element.
 - `PolishScreenshotTests.testPolishedScreensInLightAndDark`: the Inventory
   list didn't appear within 30 s after a theme change, on CI (2026-11-11).
+- `e2e/photoReorder.e2e.ts` "photos on a marketplace form reorder by
+  dragging" [desktop]: hit the 120 s test timeout before the order check,
+  on two of four fix-branch `./check.sh` runs that did not touch photos;
+  passed 6 of 6 alone (2026-11-14). Cause unknown; read the trace in
+  `e2e/results` the next time it fails.
 - `hosted-e2e/signin.e2e.ts` "in the Mac app, password resets open in the
   browser": the Account menu isn't open when the test looks for Sign out,
   about one run in two (2026-11-11). Likely the Assistant composer's
