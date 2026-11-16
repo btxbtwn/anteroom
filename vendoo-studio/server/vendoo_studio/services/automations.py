@@ -158,7 +158,6 @@ def pause_automation(db: Session, automation_id: str) -> dict:
     if row.status != "active":
         raise AutomationError("Only a running automation can be paused.")
     row.status = "paused"
-    row.updated_at = _naive(utcnow())
     db.commit()
     return view(row)
 
@@ -171,7 +170,6 @@ def resume_automation(db: Session, automation_id: str, *, now: datetime | None =
     row.status = "active"
     if row.next_run_at is None or as_utc(row.next_run_at) is None:
         row.next_run_at = _naive(first_due(row.schedule, row.timezone, moment))
-    row.updated_at = _naive(moment)
     db.commit()
     return view(row)
 
@@ -265,7 +263,8 @@ def confirm_proposal(db: Session, proposal: dict, *, now: datetime | None = None
         return pause_automation(db, str(proposal.get("id") or ""))
     body = {key: proposal.get(key) for key in ("name", "prompt", "timezone", "schedule", "filters", "actions", "marketplaces", "price_repeat")}
     if op == "update":
-        # Saves the task as the card showed it; a paused task stays paused.
+        # Saves the task as the card showed it; a paused task stays paused. updated_at moves only
+        # when the task's settings are edited, so a run or a pause since the card does not refuse it.
         task = get_automation(db, str(proposal["id"]))
         if proposal.get("base_updated_at") != task.updated_at.isoformat():
             raise AutomationError("This automation changed after the assistant suggested this. Ask again.", 409)
@@ -825,7 +824,6 @@ def finish_run(db: Session, run: AutomationRun, automation: Automation, now: dat
         automation.next_run_at = _naive(nxt)
         if automation.schedule.get("kind") == "once":
             automation.status = "paused"
-    automation.updated_at = _naive(now)
     db.commit()
 
 

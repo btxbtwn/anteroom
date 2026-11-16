@@ -72,3 +72,24 @@ def test_confirming_an_old_card_does_not_undo_a_later_edit(db, client):  # noqa:
     # The card was built from the task before that edit; confirming it must not revert the edit.
     assert saved["filters"] == edited.json()["filters"]
     assert saved["filters"]["min_age_days"] == 90
+
+
+def test_a_scheduled_run_or_a_pause_does_not_make_the_card_stale(db, client):  # noqa: F811
+    from datetime import timedelta
+
+    from vendoo_studio.models.automation import Automation
+
+    task = _task(client)
+    block = json.dumps({"op": "update", "id": task["id"], "schedule": {"kind": "daily", "time": "10:00"}})
+    proposal = automations.proposal_from_block(db, block, now=NOW)
+    # Before the seller taps Confirm, the scheduler runs the task and the seller pauses it.
+    row = db.get(Automation, task["id"])
+    run = automations.claim_scheduled_run(db, row, NOW + timedelta(hours=1))
+    assert run is not None
+    automations.finish_run(db, run, row, NOW + timedelta(hours=1), status="completed")
+    assert client.post(f"/api/automations/{task['id']}/pause").status_code == 200
+    # Neither changed what the card shows, so confirming it saves the new time.
+    automations.confirm_proposal(db, proposal, now=NOW + timedelta(hours=2))
+    saved = next(row for row in client.get("/api/automations").json() if row["id"] == task["id"])
+    assert saved["schedule"]["time"] == "10:00"
+    assert saved["status"] == "paused"
