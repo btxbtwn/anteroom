@@ -1,1 +1,0 @@
-- Sale calendar results use “sale” and “day” for a single result, and invalid time zones show a plain instruction you can correct.

@@ -1,1 +1,0 @@
-- Chat history explains why a chat could not be deleted and tells you to stop or finish an active answer before trying again.

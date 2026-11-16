@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1004 — 2026-11-16
+
+- Chat history explains why a chat could not be deleted and tells you to stop or finish an active answer before trying again.
+
+## 0.1.1003 — 2026-11-16
+
+- Sale calendar results use “sale” and “day” for a single result, and invalid time zones show a plain instruction you can correct.
+
 ## 0.1.1002 — 2026-11-16
 
 - An unfinished automation now says its price-drop amount is not set instead of showing “null” as a price or percentage.
