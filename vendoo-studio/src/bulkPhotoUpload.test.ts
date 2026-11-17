@@ -79,6 +79,45 @@ describe("createBulkPhotoListings", () => {
     expect(rotatePhoto.mock.calls).toEqual([["coat", "coat-front", 90], ["jeans", "jeans-front", -90]]);
   });
 
+  it("keeps an exact filename containing a literal backslash distinct from its basename", async () => {
+    const named = photo("tag\\front.jpg");
+    const plain = photo("front.jpg");
+    const rotatePhoto = vi.fn().mockResolvedValue({});
+    await createBulkPhotoListings([
+      { folder: null, files: [named, plain], rotations: new Map([[named, 90], [plain, -90]]) },
+    ], { cog: "", labels: "" }, {
+      create: vi.fn().mockResolvedValue({ id: "coat" }),
+      uploadPhotos: vi.fn().mockResolvedValue({ count: 2, photos: [
+        { id: "named", original_filename: "tag\\front.jpg" },
+        { id: "plain", original_filename: "front.jpg" },
+      ] }),
+      rotatePhoto,
+    });
+    expect(rotatePhoto.mock.calls).toEqual([["coat", "named", 90], ["coat", "plain", -90]]);
+  });
+
+  it.each([false, true])("does not rotate an untouched filename resembling a path (directory: %s)", async (directory) => {
+    const untouched = photo("tag\\front.jpg");
+    const turned = photo("front.jpg");
+    if (directory) {
+      for (const file of [untouched, turned]) {
+        Object.defineProperty(file, "webkitRelativePath", { value: `batch/coat/${file.name}` });
+      }
+    }
+    const rotatePhoto = vi.fn().mockResolvedValue({});
+    await createBulkPhotoListings([
+      { folder: null, files: [untouched, turned], rotations: new Map([[turned, -90]]) },
+    ], { cog: "", labels: "" }, {
+      create: vi.fn().mockResolvedValue({ id: "coat" }),
+      uploadPhotos: vi.fn().mockResolvedValue({ count: 2, photos: [
+        { id: "untouched", original_filename: directory ? "batch/coat/tag\\front.jpg" : "tag\\front.jpg" },
+        { id: "turned", original_filename: directory ? "batch/coat/front.jpg" : "front.jpg" },
+      ] }),
+      rotatePhoto,
+    });
+    expect(rotatePhoto.mock.calls).toEqual([["coat", "turned", -90]]);
+  });
+
   it("applies the shared notes to every created draft", async () => {
     const create = vi.fn()
       .mockResolvedValueOnce({ id: "listing-a" })
