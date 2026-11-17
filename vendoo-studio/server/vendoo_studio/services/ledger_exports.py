@@ -83,13 +83,14 @@ def inventory_csv(db: Session):
         for conv, raw in query.yield_per(500):
             listing = raw if isinstance(raw, dict) else {}
             notes = parse_notes(conv.notes)
-            imported, marks = notes.get("vendooListingUrls"), notes.get("marketplaceMarks")
+            imported, marks, delists = notes.get("vendooListingUrls"), notes.get("marketplaceMarks"), notes.get("marketplaceDelists")
             urls = []
             for marketplace in sales_ledger.MARKETPLACES:
                 mark = marks.get(marketplace) if isinstance(marks, dict) else None
+                deleted = delists.get(marketplace) if isinstance(delists, dict) else None
                 url, _source = current_listing(marketplace, links.get(conv.id, {}).get(marketplace),
                                                imported.get(marketplace) if isinstance(imported, dict) else None,
-                                               mark if isinstance(mark, dict) else {})
+                                               mark if isinstance(mark, dict) else {}, deleted if isinstance(deleted, dict) else {})
                 reference = listing_reference(marketplace, url)
                 urls.append(text(reference[1]) if reference else "")
             yield [text(conv.id), text(conv.title), text(listing.get("description")), text(conv.status), text(listing.get("sku")),
