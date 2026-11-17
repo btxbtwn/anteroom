@@ -132,6 +132,22 @@ export function markListedPrefill(entry: MarketplaceListing | undefined, unconfi
   return entry.url ?? "";
 }
 
+interface MarkRequest { marketplace: Marketplace; state: MarketplaceMark; url?: string; relinkDeleted?: boolean }
+
+/**
+ * After the server refuses a link because Anteroom delisted that listing, the
+ * one way to link it anyway: the seller says they just saw it live. Returns the
+ * request to resend, or null. A request that already carried that answer, or
+ * any other refusal, is never asked about again.
+ */
+export async function relinkAfterDeletedRefusal(error: unknown, request: MarkRequest,
+  confirm: (message: string, options: { confirmLabel: string }) => Promise<boolean>): Promise<MarkRequest | null> {
+  if (!(error instanceof ApiRequestError) || error.reason !== "deleted_listing" || request.relinkDeleted) return null;
+  const name = marketplaceName(request.marketplace);
+  const approved = await confirm(`${error.message}\nLink it anyway only if you just saw it live on ${name}.`, { confirmLabel: "It's still live" });
+  return approved ? { ...request, relinkDeleted: true } : null;
+}
+
 export function deletable(entry: MarketplaceListing | undefined): boolean {
   return Boolean(entry?.listing_id && !entry.sold_here && entry.state !== "deleted" && entry.state !== "deleting");
 }
@@ -438,17 +454,14 @@ export function MarketplacesLayout({
     },
   });
   const mark = useMutation({
-    mutationFn: ({ marketplace, state, url, relinkDeleted }: { marketplace: Marketplace; state: MarketplaceMark; url?: string; relinkDeleted?: boolean }) =>
+    mutationFn: ({ marketplace, state, url, relinkDeleted }: MarkRequest) =>
       api.marketplaceListings.mark(convId, marketplace, state, url, relinkDeleted),
     retry: false,
     onSuccess: (data) => { queryClient.setQueryData(liveKey, data); setLinking(null); },
     onError: async (error, request) => {
       // The pasted link is the listing Anteroom deleted. Link it only if the seller just saw it live.
-      if (!(error instanceof ApiRequestError) || error.reason !== "deleted_listing" || request.relinkDeleted) return;
-      const name = marketplaceName(request.marketplace);
-      if (await confirmDialog(`${error.message}\nLink it anyway only if you just saw it live on ${name}.`, { confirmLabel: "It's still live" })) {
-        mark.mutate({ ...request, relinkDeleted: true });
-      }
+      const resend = await relinkAfterDeletedRefusal(error, request, confirmDialog);
+      if (resend) mark.mutate(resend);
     },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: liveKey });
