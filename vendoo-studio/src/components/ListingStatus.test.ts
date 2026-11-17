@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inventoryStatus, listedFromImport, marketplacesLabel, statusHint, withDirectListings } from "./sidebar/listingStatus";
+import { inventoryStatus, listedFromImport, liveMarketplaces, marketplacesLabel, statusHint, withDirectListings } from "./sidebar/listingStatus";
 
 describe("statusHint", () => {
   it("explains each inventory status", () => {
@@ -150,5 +150,12 @@ describe("marketplacesLabel", () => {
     expect(marketplacesLabel([{ label: "Mercari", status: "LISTED" }, { label: "Poshmark", status: "SOLD" }]))
       .toBe("Listed on Mercari; Sold on Poshmark");
     expect(marketplacesLabel([{ label: "Poshmark", status: "SOLD" }])).toBe("Sold on Poshmark");
+  });
+});
+
+describe("liveMarketplaces", () => {
+  it("does not count a marketplace the item sold on as live", () => {
+    expect(liveMarketplaces({ direct_marketplaces: ["poshmark", "mercari"], sold_marketplaces: ["poshmark"] })).toEqual(["mercari"]);
+    expect(liveMarketplaces({ vendoo_marketplaces: ["poshmark"], sold_marketplaces: ["poshmark"] })).toEqual([]);
   });
 });
