@@ -676,6 +676,116 @@ def test_postgres_sale_undo_waits_for_explicit_finish_ownership(undo_env, monkey
     assert item_after.status == "active" and item_after.settled_at == manual_time and item_after.settled_by_seller
 
 
+RACE_DELETE = {"listing_id": "123456789012", "url": EBAY_URL, "at": "2026-11-17T06:00:00+00:00"}
+# Delist notes writes: the delete record as a delete starts, and a failure record.
+DELIST_WRITES = {
+    "record_delete": lambda db: marketplace_delist._record_delete(db, "race", "ebay", {**RACE_DELETE, "state": "deleting"}),
+    "store": lambda db: marketplace_delist._record(db, "race", "ebay", {**RACE_DELETE, "state": "failed", "error": "Not deleted."}),
+}
+
+
+def sold_on_mercari_while_listed_on_ebay(env):
+    """A seller-recorded Mercari sale and its sold mark, with the eBay listing still there to delist."""
+    item(env.db, "race", notes={"vendooStatus": "active", "sellerNote": "keep me",
+                                "vendooListingUrls": {"ebay": EBAY_URL, "poshmark": POSH_URL}})
+    sale = mark_sold(env, "race", marketplace="mercari").json()["sale"]
+    # The mark Mark as sold leaves when the sale alone does not prove the listing ended.
+    conv = env.db.get(Conversation, "race")
+    conv.notes = json.dumps({**parse_notes(conv.notes), "marketplaceMarks": {
+        "mercari": {"state": "sold", "at": datetime.now(UTC).isoformat(), "url": None, "listing_id": None}}})
+    env.db.commit()
+    env.client.get("/api/conversations")
+    env.db.expire_all()
+    assert parse_notes(env.db.get(Conversation, "race").notes)["marketplaceMarks"]["mercari"]["state"] == "sold"
+    return sale
+
+
+def assert_undo_kept_by_delist_write(bind, writer, sale):
+    with Session(bind=bind) as fresh:
+        notes = parse_notes(fresh.get(Conversation, "race").notes)
+        # The undone sale's mark stays gone, so the item does not read Sold again.
+        assert "mercari" not in notes.get("marketplaceMarks", {})
+        assert fresh.get(MarketplaceSale, sale["id"]) is None
+        assert status_for(fresh, "race", notes).status != "sold"
+        assert statuses(fresh, [("race", notes)])["race"].status != "sold"
+        # Unrelated notes and the delete record (the retry target) survive.
+        assert notes["sellerNote"] == "keep me"
+        assert notes["vendooListingUrls"] == {"ebay": EBAY_URL, "poshmark": POSH_URL}
+        record = notes["marketplaceDelists"]["ebay"]
+        assert (record["listing_id"], record["state"]) == ("123456789012", "deleting" if writer == "record_delete" else "failed")
+        assert marketplace_delist.listings(fresh, "race")["ebay"]["listing_id"] == "123456789012"
+
+
+@pytest.mark.sqlite_only("reproduce a sale undo between the SQLite delist notes read and write")
+@pytest.mark.parametrize("writer", DELIST_WRITES)
+def test_a_delist_notes_write_keeps_a_sale_undo_made_just_before_it(undo_env, writer):
+    from vendoo_studio.services.sales_ledger import delete_seller_sale
+
+    env = undo_env
+    sale = sold_on_mercari_while_listed_on_ebay(env)
+    bind = env.db.get_bind()
+    fired = False
+
+    def undo_before_notes_write(_connection, _cursor, statement, _parameters, _context, _many):
+        nonlocal fired
+        if fired or not statement.startswith("UPDATE conversations"):
+            return
+        fired = True
+        with Session(bind=bind) as other:
+            delete_seller_sale(other, sale["id"], sale["financial_revision"])
+
+    with Session(bind=bind) as delist:
+        event.listen(bind, "before_cursor_execute", undo_before_notes_write)
+        try:
+            DELIST_WRITES[writer](delist)
+        finally:
+            event.remove(bind, "before_cursor_execute", undo_before_notes_write)
+    assert fired
+    assert_undo_kept_by_delist_write(bind, writer, sale)
+
+
+@pytest.mark.parametrize("writer", DELIST_WRITES)
+def test_postgres_delist_notes_write_waits_for_a_sale_undo_and_keeps_it(undo_env, monkeypatch, writer):
+    import threading
+    import time
+
+    from vendoo_studio.services.sales_ledger import delete_seller_sale
+
+    env = undo_env
+    if env.db.get_bind().dialect.name != "postgresql":
+        pytest.skip("row-lock contention requires Postgres")
+    sale = sold_on_mercari_while_listed_on_ebay(env)
+    bind = env.db.get_bind()
+    failures: list[BaseException] = []
+
+    def write():
+        try:
+            with Session(bind=bind) as delist:
+                DELIST_WRITES[writer](delist)
+        except BaseException as exc:  # noqa: BLE001 - reported by the test
+            failures.append(exc)
+
+    with Session(bind=bind) as undo:
+        # Hold the undo uncommitted, so it keeps the item's row lock while the delist writes.
+        with monkeypatch.context() as held_transaction:
+            held_transaction.setattr(undo, "commit", undo.flush)
+            delete_seller_sale(undo, sale["id"], sale["financial_revision"])
+        writer_thread = threading.Thread(target=write)
+        writer_thread.start()
+        deadline = time.monotonic() + 10
+        waiting = 0
+        with bind.connect() as watch:
+            while not waiting and time.monotonic() < deadline:
+                waiting = watch.scalar(text("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
+                                            "AND wait_event_type = 'Lock'"))
+                time.sleep(0.05)
+        assert waiting and writer_thread.is_alive(), "the delist write must wait on the undo's row lock"
+        undo.commit()
+    writer_thread.join(10)
+    assert not writer_thread.is_alive() and not failures, failures
+    assert_undo_kept_by_delist_write(bind, writer, sale)
+
+
 def test_stale_sale_delete_keeps_the_sale_and_sold_settlement(undo_env):
     env = undo_env
     item(env.db, "coat")
