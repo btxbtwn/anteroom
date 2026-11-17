@@ -22,7 +22,7 @@ class PostgresTimingArtifacts(unittest.TestCase):
         path = '${{ runner.temp }}/pg-durations-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}.json'
         self.assertIn(f'--durations-path "{path}"', postgres)
         self.assertIn(f'test ! -e "{path}"', postgres)
-        safe_path = path.replace('pg-durations-', 'pg-duration-hashes-')
+        safe_path = '${{ runner.temp }}/pg-observations-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}/durations.json'
         self.assertIn(f'--input "{path}"', postgres)
         self.assertIn(f'--output "{safe_path}"', postgres)
         self.assertIn(f'            {safe_path}', postgres)

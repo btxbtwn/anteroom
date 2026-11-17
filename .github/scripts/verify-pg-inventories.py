@@ -14,14 +14,16 @@ def main():
     parser.add_argument('--lock', type=Path, required=True)
     parser.add_argument('--run-id', required=True)
     parser.add_argument('--attempt', required=True)
+    parser.add_argument('--dependency-result', required=True)
     args = parser.parse_args()
     try:
+        if args.dependency_result != 'success':
+            raise ValueError('Postgres dependencies did not succeed')
         inventories, observations = [], []
         for group in (1, 2):
-            suffix = f'{args.run_id}-{args.attempt}-{group}.json'
             directory = args.directory / str(group)
-            inventory = directory / f'pg-inventory-{suffix}'
-            durations = directory / f'pg-duration-hashes-{suffix}'
+            inventory = directory / 'inventory.json'
+            durations = directory / 'durations.json'
             if set(directory.iterdir()) != {inventory, durations}:
                 raise ValueError('Unexpected artifact files')
             inventories.append(json.loads(inventory.read_text()))

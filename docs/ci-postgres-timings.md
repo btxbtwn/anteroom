@@ -1,6 +1,6 @@
 # Postgres shard timing observations
 
-CI retains one `pg-duration-observations-<run>-<attempt>-<group>` artifact for
+CI retains one `pg-duration-observations-<run>-<group>` artifact for
 seven days after each successful Postgres shard test step. Treat these artifacts
 as public-readable to signed-in users: the repository is public.
 
@@ -30,7 +30,9 @@ interpreted as zero duration or successful coverage. A successful individual
 shard is not a complete suite profile.
 
 Before a later rebalance, require both successful Postgres shards from the same
-run, attempt, tested commit and dependency lock. Hash each nodeid from the exact
+run, tested commit and dependency lock. Producing attempts may differ when
+GitHub reuses successful dependencies; they must be positive and no greater than
+the current attempt. Hash each nodeid from the exact
 collected suite with SHA-256 over its UTF-8 bytes to map observations back to tests.
 Verify exact union with no overlap, missing nodes or collection errors; inspect
 skips/failures from CI results. Keep source run/attempt/commit provenance outside
@@ -47,7 +49,7 @@ artifact API's created_at/expires_at to verify observed expiry after collection.
 
 ## Actual-CI collection inventories
 
-The same shard artifact also includes `pg-inventory-<run>-<attempt>-<group>.json`.
+Each run/shard slot contains fixed `inventory.json` and `durations.json` files.
 A read-only pytest hook wrapper observes full collection before pytest-split and
 selected collection afterward. It hashes full nodeids without changing items,
 order, scheduling, flags or worker count. Xdist workers return their inventories
@@ -56,18 +58,35 @@ workers reject the inventory. Failed/collection-error sessions publish none.
 
 Each inventory contains only ordered full/selected SHA-256 arrays and provenance:
 actual checkout `git rev-parse HEAD`, uv.lock SHA-256, run ID/attempt, Python and
-pytest/xdist/split versions and actual xdist worker count. Hashes remain pseudonymization; the sensitive-ID
-restrictions above still apply. Raw nodeids are never serialized by the observer.
+pytest/xdist/split versions and actual xdist worker count. Hashes remain
+pseudonymization; the sensitive-ID restrictions above still apply. Raw nodeids are never serialized by the observer.
 
 The existing aggregate CI job retains its original gate (including #1621's
 NEEDS_JSON validator when integrated). Only when backend checks were selected,
-it downloads the two exact current-run/attempt artifact names using the existing
+it downloads the two exact current-run/shard artifact names using the existing
 pinned download action. No token, repository, other-run override, pattern or
 shared cache is used. It requires matching provenance/full order, nonempty unique
 selected subsets in original order, disjoint exact union, and exactly one finite
 nonnegative duration for every selected hash. Missing files or observations fail
-CI; backend-unselected runs legitimately skip the artifact steps. An old attempt
-cannot supply one shard for a rerun of the other.
+CI; backend-unselected runs legitimately skip the artifact steps. The verifier
+also explicitly rejects nonsuccessful Postgres dependency results.
+
+Each slot is replaced with `overwrite: true` only after successful tests,
+controller inventory validation and hashing. A reused successful shard retains
+its slot. A successfully rerun shard replaces its slot; attempts are recorded
+inside each manifest and need not match across shards. Commit, lock, run,
+collection order, environment versions and worker count still must match.
+
+This relies on the existing successful-dependency gate and ordered upload step,
+not on trusting an artifact's claimed job outcome: if a shard fails or is
+cancelled after upload, its dependency result prevents aggregate success. If a
+replacement upload/deletion fails, the job fails; an older surviving slot cannot
+make the gate pass. Cancellation between delete and upload may leave no slot,
+which fails verification. No automatic rerun-all or permissive fallback is used.
+
+Overwrite discards that shard's older artifact; historical per-attempt files are
+not duplicated. The producer attempt in the retained manifest is the available
+provenance. Seven-day retention restarts when a replacement is uploaded.
 
 Added work is hashing/serializing a few thousand identifiers per worker, small
 artifact transfers and standard-library validation. There is no extra suite pass

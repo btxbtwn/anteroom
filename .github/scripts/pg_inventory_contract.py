@@ -46,10 +46,14 @@ def validate_profile(inventories, observations, expected):
         raise ValueError('Both shard inventories and observations are required')
     for inventory in inventories:
         validate_record(inventory)
-        if any(inventory['provenance'].get(key) != value for key, value in expected.items()):
+        if not 1 <= int(inventory['provenance']['attempt']) <= int(expected['attempt']):
+            raise ValueError('Unexpected producing attempt')
+        if any(inventory['provenance'].get(key) != value for key, value in expected.items() if key != 'attempt'):
             raise ValueError('Unexpected provenance')
     first, second = inventories
-    if first['provenance'] != second['provenance'] or first['full'] != second['full']:
+    first_source = {key: value for key, value in first['provenance'].items() if key != 'attempt'}
+    second_source = {key: value for key, value in second['provenance'].items() if key != 'attempt'}
+    if first_source != second_source or first['full'] != second['full']:
         raise ValueError('Shard provenance or full collection differs')
     left, right = set(first['selected']), set(second['selected'])
     if left & right or left | right != set(first['full']):

@@ -61,6 +61,21 @@ class InventoryTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_profile([first, bad], profiles, first['provenance'])
 
+    def test_reused_successful_shards_allow_only_same_run_head_lock_and_bounded_attempts(self):
+        for attempts in ((2, 2), (1, 2), (1, 1)):
+            inventories = [record([0, 1]), record([2, 3])]
+            for item, attempt in zip(inventories, attempts, strict=True):
+                item['provenance']['attempt'] = str(attempt)
+            profiles = [dict.fromkeys(item['selected'], .1) for item in inventories]
+            expected = {**inventories[0]['provenance'], 'attempt': '2'}
+            self.assertEqual(validate_profile(inventories, profiles, expected), 4)
+            for field, value in [('attempt', '0'), ('attempt', '3'), ('commit', 'c' * 40),
+                                 ('lock_sha256', 'd' * 64), ('run_id', '99')]:
+                bad = copy.deepcopy(inventories)
+                bad[0]['provenance'][field] = value
+                with self.assertRaises(ValueError):
+                    validate_profile(bad, profiles, expected)
+
     def test_real_xdist_collection_hashes_without_changing_selection(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -108,14 +123,17 @@ class InventoryTests(unittest.TestCase):
                 item['provenance']['lock_sha256'] = hashlib.sha256(lock.read_bytes()).hexdigest()
                 directory = root / str(group)
                 directory.mkdir()
-                (directory / f'pg-inventory-1-1-{group}.json').write_text(json.dumps(item))
-                (directory / f'pg-duration-hashes-1-1-{group}.json').write_text(json.dumps(dict.fromkeys(item['selected'], .1)))
+                (directory / 'inventory.json').write_text(json.dumps(item))
+                (directory / 'durations.json').write_text(json.dumps(dict.fromkeys(item['selected'], .1)))
             command = [sys.executable, str(SCRIPTS / 'verify-pg-inventories.py'), '--directory', str(root),
-                       '--commit', 'a' * 40, '--lock', str(lock), '--run-id', '1', '--attempt', '1']
+                       '--commit', 'a' * 40, '--lock', str(lock), '--run-id', '1', '--attempt', '2',
+                       '--dependency-result', 'success']
             def run():
                 return subprocess.run(command, check=False, capture_output=True, text=True, timeout=10)
             self.assertEqual(run().returncode, 0)
-            payload = root / '2/pg-duration-hashes-1-1-2.json'
+            payload = root / '2/durations.json'
+            for state in ('failure', 'cancelled', 'skipped'):
+                self.assertNotEqual(subprocess.run(command[:-1] + [state], check=False, capture_output=True).returncode, 0)
             payload.write_text('{PRIVATE_SENTINEL')
             result = run()
             self.assertNotEqual(result.returncode, 0)
@@ -132,7 +150,16 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(aggregate.count('actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333'), 2)
         self.assertEqual(aggregate.count("if: needs.changes.outputs.backend == 'true'"), 4)
         for shard in (1, 2):
-            self.assertIn('name: pg-duration-observations-${{ github.run_id }}-${{ github.run_attempt }}-' + str(shard), aggregate)
+            self.assertIn('name: pg-duration-observations-${{ github.run_id }}-' + str(shard), aggregate)
+        postgres = text.split('  studio-backend-postgres:', 1)[1].split('  extension:', 1)[0]
+        self.assertIn('overwrite: true', postgres)
+        self.assertIn('name: pg-duration-observations-${{ github.run_id }}-${{ matrix.group }}', postgres)
+        self.assertLess(postgres.index('- id: postgres-tests'), postgres.index('Hash Postgres test identifiers'))
+        self.assertLess(postgres.index('Hash Postgres test identifiers'), postgres.index('actions/upload-artifact@'))
+        self.assertNotIn('continue-on-error:', postgres)
+        self.assertNotIn('if: always()', postgres)
+        self.assertIn("if: success() && steps.postgres-tests.outcome == 'success'", postgres)
+        self.assertIn('--dependency-result "${{ needs.studio-backend-postgres.result }}"', aggregate)
         self.assertNotIn('pattern:', aggregate)
         self.assertNotIn('github-token:', aggregate)
         self.assertNotIn('repository:', aggregate)
