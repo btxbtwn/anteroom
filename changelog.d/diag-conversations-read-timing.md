@@ -1,0 +1,1 @@
+- Slow inventory loads in the cloud app now record where the time went, so they can be tracked down and fixed.

@@ -174,3 +174,98 @@ def test_busy_membership_changes_the_version_but_lease_renewals_do_not(cloud, si
         db.get(BackgroundTask, task_id).status = 'cancelled'
         db.commit()
     assert snapshots._version(owner) == idle
+
+
+def timed(read):
+    """Run one snapshot read the way a request does; return its slow-line fields."""
+    from vendoo_studio.services import request_timing
+
+    async def run():
+        fields = {}
+        token = request_timing._details.set(fields)
+        try:
+            return await read(), fields
+        finally:
+            request_timing._details.reset(token)
+    return run()
+
+
+def test_slow_line_separates_waiting_on_a_discarded_build_from_rebuilding(monkeypatch):
+    # Fable's unmeasured hypothesis: a build whose own commit moves the change
+    # vector is discarded, so a tab that waited on it builds a second time.
+    cache = snapshots.SellerReadSnapshots()
+    versions, checks, entered, release = [0], [], threading.Event(), threading.Event()
+
+    def version(_owner):
+        checks.append(True)
+        return versions[0]
+
+    def load(owner, read):
+        if read == 'committing':
+            entered.set()
+            assert release.wait(5)
+            versions[0] += 1
+        return ['row'] * 11
+
+    monkeypatch.setattr(snapshots, '_version', version)
+    monkeypatch.setattr(snapshots, '_load', load)
+
+    async def run():
+        with use(context('alice')):
+            first = asyncio.create_task(timed(lambda: cache.read('inventory', 'committing')))
+            assert await asyncio.to_thread(entered.wait, 3)
+            second = asyncio.create_task(timed(lambda: cache.read('inventory', 'plain')))
+            while len(checks) < 2:
+                await asyncio.sleep(0.001)
+            # The second tab is now waiting on the first build.
+            await asyncio.sleep(0.05)
+            release.set()
+            (_rows, built), (_again, waited) = await first, await second
+            (_cached, hit) = await timed(lambda: cache.read('inventory', 'plain'))
+        return built, waited, hit
+
+    built, waited, hit = asyncio.run(run())
+    assert {key: built[key] for key in ('checks', 'waits', 'stale_peers', 'builds', 'uncached', 'rows_le')} == {
+        'checks': 1, 'waits': 0, 'stale_peers': 0, 'builds': 1, 'uncached': 1, 'rows_le': 100}
+    assert {key: waited[key] for key in ('checks', 'waits', 'stale_peers', 'builds', 'uncached')} == {
+        'checks': 2, 'waits': 1, 'stale_peers': 1, 'builds': 1, 'uncached': 0}
+    assert waited['wait_ms'] >= 40
+    assert {key: hit[key] for key in ('checks', 'waits', 'builds', 'build_total_ms', 'rows_le')} == {
+        'checks': 1, 'waits': 0, 'builds': 0, 'build_total_ms': 0, 'rows_le': 0}
+    # Same field names whatever happened, all numeric except the fixed read
+    # name and pool use: alert grouping strips digits, so one route stays one
+    # group and no seller or listing detail reaches the line.
+    assert list(built) == list(waited) == list(hit)
+    for fields in (built, waited, hit):
+        assert fields['snapshot'] == 'inventory'
+        assert all(isinstance(value, int) for key, value in fields.items()
+                   if key not in ('snapshot', 'pool_start', 'pool_end'))
+        assert 'alice' not in repr(fields)
+
+
+def test_load_splits_connection_database_and_assembly_time_and_counts_commits(monkeypatch):
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.orm import Session
+
+    engine = create_engine('sqlite://')
+    clock = [0.0]
+    monkeypatch.setattr(snapshots, 'perf_counter', lambda: clock[0])
+    owner = ServiceContext('alice', lambda: Session(engine), MagicMock(), MagicMock(), MagicMock())
+
+    def read(db):
+        clock[0] += 2  # status corrections, then a commit
+        db.execute(text('select 1'))
+        db.commit()
+        clock[0] += 3  # remaining reads, then the connection is released
+        db.execute(text('select 1'))
+        db.close()
+        clock[0] += 4  # response assembly without a connection
+        return ['row']
+
+    phases = {}
+    token = snapshots._build_phases.set(phases)
+    try:
+        assert snapshots._load(owner, read) == ['row']
+    finally:
+        snapshots._build_phases.reset(token)
+    assert phases == {'commits': 1, 'connect': 0.0, 'db': 5.0, 'assemble': 4.0}
