@@ -1,0 +1,1 @@
+- Check the Mac's Apple framework calls without hiding type errors, and report unavailable Vision buffers clearly.

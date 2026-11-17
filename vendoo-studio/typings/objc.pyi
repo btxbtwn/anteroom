@@ -1,0 +1,6 @@
+from collections.abc import Callable, Sequence
+
+class selector:
+    def __init__(self, function: Callable[[object, object], None], *, selector: bytes, signature: bytes) -> None: ...
+
+def classAddMethods(cls: type, methods: Sequence[selector]) -> None: ...
