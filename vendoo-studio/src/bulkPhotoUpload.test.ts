@@ -42,6 +42,43 @@ describe("bulkListingNotes", () => {
 });
 
 describe("createBulkPhotoListings", () => {
+  it.each(["batch/coat/", "batch\\coat\\"])("keeps folder rotations when uploaded names include %s", async (prefix) => {
+    const upright = photo("front.jpg");
+    const sideways = photo("tag.jpg");
+    const lost = photo("lost.jpg");
+    for (const file of [upright, sideways, lost]) {
+      Object.defineProperty(file, "webkitRelativePath", { value: `batch/coat/${file.name}` });
+    }
+    const rotatePhoto = vi.fn().mockResolvedValue({ id: "saved-tag" });
+    const result = await createBulkPhotoListings([
+      { folder: "batch/coat", files: [lost, sideways, upright], rotations: new Map([[lost, 180], [sideways, 90]]) },
+    ], { cog: "", labels: "" }, {
+      create: vi.fn().mockResolvedValue({ id: "coat" }),
+      uploadPhotos: vi.fn().mockResolvedValue({ count: 2, photos: [
+        { id: "saved-tag", original_filename: `${prefix}tag.jpg` },
+        { id: "saved-front", original_filename: `${prefix}front.jpg` },
+      ], errors: ["lost.jpg: Invalid photo"] }),
+      rotatePhoto,
+    });
+    expect(rotatePhoto).toHaveBeenCalledExactlyOnceWith("coat", "saved-tag", 90);
+    expect(result[0]!.errors).toEqual(["lost.jpg: Invalid photo"]);
+  });
+
+  it("keeps same-named photos in different item folders independent", async () => {
+    const first = photo("front.jpg");
+    const second = photo("front.jpg");
+    const rotatePhoto = vi.fn().mockResolvedValue({});
+    const create = vi.fn().mockResolvedValueOnce({ id: "coat" }).mockResolvedValueOnce({ id: "jeans" });
+    const uploadPhotos = vi.fn()
+      .mockResolvedValueOnce({ count: 1, photos: [{ id: "coat-front", original_filename: "batch/coat/front.jpg" }] })
+      .mockResolvedValueOnce({ count: 1, photos: [{ id: "jeans-front", original_filename: "batch/jeans/front.jpg" }] });
+    await createBulkPhotoListings([
+      { folder: "batch/coat", files: [first], rotations: new Map([[first, 90]]) },
+      { folder: "batch/jeans", files: [second], rotations: new Map([[second, -90]]) },
+    ], { cog: "", labels: "" }, { create, uploadPhotos, rotatePhoto });
+    expect(rotatePhoto.mock.calls).toEqual([["coat", "coat-front", 90], ["jeans", "jeans-front", -90]]);
+  });
+
   it("applies the shared notes to every created draft", async () => {
     const create = vi.fn()
       .mockResolvedValueOnce({ id: "listing-a" })

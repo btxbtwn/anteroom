@@ -1,0 +1,1 @@
+- Photos turned in the folder upload preview keep that rotation when their drafts are created.

@@ -86,7 +86,10 @@ export async function createBulkPhotoListings(
       Array.from(item.rotations || [], ([file, degrees]) => [file.name, degrees] as const),
     );
     for (const photo of result.photos) {
-      const degrees = rotations.get(photo.original_filename);
+      // Directory uploads can retain their relative path in the multipart
+      // filename. Each item is one folder; match its File.name basenames.
+      const name = photo.original_filename.split(/[\\/]/).pop() || photo.original_filename;
+      const degrees = rotations.get(name);
       if (!degrees) continue;
       try {
         await conversations.rotatePhoto(conv.id, photo.id, degrees);
