@@ -446,6 +446,37 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.tick()
         self.assertEqual(self.checked(), [item])
 
+    def test_an_older_bridge_mercari_refusal_without_a_price_is_held_for_the_day(self):
+        # Bridges before 0.2.74 send no price with the refusal; installed Bridges lag the server.
+        (conv, item), = self.mercari_items(1)
+        listing = MarketplaceListing(conversation_id=conv.id, marketplace="mercari", state="published", listing_id=item,
+                                     listing_url=f"https://www.mercari.com/us/item/{item}/", listed_price=25.0)
+        self.db.add(listing)
+        self.db.commit()
+        saved = self.create({**OFFER, "marketplace": "mercari", "shipping_label": None, "scope": "items", "conversation_ids": [conv.id]})
+        self.enable(saved["id"])
+        self.bridge.side_effect = self.mercari_refusal()
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(self.checked(), [item])
+        refusal = self.db.query(ListingPromotion).filter_by(listing_id=item).one()
+        self.assertEqual((refusal.state, refusal.price_cents), ("skipped", None))
+        # With no refusal price to compare, a new recorded price does not release it; the day does.
+        listing = self.db.get(MarketplaceListing, listing.id)
+        listing.listed_price = 30.0
+        self.db.commit()
+        self.bridge.reset_mock()
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(self.checked(), [])
+        self.assertTrue(self.db.get(PromotionAutomation, saved["id"]).enabled)
+        self.db.query(ListingPromotion).update({"created_at": _now() - timedelta(hours=24, minutes=1)})
+        self.db.commit()
+        self.bridge.reset_mock()
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(self.checked(), [item])
+
     def test_refusals_on_most_of_a_rules_listings_are_not_held(self):
         items = self.mercari_items(5)
         refused = {item for _conv, item in items[:4]}
