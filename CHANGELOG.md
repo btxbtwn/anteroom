@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1009 — 2026-11-17
+
+- Slow inventory loads in the cloud app now record where the time went, so they can be tracked down and fixed.
+
 ## 0.1.1008 — 2026-11-17
 
 - Photos turned in the folder upload preview keep that rotation when their drafts are created.
