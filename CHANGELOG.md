@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1006 — 2026-11-17
+
+- Delisting a new marketplace listing that fails or is still running no longer brings an old, already deleted listing link back as live, so a retry cannot delete the wrong listing or allow a duplicate.
+
 ## 0.1.1005 — 2026-11-17
 
 - A new confirmed marketplace listing no longer appears Delisted because of an old listing link, and Anteroom refuses to list it a second time.
