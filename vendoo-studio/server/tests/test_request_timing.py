@@ -132,3 +132,31 @@ def test_poll_response_after_wait_keeps_its_shape_without_warning(monkeypatch, c
         assert response.status_code == 204
         assert response.content == b""
     assert not [record for record in caplog.records if record.name == request_timing.__name__]
+
+
+def test_route_timing_fields_join_only_their_own_slow_line(caplog):
+    from vendoo_studio.services import request_timing
+
+    async def noted(scope, receive, send):
+        scope["route"] = type("Route", (), {"path": "/api/conversations"})()
+        request_timing.note(snapshot="inventory", builds=1, wait_ms=12)
+        await send({"type": "http.response.start", "status": 200})
+
+    async def plain(scope, receive, send):
+        scope["route"] = type("Route", (), {"path": "/api/status"})()
+        await send({"type": "http.response.start", "status": 200})
+
+    async def send(message):
+        pass
+
+    async def run():
+        await RequestTimingMiddleware(noted)({"type": "http", "method": "GET"}, None, send)
+        await RequestTimingMiddleware(plain)({"type": "http", "method": "GET"}, None, send)
+
+    with patch("vendoo_studio.services.request_timing.time.perf_counter", side_effect=[0, 16.463, 0, 6]):
+        asyncio.run(run())
+    first, second = [record.getMessage() for record in caplog.records]
+    assert first == "Slow response: GET /api/conversations 200 16463ms snapshot=inventory builds=1 wait_ms=12"
+    assert second == "Slow response: GET /api/status 200 6000ms"
+    # Outside a request there is nowhere to attach fields, and nothing fails.
+    request_timing.note(builds=1)

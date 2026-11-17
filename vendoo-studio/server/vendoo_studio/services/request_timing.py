@@ -1,11 +1,23 @@
 """Record slow response starts without logging private URLs or stream lifetimes."""
 import logging
 import time
+from contextvars import ContextVar
 
 from vendoo_studio.services.hosted_browser_relay import WAIT_S
 
 log = logging.getLogger(__name__)
 SLOW_SECONDS = 5
+# Fields a route adds to its own slow-response line. Alert grouping replaces
+# digits, so callers keep a constant set of names with numeric values: no
+# identifiers, content or free text, and no labels that would split a group.
+_details: ContextVar[dict[str, int | str] | None] = ContextVar("request_timing_details", default=None)
+
+
+def note(**fields: int | str) -> None:
+    """Attach bounded timing fields to this request's slow-response line."""
+    details = _details.get()
+    if details is not None:
+        details.update(fields)
 
 
 class RequestTimingMiddleware:
@@ -17,6 +29,7 @@ class RequestTimingMiddleware:
             await self.app(scope, receive, send)
             return
         started = time.perf_counter()
+        details: dict[str, int | str] = {}
 
         async def timed_send(message):
             if message["type"] == "http.response.start":
@@ -27,8 +40,13 @@ class RequestTimingMiddleware:
                 if scope["method"] == "GET" and route == "/api/browser-relay/next" and message["status"] in (200, 204):
                     allowance += WAIT_S
                 if elapsed >= allowance:
-                    log.warning("Slow response: %s %s %s %dms", scope["method"], route,
-                                message["status"], round(elapsed * 1000))
+                    log.warning("Slow response: %s %s %s %dms%s", scope["method"], route,
+                                message["status"], round(elapsed * 1000),
+                                "".join(f" {name}={value}" for name, value in details.items()))
             await send(message)
 
-        await self.app(scope, receive, timed_send)
+        token = _details.set(details)
+        try:
+            await self.app(scope, receive, timed_send)
+        finally:
+            _details.reset(token)
