@@ -142,6 +142,16 @@ export async function forgetDeviceImages(): Promise<void> {
 /** A dropped connection or a busy server is tried again; a missing photo is not. */
 const RETRY_DELAYS_MS = [500, 2000];
 
+/** A photo that did not download. `status` is the server's answer, or null when none arrived. */
+export class PhotoLoadError extends Error {
+  readonly status: number | null;
+  constructor(status: number | null) {
+    super("Photo unavailable");
+    this.name = "PhotoLoadError";
+    this.status = status;
+  }
+}
+
 function wait(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(resolve, ms);
@@ -155,11 +165,12 @@ async function fetchImageBlob(src: string, signal: AbortSignal): Promise<Blob> {
     try {
       response = await studioFetch(src, { signal });
     } catch (error) {
-      if (signal.aborted || attempt >= RETRY_DELAYS_MS.length) throw error;
+      if (signal.aborted) throw error;
+      if (attempt >= RETRY_DELAYS_MS.length) throw new PhotoLoadError(null);
     }
     if (response?.ok) return response.blob();
     const transient = !response || response.status === 429 || response.status >= 500;
-    if (!transient || attempt >= RETRY_DELAYS_MS.length) throw new Error("Photo unavailable");
+    if (!transient || attempt >= RETRY_DELAYS_MS.length) throw new PhotoLoadError(response?.status ?? null);
     await wait(RETRY_DELAYS_MS[attempt], signal);
   }
 }

@@ -1,0 +1,1 @@
+- When a full-size photo cannot load, the photo viewer now says so and offers Retry, instead of showing an empty picture with only its label.
