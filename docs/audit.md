@@ -243,6 +243,11 @@ names the code that moved focus.
   Query a narrower element.
 - `PolishScreenshotTests.testPolishedScreensInLightAndDark`: the Inventory
   list didn't appear within 30 s after a theme change, on CI (2026-11-11).
+- `AssistantSandboxTests.testStarterQuestionIsAnsweredAndKept`: "The answer
+  streams into the conversation" failed at `SandboxTests.swift:343` on two
+  of three fix-branch `./check.sh --fast` runs that didn't touch the
+  Assistant, then passed alone (2026-11-17). Likely a fixed wait on the
+  streamed answer under load.
 - `e2e/photoReorder.e2e.ts` "photos on a marketplace form reorder by
   dragging" [desktop]: hit the 120 s test timeout before the order check,
   on two of four fix-branch `./check.sh` runs that did not touch photos;
