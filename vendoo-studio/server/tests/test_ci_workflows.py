@@ -30,12 +30,24 @@ def workflow(name: str) -> dict:
     ],
 )
 def test_ci_gate_rejects_failures_and_accepts_intentional_skips(changes: str, results: str, passes: bool) -> None:
-    gate = workflow("ci.yml")["jobs"]["ci"]["steps"][0]
+    jobs = workflow("ci.yml")["jobs"]
+    gate = next(step for step in jobs["ci"]["steps"] if "NEEDS_JSON" in step.get("env", {}))
+    assert gate["env"]["NEEDS_JSON"] == "${{ toJSON(needs) }}"
+    needs = {name: {"result": "success"} for name in jobs["ci"]["needs"]}
+    outputs = dict.fromkeys(jobs["changes"]["outputs"], "true")
+    needs["changes"] = {"result": changes, "outputs": outputs}
+    for name, status in zip(("studio-frontend", "studio-backend", "studio-browser"), results.split(), strict=True):
+        needs[name]["result"] = status
+        if status == "skipped":
+            group = jobs[name]["if"].split("needs.changes.outputs.")[1].split()[0]
+            outputs[group] = "false"
     result = subprocess.run(
         ["bash", "-e", "-c", gate["run"]],
-        env={**os.environ, "CHANGES": changes, "RESULTS": results},
+        cwd=ROOT,
+        env={**os.environ, "NEEDS_JSON": json.dumps(needs)},
         capture_output=True,
         text=True,
+        check=False,
     )
     assert (result.returncode == 0) == passes, result.stdout + result.stderr
 
