@@ -29,14 +29,17 @@ def stock_after_sale(db: Session, conv_id: str, marketplace: str, listing_id: st
         return unknown
     changed_at = max(filter(None, (_time(value) for line in lines for value in (line.received_at, line.order_observed_at))), default=None)
     record = MarketplaceListingRepo(db).get(conv_id, marketplace)
+    from vendoo_studio.services.marketplace_delist import current_listing
     from vendoo_studio.services.marketplace_identity import listing_id as reference_id
 
     conv = ConversationRepo(db).get(conv_id)
     notes = parse_notes(conv.notes) if conv else {}
-    marks = notes.get("marketplaceMarks") or {}
+    marks, delists = notes.get("marketplaceMarks"), notes.get("marketplaceDelists")
     mark = marks.get(marketplace) if isinstance(marks, dict) else None
-    marked_id = reference_id(marketplace, mark.get("url")) if isinstance(mark, dict) and mark.get("state") == "listed" else None
-    current_id = marked_id or reference_id(marketplace, record.get("listing_url"))
+    deleted = delists.get(marketplace) if isinstance(delists, dict) else None
+    url, _source = current_listing(marketplace, record.get("listing_url"), None, mark if isinstance(mark, dict) else {},
+                                   deleted if isinstance(deleted, dict) else {})
+    current_id = reference_id(marketplace, url)
     if current_id and listing_id and current_id != listing_id:
         return unknown
     observed = record.get("inventory_observation") or {}

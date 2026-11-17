@@ -51,6 +51,7 @@ def _settle(conv: Conversation, when, *, backfill: bool = False, force: bool = F
     if not force and conv.unsettled_at is not None:
         return False
     conv.settled_at = conv.updated_at if backfill and conv.updated_at else when
+    conv.settled_by_seller = False
     conv.unsettled_at = None
     return True
 
@@ -59,6 +60,7 @@ def _unsettle(conv: Conversation, when) -> bool:
     if conv.settled_at is None:
         return False
     conv.settled_at = None
+    conv.settled_by_seller = False
     conv.unsettled_at = when
     return True
 
@@ -223,13 +225,17 @@ class ConversationRepo:
         return conv
 
     def settle(self, conv_id: str) -> Conversation | None:
-        conv = self.get(conv_id)
-        if not conv:
-            return None
-        _settle(conv, utcnow(), force=True)
+        # Finish owns the decision even if Sold already finished the item.
+        # Evaluate the timestamp in this write: SQLite cannot lock a preceding
+        # read, and a concurrent sale undo may have reopened it in between.
+        result = self.db.execute(update(Conversation).where(Conversation.id == conv_id).values(
+            settled_at=func.coalesce(Conversation.settled_at, utcnow()),
+            settled_by_seller=True, unsettled_at=None,
+        ).execution_options(synchronize_session=False))
         self.db.commit()
-        self.db.refresh(conv)
-        return conv
+        if type_cast(CursorResult, result).rowcount != 1:
+            return None
+        return self.db.query(Conversation).filter(Conversation.id == conv_id).populate_existing().first()
 
     def unsettle(self, conv_id: str) -> Conversation | None:
         conv = self.get(conv_id)

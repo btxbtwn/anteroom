@@ -4,7 +4,7 @@ import uuid
 
 import pytest
 from fastapi import HTTPException, Request
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import MetaData, Table, create_engine, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -175,9 +175,11 @@ def test_upgrade_of_existing_owned_records_keeps_owners(migration_engine):  # no
     from test_seller_ownership import migration_config
 
     command.upgrade(migration_config(migration_engine), "d8b6f2a19c40")
-    with Session(migration_engine) as db:
-        db.add_all([Conversation(id="before-alice", user_id=ALICE), Conversation(id="before-bob", user_id=BOB)])
-        db.commit()
+    # Seed through that revision's own table: the current model names columns
+    # later revisions added.
+    previous = Table("conversations", MetaData(), autoload_with=migration_engine)
+    with migration_engine.begin() as connection:
+        connection.execute(previous.insert(), [{"id": "before-alice", "user_id": ALICE}, {"id": "before-bob", "user_id": BOB}])
     schema_migrations.ensure_schema(migration_engine)
     for user, item in [(ALICE, "before-alice"), (BOB, "before-bob")]:
         with SellerDatabaseSession(bind=migration_engine, user_id=user) as db:
