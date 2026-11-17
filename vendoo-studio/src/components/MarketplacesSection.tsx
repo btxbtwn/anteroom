@@ -378,6 +378,9 @@ export function MarketplacesLayout({
     // arrives, so the pane above the form does not collapse and shift the form.
     placeholderData: (previous) => previous,
   });
+  // A re-check is running. The previous answer also stays as a placeholder while
+  // the query is off (no revision, no marketplace can act): nothing is checked then.
+  const rechecking = preflight.isPlaceholderData && preflight.isFetching;
 
   // Each marketplace tracks its own request, so starting one never locks the others.
   const [starting, setStarting] = useState<Partial<Record<NativeMarketplace, ActionKind>>>({});
@@ -770,7 +773,7 @@ export function MarketplacesLayout({
           <span className="min-w-0 text-pretty">{status.label}</span>
         </span>
       )}
-      {status && quiet && !check && (preflight.isPlaceholderData
+      {status && quiet && !check && (rechecking
         // The previous revision's answer is not this one's; keep the line, not the answer.
         ? <span role="status" className="flex items-center gap-1 truncate text-xs text-muted-foreground">
             <span className="sr-only">{status.label}. </span><span className="truncate">Checking…</span>
@@ -850,7 +853,7 @@ export function MarketplacesLayout({
           )}
           {reconnectNotice(selectedMarketplace)}
           {errorActions(selectedMarketplace)}
-          <HeldWhileChecking checking={preflight.isPlaceholderData} holdKey={selectedMarketplace}>
+          <HeldWhileChecking checking={rechecking} holdKey={selectedMarketplace}>
             {preflightNotice(selectedMarketplace)}
           </HeldWhileChecking>
           {settings(selectedMarketplace)}
