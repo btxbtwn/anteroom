@@ -26,4 +26,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError('Finished ownership is forward-only; never discard the seller\'s decision')
+    # Only an explicit operator downgrade reaches this; startup never downgrades.
+    # The previous schema has no column for the origin, so it is dropped with
+    # it; upgrading again treats every Finished item as the seller's decision.
+    with op.batch_alter_table('conversations', schema=None) as batch_op:
+        batch_op.drop_column('settled_by_seller')

@@ -47,3 +47,41 @@ def test_previous_release_finished_rows_default_to_seller_owned(migration_engine
         assert finished.notes == notes
     with engine.connect() as connection:
         assert connection.scalar(select(sales.c.id).where(sales.c.id == "legacy-sale")) is None
+
+
+def test_settlement_provenance_round_trips_without_losing_items_or_sales(migration_engine):  # noqa: F811
+    engine = migration_engine
+    config = migration_config(engine)
+    command.upgrade(config, "head")
+    current = MetaData()
+    conversations = Table("conversations", current, autoload_with=engine)
+    sales = Table("marketplace_sales", current, autoload_with=engine)
+    when = datetime(2026, 11, 2, 10, 30)
+    with engine.begin() as connection:
+        connection.execute(conversations.insert(), [
+            {"id": "auto-finished", "title": "Finished by a sale", "status": "sold", "settled_at": when,
+             "settled_by_seller": False, "notes": "{}"},
+            {"id": "seller-finished", "title": "Finished by the seller", "status": "draft", "settled_at": when,
+             "settled_by_seller": True, "notes": "{}"},
+        ])
+        connection.execute(sales.insert(), {"id": "auto-sale", "marketplace": "other", "order_id": "fixture-order",
+            "line_id": "fixture-line", "conversation_id": "auto-finished", "source": "seller",
+            "state": "resolved", "received_at": when, "quantity": 1})
+
+    command.downgrade(config, "fd7c3a5d05ea")
+    assert "settled_by_seller" not in {column["name"] for column in inspect(engine).get_columns("conversations")}
+    previous = MetaData()
+    old_conversations = Table("conversations", previous, autoload_with=engine)
+    old_sales = Table("marketplace_sales", previous, autoload_with=engine)
+    with engine.connect() as connection:
+        rows = connection.execute(select(old_conversations.c.id, old_conversations.c.settled_at)
+                                  .order_by(old_conversations.c.id)).all()
+        assert [(row.id, row.settled_at) for row in rows] == [("auto-finished", when), ("seller-finished", when)]
+        assert connection.scalar(select(old_sales.c.conversation_id).where(old_sales.c.id == "auto-sale")) == "auto-finished"
+
+    command.upgrade(config, "head")
+    with Session(engine) as db:
+        # The previous schema could not keep the origin: like any older
+        # release's Finished item, it is never reopened by guessing.
+        assert db.get(Conversation, "auto-finished").settled_by_seller is True
+        assert db.get(Conversation, "seller-finished").settled_by_seller is True
