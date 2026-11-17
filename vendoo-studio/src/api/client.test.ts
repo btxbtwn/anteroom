@@ -1,9 +1,36 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, errorMessage } from "./client";
-import { ApiRequestError, retryAfterMs } from "./transport";
+import { ApiRequestError, installHostedApiSession, retryAfterMs } from "./transport";
 import { reportError } from "./errorReports";
 
 vi.mock("./errorReports", () => ({ reportError: vi.fn() }));
+
+it("keeps hosted upload file identities by returned photo ID despite failures and response order", async () => {
+  const uninstall = installHostedApiSession({
+    seller: "fixture-alice", origin: "https://anteroom.test", accessToken: async () => "fixture-token", unauthorized: () => {},
+  });
+  const fetch = vi.fn()
+    .mockResolvedValueOnce(new Response("unavailable", { status: 503 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ id: "tag" }), { status: 201 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ id: "front" }), { status: 201 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify([
+      { id: "earlier", original_filename: "photo.jpg" },
+      { id: "front", original_filename: "photo.jpg" },
+      { id: "tag", original_filename: "photo.jpg" },
+    ])));
+  vi.stubGlobal("fetch", fetch);
+  try {
+    const files = ["lost.jpg", "tag.jpg", "front.jpg"].map(name => new File(["fixture"], name, { type: "image/jpeg" }));
+    const result = await api.conversations.uploadPhotos("coat", files);
+    expect(result.photos.map(p => [p.id, p.original_filename])).toEqual([["front", "front.jpg"], ["tag", "tag.jpg"]]);
+    expect(result.count).toBe(2);
+    expect(result.errors).toEqual(["lost.jpg: could not upload this photo."]);
+    expect(fetch).toHaveBeenCalledTimes(4);
+  } finally {
+    uninstall();
+    vi.unstubAllGlobals();
+  }
+});
 
 describe("errorMessage", () => {
   it("prefers a string detail", () => {
