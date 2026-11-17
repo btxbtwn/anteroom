@@ -603,3 +603,17 @@ it("disables only the agent's target row and labels it while other fields stay e
   expect(html.match(/Agent editing/g)).toHaveLength(1);
   expect(html).toContain('Ask chat');
 });
+
+
+describe("field re-check after a save", () => {
+  it("keeps each row's line, saying Checking… instead of the previous revision's answer", () => {
+    const preflight = { marketplaces: { depop: { ready: false, gaps: [
+      { field: "depop_specifics.size", message: "Size needs review.", blocking: true },
+    ], missing: [{ field: "depop_specifics.size", label: "Size", message: "Size needs review." }] } } };
+    expect(row(render({}, {}, { preflight }), "Depop")).toContain("1 to fill");
+    const checking = row(render({}, {}, { preflight, preflightPlaceholder: true }), "Depop");
+    expect(checking).toContain("Checking…");
+    expect(checking).not.toContain("to fill");
+    expect(checking).not.toContain("Ready");
+  });
+});
