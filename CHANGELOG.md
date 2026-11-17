@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1005 — 2026-11-17
+
+- A new confirmed marketplace listing no longer appears Delisted because of an old listing link, and Anteroom refuses to list it a second time.
+- Delisting that new listing no longer brings the old link back as live, and a sale of the new listing counts toward marking the item sold.
+
 ## 0.1.1004 — 2026-11-16
 
 - Chat history explains why a chat could not be deleted and tells you to stop or finish an active answer before trying again.
