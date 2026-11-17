@@ -49,10 +49,14 @@ export function liveMarketplaces(listing: {
   vendoo_marketplaces?: string[];
   direct_marketplaces?: string[];
   removed_marketplaces?: string[];
+  sold_marketplaces?: string[];
 }): string[] {
   const removed = new Set((listing.removed_marketplaces || []).map((id) => MARKETPLACE_ID_ALIASES[id] || id));
+  // A listing that sold has ended, though its record can still read live.
+  const sold = new Set((listing.sold_marketplaces || []).map((id) => MARKETPLACE_ID_ALIASES[id] || id));
   const vendoo = (listing.vendoo_marketplaces || []).filter((id) => !removed.has(MARKETPLACE_ID_ALIASES[id] || id));
-  return [...new Set([...vendoo, ...(listing.direct_marketplaces || [])])];
+  return [...new Set([...vendoo, ...(listing.direct_marketplaces || [])])]
+    .filter((id) => !sold.has(MARKETPLACE_ID_ALIASES[id] || id));
 }
 
 /**
