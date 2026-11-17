@@ -535,6 +535,147 @@ def test_deleting_a_partial_sale_preserves_an_unrelated_manually_finished_draft(
     assert after["status"] == "draft" and after["settled_at"] == before["settled_at"]
 
 
+@pytest.mark.parametrize("boundary", ["before_full_sale", "after_full_sale", "between_units"])
+def test_sale_undo_preserves_explicit_finish_through_sold_status(undo_env, boundary):
+    env = undo_env
+    item(env.db, "finished", quantity=2 if boundary == "between_units" else 1)
+    if boundary == "between_units":
+        assert mark_sold(env, "finished", quantity=1).status_code == 200
+    if boundary == "after_full_sale":
+        sale = mark_sold(env, "finished").json()["sale"]
+        env.client.get("/api/conversations")
+        assert env.client.get("/api/conversations/finished").json()["status"] == "sold"
+
+    finished = env.client.post("/api/conversations/finished/settle")
+    assert finished.status_code == 200, finished.text
+    manual_time = finished.json()["settled_at"]
+    assert manual_time is not None
+    if boundary != "after_full_sale":
+        sale = mark_sold(env, "finished", quantity=1).json()["sale"]
+    env.client.get("/api/conversations")
+    sold = env.client.get("/api/conversations/finished").json()
+    assert sold["status"] == "sold" and sold["settled_at"] == manual_time
+
+    removed = remove(env, sale["id"], sale["financial_revision"])
+    assert removed.status_code == 200, removed.text
+    after = env.client.get("/api/conversations/finished").json()
+    assert after["status"] == "active"
+    assert after["settled_at"] == manual_time
+    assert env.db.query(MarketplaceSale).count() == (1 if boundary == "between_units" else 0)
+
+
+def test_keep_open_then_undo_and_resell_preserves_the_explicit_choice(undo_env):
+    env = undo_env
+    item(env.db, "open")
+    sale = mark_sold(env, "open").json()["sale"]
+    env.client.get("/api/conversations")
+    opened = env.client.post("/api/conversations/open/unsettle")
+    assert opened.status_code == 200, opened.text
+    kept_open_at = opened.json()["unsettled_at"]
+    assert kept_open_at and opened.json()["settled_at"] is None
+    assert remove(env, sale["id"], sale["financial_revision"]).status_code == 200
+    after = env.client.get("/api/conversations/open").json()
+    assert after["status"] == "active" and after["settled_at"] is None and after["unsettled_at"] == kept_open_at
+    sale = mark_sold(env, "open").json()["sale"]
+    env.client.get("/api/conversations")
+    sold = env.client.get("/api/conversations/open").json()
+    assert sold["status"] == "sold" and sold["settled_at"] is None and sold["unsettled_at"] == kept_open_at
+    finished = env.client.post("/api/conversations/open/settle").json()
+    assert finished["settled_at"] and finished["unsettled_at"] is None
+    assert remove(env, sale["id"], sale["financial_revision"]).status_code == 200
+    assert env.client.get("/api/conversations/open").json()["settled_at"] == finished["settled_at"]
+
+
+def test_notes_updates_do_not_erase_explicit_finish_ownership(undo_env):
+    env = undo_env
+    item(env.db, "notes")
+    manual = env.client.post("/api/conversations/notes/settle").json()["settled_at"]
+    notes = {"vendooStatus": "active", "sellerNote": "Keep my Finish decision"}
+    changed = env.client.patch("/api/conversations/notes", json={"notes": json.dumps(notes)})
+    assert changed.status_code == 200, changed.text
+    sale = mark_sold(env, "notes").json()["sale"]
+    env.client.get("/api/conversations")
+    assert remove(env, sale["id"], sale["financial_revision"]).status_code == 200
+    after = env.client.get("/api/conversations/notes").json()
+    assert after["status"] == "active" and after["settled_at"] == manual
+    assert parse_notes(after["notes"])["sellerNote"] == notes["sellerNote"]
+
+
+def test_sale_undo_reloads_another_contexts_explicit_finish(undo_env):
+    env = undo_env
+    item(env.db, "finished-elsewhere")
+    sale = mark_sold(env, "finished-elsewhere").json()["sale"]
+    env.client.get("/api/conversations")
+    cached = env.db.get(Conversation, "finished-elsewhere")
+    assert cached.settled_at and not cached.settled_by_seller
+    with Session(bind=env.db.get_bind()) as other:
+        finished = ConversationRepo(other).settle(cached.id)
+        manual_time = finished.settled_at
+        assert finished.settled_by_seller
+    assert remove(env, sale["id"], sale["financial_revision"]).status_code == 200
+    env.db.refresh(cached)
+    assert cached.status == "active" and cached.settled_at == manual_time and cached.settled_by_seller
+
+
+@pytest.mark.sqlite_only("reproduce a write between the SQLite Finish read and write")
+def test_explicit_finish_survives_sale_undo_just_before_its_write(undo_env):
+    from vendoo_studio.services.sales_ledger import delete_seller_sale
+
+    env = undo_env
+    item(env.db, "finish-race")
+    sale = mark_sold(env, "finish-race").json()["sale"]
+    env.client.get("/api/conversations")
+    bind = env.db.get_bind()
+    fired = False
+
+    def undo_before_finish_write(_connection, _cursor, statement, _parameters, _context, _many):
+        nonlocal fired
+        if fired or not statement.startswith("UPDATE conversations") or "settled_by_seller" not in statement:
+            return
+        fired = True
+        with Session(bind=bind) as other:
+            delete_seller_sale(other, sale["id"], sale["financial_revision"])
+
+    with Session(bind=bind) as manual:
+        event.listen(bind, "before_cursor_execute", undo_before_finish_write)
+        try:
+            finished = ConversationRepo(manual).settle("finish-race")
+        finally:
+            event.remove(bind, "before_cursor_execute", undo_before_finish_write)
+        assert fired
+        assert finished.status == "active" and finished.settled_at is not None and finished.settled_by_seller
+        assert manual.get(MarketplaceSale, sale["id"]) is None
+
+
+def test_postgres_sale_undo_waits_for_explicit_finish_ownership(undo_env, monkeypatch):
+    from vendoo_studio.services.sales_ledger import delete_seller_sale
+
+    env = undo_env
+    if env.db.get_bind().dialect.name != "postgresql":
+        pytest.skip("row-lock contention requires Postgres")
+    item(env.db, "concurrent-finish")
+    sale = mark_sold(env, "concurrent-finish").json()["sale"]
+    env.client.get("/api/conversations")
+    with Session(bind=env.db.get_bind()) as other:
+        # Keep the real Finish update uncommitted while the other process tries
+        # to undo the sale, so the parent-row lock is actually contended.
+        with monkeypatch.context() as held_transaction:
+            held_transaction.setattr(other, "commit", other.flush)
+            held = ConversationRepo(other).settle("concurrent-finish")
+        assert held.settled_by_seller
+        manual_time = held.settled_at
+        env.db.execute(text("SET LOCAL lock_timeout = '100ms'"))
+        with pytest.raises(OperationalError, match="lock timeout"):
+            delete_seller_sale(env.db, sale["id"], sale["financial_revision"])
+        env.db.rollback()
+        assert env.db.get(MarketplaceSale, sale["id"]) is not None
+        other.commit()
+    delete_seller_sale(env.db, sale["id"], sale["financial_revision"])
+    env.db.expire_all()
+    item_after = env.db.get(Conversation, "concurrent-finish")
+    assert item_after.status == "active" and item_after.settled_at == manual_time and item_after.settled_by_seller
+
+
 def test_stale_sale_delete_keeps_the_sale_and_sold_settlement(undo_env):
     env = undo_env
     item(env.db, "coat")

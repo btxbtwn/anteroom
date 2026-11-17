@@ -1,1 +1,1 @@
-- Deleting a sale you recorded puts the item back in your working inventory when it is no longer sold, while keeping remaining sales and Sold marks on other marketplaces.
+- Deleting a sale you recorded corrects the item's Sold status and reopens items finished automatically. Items you finished by hand stay finished, as do older finished items whose original choice was not recorded.

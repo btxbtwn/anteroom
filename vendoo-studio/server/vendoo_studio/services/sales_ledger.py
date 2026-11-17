@@ -357,7 +357,7 @@ def delete_seller_sale(db: Session, sale_id: str, expected_revision: int) -> dic
                 # Once the last local sale is removed, the read-time sweep
                 # has no "own" evidence to replace a cached Sold label.
                 status = status_for(db, conv.id, parse_notes(conv.notes)).status
-                if conv.status == "sold" and status != "sold":
+                if conv.status == "sold" and status != "sold" and not conv.settled_by_seller:
                     # Undo automatic settlement, not Keep open: a later sale
                     # must still be able to settle the item again.
                     conv.settled_at = None
