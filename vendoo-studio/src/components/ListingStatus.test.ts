@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inventoryStatus, listedFromImport, statusHint, withDirectListings } from "./sidebar/listingStatus";
+import { inventoryStatus, listedFromImport, marketplacesLabel, statusHint, withDirectListings } from "./sidebar/listingStatus";
 
 describe("statusHint", () => {
   it("explains each inventory status", () => {
@@ -119,5 +119,36 @@ describe("withDirectListings removals", () => {
     expect(rows.map((row) => [row.id, row.status])).toEqual([
       ["ebay", "DELISTED"], ["depop", "SOLD"], ["mercari", "LISTED"],
     ]);
+  });
+});
+
+
+describe("withDirectListings sales Anteroom recorded", () => {
+  it("shows a marketplace the item sold on as Sold, even while its listing record is live", () => {
+    const rows = withDirectListings([], ["poshmark"], undefined, undefined, ["poshmark"]);
+    expect(rows.map((row) => [row.id, row.status])).toEqual([["poshmark", "SOLD"]]);
+  });
+
+  it("keeps a live record Listed when nothing sold there", () => {
+    const rows = withDirectListings([], ["poshmark"], undefined, undefined, []);
+    expect(rows.map((row) => [row.id, row.status])).toEqual([["poshmark", "LISTED"]]);
+  });
+
+  it("leaves the other marketplaces Listed, since the seller may still need to delist them", () => {
+    const rows = withDirectListings([{ id: "mercari", label: "Mercari", status: "LISTED" }], ["poshmark", "ebay"], undefined, undefined, ["poshmark"]);
+    expect(Object.fromEntries(rows.map((row) => [row.id, row.status]))).toEqual({ mercari: "LISTED", poshmark: "SOLD", ebay: "LISTED" });
+  });
+
+  it("never turns an imported sale back into Listed because a record is live", () => {
+    const rows = withDirectListings([{ id: "poshmark", label: "Poshmark", status: "SOLD" }], ["poshmark"]);
+    expect(rows.map((row) => [row.id, row.status])).toEqual([["poshmark", "SOLD"]]);
+  });
+});
+
+describe("marketplacesLabel", () => {
+  it("does not call a sold listing listed", () => {
+    expect(marketplacesLabel([{ label: "Mercari", status: "LISTED" }, { label: "Poshmark", status: "SOLD" }]))
+      .toBe("Listed on Mercari; Sold on Poshmark");
+    expect(marketplacesLabel([{ label: "Poshmark", status: "SOLD" }])).toBe("Sold on Poshmark");
   });
 });
