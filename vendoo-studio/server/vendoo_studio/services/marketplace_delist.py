@@ -19,6 +19,7 @@ import asyncio
 from datetime import UTC, datetime
 
 import httpx
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from vendoo_studio.models.conversation import Conversation
@@ -228,10 +229,25 @@ def known_listings(notes: dict, native: dict, sold: dict) -> dict:
     return result
 
 
-def _store(db: Session, conv_id: str, key: str, marketplace: str, value: dict | None) -> None:
-    conv = ConversationRepo(db).get(conv_id)
+def _locked_conversation(db: Session, conv_id: str) -> Conversation:
+    """The item, read after this transaction holds its row until commit.
+
+    Notes are read, merged and written back whole, so a read before the lock
+    could overwrite another writer's change, such as a sale undo removing its
+    Sold mark. A no-op write takes the lock on both databases: Postgres locks
+    the row, SQLite takes its single writer lock (its reads never lock). Hold
+    it only for the local read-merge-commit, never across a marketplace call.
+    """
+    db.execute(update(Conversation).where(Conversation.id == conv_id)
+               .values(notes=Conversation.notes, updated_at=Conversation.updated_at)
+               .execution_options(synchronize_session=False))
+    conv = db.query(Conversation).filter(Conversation.id == conv_id).populate_existing().first()
     assert conv is not None
-    db.refresh(conv)
+    return conv
+
+
+def _store(db: Session, conv_id: str, key: str, marketplace: str, value: dict | None) -> None:
+    conv = _locked_conversation(db, conv_id)
     current = _notes_dict(parse_notes(conv.notes), key)
     current = {name: entry for name, entry in current.items() if name != marketplace}
     conv.notes = merge_notes(conv.notes, {key: {**current, **({marketplace: value} if value else {})}})
@@ -488,9 +504,7 @@ def _record_delete(db: Session, conv_id: str, name: str, value: dict) -> None:
     replaced here, so the mark goes with it: kept, it would read as live again
     while this delete runs, after it fails, or once its receipt is cleared.
     """
-    conv = ConversationRepo(db).get(conv_id)
-    assert conv is not None
-    db.refresh(conv)
+    conv = _locked_conversation(db, conv_id)
     notes = parse_notes(conv.notes)
     delists = {key: entry for key, entry in _notes_dict(notes, "marketplaceDelists").items() if key != name}
     updates: dict = {"marketplaceDelists": {**delists, name: value}}
