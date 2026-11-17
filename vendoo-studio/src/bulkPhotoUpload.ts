@@ -82,11 +82,16 @@ export async function createBulkPhotoListings(
     const result = await conversations.uploadPhotos(conv.id, item.files);
     const errors = result.errors || [];
     // A file that failed to upload is missing from the result, so match by name.
-    const rotations = new Map(
-      Array.from(item.rotations || [], ([file, degrees]) => [file.name, degrees] as const),
-    );
+    const sourceFiles = new Map(item.files.map(file => [file.name, file] as const));
+    for (const file of item.files) {
+      if (file.webkitRelativePath) sourceFiles.set(file.webkitRelativePath, file);
+    }
     for (const photo of result.photos) {
-      const degrees = rotations.get(photo.original_filename);
+      // Directory uploads can retain their relative path in the multipart
+      // filename. Each item is one folder; match its File.name basenames.
+      const name = photo.original_filename.split(/[\\/]/).pop() || photo.original_filename;
+      const source = sourceFiles.get(photo.original_filename) ?? sourceFiles.get(name);
+      const degrees = source && item.rotations?.get(source);
       if (!degrees) continue;
       try {
         await conversations.rotatePhoto(conv.id, photo.id, degrees);

@@ -792,16 +792,19 @@ export const api = {
       }),
     uploadPhotos: (convId: string, files: File[], marketplace?: string): Promise<PhotoUploadResult> => trackPhotoUpload(convId, async () => {
       if (hasHostedApiSession()) return (async () => {
-        const ids: string[] = []; const errors: string[] = [];
+        const uploaded = new Map<string, string>(); const errors: string[] = [];
         for (const file of files) {
           if (file.size > 10 * 1024 * 1024) { errors.push(`${file.name}: choose a photo smaller than 10 MB.`); continue; }
           const query = marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : "";
           const response = await studioFetch(`${BASE}/drafts/${encodeURIComponent(convId)}/photos${query}`, { method: "POST", body: file });
           if (!response.ok) { errors.push(`${file.name}: could not upload this photo.`); continue; }
-          ids.push((await response.json()).id);
+          uploaded.set((await response.json()).id, file.name);
         }
         const photos = await request<ListingPhoto[]>(`/conversations/${encodeURIComponent(convId)}/photos${marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : ""}`);
-        return { ok: errors.length === 0, count: ids.length, photos: photos.filter(photo => ids.includes(photo.id)), errors };
+        // Hosted storage uses a generic name. Keep this upload's source names
+        // by ID, so preview rotations cannot shift after a failed upload.
+        return { ok: errors.length === 0, count: uploaded.size,
+          photos: photos.filter(photo => uploaded.has(photo.id)).map(photo => ({ ...photo, original_filename: uploaded.get(photo.id)! })), errors };
       })();
       const form = new FormData();
       files.forEach((f) => form.append("files", f));

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1008 — 2026-11-17
+
+- Photos turned in the folder upload preview keep that rotation when their drafts are created.
+
 ## 0.1.1007 — 2026-11-17
 
 - Deleting a sale you recorded corrects the item's Sold status and reopens items finished automatically. Items you finished by hand stay finished, as do older finished items whose original choice was not recorded.
