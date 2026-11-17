@@ -1,1 +1,1 @@
-- Check the Mac's Apple framework calls without hiding type errors, and report unavailable Vision buffers clearly.
+- Show a clear background-removal error if the Mac cannot provide an image mask.

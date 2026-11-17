@@ -150,6 +150,7 @@ def _vision_mask(img: Image.Image) -> Image.Image:
     if sys.platform != "darwin":
         raise BackgroundRemovalError("Background removal runs on a Mac.")
     try:
+        import objc
         import Quartz
         import Vision
         from Foundation import NSData
@@ -182,7 +183,7 @@ def _vision_mask(img: Image.Image) -> Image.Image:
         height = Quartz.CVPixelBufferGetHeight(buffer_ref)
         row = Quartz.CVPixelBufferGetBytesPerRow(buffer_ref)
         address = Quartz.CVPixelBufferGetBaseAddress(buffer_ref)
-        if address is None:
+        if not isinstance(address, objc.varlist):
             raise BackgroundRemovalError("Background removal returned an empty pixel buffer.")
         raw = address.as_buffer(row * height)
         # One 32-bit float per pixel, 0 = background, 1 = item.

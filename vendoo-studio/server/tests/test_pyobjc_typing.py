@@ -50,6 +50,7 @@ def test_missing_vision_results_are_reported_and_buffers_unlocked(monkeypatch, m
     from vendoo_studio.services import photo_edits
 
     unlocked = []
+    null_address = object()
     observation = SimpleNamespace(allInstances=lambda: object(),
         generateScaledMaskForImageForInstances_fromRequestHandler_error_=lambda *_: (object(), None))
     handler = SimpleNamespace(performRequests_error_=lambda *_: (True, None))
@@ -65,8 +66,9 @@ def test_missing_vision_results_are_reported_and_buffers_unlocked(monkeypatch, m
     monkeypatch.setitem(sys.modules, 'Quartz', SimpleNamespace(
         CVPixelBufferLockBaseAddress=lambda *_: 0, kCVPixelBufferLock_ReadOnly=1,
         CVPixelBufferGetWidth=lambda *_: 2, CVPixelBufferGetHeight=lambda *_: 2,
-        CVPixelBufferGetBytesPerRow=lambda *_: 8, CVPixelBufferGetBaseAddress=lambda *_: None,
+        CVPixelBufferGetBytesPerRow=lambda *_: 8, CVPixelBufferGetBaseAddress=lambda *_: null_address,
         CVPixelBufferUnlockBaseAddress=lambda *_: unlocked.append(True)))
+    monkeypatch.setitem(sys.modules, 'objc', SimpleNamespace(varlist=memoryview, NULL=null_address))
     with pytest.raises(photo_edits.BackgroundRemovalError, match='initialize|empty pixel buffer'):
         photo_edits._vision_mask(Image.new('RGB', (2, 2)))
     assert unlocked == ([True] if missing == 'address' else [])
@@ -80,7 +82,7 @@ from AppKit import NSImage, NSApplication
 from Security import SecItemAdd, SecItemUpdate
 from Quartz import CVPixelBufferRef, CVPixelBufferGetWidth, CVPixelBufferGetBaseAddress
 from Vision import VNImageRequestHandler, VNGenerateForegroundInstanceMaskRequest
-from objc import selector, classAddMethods
+from objc import selector, classAddMethods, varlist
 url = NSURL.URLWithString_("https://example.com")
 if url is not None:
     request = NSURLRequest.requestWithURL_(url)
@@ -99,7 +101,7 @@ if handler is not None and vision_request is not None:
     ok, error = handler.performRequests_error_([vision_request], None)
 def pixels(buffer: CVPixelBufferRef) -> None:
     address = CVPixelBufferGetBaseAddress(buffer)
-    if address is not None:
+    if isinstance(address, varlist):
         raw: memoryview = address.as_buffer(4)
 '''
     bad_calls = [
@@ -114,7 +116,7 @@ def pixels(buffer: CVPixelBufferRef) -> None:
         ('classAddMethods(123, [])', 'reportArgumentType'),
         ('handler.performRequests_error_([], None)', 'reportOptionalMemberAccess'),
         ('def bad_pixels(buffer: CVPixelBufferRef) -> None:\n    CVPixelBufferGetBaseAddress(buffer).as_buffer(4)',
-         'reportOptionalMemberAccess'),
+         'reportAttributeAccessIssue'),
     ] if invalid else []
     lines = common.splitlines()
     expected = []
@@ -141,6 +143,7 @@ def test_bridge_out_parameters_and_pixel_memory():
     import Quartz
     import Security
     import Vision
+    import objc
 
     assert NSStringFromSelector(None) is None
     assert NSStringFromSelector('copy:') == NSStringFromSelector(b'copy:') == 'copy:'
@@ -151,10 +154,11 @@ def test_bridge_out_parameters_and_pixel_memory():
     # Only a disposable in-memory buffer; never an app, photo, Keychain or provider call.
     status, buffer = Quartz.CVPixelBufferCreate(None, 2, 2, Quartz.kCVPixelFormatType_OneComponent32Float, None, None)
     assert status == 0 and buffer is not None
+    assert Quartz.CVPixelBufferGetBaseAddress(buffer) is objc.NULL
     assert Quartz.CVPixelBufferLockBaseAddress(buffer, Quartz.kCVPixelBufferLock_ReadOnly) == 0
     try:
         address = Quartz.CVPixelBufferGetBaseAddress(buffer)
-        assert address is not None
+        assert isinstance(address, objc.varlist)
         raw = address.as_buffer(Quartz.CVPixelBufferGetBytesPerRow(buffer) * 2)
         assert isinstance(raw, memoryview)
     finally:

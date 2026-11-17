@@ -1,4 +1,8 @@
 from collections.abc import Callable, Sequence
+from typing import Final
+
+class _NULL_type: ...
+NULL: Final[_NULL_type]
 
 class varlist:
     def as_buffer(self, size: int) -> memoryview: ...

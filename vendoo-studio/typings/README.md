@@ -7,8 +7,9 @@ unchanged; do not add catch-all exports or replace signatures with `Any`.
 Sources: [PyObjC introduction](https://pyobjc.readthedocs.io/en/latest/core/intro.html)
 and [bridge API](https://pyobjc.readthedocs.io/en/latest/api/module-objc.html).
 Objective-C output parameters passed as `None` become tuple results. Initializers
-and URL parsing can return `None`; pixel-buffer base addresses can be null and
-their variable-length pointers expose `as_buffer`. `test_pyobjc_typing.py` checks
+and URL parsing can return `None`; null pixel-buffer base addresses instead
+return `objc.NULL`. Valid addresses are `objc.varlist` pointers exposing
+`as_buffer`. `test_pyobjc_typing.py` checks
 negative/positive calls and installed framework metadata without Keychain writes.
 
 This is an application-owned subset, not a complete framework typing package.
