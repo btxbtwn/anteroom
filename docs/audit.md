@@ -40,7 +40,15 @@ These override everything below.
   `./check.sh --fast` alongside `./check.sh --all` pushed the load past 19:
   Playwright's web server missed its 120 s start, every iPhone test timed
   out, and the backend run took two hours. Finish the smoke first, then
-  check fix branches one after another. Keep fix worktrees on a short path
+  check fix branches one after another.
+- A fix worktree can reuse the audit worktree's installs: symlink
+  `vendoo-studio/.venv` and `vendoo-studio/node_modules` to them, and add
+  both paths to `$(git rev-parse --git-common-dir)/info/exclude`, or
+  `check.sh` counts the untracked symlinks as changes. pytest still imports
+  the fix worktree's code, because `pyproject.toml` puts `server` first on
+  its path. A hosted test needs Postgres: run it with
+  `ANTEROOM_TEST_DATABASE_URL` from a private `pgserver` (see `check.sh`);
+  on SQLite it is skipped. Keep fix worktrees on a short path
   (`../anteroom-fix-<name>`), not the scratchpad: macOS caps Unix socket
   paths at 104 bytes.
 
@@ -125,7 +133,9 @@ Every run, in this order:
    read that log's `ERROR` lines since the last audit, read only: they show
    live marketplace failures no sandbox can reproduce (on 2026-11-15 a
    Mercari HTTP 400 on every delist, #1539). Quote only the error, never
-   buyer or listing details. Unset
+   buyer or listing details. `ebay eligible_items failed: Reconnect eBay`
+   every 15 minutes means the seller's eBay sign-in expired: list it once
+   under **Needs the seller**, not as a finding (2026-11-17). Unset
    any leftover `VENDOO_STUDIO_PORT` / `ANTEROOM_SANDBOX` from that run before
    starting `./sandbox.sh --hosted` (hosted defaults to 4320; an inherited
    `4321` makes it fail to bind).
@@ -201,7 +211,7 @@ list remembers.
 | Day | Area | Where to look |
 |---|---|---|
 | Monday | Listing editor, every marketplace tab (the list is `FORM_ORDER` in `src/components/editorTabs.ts`), category selection, item details, variations. Neither sandbox can load eBay's category fields once a listing has a category (they come from eBay's API), so the eBay tab shows "could not be loaded" there; record eBay item specifics and variations as **not run** until the sandbox seeds them. Mercari's Shipping label shows "Choices unavailable" in both sandboxes: its choices come from Mercari's live shipping quote | `src/components/ListingEditor.tsx`, `NativeInventoryEditor.tsx`, `editorTabs.ts`, `anteroom-ios/Sources/Editor/` |
-| Tuesday | Bulk actions (edit, copy, delete, price drop, regenerate, upload), templates, inventory filters and search, import. Closing any bulk dialog, Cancel included, leaves selection mode, so select again before the next dialog. Hosted web has no bulk Marketplaces button | `src/components/Bulk*`, `ListingTemplatesDialog.tsx`, `anteroom-ios/Sources/Bulk/`, `Templates/`, `Inventory/` |
+| Tuesday | Bulk actions (edit, copy, delete, price drop, regenerate, upload), templates, inventory filters and search, import. Closing any bulk dialog, Cancel included, leaves selection mode, so select again before the next dialog. Hosted web has no bulk Marketplaces button. Use drafts with a price and photos (the journey's `Audit edit` drafts) as sources: on a blank draft Regenerate is disabled and Mark down has no price to drop. Carry each action through to its result (copy, then mark down, edit and delete the copies) on local and hosted, and confirm each through the API: only opening and cancelling the dialogs missed a hosted delete that failed on every edited draft (#1593, 2026-11-17). Import reads a live marketplace, so record it as **not run** | `src/components/Bulk*`, `ListingTemplatesDialog.tsx`, `anteroom-ios/Sources/Bulk/`, `Templates/`, `Inventory/` |
 | Wednesday | Photos: upload, drop, reorder, crop and edit, thumbnails, camera on iPhone, measurements from ruler photos | `src/components/Photo*`, `anteroom-ios/Sources/Photos/` |
 | Thursday | Assistant and listing chat, automations, suggestions, similar items, previous versions and history | `src/components/Assistant*`, `Automations*`, `ListingHistory.tsx`, `anteroom-ios/Sources/Assistant/`, `Automations/`, `History/` |
 | Friday | Settings, providers, labels, sign-in, sign-up, password reset, account menu, analytics, sales records, mark sold; Mac app first run, backups and restore, migration of a database from the previous release | `src/components/SettingsPage.tsx`, `src/components/settings/`, `src/cloud/`, `anteroom-ios/Sources/Settings/`, `Session/`, `Analytics/`, `services/backups.py` |
