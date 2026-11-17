@@ -939,6 +939,65 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         self.assertEqual(again.status_code, 409, again.text)
         self.bridge.assert_not_called()
 
+    def delist_new_poshmark(self):
+        response = self.client.post(f"/api/conversations/{self.conv.id}/marketplace-listings/delist",
+                                    json={"marketplaces": ["poshmark"], "confirm": True})
+        self.db.expire_all()
+        return response
+
+    def assert_new_poshmark_failed_and_fenced(self, response):
+        new_id = "6adc371572e62463d992ffef"
+        for entry in (response.json()["poshmark"],
+                      self.client.get(f"/api/conversations/{self.conv.id}/marketplace-listings").json()["poshmark"]):
+            self.assertEqual((entry["state"], entry["listing_id"], entry["url"]), ("failed", new_id, POSH_URL))
+            self.assertTrue(entry["error"])
+        self.bridge.reset_mock(return_value=True, side_effect=True)
+        refused = self.client.post(f"{self.base}/poshmark/list", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(refused.status_code, 409, refused.text)
+        self.bridge.assert_not_called()
+        # A retry deletes the new listing, never the long-deleted old one.
+        self.bridge.side_effect = [{"ok": True, "state": "deleted"}]
+        retried = self.delist_new_poshmark()
+        self.assertEqual(retried.status_code, 200, retried.text)
+        self.assertEqual(self.bridge.call_args.args[2]["listing_id"], new_id)
+        self.assertEqual((retried.json()["poshmark"]["state"], retried.json()["poshmark"]["listing_id"]), ("deleted", new_id))
+
+    def test_a_refused_delist_of_the_new_listing_keeps_it_and_its_fence(self):
+        self.publish_poshmark_after_stale_seller_link_and_delist()
+        self.bridge.reset_mock(return_value=True)
+        self.bridge.side_effect = [{"ok": False, "error": "Poshmark did not delete the listing."}]
+        response = self.delist_new_poshmark()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assert_new_poshmark_failed_and_fenced(response)
+
+    def test_a_delist_of_the_new_listing_that_raises_keeps_it_and_its_fence(self):
+        self.publish_poshmark_after_stale_seller_link_and_delist()
+        self.bridge.reset_mock(return_value=True)
+        self.bridge.side_effect = RuntimeError("Chrome stopped answering")
+        response = self.delist_new_poshmark()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assert_new_poshmark_failed_and_fenced(response)
+
+    def test_a_read_during_the_delist_shows_the_new_listing_being_deleted(self):
+        from vendoo_studio.services import marketplace_delist
+
+        self.publish_poshmark_after_stale_seller_link_and_delist()
+        seen = {}
+
+        def read():
+            with self.sessions() as db:
+                seen.update(marketplace_delist.listings(db, self.conv.id)["poshmark"])
+
+        async def delete_while_reading(*_args, **_kwargs):
+            # Another request's read, off the event loop like the app's own.
+            await asyncio.to_thread(read)
+            return {"ok": True, "state": "deleted"}
+
+        self.bridge.reset_mock(return_value=True)
+        self.bridge.side_effect = delete_while_reading
+        self.assertEqual(self.delist_new_poshmark().status_code, 200)
+        self.assertEqual((seen["state"], seen["listing_id"], seen["url"]), ("deleting", "6adc371572e62463d992ffef", POSH_URL))
+
     def test_a_confirmed_delist_leaves_the_record_ready_to_list_again(self):
         self.bridge.side_effect = [{"ok": True, "state": "draft", "draft_url": URLS["mercari"]}, self.published("mercari")]
         self.assertEqual(self.list("mercari")["state"], "published")

@@ -653,6 +653,23 @@ def test_deleting_the_newer_listing_retires_the_superseded_seller_link(env, mark
 
 
 @pytest.mark.parametrize("marketplace,old,new", SUPERSEDED_LINKS)
+def test_a_running_or_failed_delete_of_the_newer_listing_keeps_naming_it(env, marketplace, old, new):
+    superseded_item(env, marketplace, old, new)
+    new_id = marketplace_delist.listing_id(marketplace, new)
+    base = {"listing_id": new_id, "url": new, "at": "2026-11-01T10:00:00+00:00"}
+    marketplace_delist._record_delete(env.db, "coat", marketplace, {**base, "state": "deleting"})
+    env.db.expire_all()
+    assert marketplace not in parse_notes(env.db.get(Conversation, "coat").notes)["marketplaceMarks"]
+    entry = marketplace_delist.listings(env.db, "coat")[marketplace]
+    assert (entry["state"], entry["listing_id"], entry["url"]) == ("deleting", new_id, new)
+    marketplace_delist._record(env.db, "coat", marketplace, {**base, "state": "failed", "error": "Not deleted."})
+    env.db.expire_all()
+    entry = marketplace_delist.listings(env.db, "coat")[marketplace]
+    assert (entry["state"], entry["listing_id"], entry["error"]) == ("failed", new_id, "Not deleted.")
+    assert marketplace_delist.removed_marketplaces(parse_notes(env.db.get(Conversation, "coat").notes), {marketplace: new}) == []
+
+
+@pytest.mark.parametrize("marketplace,old,new", SUPERSEDED_LINKS)
 def test_deleting_the_marked_listing_keeps_the_seller_link(env, marketplace, old, new):
     # Retiring a same-ID mark would let an older imported link read as live again.
     item(env.db, "coat", notes={"marketplaceMarks": {marketplace: {"state": "listed", "url": old}},

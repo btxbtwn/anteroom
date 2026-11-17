@@ -1,2 +1,2 @@
 - A new confirmed marketplace listing no longer appears Delisted because of an old listing link, and Anteroom refuses to list it a second time.
-- Delisting that new listing no longer brings the old link back as live, and a sale of the new listing counts toward marking the item sold.
+- Delisting that new listing, even one that fails or is still running, no longer brings the old link back as live, and a sale of the new listing counts toward marking the item sold.
