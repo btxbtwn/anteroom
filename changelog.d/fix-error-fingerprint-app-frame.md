@@ -1,0 +1,1 @@
+- Error emails for database timeouts now name the part of Anteroom that hit them, so different problems no longer share one email group.
