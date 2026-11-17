@@ -69,8 +69,10 @@ def _sold_on(db: Session, conv_id: str, notes: dict, native: dict) -> dict[str, 
     stocks = {}
     for row in db.query(MarketplaceSale).filter(MarketplaceSale.conversation_id == conv_id, MarketplaceSale.order_status.in_(PAID_STATUSES)):
         mark = _notes_dict(notes, "marketplaceMarks").get(row.marketplace) or {}
+        deleted = _notes_dict(notes, "marketplaceDelists").get(row.marketplace)
         url, _source = current_listing(row.marketplace, (native.get(row.marketplace) or {}).get("listing_url"),
-                                       _notes_dict(notes, "vendooListingUrls").get(row.marketplace), mark)
+                                       _notes_dict(notes, "vendooListingUrls").get(row.marketplace), mark,
+                                       deleted if isinstance(deleted, dict) else {})
         current_id = listing_id(row.marketplace, url)
         if current_id and row.listing_id and current_id != row.listing_id:
             continue
@@ -108,11 +110,18 @@ def _notes_dict(notes: dict, key: str) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def current_listing(marketplace: str, anteroom_url, vendoo_url, mark: dict) -> tuple[str | None, str | None]:
+def current_listing(marketplace: str, anteroom_url, vendoo_url, mark: dict, deleted: dict) -> tuple[str | None, str | None]:
     """The listing link that names this marketplace's listing now, and who reported it."""
     candidates = [(anteroom_url, "anteroom"), (vendoo_url, "vendoo")]
     if mark.get("state") == "listed":
-        candidates.insert(0, (mark.get("url"), "seller"))
+        marked_id = listing_id(marketplace, mark.get("url"))
+        direct_id = listing_id(marketplace, anteroom_url)
+        # A mark for the removed listing cannot mask a receipt for a different
+        # live listing. Keep ordinary seller corrections and same-ID delists.
+        superseded = (deleted.get("state") == "deleted" and marked_id
+                      and deleted.get("listing_id") == marked_id and direct_id and direct_id != marked_id)
+        if not superseded:
+            candidates.insert(0, (mark.get("url"), "seller"))
     return next(((url, source) for url, source in candidates if listing_id(marketplace, url)), (None, None))
 
 
@@ -137,7 +146,7 @@ def removed_marketplaces(notes: dict, anteroom_urls: dict[str, str]) -> list[str
         # URL resolution to check whether a newer listing superseded them.
         if mark.get("state") != "not_listed" and record.get("state") != "deleted":
             continue
-        url, _source = current_listing(marketplace, anteroom_urls.get(marketplace), urls.get(marketplace), mark)
+        url, _source = current_listing(marketplace, anteroom_urls.get(marketplace), urls.get(marketplace), mark, record)
         item_id = listing_id(marketplace, url)
         if mark.get("state") == "not_listed" and (not item_id or item_id == mark.get("listing_id")):
             removed.append(marketplace)
@@ -193,7 +202,10 @@ def known_listings(notes: dict, native: dict, sold: dict) -> dict:
         mark = marks.get(marketplace)
         if not isinstance(mark, dict):
             mark = {}
-        url, source = current_listing(marketplace, binding.get("listing_url"), urls.get(marketplace), mark)
+        record = delists.get(marketplace)
+        if not isinstance(record, dict):
+            record = {}
+        url, source = current_listing(marketplace, binding.get("listing_url"), urls.get(marketplace), mark, record)
         item_id = listing_id(marketplace, url)
         if mark.get("state") == "not_listed" and (not item_id or item_id == mark.get("listing_id")):
             continue
@@ -203,9 +215,6 @@ def known_listings(notes: dict, native: dict, sold: dict) -> dict:
             sold_here = bool(reported and marked and reported > marked)
         elif mark.get("state") == "sold":
             sold_here = True
-        record = delists.get(marketplace)
-        if not isinstance(record, dict):
-            record = {}
         if not url and not record and not sold_here:
             continue
         item_id = item_id or record.get("listing_id")
@@ -471,5 +480,23 @@ def _start_delete(db: Session, conv_id: str, name: str, base: dict, job_id: str)
 
 
 def _deleted(db: Session, conv_id: str, name: str, base: dict) -> None:
-    _record(db, conv_id, name, {**base, "state": "deleted", "error": None, "at": _now()})
+    """Record a confirmed delete, in one notes write with retiring a superseded seller link.
+
+    Delist targets the seller's "listed" link unless a newer receipt superseded
+    it. Deleting a different listing than the marked one means the mark names
+    an older, already removed listing; left in place it would read as live
+    again once the newer receipt is cleared.
+    """
+    conv = ConversationRepo(db).get(conv_id)
+    assert conv is not None
+    db.refresh(conv)
+    notes = parse_notes(conv.notes)
+    delists = {key: entry for key, entry in _notes_dict(notes, "marketplaceDelists").items() if key != name}
+    updates: dict = {"marketplaceDelists": {**delists, name: {**base, "state": "deleted", "error": None, "at": _now()}}}
+    marks = _notes_dict(notes, "marketplaceMarks")
+    mark = marks.get(name)
+    if isinstance(mark, dict) and mark.get("state") == "listed" and listing_id(name, mark.get("url")) != base.get("listing_id"):
+        updates["marketplaceMarks"] = {key: entry for key, entry in marks.items() if key != name}
+    conv.notes = merge_notes(conv.notes, updates)
+    db.commit()
     _forget_deleted_listing(db, conv_id, name)

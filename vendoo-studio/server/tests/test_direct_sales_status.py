@@ -616,3 +616,59 @@ def test_sales_records_and_analytics_name_the_same_missing_amounts(env):
     assert summary["missing_records"] == 1
     assert summary["missing_counts"] == expected
     assert inventory_analytics(env.db, range_id="30d")["missing_counts"] == expected
+
+
+SUPERSEDED_LINKS = [
+    ("ebay", "https://www.ebay.com/itm/123456789012", "https://www.ebay.com/itm/987654321098"),
+    ("etsy", "https://www.etsy.com/listing/1234567890/fixture", "https://www.etsy.com/listing/9876543210/fixture"),
+    ("poshmark", "https://poshmark.com/listing/aaaaaaaaaaaaaaaaaaaaaaaa", "https://poshmark.com/listing/bbbbbbbbbbbbbbbbbbbbbbbb"),
+    ("mercari", "https://www.mercari.com/us/item/m12345678901/", "https://www.mercari.com/us/item/m98765432109/"),
+    ("depop", "https://www.depop.com/products/fixture-old-123/", "https://www.depop.com/products/fixture-new-456/"),
+]
+
+
+def superseded_item(env, marketplace, old, new):
+    """The seller's link to an old listing Anteroom deleted, and a newer listing Anteroom published since."""
+    old_id = marketplace_delist.listing_id(marketplace, old)
+    item(env.db, "coat", notes={"marketplaceMarks": {marketplace: {"state": "listed", "url": old, "listing_id": old_id,
+                                                                   "at": "2026-10-01T10:00:00+00:00"}},
+                                "marketplaceDelists": {marketplace: {"state": "deleted", "url": old, "listing_id": old_id,
+                                                                     "at": "2026-10-02T10:00:00+00:00"}}})
+    MarketplaceListingRepo(env.db).save("coat", marketplace, {"state": "published", "listing_url": new,
+                                                              "listing_id": marketplace_delist.listing_id(marketplace, new)})
+
+
+@pytest.mark.parametrize("marketplace,old,new", SUPERSEDED_LINKS)
+def test_deleting_the_newer_listing_retires_the_superseded_seller_link(env, marketplace, old, new):
+    superseded_item(env, marketplace, old, new)
+    new_id = marketplace_delist.listing_id(marketplace, new)
+    assert marketplace_delist.listings(env.db, "coat")[marketplace]["listing_id"] == new_id
+    marketplace_delist._deleted(env.db, "coat", marketplace, {"listing_id": new_id, "url": new, "at": "2026-11-01T10:00:00+00:00"})
+    env.db.expire_all()
+    entry = marketplace_delist.listings(env.db, "coat")[marketplace]
+    assert (entry["state"], entry["listing_id"]) == ("deleted", new_id)
+    notes = parse_notes(env.db.get(Conversation, "coat").notes)
+    assert marketplace not in notes["marketplaceMarks"]
+    assert marketplace_delist.removed_marketplaces(notes, {}) == [marketplace]
+
+
+@pytest.mark.parametrize("marketplace,old,new", SUPERSEDED_LINKS)
+def test_deleting_the_marked_listing_keeps_the_seller_link(env, marketplace, old, new):
+    # Retiring a same-ID mark would let an older imported link read as live again.
+    item(env.db, "coat", notes={"marketplaceMarks": {marketplace: {"state": "listed", "url": old}},
+                                "vendooListingUrls": {marketplace: new}})
+    old_id = marketplace_delist.listing_id(marketplace, old)
+    marketplace_delist._deleted(env.db, "coat", marketplace, {"listing_id": old_id, "url": old, "at": "2026-11-01T10:00:00+00:00"})
+    env.db.expire_all()
+    notes = parse_notes(env.db.get(Conversation, "coat").notes)
+    assert notes["marketplaceMarks"][marketplace]["url"] == old
+    entry = marketplace_delist.listings(env.db, "coat")[marketplace]
+    assert (entry["state"], entry["listing_id"]) == ("deleted", old_id)
+
+
+@pytest.mark.parametrize("marketplace,old,new", SUPERSEDED_LINKS)
+def test_a_sale_of_the_newer_listing_counts_despite_the_superseded_seller_link(env, marketplace, old, new):
+    superseded_item(env, marketplace, old, new)
+    line(env.db, "coat", marketplace, order="new-sale", listing_id=marketplace_delist.listing_id(marketplace, new))
+    entry = marketplace_delist.listings(env.db, "coat")[marketplace]
+    assert entry["sold_here"] is True and entry["listing_id"] == marketplace_delist.listing_id(marketplace, new)
