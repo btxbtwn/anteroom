@@ -11,7 +11,7 @@ _OPERATIONS = frozenset({"marketplace.execute", "marketplace.delete", "marketpla
 _PREVIEW_STEPS = frozenset({"mercari-account", "mercari-item", "mercari-eligibility", "mercari-bounds",
                             "depop-account", "depop-product", "depop-offer-preview"})
 _NUMBERS = frozenset({"elapsed_ms", "timeout_ms", "discount_percent", "price_cents", "offer_price_cents",
-                      "floor_cents", "poshmark_price_input", "smart_sell_minimum_input"})
+                      "floor_cents", "poshmark_price_input", "smart_sell_minimum_input", "read_price_cents"})
 _BOOLEANS = frozenset({"safe_to_retry", "smart_sell_enabled_input"})
 _DECIMAL = re.compile(r"\d{1,9}(?:\.\d{1,4})?\Z")
 
@@ -52,6 +52,8 @@ def failure_context(operation: str, payload: dict | None, result: object, elapse
         values["safe_to_retry"] = result.get("safe_to_retry")
         if operation == "marketplace.promotion_check" and payload.get("action") == "offer":
             values["preview_step"] = result.get("preview_step")
+            # What the marketplace's own item read returned before a later read refused; not an input.
+            values["read_price_cents"] = result.get("price_cents")
     listing = payload.get("listing")
     if payload.get("marketplace") == "poshmark" and isinstance(listing, dict):
         specifics = listing.get("poshmark_specifics")

@@ -16,6 +16,7 @@ from sqlalchemy.pool import StaticPool
 from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.models.listing_promotion import ListingPromotion, MarketplaceOfferFloor
+from vendoo_studio.models.marketplace_listing import MarketplaceListing
 from vendoo_studio.models.promotion_automation import PromotionAutomation, PromotionRun
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo
 from vendoo_studio.services import browser_bridge, listing_promotions, promotion_automations
@@ -316,7 +317,8 @@ class PromotionAutomationsTest(unittest.TestCase):
             if message_type == "marketplace.promotion_check" and payload["listing_id"] == item:
                 # The reply recorded on the seller's account, 2026-11-17 (release 0.1.1006).
                 return {"ok": False, "error": "Mercari refused the request.", "error_code": "rejected", "safe_to_retry": True,
-                        "marketplace_message": "Oops! Your offer can't be less than $1.00.", "preview_step": "mercari-eligibility"}
+                        "marketplace_message": "Oops! Your offer can't be less than $1.00.", "preview_step": "mercari-eligibility",
+                        "price_cents": 150}
             return await original(job, message_type, payload, timeout)
 
         self.bridge.side_effect = refuse
@@ -325,7 +327,8 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.assertEqual(sorted(self.checked()), sorted([item, other]))
         self.assertEqual([sent["listing_id"] for sent in self.promoted()], [other])
         refusal = self.db.query(ListingPromotion).filter_by(listing_id=item).one()
-        self.assertEqual((refusal.state, refusal.sent_at, refusal.price_cents), ("skipped", None, None))
+        # The price Mercari's item read returned just before it refused.
+        self.assertEqual((refusal.state, refusal.sent_at, refusal.price_cents), ("skipped", None, 150))
         self.assertEqual(refusal.note, "Mercari would not allow an offer to likers on this listing: Oops! Your offer can't be less than $1.00.")
         # The next scans do not read it again, and journal nothing new for it.
         for _ in range(2):
@@ -379,7 +382,8 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.due(saved["id"])
         self.tick()
         self.assertEqual(self.checked(), [older])
-        # A like on the held listing is read at once: Depop knows the listing by that link after all.
+        # A like newer than the refusal is read at once: Depop knows the listing by that link after all.
+        self.db.query(ListingPromotion).update({"created_at": _now() - timedelta(minutes=1)})
         row = self.db.get(PromotionAutomation, saved["id"])
         at = _now() - timedelta(seconds=10)
         row.like_events_since = at - timedelta(seconds=10)
@@ -396,7 +400,79 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.check_likes()
         self.assertEqual(self.checked(), [missing])
         self.assertEqual(self.promoted(), [])
+        # The feed keeps showing that like on the next ticks; it is older than the new refusal, so nothing is read.
+        for _ in range(2):
+            self.bridge.reset_mock()
+            self.assertEqual(self.check_likes(), 0)
+            self.assertEqual(self.checked(), [])
+        # A newer like is read again.
+        self.db.query(ListingPromotion).update({"created_at": _now() - timedelta(minutes=1)})
+        self.db.commit()
+        events.append({"listing_id": missing, "at": (_now() - timedelta(seconds=5)).isoformat() + "Z"})
+        self.bridge.reset_mock()
+        self.check_likes()
+        self.assertEqual(self.checked(), [missing])
         self.assertFalse(self.db.query(ListingPromotion).filter(ListingPromotion.sent_at.is_not(None)).count())
+
+    def test_a_new_recorded_mercari_price_releases_the_hold(self):
+        (conv, item), = self.mercari_items(1)
+        listing = MarketplaceListing(conversation_id=conv.id, marketplace="mercari", state="published", listing_id=item,
+                                     listing_url=f"https://www.mercari.com/us/item/{item}/", listed_price=25.0)
+        self.db.add(listing)
+        self.db.commit()
+        saved = self.create({**OFFER, "marketplace": "mercari", "shipping_label": None, "scope": "items", "conversation_ids": [conv.id]})
+        self.enable(saved["id"])
+        self.bridge.side_effect = self.mercari_refusal(price_cents=150)
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(self.checked(), [item])
+        # Anteroom's older record of $25 is not a change since the refusal; the same price recorded again is not either.
+        for price in (None, 1.5):
+            if price is not None:
+                listing.listed_price, listing.state = price, "published"
+                listing.action = "update"
+                self.db.commit()
+            self.db.expire_all()
+            self.bridge.reset_mock()
+            self.due(saved["id"])
+            self.tick()
+            self.assertEqual(self.checked(), [], price)
+        # A new price recorded after the refusal (an Update, or a verified read) is read at once.
+        listing = self.db.get(MarketplaceListing, listing.id)
+        listing.listed_price = 30.0
+        self.db.commit()
+        self.bridge.reset_mock()
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(self.checked(), [item])
+
+    def test_refusals_on_most_of_a_rules_listings_are_not_held(self):
+        items = self.mercari_items(5)
+        refused = {item for _conv, item in items[:4]}
+        saved = self.create({**OFFER, "marketplace": "mercari", "shipping_label": None, "scope": "items",
+                             "conversation_ids": [conv.id for conv, _item in items]})
+        self.enable(saved["id"])
+        self.bridge.side_effect = self.mercari_refusal(refused=refused)
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(len(self.checked()), 5)
+        # Four of five refused alike looks like a broad change at Mercari, not four listings: keep reading them, loudly.
+        self.db.expire_all()
+        self.bridge.reset_mock()
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(sorted(self.checked()), sorted(refused))
+
+    def mercari_refusal(self, *, refused=None, price_cents=None):
+        original = self.answer
+
+        async def refuse(job, message_type, payload, timeout=0):
+            if message_type == "marketplace.promotion_check" and (refused is None or payload["listing_id"] in refused):
+                return {"ok": False, "error": "Mercari refused the request.", "error_code": "rejected", "safe_to_retry": True,
+                        "marketplace_message": "Oops! Your offer can't be less than $1.00.", "preview_step": "mercari-eligibility",
+                        **({"price_cents": price_cents} if price_cents is not None else {})}
+            return await original(job, message_type, payload, timeout)
+        return refuse
 
     def test_a_mercari_offer_rule_starts_off_and_pauses_on_an_unknown_result(self):
         (first, first_item), (second, second_item) = self.mercari_items(2)

@@ -70,6 +70,8 @@ READ_GAP_S = 2.0
 LIKE_RECHECK = {"poshmark": timedelta(days=7), "depop": timedelta(days=7), "mercari": timedelta(days=1)}
 WAITING_FOR_LIKES = "no new likes since the last check"
 HELD_AFTER_REFUSAL = "refused at the last check; checked again a day later"
+# More held listings than this, and over half of a rule's listings, are not held.
+BROAD_REFUSALS = 3
 TICK_S = 60.0
 # How long a due round waits for Chrome to reconnect, e.g. after a restart,
 # before it is recorded as unable to run.
@@ -336,20 +338,37 @@ def _waiting_for_likes(db: Session, row: PromotionAutomation, now: datetime) -> 
             and (likes < minimum or (offered.get(listing_id) is not None and likes <= cast(int, offered[listing_id])))}
 
 
-def _held_after_refusal(db: Session, row: PromotionAutomation, now: datetime) -> set[str]:
-    """Listings whose latest check by this rule, within a day, got a refusal that repeats until the listing changes."""
+def _held_after_refusal(db: Session, row: PromotionAutomation, now: datetime, covered: int) -> dict[str, datetime]:
+    """Listings whose latest check by this rule, within a day, got a refusal that repeats until the listing changes.
+
+    Maps each to when it was refused: a like newer than that still reads it. A
+    price Anteroom recorded for the listing after the refusal, different from
+    the one the marketplace read then, releases it. So many held listings at
+    once looks like a change at the marketplace, so none is held then.
+    """
     if row.action != "offer":
-        return set()
-    latest: dict[str, tuple[str, str | None, str | None]] = {}
-    for listing_id, state, note, message in db.query(
-        ListingPromotion.listing_id, ListingPromotion.state, ListingPromotion.note, ListingPromotion.marketplace_message,
-    ).filter(
+        return {}
+    latest: dict[str, ListingPromotion] = {}
+    for promotion in db.query(ListingPromotion).filter(
         ListingPromotion.automation_id == row.id, ListingPromotion.marketplace == row.marketplace,
         ListingPromotion.action == "offer", ListingPromotion.created_at > now - offer_preview_refusals.HOLD,
     ).order_by(ListingPromotion.created_at.desc()):
-        latest.setdefault(listing_id, (state, note, message))
-    return {listing_id for listing_id, (state, note, message) in latest.items()
-            if state == "skipped" and offer_preview_refusals.held_note(note, message)}
+        latest.setdefault(promotion.listing_id, promotion)
+    refused = {listing_id: promotion for listing_id, promotion in latest.items()
+               if promotion.state == "skipped" and offer_preview_refusals.held_note(promotion.note, promotion.marketplace_message)}
+    priced = {promotion.conversation_id: promotion for promotion in refused.values()
+              if promotion.price_cents is not None and promotion.conversation_id}
+    if priced:
+        for conversation_id, listed_price, updated_at in db.query(
+            MarketplaceListing.conversation_id, MarketplaceListing.listed_price, MarketplaceListing.updated_at,
+        ).filter(MarketplaceListing.conversation_id.in_(list(priced)), MarketplaceListing.marketplace == row.marketplace):
+            promotion = priced[conversation_id]
+            if (listed_price is not None and updated_at > promotion.created_at
+                    and round(listed_price * 100) != promotion.price_cents):
+                refused.pop(promotion.listing_id, None)
+    if len(refused) > BROAD_REFUSALS and len(refused) * 2 > covered:
+        return {}
+    return {listing_id: promotion.created_at for listing_id, promotion in refused.items()}
 
 
 def _skip_reason(exc: PromotionError, send: ListingPromotion) -> str:
@@ -387,14 +406,14 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
     stop_note = None
     try:
         promotions.require_chrome()
-        targets = [target for target in _order(db, row, _covered(db, row))
+        covered = _covered(db, row)
+        targets = [target for target in _order(db, row, covered)
                    if (like_events is None or target[1] in like_events)
                    if not row.min_days_listed or (target[2] and (now - target[2]).days >= row.min_days_listed)]
         remaining = (row.daily_cap or 0) - _shares_today(db, row.marketplace, now) if row.action == "share" else None
         # Like-feed rounds read their listings; the regular scan skips those still waiting for a like.
         waiting = _waiting_for_likes(db, row, now) if like_events is None else set()
-        # A new like means the listing is worth reading again now.
-        held = _held_after_refusal(db, row, now) if like_events is None else set()
+        held = _held_after_refusal(db, row, now, len(covered))
         reads = 0
         batch = new_id()
         for conv, listing_id, _listed_at in targets:
@@ -411,7 +430,8 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                     counts["skipped"] += 1
                     reasons[WAITING_FOR_LIKES] += 1
                     continue
-                if listing_id in held:
+                # Only a like newer than the refusal reads it again before the day is up.
+                if listing_id in held and (new_like_at is None or new_like_at <= held[listing_id]):
                     counts["skipped"] += 1
                     reasons[HELD_AFTER_REFUSAL] += 1
                     continue
@@ -631,8 +651,11 @@ async def check_new_likes(db: Session, *, sleep=asyncio.sleep) -> int:
         except (ValueError, KeyError, TypeError, AttributeError):
             _pause(db, row, "The recent-like feed changed. Anteroom needs an update.")
             continue
-        covered = {target[1] for target in _covered(db, row)}
+        targets = _covered(db, row)
+        covered = {target[1] for target in targets}
+        held = _held_after_refusal(db, row, _now(), len(targets))
         events = {key: at for key, at in events.items() if key in covered
+                  and not (key in held and at <= held[key])
                   and not promotions.blocking(db, row.marketplace, key, "offer", new_like_at=at)}
         if events:
             await run_round(db, row, sleep=sleep, like_events=events)

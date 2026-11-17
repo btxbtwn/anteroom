@@ -300,6 +300,9 @@ async def _review_remote(row: ListingPromotion, listing_id: str) -> None:
             row.finished_at = _now()
             raise PromotionError(409, MERCARI_COOLDOWN_NOTE, "eligibility_cooldown")
         if held := offer_preview_refusals.recognized(row.marketplace, "marketplace.promotion_check", row.action, facts):
+            # The price the marketplace's item read returned before refusing, when the Bridge gives it.
+            if isinstance(price := facts.get("price_cents"), int) and not isinstance(price, bool) and price > 0:
+                row.price_cents = price
             raise PromotionError(409, held, facts.get("error_code"))
         raise PromotionError(409, str(facts.get("error") or "The marketplace did not answer."), facts.get("error_code"))
     row.price_cents = int(facts["price_cents"])

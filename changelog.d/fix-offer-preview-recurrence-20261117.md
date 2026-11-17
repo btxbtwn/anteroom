@@ -1,1 +1,1 @@
-- Offer automations wait a day before checking a listing again when Depop can't find it at its saved link or Mercari won't allow an offer to likers on it, instead of retrying it every 15 minutes. A new like still checks it right away.
+- Offer automations wait a day before checking a listing again when Depop can't find it at its saved link or Mercari won't allow an offer to likers on it, instead of retrying it every 15 minutes. A newer like, or a new price on the Mercari listing, checks it again right away, and refusals across most of a rule's listings keep being checked.
