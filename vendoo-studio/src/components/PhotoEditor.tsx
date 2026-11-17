@@ -1,4 +1,4 @@
-import { StudioImage } from "./StudioImage";
+import { PhotoLoadFailure, StudioImage } from "./StudioImage";
 /**
  * Photo editor: crop, turn and straighten, tone, and background removal.
  *
@@ -167,6 +167,7 @@ export function PhotoEditor({ convId, photo, index, onSaved, onClose }: Props) {
                   alt={`ListingPhoto ${index + 1} with edits`}
                   draggable={false}
                   className="block max-h-[calc(min(92vh,860px)-170px)] max-w-full select-none object-contain"
+                  renderError={(failure) => <PhotoLoadFailure {...failure} />}
                   onLoad={(event) => {
                     if (showWholeFrame) {
                       const img = event.currentTarget;

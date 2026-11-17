@@ -1,4 +1,4 @@
-import { StudioImage } from "./StudioImage";
+import { PhotoLoadFailure, StudioImage } from "./StudioImage";
 /**
  * Photo thumbnails and the enlarged photo view, shared by the photo tray and
  * the regenerate review. The lightbox follows T3 Code's ExpandedImageDialog
@@ -279,16 +279,7 @@ export function PhotoLightbox({
               quarter % 2 === 1 && "max-h-[calc(92vw-96px)] max-w-[80vh]",
             )}
             onClick={onClose}
-            renderError={({ status, retry }) => (
-              // The status stays on the element for diagnosis; the words name no IDs or addresses.
-              <div role="alert" data-photo-load-status={status ?? "none"}
-                className="flex min-h-40 min-w-60 flex-col items-center justify-center gap-2 rounded-lg border border-border/70 bg-background p-6 text-center text-sm shadow-2xl">
-                <p>{status === 401 || status === 403
-                  ? "Couldn't load this photo. Sign in again, then retry."
-                  : "Couldn't load this photo."}</p>
-                <Button size="xs" variant="outline" onClick={(event) => { event.stopPropagation(); retry(); }}>Retry</Button>
-              </div>
-            )}
+            renderError={(failure) => <PhotoLoadFailure {...failure} />}
           />
           <div className="mt-2 flex items-center gap-1.5 text-white/80 text-xs">
             {onRotate && <Button variant="overlay" size="icon-micro" onClick={() => onRotate(-90)} disabled={rotating} aria-label="Rotate left" title="Rotate left">

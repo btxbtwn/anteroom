@@ -69,3 +69,24 @@ it("asks the seller to sign in again when the download is refused for their sess
     expect(failure()?.textContent).not.toMatch(/\/api\/|session\b/);
   } finally { await act(async () => root.unmount()); }
 });
+
+it("downloads again on Retry when a photo that arrived cannot be shown", async () => {
+  fetchMock.mockResolvedValueOnce(new Response(new Blob(["not an image"]), { status: 200 }));
+  const root = await openViewer("/api/conversations/c/photos/unreadable/bytes?v=1");
+  try {
+    expect(photo()?.getAttribute("src")).toMatch(/^blob:shown-/);
+    // The browser could not decode the file it was given.
+    await act(async () => { photo()!.dispatchEvent(new Event("error")); });
+    expect(failure()?.textContent).toContain("Couldn't load this photo.");
+    expect(failure()?.dataset.photoLoadStatus).toBe("none");
+    expect(photo()).toBeNull();
+
+    fetchMock.mockResolvedValueOnce(new Response(new Blob(["jpeg"]), { status: 200 }));
+    const retry = [...document.body.querySelectorAll("button")].find((button) => button.textContent === "Retry")!;
+    await act(async () => { retry.click(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    // The unreadable copy is not reused: Retry asks the server again.
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(photo()?.getAttribute("src")).toMatch(/^blob:shown-/);
+  } finally { await act(async () => root.unmount()); }
+});

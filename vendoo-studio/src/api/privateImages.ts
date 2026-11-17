@@ -28,6 +28,15 @@ function forCurrentSession(): Map<string, string> {
   return images;
 }
 
+/** Drops this page's copy of an image, so the next load asks the server again. */
+export function forgetPrivateImage(src: string): void {
+  const cache = forCurrentSession();
+  const url = cache.get(src);
+  if (url === undefined) return;
+  cache.delete(src);
+  URL.revokeObjectURL(url);
+}
+
 /** The kept copy of a private image, if this page already loaded it. */
 export function cachedPrivateImage(src: string): string | undefined {
   const cache = forCurrentSession();
