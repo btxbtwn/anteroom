@@ -1,0 +1,2 @@
+- Deleting a sale you recorded corrects the item's Sold status and reopens items finished automatically. Items you finished by hand stay finished, as do older finished items whose original choice was not recorded.
+- Undoing a sale while a delist is being recorded no longer brings back the Sold mark the undo removed.

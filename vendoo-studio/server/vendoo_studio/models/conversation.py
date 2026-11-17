@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -19,6 +20,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    true,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -49,6 +51,9 @@ class Conversation(SellerOwned, Base):
     # The wholesale box this item came out of, when the seller said so.
     box_id: Mapped[str | None] = mapped_column(String, ForeignKey("source_boxes.id", ondelete="SET NULL"), nullable=True, index=True)
     settled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Legacy Finished rows are conservatively seller-owned. Automatic settlement
+    # explicitly records False; undoing a sale may only undo that ownership.
+    settled_by_seller: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
     unsettled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=True)

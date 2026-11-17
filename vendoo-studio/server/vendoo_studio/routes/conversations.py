@@ -434,6 +434,7 @@ def _wipe(db: Session, conv_id: str, keep_inputs: bool, notes: str | None) -> No
         db.query(ListingCorrection).filter_by(conversation_id=conv_id).delete(synchronize_session=False)
     conv.status = "draft"
     conv.settled_at = None
+    conv.settled_by_seller = False
     conv.unsettled_at = None
     conv.updated_at = utcnow()
     db.commit()

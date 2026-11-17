@@ -315,8 +315,10 @@ def delete_seller_sale(db: Session, sale_id: str, expected_revision: int) -> dic
     sold, that mark goes too, so the item no longer counts the sale.
     """
     from vendoo_studio.models.marketplace_sale import PAID_STATUSES
+    from vendoo_studio.repositories.queries import LISTING_STATUSES, _sync_settlement
     from vendoo_studio.services import marketplace_delist
-    from vendoo_studio.services.vendoo_import import parse_notes
+    from vendoo_studio.services.item_status import status_for
+    from vendoo_studio.services.vendoo_import import merge_notes, parse_notes
 
     with start_gate():
         sale = db.get(MarketplaceSale, sale_id, populate_existing=True)
@@ -327,24 +329,44 @@ def delete_seller_sale(db: Session, sale_id: str, expected_revision: int) -> dic
                               "Anteroom checks; cancel or refund it on the marketplace instead.", 409)
         conv_id, marketplace, recorded = sale.conversation_id, sale.marketplace, marketplace_delist._time(sale.received_at)
         try:
+            # Fence this item's projection against another process starting
+            # generation or changing its marks. SQLite serializes the DELETE
+            # writer; Postgres holds this row through the final commit.
+            conv = db.query(Conversation).filter(Conversation.id == conv_id).populate_existing().with_for_update().first() if conv_id else None
             result = db.execute(delete(MarketplaceSale).where(
                 MarketplaceSale.id == sale_id, MarketplaceSale.financial_revision == expected_revision,
             ).execution_options(synchronize_session=False))
             if type_cast(CursorResult, result).rowcount != 1:
                 db.rollback()
                 raise LedgerError("This sale changed. Reload it before deleting.", 409)
+            if conv is not None:
+                # SQLite's SELECT does not lock; reread after the DELETE has
+                # acquired its writer lock, before touching the projection.
+                db.refresh(conv)
+            if conv is not None and marketplace in MARKETPLACES:
+                marks = marketplace_delist._notes_dict(parse_notes(conv.notes), "marketplaceMarks")
+                mark = marks.get(marketplace)
+                marked = marketplace_delist._time(mark.get("at")) if isinstance(mark, dict) and mark.get("state") == "sold" else None
+                others = db.query(MarketplaceSale.id).filter(
+                    MarketplaceSale.conversation_id == conv_id, MarketplaceSale.marketplace == marketplace,
+                    MarketplaceSale.order_status.in_(PAID_STATUSES)).first()
+                if marked and recorded and marked >= recorded and others is None:
+                    conv.notes = merge_notes(conv.notes, {"marketplaceMarks": {
+                        name: value for name, value in marks.items() if name != marketplace}})
+            if conv is not None and conv.status in LISTING_STATUSES:
+                # Once the last local sale is removed, the read-time sweep
+                # has no "own" evidence to replace a cached Sold label.
+                status = status_for(db, conv.id, parse_notes(conv.notes)).status
+                if conv.status == "sold" and status != "sold" and not conv.settled_by_seller:
+                    # Undo automatic settlement, not Keep open: a later sale
+                    # must still be able to settle the item again.
+                    conv.settled_at = None
+                conv.status = status
+                _sync_settlement(conv, status, backfill=True)
+            # The sale, its mark and inventory projection change together.
             db.commit()
         except BaseException:
             db.rollback()
             raise
         db.expire_all()
-        conv = db.get(Conversation, conv_id) if conv_id else None
-        if conv is not None and marketplace in MARKETPLACES:
-            mark = marketplace_delist._notes_dict(parse_notes(conv.notes), "marketplaceMarks").get(marketplace)
-            marked = marketplace_delist._time(mark.get("at")) if isinstance(mark, dict) and mark.get("state") == "sold" else None
-            others = db.query(MarketplaceSale.id).filter(
-                MarketplaceSale.conversation_id == conv_id, MarketplaceSale.marketplace == marketplace,
-                MarketplaceSale.order_status.in_(PAID_STATUSES)).first()
-            if marked and recorded and marked >= recorded and others is None:
-                marketplace_delist._store(db, conv.id, "marketplaceMarks", marketplace, None)
     return {"deleted": sale_id}
