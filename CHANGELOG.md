@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1007 — 2026-11-17
+
+- Deleting a sale you recorded corrects the item's Sold status and reopens items finished automatically. Items you finished by hand stay finished, as do older finished items whose original choice was not recorded.
+- Undoing a sale while a delist is being recorded no longer brings back the Sold mark the undo removed.
+
 ## 0.1.1006 — 2026-11-17
 
 - Delisting a new marketplace listing that fails or is still running no longer brings an old, already deleted listing link back as live, so a retry cannot delete the wrong listing or allow a duplicate.
