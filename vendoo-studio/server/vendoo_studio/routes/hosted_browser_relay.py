@@ -11,6 +11,7 @@ from vendoo_studio.services import extension_connection
 from vendoo_studio.services.device_routes import claim, lookup, replay_instance
 from vendoo_studio.services.hosted_browser_relay import WAIT_S, relay_for
 from vendoo_studio.services.service_context import current
+from vendoo_studio.services.request_timing import note, reply_step
 
 router = APIRouter(prefix='/api/browser-relay')
 # Settings → Connections: which marketplaces the seller's Chrome is signed in to, as on the Mac.
@@ -97,7 +98,10 @@ def _record_timing(timing: dict) -> None:
 async def post_reply(body: Reply):
     """Chrome's answer to one command this seller's relay sent. Resolved on the event
     loop that awaits it, so the waiting action wakes at once."""
-    if pinned := await asyncio.to_thread(_pinned, claim_route=False):
+    note(relay_lookup_ms=0, relay_lookup_calls=0, relay_persist_ms=0, relay_persist_calls=0)
+    with reply_step('lookup'):
+        pinned = await asyncio.to_thread(_pinned, claim_route=False)
+    if pinned:
         return pinned
     relay = _relay()
     if not relay.is_waiting(body.request_id):
@@ -106,7 +110,8 @@ async def post_reply(body: Reply):
         if body.timing is not None:
             timing.update(body.timing.model_dump())
         try:
-            await asyncio.to_thread(_record_timing, timing)
+            with reply_step('persist'):
+                await asyncio.to_thread(_record_timing, timing)
         except SQLAlchemyError:
             pass  # Timing is diagnostic; the reply still goes through.
     relay.resolve_wait(body.request_id, body.payload)

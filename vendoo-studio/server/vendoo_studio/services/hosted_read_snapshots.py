@@ -83,10 +83,12 @@ async def _in_thread(function, *args):
 # Fixed names only: never SQL text, parameters, seller IDs or row contents.
 INVENTORY_STEPS = ('analytics', 'reconcile', 'conversations', 'covers', 'listings',
                    'direct', 'sales', 'unsent', 'assemble')
+SUGGESTION_STEPS = ('preferences', 'covers', 'photo_counts', 'listing_rows',
+                    'direct', 'conversations', 'busy', 'ranking')
 
 
 @contextmanager
-def inventory_step(db, name: str):
+def snapshot_step(db, name: str):
     """Elapsed wall time and ORM call count, not server SQL execution time.
 
     The observer belongs to this session and step only. It observes ORM
@@ -94,7 +96,7 @@ def inventory_step(db, name: str):
     autoflush statements. No additional queries or connections are acquired.
     """
     phases = _build_phases.get()
-    if phases is None or name not in INVENTORY_STEPS:
+    if phases is None or name not in (*INVENTORY_STEPS, *SUGGESTION_STEPS):
         yield
         return
     calls = 0
@@ -172,7 +174,9 @@ class SellerReadSnapshots:
                  build_commits=last_build.get('commits', 0), rows_le=last_build.get('rows_le', 0),
                  pool_start=pool_start, pool_end=_pool_use(),
                  **({f'inv_{step}_{metric}': last_build.get(f'step_{step}_{metric}', 0)
-                    for step in INVENTORY_STEPS for metric in ('ms', 'orm_calls')} if name == 'inventory' else {}))
+                    for step in INVENTORY_STEPS for metric in ('ms', 'orm_calls')} if name == 'inventory' else
+                    {f'sug_{step}_{metric}': last_build.get(f'step_{step}_{metric}', 0)
+                     for step in SUGGESTION_STEPS for metric in ('ms', 'orm_calls')} if name == 'suggestions' else {}))
 
         async def check():
             version, queued, ran = await _in_thread(_version, context)

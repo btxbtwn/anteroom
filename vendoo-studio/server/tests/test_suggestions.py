@@ -48,6 +48,39 @@ class SuggestionsTest(unittest.TestCase):
         self.assertIn(title, cards)
         return cards[title]
 
+    def test_step_diagnostics_keep_cards_and_query_count_unchanged(self):
+        from sqlalchemy import event
+        from vendoo_studio.services import hosted_read_snapshots as snapshots
+
+        self.convs.create(title="Private draft title")
+        queries = []
+        engine = self.db.get_bind()
+
+        def count(*_args):
+            queries.append(1)
+
+        event.listen(engine, 'before_cursor_execute', count)
+        try:
+            baseline = list_suggestions(self.db, now=NOW)
+            baseline_calls = len(queries)
+            queries.clear()
+            phases = {}
+            token = snapshots._build_phases.set(phases)
+            try:
+                observed = list_suggestions(self.db, now=NOW)
+            finally:
+                snapshots._build_phases.reset(token)
+            self.assertEqual(observed, baseline)
+            self.assertEqual(len(queries), baseline_calls)
+            self.assertEqual(set(phases), {f'step_{step}_{metric}' for step in snapshots.SUGGESTION_STEPS
+                                          for metric in ('ms', 'orm_calls')})
+            self.assertEqual(phases['step_preferences_orm_calls'], 0)
+            self.assertEqual(phases['step_ranking_orm_calls'], 0)
+            self.assertEqual(phases['step_photo_counts_orm_calls'], 1)
+            self.assertNotIn('Private', repr(phases))
+        finally:
+            event.remove(engine, 'before_cursor_execute', count)
+
     def test_skips_sold_and_settled(self):
         sold = self.convs.create(title="Sold tee")
         self.convs.update_status(sold.id, "sold")

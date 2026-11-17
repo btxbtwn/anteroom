@@ -239,3 +239,112 @@ def test_sales_history_uses_only_the_connected_sellers_capable_bridge():
         assert await request == {'ok': True, 'orders': []}
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('outcome', ['ok', 'sql_failure', 'unexpected', 'cancelled', 'pinned', 'missing', 'no_timing'])
+def test_reply_diagnostics_preserve_await_order_errors_and_private_payloads(monkeypatch, outcome):
+    from unittest.mock import MagicMock
+    from sqlalchemy.exc import SQLAlchemyError
+    from fastapi import HTTPException, Response
+    from vendoo_studio.routes import hosted_browser_relay as route
+    from vendoo_studio.services import request_timing
+
+    details, events = {}, []
+    token = request_timing._details.set(details)
+    relay = MagicMock()
+    relay.is_waiting.return_value = outcome != 'missing'
+    relay.timing.return_value = None if outcome == 'no_timing' else {'job_id': 'private job', 'type': 'private operation'}
+    relay.resolve_wait.side_effect = lambda *_: events.append('resolved')
+    monkeypatch.setattr(route, '_relay', lambda: relay)
+
+    def pinned(**_kwargs):
+        events.append('lookup')
+        return Response(status_code=409) if outcome == 'pinned' else None
+
+    def persist(_timing):
+        events.append('persist')
+        if outcome == 'sql_failure':
+            raise SQLAlchemyError('private storage detail')
+        if outcome == 'unexpected':
+            raise RuntimeError('private unexpected failure')
+        if outcome == 'cancelled':
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr(route, '_pinned', pinned)
+    monkeypatch.setattr(route, '_record_timing', persist)
+    body = route.Reply(request_id='a' * 32, payload={'private': 'marketplace reply'})
+    try:
+        if outcome in ('unexpected', 'cancelled', 'missing'):
+            error = {'unexpected': RuntimeError, 'cancelled': asyncio.CancelledError, 'missing': HTTPException}[outcome]
+            with pytest.raises(error):
+                asyncio.run(route.post_reply(body))
+        else:
+            result = asyncio.run(route.post_reply(body))
+            assert (result.status_code if outcome == 'pinned' else result) == (409 if outcome == 'pinned' else {'ok': True})
+        persisted = outcome not in ('pinned', 'missing', 'no_timing')
+        assert details['relay_lookup_calls'] == 1
+        assert details['relay_persist_calls'] == int(persisted)
+        assert all(type(value) is int and value >= 0 for value in details.values())
+        assert 'private' not in repr(details) and 'a' * 32 not in repr(details)
+        expected = ['lookup'] + (['persist'] if persisted else [])
+        if outcome in ('ok', 'sql_failure', 'no_timing'):
+            expected += ['resolved']
+        assert events == expected
+    finally:
+        request_timing._details.reset(token)
+
+
+@pytest.mark.parametrize('blocked_step', ['lookup', 'persist'])
+def test_reply_request_cancellation_does_not_resolve_while_its_worker_finishes(monkeypatch, blocked_step):
+    from unittest.mock import MagicMock
+    from vendoo_studio.routes import hosted_browser_relay as route
+    from vendoo_studio.services import request_timing
+
+    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+    details = {}
+    token = request_timing._details.set(details)
+    relay = MagicMock()
+    relay.is_waiting.return_value = True
+    relay.timing.return_value = {'job_id': 'private job', 'type': 'private operation'}
+    monkeypatch.setattr(route, '_relay', lambda: relay)
+
+    def block(step):
+        if blocked_step == step:
+            entered.set()
+            try:
+                assert release.wait(3)
+            finally:
+                finished.set()
+
+    def lookup(**_kwargs):
+        block('lookup')
+        return None
+
+    def persist(_timing):
+        block('persist')
+
+    monkeypatch.setattr(route, '_pinned', lookup)
+    monkeypatch.setattr(route, '_record_timing', persist)
+
+    async def run():
+        task = asyncio.create_task(route.post_reply(route.Reply(request_id='b' * 32, payload={'private': 'reply'})))
+        try:
+            assert await asyncio.to_thread(entered.wait, 2)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert details[f'relay_{blocked_step}_calls'] == 1
+            assert type(details[f'relay_{blocked_step}_ms']) is int
+            relay.resolve_wait.assert_not_called()
+        finally:
+            release.set()
+            assert await asyncio.to_thread(finished.wait, 2)
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    try:
+        asyncio.run(run())
+        relay.resolve_wait.assert_not_called()
+    finally:
+        request_timing._details.reset(token)

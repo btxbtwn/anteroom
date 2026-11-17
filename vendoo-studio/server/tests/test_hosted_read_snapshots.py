@@ -358,7 +358,7 @@ def test_pool_use_reads_the_hosted_queue_pool_without_a_query(monkeypatch):
     assert snapshots._pool_use() == '0/0'
 
 
-def test_inventory_step_counts_are_parameter_free_and_removed_after_failure(monkeypatch):
+def test_snapshot_step_counts_are_parameter_free_and_removed_after_failure(monkeypatch):
     from sqlalchemy import create_engine, select, literal
     from sqlalchemy.orm import Session
 
@@ -369,10 +369,10 @@ def test_inventory_step_counts_are_parameter_free_and_removed_after_failure(monk
     engine = create_engine('sqlite://')
     try:
         with Session(engine) as db:
-            with snapshots.inventory_step(db, 'conversations'):
+            with snapshots.snapshot_step(db, 'conversations'):
                 assert db.scalar(select(literal('private seller title'))) == 'private seller title'
             with pytest.raises(RuntimeError, match='private failure'):
-                with snapshots.inventory_step(db, 'covers'):
+                with snapshots.snapshot_step(db, 'covers'):
                     db.scalar(select(literal('private photo id')))
                     raise RuntimeError('private failure')
             db.scalar(select(literal('later private value')))
@@ -384,20 +384,21 @@ def test_inventory_step_counts_are_parameter_free_and_removed_after_failure(monk
         engine.dispose()
 
 
-def test_inventory_step_is_inert_outside_a_snapshot_build():
-    with snapshots.inventory_step(None, 'analytics'):
+def test_snapshot_step_is_inert_outside_a_snapshot_build():
+    with snapshots.snapshot_step(None, 'analytics'):
         pass
     phases = {}
     token = snapshots._build_phases.set(phases)
     try:
-        with snapshots.inventory_step(None, 'private dynamic name'):
+        with snapshots.snapshot_step(None, 'private dynamic name'):
             pass
         assert phases == {}
     finally:
         snapshots._build_phases.reset(token)
 
 
-def test_step_diagnostics_follow_shared_build_and_reset_on_cache_hit(monkeypatch):
+@pytest.mark.parametrize('snapshot,step,prefix', [('inventory', 'listings', 'inv'), ('suggestions', 'listing_rows', 'sug')])
+def test_step_diagnostics_follow_shared_build_and_reset_on_cache_hit(monkeypatch, snapshot, step, prefix):
     from dataclasses import replace
     from sqlalchemy import create_engine, literal, select
     from sqlalchemy.orm import sessionmaker
@@ -411,26 +412,26 @@ def test_step_diagnostics_follow_shared_build_and_reset_on_cache_hit(monkeypatch
     monkeypatch.setattr(snapshots, 'note', lambda **fields: reports.append(fields))
 
     def read(db):
-        with snapshots.inventory_step(db, 'listings'):
+        with snapshots.snapshot_step(db, step):
             return db.scalar(select(literal('private listing contents')))
 
     async def run():
         with use(owner):
-            assert await cache.read('inventory', read) == 'private listing contents'
-            assert await cache.read('inventory', read) == 'private listing contents'
+            assert await cache.read(snapshot, read) == 'private listing contents'
+            assert await cache.read(snapshot, read) == 'private listing contents'
 
     try:
         asyncio.run(run())
         built, hit = reports
-        assert built['inv_listings_orm_calls'] == 1
-        assert built['inv_covers_orm_calls'] == 0
-        assert all(value == 0 for key, value in hit.items() if key.startswith('inv_'))
+        assert built[f'{prefix}_{step}_orm_calls'] == 1
+        assert built[f'{prefix}_covers_orm_calls'] == 0
+        assert all(value == 0 for key, value in hit.items() if key.startswith(f'{prefix}_'))
         assert 'private' not in repr(reports)
     finally:
         engine.dispose()
 
 
-def test_inventory_step_parallel_sessions_do_not_mix_diagnostics():
+def test_snapshot_step_parallel_sessions_do_not_mix_diagnostics():
     from sqlalchemy import create_engine, literal, select
     from sqlalchemy.orm import Session
 
@@ -439,7 +440,7 @@ def test_inventory_step_parallel_sessions_do_not_mix_diagnostics():
         phases = {}
         token = snapshots._build_phases.set(phases)
         try:
-            with Session(engine) as db, snapshots.inventory_step(db, 'analytics'):
+            with Session(engine) as db, snapshots.snapshot_step(db, 'analytics'):
                 for _ in range(calls):
                     db.scalar(select(literal('private parameter')))
             return phases['step_analytics_orm_calls']

@@ -106,52 +106,62 @@ def list_suggestions(
 
     # Hosted preferences have their own short session. Read them before the
     # inventory session checks out a connection from the same bounded pool.
-    stale_days = get_stale_listing_days()
+    from vendoo_studio.services.hosted_read_snapshots import snapshot_step
+
+    with snapshot_step(db, 'preferences'):
+        stale_days = get_stale_listing_days()
     repo = ConversationRepo(db)
-    covers = repo.cover_photos()
-    photo_counts = _photo_counts(db)
-    listing_rows = _listing_rows(db)
-    direct = MarketplaceListingRepo(db).summaries()
-    conversations = repo.list_all()
+    with snapshot_step(db, 'covers'):
+        covers = repo.cover_photos()
+    with snapshot_step(db, 'photo_counts'):
+        photo_counts = _photo_counts(db)
+    with snapshot_step(db, 'listing_rows'):
+        listing_rows = _listing_rows(db)
+    with snapshot_step(db, 'direct'):
+        direct = MarketplaceListingRepo(db).summaries()
+    with snapshot_step(db, 'conversations'):
+        conversations = repo.list_all()
     from vendoo_studio.models.background_task import BackgroundTask
 
-    busy = set(db.scalars(select(BackgroundTask.conversation_id).where(
-        BackgroundTask.status.in_(("queued", "running")))))
+    with snapshot_step(db, 'busy'):
+        busy = set(db.scalars(select(BackgroundTask.conversation_id).where(
+            BackgroundTask.status.in_(("queued", "running")))))
     # Ranking parses every item's cues and notes. It needs only loaded data;
     # return the connection before that CPU work so other requests can read.
     db.close()
-    listings = _listing_state(listing_rows)
-    selling = _recent_sales(conversations, listings, when)
-    in_demand = SEASONS_IN_DEMAND[when.month]
+    with snapshot_step(db, 'ranking'):
+        listings = _listing_state(listing_rows)
+        selling = _recent_sales(conversations, listings, when)
+        in_demand = SEASONS_IN_DEMAND[when.month]
 
-    cards: list[dict[str, Any]] = []
-    for conv in conversations:
-        if conv.settled_at is not None or conv.id in busy:
-            continue
-        status = str(conv.status or "draft")
-        if status == "sold" or status in BUSY_LISTING_STATUSES:
-            continue
-        card = _card_for(
-            conv,
-            status=status,
-            photo_count=photo_counts.get(conv.id, 0),
-            listing=listings.get(conv.id),
-            direct=direct.get(conv.id, {}),
-            cover_photo=covers.get(conv.id),
-            now=when,
-            selling=selling,
-            in_demand=in_demand,
-            stale_days=stale_days,
-        )
-        if card:
-            cards.append(card)
+        cards: list[dict[str, Any]] = []
+        for conv in conversations:
+            if conv.settled_at is not None or conv.id in busy:
+                continue
+            status = str(conv.status or "draft")
+            if status == "sold" or status in BUSY_LISTING_STATUSES:
+                continue
+            card = _card_for(
+                conv,
+                status=status,
+                photo_count=photo_counts.get(conv.id, 0),
+                listing=listings.get(conv.id),
+                direct=direct.get(conv.id, {}),
+                cover_photo=covers.get(conv.id),
+                now=when,
+                selling=selling,
+                in_demand=in_demand,
+                stale_days=stale_days,
+            )
+            if card:
+                cards.append(card)
 
-    cards.sort(key=lambda card: (
-        -int(card["score"]),
-        -int(card["age_days"] or 0),
-        str(card["conversation_id"]),
-    ))
-    return cards[: max(0, int(limit))]
+        cards.sort(key=lambda card: (
+            -int(card["score"]),
+            -int(card["age_days"] or 0),
+            str(card["conversation_id"]),
+        ))
+        return cards[: max(0, int(limit))]
 
 
 def _photo_counts(db: Session) -> dict[str, int]:
