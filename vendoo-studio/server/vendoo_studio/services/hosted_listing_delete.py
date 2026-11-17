@@ -11,6 +11,7 @@ from vendoo_studio.models.background_task import BackgroundTask
 from vendoo_studio.models.conversation import Conversation, Message, Photo
 from vendoo_studio.models.job import Job
 from vendoo_studio.models.listing import Listing, ListingRevision
+from vendoo_studio.models.listing_evidence import ListingCorrection, SaleSnapshot
 from vendoo_studio.models.marketplace_listing import MarketplaceListing
 from vendoo_studio.services.background_tasks import ACTIVE
 
@@ -68,7 +69,8 @@ def remove_unsent_draft(db, identity) -> set[str]:
         raise ValueError(reason)
     keys = _photo_keys(db, identity) | _attachment_keys(db, identity)
     delete_history(db, identity)
-    for model in (Listing, ListingRevision, Photo, Message):
+    # Evidence rows reference the item without a cascade, as on the Mac (listing_delete.py).
+    for model in (Listing, ListingRevision, Photo, Message, ListingCorrection, SaleSnapshot):
         db.execute(delete(model).where(model.conversation_id == identity))
     db.execute(delete(Conversation).where(Conversation.id == identity))
     return keys
@@ -91,7 +93,6 @@ def reset_unsent_draft(db, identity, *, keep_inputs: bool) -> set[str]:
     after the caller commits; the caller then clears the listing's hidden fields.
     """
     from vendoo_studio.models.conversation import utcnow
-    from vendoo_studio.models.listing_evidence import ListingCorrection
     from vendoo_studio.services.background_tasks import delete_history
     from vendoo_studio.services.vendoo_import import parse_notes
 
