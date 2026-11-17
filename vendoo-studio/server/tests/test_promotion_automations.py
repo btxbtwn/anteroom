@@ -305,6 +305,99 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.assertEqual(self.promoted(), [])
         self.assertTrue(self.db.get(PromotionAutomation, saved["id"]).enabled)
 
+    def test_mercari_minimum_offer_refusal_waits_a_day_before_the_scan_reads_it_again(self):
+        (first, item), (second, other) = self.mercari_items(2)
+        saved = self.create({**OFFER, "marketplace": "mercari", "shipping_label": None, "scope": "items",
+                             "conversation_ids": [first.id, second.id]})
+        self.enable(saved["id"])
+        original = self.answer
+
+        async def refuse(job, message_type, payload, timeout=0):
+            if message_type == "marketplace.promotion_check" and payload["listing_id"] == item:
+                # The reply recorded on the seller's account, 2026-11-17 (release 0.1.1006).
+                return {"ok": False, "error": "Mercari refused the request.", "error_code": "rejected", "safe_to_retry": True,
+                        "marketplace_message": "Oops! Your offer can't be less than $1.00.", "preview_step": "mercari-eligibility"}
+            return await original(job, message_type, payload, timeout)
+
+        self.bridge.side_effect = refuse
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(sorted(self.checked()), sorted([item, other]))
+        self.assertEqual([sent["listing_id"] for sent in self.promoted()], [other])
+        refusal = self.db.query(ListingPromotion).filter_by(listing_id=item).one()
+        self.assertEqual((refusal.state, refusal.sent_at, refusal.price_cents), ("skipped", None, None))
+        self.assertEqual(refusal.note, "Mercari would not allow an offer to likers on this listing: Oops! Your offer can't be less than $1.00.")
+        # The next scans do not read it again, and journal nothing new for it.
+        for _ in range(2):
+            self.db.expire_all()
+            self.bridge.reset_mock()
+            self.due(saved["id"])
+            self.tick()
+            self.assertEqual(self.checked(), [])
+        self.assertEqual(self.db.query(ListingPromotion).filter_by(listing_id=item).count(), 1)
+        self.assertIn(f"{promotion_automations.HELD_AFTER_REFUSAL} (1)",
+                      self.db.query(PromotionRun).order_by(PromotionRun.started_at.desc()).first().note)
+        self.assertTrue(self.db.get(PromotionAutomation, saved["id"]).enabled)
+        # A day later the scan reads it again.
+        refusal.created_at = _now() - timedelta(hours=24, minutes=1)
+        self.db.commit()
+        self.bridge.reset_mock()
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(self.checked(), [item])
+        self.assertEqual(self.promoted(), [])
+
+    def test_depop_product_not_found_waits_a_day_unless_a_like_arrives_and_unrecognized_404s_do_not(self):
+        (first, _p0), (second, _p1) = self.items[:2]
+        missing, older = "seller-missing-cami-top", "seller-older-bridge-top"
+        for conv, slug in ((first, missing), (second, older)):
+            conv.notes = merge_notes(conv.notes, {"vendooListingUrls": {"depop": f"https://www.depop.com/products/{slug}/"}})
+            self.likes[slug] = 3
+        self.db.commit()
+        saved = self.create({**OFFER, "marketplace": "depop", "shipping_label": None, "scope": "items",
+                             "conversation_ids": [first.id, second.id]})
+        self.enable(saved["id"])
+
+        async def not_found(job, message_type, payload, timeout=0):
+            if message_type == "marketplace.promotion_check":
+                facts = {"ok": False, "error": "Depop refused the request (HTTP 404).", "error_code": "rejected",
+                         "safe_to_retry": True, "marketplace_message": "Product not found"}
+                # A Bridge from before preview steps were reported is not recognized.
+                return facts if payload["listing_id"] == older else {**facts, "preview_step": "depop-product"}
+            return {"finished": False, "known": False}
+
+        self.bridge.side_effect = not_found
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(sorted(self.checked()), sorted([missing, older]))
+        self.assertEqual(self.db.query(ListingPromotion).filter_by(listing_id=missing).one().note,
+                         "Depop could not find a listing at this item's saved Depop link: Product not found")
+        self.assertEqual(self.db.query(ListingPromotion).filter_by(listing_id=older).one().note,
+                         "Depop refused the request (HTTP 404): Product not found")
+        self.db.expire_all()
+        self.bridge.reset_mock()
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(self.checked(), [older])
+        # A like on the held listing is read at once: Depop knows the listing by that link after all.
+        row = self.db.get(PromotionAutomation, saved["id"])
+        at = _now() - timedelta(seconds=10)
+        row.like_events_since = at - timedelta(seconds=10)
+        self.db.commit()
+        events = [{"listing_id": missing, "at": at.isoformat() + "Z"}]
+
+        async def liked(job, message_type, payload, timeout=0):
+            if message_type == "marketplace.like_events":
+                return {"ok": True, "events": events}
+            return await not_found(job, message_type, payload, timeout)
+
+        self.bridge.side_effect = liked
+        self.bridge.reset_mock()
+        self.check_likes()
+        self.assertEqual(self.checked(), [missing])
+        self.assertEqual(self.promoted(), [])
+        self.assertFalse(self.db.query(ListingPromotion).filter(ListingPromotion.sent_at.is_not(None)).count())
+
     def test_a_mercari_offer_rule_starts_off_and_pauses_on_an_unknown_result(self):
         (first, first_item), (second, second_item) = self.mercari_items(2)
         saved = self.create({**OFFER, "marketplace": "mercari", "shipping_label": None, "scope": "items",

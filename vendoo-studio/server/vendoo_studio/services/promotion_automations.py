@@ -35,6 +35,7 @@ from vendoo_studio.models.marketplace_listing import MarketplaceListing
 from vendoo_studio.models.promotion_automation import PromotionAutomation, PromotionRun
 from vendoo_studio.repositories.queries import JobRepo
 from vendoo_studio.services import listing_promotions as promotions
+from vendoo_studio.services import offer_preview_refusals
 from vendoo_studio.services.automation_age import load_listed_index, resolve_listed_at
 from vendoo_studio.services.automation_schedule import (
     ScheduleError,
@@ -68,6 +69,7 @@ READ_GAP_S = 2.0
 # has no such feed, so its daily re-check is how its new likes are found.
 LIKE_RECHECK = {"poshmark": timedelta(days=7), "depop": timedelta(days=7), "mercari": timedelta(days=1)}
 WAITING_FOR_LIKES = "no new likes since the last check"
+HELD_AFTER_REFUSAL = "refused at the last check; checked again a day later"
 TICK_S = 60.0
 # How long a due round waits for Chrome to reconnect, e.g. after a restart,
 # before it is recorded as unable to run.
@@ -334,6 +336,22 @@ def _waiting_for_likes(db: Session, row: PromotionAutomation, now: datetime) -> 
             and (likes < minimum or (offered.get(listing_id) is not None and likes <= cast(int, offered[listing_id])))}
 
 
+def _held_after_refusal(db: Session, row: PromotionAutomation, now: datetime) -> set[str]:
+    """Listings whose latest check by this rule, within a day, got a refusal that repeats until the listing changes."""
+    if row.action != "offer":
+        return set()
+    latest: dict[str, tuple[str, str | None, str | None]] = {}
+    for listing_id, state, note, message in db.query(
+        ListingPromotion.listing_id, ListingPromotion.state, ListingPromotion.note, ListingPromotion.marketplace_message,
+    ).filter(
+        ListingPromotion.automation_id == row.id, ListingPromotion.marketplace == row.marketplace,
+        ListingPromotion.action == "offer", ListingPromotion.created_at > now - offer_preview_refusals.HOLD,
+    ).order_by(ListingPromotion.created_at.desc()):
+        latest.setdefault(listing_id, (state, note, message))
+    return {listing_id for listing_id, (state, note, message) in latest.items()
+            if state == "skipped" and offer_preview_refusals.held_note(note, message)}
+
+
 def _skip_reason(exc: PromotionError, send: ListingPromotion) -> str:
     """The skip text, with the marketplace's own words when it gave them."""
     text = scrub(str(exc)) or "The marketplace did not answer."
@@ -375,6 +393,8 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
         remaining = (row.daily_cap or 0) - _shares_today(db, row.marketplace, now) if row.action == "share" else None
         # Like-feed rounds read their listings; the regular scan skips those still waiting for a like.
         waiting = _waiting_for_likes(db, row, now) if like_events is None else set()
+        # A new like means the listing is worth reading again now.
+        held = _held_after_refusal(db, row, now) if like_events is None else set()
         reads = 0
         batch = new_id()
         for conv, listing_id, _listed_at in targets:
@@ -390,6 +410,10 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                 if listing_id in waiting:
                     counts["skipped"] += 1
                     reasons[WAITING_FOR_LIKES] += 1
+                    continue
+                if listing_id in held:
+                    counts["skipped"] += 1
+                    reasons[HELD_AFTER_REFUSAL] += 1
                     continue
                 if blocked := promotions.blocking(db, row.marketplace, listing_id, "offer", new_like_at=new_like_at):
                     counts["skipped"] += 1
