@@ -29,6 +29,8 @@ struct Conversation: Identifiable, Codable, Hashable, Sendable {
     var directMarketplaces: [String] = []
     /// Every direct listing record by marketplace, for the inventory table.
     var directRecords: [String: DirectRecord] = [:]
+    /// Marketplaces a sold item sold on, from Anteroom's sales and Mark as sold. Their listing records may still read live.
+    var soldMarketplaces: [String] = []
     /// Marketplaces Anteroom delisted directly, though imported history says listed.
     var removedMarketplaces: [String] = []
     /// Units sold on Anteroom's sales ledger. An Active row with some sold reads "1 of 3 sold".
@@ -74,6 +76,7 @@ struct Conversation: Identifiable, Codable, Hashable, Sendable {
         case vendooMarketplaces = "vendoo_marketplaces"
         case directMarketplaces = "direct_marketplaces"
         case directRecords = "direct_records"
+        case soldMarketplaces = "sold_marketplaces"
         case removedMarketplaces = "removed_marketplaces"
         case unitsSold = "units_sold"
         case soldAt = "sold_at"
@@ -110,6 +113,7 @@ extension Conversation {
         vendooMarketplaces = try values.decodeIfPresent([String].self, forKey: .vendooMarketplaces) ?? []
         directMarketplaces = try values.decodeIfPresent([String].self, forKey: .directMarketplaces) ?? []
         directRecords = try values.decodeIfPresent([String: DirectRecord].self, forKey: .directRecords) ?? [:]
+        soldMarketplaces = try values.decodeIfPresent([String].self, forKey: .soldMarketplaces) ?? []
         removedMarketplaces = try values.decodeIfPresent([String].self, forKey: .removedMarketplaces) ?? []
         unitsSold = try values.decodeIfPresent(Int.self, forKey: .unitsSold) ?? 0
         quantity = try values.decodeIfPresent(Int.self, forKey: .quantity)
@@ -172,6 +176,8 @@ struct ConversationSummary: Identifiable, Codable, Hashable, Sendable {
     var directMarketplaces: [String] = []
     /// Every direct listing record by marketplace, for the inventory table.
     var directRecords: [String: DirectRecord] = [:]
+    /// Marketplaces a sold item sold on, from Anteroom's sales and Mark as sold. Their listing records may still read live.
+    var soldMarketplaces: [String] = []
     /// Marketplaces Anteroom delisted directly, though imported history says listed.
     var removedMarketplaces: [String] = []
     /// Units sold on Anteroom's sales ledger. An Active row with some sold reads "1 of 3 sold".
@@ -216,6 +222,7 @@ struct ConversationSummary: Identifiable, Codable, Hashable, Sendable {
         case vendooMarketplaces = "vendoo_marketplaces"
         case directMarketplaces = "direct_marketplaces"
         case directRecords = "direct_records"
+        case soldMarketplaces = "sold_marketplaces"
         case removedMarketplaces = "removed_marketplaces"
         case unitsSold = "units_sold"
         case soldAt = "sold_at"
@@ -252,6 +259,7 @@ extension ConversationSummary {
         vendooMarketplaces = try values.decodeIfPresent([String].self, forKey: .vendooMarketplaces) ?? []
         directMarketplaces = try values.decodeIfPresent([String].self, forKey: .directMarketplaces) ?? []
         directRecords = try values.decodeIfPresent([String: DirectRecord].self, forKey: .directRecords) ?? [:]
+        soldMarketplaces = try values.decodeIfPresent([String].self, forKey: .soldMarketplaces) ?? []
         removedMarketplaces = try values.decodeIfPresent([String].self, forKey: .removedMarketplaces) ?? []
         unitsSold = try values.decodeIfPresent(Int.self, forKey: .unitsSold) ?? 0
         quantity = try values.decodeIfPresent(Int.self, forKey: .quantity)

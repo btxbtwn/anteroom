@@ -17,6 +17,8 @@ export type Listing = {
   sold_at?: string | null;
   vendoo_marketplaces?: string[];
   direct_marketplaces?: string[];
+  /** Marketplaces a sold item sold on; their listing records may still read live. */
+  sold_marketplaces?: string[];
   direct_records?: Record<string, DirectRecord>;
   vendoo_listing_urls?: Record<string, string>;
   removed_marketplaces?: string[];

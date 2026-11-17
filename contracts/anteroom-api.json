@@ -157,6 +157,15 @@
             "description": "When Anteroom's sales ledger last saw a unit of this item sell.",
             "title": "Sold At"
           },
+          "sold_marketplaces": {
+            "default": [],
+            "description": "Marketplaces a sold item sold on, from Anteroom's sales and Mark as sold. Their listing records may still read live.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Sold Marketplaces",
+            "type": "array"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -517,6 +526,15 @@
             ],
             "description": "When Anteroom's sales ledger last saw a unit of this item sell.",
             "title": "Sold At"
+          },
+          "sold_marketplaces": {
+            "default": [],
+            "description": "Marketplaces a sold item sold on, from Anteroom's sales and Mark as sold. Their listing records may still read live.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Sold Marketplaces",
+            "type": "array"
           },
           "status": {
             "title": "Status",

@@ -126,6 +126,8 @@ class ConversationSummary(ContractModel):
     """Marketplaces Anteroom published directly."""
     direct_records: dict[str, DirectRecord] = {}
     """Every direct listing record by marketplace, for the inventory table."""
+    sold_marketplaces: list[str] = []
+    """Marketplaces a sold item sold on, from Anteroom's sales and Mark as sold. Their listing records may still read live."""
     removed_marketplaces: list[str] = []
     """Marketplaces Anteroom delisted directly, though imported history says listed."""
     units_sold: int = 0
