@@ -269,3 +269,83 @@ def test_load_splits_connection_database_and_assembly_time_and_counts_commits(mo
     finally:
         snapshots._build_phases.reset(token)
     assert phases == {'commits': 1, 'connect': 0.0, 'db': 5.0, 'assemble': 4.0}
+
+
+def test_inventory_slow_line_reports_a_real_seller_build(cloud, signing_keys, monkeypatch, caplog):  # noqa: F811
+    import logging
+    import re
+
+    from sqlalchemy.orm import Session
+
+    from vendoo_studio import database
+    from vendoo_studio.models.conversation import Conversation
+    from vendoo_studio.services import request_timing
+    from vendoo_studio.services.hosted_database import SellerDatabaseSession
+
+    client, engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/drafts', headers=alice, json={'title': 'Phase tee'}).json()['id']
+    # Finish one-time archive/settlement work before measuring ordinary reads.
+    assert client.get('/api/conversations', headers=alice).status_code == 200
+    assert client.get('/api/conversations', headers=alice).status_code == 200
+    sessions, original = [], snapshots._watch
+
+    def watch(db, phases):
+        sessions.append((type(db), db.get_bind() is database.engine))
+        original(db, phases)
+
+    monkeypatch.setattr(snapshots, '_watch', watch)
+    monkeypatch.setattr(request_timing, 'SLOW_SECONDS', 0)
+    # A leftover busy label with nothing generating: the inventory build's
+    # status reconcile corrects it and commits. Written outside the seller
+    # session, so no feed row; drop the cached snapshot to force a build.
+    with Session(engine) as db:
+        db.get(Conversation, identity).status = 'in_progress'
+        db.commit()
+    client.app.state.seller_reads.completed.clear()
+
+    def fields():
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger=request_timing.__name__):
+            assert client.get('/api/conversations', headers=alice).status_code == 200
+        [line] = [record.getMessage() for record in caplog.records
+                  if record.name == request_timing.__name__ and ' /api/conversations ' in record.getMessage()]
+        assert identity not in line and USER_ID not in line
+        return dict(field.split('=') for field in line.split()[6:])
+
+    corrected, rebuilt, hit = fields(), fields(), fields()
+    # The real build ran on a seller session bound to the engine whose pool
+    # the line reports.
+    assert sessions == [(SellerDatabaseSession, True), (SellerDatabaseSession, True)]
+    # Tests run on NullPool; hosted runs a DiagnosticQueuePool (see the next test).
+    size = getattr(engine.pool, 'size', None)
+    pool = rf'\d+/{size()}' if callable(size) else '0/0'
+    for line in (corrected, rebuilt, hit):
+        assert line['snapshot'] == 'inventory'
+        assert re.fullmatch(pool, line['pool_start']) and re.fullmatch(pool, line['pool_end'])
+    # The correction's commit moved the change vector, so that build was not
+    # cached and the next read built again without committing.
+    assert (corrected['builds'], corrected['uncached'], corrected['rows_le']) == ('1', '1', '10')
+    assert int(corrected['build_commits']) >= 1
+    assert (rebuilt['builds'], rebuilt['uncached'], rebuilt['build_commits']) == ('1', '0', '0')
+    assert (hit['builds'], hit['waits'], hit['build_total_ms']) == ('0', '0', '0')
+    for line in (corrected, rebuilt):
+        phases = [int(line[f'build_{phase}_ms']) for phase in ('connect', 'db', 'assemble', 'recheck')]
+        assert all(value >= 0 for value in phases)
+        assert sum(phases) <= int(line['build_total_ms']) + len(phases)  # rounding
+
+
+def test_pool_use_reads_the_hosted_queue_pool_without_a_query(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import NullPool
+
+    from vendoo_studio.database_pool import DiagnosticQueuePool
+
+    hosted = create_engine('sqlite://', poolclass=DiagnosticQueuePool, pool_size=3, max_overflow=2)
+    monkeypatch.setattr('vendoo_studio.database.engine', hosted)
+    assert snapshots._pool_use() == '0/3'
+    with hosted.connect():
+        assert snapshots._pool_use() == '1/3'
+    assert snapshots._pool_use() == '0/3'
+    monkeypatch.setattr('vendoo_studio.database.engine', create_engine('sqlite://', poolclass=NullPool))
+    assert snapshots._pool_use() == '0/0'
