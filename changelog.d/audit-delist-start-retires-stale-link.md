@@ -1,0 +1,1 @@
+- Delisting a new marketplace listing that fails or is still running no longer brings an old, already deleted listing link back as live, so a retry cannot delete the wrong listing or allow a duplicate.

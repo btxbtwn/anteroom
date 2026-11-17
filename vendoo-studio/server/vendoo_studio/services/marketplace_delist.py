@@ -474,29 +474,34 @@ def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
 
 def _start_delete(db: Session, conv_id: str, name: str, base: dict, job_id: str) -> dict | None:
     """Record the delete as started. Returns the eBay listing record the eBay delete reads."""
-    _record(db, conv_id, name, {**base, "state": "deleting"})
+    _record_delete(db, conv_id, name, {**base, "state": "deleting"})
     JobRepo(db).add_event(job_id, "native_progress", "native_delist", {"marketplace": name, "step": "delist", "label": "Delisting"})
     return MarketplaceListingRepo(db).get(conv_id, "ebay") if name == "ebay" else None
 
 
-def _deleted(db: Session, conv_id: str, name: str, base: dict) -> None:
-    """Record a confirmed delete, in one notes write with retiring a superseded seller link.
+def _record_delete(db: Session, conv_id: str, name: str, value: dict) -> None:
+    """Write a delete record, in one notes write with retiring a superseded seller link.
 
     Delist targets the seller's "listed" link unless a newer receipt superseded
-    it. Deleting a different listing than the marked one means the mark names
-    an older, already removed listing; left in place it would read as live
-    again once the newer receipt is cleared.
+    it, so a delete of a different listing than the marked one means the mark
+    names an older, already removed listing. The record of that removal is
+    replaced here, so the mark goes with it: kept, it would read as live again
+    while this delete runs, after it fails, or once its receipt is cleared.
     """
     conv = ConversationRepo(db).get(conv_id)
     assert conv is not None
     db.refresh(conv)
     notes = parse_notes(conv.notes)
     delists = {key: entry for key, entry in _notes_dict(notes, "marketplaceDelists").items() if key != name}
-    updates: dict = {"marketplaceDelists": {**delists, name: {**base, "state": "deleted", "error": None, "at": _now()}}}
+    updates: dict = {"marketplaceDelists": {**delists, name: value}}
     marks = _notes_dict(notes, "marketplaceMarks")
     mark = marks.get(name)
-    if isinstance(mark, dict) and mark.get("state") == "listed" and listing_id(name, mark.get("url")) != base.get("listing_id"):
+    if isinstance(mark, dict) and mark.get("state") == "listed" and listing_id(name, mark.get("url")) != value.get("listing_id"):
         updates["marketplaceMarks"] = {key: entry for key, entry in marks.items() if key != name}
     conv.notes = merge_notes(conv.notes, updates)
     db.commit()
+
+
+def _deleted(db: Session, conv_id: str, name: str, base: dict) -> None:
+    _record_delete(db, conv_id, name, {**base, "state": "deleted", "error": None, "at": _now()})
     _forget_deleted_listing(db, conv_id, name)
