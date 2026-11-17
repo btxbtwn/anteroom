@@ -6,10 +6,12 @@ import { test, expect } from "@playwright/test";
 const api = `http://127.0.0.1:${process.env.VENDOO_STUDIO_PORT || "4341"}`;
 // A 4 x 6 portrait PNG: a quarter turn shows up as swapped saved dimensions.
 const portrait = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAQAAAAGCAIAAABrW6giAAAAFElEQVR4nGM8ISfHAANMDEiAHA4AT/wBEFJ55UUAAAAASUVORK5CYII=", "base64");
-// A 6 x 4 landscape PNG with different bytes, so the test can refuse this upload alone.
-const refusedLandscape = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAYAAAAECAIAAAAiZtkUAAAAFElEQVR4nGOUkzvBgAqYGDAAcUIAS/oBDEoDsgIAAAAASUVORK5CYII=", "base64");
+// A 6 x 4 landscape PNG. Each fixture has its own bytes, so the test can refuse one upload alone.
+const landscape = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAYAAAAECAIAAAAiZtkUAAAAFElEQVR4nGOUkzvBgAqYGDAAcUIAS/oBDEoDsgIAAAAASUVORK5CYII=", "base64");
+// Jeans' own 4 x 6 portrait, never matched by the refusal.
+const jeansPortrait = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAQAAAAGCAIAAABrW6giAAAAFElEQVR4nGOUW2DDAANMDEiAHA4ATDwBBjQLLX8AAAAASUVORK5CYII=", "base64");
 
-test("hosted folder drafts keep a preview turn when another photo in the folder is refused", async ({ page, request }, info) => {
+test("hosted folder drafts keep a preview turn when the folder's first photo is refused", async ({ page, request }, info) => {
   test.setTimeout(120_000);
   const login = await request.post(`${api}/local/auth/v1/token?grant_type=password`, {
     data: { email: "alice@sandbox.test", password: "sandbox" },
@@ -23,15 +25,15 @@ test("hosted folder drafts keep a preview turn when another photo in the folder 
   const created: string[] = [];
   let refused = 0;
   try {
-    // Coat: a refused landscape photo and a portrait photo turned in the preview.
-    // Jeans: the same portrait, untouched. Hosted storage names every photo the
-    // same, so only the client's own record of which file it sent can pair the
-    // turn with the saved photo and keep it off the refused one.
+    // Coat: a landscape and a portrait. Its first photo is refused and its second
+    // turned, so a turn paired with saved photos by position would land wrongly.
+    // Jeans: untouched. Hosted storage names every photo the same, so only the
+    // client's own record of which file it sent can pair the turn correctly.
     await mkdir(join(directory, "Coat"));
-    await writeFile(join(directory, "Coat", "a.png"), refusedLandscape);
+    await writeFile(join(directory, "Coat", "a.png"), landscape);
     await writeFile(join(directory, "Coat", "b.png"), portrait);
     await mkdir(join(directory, "Jeans"));
-    await writeFile(join(directory, "Jeans", "b.png"), portrait);
+    await writeFile(join(directory, "Jeans", "b.png"), jeansPortrait);
 
     await page.goto("/?sign-in");
     await page.getByLabel("Email address").fill("alice@sandbox.test");
@@ -46,16 +48,20 @@ test("hosted folder drafts keep a preview turn when another photo in the folder 
     const dialog = page.getByRole("dialog", { name: "Set details for 2 listings" });
     const coat = dialog.locator("li.bulk-upload-group")
       .filter({ has: page.getByRole("textbox", { name: "Size tag for Coat", exact: true }) });
-    // The order inside a folder follows the file system, so find the portrait by its pixels.
+    // The order inside a folder follows the file system, so read it from the preview:
+    // refuse whichever photo is first and turn the second.
     const thumbs = coat.locator(".photo-thumb img");
     await expect(thumbs).toHaveCount(2);
     await expect.poll(() => thumbs.evaluateAll(images => images.every(image => (image as HTMLImageElement).naturalWidth > 0))).toBe(true);
-    const shapes = await thumbs.evaluateAll(images => images.map(image => (image as HTMLImageElement).naturalWidth < (image as HTMLImageElement).naturalHeight));
-    const portraitIndex = shapes.indexOf(true);
-    expect(portraitIndex).toBeGreaterThanOrEqual(0);
-    await coat.getByRole("button", { name: `Rotate photo ${portraitIndex + 1} right`, exact: true }).click();
+    const shapes = await thumbs.evaluateAll(images => images.map(image => (image as HTMLImageElement).naturalWidth > (image as HTMLImageElement).naturalHeight));
+    expect(new Set(shapes).size).toBe(2);
+    const firstIsLandscape = shapes[0];
+    const refusedBytes = firstIsLandscape ? landscape : portrait;
+    // The second photo turned a quarter: a portrait saves 6x4, a landscape 4x6.
+    const coatSaved = firstIsLandscape ? "6x4" : "4x6";
+    await coat.getByRole("button", { name: "Rotate photo 2 right", exact: true }).click();
     await page.route("**/api/drafts/*/photos", async route => {
-      if (route.request().method() === "POST" && route.request().postDataBuffer()?.equals(refusedLandscape)) {
+      if (route.request().method() === "POST" && route.request().postDataBuffer()?.equals(refusedBytes)) {
         refused += 1;
         return route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "Storage is unavailable." }) });
       }
@@ -74,8 +80,8 @@ test("hosted folder drafts keep a preview turn when another photo in the folder 
       const photos = await (await request.get(`${api}/api/conversations/${draftID}/photos`, { headers })).json();
       return [draft.title, photos.map((photo: { width: number; height: number }) => `${photo.width}x${photo.height}`)];
     })));
-    // Only Coat's portrait was turned; the refused landscape never saved, and no turn moved onto it.
-    await expect.poll(saved, { timeout: 30_000 }).toEqual({ Coat: ["6x4"], Jeans: ["4x6"] });
+    // Coat keeps only its second photo, turned; the refused first never saved.
+    await expect.poll(saved, { timeout: 30_000 }).toEqual({ Coat: [coatSaved], Jeans: ["4x6"] });
   } finally {
     await page.unroute("**/api/drafts/*/photos");
     for (const draftID of [host, ...created]) await request.delete(`${api}/api/drafts/${draftID}`, { headers });
