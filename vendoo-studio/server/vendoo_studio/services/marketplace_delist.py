@@ -38,9 +38,11 @@ BROWSER_MARKETPLACES = {"poshmark", "mercari", "depop"}
 
 
 class DelistError(RuntimeError):
-    def __init__(self, status_code: int, detail: str):
+    def __init__(self, status_code: int, detail: str, reason: str | None = None):
         super().__init__(detail)
         self.status_code = status_code
+        # Sent as X-Anteroom-Reason so the app can offer the right next step.
+        self.reason = reason
 
 
 def _now() -> str:
@@ -279,14 +281,15 @@ def _forget_deleted_listing(db: Session, conv_id: str, marketplace: str) -> None
 MARKS = ("listed", "sold", "not_listed")
 
 
-def mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | None = None) -> dict:
+def mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | None = None,
+         relink_deleted: bool = False) -> dict:
     # Serialise duplicate validation and the local write with other seller
     # marks and direct action starts in this process.
     with start_gate():
-        return _mark(db, conv_id, marketplace, state, url)
+        return _mark(db, conv_id, marketplace, state, url, relink_deleted)
 
 
-def _mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | None) -> dict:
+def _mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | None, relink_deleted: bool = False) -> dict:
     """Record what the seller says about one marketplace. The marketplace itself is not touched.
 
     A mark also settles an unconfirmed direct listing: the seller has looked.
@@ -307,6 +310,17 @@ def _mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | No
 
         if any(conv.id != conv_id for conv in matching_listings(db, marketplace, item_id)):
             raise DelistError(409, "This marketplace listing is already linked to another item. Resolve the duplicate before linking it here.")
+        conv = ConversationRepo(db).get(conv_id)
+        if conv is not None:
+            # A delist writes through its own sessions; read the record it left.
+            db.refresh(conv)
+        deleted = _notes_dict(parse_notes(conv.notes if conv else None), "marketplaceDelists").get(marketplace)
+        if not relink_deleted and isinstance(deleted, dict) and deleted.get("state") == "deleted" and deleted.get("listing_id") == item_id:
+            # An old link pasted back by mistake would make Update, offers and
+            # Delist act on a listing that is gone. Only the seller's look can say otherwise.
+            name = marketplace.title()
+            raise DelistError(409, f"Anteroom delisted this {name} listing. Paste the link to the listing that is live on {name} now, "
+                                   f"or confirm it is still there if you just checked.", reason="deleted_listing")
         value.update(url=clean, listing_id=item_id)
     else:
         value.update(url=known.get("url"), listing_id=known.get("listing_id"))

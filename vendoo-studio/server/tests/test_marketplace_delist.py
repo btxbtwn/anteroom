@@ -150,9 +150,34 @@ class MarketplaceDelistTest(unittest.TestCase):
         body = self.client.post(f"{self.base}/mercari/mark", json={"state": "listed", "url": URLS["mercari"]}).json()
         self.assertEqual((body["mercari"]["listing_id"], body["mercari"]["source"], body["mercari"]["state"]), ("m70565754838", "seller", "live"))
         self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["mercari"], "confirm": True}).json()["mercari"]["state"], "deleted")
-        self.client.post(f"{self.base}/mercari/mark", json={"state": "listed", "url": URLS["mercari"]})
+        # The seller looked and the deleted listing is still there: linking it again needs that confirmation.
+        self.client.post(f"{self.base}/mercari/mark", json={"state": "listed", "url": URLS["mercari"], "relink_deleted": True})
         self.assertEqual(self.client.get(self.base).json()["mercari"]["state"], "live")
         self.ebay.assert_not_called()
+
+    def test_marking_listed_with_the_link_anteroom_deleted_needs_confirmation(self):
+        self.client.post(f"{self.base}/mercari/mark", json={"state": "listed", "url": URLS["mercari"]})
+        self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["mercari"], "confirm": True}).json()["mercari"]["state"], "deleted")
+        refused = self.client.post(f"{self.base}/mercari/mark", json={"state": "listed", "url": URLS["mercari"] + "?ref=share"})
+        self.assertEqual(refused.status_code, 409, refused.text)
+        self.assertEqual(refused.headers.get("X-Anteroom-Reason"), "deleted_listing")
+        self.assertIn("Anteroom delisted this Mercari listing", refused.json()["detail"])
+        self.assertEqual(self.client.get(self.base).json()["mercari"]["state"], "deleted")
+        # The seller looked and it is still there: an explicit confirmation links it.
+        relinked = self.client.post(f"{self.base}/mercari/mark", json={"state": "listed", "url": URLS["mercari"], "relink_deleted": True})
+        self.assertEqual(relinked.status_code, 200, relinked.text)
+        self.assertEqual(relinked.json()["mercari"]["state"], "live")
+        self.ebay.assert_not_called()
+
+    def test_a_new_link_replaces_a_deleted_listing_without_confirmation(self):
+        self.client.post(f"{self.base}/mercari/mark", json={"state": "listed", "url": URLS["mercari"]})
+        self.client.post(f"{self.base}/delist", json={"marketplaces": ["mercari"], "confirm": True})
+        replaced = self.client.post(f"{self.base}/mercari/mark", json={"state": "listed", "url": "https://www.mercari.com/us/item/m11111111111"})
+        self.assertEqual(replaced.status_code, 200, replaced.text)
+        entry = replaced.json()["mercari"]
+        self.assertEqual((entry["listing_id"], entry["state"]), ("m11111111111", "live"))
+        self.db.expire_all()
+        self.assertNotIn("mercari", parse_notes(self.conv.notes).get("marketplaceDelists", {}))
 
     def test_a_seller_linked_listing_matches_relay_sales(self):
         from vendoo_studio.services.relay_sales import find_listing

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MarketplaceListings } from "../api/marketplaceListings";
 import type { ListingData } from "../api/types";
 import type { MissingField, NativeDraft, NativeDrafts, PreflightGap } from "../api/nativeMarketplaces";
-import { MarketplacesLayout, MarketplacesSection, askChatPrompt, deletable, listChoice, reconnectText, rowStatus, saidBesideList } from "./MarketplacesSection";
+import { MarketplacesLayout, MarketplacesSection, askChatPrompt, deletable, listChoice, markListedPrefill, reconnectText, rowStatus, saidBesideList } from "./MarketplacesSection";
 import { readyMarketplaces } from "./ListEverywhereDialog";
 import { waitlist } from "./MarketplaceActivity";
 
@@ -602,4 +602,28 @@ it("disables only the agent's target row and labels it while other fields stay e
   expect(html).toContain('fieldset data-listing-row="ebay_specifics.Color"');
   expect(html.match(/Agent editing/g)).toHaveLength(1);
   expect(html).toContain('Ask chat');
+});
+
+
+describe("Mark as listed prefill", () => {
+  const sellerLink = { url: "https://www.depop.com/products/seller-old-157e/", listing_id: "seller-old-157e", source: "seller", sold_here: false } as const;
+
+  it("offers the seller's own live link to correct it", () => {
+    expect(markListedPrefill({ ...sellerLink, state: "live" }, false)).toBe(sellerLink.url);
+  });
+
+  it("never offers a link Anteroom recorded as deleted", () => {
+    expect(markListedPrefill({ ...sellerLink, state: "deleted" }, false)).toBe("");
+  });
+
+  it("offers nothing while the last marketplace action is unconfirmed", () => {
+    // The seller is about to name the listing that is really there; an old link is one click from replacing it.
+    expect(markListedPrefill({ ...sellerLink, state: "live" }, true)).toBe("");
+  });
+
+  it("offers nothing for links Anteroom or Vendoo reported", () => {
+    expect(markListedPrefill({ ...sellerLink, source: "anteroom", state: "live" }, false)).toBe("");
+    expect(markListedPrefill({ ...sellerLink, source: "vendoo", state: "live" }, false)).toBe("");
+    expect(markListedPrefill(undefined, false)).toBe("");
+  });
 });
