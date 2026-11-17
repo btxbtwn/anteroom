@@ -25,7 +25,7 @@ class PostgresTimingArtifacts(unittest.TestCase):
         safe_path = path.replace('pg-durations-', 'pg-duration-hashes-')
         self.assertIn(f'--input "{path}"', postgres)
         self.assertIn(f'--output "{safe_path}"', postgres)
-        self.assertIn(f'path: {safe_path}', postgres)
+        self.assertIn(f'            {safe_path}', postgres)
         self.assertNotIn(f'path: {path}', postgres)
         self.assertIn('id: postgres-tests', postgres)
         self.assertIn("if: success() && steps.postgres-tests.outcome == 'success'", postgres)
