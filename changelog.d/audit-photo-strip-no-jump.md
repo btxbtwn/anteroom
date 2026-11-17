@@ -1,0 +1,1 @@
+- A marketplace form no longer jumps while Anteroom re-checks its fields after a change, so tapping a photo right after reordering opens it.
