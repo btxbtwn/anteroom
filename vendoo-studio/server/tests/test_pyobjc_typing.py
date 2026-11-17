@@ -37,6 +37,10 @@ def test_stub_public_exports_exist_at_runtime(module):
             node.target.id if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) else '')
         if name and not name.startswith('_'):
             assert hasattr(runtime, name), (module, name)
+            if isinstance(node, ast.ClassDef):
+                for member in node.body:
+                    if isinstance(member, ast.FunctionDef):
+                        assert hasattr(getattr(runtime, name), member.name), (module, name, member.name)
 
 
 @pytest.mark.parametrize('missing', ['handler', 'request', 'address'])
@@ -71,35 +75,75 @@ def test_missing_vision_results_are_reported_and_buffers_unlocked(monkeypatch, m
 @pytest.mark.parametrize('invalid', [False, True])
 def test_framework_type_contract(tmp_path, invalid):
     source = tmp_path / 'calls.py'
-    source.write_text('''from Foundation import NSURL, NSURLRequest
+    common = '''from Foundation import NSURL, NSURLRequest, NSData, NSStringFromSelector
+from AppKit import NSImage, NSApplication
 from Security import SecItemAdd, SecItemUpdate
-from Quartz import CVPixelBufferGetWidth
+from Quartz import CVPixelBufferRef, CVPixelBufferGetWidth, CVPixelBufferGetBaseAddress
+from Vision import VNImageRequestHandler, VNGenerateForegroundInstanceMaskRequest
+from objc import selector, classAddMethods
 url = NSURL.URLWithString_("https://example.com")
 if url is not None:
     request = NSURLRequest.requestWithURL_(url)
 status: int = SecItemUpdate({"service": "synthetic"}, {"value": b"test"})
 code, result = SecItemAdd({"service": "synthetic"}, None)
-'''+('''SecItemUpdate([], {})
-NSURL.URLWithString_(123)
-CVPixelBufferGetWidth("not a pixel buffer")
-NSURLRequest.requestWithURL_(None)
-''' if invalid else ''))
+name: str | None = NSStringFromSelector("copy:")
+image = NSImage.alloc().initWithContentsOfFile_("synthetic.png")
+NSApplication.sharedApplication().setApplicationIconImage_(image)
+def callback(owner: object, view: object) -> None:
+    pass
+classAddMethods(NSApplication, [selector(callback, selector=b"callback:", signature=b"v@:@")])
+data = NSData.dataWithBytes_length_(b"x", 1)
+handler = VNImageRequestHandler.alloc().initWithData_options_(data, None)
+vision_request = VNGenerateForegroundInstanceMaskRequest.alloc().init()
+if handler is not None and vision_request is not None:
+    ok, error = handler.performRequests_error_([vision_request], None)
+def pixels(buffer: CVPixelBufferRef) -> None:
+    address = CVPixelBufferGetBaseAddress(buffer)
+    if address is not None:
+        raw: memoryview = address.as_buffer(4)
+'''
+    bad_calls = [
+        ('SecItemUpdate([], {})', 'reportArgumentType'),
+        ('NSURL.URLWithString_(123)', 'reportArgumentType'),
+        ('CVPixelBufferGetWidth("not a pixel buffer")', 'reportArgumentType'),
+        ('NSURLRequest.requestWithURL_(NSURL.URLWithString_("https://example.com"))', 'reportArgumentType'),
+        ('bad_status: int = SecItemAdd({}, None)', 'reportAssignmentType'),
+        ('bad_name: str = NSStringFromSelector(None)', 'reportAssignmentType'),
+        ('NSImage.alloc().initWithContentsOfFile_(123)', 'reportArgumentType'),
+        ('selector("not callable", selector=b"x:", signature=b"v@:@")', 'reportArgumentType'),
+        ('classAddMethods(123, [])', 'reportArgumentType'),
+        ('handler.performRequests_error_([], None)', 'reportOptionalMemberAccess'),
+        ('def bad_pixels(buffer: CVPixelBufferRef) -> None:\n    CVPixelBufferGetBaseAddress(buffer).as_buffer(4)',
+         'reportOptionalMemberAccess'),
+    ] if invalid else []
+    lines = common.splitlines()
+    expected = []
+    for call, rule in bad_calls:
+        parts = call.splitlines()
+        expected.append((len(lines) + len(parts) - 1, rule))
+        lines.extend(parts)
+    source.write_text('\n'.join(lines) + '\n')
     config = tmp_path / 'pyrightconfig.json'
     config.write_text(json.dumps({'include': [str(source)], 'stubPath': str(ROOT / 'typings'),
                                  'pythonVersion': '3.12', 'typeCheckingMode': 'standard'}))
     run = subprocess.run([sys.executable, '-m', 'basedpyright', '--project', str(config), '--outputjson'],
-                         capture_output=True, text=True, timeout=60)
+                         capture_output=True, text=True, timeout=120)
     result = json.loads(run.stdout)
-    assert result['summary']['errorCount'] == (4 if invalid else 0), result
+    errors = [d for d in result['generalDiagnostics'] if d['severity'] == 'error']
+    assert sorted((d['range']['start']['line'], d.get('rule')) for d in errors) == sorted(expected), result
+    assert all(Path(d['file']) == source for d in errors), result
     assert run.returncode == (1 if invalid else 0), run.stderr
 
 
 @pytest.mark.skipif(sys.platform != 'darwin', reason='installed macOS framework metadata')
 def test_bridge_out_parameters_and_pixel_memory():
+    from Foundation import NSStringFromSelector
     import Quartz
     import Security
     import Vision
 
+    assert NSStringFromSelector(None) is None
+    assert NSStringFromSelector('copy:') == NSStringFromSelector(b'copy:') == 'copy:'
     assert Security.SecItemUpdate.__metadata__()['retval']['type'] == b'i'
     assert Security.SecItemAdd.__metadata__()['arguments'][1]['type'] == b'o^@'
     assert Vision.VNImageRequestHandler.performRequests_error_.__metadata__()['arguments'][3]['type'] == b'o^@'

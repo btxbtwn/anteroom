@@ -1,5 +1,8 @@
 from collections.abc import Callable, Sequence
 
+class varlist:
+    def as_buffer(self, size: int) -> memoryview: ...
+
 class selector:
     def __init__(self, function: Callable[[object, object], None], *, selector: bytes, signature: bytes) -> None: ...
 
