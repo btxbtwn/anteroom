@@ -137,7 +137,9 @@ def build_report(record: logging.LogRecord) -> dict[str, Any]:
         # frames, so every operation that hit it shared one group. Name the
         # innermost Anteroom frame then (module path and function, no line or
         # values). Groups that already keep an Anteroom frame are unchanged.
-        if not any(_app_module(f) for f in identity_frames[-8:]):
+        # Pool timeouts stay one group per incident: whichever function was
+        # waiting for a connection is not a different failure.
+        if not isinstance(value, PoolTimeout) and not any(_app_module(f) for f in identity_frames[-8:]):
             site = next(((module, f.name) for f in reversed(identity_frames) if (module := _app_module(f))), None)
             if site is not None:
                 identity += (site,)

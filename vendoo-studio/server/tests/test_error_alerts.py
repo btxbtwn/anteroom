@@ -543,3 +543,43 @@ def test_groups_that_already_show_an_app_frame_keep_their_fingerprint():
     named = tuple((line.split('"')[1].rsplit('/', 1)[-1], line.rsplit(' in ', 1)[1]) for line in frames)
     expected = hashlib.sha256(repr(('psycopg.errors.QueryCanceled', named[-8:])).encode()).hexdigest()[:12]
     assert report['fingerprint'] == expected
+
+
+def test_pool_timeouts_through_a_session_keep_one_group_whatever_the_call_site():
+    # A pool timeout reached through a session sits under a dozen library
+    # frames. It must keep the pre-fix fingerprint, one group per incident,
+    # not split per Anteroom function that happened to wait for a connection.
+    import hashlib
+
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.exc import TimeoutError as PoolTimeout
+    from sqlalchemy.orm import Session
+
+    from vendoo_studio.database_pool import DiagnosticQueuePool
+
+    engine = create_engine('sqlite://', poolclass=DiagnosticQueuePool, pool_size=1, max_overflow=0, pool_timeout=0.001)
+
+    def timeout_from(route_file, route_name):
+        route = {'Session': Session, 'engine': engine, 'text': text}
+        exec(compile(f"def {route_name}():\n    with Session(engine) as db:\n        return db.execute(text('select 1'))\n",
+                     f'/app/vendoo-studio/server/vendoo_studio/{route_file}', 'exec'), route)
+        with engine.connect():
+            try:
+                route[route_name]()
+            except PoolTimeout:
+                record = logging.LogRecord('vendoo_studio.http', logging.ERROR, '/hosted.py', 1,
+                                           'Unhandled exception in GET %s', ('/api/x',), sys.exc_info())
+        return build_report(record)
+
+    try:
+        catalog = timeout_from('routes/catalog.py', 'categories')
+        inventory = timeout_from('routes/hosted_workspace.py', 'inventory_response')
+    finally:
+        engine.dispose()
+    assert catalog['fingerprint'] == inventory['fingerprint']
+    frames = [line.strip() for line in catalog['stack'].splitlines() if line.strip().startswith('File "')]
+    kept = [line for line in frames if not line.split('"')[1].endswith('/vendoo_studio/database_pool.py')]
+    named = tuple((line.split('"')[1].rsplit('/', 1)[-1], line.rsplit(' in ', 1)[1]) for line in kept)
+    assert not any('/vendoo_studio/' in line.split('"')[1] for line in kept[-8:]), 'the stack must be deep enough to matter'
+    expected = hashlib.sha256(repr(('sqlalchemy.exc.TimeoutError', named[-8:])).encode()).hexdigest()[:12]
+    assert catalog['fingerprint'] == expected
