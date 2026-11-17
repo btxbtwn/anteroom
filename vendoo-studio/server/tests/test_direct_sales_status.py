@@ -7,10 +7,12 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, event, text, update
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from test_seller_ownership import migration_engine  # noqa: F401
 from vendoo_studio.services import listing_persistence
 from vendoo_studio.database import Base, get_db, load_models
 from vendoo_studio.main import app
@@ -52,6 +54,17 @@ def env(monkeypatch):
     app.dependency_overrides.pop(get_db, None)
     db.close()
     engine.dispose()
+
+
+@pytest.fixture
+def undo_env(env, migration_engine):  # noqa: F811
+    """Exercise sale undo on the selected dialect, not env's SQLite stand-in."""
+    from vendoo_studio.services import schema_migrations
+
+    schema_migrations.ensure_schema(migration_engine)
+    with Session(bind=migration_engine) as db:
+        app.dependency_overrides[get_db] = lambda: db
+        yield SimpleNamespace(db=db, client=env.client)
 
 
 def item(db, conv_id, *, quantity=1, notes=None, price=40, cost=5):
@@ -414,6 +427,179 @@ def test_deleting_a_recorded_sale_puts_the_item_back(env):
     assert status(env.db, "coat").status == "active"
     assert marketplace_delist.listings(env.db, "coat")["ebay"]["sold_here"] is False
     assert env.client.get(f"/api/sales-ledger/{sale_id}").status_code == 404
+
+
+@pytest.mark.parametrize("notes,restored", [(None, "draft"), ({"vendooStatus": "active"}, "active")])
+def test_deleting_the_sale_reopens_the_persisted_inventory_item(undo_env, notes, restored):
+    env = undo_env
+    env.db.add(Conversation(id="local", title="Local sale undo", status=restored,
+                            notes=json.dumps(notes) if notes else None))
+    env.db.commit()
+    listing_persistence.save_revision(env.db, "local", {"title": "Local sale undo", "price": 45}, "user")
+    sale = mark_sold(env, "local", item_revenue="45").json()["sale"]
+    # The inventory refresh persists the sale's Sold projection and settlement.
+    assert env.client.get("/api/conversations").status_code == 200
+    before = env.client.get("/api/conversations/local").json()
+    assert before["status"] == "sold" and before["settled_at"] is not None
+
+    response = remove(env, sale["id"], sale["financial_revision"])
+    assert response.status_code == 200, response.text
+    assert env.client.get(f"/api/sales-ledger/{sale['id']}").status_code == 404
+    assert env.db.query(MarketplaceSale).count() == 0
+    # A new read must agree with the ledger, not preserve the cached Sold label.
+    after = env.client.get("/api/conversations/local").json()
+    assert after["status"] == restored
+    assert after["settled_at"] is None
+    # Undo is not an explicit Keep open instruction for all future sales.
+    assert after["unsettled_at"] is None
+    sidebar = {row["id"]: row for row in env.client.get("/api/conversations").json()}
+    assert sidebar["local"]["status"] == restored
+    assert sidebar["local"]["settled_at"] is None
+    assert mark_sold(env, "local", item_revenue="45").status_code == 200
+    env.client.get("/api/conversations")
+    sold_again = env.client.get("/api/conversations/local").json()
+    assert sold_again["status"] == "sold" and sold_again["settled_at"]
+
+
+def test_failed_sale_status_reconciliation_rolls_back_deletion_and_its_sold_mark(undo_env, monkeypatch):
+    from vendoo_studio.services import item_status, sales_ledger
+
+    env = undo_env
+    item(env.db, "coat", notes={"vendooStatus": "active", "vendooListingUrls": {"ebay": EBAY_URL}})
+    sale = mark_sold(env, "coat", marketplace="ebay", item_revenue="45").json()["sale"]
+    env.client.get("/api/conversations")
+    before = env.client.get("/api/conversations/coat").json()
+
+    def fail(*_args):
+        raise RuntimeError("fixture status read failed")
+
+    monkeypatch.setattr(item_status, "status_for", fail)
+    with pytest.raises(RuntimeError, match="fixture status read failed"):
+        sales_ledger.delete_seller_sale(env.db, sale["id"], sale["financial_revision"])
+    env.db.rollback()
+    assert env.db.get(MarketplaceSale, sale["id"]) is not None
+    env.db.expire_all()
+    conv = env.db.get(Conversation, "coat")
+    assert conv.status == "sold" and conv.settled_at.isoformat() == before["settled_at"]
+    assert marketplace_delist.listings(env.db, "coat")["ebay"]["sold_here"] is True
+
+
+@pytest.mark.parametrize("remaining", ["sale", "manual_mark", "imported_sold"])
+def test_sale_deletion_preserves_remaining_sold_evidence_and_settlement(undo_env, remaining):
+    env = undo_env
+    item(env.db, "coat")
+    sale = mark_sold(env, "coat", item_revenue="45").json()["sale"]
+    if remaining == "sale":
+        line(env.db, "coat", order="remaining-paid-order")
+    else:
+        conv = env.db.get(Conversation, "coat")
+        conv.notes = json.dumps({"vendooStatus": "sold"} if remaining == "imported_sold" else {
+            "marketplaceMarks": {"poshmark": {"state": "sold", "at": datetime.now(UTC).isoformat()}}})
+        env.db.commit()
+    env.client.get("/api/conversations")
+    before = env.client.get("/api/conversations/coat").json()
+    assert before["status"] == "sold" and before["settled_at"]
+
+    assert remove(env, sale["id"], sale["financial_revision"]).status_code == 200
+    after = env.client.get("/api/conversations/coat").json()
+    assert after["status"] == "sold"
+    assert after["settled_at"] == before["settled_at"]
+    assert env.db.query(MarketplaceSale).count() == (1 if remaining == "sale" else 0)
+
+
+def test_deleting_one_unit_reopens_a_still_live_multi_unit_item(undo_env):
+    env = undo_env
+    item(env.db, "tees", quantity=2, notes={"vendooStatus": "active", "vendooListingUrls": {"ebay": EBAY_URL}})
+    first = mark_sold(env, "tees", quantity=1).json()["sale"]
+    mark_sold(env, "tees", quantity=1)
+    env.client.get("/api/conversations")
+    assert env.client.get("/api/conversations/tees").json()["status"] == "sold"
+    assert remove(env, first["id"], first["financial_revision"]).status_code == 200
+    after = env.client.get("/api/conversations/tees").json()
+    assert after["status"] == "active" and after["settled_at"] is None
+    assert status(env.db, "tees").units_sold == 1
+    assert marketplace_delist.listings(env.db, "tees")["ebay"]["state"] == "live"
+
+
+def test_deleting_a_partial_sale_preserves_an_unrelated_manually_finished_draft(undo_env):
+    env = undo_env
+    env.db.add(Conversation(id="local", title="Finished draft", status="draft"))
+    env.db.commit()
+    listing_persistence.save_revision(env.db, "local", {"title": "Finished draft", "quantity": 2}, "user")
+    sale = mark_sold(env, "local").json()["sale"]
+    ConversationRepo(env.db).settle("local")
+    before = env.client.get("/api/conversations/local").json()
+    assert before["status"] == "draft" and before["settled_at"]
+    assert remove(env, sale["id"], sale["financial_revision"]).status_code == 200
+    after = env.client.get("/api/conversations/local").json()
+    assert after["status"] == "draft" and after["settled_at"] == before["settled_at"]
+
+
+def test_stale_sale_delete_keeps_the_sale_and_sold_settlement(undo_env):
+    env = undo_env
+    item(env.db, "coat")
+    sale = mark_sold(env, "coat", item_revenue="45").json()["sale"]
+    env.client.get("/api/conversations")
+    before = env.client.get("/api/conversations/coat").json()
+    assert sale["financial_revision"] == 1
+    assert remove(env, sale["id"], revision=0).status_code == 409
+    after = env.client.get("/api/conversations/coat").json()
+    assert after["status"] == "sold" and after["settled_at"] == before["settled_at"]
+    assert env.db.query(MarketplaceSale).count() == 1
+
+
+@pytest.mark.parametrize("busy", ["in_progress", "listing"])
+def test_sale_delete_reloads_another_contexts_busy_status(undo_env, busy):
+    env = undo_env
+    item(env.db, "coat")
+    sale = mark_sold(env, "coat", item_revenue="45").json()["sale"]
+    env.client.get("/api/conversations")
+    cached = env.db.get(Conversation, "coat")
+    assert cached.status == "sold"
+    env.db.commit()
+    env.db.refresh(cached)
+    with Session(bind=env.db.get_bind()) as other:
+        other.execute(update(Conversation).where(Conversation.id == "coat").values(
+            status=busy, settled_at=None, unsettled_at=datetime.now(UTC)))
+        other.commit()
+    assert cached.status == "sold"  # This editor's loaded identity is stale.
+    assert remove(env, sale["id"], sale["financial_revision"]).status_code == 200
+    with Session(bind=env.db.get_bind()) as fresh:
+        conv = fresh.get(Conversation, "coat")
+        assert conv.status == busy and conv.settled_at is None
+
+
+def test_postgres_sale_delete_fences_a_concurrent_busy_write(undo_env, monkeypatch):
+    from vendoo_studio.services import item_status
+
+    env = undo_env
+    engine = env.db.get_bind()
+    if engine.dialect.name != "postgresql":
+        pytest.skip("Postgres row-lock comparison; SQLite serializes writers")
+    item(env.db, "coat")
+    sale = mark_sold(env, "coat", item_revenue="45").json()["sale"]
+    env.client.get("/api/conversations")
+    original = item_status.status_for
+    checked = []
+
+    def verify_fence(db, conv_id, notes):
+        # A separate process's write cannot slip between derivation and commit.
+        with Session(bind=engine) as other:
+            other.execute(text("SET LOCAL lock_timeout = '100ms'"))
+            with pytest.raises(OperationalError) as failure:
+                other.execute(update(Conversation).where(Conversation.id == conv_id).values(status="in_progress"))
+            assert failure.value.orig.sqlstate == "55P03"
+            checked.append(conv_id)
+        return original(db, conv_id, notes)
+
+    monkeypatch.setattr(item_status, "status_for", verify_fence)
+    assert remove(env, sale["id"], sale["financial_revision"]).status_code == 200
+    assert checked == ["coat"]
+    # The lock ends with deletion's commit: subsequent work remains possible.
+    with Session(bind=engine) as other:
+        other.execute(update(Conversation).where(Conversation.id == "coat").values(status="in_progress"))
+        other.commit()
+        assert other.get(Conversation, "coat").status == "in_progress"
 
 
 def test_deleting_a_duplicate_keeps_the_first_sale(env):

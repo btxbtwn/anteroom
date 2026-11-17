@@ -1,0 +1,1 @@
+- Deleting a sale you recorded puts the item back in your working inventory when it is no longer sold, while keeping remaining sales and Sold marks on other marketplaces.
