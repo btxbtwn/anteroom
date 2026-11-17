@@ -19,7 +19,10 @@ No runtime-secret-derived IDs or custom parameter-ID/collection-generation or
 nodeid-rewriting hooks were found. Computed sources included fixed test mappings,
 helpers and checked-in category/option fixtures and deployment configuration.
 Some IDs include fake credential literals. This source review is not a guarantee
-about future tests; hashing avoids publishing raw labels if new sources change.
+about future tests. Unsalted hashes are pseudonymization, not secrecy: predictable
+labels can be recovered by dictionary guesses. Future tests must not derive IDs
+from sensitive runtime values or PII, and such IDs must not be published even
+hashed. Review parameter/ID sources before publishing new observations.
 
 These are observations, not an approved balancing profile. Failed, interrupted
 and cancelled test steps do not upload them. Missing artifacts must never be
