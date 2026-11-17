@@ -651,11 +651,16 @@ async def check_new_likes(db: Session, *, sleep=asyncio.sleep) -> int:
         except (ValueError, KeyError, TypeError, AttributeError):
             _pause(db, row, "The recent-like feed changed. Anteroom needs an update.")
             continue
-        targets = _covered(db, row)
-        covered = {target[1] for target in targets}
-        held = _held_after_refusal(db, row, _now(), len(targets))
+        covered = {target[1] for target in _covered(db, row)}
+        # The feed is re-read from the same start every minute, so a like this
+        # rule has already checked the listing for would otherwise read it again
+        # on every tick, whatever that check found. A newer like reads it.
+        checked = dict(db.query(ListingPromotion.listing_id, func.max(ListingPromotion.created_at)).filter(
+            ListingPromotion.automation_id == row.id, ListingPromotion.action == "offer",
+            ListingPromotion.listing_id.in_(list(events)),
+        ).group_by(ListingPromotion.listing_id).all()) if events else {}
         events = {key: at for key, at in events.items() if key in covered
-                  and not (key in held and at <= held[key])
+                  and not (key in checked and at <= checked[key])
                   and not promotions.blocking(db, row.marketplace, key, "offer", new_like_at=at)}
         if events:
             await run_round(db, row, sleep=sleep, like_events=events)

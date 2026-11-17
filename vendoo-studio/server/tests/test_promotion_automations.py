@@ -135,7 +135,7 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.tick()
         self.assertEqual(len(self.promoted()), 3)
         first = self.db.query(ListingPromotion).filter_by(listing_id=self.items[0][1], state="done").one()
-        first.sent_at = _now() - timedelta(minutes=2)
+        first.created_at = first.sent_at = _now() - timedelta(minutes=2)
         row.like_events_since = _now() - timedelta(minutes=3)
         self.db.commit()
         self.like_feed([{"listing_id": self.items[0][1], "at": (_now() - timedelta(minutes=1)).isoformat() + "Z"}])
@@ -202,6 +202,43 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.assertEqual(self.check_likes(), 1)
         self.assertEqual(self.promoted()[0]["marketplace"], "depop")
         self.assertEqual(self.check_likes(), 0)
+
+    def test_a_like_already_checked_does_not_read_the_listing_again_on_every_tick(self):
+        # Seen 2026-11-17: a liked Poshmark listing sold; its like stayed in the recent feed, and each
+        # one-minute tick read the listing again until Anteroom recorded the sale.
+        conv, post = self.items[0]
+        saved = self.create(OFFER)
+        self.enable(saved["id"])
+        row = self.db.get(PromotionAutomation, saved["id"])
+        at = _now() - timedelta(seconds=10)
+        row.like_events_since = at - timedelta(seconds=10)
+        self.db.commit()
+        events = [{"listing_id": post, "at": at.isoformat() + "Z"}]
+
+        async def sold(job, message_type, payload, timeout=0):
+            if message_type == "marketplace.like_events":
+                return {"ok": True, "events": events}
+            if message_type == "marketplace.promotion_check":
+                return {"ok": False, "error": "This Poshmark listing has sold or is not available.", "error_code": "rejected",
+                        "safe_to_retry": True}
+            return {"finished": False, "known": False}
+
+        self.bridge.side_effect = sold
+        self.check_likes()
+        self.assertEqual(self.checked(), [post])
+        for _ in range(2):
+            self.bridge.reset_mock()
+            self.assertEqual(self.check_likes(), 0)
+            self.assertEqual(self.checked(), [])
+        self.assertEqual(self.db.query(ListingPromotion).filter_by(listing_id=post).count(), 1)
+        # A like after that check is read.
+        self.db.query(ListingPromotion).update({"created_at": _now() - timedelta(minutes=1)})
+        self.db.commit()
+        events.append({"listing_id": post, "at": (_now() - timedelta(seconds=5)).isoformat() + "Z"})
+        self.bridge.reset_mock()
+        self.check_likes()
+        self.assertEqual(self.checked(), [post])
+        self.assertEqual(self.promoted(), [])
 
     def test_new_like_never_bypasses_an_unconfirmed_offer(self):
         saved = self.create(OFFER)
@@ -699,6 +736,7 @@ class PromotionAutomationsTest(unittest.TestCase):
         # A new like reaches the rule through the recent-like feed.
         self.likes[first_post] = 5
         row = self.db.get(PromotionAutomation, saved["id"])
+        self.db.query(ListingPromotion).update({"created_at": _now() - timedelta(minutes=1)})
         at = _now() - timedelta(seconds=10)
         row.like_events_since = at - timedelta(seconds=10)
         self.db.commit()
@@ -772,6 +810,8 @@ class PromotionAutomationsTest(unittest.TestCase):
         # A like from the feed is checked and offered at once.
         self.likes[none] = 3
         row = self.db.get(PromotionAutomation, saved["id"])
+        # That like came after the scans' checks.
+        self.db.query(ListingPromotion).update({"created_at": _now() - timedelta(minutes=1)})
         at = _now() - timedelta(seconds=10)
         row.like_events_since = at - timedelta(seconds=10)
         self.db.commit()
