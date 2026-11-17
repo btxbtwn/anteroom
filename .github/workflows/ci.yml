@@ -384,11 +384,32 @@ jobs:
           # pytest-split (in the dev extra) divides the suite between the
           # shards; the full suite still runs, each test exactly once per database.
           ./scripts/install-locked.sh python dev
+      - name: Verify duration artifacts with xdist
+        if: matrix.group == 1
+        run: python ../.github/scripts/test-pg-timing-artifacts.py
       # Each xdist worker creates its own database on this server.
-      - run: python -m pytest -q -n auto --splits 2 --group ${{ matrix.group }}
+      # A fresh, attempt-specific path supplies no input timings: assignments stay
+      # unchanged. The controller records setup/call/teardown duration per nodeid.
+      - id: postgres-tests
+        run: >-
+          python -m pytest -q -n auto --splits 2 --group ${{ matrix.group }}
+          --store-durations --clean-durations
+          --durations-path "${{ runner.temp }}/pg-durations-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}.json"
         env:
           VENDOO_STUDIO_DATA_DIR: ${{ runner.temp }}/vendoo-studio-data
           ANTEROOM_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+
+      # Failed/interrupted runs can leave partial JSON. Never upload those as a
+      # profile. A later rebalance must validate both successful shard inventories;
+      # these observations are not consumed by CI or shared through a cache.
+      - name: Keep successful Postgres shard duration observations
+        if: success() && steps.postgres-tests.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pg-duration-observations-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}
+          path: ${{ runner.temp }}/pg-durations-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}.json
+          if-no-files-found: error
+          retention-days: 7
 
   extension:
     name: Extension
