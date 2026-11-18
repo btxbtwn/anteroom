@@ -57,23 +57,28 @@ MAX_SHIPPING_LABEL = 120
 MAX_LISTING_FIELD_DEFAULT = 120
 # Per-field answers the seller wants every listing to start with. Mercari ZIP
 # and shipping label keep their own settings so one value is never stored twice;
-# the Etsy detail answers live under LISTING_FIELD_DEFAULTS_KEY.
+# the other answers live under LISTING_FIELD_DEFAULTS_KEY.
+MERCARI_SHOEBOX_PATH = "mercari_specifics.package.fitsShoebox"
 LISTING_FIELD_DEFAULTS = frozenset({
     "mercari_specifics.shipsFrom",
     "mercari_specifics.shippingClassId",
+    MERCARI_SHOEBOX_PATH,
     "etsy_specifics.whoMade",
     "etsy_specifics.whatIsIt",
 })
-_ETSY_FIELD_DEFAULT_CHOICES = {
-    "etsy_specifics.whoMade": frozenset({
+# Stored value → the label the form shows for it. Mercari's shoebox radio
+# stores "yes" or "no" under the labels "Yes" and "No"; Etsy stores its labels.
+_STORED_FIELD_DEFAULT_CHOICES: dict[str, dict[str, str]] = {
+    MERCARI_SHOEBOX_PATH: {"yes": "Yes", "no": "No"},
+    "etsy_specifics.whoMade": {label: label for label in (
         "Another company or person",
         "A member of my shop",
         "I did",
-    }),
-    "etsy_specifics.whatIsIt": frozenset({
+    )},
+    "etsy_specifics.whatIsIt": {label: label for label in (
         "A finished product",
         "A supply or tool to make things",
-    }),
+    )},
 }
 # Editor path → listing JSON keys that already answer the same Etsy question.
 _ETSY_FIELD_DEFAULT_KEYS = {
@@ -220,34 +225,40 @@ def _listing_field_default_key(path: object) -> str:
     return key
 
 
+def _stored_choice(path: str, value: object) -> str | None:
+    """The stored value a saved or submitted answer means, or None when it is not a current choice.
+
+    Mercari's radio is saved as "yes", but a label ("Yes") is the same answer.
+    """
+    text = " ".join(str(value if value is not None else "").split())
+    choices = _STORED_FIELD_DEFAULT_CHOICES[path]
+    if text in choices:
+        return text
+    return next((stored for stored, label in choices.items()
+                 if text.casefold() in (stored.casefold(), label.casefold())), None) if text else None
+
+
 def _stored_listing_field_defaults() -> dict[str, dict[str, str]]:
     raw = read_settings().get(LISTING_FIELD_DEFAULTS_KEY)
     if not isinstance(raw, dict):
         return {}
     out: dict[str, dict[str, str]] = {}
-    for path, allowed in _ETSY_FIELD_DEFAULT_CHOICES.items():
+    for path, choices in _STORED_FIELD_DEFAULT_CHOICES.items():
         row = raw.get(path)
         if not isinstance(row, dict):
             continue
-        value = " ".join(str(row.get("value") or "").split())
-        label = " ".join(str(row.get("label") or value).split())
-        if value not in allowed or label not in allowed:
+        value = _stored_choice(path, row.get("value"))
+        if value is None:
             continue
-        if len(value) > MAX_LISTING_FIELD_DEFAULT or len(label) > MAX_LISTING_FIELD_DEFAULT:
-            continue
-        out[path] = {"value": value, "label": label}
+        out[path] = {"value": value, "label": choices[value]}
     return out
 
 
-def _set_stored_listing_field_default(path: str, value: object, label: object) -> None:
-    allowed = _ETSY_FIELD_DEFAULT_CHOICES[path]
-    clean_value = " ".join(str(value or "").split())
-    clean_label = " ".join(str(label or clean_value).split())
-    if clean_value not in allowed:
+def _set_stored_listing_field_default(path: str, value: object) -> None:
+    clean_value = _stored_choice(path, value)
+    if clean_value is None:
         raise ValueError("Choose one of the current answers for that field.")
-    if clean_label not in allowed:
-        clean_label = clean_value
-    saved = {"value": clean_value, "label": clean_label}
+    saved = {"value": clean_value, "label": _STORED_FIELD_DEFAULT_CHOICES[path][clean_value]}
 
     def mutator(payload: dict) -> None:
         held = payload.get(LISTING_FIELD_DEFAULTS_KEY)
@@ -281,7 +292,7 @@ def set_listing_field_default(path: object, value: object, label: object = None)
     elif key == "mercari_specifics.shippingClassId":
         set_mercari_shipping_label(class_id=value, label=label)
     else:
-        _set_stored_listing_field_default(key, value, label)
+        _set_stored_listing_field_default(key, value)
     return get_listing_field_defaults()
 
 
@@ -302,7 +313,7 @@ def apply_listing_field_defaults(listing: dict) -> bool:
     if not isinstance(listing, dict):
         return False
     defaults = _stored_listing_field_defaults()
-    if not defaults:
+    if not any(path in defaults for path in _ETSY_FIELD_DEFAULT_KEYS):
         return False
     specifics = listing.get("etsy_specifics")
     specifics = dict(specifics) if isinstance(specifics, dict) else {}
@@ -318,6 +329,31 @@ def apply_listing_field_defaults(listing: dict) -> bool:
     if changed:
         listing["etsy_specifics"] = specifics
     return changed
+
+
+def get_mercari_shoebox_default() -> str | None:
+    """The saved answer to Mercari's "Will your item fit in a shoebox?", "yes" or "no"."""
+    saved = _stored_listing_field_defaults().get(MERCARI_SHOEBOX_PATH)
+    return saved["value"] if saved else None
+
+
+def apply_mercari_shoebox_default(listing: dict) -> bool:
+    """Answer an unanswered shoebox question from the saved default. Any answer the listing holds wins."""
+    answer = get_mercari_shoebox_default()
+    if answer is None or not isinstance(listing, dict):
+        return False
+    specifics = listing.get("mercari_specifics")
+    specifics = specifics if isinstance(specifics, dict) else {}
+    package = specifics.get("package")
+    package = package if isinstance(package, dict) else {}
+    held = package.get("fitsShoebox")
+    # "no" and False are answers; only a missing or blank one takes the default.
+    if held is not None and (not isinstance(held, str) or held.strip()):
+        return False
+    package["fitsShoebox"] = answer
+    specifics["package"] = package
+    listing["mercari_specifics"] = specifics
+    return True
 
 
 def normalize_ebay_inventory_location(value: object) -> str:
