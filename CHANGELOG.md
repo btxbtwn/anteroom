@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1032 — 2026-11-18
+
+- When a full-size photo cannot load, the photo viewer now says so and offers Retry, instead of showing an empty picture with only its label.
+
 ## 0.1.1031 — 2026-11-18
 
 - When Mercari doesn't offer your saved shipping label, the note on the Mercari tab now says List uses USPS Ground Advantage instead, and that Mercari refuses the listing if it offers neither.
