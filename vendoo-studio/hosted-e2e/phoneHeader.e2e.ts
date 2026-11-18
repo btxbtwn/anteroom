@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { showStatusTab } from "../e2e/fixtures";
 
 test("on a phone the account button ends the page header row instead of a band above it", async ({ page, request, isMobile }, info) => {
   test.skip(!isMobile, "Phone layout only; the desktop top bar has its own account button");
@@ -20,6 +21,7 @@ test("on a phone the account button ends the page header row instead of a band a
   // Signed in, the assistant is home; the inventory sits behind the navigation menu.
   await page.getByRole("button", { name: "Open navigation" }).filter({ visible: true }).click();
   await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
+  await showStatusTab(page, "Draft");
   const account = page.getByRole("button", { name: "Account", exact: true });
   const menu = page.getByRole("button", { name: "Open navigation" }).first();
   const select = page.getByRole("button", { name: "Select listings" });
