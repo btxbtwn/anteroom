@@ -83,7 +83,7 @@ export async function showStatusTab(page: Page, name: "Draft" | "Active" | "Sold
  * tests add listings above the samples, so search for it as a seller would.
  * Search runs within a status tab, so look under each, drafts first.
  */
-export async function openListing(page: Page, phone: boolean, title: string): Promise<void> {
+export async function openListing(page: Page, phone: boolean, title: string, expectedActiveCount?: number): Promise<void> {
   await page.goto("/");
   if (phone) {
     await page.getByRole("button", { name: "Open navigation" }).click();
@@ -93,7 +93,7 @@ export async function openListing(page: Page, phone: boolean, title: string): Pr
   // search window waiting for the initial request.
   const activeTab = page.getByRole("tablist", { name: "Listing status" })
     .getByRole("tab", { name: /^Active\b/ });
-  await expect(activeTab).toHaveAttribute("title", /^Active · \d+$/, { timeout: 30_000 });
+  await expect(activeTab).toHaveAttribute("title", expectedActiveCount === undefined ? /^Active · \d+$/ : `Active · ${expectedActiveCount}`, { timeout: 30_000 });
   await page.getByRole("searchbox", { name: /^Search listings/ }).fill(title);
   const link = page.getByRole("list", { name: "Listings" }).getByRole("link", { name: title, exact: true });
   for (const tab of ["Draft", "Active", "Sold"] as const) {

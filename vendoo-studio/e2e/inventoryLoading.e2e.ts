@@ -113,6 +113,7 @@ for (const activeCount of [0, 1000]) {
         // Deliberately exceed the helper's former three-second Draft window.
         await new Promise(resolve => setTimeout(resolve, 4_000));
         const response = await route.fetch();
+        if (!response.ok()) return route.fulfill({ response });
         const rows = await response.json();
         const draft = rows.find((row: { id: string }) => row.id === id);
         expect(draft).toBeTruthy();
@@ -120,12 +121,15 @@ for (const activeCount of [0, 1000]) {
         const active = Array.from({ length: activeCount }, (_, index) => ({
           ...draft, id: `active-${index}`, title: `Active sample ${index}`, status: "active",
         }));
-        await route.fulfill({ response, json: [...rows.filter((row: { status: string }) => row.status !== "active"), ...active] });
+        const headers = { ...response.headers() };
+        delete headers["content-length"];
+        await route.fulfill({ response, headers, json: [...rows.filter((row: { status: string }) => row.status !== "active"), ...active] });
       });
-      await openListing(page, phone, title);
+      await openListing(page, phone, title, activeCount);
       await expect(await titleBox(page, phone)).toHaveValue(title);
     } finally {
-      await request.delete(`/api/conversations/${id}`);
+      const removed = await request.delete(`/api/conversations/${id}`);
+      expect(removed.ok(), "Remove the slow-load test draft").toBe(true);
     }
   });
 }
