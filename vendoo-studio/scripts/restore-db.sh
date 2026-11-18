@@ -47,7 +47,7 @@ import sys
 import zlib
 from pathlib import Path
 
-from vendoo_studio.services.backups import decompress_snapshot
+from vendoo_studio.services.backups import database_revision, decompress_snapshot
 
 snapshot, staged = Path(sys.argv[1]), Path(sys.argv[2])
 # Unpack before checking: a snapshot is gzipped, and a gzip of a damaged
@@ -61,6 +61,10 @@ try:
         connection.close()
     if not result or result[0] != "ok":
         raise sqlite3.DatabaseError(result[0] if result else "unreadable database")
+    # integrity_check passes an empty file or any other program's database.
+    # Anteroom stamps every database it writes with its schema revision.
+    if database_revision(staged) is None:
+        raise sqlite3.DatabaseError("it is not an Anteroom database")
 except (OSError, EOFError, sqlite3.DatabaseError, zlib.error) as exc:
     try:
         staged.unlink(missing_ok=True)
@@ -71,7 +75,7 @@ except (OSError, EOFError, sqlite3.DatabaseError, zlib.error) as exc:
     recovery = "Choose another snapshot" if damaged else "Check file permissions, the snapshot path and free disk space, then retry"
     print(f"Cannot restore this snapshot: {exc}. {recovery}; the current database was not changed.", file=sys.stderr)
     raise SystemExit(65 if damaged else 74) from None
-print("  integrity_check ok")
+print("  integrity_check ok, Anteroom schema found")
 PY
 
 echo

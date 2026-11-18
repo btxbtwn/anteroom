@@ -66,3 +66,19 @@ def test_hidden_field_changes_require_the_listing_owner_and_restore_the_saved_ch
     assert client.put(endpoint, headers=alice, json=always).status_code == 200
     assert client.post(endpoint + '/restore-all', headers=alice, json={}).json()['always'] == []
     assert client.get(endpoint, headers=bob).json() == {'always': [], 'listing': []}
+
+
+def test_hosted_shoebox_default_saves_reloads_and_stays_with_its_seller(cloud, signing_keys):  # noqa: F811
+    client, _engine = cloud
+    alice, bob = headers(signing_keys), headers(signing_keys, BOB)
+    path = 'mercari_specifics.package.fitsShoebox'
+    endpoint = '/api/settings/listing-defaults'
+    for value, label in (('yes', 'Yes'), ('no', 'No')):
+        result = client.put(endpoint, headers=alice, json={'path': path, 'value': value, 'label': label})
+        assert result.status_code == 200, result.text
+        assert client.get(endpoint, headers=alice).json()['defaults'][path] == {'value': value, 'label': label}
+    assert path not in client.get(endpoint, headers=bob).json()['defaults']
+    assert client.put(endpoint, headers=alice, json={'path': path, 'value': 'maybe'}).status_code == 400
+    assert client.get(endpoint, headers=alice).json()['defaults'][path]['value'] == 'no'
+    assert client.delete(f'{endpoint}?path={path}', headers=alice).status_code == 200
+    assert path not in client.get(endpoint, headers=alice).json()['defaults']

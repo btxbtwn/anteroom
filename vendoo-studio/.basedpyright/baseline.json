@@ -1,55 +1,5 @@
 {
     "files": {
-        "./server/vendoo_studio/desktop.py": [
-            {
-                "code": "reportMissingImports",
-                "range": {
-                    "startColumn": 15,
-                    "endColumn": 21,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportMissingImports",
-                "range": {
-                    "startColumn": 13,
-                    "endColumn": 23,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportMissingImports",
-                "range": {
-                    "startColumn": 13,
-                    "endColumn": 19,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportMissingImports",
-                "range": {
-                    "startColumn": 13,
-                    "endColumn": 23,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportMissingImports",
-                "range": {
-                    "startColumn": 15,
-                    "endColumn": 19,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportMissingImports",
-                "range": {
-                    "startColumn": 9,
-                    "endColumn": 19,
-                    "lineCount": 1
-                }
-            }
-        ],
         "./server/vendoo_studio/routes/listing_commands.py": [
             {
                 "code": "reportOptionalMemberAccess",
@@ -80,16 +30,6 @@
                 }
             }
         ],
-        "./server/vendoo_studio/services/macos_keychain.py": [
-            {
-                "code": "reportMissingImports",
-                "range": {
-                    "startColumn": 9,
-                    "endColumn": 17,
-                    "lineCount": 1
-                }
-            }
-        ],
         "./server/vendoo_studio/services/marketplace_delist.py": [
             {
                 "code": "reportArgumentType",
@@ -116,32 +56,6 @@
                 "range": {
                     "startColumn": 30,
                     "endColumn": 46,
-                    "lineCount": 1
-                }
-            }
-        ],
-        "./server/vendoo_studio/services/photo_edits.py": [
-            {
-                "code": "reportMissingImports",
-                "range": {
-                    "startColumn": 15,
-                    "endColumn": 21,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportMissingImports",
-                "range": {
-                    "startColumn": 15,
-                    "endColumn": 21,
-                    "lineCount": 1
-                }
-            },
-            {
-                "code": "reportMissingImports",
-                "range": {
-                    "startColumn": 13,
-                    "endColumn": 23,
                     "lineCount": 1
                 }
             }

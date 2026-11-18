@@ -164,7 +164,7 @@ export function SaleCalendar({ marketplace: market, onOpenListing }: { marketpla
             {monthDays(month).map(day => {
               const onDay = activeEvents.filter(event => event.start_date <= day && event.end_date >= day);
               const outside = day.slice(0, 7) !== month;
-              return <button key={day} type="button" aria-pressed={selectedDay === day} aria-label={`${displayDate(day)}, ${onDay.length} sale events`} aria-current={day === today ? "date" : undefined}
+              return <button key={day} type="button" aria-pressed={selectedDay === day} aria-label={`${displayDate(day)}, ${onDay.length} sale ${onDay.length === 1 ? "event" : "events"}`} aria-current={day === today ? "date" : undefined}
                 className={cn(
                   "flex min-h-18 cursor-pointer flex-col items-stretch gap-1 rounded-lg border border-border/60 p-1.5 text-left outline-none transition-colors hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-ring @3xl/page:min-h-23 @3xl/page:p-2",
                   outside && "opacity-50",
@@ -189,7 +189,7 @@ export function SaleCalendar({ marketplace: market, onOpenListing }: { marketpla
               <h3 className="text-sm font-medium text-foreground">{event.title}</h3>
               <Badge variant={event.status === "ran" ? "success" : event.status === "planned" ? "info" : "secondary"} className={chipClass(event.marketplace, "h-auto")}>{marketplaceName(event.marketplace)} · {event.status === "ran" ? "Marked as run" : event.status === "planned" ? "Planned" : "Cancelled"}</Badge>
             </div>
-            <p className="text-xs text-muted-foreground">{displayDate(event.start_date)}–{displayDate(event.end_date)} · {event.timezone}{event.discount_percent == null ? "" : ` · ${event.discount_percent}% off`}{event.items.length ? ` · ${event.items.length} items` : " · Entire marketplace"}</p>
+            <p className="text-xs text-muted-foreground">{displayDate(event.start_date)}–{displayDate(event.end_date)} · {event.timezone}{event.discount_percent == null ? "" : ` · ${event.discount_percent}% off`}{event.items.length ? ` · ${event.items.length} ${event.items.length === 1 ? "item" : "items"}` : " · Entire marketplace"}</p>
             {event.status === "planned" && event.start_date <= today ? <PageNote className="text-warning-foreground">{event.end_date < today ? "This plan has ended. Mark it as run if you ran the sale, or cancel it." : "This sale is due. Set it up on the marketplace, then mark it as run."}</PageNote> : null}
             {event.minimum_profit != null && event.fee_percent != null && event.shipping_cost != null ? <PageNote>Estimated profit floor: {formatMoney(event.minimum_profit)} per item, using {event.fee_percent}% effective fees and {formatMoney(event.shipping_cost)} seller shipping per item. Actual profit can differ.</PageNote> : null}
             {event.marketplace === "depop" && event.status !== "cancelled" ? <PageNote>Depop reminder: apply the discount at the start and remove it at the end.</PageNote> : null}

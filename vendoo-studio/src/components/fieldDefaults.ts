@@ -1,3 +1,5 @@
+import { editorValuePresent } from "../listingPaths";
+
 /**
  * Saved answers the seller wants every new listing to start with.
  *
@@ -26,4 +28,21 @@ export function savedDefaultFor(
   return (stored !== "" && saved.value === stored) || (shown !== "" && saved.label === shown)
     ? saved
     : null;
+}
+
+/**
+ * The saved default a row shows while the listing has no answer of its own.
+ *
+ * The form's own value wins: it is what List sends, and for Mercari's label it
+ * is the saved carrier already matched to this package's weight tier. A saved
+ * choice that is not one of the row's current choices is a preference the
+ * marketplace has not offered, so the row stays empty rather than show it.
+ */
+export function shownSavedDefault(
+  field: { defaultValue?: unknown; selectionOnly?: boolean; options?: readonly string[] },
+  saved: SavedListingDefault | undefined,
+): string | undefined {
+  if (!saved || editorValuePresent(field.defaultValue)) return undefined;
+  if (field.selectionOnly && !(field.options ?? []).includes(saved.label)) return undefined;
+  return saved.label;
 }
