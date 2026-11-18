@@ -13,6 +13,11 @@ struct BulkListingPlan: Equatable {
         var sizeSuggested = false
         var sizeNeedsReview = false
         var sizeNote: String?
+        private let pickingOrder: [UUID]
+        var sizeReadPhotos: [UUID] {
+            let present = Set(photos)
+            return pickingOrder.filter(present.contains)
+        }
         var garment: SellerInputs.Garment = .top
         /// Typed or read values, keyed like the garment's fields.
         var measurements: [String: String] = [:]
@@ -20,6 +25,12 @@ struct BulkListingPlan: Equatable {
         var suggested: Set<String> = []
         /// What the last photo reading found, in plain words.
         var readNote: String?
+
+        init(id: UUID, photos: [UUID]) {
+            self.id = id
+            self.photos = photos
+            pickingOrder = photos
+        }
 
         /// Only the chosen garment's values, with blanks dropped.
         var typedMeasurements: [String: String] {
@@ -80,7 +91,8 @@ struct BulkListingPlan: Equatable {
                 items[index].sizeNeedsReview = true
                 items[index].sizeNote = "A photo was removed, so the size read from it was cleared. Read size tags again or type the size."
             } else if readingSizes.contains(items[index].id) {
-                items[index].sizeNeedsReview = items[index].sizeTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                items[index].sizeNeedsReview = items[index].sizeNeedsReview
+                    || items[index].sizeTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 items[index].sizeNote = "A photo was removed while reading. Read size tags again or type the size."
             }
         }
@@ -132,9 +144,18 @@ struct BulkListingPlan: Equatable {
     }
 
     /// Photo identities determine size evidence; rearranging them does not invalidate a read.
-    func matchesSizeRead(_ captured: Item) -> Bool {
+    private func matchesSizeRead(_ captured: Item) -> Bool {
         guard let current = items.first(where: { $0.id == captured.id }) else { return false }
         return Set(current.photos) == Set(captured.photos)
+    }
+
+    /// Both network completion paths use the same evidence check and current manual input.
+    mutating func completeSizeRead(_ result: Result<SizeTagReading, Error>, from captured: Item) {
+        guard matchesSizeRead(captured) else { return }
+        switch result {
+        case .success(let reading): applySizeTag(reading, to: captured.id)
+        case .failure(let error): failSizeTag(error.localizedDescription, for: captured.id)
+        }
     }
 
     mutating func applySizeTag(_ result: SizeTagReading, to id: Item.ID) {

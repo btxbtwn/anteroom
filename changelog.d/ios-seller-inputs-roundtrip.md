@@ -1,3 +1,4 @@
 - Keep saved iPhone draft edits when updating, save cleared size and item details, and leave unchanged tag sizes alone.
 - Check a photo-read size again after removing a photo, and keep measurement reading notes accurate when values are already filled.
 - Keep size-tag reading results when reordering photos or choosing a different cover.
+- Restore later unsaved edits after saving notes, and preserve unresolved size warnings when a reread is interrupted.

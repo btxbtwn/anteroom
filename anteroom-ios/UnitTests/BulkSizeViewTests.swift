@@ -15,7 +15,7 @@ final class BulkSizeViewTests: XCTestCase {
             plan.applySizeTag(.init(photosRead: 2, status: review ? "conflict" : "accepted",
                                     size: review ? nil : "0", sizes: review ? ["M", "L"] : ["0"]), to: id)
             let editor = BulkItemEditor(plan: .constant(plan), itemID: id, number: 1, thumbnails: [:],
-                                        reading: false, readingSize: false, readSize: {}, read: {})
+                                        reading: false, readingSize: false, capturedSizeRead: false, readSize: {}, read: {})
             let host = UIHostingController(rootView: NavigationStack { editor })
             host.overrideUserInterfaceStyle = review ? .dark : .light
             let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 393, height: 852))

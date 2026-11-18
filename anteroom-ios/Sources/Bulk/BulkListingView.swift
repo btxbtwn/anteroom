@@ -33,6 +33,7 @@ struct BulkListingView: View {
     @State private var boxes: [SourceBox] = []
     @State private var reading: Set<UUID> = []
     @State private var readingSizes: Set<UUID> = []
+    @State private var capturedSizeReads: Set<UUID> = []
     @State private var creating = false
     @State private var progress = 0
     @State private var problems: [String] = []
@@ -74,6 +75,7 @@ struct BulkListingView: View {
             .navigationDestination(for: UUID.self) { id in
                 BulkItemEditor(plan: $plan, itemID: id, number: (plan.items.firstIndex { $0.id == id } ?? 0) + 1,
                                thumbnails: thumbnails, reading: reading.contains(id), readingSize: readingSizes.contains(id),
+                               capturedSizeRead: capturedSizeReads.contains(id),
                                readSize: { readSizes([id]) }) { read([id]) }
             }
             .toolbar {
@@ -368,15 +370,14 @@ struct BulkListingView: View {
     }
 
     private func readSize(_ id: UUID) async {
-        defer { readingSizes.remove(id) }
+        defer { readingSizes.remove(id); capturedSizeReads.remove(id) }
         guard let item = plan.items.first(where: { $0.id == id }) else { return }
+        capturedSizeReads.insert(id)
         do {
-            let result = try await api.readSizeTags(jpegs: item.photos.compactMap { jpegs[$0] })
-            guard plan.matchesSizeRead(item) else { return }
-            plan.applySizeTag(result, to: id)
+            let result = try await api.readSizeTags(jpegs: item.sizeReadPhotos.compactMap { jpegs[$0] })
+            plan.completeSizeRead(.success(result), from: item)
         } catch {
-            guard plan.matchesSizeRead(item) else { return }
-            plan.failSizeTag(error.localizedDescription, for: id)
+            plan.completeSizeRead(.failure(error), from: item)
         }
     }
 
@@ -386,7 +387,7 @@ struct BulkListingView: View {
     }
 
     private func remove(_ id: UUID) {
-        plan.remove(id, readingSizes: readingSizes)
+        plan.remove(id, readingSizes: capturedSizeReads)
         selection.remove(id)
         jpegs[id] = nil
         thumbnails[id] = nil
@@ -553,6 +554,7 @@ struct BulkItemEditor: View {
     let thumbnails: [UUID: UIImage]
     let reading: Bool
     let readingSize: Bool
+    let capturedSizeRead: Bool
     let readSize: () -> Void
     let read: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -589,7 +591,9 @@ struct BulkItemEditor: View {
                         } header: {
                             Text(item.sizeSuggested ? "Size (from photos)" : "Size")
                         } footer: {
-                            Text("Clothing size from the tag. Reading keeps sizes you type.")
+                            Text(item.photos.count > 20
+                                 ? "Clothing size from the tag. Reads the first 20 photos you picked and keeps sizes you type."
+                                 : "Clothing size from the tag. Reading keeps sizes you type.")
                         }
                         Section("SKU") {
                             TextField("SKU (optional)", text: Binding(
@@ -631,7 +635,7 @@ struct BulkItemEditor: View {
                         Button("Make cover", systemImage: "star") { plan.makeCover(photo, in: itemID) }
                     }
                     Button("Remove photo", systemImage: "trash", role: .destructive) {
-                        plan.remove(photo, readingSizes: readingSize ? [itemID] : [])
+                        plan.remove(photo, readingSizes: capturedSizeRead ? [itemID] : [])
                     }
                 }
             }

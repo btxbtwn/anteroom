@@ -2,6 +2,33 @@ import XCTest
 @testable import Anteroom
 
 final class SellerInputsRegressionTests: XCTestCase {
+    func testSavedNotesMatchFreshInputsForDraftRestoration() throws {
+        var saved = SellerInputs()
+        saved.sku = "A"
+        saved.size = "0"
+        let fresh = SellerInputs(notes: #"{"sku":"A","size":"0"}"#)
+        XCTAssertTrue(saved.hasSameEffectiveValues(as: fresh))
+        XCTAssertEqual(try saved.noteChanges(since: fresh), [:], "A restored baseline needs no notes write when effective values match")
+        var changed = fresh
+        changed.sku = "B"
+        XCTAssertFalse(saved.hasSameEffectiveValues(as: changed))
+        changed = fresh
+        changed.packageDimensions = "12x9x3"
+        XCTAssertFalse(saved.hasSameEffectiveValues(as: changed))
+    }
+
+    func testMeasurementOnlyPatchDoesNotReplaySavedGarment() throws {
+        var current = SellerInputs(notes: #"{"garment":"top","measurements":{"top":{"length":"27"}}}"#)
+        current.setMeasurement("length", value: "28")
+        XCTAssertNil(try current.noteChanges()["garment"])
+        var saved = SellerInputs()
+        saved.setMeasurement("length", value: "27")
+        current = saved
+        current.setMeasurement("length", value: "28")
+        XCTAssertNil(try current.noteChanges(since: saved)["garment"])
+        current.garment = .pants
+        XCTAssertEqual(try current.noteChanges(since: saved)["garment"], .string("pants"))
+    }
     func testDraftSavedBeforeSizeWasAddedStillDecodes() throws {
         var inputs = SellerInputs(notes: #"{"sku":"A","future":true}"#)
         inputs.sellerNotes = "Unsaved provenance"

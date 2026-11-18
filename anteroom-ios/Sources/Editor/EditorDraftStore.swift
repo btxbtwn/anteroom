@@ -13,7 +13,7 @@ struct EditorDraft: Codable, Equatable {
 
     /// Only edits made on the version still saved come back.
     func restores(revisionID current: String?, inputs: SellerInputs) -> Bool {
-        revisionID == current && baselineInputs == inputs
+        revisionID == current && baselineInputs.hasSameEffectiveValues(as: inputs)
     }
 }
 

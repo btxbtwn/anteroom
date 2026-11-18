@@ -131,11 +131,17 @@ struct SellerInputs: Equatable, Sendable, Codable {
         }
     }
 
+    /// Raw notes preserve opaque server metadata; editable values govern draft restoration.
+    func hasSameEffectiveValues(as other: Self) -> Bool {
+        textChanges(from: other).isEmpty && garment == other.garment && measurements == other.measurements
+    }
+
     /// Send only edited keys so a stale form cannot restore a server-cleared tag size.
     func noteChanges(since baseline: SellerInputs? = nil) throws -> [String: JSONValue] {
         let before = baseline ?? Self(notes: originalNotes)
         var changes = Dictionary(uniqueKeysWithValues: textChanges(from: before).map { ($0.0, JSONValue.string($0.1)) })
-        if garment != before.garment || (measurements != before.measurements && !measurements.isEmpty) {
+        let savedGarment = Self.object(try before.encodedNotes())?["garment"] != nil
+        if garment != before.garment || (measurements != before.measurements && !measurements.isEmpty && !savedGarment) {
             changes["garment"] = .string(garment.rawValue)
         }
         var groups: [String: JSONValue] = [:]

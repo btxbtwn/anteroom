@@ -4,26 +4,49 @@ import XCTest
 final class EditorDraftTests: XCTestCase {
     func testLegacyDraftRestoresUnsavedEditsWithoutSizeProperties() throws {
         let baseline = SellerInputs(notes: #"{"size":"0","future":true}"#)
-        var form = ListingEditorModel.Form()
-        form.fields.title = "Unsaved title"
-        form.sellerInputs = baseline
-        form.sellerInputs.sku = "Unsaved SKU"
-        let draft = EditorDraft(listingID: "legacy", revisionID: "r1", baselineInputs: baseline,
-                                form: form, pending: [:], savedAt: .now)
-        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(draft)) as? [String: Any])
-        var oldBaseline = try XCTUnwrap(object["baselineInputs"] as? [String: Any])
-        oldBaseline.removeValue(forKey: "size")
-        object["baselineInputs"] = oldBaseline
-        var oldForm = try XCTUnwrap(object["form"] as? [String: Any])
-        var oldInputs = try XCTUnwrap(oldForm["sellerInputs"] as? [String: Any])
-        oldInputs.removeValue(forKey: "size")
-        oldForm["sellerInputs"] = oldInputs
-        object["form"] = oldForm
-        let restored = try JSONDecoder().decode(EditorDraft.self, from: JSONSerialization.data(withJSONObject: object))
+        // Frozen synthetic payload from the pre-size draft schema; do not regenerate with today's encoder.
+        let raw = #"""
+        {
+          "listingID":"legacy","revisionID":"r1","pending":{},"savedAt":800000000,
+          "baselineInputs":{
+            "originalNotes":"{\"size\":\"0\",\"future\":true}","sku":"","sellerNotes":"",
+            "knownFlaws":"","descriptionMeasurements":"","cog":"","packageDimensions":"",
+            "vendooLabels":"","garment":"top","measurements":{}
+          },
+          "form":{
+            "sellerInputs":{
+              "originalNotes":"{\"size\":\"0\",\"future\":true}","sku":"Unsaved SKU","sellerNotes":"",
+              "knownFlaws":"","descriptionMeasurements":"","cog":"","packageDimensions":"",
+              "vendooLabels":"","garment":"top","measurements":{}
+            },
+            "fields":{
+              "title":"Unsaved title","description":"","brand":"","condition":"","primaryColor":"",
+              "secondaryColor":"","size":"","sku":"","labels":[],"zipCode":"","categoryPath":"",
+              "department":"","packageDimensionsIn":""
+            },
+            "price":"","cost":"","quantity":"","weightOz":"","labels":""
+          }
+        }
+        """#
+        let restored = try JSONDecoder().decode(EditorDraft.self, from: Data(raw.utf8))
         XCTAssertTrue(restored.restores(revisionID: "r1", inputs: baseline))
         XCTAssertEqual(restored.form.fields.title, "Unsaved title")
         XCTAssertEqual(restored.form.sellerInputs.sku, "Unsaved SKU")
         XCTAssertEqual(restored.form.sellerInputs.size, "0")
+    }
+
+    func testNotesSaveBaselineRestoresLaterUnsavedListingEdits() {
+        var savedInputs = SellerInputs()
+        savedInputs.sku = "A"
+        var form = ListingEditorModel.Form()
+        form.fields.title = "Later unsaved title"
+        form.sellerInputs = savedInputs
+        let draft = EditorDraft(listingID: "saved-notes", revisionID: "r1", baselineInputs: savedInputs,
+                                form: form, pending: [:], savedAt: .now)
+        let freshInputs = SellerInputs(notes: #"{"sku":"A"}"#)
+        XCTAssertTrue(draft.restores(revisionID: "r1", inputs: freshInputs))
+        XCTAssertFalse(draft.restores(revisionID: "r2", inputs: freshInputs))
+        XCTAssertFalse(draft.restores(revisionID: "r1", inputs: SellerInputs(notes: #"{"sku":"B"}"#)))
     }
 
     func testDraftRoundTripsAndRestoresOnlyOnTheSameVersion() throws {
