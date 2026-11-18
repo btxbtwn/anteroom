@@ -8,12 +8,15 @@ import { BulkUploadDialog } from "./BulkUploadDialog";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-it("keeps the same photos and entered details when account relay reading fails", async () => {
+it.each([
+  "Anteroom could not reach the Mac connection for this account.",
+  "Anteroom could not read the measurements in these photos.",
+])("keeps the same photos and entered details when reading fails: %s", async (message) => {
   const file = new File(["synthetic"], "coat.jpg", { type: "image/jpeg" });
   const groups = [{ folder: "Coat", files: [file] }];
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const boxes = vi.spyOn(api.boxes, "list").mockResolvedValue({ boxes: [], stores: [] });
-  const read = vi.spyOn(api.measurements, "read").mockRejectedValue(new Error("Anteroom could not reach the Mac connection for this account."));
+  const read = vi.spyOn(api.measurements, "read").mockRejectedValue(new Error(message));
   vi.stubGlobal("URL", class extends URL {
     static createObjectURL() { return "blob:synthetic"; }
     static revokeObjectURL() {}
@@ -42,8 +45,10 @@ it("keeps the same photos and entered details when account relay reading fails",
       .find(button => button.textContent?.trim() === "Read measurements")!.click());
     expect(read).toHaveBeenCalledTimes(1);
     expect(read).toHaveBeenCalledWith([file], expect.any(String));
-    expect(dialog.textContent).toContain("could not reach the Mac connection");
+    expect(dialog.textContent).toContain(message);
     expect(dialog.textContent).toContain("Your entered details are kept");
+    expect(dialog.textContent).toContain("You can enter measurements manually or try reading again.");
+    expect(dialog.textContent).not.toContain("after checking the connection");
     expect(inputs.map(input => input.value)).toEqual(values);
     expect(dialog.isConnected).toBe(true);
     expect(confirm).not.toHaveBeenCalled(); expect(cancel).not.toHaveBeenCalled();
