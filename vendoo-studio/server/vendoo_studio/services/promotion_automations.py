@@ -430,8 +430,9 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                     counts["skipped"] += 1
                     reasons[WAITING_FOR_LIKES] += 1
                     continue
-                # Only a like newer than the refusal reads it again before the day is up.
-                if listing_id in held and (new_like_at is None or new_like_at <= held[listing_id]):
+                # As in the feed filter, keep millisecond ties eligible until a later check.
+                if listing_id in held and (new_like_at is None or new_like_at < held[listing_id].replace(
+                        microsecond=held[listing_id].microsecond // 1000 * 1000)):
                     counts["skipped"] += 1
                     reasons[HELD_AFTER_REFUSAL] += 1
                     continue
@@ -462,12 +463,12 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                     shipping = _shipping_choice(row, send)
             except PromotionError as exc:
                 db.rollback()
-                counts["skipped"] += 1
                 # Review only reads, but its refusal still belongs in the
                 # per-listing activity journal. No send timestamp; a recognized
                 # Mercari eligibility refusal gates previews only.
                 send.listing_id = send.listing_id or listing_id
                 send.state, send.note = ("failed" if exc.code in ("chrome", "network") else "skipped"), _skip_reason(exc, send)
+                counts[send.state] += 1
                 send.marketplace_message = scrub(send.marketplace_message)
                 send.finished_at = _now()
                 # The draft may have been deleted while Chrome was reading.

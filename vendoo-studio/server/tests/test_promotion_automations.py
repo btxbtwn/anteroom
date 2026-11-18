@@ -602,6 +602,14 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.bridge.side_effect = disconnected
         with patch.object(promotion_automations, "_now", return_value=at + timedelta(seconds=1)):
             self.check_likes()
+        failure = self.db.query(ListingPromotion).filter_by(listing_id=post).one()
+        self.assertEqual(failure.state, "failed")
+        self.assertIsNone(failure.sent_at)
+        self.assertIn("Chrome disconnected", failure.note)
+        run = self.db.query(PromotionRun).filter_by(automation_id=saved["id"]).one()
+        self.assertEqual((run.sent, run.skipped, run.failed), (0, 0, 1))
+        self.assertIn("Chrome disconnected", run.note)
+        self.assertEqual(self.promoted(), [])
         self.like_feed(events)
         self.bridge.reset_mock()
         with patch.object(promotion_automations, "_now", return_value=at + timedelta(seconds=2)):
@@ -611,6 +619,89 @@ class PromotionAutomationsTest(unittest.TestCase):
         with patch.object(promotion_automations, "_now", return_value=at + timedelta(seconds=3)):
             self.assertEqual(self.check_likes(), 0)
         self.assertEqual(self.checked(), [])
+        self.assertEqual(self.promoted(), [])
+        self.assertFalse(self.db.query(ListingPromotion).filter(ListingPromotion.sent_at.is_not(None)).count())
+
+    def test_chrome_preview_refusal_is_counted_as_failed_without_sending(self):
+        conv, post = self.items[0]
+        saved = self.create({**OFFER, "scope": "items", "conversation_ids": [conv.id]})
+        self.enable(saved["id"])
+        self.bridge.return_value = {"ok": False, "error": "Connect Chrome first.", "error_code": "chrome"}
+        self.bridge.side_effect = None
+        self.due(saved["id"])
+        self.tick()
+        failure = self.db.query(ListingPromotion).filter_by(listing_id=post).one()
+        self.assertEqual(failure.state, "failed")
+        self.assertIsNone(failure.sent_at)
+        self.assertIn("Connect Chrome first", failure.note)
+        run = self.db.query(PromotionRun).filter_by(automation_id=saved["id"]).one()
+        self.assertEqual((run.sent, run.skipped, run.failed), (0, 0, 1))
+        self.assertIn("Connect Chrome first", run.note)
+        self.assertEqual(self.promoted(), [])
+
+    def test_sent_rows_including_failed_are_not_retried_for_an_already_checked_like(self):
+        conv, post = self.items[0]
+        saved = self.create({**OFFER, "scope": "items", "conversation_ids": [conv.id]})
+        self.enable(saved["id"])
+        now = _now()
+        at = now - timedelta(seconds=1)
+        rule = self.db.get(PromotionAutomation, saved["id"])
+        rule.like_events_since = at - timedelta(seconds=1)
+        send = listing_promotions.new_row(conv, "poshmark", "offer", "already-sent", 20, rule.id)
+        send.listing_id, send.created_at, send.sent_at = post, now, now
+        self.db.add(send)
+        self.like_feed([{"listing_id": post, "at": at.isoformat(timespec="milliseconds") + "Z"}])
+        for state in ("failed", "sending", "unknown", "done"):
+            with self.subTest(state=state):
+                send.state = state
+                self.db.commit()
+                self.bridge.reset_mock()
+                self.assertEqual(self.check_likes(), 0)
+                self.assertEqual(self.checked(), [])
+                self.assertEqual(self.promoted(), [])
+                self.assertEqual(send.sent_at, now)
+        self.assertEqual(self.db.query(ListingPromotion).filter_by(listing_id=post).count(), 1)
+
+    def test_held_refusal_reads_a_same_millisecond_like_once(self):
+        conv, _post = self.items[0]
+        slug = "seller-missing-cami-top"
+        conv.notes = merge_notes(conv.notes, {"vendooListingUrls": {"depop": f"https://www.depop.com/products/{slug}/"}})
+        self.db.commit()
+        saved = self.create({**OFFER, "marketplace": "depop", "shipping_label": None,
+                             "scope": "items", "conversation_ids": [conv.id]})
+        self.enable(saved["id"])
+        started = (_now() + timedelta(seconds=1)).replace(microsecond=123100)
+        arrived = started + timedelta(microseconds=500)
+
+        async def not_found(job, message_type, payload, timeout=0):
+            if message_type == "marketplace.like_events":
+                return {"ok": True, "events": [{"listing_id": slug, "at": arrived.isoformat(timespec="milliseconds") + "Z"}]}
+            return {"ok": False, "error": "Depop refused the request (HTTP 404).", "error_code": "rejected",
+                    "safe_to_retry": True, "marketplace_message": "Product not found", "preview_step": "depop-product"}
+
+        self.bridge.side_effect = not_found
+        with patch.object(promotion_automations, "_now", return_value=started):
+            self.due(saved["id"])
+            self.tick()
+        refusal = self.db.query(ListingPromotion).filter_by(listing_id=slug).one()
+        self.assertEqual(refusal.state, "skipped")
+        self.assertEqual(refusal.created_at, started)
+        self.assertIn("saved Depop link", refusal.note)
+        self.assertIsNone(refusal.sent_at)
+        self.bridge.reset_mock()
+        with patch.object(promotion_automations, "_now", return_value=started + timedelta(seconds=1)):
+            self.assertEqual(self.check_likes(), 1)
+        self.assertEqual(self.checked(), [slug])
+        self.assertEqual(self.promoted(), [])
+        for seconds in (2, 3):
+            self.bridge.reset_mock()
+            with patch.object(promotion_automations, "_now", return_value=started + timedelta(seconds=seconds)):
+                self.assertEqual(self.check_likes(), 0)
+            self.assertEqual(self.checked(), [])
+            self.assertEqual(self.promoted(), [])
+        refusals = self.db.query(ListingPromotion).filter_by(listing_id=slug).all()
+        self.assertEqual(len(refusals), 2)
+        self.assertTrue(all(row.state == "skipped" and row.sent_at is None for row in refusals))
 
     def test_price_recorded_during_preview_does_not_release_later_refusal(self):
         (conv, item), = self.mercari_items(1)
