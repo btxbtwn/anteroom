@@ -7,6 +7,7 @@ on:
       - '.dockerignore'
       - '.github/workflows/hosted-image-validation.yml'
       - '.github/hosted-image-smoke.sh'
+      - '.github/scripts/test-hosted-image-smoke.py'
       - 'vendoo-studio/pyproject.toml'
       - 'vendoo-studio/uv.lock'
       - 'vendoo-studio/package*.json'
@@ -29,6 +30,8 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Check Postgres readiness polling with mocked Docker
+        run: python3 .github/scripts/test-hosted-image-smoke.py
       - name: Build exact source and smoke on disposable data
         shell: bash
         run: |
