@@ -1215,6 +1215,7 @@ async function depopApiAction(action, payload) {
       if (!/^[A-Za-z0-9_-]{1,80}$/.test(String(draft.id))) throw marketplaceError('Depop did not confirm its new draft ID. Check drafts before trying again.', { code: 'schema_drift', rejected: false });
       return { draft_url: `https://www.depop.com/sellinghub/drafts/edit/${draft.id}/` };
     }
+    if (action === 'shop_matches') return { matches: await depopShopMatches(request, payload) };
     if (!id && action !== 'publish_status' && action !== 'update') throw marketplaceError('A saved Depop draft link is required.');
     if (action === 'read') {
       const draft = await readDraft();
@@ -1461,8 +1462,13 @@ async function depopPublishEvidence(request, payload, draftPath) {
   } catch (error) {
     if (error?.status !== 404) throw error;
   }
-  const listing_url = await depopShopUrl(request, payload);
-  return listing_url ? { ...unavailable, complete: true, listing_url } : { ...unavailable, draft_posted: true };
+  // Only a product that was not in the shop before this publish can be the one it made:
+  // the seller may already have an identical listing live. Without that earlier
+  // reading, nothing in the shop is evidence.
+  const before = Array.isArray(payload.shop_before) ? payload.shop_before : null;
+  const after = before ? await depopShopMatches(request, payload) : null;
+  const made = after ? after.filter(url => !before.includes(url)) : [];
+  return made.length === 1 ? { ...unavailable, complete: true, listing_url: made[0] } : { ...unavailable, draft_posted: true };
 }
 
 // Read only error containers: draft descriptions, addresses and other seller
@@ -1606,6 +1612,39 @@ async function depopShopUrl(request, payload) {
   return '';
 }
 
+// Every product link in the seller's shop that this listing's text and price match,
+// across every page read. Null when the shop could not be read in full.
+async function depopShopMatches(request, payload) {
+  const listing = payload.listing || {};
+  if (!depopBaseDescription(listing) || !Number.isFinite(Number(listing.price))) return null;
+  let me;
+  try { me = await request('GET', '/presentation/api/v1/users/me/'); } catch { return null; }
+  const userId = String(me?.id ?? '');
+  if (!/^\d{1,15}$/.test(userId)) return null;
+  const scoped = { ...listing, seller_id: userId };
+  const matches = new Set();
+  const inventory = `/api/v1/shop/${userId}/products/?limit=200`;
+  let offset = '';
+  let previousId;
+  for (let pageNumber = 0; pageNumber < 8; pageNumber += 1) {
+    const path = offset ? `${inventory}&offset_id=${offset}` : inventory;
+    if (!depopShopRead(path)) return null;
+    let page;
+    try { page = await request('GET', path); } catch { return null; }
+    for (const product of depopProductRows(page)) {
+      if (depopShopProduct(product, scoped)) matches.add(depopListingUrl(product?.slug || product?.url));
+    }
+    const firstId = depopProductRows(page)[0]?.id;
+    if ((pageNumber && firstId != null && firstId === previousId) || page?.meta?.end === true) return [...matches];
+    previousId = firstId;
+    const next = depopCursorToken(page?.meta?.last_offset_id);
+    if (!next || next === offset) return [...matches];
+    offset = next;
+  }
+  // More pages than were read: a match could be on one not read.
+  return null;
+}
+
 async function depopAction(action, payload) {
   if (nativeOperationFor('depop')?.cancelled) throw marketplaceError('Marketplace action cancelled.', { code: 'network' });
   const result = await depopApiAction(action, payload);
@@ -1723,6 +1762,10 @@ async function runDepopNative(msg, recovery = false) {
       // whose category, size or attributes are no longer the ones sent.
       payload.depop_fields = await depopResolvedFields(payload);
       await depopAction('prepare_publish', payload);
+      // The shop's matching products before posting, so a publish whose status read is
+      // unavailable can tell its new product from an identical one already live. Read only.
+      payload.shop_before = (await depopAction('shop_matches', payload).catch(() => null))?.matches ?? null;
+      await storeReceipt({ shop_before: payload.shop_before });
       try {
         const receipt = await depopAction('publish', payload);
         committed = true;
@@ -1735,13 +1778,16 @@ async function runDepopNative(msg, recovery = false) {
     }
     if (!payload.publish_job_id) throw new Error('No confirmed Depop publish receipt is available. Review the native account.');
     let status = {};
-    let unavailable = 0;
+    // Without Depop's status read, each poll reads the draft, and the whole shop once the
+    // draft is gone. Bound them so a Check answers inside Anteroom's 65 s wait for Chrome.
+    const evidenceUntil = Date.now() + 40000;
+    let queuedPolls = 0;
+    let postedPolls = 0;
     while (Date.now() < payload.deadline) {
       status = await depopAction('publish_status', payload);
       if (status.complete) return { ok: true, state: 'published', draft_url: payload.draft_url, ...(status.listing_url ? { listing_url: status.listing_url } : {}) };
-      // Without Depop's status read, each poll reads the draft, and the shop once the draft
-      // is gone. Bound them so a Check answers inside Anteroom's wait for Chrome.
-      if (status.status_unavailable && (unavailable += 1) >= (status.draft_posted ? 3 : DEPOP_UNAVAILABLE_STATUS_POLLS)) break;
+      if (status.status_unavailable && (Date.now() >= evidenceUntil
+        || (status.draft_posted ? (postedPolls += 1) >= 2 : (queuedPolls += 1) >= DEPOP_UNAVAILABLE_STATUS_POLLS))) break;
       if (status.failed) {
         // Depop's job ended without posting this draft. The draft is untouched, so List can run again.
         return marketplaceFailure(marketplaceError(`Depop could not publish this listing.${status.reason ? ` ${status.reason}` : ''}`,
@@ -1753,19 +1799,22 @@ async function runDepopNative(msg, recovery = false) {
       await marketplaceSleep(2000);
     }
     if (status.draft_posted) {
-      // The draft left Depop's drafts, but no one product in the shop is this listing.
-      throw marketplaceError('Depop took this draft for publishing, but Anteroom could not find the new listing. '
+      // The draft left Depop's drafts, but no one new product in the shop is this listing.
+      throw Object.assign(marketplaceError('Depop took this draft for publishing, but Anteroom could not find the new listing. '
         + 'Check your Depop shop, then add the listing link here.',
-      { code: 'uncertain', rejected: false, marketplace_message: 'publish status: HTTP 404; draft: no longer in drafts; shop: no single matching listing' });
+      { code: 'uncertain', rejected: false, marketplace_message: 'publish status: HTTP 404; draft: no longer in drafts; shop: no single new matching listing' }),
+      { publish_read: true });
     }
-    throw marketplaceError('Depop has not confirmed publishing yet. Check its result later.',
+    throw Object.assign(marketplaceError('Depop has not confirmed publishing yet. Check its result later.',
       { code: 'uncertain', rejected: false, marketplace_message: status.status_unavailable
-        ? 'publish status: HTTP 404; draft: still in drafts' : `counts: ${JSON.stringify(status.counts || {})}` });
+        ? 'publish status: HTTP 404; draft: still in drafts' : `counts: ${JSON.stringify(status.counts || {})}` }),
+    { publish_read: true });
   } catch (error) {
     if (depopDraftGone(error) && !replacedDraft) payload.draft_url = '';
     // A write may have landed and the reply was lost. Read Depop before answering
     // so a finished action is a draft, a listing, or a refusal — never a guess.
-    if (committed && payload.draft_url) {
+    // A publish result already read to its end is not read again.
+    if (committed && payload.draft_url && error.publish_read !== true) {
       try {
         if (payload.publish_job_id) {
           const status = await depopAction('publish_status', payload);

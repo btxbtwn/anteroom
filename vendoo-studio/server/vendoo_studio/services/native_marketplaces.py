@@ -952,11 +952,14 @@ def _settle_check(db: Session, conv_id: str, marketplace: str, record: dict, che
                   remembered: list[dict], result: dict | None) -> dict:
     _keep_remembered(db, conv_id, marketplace, remembered)
     current = _record(db, conv_id, marketplace)
-    if (current.get("job_id") == record.get("job_id")
-            and ((record.get("state") in UNSETTLED_STATES and current.get("state") not in UNSETTLED_STATES)
-                 or current.get("listing_url") != record.get("listing_url"))):
-        # The seller settled the record while Chrome was answering (Mark as listed with
-        # the live link, or "I checked it myself"). What they saw is newer than this read.
+    settled_by_seller = (current.get("job_id") == record.get("job_id")
+                         and record.get("state") in UNSETTLED_STATES and current.get("state") not in UNSETTLED_STATES)
+    confirmed = isinstance(result, dict) and result.get("ok") is True
+    if settled_by_seller and (current.get("state") in LIVE_STATES or not confirmed):
+        # The seller settled the record while Chrome was answering. Mark as listed (with
+        # the live link) is newer than this read and wins. After "I checked it myself"
+        # only a confirmed answer replaces it: a listing that went live must not stay a
+        # draft, or the next List would publish a second copy.
         repo = JobRepo(db)
         if repo.get(record["job_id"]):
             repo.add_event(record["job_id"], "native_check_superseded", f"native_{marketplace}_check", {

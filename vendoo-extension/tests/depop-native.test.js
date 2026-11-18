@@ -468,8 +468,8 @@ function publishWithStatus404(c, payload, { draftAfterPost, shopRows }) {
     if (options.method === 'POST' && pathname === '/presentation/api/v1/drafts/products/') { posted = true; return reply(200, { id: 'job-1' }); }
     if (pathname === '/presentation/api/v1/drafts/123456/' && posted) return draftAfterPost();
     if (pathname === '/presentation/api/v1/users/me/') return reply(200, { id: 42 });
-    if (pathname.includes('/by-status/selling/')) return reply(200, { objects: shopRows(sent) });
-    if (pathname === '/api/v1/shop/42/products/') return reply(200, { meta: { end: true }, products: [] });
+    if (pathname.includes('/by-status/selling/')) return reply(200, { objects: [] });
+    if (pathname === '/api/v1/shop/42/products/') return reply(200, { meta: { end: true }, products: shopRows(sent, posted) });
     return reply(200, draft);
   };
   withCatalog(c);
@@ -487,7 +487,8 @@ test('a Depop publish whose status read answers 404 is confirmed by the posted p
   const { c, payload } = page();
   const { requests, run } = publishWithStatus404(c, payload, {
     draftAfterPost: () => reply(404, { detail: 'Not found' }),
-    shopRows: sent => [{ slug: 'seller-corona-tee-5618', description: c.depopDescription(sent), price_amount: String(sent.price), user_id: 42 }],
+    shopRows: (sent, posted) => posted
+      ? [{ slug: 'seller-corona-tee-5618', description: c.depopDescription(sent), price_amount: String(sent.price), user_id: 42 }] : [],
   });
   const result = await run();
   assert.equal(result.ok, true, result.error);
@@ -531,6 +532,42 @@ test('a Depop publish whose status read answers 404 and whose product cannot be 
   assert.doesNotMatch(`${result.error} ${result.marketplace_message || ''}`, /could not find draft/i);
   assert.match(result.error, /link/);
   assert.equal(publishPosts(requests), 1);
+});
+
+test('a Depop publish whose status read answers 404 is not confirmed by an identical listing already live', async () => {
+  const { c, payload } = page();
+  const older = sent => ({ slug: 'seller-corona-tee-older-1111', description: c.depopDescription(sent), price_amount: String(sent.price), user_id: 42 });
+  const { requests, run } = publishWithStatus404(c, payload, {
+    draftAfterPost: () => reply(404, { detail: 'Not found' }),
+    // The same item listed earlier; Depop has not shown the new product yet.
+    shopRows: sent => [older(sent)],
+  });
+  const result = await run();
+  assert.equal(result.ok, false);
+  assert.equal(result.safe_to_retry, false);
+  assert.equal(result.error_code, 'uncertain');
+  assert.equal(result.listing_url, undefined);
+  assert.equal(publishPosts(requests), 1);
+});
+
+test('a Depop status read that answers 404 confirms nothing from the shop without a reading taken before posting', async () => {
+  const { c, payload } = page();
+  c.fetch = async (url) => {
+    const { pathname } = new URL(url);
+    if (pathname.endsWith('/status/')) return reply(404, '');
+    if (pathname === '/presentation/api/v1/drafts/123456/') return reply(404, { detail: 'Not found' });
+    if (pathname === '/presentation/api/v1/users/me/') return reply(200, { id: 42 });
+    if (pathname === '/api/v1/shop/42/products/') return reply(200, { meta: { end: true },
+      products: [{ slug: 'seller-columbia-xl', description: 'Private draft', price_amount: '12', user_id: 42 }] });
+    throw new Error(pathname);
+  };
+  // A Check of a publish journalled before this change has no earlier shop reading.
+  const status = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1' });
+  assert.equal(status.complete, false);
+  assert.equal(status.draft_posted, true);
+  assert.equal(status.listing_url, undefined);
+  const known = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1', shop_before: [] });
+  assert.equal(known.listing_url, 'https://www.depop.com/products/seller-columbia-xl/');
 });
 
 test('a bodiless Depop refusal still names its step, method, path and status in the log, without ids', async () => {

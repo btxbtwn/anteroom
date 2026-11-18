@@ -1377,6 +1377,21 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
             events = [event.event_type for event in JobRepo(self.db).get_events(record["job_id"])]
             self.assertIn("native_check_superseded", events)
 
+        # "I checked it myself" alone, then Chrome confirms the listing: the confirmed
+        # answer wins, or the record would stay a draft and the next List would post a second copy.
+        async def confirmed_after_reset(job, kind, payload, timeout=None):
+            await in_worker_session(lambda db: native.reset(self.conv.id, "depop", db))
+            return {"finished": True, "result": {"ok": True, "state": "published", "draft_url": record["draft_url"],
+                                                 "listing_url": LIVE["depop"]}}
+
+        MarketplaceListingRepo(self.db).save(self.conv.id, "depop", {"state": "unknown", "listing_url": None,
+                                                                     "listing_id": None})
+        self.bridge.side_effect = confirmed_after_reset
+        checked = self.client.post(f"{self.base}/depop/check")
+        self.assertEqual(checked.status_code, 200, checked.text)
+        live = self.record("depop")
+        self.assertEqual((live["state"], live["listing_url"]), ("published", LIVE["depop"]))
+
     def test_a_pasted_draft_link_is_checked_without_repeating_the_write(self):
         self.bridge.side_effect = BrowserBridgeError("lost")
         with patch.object(native, "SETTLE_DEADLINE_S", 0):
