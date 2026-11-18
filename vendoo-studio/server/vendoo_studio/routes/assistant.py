@@ -274,6 +274,9 @@ async def _answer(
                         _save_answer, provider, answer, changes, memory_block, automation_block, thread_id, settle,
                         error,
                     )
+                except asyncio.CancelledError:
+                    outcome = "cancelled"
+                    raise
                 except background_tasks.TaskLeaseExpired:
                     outcome = "lease_lost"
                     raise

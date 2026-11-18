@@ -23,6 +23,14 @@ Mac), `prepare_ms` (shop read and prompt), `rounds`, per-round
 `round_ms`, `lookups`, `lookup_ms`, `save_ms` and `total_ms`. Values are capped
 at 600,000. No question, answer, query, provider or seller text is logged.
 
+`total_ms` starts when `_answer` starts and ends after its save/cleanup wait;
+queue wait is separate. First-token time is a point within its round, not an
+additional duration to sum. Round time includes local processing and streaming
+handoff while consuming the provider, so it is not pure provider/network time.
+Preparation and save measure their awaited intervals, including thread dispatch;
+on cancellation a thread may still finish after the await ends. Parsing,
+proposal processing and cleanup can leave time outside the named stages.
+
 <!-- coderabbit-ai-generated:v1 -->
 
 <!-- coderabbit-ai-generated-section:v1:c16ae77c1fa266df95938d44689e61b2522ff68f559affd05d4c47994dd17247 -->
