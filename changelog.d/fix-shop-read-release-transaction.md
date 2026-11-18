@@ -1,1 +1,0 @@
-- The assistant handles waits for sales history and calculations for analytics and boxes without losing its connection to your shop data.
