@@ -25,7 +25,11 @@ it("keeps the same photos and entered details when account relay reading fails",
     await act(async () => root.render(<QueryClientProvider client={client}>
       <BulkUploadDialog groups={groups} onConfirm={confirm} onCancel={cancel} />
     </QueryClientProvider>));
-    const inputs = Array.from(host.querySelectorAll<HTMLInputElement>('input[type="text"], input[type="number"]'));
+    // The dialog is portaled into document.body, outside the React root.
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+    expect(dialog).not.toBeNull();
+    const inputs = Array.from(dialog.querySelectorAll<HTMLInputElement>('input[type="text"], input[type="number"]'));
+    expect(inputs.length).toBeGreaterThan(0);
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
     for (const [index, input] of inputs.entries()) {
       await act(async () => {
@@ -34,14 +38,14 @@ it("keeps the same photos and entered details when account relay reading fails",
       });
     }
     const values = inputs.map(input => input.value);
-    await act(async () => Array.from(host.querySelectorAll("button"))
-      .find(button => button.textContent === "Read measurements")!.click());
+    await act(async () => Array.from(dialog.querySelectorAll("button"))
+      .find(button => button.textContent?.trim() === "Read measurements")!.click());
     expect(read).toHaveBeenCalledTimes(1);
     expect(read).toHaveBeenCalledWith([file], expect.any(String));
-    expect(host.textContent).toContain("could not reach the Mac connection");
-    expect(host.textContent).toContain("Your entered details are kept");
+    expect(dialog.textContent).toContain("could not reach the Mac connection");
+    expect(dialog.textContent).toContain("Your entered details are kept");
     expect(inputs.map(input => input.value)).toEqual(values);
-    expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(dialog.isConnected).toBe(true);
     expect(confirm).not.toHaveBeenCalled(); expect(cancel).not.toHaveBeenCalled();
   } finally {
     await act(async () => root.unmount()); client.clear(); host.remove();
