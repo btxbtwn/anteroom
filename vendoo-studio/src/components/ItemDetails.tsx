@@ -68,6 +68,8 @@ export function ItemDetails({ convId, part, garmentHint }: Props) {
   const [activeSuggestion, setActiveSuggestion] = useState(0);
   const [labelDraft, setLabelDraft] = useState("");
   const labelDraftRef = useRef("");
+  // The tag size shows once the item has one, and stays while the seller retypes it.
+  const [tagSizeShown, setTagSizeShown] = useState(false);
   const labelInputRef = useRef<HTMLInputElement | null>(null);
   const migratedLabelsRef = useRef(false);
 
@@ -147,6 +149,7 @@ export function ItemDetails({ convId, part, garmentHint }: Props) {
   useEffect(() => { detailsRef.current = details; }, [details]);
 
   useEffect(() => {
+    setTagSizeShown(false);
     setLabelMenuOpen(false);
     setActiveSuggestion(0);
     labelDraftRef.current = "";
@@ -309,6 +312,24 @@ export function ItemDetails({ convId, part, garmentHint }: Props) {
             onChange={(e) => scheduleSave({ ...details, knownFlaws: e.target.value })}
           />
         </div>
+        {details.size !== "" || tagSizeShown ? (
+          <div>
+            <FieldLabel htmlFor={`item-tag-size-${convId}`}>Tag size</FieldLabel>
+            <Input
+              nativeInput
+              id={`item-tag-size-${convId}`}
+              aria-describedby={`item-tag-size-help-${convId}`}
+              value={details.size}
+              onChange={(e) => {
+                setTagSizeShown(true);
+                scheduleSave({ ...details, size: e.target.value });
+              }}
+            />
+            <p id={`item-tag-size-help-${convId}`} className="mt-1 text-muted-foreground text-xs">
+              From the size tag. Generating uses it as the listing's Size.
+            </p>
+          </div>
+        ) : null}
         <div>
           <FieldLabel htmlFor={`item-labels-${convId}`}>Labels</FieldLabel>
           <div

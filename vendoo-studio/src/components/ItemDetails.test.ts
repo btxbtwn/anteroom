@@ -19,6 +19,17 @@ describe("saved seller notes", () => {
     expect(detailNoteChanges(notes, { measurements: { top: {}, pants: { inseam: "6" }, skirt: {} } }, "13x10x3").measurements)
       .toEqual({ pants: { waist: "15", inseam: "6" } });
   });
+  it("reads a bulk draft that only has a tag size as Item Details, not as seller text", () => {
+    for (const stored of ['{"size":"0"}', '{"size":0}']) {
+      const details = parseNotes(stored);
+      expect(details.size).toBe("0");
+      expect(details.sellerNotes).toBe("");
+    }
+    // Editing another detail keeps the tag size where it is.
+    const changes = detailNoteChanges('{"size":"M"}', { knownFlaws: "Pilling" }, "13x10x3");
+    expect(changes).not.toHaveProperty("size");
+    expect(changes.sellerNotes).toBe("");
+  });
   it("keeps seller text notes as seller notes on the first save", () => {
     expect(detailNoteChanges("Stain on cuff", { sku: "A1" }, "13x10x3")).toMatchObject({ sellerNotes: "Stain on cuff", sku: "A1" });
   });
