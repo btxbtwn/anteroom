@@ -78,6 +78,20 @@ class MercariFormTest(unittest.IsolatedAsyncioTestCase):
         row = next(row for row in mercari_form.form(locked)['fields'] if row['path'] == 'mercari_specifics.brand')
         self.assertEqual(row['value'], 'AM Tees')
 
+    def test_an_unconfirmed_brand_does_not_block_list_before_mercaris_live_check(self):
+        from vendoo_studio.services import native_contract
+
+        def brand_gaps(listing):
+            listing = {**listing, native_contract.KEY: native_contract.capture(
+                listing, {'mercari': mercari_form.form(listing)}, ['mercari'])}
+            return [gap for gap in native_contract.gaps(listing, 'mercari') if gap['field'] == 'mercari_specifics.brand']
+
+        found = brand_gaps({'brand': 'AM Tees', 'price': 20})
+        self.assertEqual(len(found), 1)
+        self.assertFalse(found[0]['blocking'])
+        self.assertIn("isn't in Anteroom's copy of Mercari's brand list", found[0]['message'])
+        self.assertEqual(brand_gaps({'brand': 'Nike', 'price': 20}), [])
+
     def test_an_unreadable_brand_catalog_is_an_error_not_no_brand(self):
         with patch.object(mercari_form, 'catalog', side_effect=OSError('catalog unreadable')):
             with self.assertRaises(OSError):

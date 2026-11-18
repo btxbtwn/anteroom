@@ -281,6 +281,9 @@ def prompt(contracts: dict) -> str:
     )
 
 
+NOT_AN_OPTION = "Choose a value from this marketplace's current options."
+
+
 def value_error(row: dict, value) -> str | None:
     """Validate a supplied value without truncating, guessing, or selecting a substitute."""
     if value is None or value == "" or value == [] or value == {}:
@@ -321,7 +324,7 @@ def value_error(row: dict, value) -> str | None:
         allowed = {str(item) for item in row.get("options") or []}
         allowed.update(str(item) for item in (row.get("option_values") or {}).values())
         if not allowed or any(str(item) not in allowed for item in values):
-            return "Choose a value from this marketplace's current options."
+            return NOT_AN_OPTION
     for item in values:
         if row.get("max_length") and len(str(item)) > int(row["max_length"]):
             return f"Use at most {row['max_length']} characters."
@@ -557,6 +560,14 @@ def gaps(listing: dict, market: str) -> list[dict]:
             found.append(gap(path, f"{row.get('label') or path}: Uses the account's own choice.", blocking=False))
             continue
         error = value_error(applicable_row(row, listing, fields), value)
+        if error == NOT_AN_OPTION and path == "mercari_specifics.brand":
+            # This catalog is a dated copy. List checks Mercari's current brand
+            # list and sends no brand only when Mercari has no match, so a name
+            # missing here is said, not refused.
+            found.append(gap(path, f"Brand: “{value}” isn't in Anteroom's copy of Mercari's brand list. When you "
+                                   "list, Anteroom checks Mercari's current list and uses No brand if Mercari "
+                                   "doesn't have it.", blocking=False, label=row.get("label")))
+            continue
         if error:
             # A policy or location with no stored answer is chosen from the
             # account at List. Missing one here does not stop the listing, so it
