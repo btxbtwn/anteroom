@@ -243,6 +243,9 @@ def test_openrouter_web_search_allows_repeated_searches_and_reads_citations(fake
     assert body["model"] == "deepseek/deepseek-v3.2"
     assert "plugins" not in body
     assert body["tools"] == [{"type": "openrouter:web_search"}]
+    # The server tool allows 30 searches per request unless capped; each is
+    # billed. The cap matches the research prompt's budget.
+    assert body["max_tool_calls"] == 8
     assert body["input"] == [{"role": "user", "content": "comps"}]
     assert "messages" not in body
     assert calls[0].url.path == "/api/v1/responses"
