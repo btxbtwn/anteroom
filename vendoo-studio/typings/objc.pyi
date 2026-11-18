@@ -1,0 +1,13 @@
+from collections.abc import Callable, Sequence
+from typing import Final
+
+class _NULL_type: ...
+NULL: Final[_NULL_type]
+
+class varlist:
+    def as_buffer(self, size: int) -> memoryview: ...
+
+class selector:
+    def __init__(self, function: Callable[[object, object], None], *, selector: bytes, signature: bytes) -> None: ...
+
+def classAddMethods(cls: type, methods: Sequence[selector]) -> None: ...

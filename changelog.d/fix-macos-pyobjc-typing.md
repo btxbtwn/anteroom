@@ -1,0 +1,1 @@
+- Show a clear background-removal error if the Mac cannot provide an image mask.

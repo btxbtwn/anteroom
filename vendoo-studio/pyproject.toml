@@ -111,6 +111,7 @@ venvPath = "."
 venv = ".venv"
 pythonVersion = "3.12"
 typeCheckingMode = "standard"
+stubPath = "typings"
 
 # Lower layers must not import higher ones: routes stay thin, services hold the
 # behavior, repositories hold queries, models hold tables. ignore_imports lists

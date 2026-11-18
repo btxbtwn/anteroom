@@ -1359,6 +1359,8 @@ def _load_app_url(webkit_host) -> None:  # noqa: ANN001
     from Foundation import NSURL, NSURLRequest
 
     url = NSURL.URLWithString_(saved_workspace_url())
+    if url is None:
+        raise ValueError("The saved workspace URL is invalid.")
     webkit_host.loadRequest_(NSURLRequest.requestWithURL_(url))
 
 
