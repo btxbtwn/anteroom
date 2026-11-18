@@ -98,18 +98,34 @@ test("a new listing the seller typed into is kept", async ({ page, phone, reques
 });
 
 
-test("openListing finds a draft after a slow initial inventory load", async ({ page, phone, request }, info) => {
-  const title = `Slow draft ${info.project.name} ${Date.now()}`;
-  const id = await createListing(request, title);
-  try {
-    await page.route("**/api/conversations", async route => {
-      // Deliberately exceed the helper's former three-second Draft window.
-      if (route.request().method() === "GET") await new Promise(resolve => setTimeout(resolve, 4_000));
-      await route.continue();
-    });
-    await openListing(page, phone, title);
-    await expect(await titleBox(page, phone)).toHaveValue(title);
-  } finally {
-    await request.delete(`/api/conversations/${id}`);
-  }
-});
+for (const activeCount of [0, 1000]) {
+  test(`openListing finds a draft after a slow initial inventory load with ${activeCount} active listings`, async ({ page, phone, request }, info) => {
+    const title = `Slow draft ${info.project.name} ${Date.now()}`;
+    const id = await createListing(request, title);
+    try {
+      // A conversation title and an editor listing title are separate fields.
+      const saved = await request.put(`/api/conversations/${id}/listing`, { data: {
+        expected_revision_id: "", listing: { title },
+      } });
+      expect(saved.ok()).toBe(true);
+      await page.route("**/api/conversations", async route => {
+        if (route.request().method() !== "GET") return route.continue();
+        // Deliberately exceed the helper's former three-second Draft window.
+        await new Promise(resolve => setTimeout(resolve, 4_000));
+        const response = await route.fetch();
+        const rows = await response.json();
+        const draft = rows.find((row: { id: string }) => row.id === id);
+        expect(draft).toBeTruthy();
+        // Only the browser response is expanded; no synthetic listings are saved.
+        const active = Array.from({ length: activeCount }, (_, index) => ({
+          ...draft, id: `active-${index}`, title: `Active sample ${index}`, status: "active",
+        }));
+        await route.fulfill({ response, json: [...rows.filter((row: { status: string }) => row.status !== "active"), ...active] });
+      });
+      await openListing(page, phone, title);
+      await expect(await titleBox(page, phone)).toHaveValue(title);
+    } finally {
+      await request.delete(`/api/conversations/${id}`);
+    }
+  });
+}
