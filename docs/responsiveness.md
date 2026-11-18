@@ -1091,8 +1091,11 @@ No new timeout, retry, task, query, log line or external call is introduced.
 These are diagnostic observations, not a speed fix or a common-cause claim
 about the supplied suggestions/jobs/relay samples.
 
-Focused fixtures cover suggestions cards/query-count preservation, snapshot
-cache reset, reply branch ordering, error propagation and actual awaiting-task
+The suggestions parity fixture requires a known validation card and compares
+results and query counts with observation active versus inactive in the current
+implementation; it does not compare against the previous implementation's query
+sequence. Other fixtures cover snapshot cache reset, reply branch ordering,
+error propagation and actual awaiting-task
 cancellation while its original worker finishes. Full selected local checks,
 Postgres/hosted/browser coverage and timing-overhead/load measurements remain
 unverified until separately coordinated; no production replay was used.

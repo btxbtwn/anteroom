@@ -52,7 +52,10 @@ class SuggestionsTest(unittest.TestCase):
         from sqlalchemy import event
         from vendoo_studio.services import hosted_read_snapshots as snapshots
 
-        self.convs.create(title="Private draft title")
+        conv = self.convs.create(title="Private draft title")
+        listing_persistence.save_revision(self.db, conv.id, {"title": "Private draft title", "price": 18}, "user_form")
+        self.listings.get_current(conv.id).validation_status = "error"
+        self.db.commit()
         queries = []
         engine = self.db.get_bind()
 
@@ -63,6 +66,8 @@ class SuggestionsTest(unittest.TestCase):
         try:
             baseline = list_suggestions(self.db, now=NOW)
             baseline_calls = len(queries)
+            self.assertEqual([(card['conversation_id'], card['kind']) for card in baseline],
+                             [(conv.id, 'fix_validation')])
             queries.clear()
             phases = {}
             token = snapshots._build_phases.set(phases)
