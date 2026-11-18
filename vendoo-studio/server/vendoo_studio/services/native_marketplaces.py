@@ -897,13 +897,14 @@ async def check_result(conv_id: str, marketplace: Marketplace, body: CheckReques
 
     The database steps run on worker threads; none holds a connection while the marketplace answers.
     """
-    record, snapshot, candidate, context, check_job_id = await in_worker_session(
+    record, snapshot, candidate, context, check_job_id, mark_before = await in_worker_session(
         _open_check, conv_id, marketplace, body)
     remembered: list[dict] = []
     try:
         result = await _read_result(marketplace, record, snapshot, candidate, _JobRef(check_job_id),
                                     context=context, remember=remembered.append)
-        return await in_worker_session(_settle_check, conv_id, marketplace, record, check_job_id, remembered, result)
+        return await in_worker_session(_settle_check, conv_id, marketplace, record, check_job_id, remembered, result,
+                                       mark_before)
     except BaseException:
         await asyncio.shield(in_worker_session(_fail_check, conv_id, marketplace, check_job_id, remembered))
         raise
@@ -940,7 +941,16 @@ def _open_check(db: Session, conv_id: str, marketplace: str, body: CheckRequest 
         check_job = repo.create(conv_id, record.get("revision_id") or "", snapshot, status="dispatched",
                                 current_step=f"native_{marketplace}_check")
         claim_api_job(db, check_job.id)
-    return record, snapshot, candidate, context, check_job.id
+    return record, snapshot, candidate, context, check_job.id, _seller_mark(db, conv_id, marketplace)
+
+
+def _seller_mark(db: Session, conv_id: str, marketplace: str) -> dict:
+    """The seller's last Mark as listed or not listed here. Each mark carries its own time."""
+    from vendoo_studio.services.vendoo_import import parse_notes
+
+    marks = parse_notes(_conversation(db, conv_id).notes).get("marketplaceMarks")
+    mark = marks.get(marketplace) if isinstance(marks, dict) else None
+    return mark if isinstance(mark, dict) else {}
 
 
 def _keep_remembered(db: Session, conv_id: str, marketplace: str, remembered: list[dict]) -> None:
@@ -949,21 +959,32 @@ def _keep_remembered(db: Session, conv_id: str, marketplace: str, remembered: li
 
 
 def _settle_check(db: Session, conv_id: str, marketplace: str, record: dict, check_job_id: str,
-                  remembered: list[dict], result: dict | None) -> dict:
+                  remembered: list[dict], result: dict | None, mark_before: dict | None = None) -> dict:
+    # Mark as listed and "I checked it myself" hold this gate for their read and write.
+    # Holding it here keeps a seller's mark from landing between this read and its writes.
+    with start_gate():
+        return _settle_check_locked(db, conv_id, marketplace, record, check_job_id, remembered, result, mark_before or {})
+
+
+def _settle_check_locked(db: Session, conv_id: str, marketplace: str, record: dict, check_job_id: str,
+                         remembered: list[dict], result: dict | None, mark_before: dict) -> dict:
     _keep_remembered(db, conv_id, marketplace, remembered)
     current = _record(db, conv_id, marketplace)
-    settled_by_seller = (current.get("job_id") == record.get("job_id")
-                         and record.get("state") in UNSETTLED_STATES and current.get("state") not in UNSETTLED_STATES)
+    same_action = current.get("job_id") == record.get("job_id")
+    # The seller marked this marketplace (listed with a link, or not listed) after the
+    # Check opened. What they saw is newer than this read, whatever state it began in.
+    marked = same_action and _seller_mark(db, conv_id, marketplace) != mark_before
+    # "I checked it myself" settled it after the Check opened. Only a confirmed answer
+    # replaces that: a listing that went live must not stay a draft, or the next List
+    # would publish a second copy. A confirmed Update still records the price it sent.
+    reset = (same_action and not marked
+             and record.get("state") in UNSETTLED_STATES and current.get("state") not in UNSETTLED_STATES)
     confirmed = isinstance(result, dict) and result.get("ok") is True
-    if settled_by_seller and (current.get("state") in LIVE_STATES or not confirmed):
-        # The seller settled the record while Chrome was answering. Mark as listed (with
-        # the live link) is newer than this read and wins. After "I checked it myself"
-        # only a confirmed answer replaces it: a listing that went live must not stay a
-        # draft, or the next List would publish a second copy.
+    if marked or (reset and not confirmed):
         repo = JobRepo(db)
         if repo.get(record["job_id"]):
             repo.add_event(record["job_id"], "native_check_superseded", f"native_{marketplace}_check", {
-                "marketplace": marketplace, "state": current.get("state"),
+                "marketplace": marketplace, "state": current.get("state"), "by": "mark" if marked else "reset",
                 "answered": result.get("state") if isinstance(result, dict) else None})
         repo.update_status(check_job_id, "completed")
         return current

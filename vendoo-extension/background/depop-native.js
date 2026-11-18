@@ -1087,6 +1087,8 @@ async function depopLiveFields(request, payload, product) {
 // safe_to_retry means this step wrote nothing.
 async function depopApiAction(action, payload) {
   let wrote = false;
+  // Narrowed to the publish-evidence budget once Depop's status read answers 404.
+  let readDeadline = payload.deadline;
   try {
     const request = async (method, path, body, extraHeaders) => {
       const allowedRead = method === 'GET' && (/^\/presentation\/api\/v1\/drafts\/[A-Za-z0-9_-]{1,80}\/$/.test(path)
@@ -1127,7 +1129,7 @@ async function depopApiAction(action, payload) {
       const retry = method === 'GET' || action === 'photo' || path === DEPOP_PICTURE_CHECK;
       try {
         const { data } = await marketplaceFetch(`https://webapi.depop.com${path}`, { marketplace: 'depop', step: action, method, headers,
-          credentials: 'omit', deadline: payload.deadline, retry, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+          credentials: 'omit', deadline: readDeadline, retry, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
         if (method !== 'GET' && !retry) wrote = true;
         return data;
       } catch (error) {
@@ -1403,7 +1405,8 @@ async function depopApiAction(action, payload) {
         // poll, after it has posted the item. A 404 on a read is not a refusal of
         // the publish, which Depop already accepted. Read what the publish leaves.
         if (error?.status !== 404) throw error;
-        return await depopPublishEvidence(request, payload, id ? path : '');
+        if (Number.isFinite(payload.evidence_until)) readDeadline = Math.min(payload.deadline, payload.evidence_until);
+        return await depopPublishEvidence(request, payload, id ? path : '', () => Date.now() >= readDeadline);
       }
       // Only a count names an answer. A job Depop has accepted but not started yet
       // reports no counts at all, which is waiting, not a refusal.
@@ -1453,13 +1456,15 @@ function depopPathTemplate(path) {
 // gone is posted only when its one matching product is in the seller's shop.
 // Nothing here is a refusal: the publish was accepted, so the answer is either
 // the listing or unconfirmed.
-async function depopPublishEvidence(request, payload, draftPath) {
+async function depopPublishEvidence(request, payload, draftPath, spent = () => false) {
   const unavailable = { complete: false, failed: false, counts: {}, status_unavailable: true };
   if (!draftPath) return unavailable;
   try {
     await request('GET', draftPath);
     return unavailable;
   } catch (error) {
+    // Out of time for evidence: still unconfirmed, never a refusal.
+    if (spent()) return unavailable;
     if (error?.status !== 404) throw error;
   }
   // Only a product that was not in the shop before this publish can be the one it made:
@@ -1615,7 +1620,8 @@ async function depopShopUrl(request, payload) {
 // Every product link in the seller's shop that this listing's text and price match,
 // across every page read. Null when the shop could not be read in full.
 async function depopShopMatches(request, payload) {
-  const listing = payload.listing || {};
+  // The price the publish sent: a locked Depop price, else General's.
+  const listing = { ...(payload.listing || {}), price: depopPrice(payload.listing || {}) };
   if (!depopBaseDescription(listing) || !Number.isFinite(Number(listing.price))) return null;
   let me;
   try { me = await request('GET', '/presentation/api/v1/users/me/'); } catch { return null; }
@@ -1634,11 +1640,14 @@ async function depopShopMatches(request, payload) {
     for (const product of depopProductRows(page)) {
       if (depopShopProduct(product, scoped)) matches.add(depopListingUrl(product?.slug || product?.url));
     }
+    if (page?.meta?.end === true) return [...matches];
+    // A page or cursor that repeats means the scan stopped advancing: not read in full.
     const firstId = depopProductRows(page)[0]?.id;
-    if ((pageNumber && firstId != null && firstId === previousId) || page?.meta?.end === true) return [...matches];
+    if (pageNumber && firstId != null && firstId === previousId) return null;
     previousId = firstId;
     const next = depopCursorToken(page?.meta?.last_offset_id);
-    if (!next || next === offset) return [...matches];
+    if (!next) return [...matches];
+    if (next === offset) return null;
     offset = next;
   }
   // More pages than were read: a match could be on one not read.
@@ -1784,7 +1793,7 @@ async function runDepopNative(msg, recovery = false) {
     let queuedPolls = 0;
     let postedPolls = 0;
     while (Date.now() < payload.deadline) {
-      status = await depopAction('publish_status', payload);
+      status = await depopAction('publish_status', { ...payload, evidence_until: evidenceUntil });
       if (status.complete) return { ok: true, state: 'published', draft_url: payload.draft_url, ...(status.listing_url ? { listing_url: status.listing_url } : {}) };
       if (status.status_unavailable && (Date.now() >= evidenceUntil
         || (status.draft_posted ? (postedPolls += 1) >= 2 : (queuedPolls += 1) >= DEPOP_UNAVAILABLE_STATUS_POLLS))) break;
@@ -1817,7 +1826,7 @@ async function runDepopNative(msg, recovery = false) {
     if (committed && payload.draft_url && error.publish_read !== true) {
       try {
         if (payload.publish_job_id) {
-          const status = await depopAction('publish_status', payload);
+          const status = await depopAction('publish_status', { ...payload, evidence_until: Date.now() + 10000 });
           if (status.complete) return { ok: true, state: 'published', draft_url: payload.draft_url, ...(status.listing_url ? { listing_url: status.listing_url } : {}) };
         } else if (payload.action === 'save_draft') {
           return await verify();

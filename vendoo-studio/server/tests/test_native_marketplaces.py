@@ -1410,6 +1410,25 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         live = self.record("depop")
         self.assertEqual((live["state"], live["listing_url"]), ("published", LIVE["depop"]))
 
+        # "I checked it myself" finished before the Check opened on the resting draft; the
+        # seller then marks it listed while Chrome answers. The mark is newer than either answer.
+        for answer in (None, other):
+            MarketplaceListingRepo(self.db).save(self.conv.id, "depop", {"state": "unknown", "listing_url": None,
+                                                                         "listing_id": None})
+            from vendoo_studio.services.marketplace_delist import _store as store_note
+            store_note(self.db, self.conv.id, "marketplaceMarks", "depop", None)
+            self.assertEqual(native.reset(self.conv.id, "depop", self.db)["state"], "draft")
+
+            async def mark_while_checking(job, kind, payload, timeout=None, answer=answer):
+                await in_worker_session(mark, self.conv.id, "depop", "listed", seller_link)
+                return {"finished": answer is not None, "result": answer}
+
+            self.bridge.side_effect = mark_while_checking
+            checked = self.client.post(f"{self.base}/depop/check")
+            self.assertEqual(checked.status_code, 200, checked.text)
+            kept = self.record("depop")
+            self.assertEqual((kept["state"], kept["listing_url"]), ("published", seller_link))
+
     def test_a_pasted_draft_link_is_checked_without_repeating_the_write(self):
         self.bridge.side_effect = BrowserBridgeError("lost")
         with patch.object(native, "SETTLE_DEADLINE_S", 0):

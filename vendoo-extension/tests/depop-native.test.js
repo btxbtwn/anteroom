@@ -570,6 +570,46 @@ test('a Depop status read that answers 404 confirms nothing from the shop withou
   assert.equal(known.listing_url, 'https://www.depop.com/products/seller-columbia-xl/');
 });
 
+test('the Depop shop reading matches the locked Depop price the publish sent, and a repeating page is not a full reading', async () => {
+  const { c, payload } = page();
+  const locked = { ...payload.listing, seller_fields: ['depop_specifics.price'], depop_specifics: { price: 20 } };
+  const row = { slug: 'seller-locked-price', description: 'Private draft', price_amount: '20.00', user_id: 42 };
+  let pages = 0;
+  let cursor = 'next';
+  c.fetch = async (url) => {
+    const { pathname } = new URL(url);
+    if (pathname === '/presentation/api/v1/users/me/') return reply(200, { id: 42 });
+    if (pathname === '/api/v1/shop/42/products/') {
+      pages += 1;
+      return reply(200, { meta: { end: cursor === '', last_offset_id: cursor }, products: [{ ...row, id: pages }] });
+    }
+    throw new Error(pathname);
+  };
+  cursor = '';
+  const read = await c.depopApiAction('shop_matches', { ...payload, listing: locked });
+  assert.deepEqual([...read.matches], ['https://www.depop.com/products/seller-locked-price/']);
+  // The same cursor twice: the scan stopped advancing, so it is not a full reading.
+  cursor = 'stuck';
+  const stuck = await c.depopApiAction('shop_matches', { ...payload, listing: locked });
+  assert.equal(stuck.matches, null);
+});
+
+test('Depop publish evidence reads stop at their time budget and stay unconfirmed', async () => {
+  const { c, payload } = page();
+  const seen = [];
+  c.fetch = async (url) => {
+    const { pathname } = new URL(url);
+    seen.push(pathname);
+    if (pathname.endsWith('/status/')) return reply(404, '');
+    throw new Error(`no read after the budget: ${pathname}`);
+  };
+  const status = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1', evidence_until: Date.now() - 1 });
+  assert.equal(status.complete, false);
+  assert.equal(status.status_unavailable, true);
+  assert.equal(status.listing_url, undefined);
+  assert.deepEqual(seen, ['/api/v3/drafts/products/job-1/status/']);
+});
+
 test('a bodiless Depop refusal still names its step, method, path and status in the log, without ids', async () => {
   const { c, payload } = page();
   const logs = [];
