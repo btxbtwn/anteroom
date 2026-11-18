@@ -483,12 +483,14 @@ def constrain_generated(listing: dict, seed: dict, *, freeze_categories: bool = 
             continue
         if not isinstance(contract, dict) or contract.get("unavailable") or not contract.get("fields"):
             # A form that could not be loaded is unknown, not one with no
-            # fields: keep the saved answers. Its contract stays unavailable,
-            # so List still asks for the fields to be reloaded. Seller locks
-            # still win, including a locked path saved with no value.
-            for path, _value in list(_leaves(block, prefix, set())):
-                if is_locked(seed, path):
-                    set_path(listing, path, copy.deepcopy(get_path(seed, path)))
+            # fields: nothing here can be checked. Keep the answers already
+            # saved (seed) and drop anything new, which no form has checked.
+            # The seed also holds the seller's locked answers.
+            saved = seed.get(prefix)
+            if isinstance(saved, dict):
+                listing[prefix] = copy.deepcopy(saved)
+            else:
+                listing.pop(prefix, None)
             continue
         rows = {path_of(row): row for row in contract.get("fields") or []}
         for path, value in list(_leaves(block, prefix, set(rows))):

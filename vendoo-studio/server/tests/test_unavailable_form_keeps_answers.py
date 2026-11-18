@@ -47,7 +47,7 @@ class ConstrainGeneratedTest(unittest.TestCase):
             listing = {"mercari_specifics": copy.deepcopy(SAVED_MERCARI), native_contract.KEY: {"mercari": contract}}
             native_contract.constrain_generated(listing, copy.deepcopy(listing), freeze_categories=False)
             self.assertEqual(listing["mercari_specifics"], SAVED_MERCARI, contract)
-            # The form stays unknown, so List still asks for the fields to be reloaded.
+            # The form stays unknown, and is reported as needing a reload.
             self.assertEqual(listing[native_contract.KEY]["mercari"], contract)
 
     def test_seller_locks_still_win_on_an_unavailable_form(self):
@@ -55,12 +55,23 @@ class ConstrainGeneratedTest(unittest.TestCase):
                 "seller_fields": ["mercari_specifics.condition", "mercari_specifics.brand"]}
         listing = {**copy.deepcopy(seed), "mercari_specifics": {"condition": "1", "brand": "Generated", "shipsFrom": "70115"}}
         native_contract.constrain_generated(listing, seed, freeze_categories=False)
-        self.assertEqual(listing["mercari_specifics"]["condition"], "3")
-        # A locked path the seed holds no value for is not filled by generation.
-        self.assertNotIn("brand", listing["mercari_specifics"])
-        self.assertEqual(listing["mercari_specifics"]["shipsFrom"], "70115")
+        # The saved, locked condition stays. Generated answers no form checked,
+        # including one for a locked path the seed holds no value for, are dropped.
+        self.assertEqual(listing["mercari_specifics"], {"condition": "3"})
 
-    def test_unavailable_contract_still_blocks_listing(self):
+    def test_generation_on_an_unavailable_form_keeps_saved_answers_and_drops_new_ones(self):
+        seed = {"mercari_specifics": copy.deepcopy(SAVED_MERCARI), native_contract.KEY: {"mercari": {"unavailable": True}}}
+        listing = {**copy.deepcopy(seed), "mercari_specifics": {
+            "brand": "Generated", "condition": "1", "material": "cotton", "smartPricing": {}}}
+        native_contract.constrain_generated(listing, seed, freeze_categories=False)
+        self.assertEqual(listing["mercari_specifics"], SAVED_MERCARI)
+        # With nothing saved for that marketplace, its unchecked generated block is dropped.
+        listing = {native_contract.KEY: {"mercari": {"unavailable": True}}, "mercari_specifics": {"material": "cotton"}}
+        native_contract.constrain_generated(listing, {native_contract.KEY: {"mercari": {"unavailable": True}}},
+                                            freeze_categories=False)
+        self.assertNotIn("mercari_specifics", listing)
+
+    def test_unavailable_contract_is_reported_as_needing_a_reload(self):
         listing = {"mercari_specifics": copy.deepcopy(SAVED_MERCARI), native_contract.KEY: {"mercari": {"unavailable": True}}}
         native_contract.constrain_generated(listing, copy.deepcopy(listing), freeze_categories=False)
         found = native_contract.gaps(listing, "mercari")
