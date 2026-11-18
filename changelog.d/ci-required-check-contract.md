@@ -1,0 +1,1 @@
+- Keep required checks from passing when an affected test group did not run, and run every check group when a changed file's impact is unknown.
