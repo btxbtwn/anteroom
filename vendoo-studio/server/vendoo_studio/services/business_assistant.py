@@ -466,9 +466,11 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
     from vendoo_studio.database import end_read
     from vendoo_studio.services.inventory_analytics import analytics_ranges, read_analytics_inputs, rows_from_inputs
 
-    # Each read ends its transaction before calculating (end_read). A wait for
-    # the imported-sales archive lock or a large shop's calculations must not
-    # hold an idle transaction, which Postgres ends after its deadline.
+    # Analytics inputs release their transaction (end_read) before calculating.
+    # _records and boxes.results(release=True) also release it. The later ad,
+    # event and Scout reads reopen a transaction that stays open through the
+    # sourcing and summary calculations, _automation_lines and later Scout reads.
+    # Postgres can end that transaction after its idle deadline.
     inputs = read_analytics_inputs(db)
     end_read(db, keep=[line for lines in inputs.sales.values() for line in lines])
     rows = rows_from_inputs(inputs)

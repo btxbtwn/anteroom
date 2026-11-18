@@ -279,17 +279,19 @@ def test_shop_snapshot_waits_for_the_sales_archive_lock_outside_a_transaction(
 
     class HeldByAnotherThread:
         def __enter__(self):
-            taken, done = threading.Event(), threading.Event()
+            taken, timed, done = threading.Event(), threading.Event(), threading.Event()
 
             def hold():
                 with lock:
                     taken.set()
+                    timed.wait()
                     time.sleep(.3)
                 done.set()
 
             threading.Thread(target=hold, daemon=True).start()
             assert taken.wait(5)
             started = time.monotonic()
+            timed.set()
             lock.acquire()
             waits.append(time.monotonic() - started)
             done.wait(5)
