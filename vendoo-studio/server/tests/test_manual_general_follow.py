@@ -26,3 +26,35 @@ def test_deliberate_native_title_edit_remains_independent():
     saved = prepared_listing(previous, submitted)
     assert saved['poshmark_specifics']['title'] == 'General title'
     assert 'poshmark_specifics.title' in saved['seller_fields']
+
+
+def test_depop_size_choice_survives_save_when_it_matches_general_and_a_blank_id_remains():
+    for category in ('womenswear_tshirts', 'womenswear_jeans'):
+        for captured_form in (False, True):
+            previous = {'title': 'Example garment', 'description': 'Example', 'size': '0',
+                        'direct_category_ids': {'depop': category},
+                        'depop_specifics': {'size': '', 'nativeSizeId': ''},
+                        'seller_fields': ['depop_specifics.size', 'depop_specifics.nativeSizeId']}
+            if captured_form:
+                previous['_native_forms'] = {'depop': {}}
+            submitted = copy.deepcopy(previous)
+            submitted['depop_specifics']['size'] = '0'
+            saved = prepared_listing(previous, submitted)
+            specifics = saved['depop_specifics']
+            assert marketplace_text(saved, 'depop', 'size') == '0'
+            # Posting checks a remaining native ID before falling back to General.
+            # It is safe to retain it only while a label remains authoritative.
+            assert 'size' in specifics or 'nativeSizeId' not in specifics
+            if 'size' not in specifics:
+                assert 'depop_specifics.nativeSizeId' not in saved.get('seller_fields', [])
+
+
+def test_depop_explicit_size_clear_keeps_its_blank_and_lock():
+    previous = {'title': 'Example garment', 'size': '0',
+                'direct_category_ids': {'depop': 'womenswear_tshirts'},
+                'depop_specifics': {'size': '0', 'nativeSizeId': ''}}
+    submitted = copy.deepcopy(previous)
+    submitted['depop_specifics']['size'] = ''
+    saved = prepared_listing(previous, submitted)
+    assert saved['depop_specifics']['size'] == ''
+    assert 'depop_specifics.size' in saved['seller_fields']

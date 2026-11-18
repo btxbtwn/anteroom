@@ -23,6 +23,30 @@ from vendoo_studio.services.etsy_listings import requirements as etsy_requiremen
 
 
 class ChromePreflightTest(unittest.TestCase):
+    def test_depop_explicitly_cleared_clothing_size_blocks_list_despite_general_size(self):
+        listing = {"size": "0", "direct_category_ids": {"depop": "womenswear_jeans"},
+                   "depop_specifics": {"size": "", "nativeSizeId": "", "parcelSize": "Large"},
+                   "seller_fields": ["depop_specifics.size", "depop_specifics.nativeSizeId"]}
+        found = depop_requirements(listing, Context())
+        size = next(item for item in found if item["field"] == "depop_specifics.size")
+        self.assertTrue(size["blocking"])
+        self.assertIn("clothing size", size["message"])
+        self.assertNotIn("parcelSize", size["field"])
+        del listing["depop_specifics"]["size"]
+        self.assertTrue(any(item["field"] == "depop_specifics.size" and item["blocking"]
+                            for item in depop_requirements(listing, Context())))
+        listing["_native_forms"] = {"depop": {"fields": [{"path": "depop_specifics.nativeSizeId"}]}}
+        self.assertTrue(any(item["field"] == "depop_specifics.nativeSizeId" and item["blocking"]
+                            for item in depop_requirements(listing, Context())))
+        del listing["depop_specifics"]["nativeSizeId"]
+        self.assertFalse(any("clothing size" in item["message"]
+                             for item in depop_requirements(listing, Context())))
+        # A category whose native form has no Size row does not need one.
+        with patch("vendoo_studio.services.depop_form.catalog", return_value={"categories": []}):
+            listing["depop_specifics"]["size"] = ""
+            self.assertFalse(any(item["field"] == "depop_specifics.size"
+                                 for item in depop_requirements(listing, Context())))
+
     def test_missing_categories_block_every_direct_marketplace(self):
         from vendoo_studio.services.direct_preflight import blocking, gaps
 

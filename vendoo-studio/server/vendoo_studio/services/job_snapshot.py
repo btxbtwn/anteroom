@@ -92,7 +92,8 @@ def ensure_listing_defaults(listing_snapshot: dict) -> None:
     if not isinstance(listing_snapshot, dict):
         return
 
-    from vendoo_studio.models.schema import ListingSchema
+    from vendoo_studio.models.listing_values import canonical_option
+    from vendoo_studio.models.schema import ListingSchema, VALID_DEPOP_PARCEL
 
     condition = listing_snapshot.get("condition")
     if condition:
@@ -119,8 +120,20 @@ def ensure_listing_defaults(listing_snapshot: dict) -> None:
 
     from vendoo_studio.services.seller_overrides import preserving_locks
 
+    # Sending an approved revision must use the package its Depop form shows.
+    # Weight-based inference is for filling missing data, not replacing a saved
+    # marketplace choice (including a blank that still needs the seller).
+    depop = listing_snapshot.get("depop_specifics") or {}
+    parcel_key = next((key for key in ("parcelSize", "parcel_size") if key in depop), None)
+    parcel = copy.deepcopy(depop[parcel_key]) if parcel_key else None
+    if isinstance(parcel, str):
+        parcel = canonical_option(parcel, VALID_DEPOP_PARCEL) or parcel
+
     def _normalize(listing: dict) -> None:
         align_size_fields(listing)
         normalize_listing_dropdowns(listing)
 
     preserving_locks(listing_snapshot, _normalize)
+    if parcel_key:
+        listing_snapshot["depop_specifics"]["parcelSize"] = parcel
+        listing_snapshot["depop_specifics"].pop("parcel_size", None)

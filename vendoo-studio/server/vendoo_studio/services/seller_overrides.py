@@ -629,6 +629,11 @@ def reconcile_size_fields(previous: dict | None, submitted: dict) -> None:
         if any(_same_followed(value, item) for item in matches if item):
             block.pop(key, None)
             locks = _unlock_field(locks, marketplace, "size")
+            if marketplace == "depop":
+                # The selected label follows General now. An older ID (including
+                # a category-reset blank) must not override that same choice.
+                block.pop("nativeSizeId", None)
+                locks = _unlock_field(locks, marketplace, "nativeSizeId")
         elif path in changed or owned_lock:
             locks.add(path)
     _write_locks(submitted, locks)

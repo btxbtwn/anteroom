@@ -1,0 +1,2 @@
+- Keep your saved Depop package size when preparing a listing, even when its saved weight suggests a different package.
+- Let choosing Depop's clothing Size replace an old blank size, and identify a cleared required clothing size before listing.
