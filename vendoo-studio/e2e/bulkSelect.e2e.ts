@@ -1,4 +1,4 @@
-import { createListing, expect, test } from "./fixtures";
+import { createListing, expect, showStatusTab, test } from "./fixtures";
 
 test("Select mode keeps every action off until a listing is picked, and only Delete is destructive", async ({ page, phone, request }, info) => {
   test.setTimeout(90_000);
@@ -10,6 +10,7 @@ test("Select mode keeps every action off until a listing is picked, and only Del
       await page.getByRole("button", { name: "Open navigation" }).click();
       await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
     }
+    await showStatusTab(page, "Draft");
     await page.getByRole("button", { name: "Select listings", exact: true }).click();
     const bar = page.getByRole("region", { name: "Bulk listing actions" });
     await expect(bar.getByRole("status")).toHaveText("0 selected");

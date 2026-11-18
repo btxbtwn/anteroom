@@ -203,8 +203,8 @@ final class DestinationSandboxTests: XCTestCase {
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         launchSandbox(app)
 
-        let allTab = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Open,'")).firstMatch
-        XCTAssertTrue(allTab.waitForExistence(timeout: 30), "Inventory shows its status tabs")
+        let activeTab = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Active,'")).firstMatch
+        XCTAssertTrue(activeTab.waitForExistence(timeout: 30), "Inventory shows its status tabs")
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Draft,'")).firstMatch.exists)
         keep(app, "Inventory with status tabs")
         let filters = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Filters'")).firstMatch
@@ -300,8 +300,8 @@ final class AnalyticsSandboxTests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         launchSandbox(app)
-        let allTab = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Open,'")).firstMatch
-        XCTAssertTrue(allTab.waitForExistence(timeout: 30), "Inventory has loaded")
+        let activeTab = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Active,'")).firstMatch
+        XCTAssertTrue(activeTab.waitForExistence(timeout: 30), "Inventory has loaded")
         let analytics = app.tabBars.buttons["Analytics"]
         analytics.tap()
         // The first tap on the floating tab bar after launch can land before it accepts touches.
@@ -381,6 +381,7 @@ final class EbayFormSandboxTests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         launchSandbox(app)
+        showDrafts(app)
         let listing = app.staticTexts["Levi's M Blue Cotton Crew Neck T-Shirt"].firstMatch
         XCTAssertTrue(listing.waitForExistence(timeout: 30))
         listing.tap()
@@ -658,6 +659,14 @@ fileprivate extension XCTestCase {
         XCTAssertTrue(button.isSelected, "The \(tab) tab opens")
     }
 
+    /// Inventory opens on Active; the sample listings are drafts.
+    @MainActor
+    func showDrafts(_ app: XCUIApplication) {
+        let drafts = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Draft,'")).firstMatch
+        XCTAssertTrue(drafts.waitForExistence(timeout: 30), "Inventory shows its status tabs")
+        drafts.tap()
+    }
+
     @MainActor
     func openNewListing(_ app: XCUIApplication) {
         // One tap creates an untitled draft and opens it (no title sheet),
@@ -696,7 +705,7 @@ final class PolishScreenshotTests: XCTestCase {
         for theme in ["Light", "Dark"] {
             choose(theme, app)
             app.tabBars.buttons["Inventory"].tap()
-            XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Open,'")).firstMatch.waitForExistence(timeout: 30))
+            XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Active,'")).firstMatch.waitForExistence(timeout: 30))
             keep(app, "\(theme): Inventory")
             app.buttons["Sort listings, Recent activity"].firstMatch.tap()
             XCTAssertTrue(app.buttons["Date created"].waitForExistence(timeout: 10), "Sort by lists the fields")
@@ -721,7 +730,7 @@ final class PolishScreenshotTests: XCTestCase {
         // The largest text sizes keep whole words on the status tabs and rows.
         app.launchArguments += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"]
         launchSandbox(app)
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Open,'")).firstMatch.waitForExistence(timeout: 30))
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Active,'")).firstMatch.waitForExistence(timeout: 30))
         keep(app, "Accessibility L: Inventory")
     }
 
@@ -796,6 +805,7 @@ final class CoreFlowSandboxTests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         launchSandbox(app)
+        showDrafts(app)
         let listing = app.staticTexts["Sandbox photos only"].firstMatch
         XCTAssertTrue(listing.waitForExistence(timeout: 30))
         let generate = app.buttons["generate-listing"]

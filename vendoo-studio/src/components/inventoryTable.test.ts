@@ -93,17 +93,23 @@ describe("inventoryRows", () => {
     { id: "b", title: "New tee", status: "active", updated_at: "2026-11-01T00:00:00Z", price: 12 },
     { id: "c", title: "Sold boots", status: "sold", settled_at: "2026-10-15T00:00:00Z", updated_at: "2026-10-15T00:00:00Z" },
   ];
-  it("orders by recent activity and keeps finished listings out of All", () => {
-    expect(inventoryRows(rows, "", "all", "recent").map((row) => row.id)).toEqual(["b", "a"]);
+  const drafts = [
+    rows[0],
+    { id: "e", title: "Failed send", status: "failed", updated_at: "2026-11-03T00:00:00Z", price: 30 },
+    { id: "f", title: "Sending", status: "listing", updated_at: "2026-10-20T00:00:00Z", price: 50 },
+  ];
+  it("orders by recent activity within a tab", () => {
+    expect(inventoryRows([...rows, ...drafts.slice(1)], "", "draft", "recent").map((row) => row.id)).toEqual(["e", "f", "a"]);
   });
-  it("keeps a sale out of Open even before it settles", () => {
+  it("keeps a sale under Sold even before it settles", () => {
     const unsettledSale = { id: "d", title: "Reopened sale", status: "sold", updated_at: "2026-11-02T00:00:00Z" };
-    expect(inventoryRows([...rows, unsettledSale], "", "all", "recent").map((row) => row.id)).toEqual(["b", "a"]);
+    expect(inventoryRows([...rows, unsettledSale], "", "active", "recent").map((row) => row.id)).toEqual(["b"]);
     expect(inventoryRows([...rows, unsettledSale], "", "sold", "recent").map((row) => row.id)).toEqual(["d", "c"]);
   });
   it("keeps the status tab, search and sort", () => {
     expect(inventoryRows(rows, "", "sold", "recent").map((row) => row.id)).toEqual(["c"]);
-    expect(inventoryRows(rows, "boots", "all", "recent").map((row) => row.id)).toEqual(["c"]);
-    expect(inventoryRows(rows, "", "all", "price_desc").map((row) => row.id)).toEqual(["a", "b"]);
+    expect(inventoryRows(rows, "boots", "sold", "recent").map((row) => row.id)).toEqual(["c"]);
+    expect(inventoryRows(rows, "boots", "active", "recent").map((row) => row.id)).toEqual([]);
+    expect(inventoryRows([...rows, ...drafts.slice(1)], "", "draft", "price_desc").map((row) => row.id)).toEqual(["f", "a", "e"]);
   });
 });

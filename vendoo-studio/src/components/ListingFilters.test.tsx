@@ -11,19 +11,19 @@ function tabs(counts: Record<string, number> | null) {
 }
 
 describe("ListingFilters status tabs", () => {
-  it("names the working list Open, since sold listings have their own tab", () => {
-    const html = tabs({ all: 4, draft: 1, active: 3, sold: 12 });
-    expect(html).toContain('title="Open · 4"');
-    // A space between label and count makes the accessible name "Open 4".
-    expect(html).toMatch(/>Open<\/span> <span[^>]*>4</);
-    expect(html).toContain(">Open</span>");
-    expect(html).not.toContain(">All</span>");
-    expect(html).toContain('title="Sold · 12"');
+  it("offers Draft, Active and Sold, opening on Active", () => {
+    const html = tabs({ draft: 1, active: 3, sold: 12 });
+    const names = [...html.matchAll(/role="tab"[^>]*aria-selected="(true|false)"[^>]*title="([^"]+)"/g)].map((match) => [match[2], match[1]]);
+    expect(names).toEqual([["Draft · 1", "false"], ["Active · 3", "true"], ["Sold · 12", "false"]]);
+    // A space between label and count makes the accessible name "Active 3".
+    expect(html).toMatch(/>Active<\/span> <span[^>]*>3</);
+    expect(html).not.toContain(">Open</span>");
+    expect(html).not.toContain(">Failed</span>");
   });
 
   it("shows no counts until the inventory has loaded", () => {
     const html = tabs(null);
-    expect(html).toContain('title="Open"');
+    expect(html).toContain('title="Active"');
     expect(html).not.toMatch(/tabular-nums[^>]*>0</);
     expect(html).not.toContain(" · 0");
   });

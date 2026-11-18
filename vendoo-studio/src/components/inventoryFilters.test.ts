@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_LISTING_FILTERS,
+  LISTING_STATUS_TABS,
   compactCount,
+  emptyTabLabel,
   activeFilterCount,
   filterListings,
   labelOptions,
@@ -85,12 +87,14 @@ describe("matchesSearch", () => {
 });
 
 describe("filterListings", () => {
-  it("opens on everything not sold", () => {
-    expect(filterListings(inventory, "", DEFAULT_LISTING_FILTERS)).toEqual([tee, draft]);
+  it("opens on Active", () => {
+    expect(DEFAULT_LISTING_FILTERS.status).toBe("active");
+    expect(filterListings(inventory, "", DEFAULT_LISTING_FILTERS)).toEqual([tee]);
   });
 
-  it("finds a sold listing from Open while searching", () => {
-    expect(filterListings(inventory, "martens", DEFAULT_LISTING_FILTERS)).toEqual([boots]);
+  it("searches within the tab in front of the seller", () => {
+    expect(filterListings(inventory, "martens", DEFAULT_LISTING_FILTERS)).toEqual([]);
+    expect(filterListings(inventory, "martens", withFilters({ status: "sold" }))).toEqual([boots]);
   });
 
   it("filters by status tab", () => {
@@ -103,6 +107,8 @@ describe("filterListings", () => {
     // A send in progress, or a status this build does not know, still has a tab.
     expect(listingStatusTab("listing")).toBe("draft");
     expect(listingStatusTab("archived")).toBe("draft");
+    // A failed send never went live, so it is a draft too; its row keeps the Failed label.
+    expect(listingStatusTab("failed")).toBe("draft");
     expect(filterListings([...inventory, inProgress], "", withFilters({ status: "draft" }))).toEqual([
       draft,
       inProgress,
@@ -120,17 +126,14 @@ describe("filterListings", () => {
   });
 
   it("shows only unlisted items when no marketplace is picked", () => {
-    expect(filterListings(inventory, "", withFilters({ notListed: true }))).toEqual([draft]);
+    expect(filterListings(inventory, "", withFilters({ status: "draft", notListed: true }))).toEqual([draft]);
   });
 
   it("shows what is missing from any picked marketplace", () => {
-    expect(filterListings(inventory, "", withFilters({ notListed: true, marketplaces: ["ebay"] }))).toEqual([draft]);
-    expect(filterListings(inventory, "", withFilters({ notListed: true, marketplaces: ["ebay", "poshmark"] }))).toEqual([draft]);
+    expect(filterListings(inventory, "", withFilters({ status: "draft", notListed: true, marketplaces: ["ebay"] }))).toEqual([draft]);
+    expect(filterListings(inventory, "", withFilters({ status: "draft", notListed: true, marketplaces: ["ebay", "poshmark"] }))).toEqual([draft]);
     expect(filterListings(inventory, "", withFilters({ status: "sold", notListed: true, marketplaces: ["ebay"] }))).toEqual([boots]);
-    expect(filterListings(inventory, "", withFilters({ notListed: true, marketplaces: ["ebay", "depop"] }))).toEqual([
-      tee,
-      draft,
-    ]);
+    expect(filterListings(inventory, "", withFilters({ notListed: true, marketplaces: ["ebay", "depop"] }))).toEqual([tee]);
   });
 
   it("keeps the other filters working under Not listed", () => {
@@ -226,31 +229,30 @@ describe("filter options", () => {
     const shown = filterListings(listings, "", withFilters({ status: "draft" }))
       .filter((listing) => visibleInInventory(listing, "draft"));
     expect(shown).toEqual([draft]);
-    expect(statusCounts(listings).draft).toBe(shown.length);
-    expect(statusCounts(listings).all).toBe(1);
+    expect(statusCounts(listings)).toEqual({ draft: shown.length });
   });
 
   it("includes finished drafts in search and when the finished draft is open", () => {
     const listings = [draft, finishedDraft];
     expect(visibleInInventory(finishedDraft, "draft", true)).toBe(true);
-    expect(statusCounts(listings, true)).toEqual({ all: 2, draft: 2 });
+    expect(statusCounts(listings, true)).toEqual({ draft: 2 });
     expect(visibleInInventory(finishedDraft, "draft", false, finishedDraft.id)).toBe(true);
-    expect(statusCounts(listings, false, finishedDraft.id)).toEqual({ all: 2, draft: 2 });
-    expect(statusCounts(listings, false, "another-listing")).toEqual({ all: 1, draft: 1 });
+    expect(statusCounts(listings, false, finishedDraft.id)).toEqual({ draft: 2 });
+    expect(statusCounts(listings, false, "another-listing")).toEqual({ draft: 1 });
   });
 
   it("keeps finished sold listings in the Sold count", () => {
     const sold = { ...boots, settled_at: "2026-10-28T12:00:00Z" };
     expect(visibleInInventory(sold, "sold")).toBe(true);
-    expect(statusCounts([draft, sold])).toEqual({ all: 1, draft: 1, sold: 1 });
+    expect(statusCounts([draft, sold])).toEqual({ draft: 1, sold: 1 });
   });
 
   it("counts each status tab", () => {
-    expect(statusCounts(inventory)).toEqual({ all: 2, active: 1, sold: 1, draft: 1 });
+    expect(statusCounts(inventory)).toEqual({ active: 1, sold: 1, draft: 1 });
   });
 
   it("counts an in-progress listing as a draft", () => {
-    expect(statusCounts([...inventory, inProgress])).toEqual({ all: 3, active: 1, sold: 1, draft: 2 });
+    expect(statusCounts([...inventory, inProgress])).toEqual({ active: 1, sold: 1, draft: 2 });
   });
 
   it("counts a Vendoo draft Anteroom published as listed", () => {
@@ -260,13 +262,13 @@ describe("filter options", () => {
       direct_marketplaces: ["depop", "ebay"],
       unsent_edits: true,
     };
-    expect(statusCounts([jacket])).toEqual({ all: 1, active: 1 });
+    expect(statusCounts([jacket])).toEqual({ active: 1 });
     expect(filterListings([jacket], "", withFilters({ status: "active", marketplaces: ["depop"] }))).toEqual([jacket]);
     expect(filterListings([jacket], "", withFilters({ notListed: true }))).toEqual([]);
     expect(marketplaceCounts([jacket])).toMatchObject({ depop: 1, ebay: 1 });
     const formerlyFailed = { ...jacket, status: "failed" };
     expect(filterListings([formerlyFailed], "", withFilters({ status: "active" }))).toEqual([formerlyFailed]);
-    expect(filterListings([formerlyFailed], "", withFilters({ status: "failed" }))).toEqual([]);
+    expect(filterListings([formerlyFailed], "", withFilters({ status: "draft" }))).toEqual([]);
   });
 
   it("lists every label once, sorted", () => {
@@ -345,7 +347,7 @@ describe("missing sale details", () => {
     expect(activeFilterCount({ ...DEFAULT_LISTING_FILTERS, missingSale: true })).toBe(1);
   });
 
-  it("keeps an active listing with a partial sale missing details on Open", () => {
+  it("keeps an active listing with a partial sale missing details on Active", () => {
     const partial: FilterableListing = { ...tee, missing_sale_data: ["fees"] };
     expect(filterListings([incomplete, partial], "", { ...DEFAULT_LISTING_FILTERS, missingSale: true })).toEqual([partial]);
   });
@@ -381,7 +383,7 @@ describe("unsent edits", () => {
 
   it("counts each listing in exactly one tab", () => {
     const draft: FilterableListing = { ...tee, status: "draft", unsent_edits: true };
-    expect(statusCounts([edited, sent, draft])).toEqual({ all: 3, active: 2, draft: 1 });
+    expect(statusCounts([edited, sent, draft])).toEqual({ active: 2, draft: 1 });
   });
 
   it("leaves a sold item under Sold alone", () => {
@@ -392,7 +394,7 @@ describe("unsent edits", () => {
   });
 });
 
-describe("Open", () => {
+describe("status tabs", () => {
   // A sale the seller reopened keeps its status but loses settled_at.
   const reopenedSale: FilterableListing = { ...boots, title: "Reopened sale", unsettled_at: "2026-11-01T00:00:00Z" } as FilterableListing;
   const settledSale: FilterableListing = { ...boots, settled_at: "2026-10-01T00:00:00Z" };
@@ -400,23 +402,26 @@ describe("Open", () => {
   const sending: FilterableListing = { ...draft, title: "Sending", status: "listing" };
   const mixed = [tee, draft, inProgress, failed, sending, reopenedSale, settledSale];
 
-  it("counts exactly Draft + Active + Failed, never a sale", () => {
-    const counts = statusCounts(mixed);
-    expect(counts).toEqual({ all: 5, active: 1, draft: 3, failed: 1, sold: 2 });
-    expect(counts.all).toBe(counts.draft + counts.active + counts.failed);
+  it("are Draft, Active and Sold, and anything not live or sold is a draft", () => {
+    expect(LISTING_STATUS_TABS).toEqual(["draft", "active", "sold"]);
+    expect(statusCounts(mixed)).toEqual({ active: 1, draft: 4, sold: 2 });
+    expect(filterListings(mixed, "", withFilters({ status: "draft" }))).toEqual([draft, inProgress, failed, sending]);
   });
 
-  it("and Sold hold every listing between them", () => {
-    const open = filterListings(mixed, "", DEFAULT_LISTING_FILTERS);
-    const sold = filterListings(mixed, "", withFilters({ status: "sold" }));
-    expect(open).not.toContain(reopenedSale);
-    expect([...open, ...sold]).toHaveLength(mixed.length);
+  it("name an empty tab after itself", () => {
+    expect(emptyTabLabel("draft")).toBe("No draft listings");
+    expect(emptyTabLabel("sold")).toBe("No sold listings");
+  });
+
+  it("hold every listing exactly once between them", () => {
+    const shown = LISTING_STATUS_TABS.flatMap((status) => filterListings(mixed, "", withFilters({ status })));
+    expect(shown).toHaveLength(mixed.length);
+    expect(new Set(shown).size).toBe(mixed.length);
   });
 });
 
 describe("statusForSort", () => {
   it("opens the Sold tab when sorting by sale date", () => {
-    expect(statusForSort("sold_desc", "all")).toBe("sold");
     expect(statusForSort("sold_desc", "active")).toBe("sold");
   });
 

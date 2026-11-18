@@ -14,7 +14,7 @@ import { useWorkspaceRuntime } from "../app/runtime";
 import { cn } from "../lib/utils";
 import { editorTabs } from "./editorTabs";
 import { formatMoney } from "./analyticsFormat";
-import { LISTING_SORTS, LISTING_STATUS_LABELS, LISTING_STATUS_TABS, statusCounts, matchesSearch, statusForSort, type ListingSortId, type ListingStatusFilter } from "./inventoryFilters";
+import { LISTING_SORTS, LISTING_STATUS_LABELS, LISTING_STATUS_TABS, emptyTabLabel, statusCounts, matchesSearch, statusForSort, type ListingSortId, type ListingStatusFilter } from "./inventoryFilters";
 import { marketplacePrice, marketplacePriceDescription } from "./inventoryPrices";
 import { inventoryRows, listedCounts, marketplaceCell, type MarketplaceCellKind } from "./inventoryTable";
 import { MarketplaceLogo } from "./MarketplaceLogo";
@@ -64,7 +64,7 @@ export function InventoryTablePage({
 }) {
   const query = useListingSearch();
   const runtime = useWorkspaceRuntime();
-  const [status, setStatus] = useState<ListingStatusFilter>("all");
+  const [status, setStatus] = useState<ListingStatusFilter>("active");
   const [sort, setSort] = useState<ListingSortId>("recent");
   const needle = useDeferredValue(query).trim().toLowerCase();
   const { data: marketplaceSettings } = useQuery({ queryKey: ["settings-marketplaces"], queryFn: api.settings.marketplaces });
@@ -81,7 +81,6 @@ export function InventoryTablePage({
   const counts = useMemo(() => statusCounts(searched, Boolean(needle)), [searched, needle]);
   const rows = useMemo(() => inventoryRows(all, needle, status, sort), [all, needle, status, sort]);
   const listed = useMemo(() => listedCounts(rows, marketplaces), [rows, marketplaces]);
-  const tabs = (["all", ...LISTING_STATUS_TABS] as const).filter((tab) => tab !== "failed" || counts.failed);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   // oxlint-disable-next-line react/incompatible-library -- The app does not use the React Compiler; nothing memoizes this component.
@@ -125,7 +124,7 @@ export function InventoryTablePage({
             if (value) setStatus(value);
           }}
         >
-          {tabs.map((tab) => (
+          {LISTING_STATUS_TABS.map((tab) => (
             <Toggle key={tab} value={tab}>
               {LISTING_STATUS_LABELS[tab]}
               {loading ? null : " "}
@@ -165,7 +164,7 @@ export function InventoryTablePage({
             ) : loading ? (
               <InventoryRowsSkeleton columns={columns} marketplaces={marketplaces.length} />
             ) : rows.length === 0 ? (
-              <EmptyRow>{all.length ? "No matching listings" : "No listings yet"}</EmptyRow>
+              <EmptyRow>{!all.length ? "No listings yet" : needle ? "No matching listings" : emptyTabLabel(status)}</EmptyRow>
             ) : (
               <div className="relative" style={{ height: virtualizer.getTotalSize() }}>
                 {visible.map((item) => {

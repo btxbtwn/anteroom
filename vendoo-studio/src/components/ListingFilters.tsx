@@ -30,7 +30,6 @@ import {
   toggleValue,
   type ListingFilters as Filters,
   type ListingSortId,
-  type ListingStatusFilter,
 } from "./inventoryFilters";
 
 /** One narrowing, as a checkable menu row: check, glyph, name, count. */
@@ -115,11 +114,6 @@ export function ListingFilters({
   onChange: (next: Filters) => void;
 }) {
   const chosen = activeFilterCount(filters);
-  // "Failed" shows only when something failed.
-  const tabs: ListingStatusFilter[] = [
-    "all",
-    ...LISTING_STATUS_TABS.filter((status) => status !== "failed" || counts?.failed),
-  ];
   const sortLabel = LISTING_SORTS.find((option) => option.id === filters.sort)?.label ?? "Sort";
 
   return (
@@ -133,7 +127,7 @@ export function ListingFilters({
         role="tablist"
         aria-label="Listing status"
       >
-        {tabs.map((status) => {
+        {LISTING_STATUS_TABS.map((status) => {
           const selected = filters.status === status;
           return (
             <button
@@ -149,7 +143,7 @@ export function ListingFilters({
             >
               <span className="flex min-w-0 items-baseline gap-1">
                 <span className="min-w-0 truncate">{LISTING_STATUS_LABELS[status]}</span>
-                {/* The space keeps the accessible name "Open 4", not "Open4"; flex layout hides it. */}
+                {/* The space keeps the accessible name "Draft 4", not "Draft4"; flex layout hides it. */}
                 {counts ? " " : null}
                 {counts ? (
                   <span className="shrink-0 text-2xs text-sidebar-muted-foreground tabular-nums @max-[300px]/tabs:group-data-[active=false]/tab:hidden @max-[212px]/tabs:hidden">
