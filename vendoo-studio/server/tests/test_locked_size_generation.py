@@ -180,6 +180,17 @@ class LockedSizeGenerationTest(unittest.TestCase):
             parsed = self.generate(size="M", ebay_specifics={"Size": "PL", "sizeType": "Petites"})
         self.assertEqual(parsed["ebay_specifics"]["Size"], "PM")
 
+    def test_native_ebay_size_type_falls_back_after_stripping_blank_values(self):
+        from vendoo_studio.services.listing_generate import _follow_native_size_rows
+
+        row = {**EBAY_ROW, "options": ["PM", "M"]}
+        seed = {"seller_fields": ["size"], "size": "M", "_native_forms": {"ebay": {"fields": [row]}}}
+        for size_type, expected in (("", "PM"), ("   ", "PM"), (" Regular ", "M")):
+            with self.subTest(size_type=size_type):
+                listing = {"sizeType": "Petites", "ebay_specifics": {"Size": "L", "sizeType": size_type}}
+                _follow_native_size_rows(listing, seed, "M")
+                self.assertEqual(listing["ebay_specifics"]["Size"], expected)
+
     def test_without_a_lock_the_generated_size_stands(self):
         self.seller_set("L", locks=())
         parsed = self.generate(poshmark_specifics={"size": "S"})

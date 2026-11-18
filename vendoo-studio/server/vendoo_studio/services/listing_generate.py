@@ -1022,7 +1022,7 @@ def _ebay_size_type(listing: dict, seed: dict, block: dict) -> str:
                 return value
     value = ebay_optional_raw(block, "sizeType") or next(
         (item for key, item in block.items() if key.replace(" ", "").casefold() == "sizetype"), None)
-    return str(value or listing.get("sizeType") or "").strip()
+    return str(value or "").strip() or str(listing.get("sizeType") or "").strip()
 
 
 def _drop_unformed_size_ids(listing: dict, seed: dict) -> None:
