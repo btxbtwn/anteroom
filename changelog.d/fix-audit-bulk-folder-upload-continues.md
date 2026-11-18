@@ -1,0 +1,1 @@
+- When you add several folders at once and one of them can't be uploaded (for example, it has more than 20 photos), the other folders are still added and generated, and the message names the folder that failed.

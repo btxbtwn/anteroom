@@ -79,7 +79,16 @@ export async function createBulkPhotoListings(
       ...(notes ? { notes } : {}),
       ...(defaults.boxId ? { box_id: defaults.boxId } : {}),
     });
-    const result = await conversations.uploadPhotos(conv.id, item.files);
+    let result: PhotoUploadResult;
+    try {
+      result = await conversations.uploadPhotos(conv.id, item.files);
+    } catch (err) {
+      // One refused folder (over 20 photos, or every file unreadable) must not
+      // stop the folders after it or hide the drafts already started.
+      const message = err instanceof Error ? err.message : "Upload failed";
+      listings.push({ convId: conv.id, folder: item.folder, count: 0, errors: [`${listingTitleForFolder(item.folder)}: ${message}`] });
+      continue;
+    }
     const errors = result.errors || [];
     // A file that failed to upload is missing from the result, so match by name.
     const sourceFiles = new Map(item.files.map(file => [file.name, file] as const));

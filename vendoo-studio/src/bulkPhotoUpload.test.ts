@@ -64,6 +64,29 @@ describe("createBulkPhotoListings", () => {
     expect(result[0]!.errors).toEqual(["lost.jpg: Invalid photo"]);
   });
 
+  it("keeps going when one folder's upload is refused, and names that folder", async () => {
+    const create = vi.fn()
+      .mockResolvedValueOnce({ id: "coat" })
+      .mockResolvedValueOnce({ id: "jeans" })
+      .mockResolvedValueOnce({ id: "boots" });
+    const uploadPhotos = vi.fn()
+      .mockResolvedValueOnce({ count: 1, photos: [] })
+      .mockRejectedValueOnce(new Error("Maximum 20 photos per listing"))
+      .mockResolvedValueOnce({ count: 2, photos: [] });
+
+    const result = await createBulkPhotoListings([
+      { folder: "batch/Coat", files: [photo("a.jpg")] },
+      { folder: "batch/Jeans", files: [photo("b.jpg")] },
+      { folder: "batch/Boots", files: [photo("c.jpg"), photo("d.jpg")] },
+    ], { cog: "", labels: "" }, { create, uploadPhotos, rotatePhoto: vi.fn() });
+
+    expect(result).toEqual([
+      { convId: "coat", folder: "batch/Coat", count: 1, errors: [] },
+      { convId: "jeans", folder: "batch/Jeans", count: 0, errors: ["Jeans: Maximum 20 photos per listing"] },
+      { convId: "boots", folder: "batch/Boots", count: 2, errors: [] },
+    ]);
+  });
+
   it("keeps same-named photos in different item folders independent", async () => {
     const first = photo("front.jpg");
     const second = photo("front.jpg");
