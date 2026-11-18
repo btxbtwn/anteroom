@@ -200,10 +200,12 @@ async def _answer(
     preparing = True
     try:
         run.publish(sse_event("status", "Reading your shop…"))
-        messages, shop = await await_with_pulses(
-            run, asyncio.to_thread(_prepare, question, attachments, thread_id), [],
-        )
-        timing.prepare_ms = business_assistant.elapsed_ms(timing.started)
+        try:
+            messages, shop = await await_with_pulses(
+                run, asyncio.to_thread(_prepare, question, attachments, thread_id), [],
+            )
+        finally:
+            timing.prepare_ms = business_assistant.elapsed_ms(timing.started)
         preparing = False
         async for item in iter_with_keepalives(business_assistant.answer(provider, messages, shop, timing)):
             if item is None:
@@ -248,8 +250,6 @@ async def _answer(
         raise
     except Exception as exc:
         outcome = "error"
-        if preparing:
-            timing.prepare_ms = business_assistant.elapsed_ms(timing.started)
         _log_answer_failure(exc)
         # Provider/SQL exception bodies can include credentials and private shop
         # data. Only our deadline error has a controlled seller-facing message.
@@ -269,11 +269,19 @@ async def _answer(
         try:
             if answer.strip():
                 save_started = time.monotonic()
-                await asyncio.to_thread(
-                    _save_answer, provider, answer, changes, memory_block, automation_block, thread_id, settle,
-                    error,
-                )
-                timing.save_ms = business_assistant.elapsed_ms(save_started)
+                try:
+                    await asyncio.to_thread(
+                        _save_answer, provider, answer, changes, memory_block, automation_block, thread_id, settle,
+                        error,
+                    )
+                except background_tasks.TaskLeaseExpired:
+                    outcome = "lease_lost"
+                    raise
+                except Exception:
+                    outcome = "error"
+                    raise
+                finally:
+                    timing.save_ms = business_assistant.elapsed_ms(save_started)
         finally:
             total_ms = business_assistant.elapsed_ms(timing.started)
             slow = total_ms >= business_assistant.SLOW_ANSWER_MS

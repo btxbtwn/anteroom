@@ -707,26 +707,28 @@ async def answer(
         round_started = time.monotonic()
         timing.first_token_ms.append(None)
         timing.round_ms.append(0)
-        async for item in provider.chat(messages, stream=True):
-            kind, text = unpack_stream_item(item)
-            if not text:
-                continue
-            if timing.first_token_ms[-1] is None:
-                timing.first_token_ms[-1] = elapsed_ms(round_started)
+        try:
+            async for item in provider.chat(messages, stream=True):
+                kind, text = unpack_stream_item(item)
+                if not text:
+                    continue
+                if timing.first_token_ms[-1] is None:
+                    timing.first_token_ms[-1] = elapsed_ms(round_started)
+                timing.round_ms[-1] = elapsed_ms(round_started)
+                if kind == "thinking":
+                    yield "thinking", text
+                    continue
+                reply += text
+                visible = _visible(reply)
+                end = answer_links.safe_end(visible, released)
+                if end > released:
+                    piece = links.clean(visible[released:end])
+                    released = end
+                    if piece:
+                        yield "text", lead + piece
+                        lead, written = "", True
+        finally:
             timing.round_ms[-1] = elapsed_ms(round_started)
-            if kind == "thinking":
-                yield "thinking", text
-                continue
-            reply += text
-            visible = _visible(reply)
-            end = answer_links.safe_end(visible, released)
-            if end > released:
-                piece = links.clean(visible[released:end])
-                released = end
-                if piece:
-                    yield "text", lead + piece
-                    lead, written = "", True
-        timing.round_ms[-1] = elapsed_ms(round_started)
         lookup = find_lookup(reply)
         if lookup is None:
             words, memory, changes, automation = assistant_memory.peel(reply)
@@ -753,9 +755,11 @@ async def answer(
             return
         yield "status", lookup_label(lookup)
         lookup_started = time.monotonic()
-        result = await run_any_lookup(lookup, shop, viewed)
         timing.lookups += 1
-        timing.lookup_ms = min(TIMING_CAP_MS, timing.lookup_ms + elapsed_ms(lookup_started))
+        try:
+            result = await run_any_lookup(lookup, shop, viewed)
+        finally:
+            timing.lookup_ms = min(TIMING_CAP_MS, timing.lookup_ms + elapsed_ms(lookup_started))
         texts = [result] if isinstance(result, str) else [part["text"] for part in result if part.get("type") == "text"]
         links.allow(texts)
         if used == MAX_LOOKUPS - 1:

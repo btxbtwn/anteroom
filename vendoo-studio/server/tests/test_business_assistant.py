@@ -950,3 +950,90 @@ def test_every_range_the_assistant_reads_matches_analytics(workspace):
         assert shared[range_id] == inventory_analytics(db, range_id=range_id, now=NOW, rows=rows), range_id
     assert shared["all"]["incomplete_sales"] and shared["30d"]["ads"]["spend"]
     assert jeans.id in {row.conversation_id for row in rows}
+
+
+@pytest.mark.parametrize('pieces', [False, True])
+def test_failed_round_records_wait_until_failure(monkeypatch, pieces):
+    from types import SimpleNamespace
+
+    clock = [0.0]
+    monkeypatch.setattr(business_assistant, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+    failure = RuntimeError('provider failed')
+
+    class FailingProvider:
+        async def chat(self, *_args, **_kwargs):
+            if pieces:
+                clock[0] = 1.0
+                yield 'Hello.'
+            clock[0] = 80.0
+            raise failure
+
+    timing = business_assistant.AnswerTiming()
+
+    async def consume():
+        async for _ in business_assistant.answer(FailingProvider(), [], None, timing):
+            pass
+
+    with pytest.raises(RuntimeError) as caught:
+        asyncio.run(consume())
+    assert caught.value is failure
+    assert timing.round_ms == [80_000]
+    assert timing.first_token_ms == [1000 if pieces else None]
+
+
+def test_cancelled_lookup_records_attempt_and_wait(monkeypatch):
+    from types import SimpleNamespace
+
+    clock = [0.0]
+    monkeypatch.setattr(business_assistant, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+
+    async def cancelled(*_args):
+        clock[0] = 8.0
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(business_assistant, 'run_any_lookup', cancelled)
+    timing = business_assistant.AnswerTiming()
+
+    async def consume():
+        async for _ in business_assistant.answer(Provider(('```view_box_media\nbox:1\n```',)), [], None, timing):
+            pass
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(consume())
+    assert timing.lookups == 1
+    assert timing.lookup_ms == 8000
+
+
+def test_cancelled_preparation_records_wait(monkeypatch, caplog):
+    caplog.set_level('INFO', logger='vendoo_studio.assistant')
+
+    async def cancelled(_run, work, *_args):
+        work.close()
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(assistant_route, 'await_with_pulses', cancelled)
+    monkeypatch.setattr(business_assistant, 'elapsed_ms', lambda _start: 7000)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(assistant_route._answer(assistant_route._Journal(), Provider(), 'Question'))
+    [line] = timing_lines(caplog)
+    assert 'outcome=cancelled ' in line and 'prepare_ms=7000 ' in line
+
+
+@pytest.mark.parametrize('lease_lost', [False, True])
+def test_failed_save_records_outcome_and_duration(workspace, monkeypatch, caplog, lease_lost):
+    from vendoo_studio.services import background_tasks
+
+    caplog.set_level('INFO', logger='vendoo_studio.assistant')
+    failure = background_tasks.TaskLeaseExpired() if lease_lost else RuntimeError('save failed')
+
+    def fail_save(*_args):
+        raise failure
+
+    monkeypatch.setattr(assistant_route, '_save_answer', fail_save)
+    monkeypatch.setattr(business_assistant, 'elapsed_ms', lambda _start: 9000)
+    with pytest.raises(type(failure)) as caught:
+        asyncio.run(assistant_route._answer(assistant_route._Journal(), Provider(), 'Question'))
+    assert caught.value is failure
+    [line] = timing_lines(caplog)
+    outcome = 'lease_lost' if lease_lost else 'error'
+    assert f'outcome={outcome} ' in line and 'save_ms=9000 ' in line

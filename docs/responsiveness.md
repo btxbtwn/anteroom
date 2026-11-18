@@ -23,13 +23,19 @@ Mac), `prepare_ms` (shop read and prompt), `rounds`, per-round
 `round_ms`, `lookups`, `lookup_ms`, `save_ms` and `total_ms`. Values are capped
 at 600,000. No question, answer, query, provider or seller text is logged.
 
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:c16ae77c1fa266df95938d44689e61b2522ff68f559affd05d4c47994dd17247 -->
+
 Answers under 30 s log at INFO, which hosted logging drops; slower ones log at
-WARNING, which reaches Fly logs and joins the hourly batched operator report
-(grouped by call site, as `Slow response` lines are). `queue_wait_ms` compares
-the worker clock with the database's `created_at`; skew is clamped at zero, not
-corrected. Time between `total_ms` and the follower seeing `[DONE]` (journal
-polling) is not included. This line measures; it changes no answer behavior and
-proves no cause by itself.
+WARNING, which goes only to the hourly batched operator alert email
+(grouped by call site, as `Slow response` lines are), not to Fly logs.
+`queue_wait_ms` compares the worker clock with the database's `created_at`;
+skew is clamped at zero, not corrected. Time between `total_ms` and the
+follower seeing `[DONE]` (journal polling) is not included. This line measures;
+it changes no answer behavior and proves no cause by itself.
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 
 ## Assistant shop read: shared range inputs, 2026-11-18
