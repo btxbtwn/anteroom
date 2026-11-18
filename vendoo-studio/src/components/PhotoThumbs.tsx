@@ -1,4 +1,4 @@
-import { StudioImage } from "./StudioImage";
+import { PhotoLoadFailure, StudioImage } from "./StudioImage";
 /**
  * Photo thumbnails and the enlarged photo view, shared by the photo tray and
  * the regenerate review. The lightbox follows T3 Code's ExpandedImageDialog
@@ -279,6 +279,7 @@ export function PhotoLightbox({
               quarter % 2 === 1 && "max-h-[calc(92vw-96px)] max-w-[80vh]",
             )}
             onClick={onClose}
+            renderError={(failure) => <PhotoLoadFailure {...failure} />}
           />
           <div className="mt-2 flex items-center gap-1.5 text-white/80 text-xs">
             {onRotate && <Button variant="overlay" size="icon-micro" onClick={() => onRotate(-90)} disabled={rotating} aria-label="Rotate left" title="Rotate left">
