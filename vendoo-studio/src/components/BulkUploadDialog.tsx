@@ -214,11 +214,17 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
       const cleared = row.sizeSuggested
         ? { size: "", sizeSuggested: false, sizeReview: true,
           sizeNote: "A photo was removed, so the size read from it was cleared. Read size tags again or type the size." }
-        : row.sizeNote === READING_SIZE_NOTE
-          // Its reading is of the earlier photos and will be dropped; say so instead of "Reading…".
-          ? { sizeReview: row.size.trim() === "",
-            sizeNote: "A photo was removed while reading. Read size tags again or type the size." }
-          : {};
+        : row.sizeWarning
+          // The tag evidence against the typed size may have come from the removed photo, and
+          // nothing records which photo it was: it no longer stands, so an empty re-read can't
+          // restore it. The size stays flagged until it is read again or checked.
+          ? { sizeWarning: undefined, sizeReview: true,
+            sizeNote: "A photo was removed, so the earlier tag check no longer applies. Read size tags again or check the tag." }
+          : row.sizeNote === READING_SIZE_NOTE
+            // Its reading is of the earlier photos and will be dropped; say so instead of "Reading…".
+            ? { sizeReview: row.size.trim() === "",
+              sizeNote: "A photo was removed while reading. Read size tags again or type the size." }
+            : {};
       return { ...row, ...cleared, photoSet: row.photoSet + 1 };
     }));
   };
@@ -363,7 +369,11 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
                       value={row.size}
                       onChange={(event) => {
                         setAnnounceSizes(false);
-                        setRow(groupIndex, { size: event.target.value, sizeSuggested: false, sizeReview: false, sizeWarning: undefined });
+                        // An edit settles the old warning; a running read's note stays so a photo removal can still void it.
+                        setRow(groupIndex, {
+                          size: event.target.value, sizeSuggested: false, sizeReview: false, sizeWarning: undefined,
+                          ...(row.sizeNote === READING_SIZE_NOTE ? {} : { sizeNote: undefined }),
+                        });
                       }}
                       onKeyDown={onInputKeyDown}
                     />

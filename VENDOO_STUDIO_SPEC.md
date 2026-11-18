@@ -220,7 +220,7 @@ Mobile and narrow screens use Photos, Chat, Listing, and Automation tabs.
 - Avoid generic dashboard cards and excessive rounded containers.
 - Persistent status bar for extension and validation state.
 - Fully usable desktop and mobile layouts.
-- Settings → Connections → Remote access enables private Tailscale Serve to the loopback Anteroom (same process/data as the Mac UI). Copy the HTTPS link for phone browsers on the Tailnet. No native mobile app; Funnel stays off.
+- Settings → Connections → Remote access enables private Tailscale Serve to the loopback Anteroom (same process/data as the Mac UI). Copy the HTTPS link for phone browsers on the Tailnet; this remote-access path is browser-only (the iPhone app uses the hosted API). Funnel stays off.
 
 ### Sourcing
 

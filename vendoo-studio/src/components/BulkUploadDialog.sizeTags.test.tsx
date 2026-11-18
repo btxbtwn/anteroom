@@ -35,7 +35,7 @@ async function settle(check: () => void) {
   });
 }
 
-async function openDialog(onConfirm = vi.fn()) {
+async function openDialog(onConfirm = vi.fn(), dialogGroups = groups) {
   vi.spyOn(api.boxes, "list").mockResolvedValue({ boxes: [] } as never);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const host = document.createElement("div");
@@ -44,7 +44,7 @@ async function openDialog(onConfirm = vi.fn()) {
   await act(async () => root.render(
     <WorkspaceRuntimeProvider value={desktopRuntime}>
       <QueryClientProvider client={client}>
-        <BulkUploadDialog groups={groups} onCancel={vi.fn()} onConfirm={onConfirm} />
+        <BulkUploadDialog groups={dialogGroups} onCancel={vi.fn()} onConfirm={onConfirm} />
       </QueryClientProvider>
     </WorkspaceRuntimeProvider>,
   ));
@@ -209,10 +209,36 @@ it("keeps a size mismatch warning when a re-read finds no tag", async () => {
     expect(size("Jeans").value).toBe("34 x 30");
     expect(size("Jeans").className).toContain("needs-review");
     expect(note()).toBe("The tag reads 32 x 30. Check the size you typed.");
-    // Editing the size clears the warning; a later empty re-read doesn't bring it back.
+    // Editing the size clears the warning and its note at once; a later empty re-read doesn't bring it back.
     await act(async () => setInput(size("Jeans"), "32 x 30"));
+    expect(size("Jeans").getAttribute("aria-describedby")).toBeNull();
+    expect(size("Jeans").className).not.toContain("needs-review");
     await reread(() => read.mockResolvedValue({ photos_read: 1, status: "not_found", size: null, sizes: [] }));
     expect(size("Jeans").className).not.toContain("needs-review");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
+it("drops a typed size's tag warning when a photo is removed, so an empty re-read can't restore it", async () => {
+  const read = vi.spyOn(api.sizeTags, "read").mockImplementation(async (files) => tagReads[files[0]!.name.replace(".jpg", "")]!);
+  const twoPhotos = groups.map((group) => ({ ...group, files: [...group.files, new File(["y"], `${group.folder}-2.jpg`, { type: "image/jpeg" })] }));
+  const { root, size, button } = await openDialog(vi.fn(), twoPhotos);
+  const note = () => document.getElementById(size("Jeans").getAttribute("aria-describedby")!)!.textContent;
+  try {
+    await act(async () => setInput(size("Jeans"), "34 x 30"));
+    await act(async () => button("Read size tags").click());
+    await settle(() => expect(note()).toBe("The tag reads 32 x 30. Check the size you typed."));
+    // Jeans is the second item; its "Remove photo 2" is the second such button.
+    await act(async () => document.querySelectorAll<HTMLButtonElement>('[aria-label="Remove photo 2"]')[1]!.click());
+    expect(size("Jeans").value).toBe("34 x 30");
+    expect(size("Jeans").className).toContain("needs-review");
+    expect(note()).toBe("A photo was removed, so the earlier tag check no longer applies. Read size tags again or check the tag.");
+    read.mockResolvedValue({ photos_read: 1, status: "not_found", size: null, sizes: [] });
+    await act(async () => button("Read size tags").click());
+    await settle(() => expect(document.querySelector('[role="status"]')!.textContent).toContain("Size tags read."));
+    expect(size("Jeans").className).not.toContain("needs-review");
+    expect(size("Jeans").getAttribute("aria-describedby")).toBeNull();
   } finally {
     await act(async () => root.unmount());
   }
