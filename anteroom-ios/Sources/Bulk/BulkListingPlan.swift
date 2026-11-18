@@ -13,6 +13,8 @@ struct BulkListingPlan: Equatable {
         var sizeSuggested = false
         var sizeNeedsReview = false
         var sizeNote: String?
+        /// Tag evidence stays separate from transient request errors.
+        var sizeWarning: String?
         private let pickingOrder: [UUID]
         var sizeReadPhotos: [UUID] {
             let present = Set(photos)
@@ -91,6 +93,7 @@ struct BulkListingPlan: Equatable {
             if items[index].sizeSuggested {
                 items[index].sizeTag = ""
                 items[index].sizeSuggested = false
+                items[index].sizeWarning = nil
                 items[index].sizeNeedsReview = true
                 items[index].sizeNote = "A photo was removed, so the size read from it was cleared. Read size tags again or type the size."
             } else if readingSizes.contains(items[index].id) {
@@ -144,6 +147,7 @@ struct BulkListingPlan: Equatable {
             $0.sizeSuggested = false
             $0.sizeNeedsReview = false
             $0.sizeNote = nil
+            $0.sizeWarning = nil
         }
     }
 
@@ -168,10 +172,14 @@ struct BulkListingPlan: Equatable {
             let size = result.size?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             // An inconclusive reread supplies no evidence to resolve an earlier warning.
             if !typed.isEmpty, item.sizeNeedsReview,
-               result.status == "not_found" || result.status == "unreadable" { return }
+               result.status == "not_found" || result.status == "unreadable" {
+                if let warning = item.sizeWarning { item.sizeNote = warning }
+                return
+            }
             item.sizeSuggested = false
             item.sizeNeedsReview = false
             item.sizeNote = nil
+            item.sizeWarning = nil
             item.sizeTag = typed
             if result.status == "accepted", !size.isEmpty, result.photosRead > 0 {
                 if typed.isEmpty {
@@ -183,11 +191,13 @@ struct BulkListingPlan: Equatable {
                 } else {
                     item.sizeNeedsReview = true
                     item.sizeNote = "The tag reads \(size). Check the size you typed."
+                    item.sizeWarning = item.sizeNote
                 }
             } else if result.status == "conflict" {
                 item.sizeNeedsReview = true
                 let next = typed.isEmpty ? "Check the tag and type the size." : "Check the size you typed."
                 item.sizeNote = "The photos show different sizes (\(result.sizes.joined(separator: ", "))). \(next)"
+                if !typed.isEmpty { item.sizeWarning = item.sizeNote }
             } else if typed.isEmpty {
                 item.sizeNeedsReview = true
                 item.sizeNote = result.status == "not_found" || result.photosRead == 0
@@ -203,6 +213,7 @@ struct BulkListingPlan: Equatable {
             let blank = item.sizeTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             item.sizeNeedsReview = item.sizeNeedsReview || blank
             item.sizeNote = message + (blank ? " Type the size from the tag." : "")
+            if !blank, let warning = item.sizeWarning { item.sizeNote = "\(message) \(warning)" }
         }
     }
 

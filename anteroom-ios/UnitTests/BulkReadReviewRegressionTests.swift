@@ -16,7 +16,9 @@ final class BulkReadReviewRegressionTests: XCTestCase {
             let captured = plan.items[0]
             if status == "failure" {
                 plan.completeSizeRead(.failure(ReadFailure()), from: captured)
-                XCTAssertEqual(plan.items[0].sizeNote, "Read failed.")
+                XCTAssertEqual(plan.items[0].sizeNote, "Read failed. The tag reads L. Check the size you typed.")
+                plan.completeSizeRead(.success(.init(photosRead: 1, status: "not_found", size: nil, sizes: [])), from: captured)
+                XCTAssertEqual(plan.items[0].sizeNote, "The tag reads L. Check the size you typed.")
             } else {
                 plan.completeSizeRead(.success(.init(photosRead: 1, status: status, size: nil, sizes: [])), from: captured)
                 XCTAssertEqual(plan.items[0].sizeNote, "The tag reads L. Check the size you typed.")
@@ -26,13 +28,20 @@ final class BulkReadReviewRegressionTests: XCTestCase {
             plan.completeSizeRead(.success(.init(photosRead: 1, status: "accepted", size: "M", sizes: ["M"])), from: captured)
             XCTAssertFalse(plan.items[0].sizeNeedsReview)
             XCTAssertEqual(plan.items[0].sizeNote, "Size matches the tag.")
+            XCTAssertNil(plan.items[0].sizeWarning)
             plan.applySizeTag(.init(photosRead: 1, status: "accepted", size: "XL", sizes: ["XL"]), to: item.id)
             XCTAssertEqual(plan.items[0].sizeNote, "The tag reads XL. Check the size you typed.")
             plan.applySizeTag(.init(photosRead: 1, status: "conflict", size: nil, sizes: ["M", "XL"]), to: item.id)
             XCTAssertTrue(plan.items[0].sizeNote?.contains("different sizes") == true)
+            let conflictWarning = plan.items[0].sizeNote
+            plan.failSizeTag("Read failed.", for: item.id)
+            XCTAssertEqual(plan.items[0].sizeNote, "Read failed. " + (conflictWarning ?? ""))
+            plan.applySizeTag(.init(photosRead: 1, status: "unreadable", size: nil, sizes: []), to: item.id)
+            XCTAssertEqual(plan.items[0].sizeNote, conflictWarning)
             plan.setSizeTag("0", for: item.id)
             XCTAssertFalse(plan.items[0].sizeNeedsReview)
             XCTAssertNil(plan.items[0].sizeNote)
+            XCTAssertNil(plan.items[0].sizeWarning)
             plan.failSizeTag("Read failed.", for: item.id)
             XCTAssertFalse(plan.items[0].sizeNeedsReview, "Unflagged manual input stays unflagged")
             XCTAssertEqual(plan.items[0].sizeNote, "Read failed.")
