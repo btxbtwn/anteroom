@@ -58,6 +58,9 @@ export function PhotoEditor({ convId, photo, index, onSaved, onClose }: Props) {
   const [frameAspect, setFrameAspect] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  // A preview that arrived but cannot be shown; Retry asks for a new one.
+  const [unreadablePreview, setUnreadablePreview] = useState<string | null>(null);
+  const [previewAttempt, setPreviewAttempt] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const showWholeFrame = tool === "crop";
@@ -87,7 +90,7 @@ export function PhotoEditor({ convId, photo, index, onSaved, onClose }: Props) {
       // Revoked once the next preview has replaced it.
       if (url) window.setTimeout(() => URL.revokeObjectURL(url as string), 1000);
     };
-  }, [convId, photo.id, edits, showWholeFrame]);
+  }, [convId, photo.id, edits, showWholeFrame, previewAttempt]);
 
   const update = (patch: Partial<EditRecipe>) => setEdits((current) => ({ ...current, ...patch }));
   const aspect = CROP_ASPECTS.find((option) => option.id === aspectId)?.aspect ?? null;
@@ -160,14 +163,18 @@ export function PhotoEditor({ convId, photo, index, onSaved, onClose }: Props) {
         </div>
         <div className="grid min-h-0 flex-1 grid-rows-[1fr_auto] md:grid-cols-[1fr_300px] md:grid-rows-1">
           <div className="relative flex min-h-0 items-center justify-center overflow-hidden bg-neutral-900 p-6">
-            {previewUrl ? (
+            {previewUrl && unreadablePreview === previewUrl ? (
+              // The same file would fail again: Retry renders these edits anew.
+              // No crop frame here, so nothing covers the button.
+              <PhotoLoadFailure status={null} retry={() => setPreviewAttempt((count) => count + 1)} />
+            ) : previewUrl ? (
               <div className="relative max-w-full leading-none">
                 <StudioImage
                   src={previewUrl}
                   alt={`ListingPhoto ${index + 1} with edits`}
                   draggable={false}
                   className="block max-h-[calc(min(92vh,860px)-170px)] max-w-full select-none object-contain"
-                  renderError={(failure) => <PhotoLoadFailure {...failure} />}
+                  onError={() => setUnreadablePreview(previewUrl)}
                   onLoad={(event) => {
                     if (showWholeFrame) {
                       const img = event.currentTarget;
