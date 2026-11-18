@@ -1058,12 +1058,17 @@ def test_cancelled_preparation_records_wait(monkeypatch, caplog):
     assert 'outcome=cancelled ' in line and 'prepare_ms=7000 ' in line
 
 
-@pytest.mark.parametrize('failure_name, outcome', [('RuntimeError', 'error'), ('TaskLeaseExpired', 'lease_lost'), ('TaskStopped', 'cancelled')])
+@pytest.mark.parametrize('failure_name, outcome', [
+    ('RuntimeError', 'error'), ('TaskLeaseExpired', 'lease_lost'),
+    ('TaskStopped', 'cancelled'), ('CancelledError', 'cancelled'),
+])
 def test_failed_save_records_outcome_and_duration(workspace, monkeypatch, caplog, failure_name, outcome):
     from vendoo_studio.services import background_tasks
 
     caplog.set_level('INFO', logger='vendoo_studio.assistant')
-    failure = RuntimeError('save failed') if failure_name == 'RuntimeError' else getattr(background_tasks, failure_name)()
+    failure = (RuntimeError('save failed') if failure_name == 'RuntimeError' else
+               asyncio.CancelledError() if failure_name == 'CancelledError' else
+               getattr(background_tasks, failure_name)())
 
     def fail_save(*_args):
         raise failure
@@ -1092,8 +1097,13 @@ def test_journal_stop_reason_survives_worker_cancellation(monkeypatch, caplog, s
     def reject(*_args, **_kwargs):
         raise failure
 
+    def unexpected(*_args, **_kwargs):
+        pytest.fail('Preparation was cancelled; no provider round or save may start')
+
     monkeypatch.setattr(assistant_route, 'await_with_pulses', preparing)
     monkeypatch.setattr(assistant_route, '_require_provider', Provider)
+    monkeypatch.setattr(assistant_route, '_save_answer', unexpected)
+    monkeypatch.setattr(business_assistant, 'answer', unexpected)
     monkeypatch.setattr(background_tasks, 'EVENT_INTERVAL', 0.001)
     monkeypatch.setattr(background_tasks, 'append_events', reject)
     monkeypatch.setattr(background_tasks, 'finish', reject)
@@ -1102,3 +1112,4 @@ def test_journal_stop_reason_survives_worker_cancellation(monkeypatch, caplog, s
     [line] = timing_lines(caplog)
     outcome = 'cancelled' if stopped else 'lease_lost'
     assert f'outcome={outcome} ' in line
+    assert 'rounds=0 ' in line and 'lookups=0 ' in line and 'save_ms=- ' in line

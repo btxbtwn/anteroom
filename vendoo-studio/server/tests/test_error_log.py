@@ -90,18 +90,34 @@ class ErrorLogTest(unittest.TestCase):
 
 
 def test_hosted_assistant_timings_keep_individual_samples(tmp_path, monkeypatch):
+    from vendoo_studio.services import error_alerts
+
     path = tmp_path / 'timings.jsonl'
     monkeypatch.setattr(error_log, '_disk_path', lambda: path)
     # Force the existing ring's compaction path without generating thousands of logs.
     monkeypatch.setattr(error_log, '_DISK_MAX', 2)
     path.write_text('{"message":"old"}\n' * 40000)
     logger = logging.getLogger('vendoo_studio.assistant')
-    with patch.object(logger, 'handlers', []), patch.object(logger, 'propagate', False):
+    reports = []
+
+    class Alerts(logging.Handler):
+        def emit(self, record):
+            reports.append(error_alerts.build_report(record))
+
+    alert = Alerts(level=logging.WARNING)
+    with patch.object(logger, 'handlers', [alert]), patch.object(logger, 'propagate', False), patch.object(
+        logger, 'level', logging.WARNING
+    ):
         error_log.install_assistant_timings()
         error_log.install_assistant_timings()
-        logger.warning('assistant answer timing: outcome=answered total_ms=80000')
-        logger.warning('assistant answer timing: outcome=answered total_ms=40000')
+        assert len(logger.handlers) == 2
+        for total in (80000, 40000):
+            logger.warning('assistant answer timing: outcome=answered total_ms=%s', total)
     entries = error_log.query_entries(grep='assistant answer timing')
     assert [entry['message'].split('total_ms=')[1] for entry in entries] == ['40000', '80000']
     assert path.stat().st_size < 512_000
     assert len(path.read_text().splitlines()) <= 3
+    # Both samples still reach alert handling, even though its grouping merges them.
+    assert len(reports) == 2
+    assert reports[0]['fingerprint'] == reports[1]['fingerprint']
+    assert reports[0]['message'] != reports[1]['message']

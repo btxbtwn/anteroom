@@ -21,7 +21,10 @@ timing:`, with only fixed field names and whole milliseconds: `outcome`,
 Mac), `prepare_ms` (shop read and prompt), `rounds`, per-round
 `first_token_ms` (first piece including thinking, `-` when none arrived) and
 `round_ms`, `lookups`, `lookup_ms`, `save_ms` and `total_ms`. Values are capped
-at 600,000. No question, answer, query, provider or seller text is logged.
+at 600,000. The timing message contains only fixed labels and numeric timing
+values: no question, answer, SQL, provider text, URLs or tokens. This describes
+the message, not the full operator report: existing alert enrichment may attach
+seller identifiers and request/environment metadata. That policy is unchanged.
 
 `total_ms` starts when `_answer` starts and ends after its save/cleanup wait;
 queue wait is separate. First-token time is a point within its round, not an
@@ -40,11 +43,12 @@ proposal processing and cleanup can leave time outside the named stages.
 <!-- coderabbit-ai-generated-section:v1:a7bf8ddaba1ad12e7f8db7edee06b4c705d6b50d207af17c02a51d566f3f7868 -->
 
 Answers under 30 s log at INFO, which hosted logging drops; slower ones log at
-WARNING and enter the hourly batched operator alert email (grouped by call site,
+WARNING and, when operator alerts are enabled, enter the hourly batched operator alert email (grouped by call site,
 as `Slow response` lines are). The digest retains only the latest sample in each
 group. Hosted workers also retain individual warnings in the existing local
 `logs/anteroom.jsonl` diagnostic sink under the configured data directory. Once
-the file exceeds 512,000 bytes it is trimmed to its last 2,000 entries; messages
+the file exceeds 512,000 bytes and has more than 2,000 entries it is trimmed to
+its last 2,000 entries; this is a rolling entry limit, not a 512,000-byte hard cap. Messages
 are capped at 4,000 characters. Operators can read this worker-local file; it is
 not shared across Machines and can be lost with the filesystem. Disk logging is
 best effort and does not change alert delivery. No stderr handler is added.
