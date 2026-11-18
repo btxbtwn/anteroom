@@ -271,6 +271,13 @@ names the code that moved focus.
   of three fix-branch `./check.sh --fast` runs that didn't touch the
   Assistant, then passed alone (2026-11-17). Likely a fixed wait on the
   streamed answer under load.
+- `AutomationOffersSandboxTests.testOfferOverviewAndEvidenceWithAccessibilityText`:
+  failed at `SandboxTests.swift:11` in `./check.sh --all` (2026-11-18). The
+  "Automations" button was not found right after tapping More, so
+  `openMorePage` waited for a "More" back button that wasn't there. It passed
+  alone. Likely cause: `openMorePage` checks `isHittable` before the More list
+  has rendered (slower at accessibility text sizes under load). Wait for the
+  list or the destination before choosing the back-button branch.
 - `test_hosted_assistant.py::test_shop_snapshot_survives_calculation_longer_than_the_idle_transaction_deadline`
   (Postgres): `IdleInTransactionSessionTimeout` in `read_sale_lines`, under
   `inventory_analytics`, before the slow size audit the test stands in for
