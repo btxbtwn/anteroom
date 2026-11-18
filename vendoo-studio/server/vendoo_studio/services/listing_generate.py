@@ -1197,6 +1197,17 @@ def _asking_price(notes: dict) -> float:
     return amount if amount > 0 else 0.0
 
 
+def seller_size(notes: dict) -> str:
+    """The clothing size the seller confirmed in Item Details. 0 is a size; only blank is none.
+
+    Not the shipping package size, which is ``packageDimensions``.
+    """
+    value = notes.get("size") if isinstance(notes, dict) else None
+    if value is None or isinstance(value, bool):
+        return ""
+    return str(value).strip()
+
+
 def seller_item_details(notes: str | None) -> str:
     if not notes:
         return ""
@@ -1219,6 +1230,9 @@ def seller_item_details(notes: str | None) -> str:
     sku = str(parsed.get("sku") or "").strip()
     if sku:
         lines.append(f"- SKU: {sku} (keep this exact SKU)")
+    size = seller_size(parsed)
+    if size:
+        lines.append(f"- Size: {size} (the clothing size on the item's tag, confirmed by the seller; use this exact size)")
     labels = str(parsed.get("vendooLabels") or "").strip()
     if labels:
         lines.append(f"- Labels: {labels}")
@@ -1434,6 +1448,13 @@ def persist_generated_listing(
             listing["sku"] = seller_sku
         else:
             listing.pop("sku", None)
+        # The size the seller confirmed from the tag is General Size; marketplace
+        # size slots that followed the model's size follow the seller's instead.
+        size = seller_size(seller)
+        if size and size != str(listing.get("size") or "").strip():
+            model_size = listing.get("size")
+            listing["size"] = size
+            align_size_fields(listing, previous_size=None if model_size is None else str(model_size))
         # Marketplace copies from the model must not override the seller's SKU.
         for key, value in listing.items():
             if key.endswith("_specifics") and isinstance(value, dict):

@@ -13,7 +13,7 @@ from vendoo_studio.config import MAX_PHOTO_SIZE_MB
 from vendoo_studio.database import in_worker_session
 from vendoo_studio.models.conversation import Conversation, Photo
 from vendoo_studio.repositories.queries import ConversationRepo
-from vendoo_studio.services import hosted_photos, measure_read
+from vendoo_studio.services import hosted_photos, measure_read, size_tag_read
 from vendoo_studio.services.hosted_database import SellerDatabaseSession, in_seller_session
 from vendoo_studio.services.listing_provider import get_photo_provider
 from vendoo_studio.services.photo_store import photo_store
@@ -27,13 +27,32 @@ class ReadSavedRequest(BaseModel):
     garment: str
 
 
+def _photo_provider(what: str):
+    provider = get_photo_provider()
+    if provider is None or not callable(getattr(provider, "vision_chat", None)):
+        raise HTTPException(503, f"Connect a model in Settings to read {what} from photos.")
+    return provider
+
+
 def _provider(garment: str):
     if garment not in GARMENTS:
         raise HTTPException(400, f"Garment must be one of {', '.join(GARMENTS)}")
-    provider = get_photo_provider()
-    if provider is None or not callable(getattr(provider, "vision_chat", None)):
-        raise HTTPException(503, "Connect a model in Settings to read measurements from photos.")
-    return provider
+    return _photo_provider("measurements")
+
+
+async def _write_uploads(files: list[UploadFile], workdir: str) -> list[Path]:
+    """Photos not saved yet (bulk upload), written to `workdir` in their order."""
+    if len(files) > 20:
+        raise HTTPException(400, "Maximum 20 photos per listing")
+    paths = []
+    for index, upload in enumerate(files):
+        contents = await upload.read()
+        if len(contents) > MAX_PHOTO_SIZE_MB * 1024 * 1024:
+            raise HTTPException(400, f"{upload.filename or 'Photo'} is over {MAX_PHOTO_SIZE_MB}MB")
+        path = Path(workdir) / f"{index:02d}{Path(upload.filename or 'photo.jpg').suffix.lower() or '.jpg'}"
+        path.write_bytes(contents)
+        paths.append(path)
+    return paths
 
 
 async def _read(provider, paths: list[Path], garment: str) -> dict:
@@ -47,18 +66,20 @@ async def _read(provider, paths: list[Path], garment: str) -> dict:
 async def read_measurements(files: list[UploadFile] = File(...), garment: str = Form(...)):
     """Suggest an item's measurements from photos not saved yet (bulk upload). Saves nothing."""
     provider = _provider(garment)
-    if len(files) > 20:
-        raise HTTPException(400, "Maximum 20 photos per listing")
     with tempfile.TemporaryDirectory(prefix="measure-upload-") as workdir:
-        paths = []
-        for index, upload in enumerate(files):
-            contents = await upload.read()
-            if len(contents) > MAX_PHOTO_SIZE_MB * 1024 * 1024:
-                raise HTTPException(400, f"{upload.filename or 'Photo'} is over {MAX_PHOTO_SIZE_MB}MB")
-            path = Path(workdir) / f"{index:02d}{Path(upload.filename or 'photo.jpg').suffix.lower() or '.jpg'}"
-            path.write_bytes(contents)
-            paths.append(path)
-        return await _read(provider, paths, garment)
+        return await _read(provider, await _write_uploads(files, workdir), garment)
+
+
+@router.post("/api/size-tags/read")
+async def read_size_tags(files: list[UploadFile] = File(...)):
+    """Suggest an item's clothing size from its size tag in photos not saved yet (bulk upload). Saves nothing."""
+    provider = _photo_provider("size tags")
+    with tempfile.TemporaryDirectory(prefix="size-tag-upload-") as workdir:
+        paths = await _write_uploads(files, workdir)
+        try:
+            return await size_tag_read.read_size_tag(provider, paths)
+        except RuntimeError as exc:
+            raise HTTPException(502, str(exc)) from exc
 
 
 @router.post("/api/conversations/{conv_id}/measurements/read")

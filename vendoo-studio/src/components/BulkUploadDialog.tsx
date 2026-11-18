@@ -10,6 +10,7 @@ import { BOXES_QUERY_KEY, boxStoreName } from "./boxPurchases";
 import { GARMENTS, garmentFields, guessGarment, type Garment } from "./garmentMeasurements";
 import { dragHasFiles, listingTitleForFolder, moveItem, type PhotoFolderGroup } from "../photoDrop";
 import { applyReading, readEach } from "../measurementReading";
+import { applySizeTagReading } from "../sizeTagReading";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { StudioImage } from "./StudioImage";
 
@@ -26,7 +27,14 @@ type DragSpot = { group: number; photo: number };
 
 type Row = {
   sku: string;
-  sizeTag: string;
+  /** The clothing size on the tag (not the shipping package size); "0" is a size. */
+  size: string;
+  /** Size filled from the tag and not yet touched by the seller. */
+  sizeSuggested: boolean;
+  /** The tag was missing, unreadable, conflicting or disagrees with the typed size. */
+  sizeReview: boolean;
+  /** What the last size-tag reading found, in plain words. */
+  sizeNote?: string;
   garment: Garment;
   measurements: Record<string, string>;
   /** Fields filled from the photos and not yet touched by the seller. */
@@ -38,7 +46,7 @@ type Row = {
 /**
  * Everything a bulk upload needs in one window, before anything is created:
  * photo order, the box, COG and labels every draft shares, and each item's
- * own size tag, SKU and measurements. Click a photo to read the tape in it, or to turn
+ * own size, SKU and measurements. Click a photo to read the tape in it, or to turn
  * it the right way up. Only the x and Cancel close it, so a stray click
  * outside cannot throw away what was typed.
  */
@@ -56,12 +64,15 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
   const [groups, setGroups] = useState(initialGroups);
   const [rows, setRows] = useState<Row[]>(() => initialGroups.map((group) => ({
     sku: "",
-    sizeTag: "",
+    size: "",
+    sizeSuggested: false,
+    sizeReview: false,
     garment: guessGarment(listingTitleForFolder(group.folder)),
     measurements: {},
     suggested: [],
   })));
   const [reading, setReading] = useState<{ done: number; total: number } | null>(null);
+  const [sizeReading, setSizeReading] = useState<{ done: number; total: number } | null>(null);
   const [dragFrom, setDragFrom] = useState<DragSpot | null>(null);
   const [dropOn, setDropOn] = useState<DragSpot | null>(null);
   const [zoom, setZoom] = useState<DragSpot | null>(null);
@@ -126,6 +137,35 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
     setReading(null);
   };
 
+  // Fills a blank Size from each item's size tag; a typed size stays. A missing,
+  // unreadable or conflicting tag is left for the seller, never guessed.
+  const readSizeTags = async () => {
+    const todo = groups.map((_, index) => index).filter((index) => groups[index]!.files.length);
+    setSizeReading({ done: 0, total: todo.length });
+    await readEach(todo, async (index) => {
+      setRow(index, { sizeNote: "Reading the size tag…", sizeReview: false });
+      try {
+        const result = await api.sizeTags.read(groups[index]!.files);
+        setRows((current) => current.map((row, i) => {
+          if (i !== index) return row;
+          const outcome = applySizeTagReading(row.size, result);
+          return {
+            ...row,
+            size: outcome.size,
+            sizeSuggested: row.sizeSuggested || outcome.suggested,
+            sizeReview: outcome.needsReview,
+            sizeNote: outcome.note || undefined,
+          };
+        }));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Reading failed.";
+        setRow(index, { sizeNote: `${message} Type the size from the tag.` });
+      }
+      setSizeReading((current) => current && { ...current, done: current.done + 1 });
+    });
+    setSizeReading(null);
+  };
+
   const rotate = (file: File, degrees: 90 | -90) => setTurns((current) => (
     new Map(current).set(file, ((current.get(file) || 0) + degrees / 90 + 4) % 4)
   ));
@@ -159,8 +199,8 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
         const degrees = rotationForTurns(turns.get(file) || 0);
         if (degrees) rotations.set(file, degrees);
       }
-      const { sku, sizeTag, garment, measurements } = rows[index]!;
-      return { ...group, sku, sizeTag, garment, measurements, rotations };
+      const { sku, size, garment, measurements } = rows[index]!;
+      return { ...group, sku, size, garment, measurements, rotations };
     }), generate && runtime.features.has("generation"));
   };
 
@@ -196,8 +236,8 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
             Set details for {count} listings
           </h2>
           <p className="confirm-dialog-description">
-            Box, COG and labels go on every draft. Add each item's size tag, SKU and measurements
-            below; check any measurements read from photos before creating.
+            Box, COG and labels go on every draft. Add each item's size, SKU and measurements
+            below; check anything read from photos before creating.
           </p>
         </div>
         <div className="bulk-upload-fields">
@@ -251,7 +291,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
             <span className="bulk-upload-help">Separate multiple labels with commas.</span>
           </label>
         </div>
-        <ul className="bulk-upload-groups" aria-label="Each listing's photos, size tag, SKU and measurements">
+        <ul className="bulk-upload-groups" aria-label="Each listing's photos, size, SKU and measurements">
           {groups.map((group, groupIndex) => {
             const title = listingTitleForFolder(group.folder);
             const row = rows[groupIndex]!;
@@ -263,15 +303,17 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
                     <span className="photo-tray-meta"> · {group.files.length} photos</span>
                   </span>
                   <label className="bulk-measure-size">
-                    <span className="label">Size tag</span>
+                    <span className="label">Size</span>
                     <input
-                      className="input"
+                      className={`input${row.sizeSuggested ? " is-suggested" : ""}${row.sizeReview ? " needs-review" : ""}`}
                       type="text"
                       autoComplete="off"
-                      placeholder="e.g. XL, 32 × 30"
-                      aria-label={`Size tag for ${title}`}
-                      value={row.sizeTag}
-                      onChange={(event) => setRow(groupIndex, { sizeTag: event.target.value })}
+                      placeholder="From the tag"
+                      aria-label={`Size for ${title}`}
+                      aria-describedby={row.sizeNote ? `bulk-size-note-${groupIndex}` : undefined}
+                      title={row.sizeSuggested ? "Read from the size tag. Check it before creating." : undefined}
+                      value={row.size}
+                      onChange={(event) => setRow(groupIndex, { size: event.target.value, sizeSuggested: false, sizeReview: false })}
                       onKeyDown={onInputKeyDown}
                     />
                   </label>
@@ -404,6 +446,15 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
                     </label>
                   ))}
                 </div>
+                {row.sizeNote ? (
+                  <p
+                    id={`bulk-size-note-${groupIndex}`}
+                    className={`bulk-upload-help bulk-measure-note${row.sizeReview ? " needs-review" : ""}`}
+                    aria-live="polite"
+                  >
+                    {row.sizeNote}
+                  </p>
+                ) : null}
                 {row.readNote ? <p className="bulk-upload-help bulk-measure-note">{row.readNote}</p> : null}
               </li>
             );
@@ -417,16 +468,25 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
           <button
             type="button"
             className="btn btn-secondary"
+            disabled={sizeReading !== null || !runtime.features.has("generation")}
+            title="Fill blank sizes from the size tag in each item's photos"
+            onClick={() => void readSizeTags()}
+          >
+            {sizeReading ? `Reading tags ${sizeReading.done} of ${sizeReading.total}…` : "Read size tags"}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
             disabled={reading !== null || !runtime.features.has("generation")}
             title="Fill blank measurements from photos with a yardstick on the item"
             onClick={() => void readMeasurements()}
           >
             {reading ? `Reading ${reading.done} of ${reading.total}…` : "Read measurements"}
           </button>
-          <button type="button" className="btn btn-secondary" disabled={invalidCog || reading !== null} onClick={() => confirm(false)}>
+          <button type="button" className="btn btn-secondary" disabled={invalidCog || reading !== null || sizeReading !== null} onClick={() => confirm(false)}>
             Create drafts only
           </button>
-          {runtime.features.has("generation") && <button type="submit" className="btn btn-primary" disabled={invalidCog || reading !== null}>
+          {runtime.features.has("generation") && <button type="submit" className="btn btn-primary" disabled={invalidCog || reading !== null || sizeReading !== null}>
             Create and generate {count}
           </button>}
         </div>

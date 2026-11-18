@@ -970,8 +970,18 @@ export interface MeasurementReadResult {
   photos_read: number;
   /** Keyed like the bulk upload's measurement fields (pitToPit, length, waist, legOpening, ...). */
   measurements: Record<string, MeasurementRead>;
-  /** The provider and model that read the photos, e.g. "OpenRouter (openrouter/auto)". */
-  reader?: string;
+}
+
+/**
+ * The clothing size read off an item's size tag (not its shipping package size).
+ * `size` is set only when two independent reads agree; otherwise the seller checks the tag.
+ */
+export interface SizeTagReadResult {
+  photos_read: number;
+  status: "accepted" | "not_found" | "unreadable" | "conflict";
+  size: string | null;
+  /** Every distinct size the reads saw, for a conflict. */
+  sizes: string[];
 }
 
 export interface ScoutCheck {

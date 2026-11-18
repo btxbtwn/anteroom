@@ -86,7 +86,11 @@ def _search_photos(paths: list[Path], out: Path) -> list[dict]:
 
 
 def reader_name(provider) -> str:
-    """The provider and photo model a seller would recognise, for the bulk upload's notes."""
+    """The provider and photo model that read, for the server log only.
+
+    Sellers see neutral notes ("Filled from photos"): a model name in a note
+    reads as part of the listing and was being copied into it.
+    """
     from vendoo_studio.services.provider_deadlines import provider_label
 
     label = provider_label(getattr(provider, "name", None))
@@ -118,7 +122,7 @@ def find_ruler_photos(paths: list[Path], out: Path) -> list[dict]:
     return found
 
 
-def _image(url: str) -> dict:
+def image_part(url: str) -> dict:
     return {"type": "image_url", "image_url": {"url": url}}
 
 
@@ -136,7 +140,8 @@ def _json_object(text: str) -> dict | None:
     return None
 
 
-async def _ask(provider, system: str, parts: list[dict]) -> dict:
+async def ask_vision_json(provider, system: str, parts: list[dict]) -> dict:
+    """One photo-model answer, as the JSON object in it (empty when it gave none)."""
     from vendoo_studio.providers.xiaomi_mimo import unpack_stream_item
 
     messages = [{"role": "system", "content": system}, {"role": "user", "content": parts}]
@@ -157,14 +162,14 @@ async def _read_once(provider, photos: list[dict], garment: str, measures: list[
     locate_parts: list[dict] = [{"type": "text", "text": f"Garment: {garment}. Measurements to read: {wanted}."}]
     for photo in photos:
         overview = await encode_images([photo["overview"]], 1200)
-        locate_parts += [{"type": "text", "text": f"Photo {photo['number']}: overview, each stick's letter on it."}, _image(overview[0])]
+        locate_parts += [{"type": "text", "text": f"Photo {photo['number']}: overview, each stick's letter on it."}, image_part(overview[0])]
         for stick in photo["sticks"]:
             strip = await encode_images([stick["strip"]], 2000)
             locate_parts += [
                 {"type": "text", "text": f"Photo {photo['number']}, stick {stick['stick']}: the straightened stick, tile numbers above it."},
-                _image(strip[0]),
+                image_part(strip[0]),
             ]
-    located = await _ask(
+    located = await ask_vision_json(
         provider,
         "You read garment measurements from photos where the seller laid yardsticks on the item.\n\n"
         f"{rules}\n\n"
@@ -195,11 +200,11 @@ async def _read_once(provider, photos: list[dict], garment: str, measures: list[
             tiles = sorted(sorted(tiles, key=lambda n: abs(n - centre))[:MAX_TILES_SHOWN])
         urls = await encode_images([stick["strip"], *(stick["tiles"][n - 1] for n in tiles)], 1600)
         read_parts += [{"type": "text", "text": f"{measure}: photo {photo['number']}, stick {stick['stick']} (whole stick, then tiles {tiles})."}]
-        read_parts += [_image(url) for url in urls]
+        read_parts += [image_part(url) for url in urls]
         asked.append(measure)
     if not asked:
         return {}
-    return await _ask(
+    return await ask_vision_json(
         provider,
         "You read garment measurements from enlarged crops of a yardstick laid on the item.\n\n"
         f"{rules}\n\n"
@@ -216,7 +221,8 @@ async def read_measurements(provider, paths: list[Path], garment: str) -> dict:
     with tempfile.TemporaryDirectory(prefix="measure-") as workdir:
         photos = await asyncio.to_thread(_search_photos, paths, Path(workdir))
         if not photos:
-            return {"photos_read": 0, "measurements": {}, "reader": reader_name(provider)}
+            log.info("measurement read: no yardstick photo among %d (%s)", len(paths), reader_name(provider))
+            return {"photos_read": 0, "measurements": {}}
         first, second = await asyncio.gather(
             _read_once(provider, photos, garment, measures),
             _read_once(provider, photos, garment, measures),
@@ -232,4 +238,7 @@ async def read_measurements(provider, paths: list[Path], garment: str) -> dict:
             found = next(r for r in reads if module.parse_inches(r) is not None)
             reads = [found, third.get(measure, "cannot read")]
         measurements[FIELD_KEYS.get(measure, measure)] = module.settle_one(*reads)
-    return {"photos_read": len(photos), "measurements": measurements, "reader": reader_name(provider)}
+    accepted = sum(1 for read in measurements.values() if read.get("status") == "accepted")
+    log.info("measurement read: %d of %d accepted from %d photos (%s)",
+             accepted, len(measurements), len(photos), reader_name(provider))
+    return {"photos_read": len(photos), "measurements": measurements}

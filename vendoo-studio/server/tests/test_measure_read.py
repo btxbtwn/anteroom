@@ -113,14 +113,19 @@ class ReadMeasurementsRouteTest(unittest.TestCase):
     def test_no_yardstick_photo_reads_nothing(self):
         provider = FakeProvider([])
         body = self.post(provider, [_plain_photo()]).json()
-        self.assertEqual(body, {"photos_read": 0, "measurements": {}, "reader": "The AI provider"})
+        self.assertEqual(body, {"photos_read": 0, "measurements": {}})
         self.assertEqual(provider.calls, [])
 
-    def test_names_the_model_that_read_the_photos(self):
+    def test_the_model_is_logged_not_shown_to_the_seller(self):
+        """A model name in the seller's notes was copied into listings; diagnostics keep it."""
         provider = FakeProvider([{"pit_to_pit": 20.5}, {"pit_to_pit": 20.5}])
-        provider.name, provider.vision_model = "openrouter", "openrouter/auto"
-        body = self.post(provider, [_ruler_photo()]).json()
-        self.assertEqual(body["reader"], "OpenRouter (openrouter/auto)")
+        provider.name, provider.vision_model = "openrouter", "google/gemini-flash-latest"
+        with self.assertLogs("vendoo_studio.services.measure_read", "INFO") as logs:
+            response = self.post(provider, [_ruler_photo()])
+        self.assertNotIn("reader", response.json())
+        self.assertNotIn("gemini", response.text.casefold())
+        self.assertNotIn("openrouter", response.text.casefold())
+        self.assertIn("OpenRouter (google/gemini-flash-latest)", "\n".join(logs.output))
 
     def test_needs_a_connected_model(self):
         response = self.post(None, [_ruler_photo()])

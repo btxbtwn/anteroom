@@ -388,6 +388,35 @@ class PersistListingTest(unittest.TestCase):
         )
         self.assertEqual(parsed["sku"], "BIN4-001")
 
+    def test_tag_size_from_bulk_upload_wins_and_marketplaces_follow(self):
+        """The bulk upload read Size from the tag; the model's guess does not replace it."""
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M", "packageDimensions": "13x10x3"}))
+        parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
+            **LISTING_JSON, "size": "S", "poshmark_specifics": {"size": "S"}, "mercari_specifics": {"size": "S"},
+        })
+        self.assertEqual(parsed["size"], "M")
+        self.assertEqual(parsed["poshmark_specifics"]["size"], "M")
+        self.assertEqual(parsed["mercari_specifics"]["size"], "M")
+        # Clothing size and the shipping package are separate facts.
+        self.assertEqual(parsed["package_dimensions_in"], "13x10x3")
+
+    def test_tag_size_zero_is_a_size(self):
+        for stored in ("0", 0):
+            with self.subTest(stored=stored):
+                ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": stored}))
+                parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
+                    **LISTING_JSON, "size": "2", "poshmark_specifics": {"size": "2"},
+                })
+                self.assertEqual(parsed["size"], "0")
+                self.assertEqual(parsed["poshmark_specifics"]["size"], "0")
+                self.assertIn("- Size: 0 (", seller_item_details(json.dumps({"size": stored})))
+
+    def test_without_a_tag_size_the_generated_size_stays(self):
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": " "}))
+        parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={**LISTING_JSON, "size": "S"})
+        self.assertEqual(parsed["size"], "S")
+        self.assertNotIn("Size:", seller_item_details(json.dumps({"size": " ", "sku": "A1"})))
+
     def test_model_sku_is_dropped_without_a_seller_sku(self):
         parsed = persist_generated_listing(
             self.db, self.conv.id, "", parsed={**LISTING_JSON, "sku": "NIKE-M"},

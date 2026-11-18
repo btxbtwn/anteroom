@@ -111,7 +111,7 @@ describe("Listing action deadlines", () => {
 describe("Reading measurements from photos", () => {
   afterEach(() => vi.unstubAllGlobals());
   const photo = () => new File(["x"], "1.jpg", { type: "image/jpeg" });
-  const result = { photos_read: 1, measurements: {}, reader: "OpenRouter" };
+  const result = { photos_read: 1, measurements: {} };
 
   it("tries once more when a restart cuts the read off", async () => {
     const fetch = vi.fn()
@@ -146,6 +146,31 @@ describe("Reading measurements from photos", () => {
       "The server restarted while reading. Press Read measurements again.",
     );
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("Reading size tags from photos", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("posts the item's photos and retries a cut-off read once", async () => {
+    const result = { photos_read: 2, status: "accepted", size: "0", sizes: ["0"] };
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(new Response("Internal Server Error", { status: 500 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(result)));
+    vi.stubGlobal("fetch", fetch);
+    const photos = [new File(["a"], "1.jpg"), new File(["b"], "2.jpg")];
+    await expect(api.sizeTags.read(photos)).resolves.toEqual(result);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const [url, init] = fetch.mock.calls[1]!;
+    expect(String(url)).toMatch(/\/api\/size-tags\/read$/);
+    expect((init.body as FormData).getAll("files")).toHaveLength(2);
+  });
+
+  it("names its own button when the server keeps restarting", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 503 })));
+    await expect(api.sizeTags.read([new File(["a"], "1.jpg")])).rejects.toThrow(
+      "The server restarted while reading. Press Read size tags again.",
+    );
   });
 });
 
