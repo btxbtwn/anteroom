@@ -11,6 +11,9 @@ from vendoo_studio.config import skills_dir
 from vendoo_studio.models.sizes import size_choice
 from vendoo_studio.services.chrome_listing import poshmark_color_name
 from vendoo_studio.services.seller_overrides import get_path, marketplace_text, price_for
+from vendoo_studio.services.vendoo_encodings import marketplace_condition
+
+CONDITIONS = frozenset({"nwt", "uln", "ug", "uf"})
 
 
 @lru_cache(maxsize=1)
@@ -76,6 +79,31 @@ def _size_pools(listing: dict, groups: list, key) -> list[list]:
     return [[group for group in groups if group["id"] != "custom"]]
 
 
+def _condition_from_text(value) -> str:
+    """Poshmark's code for a condition in words, as List reads it; empty when none fits."""
+    text = str(value or "").lower()
+    if re.search(r"new with tags|\bnwt\b", text) and "without" not in text:
+        return "nwt"
+    for pattern, code in ((r"new without tags|\bnwot\b|like new|excellent", "uln"), (r"fair|poor", "uf"),
+                          (r"good|imperfection|defect|pre-owned|used", "ug"), (r"^new\b|brand new", "nwt")):
+        if re.search(pattern, text):
+            return code
+    return ""
+
+
+def _general_condition(listing: dict) -> str:
+    """The condition List sends when this form has none of its own, or empty when General has none."""
+    chosen = _condition_from_text((listing.get("poshmark_specifics") or {}).get("poshmarkCondition"))
+    if chosen:
+        return chosen
+    form = listing.get("form")
+    prepared = str(((form.get("overrides") if isinstance(form, dict) else None) or {}).get("condition") or "").lower()
+    if prepared in CONDITIONS:
+        return prepared
+    code = str(marketplace_condition(None, "poshmark", listing.get("condition")) or "")
+    return code if code in CONDITIONS else _condition_from_text(listing.get("condition"))
+
+
 def _initial_inventory(listing: dict, groups: list) -> list:
     details = listing.get("poshmark_specifics") or {}
     def key(value):
@@ -125,6 +153,9 @@ def form(listing: dict) -> dict:
             row["inventory_system"] = str(specifics.get("sizeSystem") or "us").lower()
             if value is None:
                 value = _initial_inventory(listing, groups)
+        elif path == "poshmark_specifics.condition" and value is None:
+            # Follows General until the seller picks one here, as List does.
+            value = _general_condition(listing)
         elif path == "poshmark_specifics.multiItem" and value is None:
             value = "true" if _multiple(listing) else "false"
         elif path == "poshmark_specifics.colors" and value is None:

@@ -54,6 +54,28 @@ class MercariFormTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(fields['mercari_specifics.package.fitsShoebox']['required'])
         self.assertEqual(listing, before)
 
+    def test_brand_missing_from_mercaris_catalog_is_its_no_brand_choice(self):
+        # AM TEES XL (draft 0b945d2660ec): General brand "AM Tees", no Mercari brand of its own.
+        listing = {'brand': 'AM Tees', 'condition': 'Pre-Owned - Good', 'price': 20}
+        before = copy.deepcopy(listing)
+        row = next(row for row in mercari_form.form(listing)['fields'] if row['path'] == 'mercari_specifics.brand')
+        self.assertEqual(row['value'], mercari_form.NO_BRAND)
+        self.assertIn(row['value'], row['option_values'].values())
+        self.assertEqual(listing, before)
+
+    def test_recognized_and_seller_locked_brands_are_kept(self):
+        row = next(row for row in mercari_form.form({'brand': 'nike'})['fields'] if row['path'] == 'mercari_specifics.brand')
+        self.assertEqual(row['value'], 'Nike')
+        locked = {'brand': 'AM Tees', 'mercari_specifics': {'brand': 'AM Tees'},
+                  'seller_fields': ['mercari_specifics.brand']}
+        row = next(row for row in mercari_form.form(locked)['fields'] if row['path'] == 'mercari_specifics.brand')
+        self.assertEqual(row['value'], 'AM Tees')
+
+    def test_an_unreadable_brand_catalog_is_an_error_not_no_brand(self):
+        with patch.object(mercari_form, 'catalog', side_effect=OSError('catalog unreadable')):
+            with self.assertRaises(OSError):
+                mercari_form.form({'brand': 'AM Tees'})
+
     async def test_shipping_requires_the_sellers_shoebox_answer_and_uses_live_fees(self):
         listing = {'direct_category_ids': {'mercari': '275'}, 'weight_lb': 1, 'package_dimensions_in': '13x10x3'}
         quote = {'id': 2552, 'fee': 799, 'standardFee': 899, 'etaForSeller': '1 - 7 days',

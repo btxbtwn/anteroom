@@ -9,7 +9,7 @@ from collections import Counter
 from functools import lru_cache
 
 from vendoo_studio.config import skills_dir
-from vendoo_studio.services.seller_overrides import get_path, marketplace_text, price_for
+from vendoo_studio.services.seller_overrides import field_locked, get_path, marketplace_text, price_for
 
 NO_BRAND = "No Brand/Not sure"
 
@@ -143,8 +143,11 @@ def form(listing: dict, shipping_classes: list[dict] | None = None, *, notes: li
     brand = marketplace_text(listing, "mercari", "brand")
     blank = re.sub(r"[^a-z0-9]+", " ", brand.casefold()).strip() in {
         "", "unbranded", "no brand", "not sure", "no brand not sure", "none", "n a", "na", "unknown"}
-    brand = NO_BRAND if blank or specifics.get("noBrand") is True else next(
-        (name for name in brands if name.casefold() == brand.casefold()), brand)
+    known = next((name for name in brands if name.casefold() == brand.casefold()), None)
+    # A name Mercari's catalog does not have is listed with no brand, as List
+    # sends it. A brand the seller locked on this form is shown as they left it.
+    brand = NO_BRAND if blank or specifics.get("noBrand") is True or (
+        known is None and not field_locked(listing, "mercari", "brand")) else known or brand
     picker = brand_choices()
     fields["mercari_specifics.brand"].update(value=brand, options=list(picker["options"]),
                                             option_values=dict(picker["option_values"]))

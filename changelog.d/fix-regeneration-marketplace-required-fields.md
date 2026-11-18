@@ -1,0 +1,2 @@
+- Poshmark's Condition now shows the listing's condition instead of staying empty and counting as a missing field.
+- Mercari's Brand now shows "No brand / Not sure" when Mercari's brand list doesn't have the listing's brand. A brand you set on the Mercari tab yourself stays as you set it.
