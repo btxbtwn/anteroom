@@ -8,6 +8,12 @@ PRs for the bugs it finds. It never merges.
 This file holds **instructions only**. Results go in the daily GitHub issue.
 Change this file through a PR (see **Keeping this file current**).
 
+**Unresolved for Cristian:** the merge permission in **Fixing bugs** and the
+daily test/flake quota in **Each run** conflict with the scheduled audit brief,
+which forbids auto-merge and daily quotas. This PR leaves that policy decision
+open; follow the stricter brief until Cristian resolves it. These instructions
+do not grant new merge permissions or expand quotas.
+
 ## Safety rules
 
 These override everything below.
@@ -90,12 +96,23 @@ Every run, in this order:
    Mac started with 2.6 GB free and 14 GB of swap already in use, and the
    backend suite's first minute added a 1 GB swap file. The seller's own app
    writes to that disk and needs room to snapshot before a migration (it once
-   refused to start: "5.7 GB free, 5.8 GB needed"). If less than about 10 GB
-   is free, record the local suites, sandboxes and iPhone build as **not
-   run (disk)**, do the read-only steps (deploy check, log read, PR review),
-   and list freeing space under **Needs the seller**. Never delete files to
-   make room. Installing with `uv pip install` (APFS clones from uv's cache)
-   costs almost no disk; `pip` copies about 1 GB per venv.
+   refused to start: "5.7 GB free, 5.8 GB needed"). About 10 GB is a stop
+   floor, never clearance to start. Before any heavy work, budget fresh snapshot
+   allocation if needed, the native build/runtime floor, dependency installation
+   headroom and a reserve for further swap growth. Record the measured free
+   space, swap usage and each allocation; if they do not fit with that reserve,
+   record the affected suites, sandboxes and builds as **not run (disk)**.
+   On 2026-11-18, 12 GiB free with 11 GiB swap was insufficient for a 5.8 GB
+   fresh snapshot plus a 5.25 GiB native build floor and swap reserve. The Mac
+   native hold at `495c9b61` remains until resources are cleared separately.
+   A native-only gate needs neither a migration nor an installed-app launch;
+   do not add those steps to clear it. Continue read-only review and report
+   the resource blocker under **Needs the seller**. Never delete files to make
+   room. Do not assume a fresh install is safe: inspect the actual uv cache,
+   filesystem, clone support and allocated space, and reserve install headroom.
+   APFS clones can reduce initial allocation, but `uv pip install` has no
+   general near-zero-disk guarantee; cache misses, copies and later writes
+   consume space.
    Don't start `check.sh` with `&` inside a script: a background job in a
    non-interactive shell ignores SIGINT, and
    `test_check_postgres_cleanup.py::...[INT--2]` then fails with `0 == -2`
@@ -129,12 +146,27 @@ Every run, in this order:
    CI never builds the hosted image, so a base-image bump can pass CI and
    fail every deploy (2026-11-16: Python 3.15 from Dependabot's #1547 broke
    deploys for five hours). Report a failed latest run with its log line.
-   The deploy also waits for CI to pass on every merge since the commit
-   production runs, so one failed CI run on `main` blocks every later deploy
-   until that run is re-run, even when newer commits pass. On 2026-11-18 a
-   flaky Postgres test on `fa824f9a` kept production on `b73c5347` while 26
-   merges waited. Name the commit and the failing test in the report.
-   Re-running that CI run starts a deploy, so leave it for the seller.
+   The current deploy gate requires passing CI on every non-release
+   first-parent commit since the recorded production commit. A historical
+   failure can block later deploys even after a fix passes on newer code.
+   On 2026-11-18, `fa824f9a` failed
+   `test_shop_snapshot_survives_calculation_longer_than_the_idle_transaction_deadline`
+   with `IdleInTransactionSessionTimeout` in `read_sale_lines`. The read
+   transaction stayed open across the sales archive lock and CPU calculations.
+   #1653 (merged as `5cc7fea1`) fixed that defect and added deterministic lock
+   regression coverage; the original test, its 150 ms deadline and its sleep
+   were unchanged. Do not classify this failure as merely flaky or lengthen
+   the deadline/sleep as a fix.
+   Preserve the historical failure, its commit, run/attempt and logs in the
+   report. A historical CI rerun executes the old defective code; a passing
+   attempt can unlock all eligible backlog and automatic deployment. Do not
+   recommend or trigger a rerun as the default recovery. Recovery needs a
+   separate authorized proposal and approval, with its deployment consequences
+   stated explicitly. The gate-only owner (`e25e13c4`) is reviewing that proposal;
+   this documentation change implements no gate policy. At the 2026-11-18
+   handoff, main was `ffe66259` (0.1.1033), while live health was reported as
+   0.1.1011: merged is not deployed. Record fresh evidence during a future audit
+   rather than treating those versions as current indefinitely.
 2. `cd vendoo-studio && npm run e2e` (local web, desktop and phone sizes).
 3. `cd vendoo-studio && npm run e2e:hosted` (hosted web, two sellers).
 4. `./anteroom-ios/test-sandbox.sh` (iPhone XCUITests in the Simulator). Run
@@ -278,15 +310,6 @@ names the code that moved focus.
   alone. Likely cause: `openMorePage` checks `isHittable` before the More list
   has rendered (slower at accessibility text sizes under load). Wait for the
   list or the destination before choosing the back-button branch.
-- `test_hosted_assistant.py::test_shop_snapshot_survives_calculation_longer_than_the_idle_transaction_deadline`
-  (Postgres): `IdleInTransactionSessionTimeout` in `read_sale_lines`, under
-  `inventory_analytics`, before the slow size audit the test stands in for
-  had run. It failed in CI on `main` at `fa824f9a`, and that one run blocked
-  every hosted deploy; the commits just before and after passed
-  (2026-11-18). Likely cause: the test's 150 ms idle timeout covers all of
-  `read_shop`, so any ordinary pause on a loaded runner ends the transaction.
-  Production uses 30 s. Apply the short timeout only around the size audit,
-  or lengthen both the timeout and the sleep.
 - `e2e/photoReorder.e2e.ts` "photos on a marketplace form reorder by
   dragging" [desktop]: hit the 120 s test timeout before the order check,
   on two of four fix-branch `./check.sh` runs that did not touch photos;
