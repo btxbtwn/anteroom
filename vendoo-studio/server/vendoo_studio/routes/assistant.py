@@ -276,7 +276,11 @@ async def _answer(
                 on_committed = None
                 if isinstance(run, _Journal):
                     saved_outcome = outcome
-                    on_committed = lambda: run.confirm_saved(saved_outcome)
+
+                    def confirm_committed() -> None:
+                        run.confirm_saved(saved_outcome)
+
+                    on_committed = confirm_committed
                 try:
                     await asyncio.to_thread(
                         _save_answer, provider, answer, changes, memory_block, automation_block, thread_id, settle,
