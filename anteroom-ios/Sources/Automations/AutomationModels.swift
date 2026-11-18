@@ -389,7 +389,8 @@ enum AutomationFormat {
         guard !actions.isEmpty else { return "No actions" }
         return actions.map { action in
             guard action.type == "price" else { return action.type.replacingOccurrences(of: "_", with: " ") }
-            let value = action.value.map { GeneralFields.text($0) } ?? "?"
+            guard let raw = action.value else { return "price drop amount not set" }
+            let value = GeneralFields.text(raw)
             let amount = action.mode == "amount" ? "$\(value)" : "\(value)%"
             let cadence = action.repeatMode == "step" ? " each cycle" : action.repeatMode == "once" ? " once" : ""
             let floor = action.floor.map { ", floor $\(GeneralFields.text($0))" } ?? ""
