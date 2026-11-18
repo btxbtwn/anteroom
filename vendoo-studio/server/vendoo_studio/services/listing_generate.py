@@ -940,7 +940,9 @@ def propagate_general_size(listing: dict, *, previous_size: str | None = None) -
             target = depop_size_for(size, listing)
             if "size" not in block and target == size:
                 continue
-            if current and current.casefold() != "other" and current not in {target, size, previous}:
+            # Depop's own spelling of the previous size (a kids' age) was following it too.
+            followed = {target, size, previous} | ({depop_size_for(previous, listing)} if previous else set())
+            if current and current.casefold() != "other" and current not in followed:
                 continue
         elif "size" not in block:
             continue
@@ -964,6 +966,28 @@ def _size_key_locked(seed: dict, market: str, key: str) -> bool:
     from vendoo_studio.services.seller_overrides import field_locked, is_locked
 
     return is_locked(seed, f"{market}_specifics.{key}") or field_locked(seed, market, key)
+
+
+def _replace_title_size(listing: dict, old: str, new: str) -> None:
+    """Put ``new`` where the title carries the model's whole size ``old`` (One Size, 32x30).
+
+    sync_title_size replaces one token, so a two-word size would keep half its
+    words beside the new size. When the swap passes 80 characters, the last words
+    go: the size the seller set is worth more than a trailing descriptor.
+    """
+    title = str(listing.get("title") or "").strip()
+    old_tokens, new_tokens = old.split(), new.split()
+    if not title or not old_tokens or not new_tokens:
+        return
+    tokens = title.split()
+    brand = [part.casefold() for part in str(listing.get("brand") or "").split()]
+    slot = len(brand) if [token.casefold() for token in tokens[: len(brand)]] == brand else 0
+    if [token.strip(",").casefold() for token in tokens[slot: slot + len(old_tokens)]] != [t.casefold() for t in old_tokens]:
+        return
+    tokens[slot: slot + len(old_tokens)] = new_tokens
+    while len(" ".join(tokens)) > 80 and len(tokens) > slot + len(new_tokens):
+        tokens.pop()
+    listing["title"] = " ".join(tokens)
 
 
 def _drop_unformed_size_ids(listing: dict, seed: dict) -> None:
@@ -1488,6 +1512,9 @@ def persist_generated_listing(
     generated_size = sanitize_size_value(listing.get("size"))
     follow_locked_size = bool(locked_size) and locked_size != generated_size
     if follow_locked_size:
+        _replace_title_size(listing, raw_generated_size, locked_size)
+        if generated_size != raw_generated_size:
+            _replace_title_size(listing, generated_size, locked_size)
         listing["size"] = locked_size
         align_size_fields(listing, previous_size=generated_size or None)
         _drop_unformed_size_ids(listing, seed)

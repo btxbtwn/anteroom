@@ -75,9 +75,10 @@ class LockedSizeGenerationTest(unittest.TestCase):
         self.seller_set("XL", _native_forms={"ebay": {"fields": [EBAY_ROW]}, "mercari": {"fields": [MERCARI_ROW]}})
         parsed = self.generate(ebay_specifics={"Size": "S"}, mercari_specifics={"nativeSizeId": "11"})
         self.assertEqual(parsed["size"], "XL")
-        # eBay's Size and Mercari's size ID are chosen from options: neither keeps S nor takes "XL" as text.
-        self.assertNotIn(parsed.get("ebay_specifics", {}).get("Size"), {"S", "XL"})
-        self.assertNotIn(parsed.get("mercari_specifics", {}).get("nativeSizeId"), {"11", "XL"})
+        # eBay's Size and Mercari's size ID are chosen from options, which don't offer XL:
+        # both are left empty (a gap for the seller), never the model's S, free text or another size.
+        self.assertIn(parsed.get("ebay_specifics", {}).get("Size"), (None, ""))
+        self.assertIn(parsed.get("mercari_specifics", {}).get("nativeSizeId"), (None, ""))
 
     def test_a_native_size_id_without_its_form_row_is_dropped_for_the_form_to_derive(self):
         self.seller_set("L")
@@ -93,6 +94,19 @@ class LockedSizeGenerationTest(unittest.TestCase):
         self.assertEqual(parsed["size"], "34")
         self.assertEqual(parsed["ebay_specifics"]["inseam"], "30")
         self.assertEqual(parsed["title"], "Levi's 34 Jeans 505 Blue")
+
+    def test_a_multi_word_model_size_is_replaced_whole_in_the_title(self):
+        self.seller_set("M", brand="Acme", title="Acme M Vintage Hat")
+        parsed = self.generate(brand="Acme", size="One Size", title="Acme One Size Vintage Hat")
+        self.assertEqual(parsed["title"], "Acme M Vintage Hat")
+
+    def test_a_title_over_80_characters_drops_its_last_words_not_the_size(self):
+        title = "M&O GOLD S Graphic T-Shirt Green Tie-Dye Regular Fit Crew Neck Cotton Summer Tee"
+        self.assertEqual(len(title), 80)
+        self.seller_set("XXL")
+        parsed = self.generate(title=title)
+        self.assertTrue(parsed["title"].startswith("M&O GOLD XXL Graphic T-Shirt"), parsed["title"])
+        self.assertLessEqual(len(parsed["title"]), 80)
 
     def test_without_a_lock_the_generated_size_stands(self):
         self.seller_set("L", locks=())
