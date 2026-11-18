@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { showStatusTab } from "../e2e/fixtures";
 
 const api = `http://127.0.0.1:${process.env.VENDOO_STUDIO_PORT || "4341"}`;
 
@@ -31,6 +32,7 @@ test("drafts edited in bulk can then be deleted in bulk", async ({ page, request
       await page.getByRole("button", { name: "Open navigation" }).click();
       await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
     }
+    await showStatusTab(page, "Draft");
     await page.getByRole("button", { name: "Select listings", exact: true }).click();
     for (const draft of drafts) await page.getByRole("checkbox", { name: `Select ${draft.title}`, exact: true }).click();
   };
