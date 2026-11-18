@@ -348,9 +348,15 @@ class MarketplaceDelistTest(unittest.TestCase):
                       for sale in self.db.query(MarketplaceSale).filter_by(conversation_id=self.conv.id))
 
     def _row(self) -> dict:
-        response = self.client.get(f"/api/conversations/{self.conv.id}")
+        """The item's inventory row, as the sidebar reads it (that read also brings its stored label up to date)."""
+        self.db.expire_all()
+        response = self.client.get("/api/conversations")
         self.assertEqual(response.status_code, 200, response.text)
-        return response.json()
+        return next(row for row in response.json() if row["id"] == self.conv.id)
+
+    def _states(self) -> dict:
+        self.db.expire_all()
+        return {name: entry["state"] for name, entry in self.client.get(self.base).json().items()}
 
     def test_listings_already_removed_elsewhere_read_delisted_and_the_sale_stands(self):
         self._sold_on_depop_with_imported_snapshot()
@@ -404,8 +410,7 @@ class MarketplaceDelistTest(unittest.TestCase):
                 [sale_id], session_factory=sessionmaker(bind=self.db.get_bind())))
         self.assertIn("Etsy could not be delisted", notes[sale_id])
         self.assertEqual(sorted(call.args[2]["marketplace"] for call in self.bridge.call_args_list), ["mercari", "poshmark"])
-        states = {name: entry["state"] for name, entry in self.client.get(self.base).json().items()}
-        self.assertEqual(states, {"ebay": "deleted", "etsy": "failed", "poshmark": "deleted", "mercari": "deleted", "depop": "live"})
+        self.assertEqual(self._states(), {"ebay": "deleted", "etsy": "failed", "poshmark": "deleted", "mercari": "deleted", "depop": "live"})
         self.assertEqual(self._status(), "sold")
         self.assertEqual(self._sales(), sales)
         self.assertEqual(set(self._row()["removed_marketplaces"]), {"ebay", "poshmark", "mercari"})
