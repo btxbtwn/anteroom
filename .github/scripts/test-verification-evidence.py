@@ -156,7 +156,7 @@ class VerificationEvidence(unittest.TestCase):
         self.assertEqual(result['native_changes'], ['anteroom-ios/Sources/Foo.swift'])
         self.assertTrue(result['migration_changes'])
 
-    @patch.dict(os.environ, {'GITHUB_SHA': TARGET})
+    @patch.dict(os.environ, {'GITHUB_SHA': TARGET, 'GITHUB_EVENT_NAME': 'workflow_dispatch'})
     def test_wrong_target_nonfirstparent_same_or_reversed_span_fails(self):
         with patch.object(evidence, 'git', self.fake_git):
             for target, base in ((BASE, TARGET), (TARGET, TARGET), (TARGET, 'd'*40)):
@@ -192,6 +192,7 @@ class VerificationEvidence(unittest.TestCase):
         self.assertEqual(ci.count('VERIFICATION_DATABASE:'), 2)
         self.assertEqual(ci.count('if: success() && inputs.full_verification'), 2)
         self.assertIn('python3 .github/scripts/test-verification-evidence.py', ci)
+        self.assertIn('python ../.github/scripts/test-verification-inventory.py', ci)
 
     def test_receipt_cli_only_reads_api_and_cannot_consume_approvals(self):
         text = Path(evidence.__file__).read_text()

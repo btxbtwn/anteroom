@@ -355,6 +355,11 @@ jobs:
           # pytest-split (in the dev extra) divides the suite between the
           # shards; the full suite still runs, each test exactly once per database.
           ./scripts/install-locked.sh python dev
+      - name: Exercise verification collector with real xdist and split
+        if: matrix.group == 1
+        run: python ../.github/scripts/test-verification-inventory.py
+        env:
+          PYTEST_PLUGINS: ""
       - run: python -m pytest -q -n auto --splits 2 --group ${{ matrix.group }}
         env:
           VENDOO_STUDIO_DATA_DIR: ${{ runner.temp }}/vendoo-studio-data

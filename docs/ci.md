@@ -85,8 +85,9 @@ GitHub rather than treat the existence of a receipt as success.
 
 This is **Linux verification evidence, not a deployment approval/checkpoint**.
 The production base is supplied for the reviewed span, not independently
-verified as live. Native changes are listed and require separate pinned native
-receipts; hosted image validation, live schema/Machine reconciliation, backup
+verified as live. Detected native changes are listed; the list is not exhaustive for shared
+Python/packaging changes. Native impact assessment and pinned native receipts
+remain separate requirements; hosted image validation, live schema/Machine reconciliation, backup
 readiness and production load measurements are not established by this run.
 There is no approval consumer, historical-CI override or deploy integration.
 No production secrets, write permissions, migration, image push or rollout are
@@ -101,3 +102,8 @@ separate consequential action and is not authorized by verification work.
 Historical `fa824f9a` remains failed. Clearing that gate, any production recovery,
 and the policy for subsequent queued automatic deploys require separate review
 and approval; see the [recovery proposal](proposals/historical-postgres-gate-recovery.md).
+
+Normal PR CI also exercises the optional collector against tiny standalone
+pytest fixtures with real xdist/split, skips, expected failures and subtests.
+Failed tests, failed subtests, collection errors and worker loss must not
+publish successful inventories. These fixtures do not access app or seller data.

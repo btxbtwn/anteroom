@@ -165,7 +165,7 @@ def main() -> None:
         payloads = [json.loads(p.read_text()) for p in sorted(args.inventories.glob('*.json'))]
         result['backend_inventory'] = validate_inventory(payloads, result)
         result['scope'] = 'all Linux CI components; native validation remains separate'
-        result['native_validation'] = 'required separately' if result['native_changes'] else 'no native source delta'
+        result['native_validation'] = 'not performed; separate native impact assessment and pinned receipts required'
         result['deployment_authorized'] = False
     print(json.dumps(result, indent=2))
 
