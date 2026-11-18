@@ -1,0 +1,1 @@
+- Delist now has tests showing that a listing another app already removed reads Delisted while the sale and Sold status stay, and that a sign-in problem, timeout or unclear answer never counts as removed.
