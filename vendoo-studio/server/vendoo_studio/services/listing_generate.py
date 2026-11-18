@@ -1036,6 +1036,11 @@ async def fill_validation_gaps(provider, listing: dict, *, analysis: str = "", n
 
     blockers = await asyncio.to_thread(validation_errors, listing)
     locked = locked_paths(listing)
+    # With a size read from the tag, no size slot is the model's to fill: one the
+    # tag's spelling could not fill stays a gap for the seller, never a guess.
+    from vendoo_studio.services.vendoo_import import parse_notes
+
+    tag_size = bool(seller_size(parse_notes(notes))) if notes else False
     protected = {"category_path", "category_id", "marketplace_categories", "marketplace_category_ids",
                  "marketplace_category_objects", "direct_category_ids", "sku", "seller_fields"}
     allowed = {}
@@ -1044,6 +1049,8 @@ async def fill_validation_gaps(provider, listing: dict, *, analysis: str = "", n
         if not field or field.split(".")[0].startswith("_") or field.split(".")[0] in protected:
             continue
         if any(field == path or field.startswith(path + ".") or path.startswith(field + ".") for path in locked):
+            continue
+        if tag_size and field.split(".")[-1].casefold() == "size":
             continue
         # A container error does not authorize replacement of all its fields.
         value = listing
