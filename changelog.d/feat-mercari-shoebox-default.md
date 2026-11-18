@@ -1,1 +1,0 @@
-- Save your answer to Mercari’s “Will your item fit in a shoebox?” as the default for new listings, with the same bookmark as Shipping label. A listing that already has its own Yes or No keeps it.

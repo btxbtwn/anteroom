@@ -1,1 +1,0 @@
-- Mercari no longer says the Shipping label is required and empty when your saved label is shown. It says List will use your saved label if Mercari offers it for the package, and asks you to choose one when Mercari doesn't offer it.

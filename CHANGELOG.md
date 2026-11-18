@@ -6,6 +6,26 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1016 — 2026-11-18
+
+- Refuse to restore an empty file or another program's database over your Anteroom data.
+
+## 0.1.1015 — 2026-11-18
+
+- Deleting a draft you had edited no longer fails with "Cloud data is temporarily unavailable" in your online account, alone or in a bulk delete.
+
+## 0.1.1014 — 2026-11-18
+
+- Delisting a duplicate listing you linked no longer makes Anteroom forget its own listing that is still live on that marketplace.
+
+## 0.1.1013 — 2026-11-18
+
+- Save your answer to Mercari’s “Will your item fit in a shoebox?” as the default for new listings, with the same bookmark as Shipping label. A listing that already has its own Yes or No keeps it.
+
+## 0.1.1012 — 2026-11-18
+
+- Mercari no longer says the Shipping label is required and empty when your saved label is shown. It says List will use your saved label if Mercari offers it for the package, and asks you to choose one when Mercari doesn't offer it.
+
 ## 0.1.1011 — 2026-11-18
 
 - Sold and active price research spends fewer paid web searches: each search only looks for its own kind of listing, and OpenRouter research stops after eight searches.
