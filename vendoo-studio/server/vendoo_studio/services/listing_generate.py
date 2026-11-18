@@ -1580,8 +1580,16 @@ def persist_generated_listing(
         listing["poshmark_specifics"] = specifics
     from vendoo_studio.services.native_contract import constrain_generated
 
+    # Men's bottoms: normalization stored the inseam on the generated eBay block,
+    # which the model's native eBay block (copied before it) is about to replace.
+    stored_inseam = str((listing.get("ebay_specifics") or {}).get("inseam") or "").strip() \
+        if isinstance(listing.get("ebay_specifics"), dict) else ""
     for market, block in native_blocks.items():
         listing[f"{market}_specifics"] = block
+    restored_ebay = native_blocks.get("ebay")
+    if stored_inseam and isinstance(restored_ebay, dict) and not _size_key_locked(seed, "ebay", "inseam") \
+            and not any(key.casefold() == "inseam" and str(value or "").strip() for key, value in restored_ebay.items()):
+        listing["ebay_specifics"] = {**restored_ebay, "inseam": stored_inseam}
     if follow_locked_size and native_blocks:
         # The direct tabs' blocks were copied from the model before alignment.
         propagate_general_size(listing, previous_size=raw_generated_size or generated_size or None)

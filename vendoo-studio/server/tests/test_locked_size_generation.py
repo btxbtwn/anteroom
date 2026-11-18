@@ -125,6 +125,24 @@ class LockedSizeGenerationTest(unittest.TestCase):
         self.assertEqual(parsed["size"], "M")
         self.assertEqual(parsed["depop_specifics"]["size"], "10 years")
 
+    def test_mens_bottoms_inseam_reaches_the_native_ebay_inseam_row(self):
+        rows = [{**EBAY_ROW, "options": ["30", "32", "34"]},
+                {"path": "ebay_specifics.Inseam", "label": "Inseam", "selection_only": True, "options": ["30", "32"]}]
+        jeans = {"department": "Men", "category_path": "Men > Jeans", "brand": "Levi's"}
+        self.seller_set("32", _native_forms={"ebay": {"fields": rows}}, title="Levi's 32 Jeans", **jeans)
+        parsed = self.generate(size="32x30", title="Levi's 32x30 Jeans", ebay_specifics={"Size": "34"}, **jeans)
+        self.assertEqual(parsed["ebay_specifics"]["Size"], "32")
+        self.assertEqual(parsed["ebay_specifics"]["Inseam"], "30")
+
+    def test_an_inseam_the_seller_locked_stays(self):
+        rows = [{**EBAY_ROW, "options": ["30", "32", "34"]},
+                {"path": "ebay_specifics.Inseam", "label": "Inseam", "selection_only": True, "options": ["30", "32"]}]
+        jeans = {"department": "Men", "category_path": "Men > Jeans", "brand": "Levi's"}
+        self.seller_set("32", locks=("size", "ebay_specifics.Inseam"), _native_forms={"ebay": {"fields": rows}},
+                        ebay_specifics={"Size": "32", "Inseam": "32"}, title="Levi's 32 Jeans", **jeans)
+        parsed = self.generate(size="32x30", title="Levi's 32x30 Jeans", ebay_specifics={"Size": "34"}, **jeans)
+        self.assertEqual(parsed["ebay_specifics"]["Inseam"], "32")
+
     def test_without_a_lock_the_generated_size_stands(self):
         self.seller_set("L", locks=())
         parsed = self.generate(poshmark_specifics={"size": "S"})
