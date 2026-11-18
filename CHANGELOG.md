@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1022 — 2026-11-18
+
+- A marketplace form no longer jumps while Anteroom re-checks its fields after a change, so tapping a photo right after reordering opens it.
+
 ## 0.1.1021 — 2026-11-18
 
 - Show a clear background-removal error if the Mac cannot provide an image mask.
