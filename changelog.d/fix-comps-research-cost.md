@@ -1,2 +1,0 @@
-- Sold and active price research spends fewer paid web searches: each search only looks for its own kind of listing, and OpenRouter research stops after eight searches.
-- Generation records now count the web searches each research call ran, so search fees can be told apart from model costs.

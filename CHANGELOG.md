@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1011 — 2026-11-18
+
+- Sold and active price research spends fewer paid web searches: each search only looks for its own kind of listing, and OpenRouter research stops after eight searches.
+- Generation records now count the web searches each research call ran, so search fees can be told apart from model costs.
+
 ## 0.1.1010 — 2026-11-18
 
 - Steadier automated checks for listing generation, so a test-only crash no longer blocks updates.
