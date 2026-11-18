@@ -166,15 +166,25 @@ class VerificationEvidence(unittest.TestCase):
             # Inherited Git overrides must never redirect a disposable fixture.
             git_env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
             production_git = evidence.git
+            empty_hooks = root / 'empty-hooks'
+            empty_hooks.mkdir()
             def git(*args):
                 with patch.dict(os.environ, git_env, clear=True):
-                    return production_git('-C', str(root), *args)
+                    return production_git('-c', f'core.hooksPath={empty_hooks}', '-C', str(root), *args)
             redirected = root / 'must-not-be-a-repository'
             with patch.dict(os.environ, {'GIT_DIR': str(redirected), 'GIT_WORK_TREE': str(redirected),
                                         'GIT_INDEX_FILE': str(redirected / 'index')}):
                 git('init', '-q')
             self.assertTrue((root / '.git').is_dir())
             self.assertFalse(redirected.exists())
+            rejecting_hooks = root / '.git/rejecting-hooks'
+            rejecting_hooks.mkdir()
+            hook = rejecting_hooks / 'pre-commit'
+            hook.write_text('#!/bin/sh\nexit 1\n')
+            hook.chmod(0o700)
+            # Repository config outranks global config; the command override
+            # must suppress even this stronger rejecting hook configuration.
+            git('config', 'core.hooksPath', str(rejecting_hooks))
             source = root / 'anteroom-ios/Sources/Foo.swift'
             source.parent.mkdir(parents=True)
             source.write_text('synthetic native source')

@@ -19,12 +19,20 @@ SCRIPTS = Path(__file__).resolve().parent
 class RealCollection(unittest.TestCase):
     def git(self, root, *args):
         git_env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
-        return subprocess.run(['git', '-C', str(root), *args], check=True, capture_output=True,
+        empty_hooks = root / 'empty-hooks'
+        empty_hooks.mkdir(exist_ok=True)
+        return subprocess.run(['git', '-c', f'core.hooksPath={empty_hooks}', '-C', str(root), *args], check=True, capture_output=True,
                               text=True, timeout=10, env=git_env).stdout.strip()
 
     def fixture(self, root, source):
         (root / 'test_sample.py').write_text(source)
         self.git(root, 'init', '-q')
+        rejecting_hooks = root / '.git/rejecting-hooks'
+        rejecting_hooks.mkdir()
+        hook = rejecting_hooks / 'pre-commit'
+        hook.write_text('#!/bin/sh\nexit 1\n')
+        hook.chmod(0o700)
+        self.git(root, 'config', 'core.hooksPath', str(rejecting_hooks))
         self.git(root, 'add', 'test_sample.py')
         self.git(root, '-c', 'user.name=Verification', '-c', 'user.email=verification@example.invalid',
                  '-c', 'commit.gpgsign=false', 'commit', '-qm', 'Synthetic fixture')
