@@ -1,6 +1,6 @@
 import type { SizeTagReadResult } from "./api/types";
 
-export interface SizeTagOutcome {
+interface SizeTagOutcome {
   /** The row's Size: what the seller typed, or the tag's size when the field was blank. */
   size: string;
   /** True when the size came from the tag and the seller has not touched it. */
