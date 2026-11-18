@@ -163,12 +163,12 @@ class VerificationEvidence(unittest.TestCase):
     def test_impact_paths_preserve_unicode_whitespace_and_renamed_sources(self):
         with tempfile.TemporaryDirectory(prefix='verification-paths-') as directory:
             root = Path(directory)
-            # Inherited Git overrides must never redirect a disposable fixture.
-            git_env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
             production_git = evidence.git
             empty_hooks = root / 'empty-hooks'
             empty_hooks.mkdir()
             def git(*args):
+                # Filter at call time so injected overrides exercise isolation.
+                git_env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
                 with patch.dict(os.environ, git_env, clear=True):
                     return production_git('-c', f'core.hooksPath={empty_hooks}', '-C', str(root), *args)
             redirected = root / 'must-not-be-a-repository'
