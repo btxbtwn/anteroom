@@ -123,13 +123,19 @@ for (const activeCount of [0, 1000]) {
         }));
         const headers = { ...response.headers() };
         delete headers["content-length"];
+        delete headers["content-encoding"];
         await route.fulfill({ response, headers, json: [...rows.filter((row: { status: string }) => row.status !== "active"), ...active] });
       });
       await openListing(page, phone, title, activeCount);
       await expect(await titleBox(page, phone)).toHaveValue(title);
     } finally {
-      const removed = await request.delete(`/api/conversations/${id}`);
-      expect(removed.ok(), "Remove the slow-load test draft").toBe(true);
+      // Report cleanup errors alongside any failure from the test body.
+      try {
+        const removed = await request.delete(`/api/conversations/${id}`);
+        expect.soft(removed.ok(), "Remove the slow-load test draft").toBe(true);
+      } catch (error) {
+        expect.soft(error, "Remove the slow-load test draft").toBeUndefined();
+      }
     }
   });
 }
