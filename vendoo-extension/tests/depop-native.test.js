@@ -566,12 +566,17 @@ test('a Depop status read that answers 404 confirms nothing from the shop withou
   assert.equal(status.complete, false);
   assert.equal(status.draft_posted, true);
   assert.equal(status.listing_url, undefined);
-  const known = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1', shop_before: { seller_id: '42', urls: [] } });
+  const known = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1', shop_before: { seller_id: '42', urls: [], seen: [] } });
   assert.equal(known.listing_url, 'https://www.depop.com/products/seller-columbia-xl/');
   // Published from another Depop account than the one Chrome is signed in to now.
-  const switched = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1', shop_before: { seller_id: '7', urls: [] } });
+  const switched = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1', shop_before: { seller_id: '7', urls: [], seen: [] } });
   assert.equal(switched.listing_url, undefined);
   assert.equal(switched.draft_posted, true);
+  // In the shop before posting, at another price: repriced since, it is still not this publish's product.
+  const repriced = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1',
+    shop_before: { seller_id: '42', urls: [], seen: ['https://www.depop.com/products/seller-columbia-xl/'] } });
+  assert.equal(repriced.listing_url, undefined);
+  assert.equal(repriced.draft_posted, true);
 });
 
 test('the Depop shop reading matches the locked Depop price the publish sent, and a repeating page is not a full reading', async () => {
@@ -591,7 +596,7 @@ test('the Depop shop reading matches the locked Depop price the publish sent, an
   };
   cursor = '';
   const read = await c.depopApiAction('shop_matches', { ...payload, listing: locked });
-  assert.deepEqual({ ...read.matches, urls: [...read.matches.urls] }, { seller_id: '42', urls: ['https://www.depop.com/products/seller-locked-price/'] });
+  assert.deepEqual({ ...read.matches, urls: [...read.matches.urls] }, { seller_id: '42', urls: ['https://www.depop.com/products/seller-locked-price/'], seen: read.matches.seen });
   // The same cursor twice: the scan stopped advancing, so it is not a full reading.
   cursor = 'stuck';
   const stuck = await c.depopApiAction('shop_matches', { ...payload, listing: locked });
