@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import tempfile
+from collections.abc import Awaitable
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
@@ -19,6 +21,7 @@ from vendoo_studio.services.listing_provider import get_photo_provider
 from vendoo_studio.services.photo_store import photo_store
 
 router = APIRouter(tags=["measurements"])
+log = logging.getLogger(__name__)
 
 GARMENTS = ("top", "pants", "skirt")
 
@@ -55,11 +58,27 @@ async def _write_uploads(files: list[UploadFile], workdir: str) -> list[Path]:
     return paths
 
 
-async def _read(provider, paths: list[Path], garment: str) -> dict:
+async def _explained(reading: Awaitable[dict], what: str) -> dict:
+    """A reading's failure as a message the seller can act on.
+
+    A provider that failed or stalled is named (502). Anything else is logged and
+    explained (500): an unexplained 500 reads to the client as a restart, and it
+    would say "the server restarted" for what was really a failed read.
+    """
     try:
-        return await measure_read.read_measurements(provider, paths, garment)
+        return await reading
+    except HTTPException:
+        raise
     except RuntimeError as exc:
         raise HTTPException(502, str(exc)) from exc
+    except Exception as exc:
+        log.exception("reading %s from photos failed", what)
+        # Only what failed: each client adds its own next step after it.
+        raise HTTPException(500, f"Anteroom could not read the {what} in these photos.") from exc
+
+
+async def _read(provider, paths: list[Path], garment: str) -> dict:
+    return await _explained(measure_read.read_measurements(provider, paths, garment), "measurements")
 
 
 @router.post("/api/measurements/read")
@@ -76,10 +95,7 @@ async def read_size_tags(files: list[UploadFile] = File(...)):
     provider = _photo_provider("size tags")
     with tempfile.TemporaryDirectory(prefix="size-tag-upload-") as workdir:
         paths = await _write_uploads(files, workdir)
-        try:
-            return await size_tag_read.read_size_tag(provider, paths)
-        except RuntimeError as exc:
-            raise HTTPException(502, str(exc)) from exc
+        return await _explained(size_tag_read.read_size_tag(provider, paths), "size")
 
 
 @router.post("/api/conversations/{conv_id}/measurements/read")

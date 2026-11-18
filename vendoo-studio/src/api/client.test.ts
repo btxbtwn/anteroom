@@ -166,6 +166,15 @@ describe("Reading size tags from photos", () => {
     expect((init.body as FormData).getAll("files")).toHaveLength(2);
   });
 
+  it("shows a failure the server explains instead of blaming a restart", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ detail: "Anteroom could not read the size in these photos." }), { status: 500 },
+    ));
+    vi.stubGlobal("fetch", fetch);
+    await expect(api.sizeTags.read([new File(["a"], "1.jpg")])).rejects.toThrow("Anteroom could not read the size in these photos.");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   it("names its own button when the server keeps restarting", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 503 })));
     await expect(api.sizeTags.read([new File(["a"], "1.jpg")])).rejects.toThrow(
