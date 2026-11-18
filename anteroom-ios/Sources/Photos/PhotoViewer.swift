@@ -8,7 +8,8 @@ struct PhotoViewer: View {
     let listingID: String
     @Binding var photos: [ListingPhoto]
     @State var selection: String
-    let onDelete: (ListingPhoto) -> Void
+    /// Deletes a photo and returns why it failed, or nil once it is gone.
+    let onDelete: (ListingPhoto) async -> String?
 
     @Environment(\.dismiss) private var dismiss
     @State private var busy = false
@@ -53,12 +54,7 @@ struct PhotoViewer: View {
                 Text(error ?? "")
             }
             .confirmationDialog("Delete this photo?", isPresented: $confirmDelete, titleVisibility: .visible) {
-                Button("Delete photo", role: .destructive) {
-                    guard let photo = current else { return }
-                    let next = neighbor(of: photo)
-                    onDelete(photo)
-                    if let next { selection = next } else { dismiss() }
-                }
+                Button("Delete photo", role: .destructive) { delete() }
             }
             .sheet(item: $adjusting) { photo in
                 PhotoAdjustSheet(api: api, listingID: listingID, photo: photo) { replace($0) }
@@ -81,6 +77,23 @@ struct PhotoViewer: View {
 
     private func replace(_ photo: ListingPhoto) {
         if let index = photos.firstIndex(where: { $0.id == photo.id }) { photos[index] = photo }
+    }
+
+    /// Moves on only once the photo is gone; a failure stays on it and says why.
+    private func delete() {
+        guard let photo = current else { return }
+        let next = neighbor(of: photo)
+        busy = true
+        Task {
+            defer { busy = false }
+            if let failure = await onDelete(photo) {
+                error = failure
+            } else if let next {
+                selection = next
+            } else {
+                dismiss()
+            }
+        }
     }
 
     private func rotate(_ degrees: Int) {

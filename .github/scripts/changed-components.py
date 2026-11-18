@@ -124,9 +124,9 @@ def components(files: list[str]) -> dict[str, bool]:
                 # value matrix reads the marketplace option lists.
                 selected.update(("frontend", "extension"))
         else:
-            # Unknown inputs run every Studio suite rather than silently
-            # dropping coverage. Audits depend on the locked Python packages.
-            selected.update(("frontend", "backend", "browser", "health"))
+            # Unknown inputs run every group rather than guessing which
+            # consumers or tools depend on them.
+            selected.update(COMPONENTS)
     return {name: name in selected for name in COMPONENTS}
 
 

@@ -170,10 +170,15 @@ def repeated_lines(lines: list[MarketplaceSale]) -> set[str]:
 
     repeated: set[str] = set()
     orders = [line for line in lines if line.source == "marketplace" and line.is_order_backed]
+    # Index every hyphen-delimited suffix to preserve both bare transaction
+    # IDs and IDs containing hyphens, without scanning orders for each line.
+    ebay_suffixes = {
+        (line.order_id, line.line_id[offset + 1:])
+        for line in orders if line.marketplace == "ebay"
+        for offset, char in enumerate(line.line_id) if char == "-"
+    }
     for line in orders:
-        if line.marketplace == "ebay" and any(
-                other is not line and other.marketplace == "ebay" and other.order_id == line.order_id
-                and other.line_id.endswith(f"-{line.line_id}") for other in orders):
+        if line.marketplace == "ebay" and (line.order_id, line.line_id) in ebay_suffixes:
             repeated.add(line.id)
     copies = [line for line in lines if line.source == "vendoo"]
     for order in sorted((line for line in orders if line.id not in repeated),

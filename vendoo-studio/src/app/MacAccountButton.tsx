@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { LIVE_POLL_MS, pollMs } from "../api/polling";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getAccountMove, startAccountMove, type AccountMoveResult } from "../api/accountMove";
+import { getAccountDestination, getAccountMove, startAccountMove, type AccountMoveResult } from "../api/accountMove";
 import { Button } from "../components/ui/button";
 import {
   Dialog,
@@ -18,18 +18,42 @@ import { useMacApp } from "../lib/macApp";
 
 const plural = (count: number, word: string) => `${count.toLocaleString()} ${word}${count === 1 ? "" : "s"}`;
 
-/** In the Mac app, opens the seller's account, moving this Mac's listings into it first. */
+/** Account navigation and optional listing copying are separate decisions. */
 export function MacAccountButton() {
   const mac = useMacApp();
   const [open, setOpen] = useState(false);
+  const [copy, setCopy] = useState(false);
+  const destination = useQuery({ queryKey: ["account-destination"], queryFn: getAccountDestination, enabled: mac && open });
   if (!mac) return null;
   return (
     <>
       <Button type="button" size="xs" variant="outline" onClick={() => setOpen(true)}
-        title="See your listings in your account, the same as on the web and iPhone">
-        Sign in
+        title="Open your Anteroom account or choose to copy this Mac’s listings">
+        My Account
       </Button>
-      {open && <MoveToAccountDialog onClose={() => setOpen(false)} />}
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogPopup className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Anteroom account</DialogTitle>
+            <DialogDescription>Use the same Anteroom account on this Mac, the web and iPhone.</DialogDescription>
+          </DialogHeader>
+          <DialogPanel className="space-y-4 text-sm">
+            <p>Provider sign-in on this Mac is separate from your Anteroom account connection.</p>
+            <p>For web and iPhone subscription requests, sign into the same account here and keep Anteroom open on this Mac.</p>
+            {destination.error && <p role="alert">{destination.error.message}</p>}
+            <Button type="button" variant="ghost" onClick={() => { setOpen(false); setCopy(true); }}>
+              Copy this Mac’s listings…
+            </Button>
+          </DialogPanel>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>Close</Button>
+            <Button type="button" disabled={!destination.data} onClick={() => {
+              if (destination.data) window.location.assign(destination.data.hosted_url);
+            }}>Open My Account</Button>
+          </DialogFooter>
+        </DialogPopup>
+      </Dialog>
+      {copy && <MoveToAccountDialog onClose={() => setCopy(false)} />}
     </>
   );
 }

@@ -6,6 +6,104 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1033 — 2026-11-18
+
+- The assistant handles waits for sales history and calculations for analytics and boxes without losing its connection to your shop data.
+
+## 0.1.1032 — 2026-11-18
+
+- When a full-size photo cannot load, the photo viewer now says so and offers Retry, instead of showing an empty picture with only its label.
+
+## 0.1.1031 — 2026-11-18
+
+- When Mercari doesn't offer your saved shipping label, the note on the Mercari tab now says List uses USPS Ground Advantage instead, and that Mercari refuses the listing if it offers neither.
+
+## 0.1.1030 — 2026-11-18
+
+- Mark as listed no longer suggests an old link Anteroom delisted, or any link while a marketplace action is unconfirmed, and pasting a link to a listing Anteroom delisted now asks you to confirm it is still live.
+
+## 0.1.1029 — 2026-11-18
+
+- Tell apart provider sign-in on your Mac and its connection to your Anteroom account, and keep opening your account separate from copying listings.
+- Keep bulk-upload details when measurement reading cannot reach your Mac, with clearer connection guidance.
+
+## 0.1.1028 — 2026-11-18
+
+- The assistant reads your shop faster before it answers: sales figures for every date range now share one read of your sales, sale events and ad spend.
+
+## 0.1.1027 — 2026-11-18
+
+- Error emails for database timeouts now name the part of Anteroom that hit them, so different problems no longer share one email group.
+
+## 0.1.1026 — 2026-11-18
+
+- Delist now has tests showing that a listing another app already removed reads Delisted while the sale and Sold status stay, and that a sign-in problem, timeout or unclear answer never counts as removed.
+
+## 0.1.1025 — 2026-11-18
+
+- After an Anteroom update, the web no longer tells you to update Anteroom Bridge before Chrome has reconnected. It asks you to connect Chrome instead.
+
+## 0.1.1024 — 2026-11-18
+
+- Steadier automated checks for reading sales in the background.
+
+## 0.1.1023 — 2026-11-18
+
+- Fix two checks that could fail at random when they test that a delist waits for a sale undo. No change to the app.
+
+## 0.1.1022 — 2026-11-18
+
+- A marketplace form no longer jumps while Anteroom re-checks its fields after a change, so tapping a photo right after reordering opens it.
+
+## 0.1.1021 — 2026-11-18
+
+- Show a clear background-removal error if the Mac cannot provide an image mask.
+
+## 0.1.1020 — 2026-11-18
+
+- Slow inventory reports now show which read step took time, helping diagnose delays without recording listing details.
+
+## 0.1.1019 — 2026-11-18
+
+- Keep required checks from passing when an affected test group did not run, and run every check group when a changed file's impact is unknown.
+
+## 0.1.1018 — 2026-11-18
+
+- Keep safe database failure details in error reports when saved account credentials cannot be read or updated, without exposing credentials.
+
+## 0.1.1017 — 2026-11-18
+
+- The sale calendar now says "1 item" and "1 sale event" instead of "1 items" and "1 sale events".
+
+## 0.1.1016 — 2026-11-18
+
+- Refuse to restore an empty file or another program's database over your Anteroom data.
+
+## 0.1.1015 — 2026-11-18
+
+- Deleting a draft you had edited no longer fails with "Cloud data is temporarily unavailable" in your online account, alone or in a bulk delete.
+
+## 0.1.1014 — 2026-11-18
+
+- Delisting a duplicate listing you linked no longer makes Anteroom forget its own listing that is still live on that marketplace.
+
+## 0.1.1013 — 2026-11-18
+
+- Save your answer to Mercari’s “Will your item fit in a shoebox?” as the default for new listings, with the same bookmark as Shipping label. A listing that already has its own Yes or No keeps it.
+
+## 0.1.1012 — 2026-11-18
+
+- Mercari no longer says the Shipping label is required and empty when your saved label is shown. It says List will use your saved label if Mercari offers it for the package, and asks you to choose one when Mercari doesn't offer it.
+
+## 0.1.1011 — 2026-11-18
+
+- Sold and active price research spends fewer paid web searches: each search only looks for its own kind of listing, and OpenRouter research stops after eight searches.
+- Generation records now count the web searches each research call ran, so search fees can be told apart from model costs.
+
+## 0.1.1010 — 2026-11-18
+
+- Steadier automated checks for listing generation, so a test-only crash no longer blocks updates.
+
 ## 0.1.1009 — 2026-11-17
 
 - Slow inventory loads in the cloud app now record where the time went, so they can be tracked down and fixed.

@@ -9,8 +9,11 @@ from vendoo_studio.services.comp_research import (
     COMPS_FAILED_NOTE,
     COMPS_SETUP_NOTE,
     COMPS_TIMEOUT_NOTE,
+    ACTIVE,
+    SOLD,
     ModelSearch,
     comps_search_available,
+    comps_search_messages,
     comps_setup_note,
     model_report,
     model_search,
@@ -168,6 +171,38 @@ class CompAvailabilityTest(unittest.TestCase):
             self.assertIsNone(model_search())
 
 
+class SearchPromptTest(unittest.TestCase):
+    """Each paid search reads only the rules for its own side."""
+
+    def test_sold_search_is_not_told_to_hunt_active_listings(self):
+        system, user = comps_search_messages("Levi's 501 sold comps", SOLD)
+        rules = system["content"]
+        self.assertIn("Require explicit evidence that the item sold", rules)
+        self.assertIn("roughly eight searches", rules)
+        self.assertNotIn("still for sale, aiming", rules)
+        self.assertNotIn("roughly four searches", rules)
+        self.assertTrue(user["content"].startswith("Find recently sold comps for: Levi's 501"))
+
+    def test_active_search_is_not_told_to_hunt_sold_comps(self):
+        system, user = comps_search_messages("Levi's 501", ACTIVE)
+        rules = system["content"]
+        self.assertIn("still for sale, aiming for at least three", rules)
+        self.assertIn("roughly four searches", rules)
+        self.assertIn("An asking price is not a sold price", rules)
+        self.assertNotIn("aim for at least six", rules)
+        self.assertNotIn("Require explicit evidence that the item sold", rules)
+        self.assertTrue(user["content"].startswith("Find active marketplace listings"))
+
+    def test_both_sides_keep_the_shared_rules_and_answer_shape(self):
+        for side in (SOLD, ACTIVE):
+            rules = comps_search_messages("Levi's 501", side)[0]["content"]
+            self.assertIn("excluding shipping and fees", rules)
+            self.assertIn("Exclude lots, bundles", rules)
+            self.assertIn("exact listing URL you observed", rules)
+            self.assertIn("Do not invent prices or URLs", rules)
+            self.assertNotIn("## ", rules)
+
+
 class ModelReportTest(unittest.TestCase):
     def test_reads_sold_and_live_listings(self):
         report = model_report(
@@ -239,7 +274,9 @@ class ResearchTest(unittest.IsolatedAsyncioTestCase):
         asks = sorted(call[1]["content"] for call in calls)
         self.assertTrue(asks[0].startswith("Find active marketplace listings"))
         self.assertTrue(asks[1].startswith("Find recently sold comps for: Levi's"))
-        self.assertIn("Require explicit evidence that the item sold", calls[0][0]["content"])
+        rules = {call[1]["content"].split(" ", 2)[1]: call[0]["content"] for call in calls}
+        self.assertIn("Require explicit evidence that the item sold", rules["recently"])
+        self.assertNotIn("Require explicit evidence that the item sold", rules["active"])
         brave.assert_awaited_once()
         # A small fixed budget: the top sold queries plus one active query.
         from vendoo_studio.services.brave_search import brave_active_queries, brave_sold_queries, item_fields
