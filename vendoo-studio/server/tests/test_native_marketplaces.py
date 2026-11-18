@@ -998,6 +998,24 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         self.assertEqual(self.delist_new_poshmark().status_code, 200)
         self.assertEqual((seen["state"], seen["listing_id"], seen["url"]), ("deleting", "6adc371572e62463d992ffef", POSH_URL))
 
+    def test_deleting_a_seller_linked_listing_keeps_a_different_live_anteroom_listing(self):
+        # Anteroom's own Poshmark listing is live.
+        self.bridge.return_value = {"ok": True, "state": "published", "listing_url": POSH_URL}
+        self.assertEqual(self.list("poshmark")["state"], "published")
+        # The seller links a duplicate listing and delists it.
+        duplicate_id = "b" * 24
+        marked = self.client.post(f"/api/conversations/{self.conv.id}/marketplace-listings/poshmark/mark",
+                                  json={"state": "listed", "url": f"https://poshmark.com/listing/dup-{duplicate_id}"})
+        self.assertEqual(marked.status_code, 200, marked.text)
+        self.bridge.reset_mock(return_value=True)
+        self.bridge.side_effect = [{"ok": True, "state": "deleted"}]
+        response = self.delist_new_poshmark()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.bridge.call_args.args[2]["listing_id"], duplicate_id)
+        # Only the duplicate was deleted: Anteroom's own listing is still live.
+        record = self.record("poshmark")
+        self.assertEqual((record.get("state"), record.get("listing_url")), ("published", POSH_URL))
+
     def test_a_confirmed_delist_leaves_the_record_ready_to_list_again(self):
         self.bridge.side_effect = [{"ok": True, "state": "draft", "draft_url": URLS["mercari"]}, self.published("mercari")]
         self.assertEqual(self.list("mercari")["state"], "published")
@@ -1035,7 +1053,7 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
     def test_poshmark_lists_in_one_step_and_updates_the_same_listing(self):
         self.bridge.return_value = {"ok": True, "state": "published", "listing_url": POSH_URL}
         record = self.list("poshmark")
-        self.assertEqual((record["state"], record["listing_url"]), ("published", POSH_URL))
+        self.assertEqual((record.get("state"), record.get("listing_url")), ("published", POSH_URL))
         self.assertEqual(self.actions(), ["list"])
         self.assertEqual(self.client.post(f"{self.base}/poshmark/list", json={"revision_id": self.rev.id, "confirm": True}).status_code, 409)
         revised = listing_persistence.save_revision(self.db, self.conv.id, {**LISTING, "title": "Updated tee"}, "user")
