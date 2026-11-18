@@ -96,6 +96,11 @@ Every run, in this order:
    and list freeing space under **Needs the seller**. Never delete files to
    make room. Installing with `uv pip install` (APFS clones from uv's cache)
    costs almost no disk; `pip` copies about 1 GB per venv.
+   Don't start `check.sh` with `&` inside a script: a background job in a
+   non-interactive shell ignores SIGINT, and
+   `test_check_postgres_cleanup.py::...[INT--2]` then fails with `0 == -2`
+   (2026-11-18). Use the tool's own background mode, or run it in the
+   foreground.
 1. `./check.sh --all` in the audit worktree after setup
    (`cd vendoo-studio && python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]" && npm ci && npx playwright install chromium webkit`).
    Phone browser tests run in WebKit. After a Playwright bump, a Mac without
