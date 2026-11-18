@@ -108,6 +108,11 @@ struct BusinessAssistantTests {
         precondition(!ChatScroll.nearBottom(offsetY: 600, containerHeight: 800, bottomInset: 60, contentHeight: 1800))
         // A short conversation is always at its end.
         precondition(ChatScroll.nearBottom(offsetY: 0, containerHeight: 800, bottomInset: 60, contentHeight: 300))
+        // A refused chat delete says what to do, as AssistantThreadPanel.tsx does.
+        precondition(AssistantFormat.deleteFailure("The assistant is still answering in this chat.", status: 409)
+                     == "The assistant is still answering in this chat. Stop answering or wait for the answer to finish, then try deleting again.")
+        precondition(AssistantFormat.deleteFailure("That conversation is gone.", status: 404) == "That conversation is gone.")
+        precondition(AssistantFormat.deleteFailure("The network connection was lost.", status: nil) == "The network connection was lost.")
         print("Business assistant tests passed")
     }
 

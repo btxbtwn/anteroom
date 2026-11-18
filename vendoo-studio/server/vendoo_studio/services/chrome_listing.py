@@ -14,6 +14,8 @@ import re
 from decimal import Decimal, ROUND_HALF_UP
 
 from vendoo_studio.services.direct_preflight import Context, gap, requirement
+from vendoo_studio.services.mercari_shipping_label import PATH as LABEL_PATH
+from vendoo_studio.services.mercari_shipping_label import label_answer
 
 # Poshmark's catalog colors (catalog_v2, read 2026-10-25). Grey and Beige are its Gray and Tan.
 POSHMARK_COLORS = (
@@ -139,8 +141,8 @@ def mercari_requirements(snapshot: dict, context: Context) -> list[dict]:
                              "Mercari needs an answer to “Will your item fit in a shoebox?”"))
         if not _mercari_ounces(snapshot, package, overrides):
             found.append(gap("mercari_specifics.package.pounds", "Mercari needs a package weight for its prepaid label."))
-        if not _mercari_shipping_label(specifics, form):
-            found.append(gap("mercari_specifics.shippingClassId", "Mercari needs a prepaid shipping label."))
+        if label_answer(snapshot).source == "none":
+            found.append(gap(LABEL_PATH, "Mercari needs a prepaid shipping label."))
     # Chrome checks the selected leaf and size against Mercari's own master
     # catalog before uploading. Vendoo's mirrored size table is not consulted.
     del context
@@ -184,22 +186,6 @@ def _mercari_ounces(snapshot: dict, package: dict, overrides: dict) -> int:
         if total > 0:
             return total
     return 0
-
-
-def _mercari_shipping_label(specifics: dict, form: dict) -> str:
-    """A listing's picked label id or the seller's saved carrier default."""
-    form_specifics = form.get("specifics")
-    if not isinstance(form_specifics, dict):
-        form_specifics = {}
-    shipping = form_specifics.get("shipping")
-    if not isinstance(shipping, dict):
-        shipping = {}
-    for value in (specifics.get("shippingClassId"), shipping.get("carrierId")):
-        text = str(value or "").strip()
-        if text and text != "0":
-            return text
-    saved = form.get("mercari_shipping_label")
-    return str(saved.get("label") or "").strip() if isinstance(saved, dict) else ""
 
 
 @requirement("depop")

@@ -141,14 +141,15 @@ struct PhotoStrip: View {
             set: { if !$0 { photoToDelete = nil } }
         ), titleVisibility: .visible) {
             Button("Delete photo", role: .destructive) {
-                if let photo = photoToDelete { delete(photo) }
+                if let photo = photoToDelete { Task { error = await remove(photo) } }
                 photoToDelete = nil
             }
             Button("Cancel", role: .cancel) { photoToDelete = nil }
         }
         .padding(.vertical, 4)
         .fullScreenCover(item: Binding(get: { viewing.map(PhotoSelection.init) }, set: { viewing = $0?.id })) { start in
-            PhotoViewer(api: api, listingID: listingID, photos: $photos, selection: start.id) { delete($0) }
+            // The viewer covers this strip, so it shows a failed delete itself.
+            PhotoViewer(api: api, listingID: listingID, photos: $photos, selection: start.id) { await remove($0) }
         }
         .sheet(isPresented: $arranging) {
             ArrangePhotosSheet(api: api, listingID: listingID, photos: $photos)
@@ -161,6 +162,7 @@ struct PhotoStrip: View {
         .fileImporter(isPresented: $showingFiles, allowedContentTypes: [.image], allowsMultipleSelection: true) { result in
             switch result {
             case .success(let urls):
+                error = nil
                 Task { await uploadFiles(Array(urls.prefix(remaining))) }
             case .failure(let failure):
                 error = failure.localizedDescription
@@ -240,6 +242,7 @@ struct PhotoStrip: View {
     /// Uploads a batch, keeping iOS from suspending it if the seller switches
     /// apps, then says how many didn't make it.
     private func send<Source>(_ sources: [Source], prepare: @MainActor (Source) async -> Data?) async {
+        error = nil
         uploading += sources.count
         PhotoUploadTracker.shared.begin(listingID, count: sources.count)
         let report = await withBackgroundTime("Upload photos") {
@@ -256,14 +259,14 @@ struct PhotoStrip: View {
         if report.problems > 0 { uploadFailures += 1 }
     }
 
-    private func delete(_ photo: ListingPhoto) {
-        Task {
-            do {
-                try await api.deletePhoto(listingID: listingID, photoID: photo.id)
-                photos.removeAll { $0.id == photo.id }
-            } catch {
-                self.error = error.localizedDescription
-            }
+    /// Deletes one photo. Returns why it failed, or nil once it is gone.
+    private func remove(_ photo: ListingPhoto) async -> String? {
+        do {
+            try await api.deletePhoto(listingID: listingID, photoID: photo.id)
+            photos.removeAll { $0.id == photo.id }
+            return nil
+        } catch {
+            return error.localizedDescription
         }
     }
 }

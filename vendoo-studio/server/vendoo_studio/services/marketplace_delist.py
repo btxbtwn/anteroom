@@ -258,15 +258,20 @@ def _record(db: Session, conv_id: str, marketplace: str, value: dict) -> None:
     _store(db, conv_id, "marketplaceDelists", marketplace, value)
 
 
-def _forget_deleted_listing(db: Session, conv_id: str, marketplace: str) -> None:
-    """A confirmed delete leaves nothing live, so the listing record rests as Mark as not listed leaves it.
+def _forget_deleted_listing(db: Session, conv_id: str, marketplace: str, deleted_id: str | None) -> None:
+    """A confirmed delete of Anteroom's listing leaves nothing live, so its record rests as Mark as not listed leaves it.
 
     Without this the record still reads published and List refuses the item
     as already listed. The marketplace IDs stay, so a new List reuses them.
+    A delete of a different listing (a duplicate the seller linked) leaves
+    Anteroom's own listing live, so its record stays.
     """
     records = MarketplaceListingRepo(db)
     record = records.get(conv_id, marketplace)
     if record.get("state") not in {"published", "pending_review"}:
+        return
+    live_id = listing_id(marketplace, record.get("listing_url"))
+    if live_id and deleted_id and str(live_id) != str(deleted_id):
         return
     from vendoo_studio.services.native_marketplaces import _resting_state
 
@@ -518,4 +523,4 @@ def _record_delete(db: Session, conv_id: str, name: str, value: dict) -> None:
 
 def _deleted(db: Session, conv_id: str, name: str, base: dict) -> None:
     _record_delete(db, conv_id, name, {**base, "state": "deleted", "error": None, "at": _now()})
-    _forget_deleted_listing(db, conv_id, name)
+    _forget_deleted_listing(db, conv_id, name, base.get("listing_id"))

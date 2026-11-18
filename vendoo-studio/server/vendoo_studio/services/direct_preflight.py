@@ -158,7 +158,7 @@ def _empty_form_rows(snapshot: dict, marketplace: str) -> list[dict]:
     exists the locally built form names the same required rows. They are said
     beside List and counted as missing; the marketplace refuses them on List.
     """
-    from vendoo_studio.services import native_contract
+    from vendoo_studio.services import mercari_shipping_label, native_contract
 
     if (snapshot.get(native_contract.KEY) or {}).get(marketplace) or marketplace not in _LOCAL_FORMS:
         return []
@@ -169,6 +169,16 @@ def _empty_form_rows(snapshot: dict, marketplace: str) -> list[dict]:
         if (not path or not row.get("required") or row.get("locked") or row.get("input_type") in _NOT_ANSWERS
                 or native_contract.account_resolved(row)):
             continue
+        if marketplace == "mercari" and path == mercari_shipping_label.PATH and _empty(row):
+            # This form is built without Mercari's labels for the package, so a
+            # saved carrier cannot be matched to one here. List tries it, and
+            # the module check refuses a listing with no label at all.
+            answer = mercari_shipping_label.label_answer(snapshot)
+            if answer.source == "default":
+                found.append(gap(path, mercari_shipping_label.unverified_default_message(answer.value),
+                                 blocking=False, label=str(row.get("label") or "").strip() or None))
+            if answer.source != "none":
+                continue
         if _empty(row) and not _general_answer(snapshot, path):
             label = str(row.get("label") or "").strip() or None
             found.append(gap(path, f"{label or path}: Required field is empty.", blocking=False,
