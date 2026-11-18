@@ -191,13 +191,28 @@ it("keeps a size mismatch warning when a re-read finds no tag", async () => {
     await act(async () => setInput(size("Jeans"), "34 x 30"));
     await act(async () => button("Read size tags").click());
     await settle(() => expect(size("Jeans").className).toContain("needs-review"));
-    read.mockResolvedValue({ photos_read: 1, status: "not_found", size: null, sizes: [] });
-    await act(async () => button("Read size tags").click());
-    await settle(() => expect(document.querySelector('[role="status"]')!.textContent).toContain("Size tags read."));
+    const note = () => document.getElementById(size("Jeans").getAttribute("aria-describedby")!)!.textContent;
+    const reread = async (mock: () => void) => {
+      read.mockClear();
+      mock();
+      await act(async () => button("Read size tags").click());
+      // The status empties when a read starts, so this waits for this read, not the last one.
+      await settle(() => expect(document.querySelector('[role="status"]')!.textContent).toContain("Size tags read."));
+      expect(read).toHaveBeenCalledTimes(3);
+    };
+    // A failed re-read shows its error with the mismatch, without dropping it.
+    await reread(() => read.mockRejectedValue(new Error("OpenRouter stopped answering while looking at the photos.")));
+    expect(size("Jeans").className).toContain("needs-review");
+    expect(note()).toBe("OpenRouter stopped answering while looking at the photos. The tag reads 32 x 30. Check the size you typed.");
+    // A later re-read that finds no tag restores the mismatch itself, not the error.
+    await reread(() => read.mockResolvedValue({ photos_read: 1, status: "not_found", size: null, sizes: [] }));
     expect(size("Jeans").value).toBe("34 x 30");
     expect(size("Jeans").className).toContain("needs-review");
-    expect(document.getElementById(size("Jeans").getAttribute("aria-describedby")!)!.textContent)
-      .toBe("The tag reads 32 x 30. Check the size you typed.");
+    expect(note()).toBe("The tag reads 32 x 30. Check the size you typed.");
+    // Editing the size clears the warning; a later empty re-read doesn't bring it back.
+    await act(async () => setInput(size("Jeans"), "32 x 30"));
+    await reread(() => read.mockResolvedValue({ photos_read: 1, status: "not_found", size: null, sizes: [] }));
+    expect(size("Jeans").className).not.toContain("needs-review");
   } finally {
     await act(async () => root.unmount());
   }

@@ -35,8 +35,13 @@ type Row = {
   sizeSuggested: boolean;
   /** The tag was missing, unreadable, conflicting or disagrees with the typed size. */
   sizeReview: boolean;
-  /** What the last size-tag reading found, in plain words. */
+  /** What the last size-tag reading found, in plain words; also progress and errors. */
   sizeNote?: string;
+  /**
+   * The tag evidence against a typed size ("The tag reads M…"), kept apart from progress
+   * and errors so a failed or empty re-read cannot replace it. Editing the size clears it.
+   */
+  sizeWarning?: string;
   /** Bumped when a photo is removed, so a reading of the earlier photos is not applied. */
   photoSet: number;
   garment: Garment;
@@ -151,7 +156,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
     setSizeReading({ done: 0, total: todo.length });
     setAnnounceSizes(false);
     await readEach(todo, async (index) => {
-      const { photoSet, sizeNote: noteBefore } = rows[index]!;
+      const { photoSet } = rows[index]!;
       setRow(index, { sizeNote: READING_SIZE_NOTE });
       try {
         const result = await api.sizeTags.read(groups[index]!.files);
@@ -161,15 +166,17 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
           const outcome = applySizeTagReading(row.sizeSuggested ? "" : row.size, result);
           // A re-read that saw nothing new (no tag, unreadable) keeps an earlier warning
           // on a typed size: the earlier evidence still stands. Editing the size clears it.
-          if (!outcome.suggested && !outcome.needsReview && !outcome.note && row.sizeReview) {
-            return { ...row, sizeNote: noteBefore };
+          if (!outcome.suggested && !outcome.needsReview && !outcome.note && row.sizeWarning) {
+            return { ...row, sizeReview: true, sizeNote: row.sizeWarning };
           }
+          const typed = !outcome.suggested && outcome.size.trim() !== "";
           return {
             ...row,
             size: outcome.size,
             sizeSuggested: outcome.suggested,
             sizeReview: outcome.needsReview,
             sizeNote: outcome.note || undefined,
+            sizeWarning: typed && outcome.needsReview ? outcome.note : undefined,
           };
         }));
       } catch (error) {
@@ -181,7 +188,8 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
           if (blank || row.sizeSuggested) {
             return { ...row, sizeReview: true, sizeNote: `${message} ${blank ? "Type the size from the tag." : "Check the size against the tag."}` };
           }
-          return { ...row, sizeNote: message };
+          // The error is shown without dropping the tag evidence against the typed size.
+          return { ...row, sizeNote: row.sizeWarning ? `${message} ${row.sizeWarning}` : message };
         }));
       }
       setSizeReading((current) => current && { ...current, done: current.done + 1 });
@@ -355,7 +363,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
                       value={row.size}
                       onChange={(event) => {
                         setAnnounceSizes(false);
-                        setRow(groupIndex, { size: event.target.value, sizeSuggested: false, sizeReview: false });
+                        setRow(groupIndex, { size: event.target.value, sizeSuggested: false, sizeReview: false, sizeWarning: undefined });
                       }}
                       onKeyDown={onInputKeyDown}
                     />
