@@ -89,8 +89,10 @@ export async function createBulkPhotoListings(
       // uploads go one photo at a time, so a failure can follow saved photos:
       // count what the draft holds so it still generates.
       const message = err instanceof Error ? err.message : "Upload failed";
-      const saved = await conversations.photos(conv.id).then((photos) => photos.length, () => 0);
-      listings.push({ convId: conv.id, folder: item.folder, count: saved, errors: [`${item.folder || "New Listing"}: ${message}`] });
+      const saved = await conversations.photos(conv.id).then((photos) => photos.length, () => null);
+      // An unreadable draft may still hold photos: say so rather than call it empty.
+      const unknown = saved === null ? " Anteroom couldn't check which of its photos were saved; open the draft to check." : "";
+      listings.push({ convId: conv.id, folder: item.folder, count: saved ?? 0, errors: [`${item.folder || "New Listing"}: ${message}${unknown}`] });
       continue;
     }
     const errors = result.errors || [];

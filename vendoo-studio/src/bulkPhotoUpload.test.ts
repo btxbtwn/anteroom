@@ -106,7 +106,7 @@ describe("createBulkPhotoListings", () => {
     expect(result).toEqual([{ convId: "coat", folder: null, count: 2, errors: ["New Listing: Failed to fetch"] }]);
   });
 
-  it("records no photos when the refused draft's photos cannot be read either", async () => {
+  it("says the saved photos are unknown when the refused draft's photos cannot be read either", async () => {
     const result = await createBulkPhotoListings([
       { folder: "batch/Coat", files: [photo("a.jpg")] },
     ], { cog: "", labels: "" }, {
@@ -116,7 +116,9 @@ describe("createBulkPhotoListings", () => {
       photos: vi.fn().mockRejectedValue(new Error("Failed to fetch")),
     });
 
-    expect(result[0]).toMatchObject({ count: 0, errors: ["batch/Coat: Failed to fetch"] });
+    expect(result[0]).toMatchObject({ count: 0, errors: [
+      "batch/Coat: Failed to fetch Anteroom couldn't check which of its photos were saved; open the draft to check.",
+    ] });
   });
 
   it("keeps same-named photos in different item folders independent", async () => {
