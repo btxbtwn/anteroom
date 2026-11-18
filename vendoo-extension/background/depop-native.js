@@ -1139,7 +1139,9 @@ async function depopApiAction(action, payload) {
           ? `sent: ${Object.keys(body).sort().join(', ')}` : '';
         const extra = [detail && !String(error.marketplace_message || '').includes(detail) ? detail : '', sent].filter(Boolean);
         if (extra.length) error.marketplace_message = [error.marketplace_message, ...extra].filter(Boolean).join(' | ');
-        if (detail || sent) marketplaceLog('depop', action, { method, status: error.status || null, error_code: error.code || null, body: detail, sent });
+        // Logged even without a body: a bodiless 404 must still name the request that answered it.
+        marketplaceLog('depop', action, { method, status: error.status || null, error_code: error.code || null,
+          path: depopPathTemplate(path), body: detail, sent });
         throw error;
       }
     };
@@ -1434,6 +1436,15 @@ async function depopApiAction(action, payload) {
   } catch (error) {
     return marketplaceFailure(error, !wrote);
   }
+}
+
+// Depop's own path words, with every id, slug and query left out of logs.
+const DEPOP_PATH_WORDS = new Set(['presentation', 'api', 'v1', 'v2', 'v3', 'drafts', 'products', 'status', 'by-slug',
+  'edit-listing', 'shops', 'shop', 'by-status', 'selling', 'users', 'me', 'pictures', 'attributes', 'addresses',
+  'settings', 'shipping', 'providers', 'depop', 'validate']);
+function depopPathTemplate(path) {
+  return String(path || '').split('?')[0].split('/')
+    .map(part => (!part || DEPOP_PATH_WORDS.has(part) ? part : '{id}')).join('/');
 }
 
 // The publish status read is unavailable. Posting consumes the draft, so a draft

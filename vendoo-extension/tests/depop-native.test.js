@@ -533,6 +533,18 @@ test('a Depop publish whose status read answers 404 and whose product cannot be 
   assert.equal(publishPosts(requests), 1);
 });
 
+test('a bodiless Depop refusal still names its step, method, path and status in the log, without ids', async () => {
+  const { c, payload } = page();
+  const logs = [];
+  c.console.log = (...args) => logs.push(args.join(' '));
+  c.fetch = async () => reply(404, '');
+  await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-777', listing: {} });
+  const line = logs.find(text => text.includes('path='));
+  assert.ok(line, logs.join('\n'));
+  assert.match(line, /step=publish_status method=GET status=404 .*path=\/api\/v3\/drafts\/products\/\{id\}\/status\//);
+  assert.doesNotMatch(logs.join('\n'), /job-777|123456/);
+});
+
 test('an uncertain Depop mutation is never retried', async () => {
   const { c, requests, payload } = page();
   c.fetch = async (_url, options) => { requests.push(options); throw new Error('Disconnected'); };
