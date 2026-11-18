@@ -481,6 +481,11 @@ def constrain_generated(listing: dict, seed: dict, *, freeze_categories: bool = 
         block = listing.get(prefix)
         if not isinstance(block, dict):
             continue
+        if not isinstance(contract, dict) or contract.get("unavailable") or not contract.get("fields"):
+            # A form that could not be loaded is unknown, not one with no
+            # fields: keep the saved answers. Its contract stays unavailable,
+            # so List still asks for the fields to be reloaded.
+            continue
         rows = {path_of(row): row for row in contract.get("fields") or []}
         for path, value in list(_leaves(block, prefix, set(rows))):
             if market == "ebay" and path not in rows:
