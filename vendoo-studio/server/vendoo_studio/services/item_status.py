@@ -269,8 +269,11 @@ def statuses(db: Session, conversations: list[tuple[str, dict]]) -> dict[str, It
         sold_out = units > 0 and quantity > 1 and _read_sold_out(observations.get(conv_id, {}), own)
         if vendoo == "sold" or units >= quantity or sold_out:
             # The latest sale Analytics counts, so the Sold tab orders sales as Analytics lists them.
-            moments = [sale_moment(line) for line in counted_sales(own, quantity)] if own else mark_moments
-            sold_on = {line.marketplace for line in own} | {
+            counted = counted_sales(own, quantity)
+            moments = [sale_moment(line) for line in counted] if own else mark_moments
+            # Only the sales Analytics counts: a cleanup report from clearing
+            # another listing after the sale did not sell the item there.
+            sold_on = {line.marketplace for line in counted} | {
                 name for name, mark in marks.items() if isinstance(mark, dict) and mark.get("state") == "sold"}
             result[conv_id] = ItemStatus("sold", units, quantity, max(filter(None, moments), default=None),
                                          own=vendoo != "sold", sold_on=tuple(sorted(name for name in sold_on if name in MARKETPLACES)))

@@ -1138,3 +1138,15 @@ def test_the_mac_list_names_the_marketplace_a_sold_item_sold_on(env):
     assert rows["top"]["status"] == "sold"
     assert rows["top"]["sold_marketplaces"] == ["poshmark"]
     assert rows["tees"]["sold_marketplaces"] == []
+
+
+def test_a_cleanup_report_after_the_sale_is_not_named_as_where_it_sold(env):
+    # The coat sold on eBay; clearing its Mercari listing later read as "sold" there.
+    item(env.db, "coat", notes={"vendooStatus": "active"})
+    line(env.db, "coat", "ebay", order="o1", order_line="l1", when=datetime(2026, 11, 1))
+    env.db.add(MarketplaceSale(marketplace="mercari", order_id="m123", line_id="m123", listing_id="m123",
+                               conversation_id="coat", sold_at=datetime(2026, 11, 2)))
+    env.db.commit()
+    rows = {row["id"]: row for row in env.client.get("/api/conversations").json()}
+    assert rows["coat"]["status"] == "sold"
+    assert rows["coat"]["sold_marketplaces"] == ["ebay"]
