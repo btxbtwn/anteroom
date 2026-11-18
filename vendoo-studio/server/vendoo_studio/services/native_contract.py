@@ -551,6 +551,11 @@ def gaps(listing: dict, market: str) -> list[dict]:
             value = shared_answer(listing, row, market, path)
         if value in (None, "", [], {}) and not is_locked(listing, path):
             value = settings_answer(listing, path)
+        if value in (None, "", [], {}) and not is_locked(listing, path) and market == "mercari":
+            label_error, value = _mercari_label(listing, row, path, value)
+            if label_error:
+                found.append(gap(path, label_error, label=row.get("label")))
+                continue
         if account_resolved(row) and value in (None, "", [], {}):
             # List picks this from the seller's account, so the row is not
             # empty in any way that stops the listing.
@@ -593,6 +598,27 @@ _SETTINGS_CHOICES = {"ebay_specifics.fulfillmentPolicyId": "fulfillment_policy_i
                      "ebay_specifics.paymentPolicyId": "payment_policy_id",
                      "ebay_specifics.returnPolicyId": "return_policy_id",
                      "ebay_specifics.merchantLocationKey": "merchant_location_key"}
+
+
+def _mercari_label(listing: dict, row: dict, path: str, value: Any) -> tuple[str | None, Any]:
+    """Mercari's empty label row answered the way List answers it: ``(error, value)``.
+
+    A captured form holds the labels Mercari offered for this package, so a
+    saved carrier counts only when that form offers it, under its id for this
+    weight tier. A label the prepared form resolved is checked like any value.
+    """
+    from vendoo_studio.services import mercari_shipping_label as labels
+
+    # Ship on your own asks for no label, so it has nothing to answer here.
+    if path != labels.PATH or not row.get("required") or not labels.needs_label(listing):
+        return None, value
+    answer = labels.label_answer(listing)
+    if answer.source == "form":
+        return None, answer.value
+    if answer.source == "default":
+        offered = labels.offered_id(row, answer.value)
+        return (None, offered) if offered else (labels.unavailable_default_message(answer.value), value)
+    return None, value
 
 
 def settings_answer(listing: dict, path: str) -> str | None:
