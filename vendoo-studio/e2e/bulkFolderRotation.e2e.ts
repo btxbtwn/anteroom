@@ -22,7 +22,7 @@ test("a photo turned in the folder preview is saved turned on its own draft", as
     if (phone) await page.getByRole("tab", { name: "Listing" }).click();
     await page.locator("input[webkitdirectory]").setInputFiles(directory);
     const dialog = page.getByRole("dialog", { name: "Set details for 2 listings" });
-    const coat = dialog.locator("li.bulk-upload-group").filter({ has: page.getByRole("textbox", { name: "Size tag for Coat", exact: true }) });
+    const coat = dialog.locator("li.bulk-upload-group").filter({ has: page.getByRole("textbox", { name: "Size for Coat", exact: true }) });
     await coat.getByRole("button", { name: "Rotate photo 1 right", exact: true }).click();
     page.on("response", async response => {
       if (response.request().method() === "POST" && response.url().endsWith("/api/conversations") && response.ok()) {
