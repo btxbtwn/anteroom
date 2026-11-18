@@ -1402,6 +1402,19 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
             return {"finished": True, "result": {"ok": True, "state": "published", "draft_url": record["draft_url"],
                                                  "listing_url": LIVE["depop"]}}
 
+        # A confirmation for some other draft is not one: the reset stays.
+        async def other_draft_after_reset(job, kind, payload, timeout=None):
+            await in_worker_session(lambda db: native.reset(self.conv.id, "depop", db))
+            return {"finished": True, "result": {"ok": True, "state": "published", "listing_url": LIVE["depop"],
+                                                 "draft_url": "https://www.depop.com/sellinghub/drafts/edit/otherdraft9/"}}
+
+        MarketplaceListingRepo(self.db).save(self.conv.id, "depop", {"state": "unknown", "listing_url": None,
+                                                                     "listing_id": None})
+        self.bridge.side_effect = other_draft_after_reset
+        checked = self.client.post(f"{self.base}/depop/check")
+        self.assertEqual(checked.status_code, 200, checked.text)
+        self.assertEqual(self.record("depop")["state"], "draft")
+
         MarketplaceListingRepo(self.db).save(self.conv.id, "depop", {"state": "unknown", "listing_url": None,
                                                                      "listing_id": None})
         self.bridge.side_effect = confirmed_after_reset

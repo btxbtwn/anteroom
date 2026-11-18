@@ -1646,7 +1646,8 @@ async function depopShopMatches(request, payload) {
     if (pageNumber && firstId != null && firstId === previousId) return null;
     previousId = firstId;
     const next = depopCursorToken(page?.meta?.last_offset_id);
-    if (!next) return [...matches];
+    // More pages, but no cursor that reaches them: not read in full.
+    if (!next) return page?.meta?.end === false ? null : [...matches];
     if (next === offset) return null;
     offset = next;
   }

@@ -980,6 +980,13 @@ def _settle_check_locked(db: Session, conv_id: str, marketplace: str, record: di
     reset = (same_action and not marked
              and record.get("state") in UNSETTLED_STATES and current.get("state") not in UNSETTLED_STATES)
     confirmed = isinstance(result, dict) and result.get("ok") is True
+    if reset and confirmed:
+        # Only an answer that would be recorded as settled replaces the reset; one for
+        # another draft, or without the listing link, leaves the seller's reset in place.
+        try:
+            confirmed = _outcome(marketplace, record.get("action") or "", current, result)["state"] not in UNSETTLED_STATES
+        except NativeMarketplaceError:
+            confirmed = False
     if marked or (reset and not confirmed):
         repo = JobRepo(db)
         if repo.get(record["job_id"]):

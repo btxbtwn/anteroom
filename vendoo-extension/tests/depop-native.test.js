@@ -592,6 +592,10 @@ test('the Depop shop reading matches the locked Depop price the publish sent, an
   cursor = 'stuck';
   const stuck = await c.depopApiAction('shop_matches', { ...payload, listing: locked });
   assert.equal(stuck.matches, null);
+  // More pages, but a cursor Anteroom cannot use: not read in full either.
+  cursor = 'x'.repeat(221);
+  const unusable = await c.depopApiAction('shop_matches', { ...payload, listing: locked });
+  assert.equal(unusable.matches, null);
 });
 
 test('Depop publish evidence reads stop at their time budget and stay unconfirmed', async () => {
