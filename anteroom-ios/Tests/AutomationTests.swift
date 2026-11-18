@@ -50,6 +50,9 @@ struct AutomationTests {
                      == "Weekly on Mon, Fri at 09:00 (UTC)")
         precondition(AutomationFormat.actions([AutomationAction(type: "price", mode: "amount", value: 5, floor: 15, repeatMode: "once"),
                                                AutomationAction(type: "relist")]) == "drop $5 once, floor $15, relist")
+        precondition(AutomationFormat.actions([AutomationAction(type: "price", mode: "percent"), AutomationAction(type: "regenerate")])
+                     == "price drop amount not set, regenerate")
+        precondition(AutomationFormat.actions([AutomationAction(type: "price", mode: "amount")]) == "price drop amount not set")
         precondition(AutomationFormat.runsLine(last: "—", next: "—") == nil)
         precondition(AutomationFormat.runsLine(last: "—", next: "Nov 9, 8:00 AM") == "Next Nov 9, 8:00 AM")
         precondition(AutomationFormat.runsLine(last: "Nov 2, 9:00 AM", next: "—") == "Last run Nov 2, 9:00 AM")

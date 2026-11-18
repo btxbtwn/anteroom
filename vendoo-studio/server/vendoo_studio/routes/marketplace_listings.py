@@ -21,6 +21,8 @@ class MarkRequest(BaseModel):
     """The seller's correction for one marketplace; ``url`` is required to mark it listed."""
     state: str
     url: str | None = Field(default=None, max_length=500)
+    # The seller checked: the listing Anteroom deleted is still live there.
+    relink_deleted: bool = False
 
 
 @router.get("")
@@ -34,9 +36,10 @@ def listings(conv_id: str, db: Session = Depends(get_db, scope="function")):
 @router.post("/{marketplace}/mark")
 def mark(conv_id: str, marketplace: str, body: MarkRequest, db: Session = Depends(get_db)):
     try:
-        return marketplace_delist.mark(db, conv_id, marketplace, body.state, body.url)
+        return marketplace_delist.mark(db, conv_id, marketplace, body.state, body.url, body.relink_deleted)
     except marketplace_delist.DelistError as exc:
-        raise HTTPException(exc.status_code, str(exc)) from exc
+        headers = {"X-Anteroom-Reason": exc.reason} if exc.reason else None
+        raise HTTPException(exc.status_code, str(exc), headers=headers) from exc
 
 
 # Delist and Check sales wait on marketplaces or Chrome. They take no request session;

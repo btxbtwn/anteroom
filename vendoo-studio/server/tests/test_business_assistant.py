@@ -845,3 +845,45 @@ def test_the_brief_reads_the_same_through_the_day_so_a_prompt_cache_can_keep_it(
     assert morning.brief == later.brief
     for shop in (morning, later):
         shop.lookups.close()
+
+
+def test_one_question_reads_each_part_of_the_shop_once(workspace, monkeypatch):
+    """Eight sales ranges share one read of the listings, the sale ledger, sale events and ad spend."""
+    from vendoo_studio.services import ad_spend, inventory_analytics, sale_events, sales_records
+
+    db, _client = workspace
+    seed(db)
+    calls: dict[str, int] = {}
+    for module, name in ((inventory_analytics, "read_analytics_inputs"), (sales_records, "read_sale_lines"),
+                         (sale_events, "windows"), (ad_spend, "list_entries")):
+        real = getattr(module, name)
+
+        def counted(*args, _real=real, _name=name, **kwargs):
+            calls[_name] = calls.get(_name, 0) + 1
+            return _real(*args, **kwargs)
+
+        monkeypatch.setattr(module, name, counted)
+
+    shop = business_assistant.read_shop(db, now=NOW)
+    shop.lookups.close()
+    # Ad spend is read once for the eight ranges and once for the seller's own entries table.
+    assert calls == {"read_analytics_inputs": 1, "read_sale_lines": 1, "windows": 1, "list_entries": 2}
+
+
+def test_every_range_the_assistant_reads_matches_analytics(workspace):
+    """Sharing the reads changes no figure: each range equals Analytics' own answer for it."""
+    from vendoo_studio.services import ad_spend
+    from vendoo_studio.services.inventory_analytics import ANALYTICS_RANGES, analytics_ranges, inventory_analytics, load_rows
+
+    db, _client = workspace
+    _box, jeans, _coat = seed(db)
+    add_listing(db, "Undated sale", {"price": 30}, {"vendooStatus": "sold", "vendooSale": {"marketplace": "ebay"}})
+    db.add(AdSpend(marketplace="ebay", start_date=date(2026, 9, 20), end_date=date(2026, 9, 29), spend=12.5))
+    db.commit()
+    assert ad_spend.list_entries(db)
+    rows = load_rows(db)
+    shared = analytics_ranges(db, ANALYTICS_RANGES, now=NOW, rows=rows)
+    for range_id in ANALYTICS_RANGES:
+        assert shared[range_id] == inventory_analytics(db, range_id=range_id, now=NOW, rows=rows), range_id
+    assert shared["all"]["incomplete_sales"] and shared["30d"]["ads"]["spend"]
+    assert jeans.id in {row.conversation_id for row in rows}

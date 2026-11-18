@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import httpx
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -14,6 +16,8 @@ from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
 from vendoo_studio.repositories.queries import ConversationRepo
+from vendoo_studio.services.marketplace_delist import _delete_ebay as REAL_DELETE_EBAY
+from vendoo_studio.services.marketplace_delist import _delete_etsy as REAL_DELETE_ETSY
 from vendoo_studio.services.marketplace_delist import listing_id
 from vendoo_studio.services.vendoo_import import merge_notes, parse_notes
 
@@ -150,9 +154,34 @@ class MarketplaceDelistTest(unittest.TestCase):
         body = self.client.post(f"{self.base}/mercari/mark", json={"state": "listed", "url": URLS["mercari"]}).json()
         self.assertEqual((body["mercari"]["listing_id"], body["mercari"]["source"], body["mercari"]["state"]), ("m70565754838", "seller", "live"))
         self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["mercari"], "confirm": True}).json()["mercari"]["state"], "deleted")
-        self.client.post(f"{self.base}/mercari/mark", json={"state": "listed", "url": URLS["mercari"]})
+        # The seller looked and the deleted listing is still there: linking it again needs that confirmation.
+        self.client.post(f"{self.base}/mercari/mark", json={"state": "listed", "url": URLS["mercari"], "relink_deleted": True})
         self.assertEqual(self.client.get(self.base).json()["mercari"]["state"], "live")
         self.ebay.assert_not_called()
+
+    def test_marking_listed_with_the_link_anteroom_deleted_needs_confirmation(self):
+        self.client.post(f"{self.base}/mercari/mark", json={"state": "listed", "url": URLS["mercari"]})
+        self.assertEqual(self.client.post(f"{self.base}/delist", json={"marketplaces": ["mercari"], "confirm": True}).json()["mercari"]["state"], "deleted")
+        refused = self.client.post(f"{self.base}/mercari/mark", json={"state": "listed", "url": URLS["mercari"] + "?ref=share"})
+        self.assertEqual(refused.status_code, 409, refused.text)
+        self.assertEqual(refused.headers.get("X-Anteroom-Reason"), "deleted_listing")
+        self.assertIn("Anteroom delisted this Mercari listing", refused.json()["detail"])
+        self.assertEqual(self.client.get(self.base).json()["mercari"]["state"], "deleted")
+        # The seller looked and it is still there: an explicit confirmation links it.
+        relinked = self.client.post(f"{self.base}/mercari/mark", json={"state": "listed", "url": URLS["mercari"], "relink_deleted": True})
+        self.assertEqual(relinked.status_code, 200, relinked.text)
+        self.assertEqual(relinked.json()["mercari"]["state"], "live")
+        self.ebay.assert_not_called()
+
+    def test_a_new_link_replaces_a_deleted_listing_without_confirmation(self):
+        self.client.post(f"{self.base}/mercari/mark", json={"state": "listed", "url": URLS["mercari"]})
+        self.client.post(f"{self.base}/delist", json={"marketplaces": ["mercari"], "confirm": True})
+        replaced = self.client.post(f"{self.base}/mercari/mark", json={"state": "listed", "url": "https://www.mercari.com/us/item/m11111111111"})
+        self.assertEqual(replaced.status_code, 200, replaced.text)
+        entry = replaced.json()["mercari"]
+        self.assertEqual((entry["listing_id"], entry["state"]), ("m11111111111", "live"))
+        self.db.expire_all()
+        self.assertNotIn("mercari", parse_notes(self.conv.notes).get("marketplaceDelists", {}))
 
     def test_a_seller_linked_listing_matches_relay_sales(self):
         from vendoo_studio.services.relay_sales import find_listing
@@ -323,6 +352,140 @@ class MarketplaceDelistTest(unittest.TestCase):
         self._delist_everywhere()
         self.assertEqual(self._status(), "draft")
 
+    # Another cross-lister (or the seller, on the marketplace itself) can remove
+    # the other listings first. Delist then finds them gone: each reads Delisted,
+    # while the sale, the Sold status and every other marketplace stand.
+    ALREADY = {"ok": True, "state": "deleted", "already": True}
+
+    def _sold_on_depop_with_imported_snapshot(self) -> str:
+        """Sold on Depop; the frozen Vendoo snapshot still calls it listed everywhere."""
+        self.conv.notes = merge_notes(self.conv.notes, {"vendooStatus": "active", "vendooMarketplaces": list(URLS)})
+        sale = MarketplaceSale(marketplace="depop", order_id="d1", line_id="d1-line", listing_id="shop-classic-tee-136d",
+                               quantity=1, conversation_id=self.conv.id)
+        self.db.add(sale)
+        self.db.commit()
+        return sale.id
+
+    def _answer_by_marketplace(self, answers: dict) -> None:
+        self.bridge.side_effect = lambda _job, _kind, payload, **_: answers[payload["marketplace"]]
+
+    def _sales(self) -> list[tuple]:
+        self.db.expire_all()
+        return sorted((sale.id, sale.marketplace, sale.order_status, sale.state, sale.quantity)
+                      for sale in self.db.query(MarketplaceSale).filter_by(conversation_id=self.conv.id))
+
+    def _row(self) -> dict:
+        """The item's inventory row, as the sidebar reads it (that read also brings its stored label up to date)."""
+        self.db.expire_all()
+        response = self.client.get("/api/conversations")
+        self.assertEqual(response.status_code, 200, response.text)
+        return next(row for row in response.json() if row["id"] == self.conv.id)
+
+    def _states(self) -> dict:
+        self.db.expire_all()
+        return {name: entry["state"] for name, entry in self.client.get(self.base).json().items()}
+
+    def test_listings_already_removed_elsewhere_read_delisted_and_the_sale_stands(self):
+        self._sold_on_depop_with_imported_snapshot()
+        sales = self._sales()
+        self.assertEqual(self._status(), "sold")
+        self.ebay.return_value = self.ALREADY
+        self.etsy.return_value = self.ALREADY
+        self._answer_by_marketplace({
+            "poshmark": self.ALREADY,
+            "mercari": {"ok": False, "error": "Mercari asked to sign in again. Reconnect Mercari in Anteroom.", "error_code": "signed_out"},
+        })
+        body = self.client.post(f"{self.base}/delist", json={"marketplaces": ["ebay", "etsy", "poshmark", "mercari"], "confirm": True})
+        self.assertEqual(body.status_code, 200, body.text)
+        states = {name: entry["state"] for name, entry in body.json().items()}
+        self.assertEqual(states, {"ebay": "deleted", "etsy": "deleted", "poshmark": "deleted", "mercari": "failed", "depop": "live"})
+        # A sign-in failure is never taken for "already gone": Mercari is still on the item, with the reason.
+        self.assertIn("sign in again", body.json()["mercari"]["error"])
+        self.assertTrue(body.json()["depop"]["sold_here"])
+        self.assertNotIn("depop", [call.args[2]["marketplace"] for call in self.bridge.call_args_list])
+        self.assertEqual(self._status(), "sold")
+        self.assertEqual(self._sales(), sales)
+        row = self._row()
+        self.assertEqual(row["status"], "sold")
+        self.assertEqual(set(row["removed_marketplaces"]), {"ebay", "etsy", "poshmark"})
+
+        # Repeating it is safe: the same listings stay Delisted, and nothing about the sale changes.
+        again = self.client.post(f"{self.base}/delist", json={"marketplaces": ["ebay", "poshmark"], "confirm": True})
+        self.assertEqual(again.status_code, 200, again.text)
+        self.assertEqual((again.json()["ebay"]["state"], again.json()["poshmark"]["state"], again.json()["mercari"]["state"]),
+                         ("deleted", "deleted", "failed"))
+        # Once the seller reconnects Mercari, it finds that listing gone too.
+        self._answer_by_marketplace({"mercari": self.ALREADY})
+        last = self.client.post(f"{self.base}/delist", json={"marketplaces": ["mercari"], "confirm": True})
+        self.assertEqual(last.json()["mercari"]["state"], "deleted")
+        self.assertEqual(self._status(), "sold")
+        self.assertEqual(self._sales(), sales)
+        self.assertEqual(set(self._row()["removed_marketplaces"]), {"ebay", "etsy", "poshmark", "mercari"})
+
+    def test_the_delist_after_a_sale_records_listings_already_gone_as_delisted(self):
+        from vendoo_studio.services import marketplace_accounts
+
+        sale_id = self._sold_on_depop_with_imported_snapshot()
+        sales = self._sales()
+        self.ebay.return_value = self.ALREADY
+        # The connected Etsy shop doesn't own this listing: refused, never counted as gone.
+        self.etsy.side_effect = ValueError("This Etsy listing belongs to another shop. Connect the shop that owns it.")
+        self._answer_by_marketplace({"poshmark": self.ALREADY, "mercari": self.ALREADY})
+        with patch("vendoo_studio.services.user_settings.autodelist_enabled", return_value=True), \
+                patch("vendoo_studio.services.mac_workspace.account_shown", return_value=False):
+            notes = asyncio.run(marketplace_accounts.autodelist_for_sales(
+                [sale_id], session_factory=sessionmaker(bind=self.db.get_bind())))
+        self.assertIn("Etsy could not be delisted", notes[sale_id])
+        self.assertEqual(sorted(call.args[2]["marketplace"] for call in self.bridge.call_args_list), ["mercari", "poshmark"])
+        self.assertEqual(self._states(), {"ebay": "deleted", "etsy": "failed", "poshmark": "deleted", "mercari": "deleted", "depop": "live"})
+        self.assertEqual(self._status(), "sold")
+        self.assertEqual(self._sales(), sales)
+        self.assertEqual(set(self._row()["removed_marketplaces"]), {"ebay", "poshmark", "mercari"})
+
+    def _delist_with_real_ebay_and_etsy(self, ebay_client, etsy_api):
+        """Delist eBay and Etsy through their real steps; only eBay's and Etsy's own APIs are faked."""
+        from vendoo_studio.services import marketplace_delist as d
+
+        self.ebay.side_effect = REAL_DELETE_EBAY
+        self.etsy.side_effect = REAL_DELETE_ETSY
+        with patch("vendoo_studio.services.ebay_client.EbayClient.connect", ebay_client), \
+                patch("vendoo_studio.services.etsy_listings.connected_shop_id", return_value="42"), \
+                patch.object(d.marketplace_accounts, "etsy_api", etsy_api):
+            response = self.client.post(f"{self.base}/delist", json={"marketplaces": ["ebay", "etsy"], "confirm": True})
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def test_the_real_ebay_and_etsy_steps_record_listings_already_gone_without_deleting(self):
+        from vendoo_studio.services.ebay_client import EbayFailure
+
+        self._sold_on_depop_with_imported_snapshot()
+        sales = self._sales()
+        # eBay has no read: ending an ended listing answers 1047. Etsy reads first and finds nothing.
+        client = SimpleNamespace(trading=AsyncMock(side_effect=EbayFailure("eBay rejected the listing request. Error code: 1047.")))
+        etsy_api = AsyncMock(side_effect=_etsy_status(404))
+        body = self._delist_with_real_ebay_and_etsy(AsyncMock(return_value=client), etsy_api)
+        self.assertEqual((body["ebay"]["state"], body["etsy"]["state"]), ("deleted", "deleted"))
+        self.assertEqual([call.args for call in etsy_api.await_args_list], [("GET", "listings/4578284433")])
+        client.trading.assert_awaited_once()
+        self.assertEqual(self._status(), "sold")
+        self.assertEqual(self._sales(), sales)
+        self.assertEqual(set(self._row()["removed_marketplaces"]), {"ebay", "etsy"})
+
+    def test_the_real_ebay_and_etsy_steps_keep_a_sign_in_failure_on_the_item(self):
+        from vendoo_studio.services.marketplace_accounts import SignInRequired
+
+        self._sold_on_depop_with_imported_snapshot()
+        sales = self._sales()
+        etsy_api = AsyncMock(side_effect=SignInRequired("Etsy isn't connected."))
+        body = self._delist_with_real_ebay_and_etsy(
+            AsyncMock(side_effect=SignInRequired("Connect eBay to use this workspace.")), etsy_api)
+        self.assertEqual((body["ebay"]["state"], body["etsy"]["state"]), ("failed", "failed"))
+        self.assertTrue(body["ebay"]["error"] and body["etsy"]["error"])
+        self.assertEqual(etsy_api.await_count, 1)
+        self.assertEqual(self._status(), "sold")
+        self.assertEqual(self._sales(), sales)
+        self.assertEqual(self._row()["removed_marketplaces"], [])
+
 
 class MarketplaceStepsTest(unittest.IsolatedAsyncioTestCase):
     async def test_etsy_checks_the_shop_then_deletes(self):
@@ -348,6 +511,66 @@ class MarketplaceStepsTest(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 await d._delete_etsy("4578284433")
         self.assertEqual(api.await_count, 1)
+
+    async def test_etsy_reports_a_listing_already_gone_as_deleted_without_a_delete(self):
+        from vendoo_studio.services import marketplace_delist as d
+
+        api = AsyncMock(side_effect=_etsy_status(404))
+        with patch("vendoo_studio.services.etsy_listings.connected_shop_id", return_value="42"), \
+                patch.object(d.marketplace_accounts, "etsy_api", api):
+            for _ in range(2):
+                self.assertEqual(await d._delete_etsy("4578284433"), {"ok": True, "state": "deleted", "already": True})
+        self.assertEqual([call.args for call in api.await_args_list], [("GET", "listings/4578284433")] * 2)
+
+    async def test_etsy_never_counts_a_sign_in_server_error_timeout_or_sale_as_gone(self):
+        from vendoo_studio.services import marketplace_delist as d
+
+        request = httpx.Request("GET", "https://openapi.etsy.com/v3/application/listings/4578284433")
+        failures = [_etsy_status(401), _etsy_status(403), _etsy_status(500), _etsy_status(429),
+                    httpx.ReadTimeout("timed out", request=request)]
+        for failure in failures:
+            api = AsyncMock(side_effect=failure)
+            with patch("vendoo_studio.services.etsy_listings.connected_shop_id", return_value="42"), \
+                    patch.object(d.marketplace_accounts, "etsy_api", api):
+                with self.assertRaises(httpx.HTTPError, msg=repr(failure)):
+                    await d._delete_etsy("4578284433")
+            self.assertEqual(api.await_count, 1, repr(failure))
+        api = AsyncMock(return_value={"shop_id": 42, "state": "sold_out"})
+        with patch("vendoo_studio.services.etsy_listings.connected_shop_id", return_value="42"), \
+                patch.object(d.marketplace_accounts, "etsy_api", api):
+            with self.assertRaises(ValueError):
+                await d._delete_etsy("4578284433")
+        self.assertEqual(api.await_count, 1)
+
+    async def test_etsy_never_counts_a_sign_in_or_relay_refusal_as_gone(self):
+        from vendoo_studio.services import marketplace_delist as d
+        from vendoo_studio.services.marketplace_accounts import SignInRequired
+        from vendoo_studio.services.relay_client import RelayError
+
+        for failure in (SignInRequired("Etsy isn't connected."), RelayError("Anteroom's relay refused this Mac.", 401)):
+            api = AsyncMock(side_effect=failure)
+            with patch("vendoo_studio.services.etsy_listings.connected_shop_id", return_value="42"), \
+                    patch.object(d.marketplace_accounts, "etsy_api", api):
+                with self.assertRaises(type(failure)):
+                    await d._delete_etsy("4578284433")
+            self.assertEqual(api.await_count, 1, repr(failure))
+
+    async def test_ebay_never_counts_a_sign_in_timeout_or_server_error_as_ended(self):
+        from vendoo_studio.services import marketplace_delist as d
+        from vendoo_studio.services.ebay_client import EbayFailure
+        from vendoo_studio.services.marketplace_accounts import SignInRequired
+
+        with patch("vendoo_studio.services.ebay_client.EbayClient.connect",
+                   AsyncMock(side_effect=SignInRequired("Connect eBay to use this workspace."))):
+            with self.assertRaises(SignInRequired):
+                await d._delete_ebay("377507697747")
+        request = httpx.Request("POST", "https://api.ebay.com/ws/api.dll")
+        for failure in (EbayFailure("eBay asked to sign in again.", 401, code="signed_out"),
+                        EbayFailure("eBay had a problem answering.", 503), httpx.ReadTimeout("timed out", request=request)):
+            client = SimpleNamespace(trading=AsyncMock(side_effect=failure))
+            with patch("vendoo_studio.services.ebay_client.EbayClient.connect", AsyncMock(return_value=client)):
+                with self.assertRaises(type(failure), msg=repr(failure)):
+                    await d._delete_ebay("377507697747")
 
     async def test_ebay_ends_the_item_and_treats_already_ended_as_done(self):
         from vendoo_studio.services import marketplace_delist as d
@@ -378,3 +601,9 @@ class MarketplaceStepsTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(sent["xml"].startswith('<?xml version="1.0" encoding="utf-8"?>'))
         self.assertIn("<ItemID>377507697747</ItemID>", sent["xml"])
         self.assertIn("<EndingReason>NotAvailable</EndingReason>", sent["xml"])
+
+
+def _etsy_status(code: int) -> httpx.HTTPStatusError:
+    """The error Etsy's API client raises for an HTTP status."""
+    request = httpx.Request("GET", "https://openapi.etsy.com/v3/application/listings/4578284433")
+    return httpx.HTTPStatusError(f"HTTP {code}", request=request, response=httpx.Response(code, request=request))

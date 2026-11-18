@@ -122,24 +122,57 @@ def inventory_analytics(
             raise ValueError("custom range needs a start on or before its end")
     elif range_id not in ANALYTICS_RANGES:
         raise ValueError(range_id)
-    from vendoo_studio.services.ad_spend import list_entries, summarize_ads
-    from vendoo_studio.services.sale_events import windows
-    from vendoo_studio.services.sales_records import incomplete_sales, missing_counts
-
-
     clock = now or datetime.now(UTC)
     if clock.tzinfo is None:
         clock = clock.replace(tzinfo=UTC)
     rows = load_rows(db) if rows is None else rows
-    payload = summarize(rows, range_id=range_id, now=clock, events=windows(db), start=start, end=end)
+    return _range_payload(rows, _RangeInputs.read(db, rows), range_id, clock, start, end)
+
+
+def analytics_ranges(
+    db, range_ids: tuple[str, ...], *, now: datetime, rows: list[AnalyticsItem],
+) -> dict[str, dict[str, Any]]:
+    """``inventory_analytics`` for several ranges, reading what every range shares once."""
+    for range_id in range_ids:
+        if range_id not in ANALYTICS_RANGES:
+            raise ValueError(range_id)
+    inputs = _RangeInputs.read(db, rows)
+    return {range_id: _range_payload(rows, inputs, range_id, now) for range_id in range_ids}
+
+
+@dataclass
+class _RangeInputs:
+    """What every range's totals read besides the listings; none of it depends on the range."""
+
+    events: list[Any]
+    incomplete: list[dict[str, Any]]
+    ad_entries: list[Any]
+
+    @classmethod
+    def read(cls, db, rows: list[AnalyticsItem]) -> _RangeInputs:
+        from vendoo_studio.services.ad_spend import list_entries
+        from vendoo_studio.services.sale_events import windows
+        from vendoo_studio.services.sales_records import incomplete_sales
+
+        return cls(events=windows(db), incomplete=incomplete_sales(db, rows), ad_entries=list_entries(db))
+
+
+def _range_payload(
+    rows: list[AnalyticsItem], inputs: _RangeInputs, range_id: str, clock: datetime,
+    start: date | None = None, end: date | None = None,
+) -> dict[str, Any]:
+    from vendoo_studio.services.ad_spend import summarize_ads
+    from vendoo_studio.services.sales_records import missing_counts
+
+    payload = summarize(rows, range_id=range_id, now=clock, events=inputs.events, start=start, end=end)
     window_start, window_end = _window(range_id, clock, start, end)
-    incomplete = incomplete_sales(db, rows)
+    incomplete = inputs.incomplete
     return {
         **payload,
         "incomplete_sales": incomplete,
         "missing_counts": missing_counts([row["missing"] for row in incomplete]),
         "ads": summarize_ads(
-            list_entries(db),
+            inputs.ad_entries,
             start=window_start,
             end=window_end if range_id == "custom" else None,
             marketplace_revenue={row["id"]: row["revenue"] for row in payload["marketplaces"]},

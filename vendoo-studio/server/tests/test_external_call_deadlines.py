@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import tempfile
 import threading
 import time
 import unittest
@@ -19,6 +20,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
+from worker_sessions import file_engine
 
 from vendoo_studio import sandbox
 from vendoo_studio.database import Base, get_db
@@ -104,7 +107,12 @@ class _Workspace(unittest.IsolatedAsyncioTestCase):
     notes = STALL_MARKER
 
     async def asyncSetUp(self):
-        engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        # A stream's worker threads and another request's query run at the
+        # same time here, so each session needs its own connection.
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        engine = file_engine(directory.name)
+        self.addCleanup(engine.dispose)
         Base.metadata.create_all(engine)
         self.Session = sessionmaker(bind=engine)
 

@@ -134,20 +134,23 @@ def _check_counts(box: SourceBox) -> None:
         raise BoxCountError(f"{box.unsellable} unsellable is more than the {box.pieces} pieces in the box")
 
 
-def results(db: Session, now: datetime | None = None) -> dict[str, Any]:
-    """Every box with what it has returned so far, and the same per store."""
+def results(db: Session, now: datetime | None = None, rows: list[AnalyticsItem] | None = None) -> dict[str, Any]:
+    """Every box with what it has returned so far, and the same per store.
+
+    ``rows`` lets a caller that already loaded the listings' analytics rows reuse them.
+    """
     now = now or datetime.now(UTC)
     boxes = list_boxes(db)
     items_by_box: dict[str, list[AnalyticsItem]] = {}
-    for item in load_rows(db):
+    for item in load_rows(db) if rows is None else rows:
         if item.box_id:
             items_by_box.setdefault(item.box_id, []).append(item)
-    rows = [_box_row(box, items_by_box.get(box.id, []), now) for box in boxes]
+    box_rows = [_box_row(box, items_by_box.get(box.id, []), now) for box in boxes]
     stores: dict[str, list[tuple[SourceBox, list[AnalyticsItem]]]] = {}
     for box in boxes:
         stores.setdefault(box.store, []).append((box, items_by_box.get(box.id, [])))
     return {
-        "boxes": rows,
+        "boxes": box_rows,
         "stores": [_store_row(name, entries, now) for name, entries in sorted(stores.items())],
     }
 

@@ -20,15 +20,18 @@ for (const connected of [false, true]) test(`desktop subscriptions ${connected ?
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name: "Providers", exact: true }).click();
   for (const name of ["ChatGPT", "Claude"]) {
+    const readiness = connected
+      ? `At the last status check, ${name} was available through this account’s Mac connection.`
+      : `This account does not currently see ${name} ready on its Mac connection.`;
     await page.getByRole("group", { name: "Providers", exact: true }).getByRole("button", { name: new RegExp(name) }).click();
-    await expect(page.getByText(connected ? `${name} on your computer is connected.` : `Open Anteroom on your computer, sign into your ${name} subscription`, { exact: false })).toBeVisible();
-    await expect(page.getByText(connected ? "Keep the computer awake and Anteroom open" : "Subscription credentials stay on your computer.", { exact: false })).toBeVisible();
+    await expect(page.getByText(readiness, { exact: false })).toBeVisible();
+    await expect(page.getByText(connected ? "This is a readiness check, not a completed AI request." : "No listing copy or import is needed to connect.", { exact: false })).toBeVisible();
     if (connected) {
       await page.getByRole("combobox", { name: "Primary listing AI" }).click();
       await expect(page.getByRole("option", { name, exact: true })).toBeEnabled();
       await page.keyboard.press("Escape");
     }
-    await page.getByText(connected ? `${name} on your computer is connected.` : `Open Anteroom on your computer, sign into your ${name} subscription`, { exact: false }).scrollIntoViewIfNeeded();
+    await page.getByText(readiness, { exact: false }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: `e2e/results/hosted/subscription-${name}-${info.project.name}-${connected}.png` });
   }
   expect(errors).toEqual([]);

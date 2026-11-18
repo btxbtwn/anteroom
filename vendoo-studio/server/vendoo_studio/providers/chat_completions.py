@@ -391,6 +391,10 @@ def openrouter_sources(payload: dict) -> list[dict]:
     return sources
 
 
+# The most web searches one OpenRouter research request may run.
+WEB_SEARCH_MAX_CALLS = 8
+
+
 class OpenRouterProvider(ChatCompletionsProvider):
     """OpenRouter runs model-directed web searches through its server tool."""
 
@@ -416,6 +420,10 @@ class OpenRouterProvider(ChatCompletionsProvider):
         # model refine queries, as the sold-comps research prompt asks.
         # https://openrouter.ai/docs/guides/features/server-tools/web-search
         body["tools"] = [{"type": "openrouter:web_search"}]
+        # Each search is billed on top of the tokens its results add, and the
+        # server tool otherwise allows up to 30 per request. The research
+        # prompt asks for roughly eight; hold the model to that.
+        body["max_tool_calls"] = WEB_SEARCH_MAX_CALLS
         payload = await self._post(body, timeout=90, endpoint="responses")
         answer = web_search_answer(payload.get("output") or [])
         sources = openrouter_sources(payload)

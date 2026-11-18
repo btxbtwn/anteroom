@@ -678,6 +678,10 @@ def test_postgres_sale_undo_waits_for_explicit_finish_ownership(undo_env, monkey
 
 RACE_DELETE = {"listing_id": "123456789012", "url": EBAY_URL, "at": "2026-11-17T06:00:00+00:00"}
 # Delist notes writes: the delete record as a delete starts, and a failure record.
+# A notes write waiting on the item's row lock (marketplace_delist._locked_conversation).
+LOCKED_NOTES_WRITE = text("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
+                          "AND wait_event_type = 'Lock' AND query LIKE 'UPDATE conversations %'")
+
 DELIST_WRITES = {
     "record_delete": lambda db: marketplace_delist._record_delete(db, "race", "ebay", {**RACE_DELETE, "state": "deleting"}),
     "store": lambda db: marketplace_delist._record(db, "race", "ebay", {**RACE_DELETE, "state": "failed", "error": "Not deleted."}),
@@ -770,16 +774,18 @@ def test_postgres_delist_notes_write_waits_for_a_sale_undo_and_keeps_it(undo_env
         with monkeypatch.context() as held_transaction:
             held_transaction.setattr(undo, "commit", undo.flush)
             delete_seller_sale(undo, sale["id"], sale["financial_revision"])
-        writer_thread = threading.Thread(target=write)
-        writer_thread.start()
-        deadline = time.monotonic() + 10
-        waiting = 0
-        with bind.connect() as watch:
+        # Postgres keeps one pg_stat_activity snapshot per transaction, so the
+        # watch autocommits: each poll then sees the writer as it is now.
+        with bind.connect().execution_options(isolation_level="AUTOCOMMIT") as watch:
+            writer_thread = threading.Thread(target=write)
+            writer_thread.start()
+            deadline = time.monotonic() + 10
+            waiting = 0
             while not waiting and time.monotonic() < deadline:
-                waiting = watch.scalar(text("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
-                                            "AND wait_event_type = 'Lock'"))
+                waiting = watch.scalar(LOCKED_NOTES_WRITE)
                 time.sleep(0.05)
-        assert waiting and writer_thread.is_alive(), "the delist write must wait on the undo's row lock"
+        assert writer_thread.is_alive(), failures
+        assert waiting, "the delist write must wait on the undo's row lock"
         undo.commit()
     writer_thread.join(10)
     assert not writer_thread.is_alive() and not failures, failures

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import re
 import tempfile
 import threading
@@ -12,11 +13,36 @@ from pathlib import Path
 from fastapi import HTTPException
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError, SQLAlchemyError, TimeoutError as PoolTimeout
 
 from vendoo_studio.models.user_preference import UserPreference
 from vendoo_studio.services.hosted_database import SellerDatabaseSession, note_changes
 from vendoo_studio.services.service_context import ServiceContext
+
+
+_log = logging.getLogger(__name__)
+# Only fixed codes are emitted; even a driver's sqlstate can be arbitrary text.
+_STORAGE_SQLSTATES = frozenset({'08003', '08006', '23503', '23505', '40001', '40P01',
+                               '42501', '53300', '55000', '55P03', '57014', '57P01'})
+
+
+def _storage_failure(operation: str, stage: str, exc: SQLAlchemyError) -> None:
+    """Report classification only: raw Vault exceptions can carry bound secrets."""
+    family = next((label for kind, label in (
+        (PoolTimeout, 'pool_timeout'), (IntegrityError, 'integrity'),
+        (OperationalError, 'operational'), (DBAPIError, 'database'),
+    ) if isinstance(exc, kind)), 'sqlalchemy')
+    sqlstate = 'unknown'
+    if isinstance(exc, DBAPIError):
+        try:
+            candidate = getattr(exc.orig, 'sqlstate', None)
+            if type(candidate) is str and candidate in _STORAGE_SQLSTATES:
+                sqlstate = candidate
+        except Exception:  # noqa: BLE001 - diagnostic metadata must not replace the safe storage failure
+            pass
+    # Never attach exc_info, the exception object, its chain, or arbitrary names.
+    _log.error('Credential storage failed (operation=%s; stage=%s; family=%s; sqlstate=%s)',
+               operation, stage, family, sqlstate)
 
 
 class CredentialStorageUnavailable(RuntimeError):
@@ -81,10 +107,14 @@ class VaultSecretStore:
 
     def get(self, account):
         if account not in self._cache:
+            stage = 'session'
             try:
                 with self.sessions() as db:
+                    stage = 'read'
                     self._cache[account] = self._read(db, account)
-            except SQLAlchemyError:
+                    stage = 'close'
+            except SQLAlchemyError as exc:
+                _storage_failure('get', stage, exc)
                 raise CredentialStorageUnavailable() from None
         return self._cache[account]
 
@@ -96,24 +126,34 @@ class VaultSecretStore:
         self.update(account, lambda _previous: None)
 
     def update(self, account, mutator):
+        stage = 'session'
         try:
             with self.sessions() as db:
+                stage = 'lock'
                 db.execute(text('SELECT pg_advisory_xact_lock(hashtextextended(:identity, 0))'),
                            {'identity': f'anteroom-secret:{self.owner}:{account}'})
+                stage = 'read'
                 previous = self._read(db, account)
+                stage = 'mutate'
                 value = mutator(previous)
                 if value == previous:
                     # Nothing changed: no write, and no change for other devices to re-read.
                     self._cache[account] = value
+                    stage = 'close'
                     return
+                stage = 'write'
                 db.execute(text('SELECT anteroom_private.secret_write(:slot, :value)'), {'slot': account, 'value': value})
                 # The function writes outside the ORM; announce it like any settings change.
+                stage = 'change'
                 note_changes(db, 'user_secret_references')
+                stage = 'commit'
                 db.commit()
                 self._cache[account] = value
-        except SQLAlchemyError:
+                stage = 'close'
+        except SQLAlchemyError as exc:
             # SQLAlchemy exceptions may contain bound secret parameters. They
             # must never reach an API response, SSE error, or exception logger.
+            _storage_failure('update', stage, exc)
             raise CredentialStorageUnavailable() from None
 
 
