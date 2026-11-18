@@ -1109,6 +1109,9 @@ async def fill_validation_gaps(provider, listing: dict, *, analysis: str = "", n
 
     blockers = await asyncio.to_thread(validation_errors, listing)
     locked = locked_paths(listing)
+    # Under a General Size the seller set, a marketplace size row left empty because
+    # it does not offer that size is a gap for the seller, not the model's to fill.
+    size_locked = "size" in locked
     protected = {"category_path", "category_id", "marketplace_categories", "marketplace_category_ids",
                  "marketplace_category_objects", "direct_category_ids", "sku", "seller_fields"}
     allowed = {}
@@ -1117,6 +1120,8 @@ async def fill_validation_gaps(provider, listing: dict, *, analysis: str = "", n
         if not field or field.split(".")[0].startswith("_") or field.split(".")[0] in protected:
             continue
         if any(field == path or field.startswith(path + ".") or path.startswith(field + ".") for path in locked):
+            continue
+        if size_locked and field.split(".")[-1].casefold() in {"size", "nativesizeid"}:
             continue
         # A container error does not authorize replacement of all its fields.
         value = listing
@@ -1510,10 +1515,19 @@ def persist_generated_listing(
         # its waist is replaced by the seller's.
         normalize_mens_bottoms_size(listing)
     generated_size = sanitize_size_value(listing.get("size"))
-    follow_locked_size = bool(locked_size) and locked_size != generated_size
+    # Every unlocked marketplace size follows a locked General Size, even when the
+    # model's General Size agreed: its slots or native rows can still name another.
+    follow_locked_size = bool(locked_size)
     if follow_locked_size:
-        _replace_title_size(listing, raw_generated_size, locked_size)
-        if generated_size != raw_generated_size:
+        # Depop spells kids' sizes as ages by category; map with the saved category
+        # when the model's answer left it out (constrain_generated restores it later).
+        saved_depop = (seed.get("direct_category_ids") or {}).get("depop") if isinstance(seed.get("direct_category_ids"), dict) else None
+        current_ids = listing.get("direct_category_ids") if isinstance(listing.get("direct_category_ids"), dict) else {}
+        if saved_depop and not current_ids.get("depop"):
+            listing["direct_category_ids"] = {**current_ids, "depop": saved_depop}
+        if locked_size != raw_generated_size:
+            _replace_title_size(listing, raw_generated_size, locked_size)
+        if generated_size not in {raw_generated_size, locked_size}:
             _replace_title_size(listing, generated_size, locked_size)
         listing["size"] = locked_size
         align_size_fields(listing, previous_size=generated_size or None)

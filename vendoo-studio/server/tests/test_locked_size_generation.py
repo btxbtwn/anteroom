@@ -108,6 +108,23 @@ class LockedSizeGenerationTest(unittest.TestCase):
         self.assertTrue(parsed["title"].startswith("M&O GOLD XXL Graphic T-Shirt"), parsed["title"])
         self.assertLessEqual(len(parsed["title"]), 80)
 
+    def test_native_rows_follow_even_when_the_models_general_size_agreed(self):
+        row = {**EBAY_ROW, "options": ["30", "32", "34"]}
+        jeans = {"department": "Men", "category_path": "Men > Jeans", "title": "Levi's 32 Jeans 505 Blue", "brand": "Levi's"}
+        self.seller_set("32", _native_forms={"ebay": {"fields": [row]}}, ebay_specifics={"Size": "32"}, **jeans)
+        # 32x30 normalizes to the locked 32, but the model's eBay row says 34.
+        parsed = self.generate(size="32x30", ebay_specifics={"Size": "34"}, **{**jeans, "title": "Levi's 32x30 Jeans 505 Blue"})
+        self.assertEqual(parsed["size"], "32")
+        self.assertEqual(parsed["ebay_specifics"]["Size"], "32")
+
+    def test_depop_kids_size_maps_with_the_saved_category_when_the_model_omits_it(self):
+        row = {"path": "depop_specifics.size", "label": "Size", "selection_only": True, "options": ["10 years", "16 years"]}
+        self.seller_set("M", _native_forms={"depop": {"fields": [row]}}, depop_specifics={"size": "10 years"},
+                        direct_category_ids={"depop": "kidswear_jackets"})
+        parsed = self.generate(size="XL (18/20)", depop_specifics={"size": "16 years"})
+        self.assertEqual(parsed["size"], "M")
+        self.assertEqual(parsed["depop_specifics"]["size"], "10 years")
+
     def test_without_a_lock_the_generated_size_stands(self):
         self.seller_set("L", locks=())
         parsed = self.generate(poshmark_specifics={"size": "S"})
