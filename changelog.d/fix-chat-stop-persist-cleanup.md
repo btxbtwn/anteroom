@@ -1,1 +1,0 @@
-- Stopping a listing chat no longer reports its rejected save as a new chat error.
