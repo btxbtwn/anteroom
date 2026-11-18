@@ -150,3 +150,89 @@ test('nothing is deleted without confirmation or a valid ID', async () => {
   }
   assert.equal(requests.length, 0);
 });
+
+// A listing someone else already removed (another cross-lister, the seller on
+// the marketplace itself) is reported as deleted without sending a delete.
+// Only the marketplace's own "gone" answer counts: a sign-in, timeout,
+// server error or unknown status never does, and never sends a delete.
+const DEPOP_SLUG = 'shop-tee-136d';
+const depopRead = `GET webapi.depop.com/presentation/api/v1/products/by-slug/${DEPOP_SLUG}/`;
+const runDepop = c => c.runMarketplaceDelete({ marketplace: 'depop', listing_id: DEPOP_SLUG, confirm: true });
+const timeout = () => { throw Object.assign(new Error('The operation timed out.'), { name: 'TimeoutError' }); };
+
+test('Depop reports a listing already gone on the first read as deleted, without a delete, every time', async () => {
+  for (const answer of [[404, {}], [200, { id: 123456789, status: 'DELETED' }]]) {
+    const { c, requests } = worker({ [depopRead]: answer });
+    for (let run = 0; run < 2; run += 1) {
+      const result = await runDepop(c);
+      assert.deepEqual({ ...result }, { ok: true, state: 'deleted', already: true }, JSON.stringify(answer));
+    }
+    assert.deepEqual(requests, [depopRead, depopRead], JSON.stringify(answer));
+  }
+});
+
+test('Depop never counts a sign-in, timeout, server error or unreadable answer as already gone', async () => {
+  const cases = [
+    ['signed_out', [401, { message: 'Unauthorized' }]],
+    ['signed_out', [403, { message: 'Forbidden' }]],
+    ['network', [503, { message: 'Unavailable' }]],
+    ['network', timeout],
+    ['rejected', [400, { message: 'Bad slug' }]],
+    ['schema_drift', [200, { id: 'not-a-number', status: 'ONSALE' }]],
+  ];
+  for (const [code, answer] of cases) {
+    const { c, requests } = worker({ [depopRead]: answer });
+    const result = await runDepop(c);
+    assert.equal(result.ok, false, code);
+    assert.equal(result.already, undefined, code);
+    assert.equal(result.error_code, code, `${code}: ${result.error}`);
+    assert.ok(!requests.some(r => r.startsWith('DELETE')), code);
+  }
+  const signedOut = worker({});
+  signedOut.c.chrome.cookies = { get: async () => null };
+  const result = await runDepop(signedOut.c);
+  assert.equal(result.ok, false);
+  assert.equal(result.error_code, 'signed_out');
+  assert.deepEqual(signedOut.requests, []);
+});
+
+test('Poshmark never counts a sign-in, timeout or unknown error as already gone', async () => {
+  const cases = [
+    ['signed_out', [401, { error: { errorType: 'AuthenticationError' } }]],
+    ['network', timeout],
+    ['network', [500, {}]],
+  ];
+  for (const [code, answer] of cases) {
+    const { c, requests } = worker({ [`GET ${posh}`]: answer });
+    const result = await c.runMarketplaceDelete({ marketplace: 'poshmark', listing_id: POST, confirm: true });
+    assert.equal(result.ok, false, code);
+    assert.equal(result.already, undefined, code);
+    assert.equal(result.error_code, code, `${code}: ${result.error}`);
+    assert.ok(!requests.some(r => r.startsWith('DELETE')), code);
+  }
+  // A Poshmark error that is not its "removed" or "not found" answer is not a removal.
+  const { c, requests } = worker({ [`GET ${posh}`]: [200, { error: { errorType: 'InternalError', userMessage: 'Try again later' } }] });
+  const result = await c.runMarketplaceDelete({ marketplace: 'poshmark', listing_id: POST, confirm: true });
+  assert.equal(result.ok, false);
+  assert.equal(result.already, undefined);
+  assert.ok(!requests.some(r => r.startsWith('DELETE')));
+});
+
+test('Mercari never counts an unknown status, sign-in or timeout as already gone', async () => {
+  // Only cancel / admin_cancel mean removed. Anything else unfamiliar is the seller's to check.
+  for (const status of ['inactive', 'suspended', '']) {
+    const s = mercari(mercariItem({ status }));
+    const result = await s.run();
+    assert.equal(result.ok, false, status);
+    assert.equal(result.already, undefined, status);
+    assert.deepEqual(s.operations, ['sellFetchItemsDetails'], status);
+  }
+  for (const [code, answer] of [['signed_out', [401, { errors: [{ message: 'Unauthorized' }] }]], ['network', timeout]]) {
+    const { c, requests } = worker({ 'POST www.mercari.com/v1/api': answer });
+    const result = await c.runMarketplaceDelete({ marketplace: 'mercari', listing_id: MERCARI_ID, confirm: true });
+    assert.equal(result.ok, false, code);
+    assert.equal(result.already, undefined, code);
+    assert.equal(result.error_code, code, `${code}: ${result.error}`);
+    assert.equal(requests.filter(r => r === 'POST www.mercari.com/v1/api').length >= 1, true, code);
+  }
+});
