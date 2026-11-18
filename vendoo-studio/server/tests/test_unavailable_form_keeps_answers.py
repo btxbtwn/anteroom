@@ -57,7 +57,7 @@ class ConstrainGeneratedTest(unittest.TestCase):
         native_contract.constrain_generated(listing, seed, freeze_categories=False)
         self.assertEqual(listing["mercari_specifics"]["condition"], "3")
         # A locked path the seed holds no value for is not filled by generation.
-        self.assertIsNone(listing["mercari_specifics"]["brand"])
+        self.assertNotIn("brand", listing["mercari_specifics"])
         self.assertEqual(listing["mercari_specifics"]["shipsFrom"], "70115")
 
     def test_unavailable_contract_still_blocks_listing(self):
