@@ -100,5 +100,11 @@ async def reply(body: Reply):
 async def status():
     if pinned := await asyncio.to_thread(_pinned, 'mac', claim_route=False):
         return pinned
-    connection = relay()
+    from vendoo_studio.services.mac_inference import existing_relay
+    context = current()
+    if context is None:
+        raise HTTPException(404, 'Not found')
+    connection = existing_relay(context.seller_id)
+    if connection is None:
+        return {'connected': False, 'providers': {}}
     return {'connected': connection.connected, 'providers': connection.models if connection._local() else {}}
