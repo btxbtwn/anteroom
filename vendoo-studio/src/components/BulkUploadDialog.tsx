@@ -151,14 +151,19 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
     setSizeReading({ done: 0, total: todo.length });
     setAnnounceSizes(false);
     await readEach(todo, async (index) => {
-      const photoSet = rows[index]!.photoSet;
-      setRow(index, { sizeNote: READING_SIZE_NOTE, sizeReview: false });
+      const { photoSet, sizeNote: noteBefore } = rows[index]!;
+      setRow(index, { sizeNote: READING_SIZE_NOTE });
       try {
         const result = await api.sizeTags.read(groups[index]!.files);
         setRows((current) => current.map((row, i) => {
           if (i !== index || row.photoSet !== photoSet) return row;
           // A size an earlier reading filled is replaced, not treated as typed.
           const outcome = applySizeTagReading(row.sizeSuggested ? "" : row.size, result);
+          // A re-read that saw nothing new (no tag, unreadable) keeps an earlier warning
+          // on a typed size: the earlier evidence still stands. Editing the size clears it.
+          if (!outcome.suggested && !outcome.needsReview && !outcome.note && row.sizeReview) {
+            return { ...row, sizeNote: noteBefore };
+          }
           return {
             ...row,
             size: outcome.size,

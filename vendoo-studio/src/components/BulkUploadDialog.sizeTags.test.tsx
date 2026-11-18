@@ -184,6 +184,25 @@ it("flags a size an earlier reading filled when a re-read fails", async () => {
   }
 });
 
+it("keeps a size mismatch warning when a re-read finds no tag", async () => {
+  const read = vi.spyOn(api.sizeTags, "read").mockImplementation(async (files) => tagReads[files[0]!.name.replace(".jpg", "")]!);
+  const { root, size, button } = await openDialog();
+  try {
+    await act(async () => setInput(size("Jeans"), "34 x 30"));
+    await act(async () => button("Read size tags").click());
+    await settle(() => expect(size("Jeans").className).toContain("needs-review"));
+    read.mockResolvedValue({ photos_read: 1, status: "not_found", size: null, sizes: [] });
+    await act(async () => button("Read size tags").click());
+    await settle(() => expect(document.querySelector('[role="status"]')!.textContent).toContain("Size tags read."));
+    expect(size("Jeans").value).toBe("34 x 30");
+    expect(size("Jeans").className).toContain("needs-review");
+    expect(document.getElementById(size("Jeans").getAttribute("aria-describedby")!)!.textContent)
+      .toBe("The tag reads 32 x 30. Check the size you typed.");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
 it("never shows the provider or model in reading notes", async () => {
   vi.spyOn(api.sizeTags, "read").mockResolvedValue(tagReads.Shorts!);
   // An older server still sends who read; the dialog must not show it.
