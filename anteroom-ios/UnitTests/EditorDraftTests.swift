@@ -2,6 +2,27 @@ import XCTest
 @testable import Anteroom
 
 final class EditorDraftTests: XCTestCase {
+    func testLegacyUnversionedCopyRemainsRecoverableWithoutAutomaticRestoration() throws {
+        var kept = ListingEditorModel.Form()
+        kept.fields.title = "Unsaved title"
+        kept.price = "19"
+        kept.sellerInputs.sku = "Unsaved SKU"
+        let draft = EditorDraft(listingID: "recovery", revisionID: nil, baselineInputs: SellerInputs(),
+                                form: kept, pending: ["ebay.title": .string("Kept eBay title")], savedAt: .now)
+        let decoded = try JSONDecoder().decode(EditorDraft.self, from: JSONEncoder().encode(draft))
+        var current = ListingEditorModel.Form()
+        current.fields.title = "Newer server title"
+        current.sellerInputs = SellerInputs(notes: #"{"future":true}"#)
+        XCTAssertFalse(decoded.restores(revisionID: nil, inputs: current.sellerInputs, currentForm: current))
+        let recovered = decoded.recoveredForm(onto: current)
+        XCTAssertEqual(recovered.fields.title, "Unsaved title")
+        XCTAssertEqual(recovered.price, "19")
+        XCTAssertEqual(recovered.sellerInputs.sku, "Unsaved SKU")
+        XCTAssertTrue(try recovered.sellerInputs.encodedNotes().contains("future"))
+        XCTAssertEqual(decoded.pending["ebay.title"], .string("Kept eBay title"))
+        XCTAssertEqual(current.fields.title, "Newer server title")
+    }
+
     func testUnversionedDraftRejectsChangedListingButAllowsOpaqueMetadata() {
         var baseline = ListingEditorModel.Form()
         baseline.fields.title = "Shirt"

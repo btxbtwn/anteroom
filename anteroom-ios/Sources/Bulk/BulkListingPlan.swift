@@ -96,6 +96,10 @@ struct BulkListingPlan: Equatable {
                 items[index].sizeWarning = nil
                 items[index].sizeNeedsReview = true
                 items[index].sizeNote = "A photo was removed, so the size read from it was cleared. Read size tags again or type the size."
+            } else if items[index].sizeWarning != nil {
+                items[index].sizeWarning = nil
+                items[index].sizeNeedsReview = true
+                items[index].sizeNote = "A photo was removed, so the earlier tag check no longer applies. Read size tags again or check the tag."
             } else if readingSizes.contains(items[index].id) {
                 items[index].sizeNeedsReview = items[index].sizeNeedsReview
                     || items[index].sizeTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

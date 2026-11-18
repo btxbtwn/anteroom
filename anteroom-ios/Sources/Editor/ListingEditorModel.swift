@@ -51,6 +51,8 @@ final class ListingEditorModel {
     var hasConflict = false
     /// Said once after opening: unsaved edits kept from last time came back, or were dropped.
     var draftNotice: String?
+    private(set) var recoveryDraft: EditorDraft?
+    private var usingRecoveredCopy = false
     private var checkedStash = false
     /// Each marketplace tab's state for the saved listing: ready, fields missing, listed or sold.
     private(set) var choices: [ListChoice] = []
@@ -145,36 +147,78 @@ final class ListingEditorModel {
     /// Keeps unsaved edits on the device while the app is in the background,
     /// where iOS may end it, or while the editor is closed. Save, Discard and
     /// sign-out remove them.
-    func stashEdits() {
-        guard hasChanges else { return EditorDraftStore.remove(listingID) }
-        EditorDraftStore.save(EditorDraft(listingID: listingID, revisionID: revisionID, baselineInputs: saved.sellerInputs,
-                                          form: form, pending: pending, savedAt: Date(), baselineForm: saved))
+    @discardableResult
+    func stashEdits() -> Bool {
+        // Keep current work separately from the unresolved copy.
+        guard hasChanges else { return false }
+        if let recoveryDraft, !EditorDraftStore.save(recoveryDraft, recovery: true) { return false }
+        return EditorDraftStore.save(EditorDraft(listingID: listingID, revisionID: revisionID, baselineInputs: saved.sellerInputs,
+                                                form: form, pending: pending, savedAt: Date(), baselineForm: saved))
     }
 
     func forgetStash() {
+        guard recoveryDraft == nil else { return }
         EditorDraftStore.remove(listingID)
+        if usingRecoveredCopy {
+            EditorDraftStore.remove(listingID, recovery: true)
+            usingRecoveredCopy = false
+        }
+    }
+
+    /// Explicit local recovery only; the seller still reviews and saves the editor.
+    func recoverKeptDraft() {
+        guard let draft = recoveryDraft else { return }
+        form = draft.recoveredForm(onto: saved)
+        pending = draft.pending
+        recoveryDraft = nil
+        draftNotice = nil
+        usingRecoveredCopy = true
+        if stashEdits() {
+            // The chosen edits now have a normal, recoverable stash with a fresh baseline.
+            EditorDraftStore.remove(listingID, recovery: true)
+            usingRecoveredCopy = false
+        }
+    }
+
+    func discardKeptDraft() {
+        if let recoveryDraft, EditorDraftStore.load(listingID) == recoveryDraft {
+            EditorDraftStore.remove(listingID)
+        }
+        EditorDraftStore.remove(listingID, recovery: true)
+        recoveryDraft = nil
+        draftNotice = nil
+        forgetStash()
+        stashEdits()
     }
 
     /// Puts the form back to what is saved and drops any kept copy.
     func discardChanges() {
         form = saved
         pending = [:]
+        if recoveryDraft != nil, EditorDraftStore.load(listingID) != recoveryDraft {
+            EditorDraftStore.remove(listingID)
+        }
         forgetStash()
     }
 
-    /// Puts kept edits back when they were made on the version still saved;
-    /// otherwise drops them, since they'd overwrite changes made elsewhere.
+    /// Safe copies restore automatically; conflicts stay on disk for an explicit choice.
     private func restoreStash() {
-        guard let draft = EditorDraftStore.load(listingID) else { return }
-        EditorDraftStore.remove(listingID)
+        recoveryDraft = EditorDraftStore.load(listingID, recovery: true)
+        guard let draft = EditorDraftStore.load(listingID) else {
+            if recoveryDraft != nil { draftNotice = "Your earlier unsaved edits are still kept on this phone. Review the kept copy before choosing what to keep." }
+            return
+        }
         let when = draft.savedAt.formatted(date: .abbreviated, time: .shortened)
-        if draft.restores(revisionID: revisionID, inputs: saved.sellerInputs, currentForm: saved) {
-            form = draft.form
-            form.sellerInputs = draft.form.sellerInputs.restoringNotesBaseline(from: saved.sellerInputs)
+        if draft != recoveryDraft, draft.restores(revisionID: revisionID, inputs: saved.sellerInputs, currentForm: saved) {
+            form = draft.recoveredForm(onto: saved)
             pending = draft.pending
             draftNotice = "Your unsaved changes from \(when) are back. Save to keep them."
         } else {
-            draftNotice = "This listing changed somewhere else after \(when), so your unsaved changes from then were discarded."
+            if recoveryDraft == nil {
+                recoveryDraft = draft
+                EditorDraftStore.save(draft, recovery: true)
+            }
+            draftNotice = "Your unsaved changes from \(when) are still kept on this phone. They couldn't be safely restored. Compare the kept copy with the current details before choosing what to keep."
         }
     }
 
@@ -281,7 +325,6 @@ final class ListingEditorModel {
             }
         }
         Task { await loadReadiness() }
-        forgetStash()
         if form.sellerInputs != saved.sellerInputs {
             do {
                 try await api.saveNotes(listingID, changes: noteChanges)
@@ -291,6 +334,7 @@ final class ListingEditorModel {
                 return false
             }
         }
+        forgetStash()
         return true
     }
 

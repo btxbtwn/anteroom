@@ -5,6 +5,25 @@ final class BulkReadReviewRegressionTests: XCTestCase {
     private struct ReadFailure: LocalizedError {
         var errorDescription: String? { "Read failed." }
     }
+    func testPhotoRemovalInvalidatesTypedTagEvidenceBeforeInterruptedRead() throws {
+        for reading in [false, true] {
+            var plan = BulkListingPlan()
+            let photos = [UUID(), UUID()]
+            plan.add(photos)
+            let item = try XCTUnwrap(plan.makeItem(from: Set(photos)))
+            plan.setSizeTag("M", for: item.id)
+            plan.applySizeTag(.init(photosRead: 2, status: "accepted", size: "L", sizes: ["L"]), to: item.id)
+            plan.remove(photos[1], readingSizes: reading ? [item.id] : [])
+            XCTAssertEqual(plan.items[0].sizeTag, "M")
+            XCTAssertNil(plan.items[0].sizeWarning)
+            XCTAssertTrue(plan.items[0].sizeNeedsReview)
+            let note = "A photo was removed, so the earlier tag check no longer applies. Read size tags again or check the tag."
+            XCTAssertEqual(plan.items[0].sizeNote, note)
+            plan.applySizeTag(.init(photosRead: 1, status: "not_found", size: nil, sizes: []), to: item.id)
+            XCTAssertEqual(plan.items[0].sizeNote, note)
+            XCTAssertNil(plan.items[0].sizeWarning)
+        }
+    }
     func testInconclusiveRereadKeepsEarlierWarningUntilNewEvidenceOrEditing() throws {
         for status in ["not_found", "unreadable", "failure"] {
             var plan = BulkListingPlan()
@@ -74,7 +93,7 @@ final class BulkReadReviewRegressionTests: XCTestCase {
         plan.remove(photos[1], readingSizes: [item.id])
         XCTAssertEqual(plan.items[0].sizeTag, "M")
         XCTAssertTrue(plan.items[0].sizeNeedsReview)
-        XCTAssertTrue(plan.items[0].sizeNote?.contains("removed while reading") == true)
+        XCTAssertTrue(plan.items[0].sizeNote?.contains("earlier tag check no longer applies") == true)
     }
 
     func testRemovingPhotoBeforeWorkerCapturesItDoesNotShowInterruptedRead() throws {
