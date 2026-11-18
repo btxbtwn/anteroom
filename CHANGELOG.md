@@ -6,6 +6,22 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1021 — 2026-11-18
+
+- Show a clear background-removal error if the Mac cannot provide an image mask.
+
+## 0.1.1020 — 2026-11-18
+
+- Slow inventory reports now show which read step took time, helping diagnose delays without recording listing details.
+
+## 0.1.1019 — 2026-11-18
+
+- Keep required checks from passing when an affected test group did not run, and run every check group when a changed file's impact is unknown.
+
+## 0.1.1018 — 2026-11-18
+
+- Keep safe database failure details in error reports when saved account credentials cannot be read or updated, without exposing credentials.
+
 ## 0.1.1017 — 2026-11-18
 
 - The sale calendar now says "1 item" and "1 sale event" instead of "1 items" and "1 sale events".
