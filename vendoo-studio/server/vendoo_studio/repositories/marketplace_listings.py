@@ -68,6 +68,8 @@ class MarketplaceListingRepo:
         for name in FIELDS if replace else values:
             value = values.get(name)
             setattr(row, name, value if value is not None or name != "state" else "not_saved")
+        if "listed_price" in values or replace:
+            row.price_recorded_at = datetime.now(UTC).replace(tzinfo=None) if row.listed_price is not None else None
         self.db.commit()
         return as_dict(row)
 

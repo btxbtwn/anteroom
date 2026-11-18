@@ -18,6 +18,7 @@ from vendoo_studio.main import app
 from vendoo_studio.models.listing_promotion import ListingPromotion, MarketplaceOfferFloor
 from vendoo_studio.models.marketplace_listing import MarketplaceListing
 from vendoo_studio.models.promotion_automation import PromotionAutomation, PromotionRun
+from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 from vendoo_studio.repositories.queries import ConversationRepo, JobRepo
 from vendoo_studio.services import browser_bridge, listing_promotions, promotion_automations
 from vendoo_studio.services.vendoo_import import merge_notes
@@ -465,10 +466,9 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.assertEqual(self.checked(), [item])
         # Anteroom's older record of $25 is not a change since the refusal; the same price recorded again is not either.
         for price in (None, 1.5):
+            MarketplaceListingRepo(self.db).save(conv.id, "mercari", {"inventory_observation": {"price": None}})
             if price is not None:
-                listing.listed_price, listing.state = price, "published"
-                listing.action = "update"
-                self.db.commit()
+                MarketplaceListingRepo(self.db).save(conv.id, "mercari", {"listed_price": price, "state": "published", "action": "update"})
             self.db.expire_all()
             self.bridge.reset_mock()
             self.due(saved["id"])
@@ -476,8 +476,7 @@ class PromotionAutomationsTest(unittest.TestCase):
             self.assertEqual(self.checked(), [], price)
         # A new price recorded after the refusal (an Update, or a verified read) is read at once.
         listing = self.db.get(MarketplaceListing, listing.id)
-        listing.listed_price = 30.0
-        self.db.commit()
+        MarketplaceListingRepo(self.db).save(conv.id, "mercari", {"listed_price": 30.0})
         self.bridge.reset_mock()
         self.due(saved["id"])
         self.tick()
@@ -500,8 +499,7 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.assertEqual((refusal.state, refusal.price_cents), ("skipped", None))
         # With no refusal price to compare, a new recorded price does not release it; the day does.
         listing = self.db.get(MarketplaceListing, listing.id)
-        listing.listed_price = 30.0
-        self.db.commit()
+        MarketplaceListingRepo(self.db).save(conv.id, "mercari", {"listed_price": 30.0})
         self.bridge.reset_mock()
         self.due(saved["id"])
         self.tick()
@@ -530,6 +528,40 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.due(saved["id"])
         self.tick()
         self.assertEqual(sorted(self.checked()), sorted(refused))
+
+    def test_excluded_refusals_do_not_release_a_covered_hold(self):
+        items = self.mercari_items(8)
+        refused = {item for _conv, item in items[:4]}
+        saved = self.create({**OFFER, "marketplace": "mercari", "shipping_label": None, "scope": "items",
+                             "conversation_ids": [conv.id for conv, _item in items]})
+        self.enable(saved["id"])
+        self.bridge.side_effect = self.mercari_refusal(refused=refused)
+        self.due(saved["id"])
+        self.tick()
+        row = self.db.get(PromotionAutomation, saved["id"])
+        row.excluded_ids = [conv.id for conv, _item in items[:3]]
+        self.db.commit()
+        self.bridge.reset_mock()
+        self.due(saved["id"])
+        self.tick()
+        self.assertNotIn(items[3][1], self.checked())
+
+    def test_like_arriving_during_read_is_checked_on_next_feed_tick(self):
+        conv, post = self.items[0]
+        saved = self.create({**OFFER, "scope": "items", "conversation_ids": [conv.id]})
+        self.enable(saved["id"])
+        self.likes[post] = 0
+        arrived = []
+        self.on_check = lambda: arrived.append(_now())
+        self.due(saved["id"])
+        self.tick()
+        self.on_check = None
+        check = self.db.query(ListingPromotion).filter_by(listing_id=post).one()
+        self.assertLess(check.created_at, arrived[0])
+        self.like_feed([{"listing_id": post, "at": arrived[0].isoformat() + "Z"}])
+        self.bridge.reset_mock()
+        self.check_likes()
+        self.assertEqual(self.checked(), [post])
 
     def mercari_refusal(self, *, refused=None, price_cents=None):
         original = self.answer

@@ -338,7 +338,7 @@ def _waiting_for_likes(db: Session, row: PromotionAutomation, now: datetime) -> 
             and (likes < minimum or (offered.get(listing_id) is not None and likes <= cast(int, offered[listing_id])))}
 
 
-def _held_after_refusal(db: Session, row: PromotionAutomation, now: datetime, covered: int) -> dict[str, datetime]:
+def _held_after_refusal(db: Session, row: PromotionAutomation, now: datetime, covered: set[str]) -> dict[str, datetime]:
     """Listings whose latest check by this rule, within a day, got a refusal that repeats until the listing changes.
 
     Maps each to when it was refused: a like newer than that still reads it. A
@@ -355,18 +355,18 @@ def _held_after_refusal(db: Session, row: PromotionAutomation, now: datetime, co
     ).order_by(ListingPromotion.created_at.desc()):
         latest.setdefault(promotion.listing_id, promotion)
     refused = {listing_id: promotion for listing_id, promotion in latest.items()
-               if promotion.state == "skipped" and offer_preview_refusals.held_note(promotion.note, promotion.marketplace_message)}
+               if listing_id in covered and promotion.state == "skipped" and offer_preview_refusals.held_note(promotion.note, promotion.marketplace_message)}
     priced = {promotion.conversation_id: promotion for promotion in refused.values()
               if promotion.price_cents is not None and promotion.conversation_id}
     if priced:
-        for conversation_id, listed_price, updated_at in db.query(
-            MarketplaceListing.conversation_id, MarketplaceListing.listed_price, MarketplaceListing.updated_at,
+        for conversation_id, listed_price, price_recorded_at in db.query(
+            MarketplaceListing.conversation_id, MarketplaceListing.listed_price, MarketplaceListing.price_recorded_at,
         ).filter(MarketplaceListing.conversation_id.in_(list(priced)), MarketplaceListing.marketplace == row.marketplace):
             promotion = priced[conversation_id]
-            if (listed_price is not None and updated_at > promotion.created_at
+            if (listed_price is not None and price_recorded_at is not None and price_recorded_at > promotion.created_at
                     and round(listed_price * 100) != promotion.price_cents):
                 refused.pop(promotion.listing_id, None)
-    if len(refused) > BROAD_REFUSALS and len(refused) * 2 > covered:
+    if len(refused) > BROAD_REFUSALS and len(refused) * 2 > len(covered):
         return {}
     return {listing_id: promotion.created_at for listing_id, promotion in refused.items()}
 
@@ -413,7 +413,7 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
         remaining = (row.daily_cap or 0) - _shares_today(db, row.marketplace, now) if row.action == "share" else None
         # Like-feed rounds read their listings; the regular scan skips those still waiting for a like.
         waiting = _waiting_for_likes(db, row, now) if like_events is None else set()
-        held = _held_after_refusal(db, row, now, len(covered))
+        held = _held_after_refusal(db, row, now, {target[1] for target in covered})
         reads = 0
         batch = new_id()
         for conv, listing_id, _listed_at in targets:
@@ -448,6 +448,8 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                     await sleep(READ_GAP_S)
                 reads += 1
             send = promotions.new_row(conv, row.marketplace, row.action, batch, row.discount_percent, row.id)
+            # Feed events arriving during the read must remain newer than this check.
+            send.created_at = _now()
             try:
                 await promotions.review(db, send, conv, new_like_at=new_like_at)
                 shipping = None
