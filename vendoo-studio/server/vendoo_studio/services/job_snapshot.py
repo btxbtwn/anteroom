@@ -93,7 +93,8 @@ def ensure_listing_defaults(listing_snapshot: dict) -> None:
         return
 
     from vendoo_studio.models.listing_values import canonical_option
-    from vendoo_studio.models.schema import ListingSchema, VALID_DEPOP_PARCEL
+    from vendoo_studio.models.schema import ListingSchema
+    from vendoo_studio.services.depop_fields import VALID_DEPOP_PARCEL
 
     condition = listing_snapshot.get("condition")
     if condition:
