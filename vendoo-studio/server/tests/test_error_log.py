@@ -87,3 +87,21 @@ class ErrorLogTest(unittest.TestCase):
             error_log.install()
             logger.warning("api_key=%s", "failed_write_secret_123")
         self.assertNotIn("failed_write_secret_123", fallback.getvalue())
+
+
+def test_hosted_assistant_timings_keep_individual_samples(tmp_path, monkeypatch):
+    path = tmp_path / 'timings.jsonl'
+    monkeypatch.setattr(error_log, '_disk_path', lambda: path)
+    # Force the existing ring's compaction path without generating thousands of logs.
+    monkeypatch.setattr(error_log, '_DISK_MAX', 2)
+    path.write_text('{"message":"old"}\n' * 40000)
+    logger = logging.getLogger('vendoo_studio.assistant')
+    with patch.object(logger, 'handlers', []), patch.object(logger, 'propagate', False):
+        error_log.install_assistant_timings()
+        error_log.install_assistant_timings()
+        logger.warning('assistant answer timing: outcome=answered total_ms=80000')
+        logger.warning('assistant answer timing: outcome=answered total_ms=40000')
+    entries = error_log.query_entries(grep='assistant answer timing')
+    assert [entry['message'].split('total_ms=')[1] for entry in entries] == ['40000', '80000']
+    assert path.stat().st_size < 512_000
+    assert len(path.read_text().splitlines()) <= 3

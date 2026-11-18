@@ -245,6 +245,9 @@ async def _answer(
             error = "The assistant returned an empty answer. Ask again."
             run.publish(sse_event("error", error))
         outcome = "error" if error else "answered"
+    except background_tasks.TaskStopped:
+        outcome = "cancelled"
+        raise
     except background_tasks.TaskLeaseExpired:
         outcome = "lease_lost"
         raise
@@ -277,6 +280,9 @@ async def _answer(
                 except asyncio.CancelledError:
                     outcome = "cancelled"
                     raise
+                except background_tasks.TaskStopped:
+                    outcome = "cancelled"
+                    raise
                 except background_tasks.TaskLeaseExpired:
                     outcome = "lease_lost"
                     raise
@@ -286,6 +292,8 @@ async def _answer(
                 finally:
                     timing.save_ms = business_assistant.elapsed_ms(save_started)
         finally:
+            if isinstance(run, _Journal) and run.stop_outcome is not None:
+                outcome = run.stop_outcome
             total_ms = business_assistant.elapsed_ms(timing.started)
             slow = total_ms >= business_assistant.SLOW_ANSWER_MS
             log.log(logging.WARNING if slow else logging.INFO, "%s", timing.line(outcome, total_ms))
@@ -569,6 +577,7 @@ class _Journal(GenerationRun):
     def __init__(self) -> None:
         super().__init__()
         self.pending: list[str] = []
+        self.stop_outcome: str | None = None
 
     def publish(self, item: str, *, record: bool = True) -> None:
         # Pulses only keep a live connection open; followers poll the journal.
@@ -614,6 +623,8 @@ async def answer_task(task_id: str, token: str, task) -> bool:
         shutting_down = True
         raise
     except Exception as exc:
+        if isinstance(exc, background_tasks.TaskLeaseExpired):
+            journal.stop_outcome = "cancelled" if isinstance(exc, background_tasks.TaskStopped) else "lease_lost"
         if not isinstance(exc, background_tasks.TaskLeaseExpired):
             _log_answer_failure(exc)
         try:

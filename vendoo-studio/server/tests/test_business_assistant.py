@@ -1058,12 +1058,12 @@ def test_cancelled_preparation_records_wait(monkeypatch, caplog):
     assert 'outcome=cancelled ' in line and 'prepare_ms=7000 ' in line
 
 
-@pytest.mark.parametrize('lease_lost', [False, True])
-def test_failed_save_records_outcome_and_duration(workspace, monkeypatch, caplog, lease_lost):
+@pytest.mark.parametrize('failure_name, outcome', [('RuntimeError', 'error'), ('TaskLeaseExpired', 'lease_lost'), ('TaskStopped', 'cancelled')])
+def test_failed_save_records_outcome_and_duration(workspace, monkeypatch, caplog, failure_name, outcome):
     from vendoo_studio.services import background_tasks
 
     caplog.set_level('INFO', logger='vendoo_studio.assistant')
-    failure = background_tasks.TaskLeaseExpired() if lease_lost else RuntimeError('save failed')
+    failure = RuntimeError('save failed') if failure_name == 'RuntimeError' else getattr(background_tasks, failure_name)()
 
     def fail_save(*_args):
         raise failure
@@ -1074,5 +1074,31 @@ def test_failed_save_records_outcome_and_duration(workspace, monkeypatch, caplog
         asyncio.run(assistant_route._answer(assistant_route._Journal(), Provider(), 'Question'))
     assert caught.value is failure
     [line] = timing_lines(caplog)
-    outcome = 'lease_lost' if lease_lost else 'error'
     assert f'outcome={outcome} ' in line and 'save_ms=9000 ' in line
+
+
+@pytest.mark.parametrize('stopped', [False, True])
+def test_journal_stop_reason_survives_worker_cancellation(monkeypatch, caplog, stopped):
+    from types import SimpleNamespace
+    from vendoo_studio.services import background_tasks
+
+    caplog.set_level('INFO', logger='vendoo_studio.assistant')
+    failure = background_tasks.TaskStopped() if stopped else background_tasks.TaskLeaseExpired()
+
+    async def preparing(_run, work, *_args):
+        work.close()
+        await asyncio.Future()
+
+    def reject(*_args, **_kwargs):
+        raise failure
+
+    monkeypatch.setattr(assistant_route, 'await_with_pulses', preparing)
+    monkeypatch.setattr(assistant_route, '_require_provider', Provider)
+    monkeypatch.setattr(background_tasks, 'EVENT_INTERVAL', 0.001)
+    monkeypatch.setattr(background_tasks, 'append_events', reject)
+    monkeypatch.setattr(background_tasks, 'finish', reject)
+    task = SimpleNamespace(payload={'question': 'Question'}, assistant_thread_id=None, created_at=datetime.now(UTC))
+    assert asyncio.run(assistant_route.answer_task('task', 'token', task)) is True
+    [line] = timing_lines(caplog)
+    outcome = 'cancelled' if stopped else 'lease_lost'
+    assert f'outcome={outcome} ' in line

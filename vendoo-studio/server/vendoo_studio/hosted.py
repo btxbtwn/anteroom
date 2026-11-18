@@ -244,6 +244,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         give_threads(asyncio.get_running_loop())
         from vendoo_studio.services.error_alerts import install_alerts, uninstall_alerts
         install_alerts()
+        from vendoo_studio.services.error_log import install_assistant_timings
+        install_assistant_timings()
         # ORM relationship names must resolve before a route constructs its
         # first query, which happens before the session's after_begin hook.
         from vendoo_studio.database import load_models

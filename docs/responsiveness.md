@@ -35,9 +35,21 @@ proposal processing and cleanup can leave time outside the named stages.
 
 <!-- coderabbit-ai-generated-section:v1:c16ae77c1fa266df95938d44689e61b2522ff68f559affd05d4c47994dd17247 -->
 
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:a7bf8ddaba1ad12e7f8db7edee06b4c705d6b50d207af17c02a51d566f3f7868 -->
+
 Answers under 30 s log at INFO, which hosted logging drops; slower ones log at
-WARNING, which goes only to the hourly batched operator alert email
-(grouped by call site, as `Slow response` lines are), not to Fly logs.
+WARNING and enter the hourly batched operator alert email (grouped by call site,
+as `Slow response` lines are). The digest retains only the latest sample in each
+group. Hosted workers also retain individual warnings in the existing local
+`logs/anteroom.jsonl` diagnostic sink under the configured data directory. Once
+the file exceeds 512,000 bytes it is trimmed to its last 2,000 entries; messages
+are capped at 4,000 characters. Operators can read this worker-local file; it is
+not shared across Machines and can be lost with the filesystem. Disk logging is
+best effort and does not change alert delivery. No stderr handler is added.
+
+<!-- /coderabbit-ai-generated:v1 -->
 `queue_wait_ms` compares the worker clock with the database's `created_at`;
 skew is clamped at zero, not corrected. Time between `total_ms` and the
 follower seeing `[DONE]` (journal polling) is not included. This line measures;
