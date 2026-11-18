@@ -131,6 +131,12 @@ struct BulkListingPlan: Equatable {
         }
     }
 
+    /// Photo identities determine size evidence; rearranging them does not invalidate a read.
+    func matchesSizeRead(_ captured: Item) -> Bool {
+        guard let current = items.first(where: { $0.id == captured.id }) else { return false }
+        return Set(current.photos) == Set(captured.photos)
+    }
+
     mutating func applySizeTag(_ result: SizeTagReading, to id: Item.ID) {
         update(id) { item in
             let typed = item.sizeSuggested ? "" : item.sizeTag.trimmingCharacters(in: .whitespacesAndNewlines)

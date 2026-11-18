@@ -2,6 +2,45 @@ import XCTest
 @testable import Anteroom
 
 final class BulkReadReviewRegressionTests: XCTestCase {
+    func testReorderAndMakeCoverKeepBothSuccessAndErrorResults() throws {
+        for makeCover in [false, true] {
+            for failed in [false, true] {
+                var plan = BulkListingPlan()
+                let photos = [UUID(), UUID(), UUID()]
+                plan.add(photos)
+                let captured = try XCTUnwrap(plan.makeItem(from: Set(photos)))
+                if makeCover { plan.makeCover(photos[2], in: captured.id) }
+                else { plan.movePhotos(in: captured.id, from: IndexSet(integer: 0), to: 3) }
+                if plan.matchesSizeRead(captured) {
+                    if failed { plan.failSizeTag("Read failed.", for: captured.id) }
+                    else { plan.applySizeTag(.init(photosRead: 3, status: "accepted", size: "0", sizes: ["0"]), to: captured.id) }
+                }
+                XCTAssertEqual(plan.items[0].sizeTag, failed ? "" : "0")
+                XCTAssertEqual(plan.items[0].sizeNeedsReview, failed)
+                XCTAssertEqual(plan.items[0].sizeNote, failed ? "Read failed. Type the size from the tag." : "Size filled from the tag. Check it.")
+            }
+        }
+    }
+
+    func testRemovedPhotosRejectBothCallbacksAndKeepRecoveryNote() throws {
+        for failed in [false, true] {
+            var plan = BulkListingPlan()
+            let photos = [UUID(), UUID()]
+            plan.add(photos)
+            let captured = try XCTUnwrap(plan.makeItem(from: Set(photos)))
+            plan.remove(photos[0], readingSizes: [captured.id])
+            if plan.matchesSizeRead(captured) {
+                if failed { plan.failSizeTag("Read failed.", for: captured.id) }
+                else { plan.applySizeTag(.init(photosRead: 2, status: "accepted", size: "0", sizes: ["0"]), to: captured.id) }
+            }
+            XCTAssertEqual(plan.items[0].sizeTag, "")
+            XCTAssertTrue(plan.items[0].sizeNeedsReview)
+            XCTAssertEqual(plan.items[0].sizeNote, "A photo was removed while reading. Read size tags again or type the size.")
+            plan.ungroup(captured.id)
+            XCTAssertFalse(plan.matchesSizeRead(captured))
+        }
+    }
+
     func testRemovingPhotoClearsItsUntouchedSizeSuggestion() throws {
         var plan = BulkListingPlan()
         let photos = [UUID(), UUID()]

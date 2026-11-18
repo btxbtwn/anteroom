@@ -372,10 +372,10 @@ struct BulkListingView: View {
         guard let item = plan.items.first(where: { $0.id == id }) else { return }
         do {
             let result = try await api.readSizeTags(jpegs: item.photos.compactMap { jpegs[$0] })
-            guard plan.items.first(where: { $0.id == id })?.photos == item.photos else { return }
+            guard plan.matchesSizeRead(item) else { return }
             plan.applySizeTag(result, to: id)
         } catch {
-            guard plan.items.first(where: { $0.id == id })?.photos == item.photos else { return }
+            guard plan.matchesSizeRead(item) else { return }
             plan.failSizeTag(error.localizedDescription, for: id)
         }
     }
