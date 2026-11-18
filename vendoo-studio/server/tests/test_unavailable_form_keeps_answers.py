@@ -50,6 +50,16 @@ class ConstrainGeneratedTest(unittest.TestCase):
             # The form stays unknown, so List still asks for the fields to be reloaded.
             self.assertEqual(listing[native_contract.KEY]["mercari"], contract)
 
+    def test_seller_locks_still_win_on_an_unavailable_form(self):
+        seed = {"mercari_specifics": {"condition": "3"}, native_contract.KEY: {"mercari": {"unavailable": True}},
+                "seller_fields": ["mercari_specifics.condition", "mercari_specifics.brand"]}
+        listing = {**copy.deepcopy(seed), "mercari_specifics": {"condition": "1", "brand": "Generated", "shipsFrom": "70115"}}
+        native_contract.constrain_generated(listing, seed, freeze_categories=False)
+        self.assertEqual(listing["mercari_specifics"]["condition"], "3")
+        # A locked path the seed holds no value for is not filled by generation.
+        self.assertIsNone(listing["mercari_specifics"]["brand"])
+        self.assertEqual(listing["mercari_specifics"]["shipsFrom"], "70115")
+
     def test_unavailable_contract_still_blocks_listing(self):
         listing = {"mercari_specifics": copy.deepcopy(SAVED_MERCARI), native_contract.KEY: {"mercari": {"unavailable": True}}}
         native_contract.constrain_generated(listing, copy.deepcopy(listing), freeze_categories=False)
