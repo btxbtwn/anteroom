@@ -54,19 +54,26 @@ class MercariFormTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(fields['mercari_specifics.package.fitsShoebox']['required'])
         self.assertEqual(listing, before)
 
-    def test_brand_missing_from_mercaris_catalog_is_its_no_brand_choice(self):
+    def test_a_brand_missing_from_the_catalog_copy_is_not_shown_as_no_brand(self):
         # AM TEES XL (draft 0b945d2660ec): General brand "AM Tees", no Mercari brand of its own.
+        # The bundled catalog is a dated copy, so absence there is not a confirmed no-match.
         listing = {'brand': 'AM Tees', 'condition': 'Pre-Owned - Good', 'price': 20}
         before = copy.deepcopy(listing)
         row = next(row for row in mercari_form.form(listing)['fields'] if row['path'] == 'mercari_specifics.brand')
-        self.assertEqual(row['value'], mercari_form.NO_BRAND)
-        self.assertIn(row['value'], row['option_values'].values())
+        self.assertEqual(row['value'], 'AM Tees')
+        self.assertIn("isn't in Anteroom's copy of Mercari's brand list", row['help'])
+        self.assertIn('otherwise the item is listed with No brand', row['help'])
         self.assertEqual(listing, before)
 
-    def test_recognized_and_seller_locked_brands_are_kept(self):
+    def test_recognized_blank_and_seller_brands_are_kept(self):
         row = next(row for row in mercari_form.form({'brand': 'nike'})['fields'] if row['path'] == 'mercari_specifics.brand')
         self.assertEqual(row['value'], 'Nike')
-        locked = {'brand': 'AM Tees', 'mercari_specifics': {'brand': 'AM Tees'},
+        self.assertNotIn('help', row)
+        for listing in ({'brand': ''}, {'brand': 'Unbranded'}, {'brand': 'AM Tees', 'mercari_specifics': {'noBrand': True}}):
+            row = next(row for row in mercari_form.form(listing)['fields'] if row['path'] == 'mercari_specifics.brand')
+            self.assertEqual(row['value'], mercari_form.NO_BRAND, listing)
+            self.assertNotIn('help', row)
+        locked = {'brand': 'Other', 'mercari_specifics': {'brand': 'AM Tees'},
                   'seller_fields': ['mercari_specifics.brand']}
         row = next(row for row in mercari_form.form(locked)['fields'] if row['path'] == 'mercari_specifics.brand')
         self.assertEqual(row['value'], 'AM Tees')

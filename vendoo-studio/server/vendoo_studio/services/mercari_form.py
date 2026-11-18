@@ -9,7 +9,7 @@ from collections import Counter
 from functools import lru_cache
 
 from vendoo_studio.config import skills_dir
-from vendoo_studio.services.seller_overrides import field_locked, get_path, marketplace_text, price_for
+from vendoo_studio.services.seller_overrides import get_path, marketplace_text, price_for
 
 NO_BRAND = "No Brand/Not sure"
 
@@ -144,13 +144,19 @@ def form(listing: dict, shipping_classes: list[dict] | None = None, *, notes: li
     blank = re.sub(r"[^a-z0-9]+", " ", brand.casefold()).strip() in {
         "", "unbranded", "no brand", "not sure", "no brand not sure", "none", "n a", "na", "unknown"}
     known = next((name for name in brands if name.casefold() == brand.casefold()), None)
-    # A name Mercari's catalog does not have is listed with no brand, as List
-    # sends it. A brand the seller locked on this form is shown as they left it.
-    brand = NO_BRAND if blank or specifics.get("noBrand") is True or (
-        known is None and not field_locked(listing, "mercari", "brand")) else known or brand
+    unconfirmed = not blank and specifics.get("noBrand") is not True and known is None
+    brand = NO_BRAND if blank or specifics.get("noBrand") is True else known or brand
     picker = brand_choices()
     fields["mercari_specifics.brand"].update(value=brand, options=list(picker["options"]),
                                             option_values=dict(picker["option_values"]))
+    if unconfirmed:
+        # This catalog is a dated copy, so a missing name is not proof Mercari
+        # lacks the brand. List checks Mercari's current list and sends no brand
+        # only when Mercari has no match; a failed check stops List instead.
+        fields["mercari_specifics.brand"]["help"] = (
+            f"“{brand}” isn't in Anteroom's copy of Mercari's brand list. When you list, Anteroom checks "
+            "Mercari's current list: if Mercari has this brand it's used, otherwise the item is listed with "
+            "No brand. Choose a brand or No brand / Not sure to decide now.")
     fields["mercari_specifics.condition"]["value"] = _condition(specifics.get("condition") or listing.get("condition"))
     sizes = _sizes(category)
     if sizes:
