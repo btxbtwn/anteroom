@@ -120,6 +120,30 @@ const TONE_ICON: Record<Tone, ReactNode> = {
   idle: <CircleIcon aria-hidden className="size-3.5 text-muted-foreground/60" />,
 };
 
+/**
+ * Keeps a slot's last height while its content is re-checked for a new
+ * revision. The old answer is hidden (it may be stale), but the space stays,
+ * so the form below does not jump up and back while a tap is on its way.
+ */
+function HeldWhileChecking({ checking, holdKey, children }: { checking: boolean; holdKey: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [last, setLast] = useState<{ key: string; height: number } | null>(null);
+  useLayoutEffect(() => {
+    if (checking) return;
+    // Measured after each settled answer; an equal value leaves state as it is.
+    const height = ref.current?.offsetHeight ?? 0;
+    setLast((previous) => previous?.key === holdKey && previous.height === height ? previous
+      : height ? { key: holdKey, height } : null);
+  }, [checking, holdKey, children]);
+  const held = checking && last?.key === holdKey ? last.height : 0;
+  if (!children && !held) return null;
+  return (
+    <div ref={ref} aria-busy={checking || undefined} style={held ? { minHeight: held } : undefined}>
+      {children}
+    </div>
+  );
+}
+
 export function deletable(entry: MarketplaceListing | undefined): boolean {
   return Boolean(entry?.listing_id && !entry.sold_here && entry.state !== "deleted" && entry.state !== "deleting");
 }
@@ -354,6 +378,9 @@ export function MarketplacesLayout({
     // arrives, so the pane above the form does not collapse and shift the form.
     placeholderData: (previous) => previous,
   });
+  // A re-check is running. The previous answer also stays as a placeholder while
+  // the query is off (no revision, no marketplace can act): nothing is checked then.
+  const rechecking = preflight.isPlaceholderData && preflight.isFetching;
 
   // Each marketplace tracks its own request, so starting one never locks the others.
   const [starting, setStarting] = useState<Partial<Record<NativeMarketplace, ActionKind>>>({});
@@ -746,7 +773,12 @@ export function MarketplacesLayout({
           <span className="min-w-0 text-pretty">{status.label}</span>
         </span>
       )}
-      {status && quiet && !check && <span className="sr-only">{status.label}</span>}
+      {status && quiet && !check && (rechecking
+        // The previous revision's answer is not this one's; keep the line, not the answer.
+        ? <span role="status" className="flex items-center gap-1 truncate text-xs text-muted-foreground">
+            <span className="sr-only">{status.label}. </span><span className="truncate">Checking…</span>
+          </span>
+        : <span className="sr-only">{status.label}</span>)}
       {check && (
         <span role="status" className={cn("flex items-center gap-1 truncate text-xs text-muted-foreground tabular-nums",
           missing > 0 && "text-warning-foreground")}>
@@ -821,7 +853,9 @@ export function MarketplacesLayout({
           )}
           {reconnectNotice(selectedMarketplace)}
           {errorActions(selectedMarketplace)}
-          {preflightNotice(selectedMarketplace)}
+          <HeldWhileChecking checking={rechecking} holdKey={selectedMarketplace}>
+            {preflightNotice(selectedMarketplace)}
+          </HeldWhileChecking>
           {settings(selectedMarketplace)}
           {linkForm(selectedMarketplace)}
           {(() => {
