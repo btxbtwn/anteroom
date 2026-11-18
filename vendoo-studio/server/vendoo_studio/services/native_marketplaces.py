@@ -988,7 +988,7 @@ def _settle_check_locked(db: Session, conv_id: str, marketplace: str, record: di
     reset = (same_action and not marked
              and record.get("state") in UNSETTLED_STATES and current.get("state") not in UNSETTLED_STATES)
     confirmed = isinstance(result, dict) and result.get("ok") is True
-    if reset and confirmed:
+    if reset and confirmed and isinstance(result, dict):
         # Only an answer that would be recorded as settled replaces the reset; one for
         # another draft, or without the listing link, leaves the seller's reset in place.
         try:

@@ -1622,7 +1622,7 @@ async function depopShopUrl(request, payload) {
 // match, across every page read, with that seller's id. Null when the shop could not be read in full.
 async function depopShopMatches(request, payload) {
   // The price the publish sent: a locked Depop price, else General's.
-  const listing = { ...(payload.listing || {}), price: depopPrice(payload.listing || {}) };
+  const listing = { ...payload.listing, price: depopPrice(payload.listing || {}) };
   if (!depopBaseDescription(listing) || !Number.isFinite(Number(listing.price))) return null;
   let me;
   try { me = await request('GET', '/presentation/api/v1/users/me/'); } catch { return null; }

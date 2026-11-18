@@ -1355,6 +1355,10 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         # Production, 2026-11-18: Depop's publish was unconfirmed, a Check was asking
         # Chrome, and the seller pasted the live link before Chrome answered.
         from vendoo_studio.database import in_worker_session
+
+        # Read once: the test session's commits expire self.conv, and reading it again
+        # inside a Chrome stand-in would query on the event loop.
+        conv_id = self.conv.id
         from vendoo_studio.services.marketplace_delist import mark
 
         async def publish_lost(job, kind, payload, timeout=None):
@@ -1379,9 +1383,9 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         for answer, reset_first in ((stale, False), (other, False), (stale, True)):
             async def bridge(job, kind, payload, timeout=None, answer=answer, reset_first=reset_first):
                 if reset_first:
-                    rested = await in_worker_session(lambda db: native.reset(self.conv.id, "depop", db))
+                    rested = await in_worker_session(lambda db: native.reset(conv_id, "depop", db))
                     self.assertEqual(rested["state"], "draft")
-                await in_worker_session(mark, self.conv.id, "depop", "listed", seller_link)
+                await in_worker_session(mark, conv_id, "depop", "listed", seller_link)
                 return {"finished": True, "result": answer}
 
             MarketplaceListingRepo(self.db).save(self.conv.id, "depop", {"state": "unknown", "listing_url": None,
@@ -1398,13 +1402,13 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         # "I checked it myself" alone, then Chrome confirms the listing: the confirmed
         # answer wins, or the record would stay a draft and the next List would post a second copy.
         async def confirmed_after_reset(job, kind, payload, timeout=None):
-            await in_worker_session(lambda db: native.reset(self.conv.id, "depop", db))
+            await in_worker_session(lambda db: native.reset(conv_id, "depop", db))
             return {"finished": True, "result": {"ok": True, "state": "published", "draft_url": record["draft_url"],
                                                  "listing_url": LIVE["depop"]}}
 
         # A confirmation for some other draft is not one: the reset stays.
         async def other_draft_after_reset(job, kind, payload, timeout=None):
-            await in_worker_session(lambda db: native.reset(self.conv.id, "depop", db))
+            await in_worker_session(lambda db: native.reset(conv_id, "depop", db))
             return {"finished": True, "result": {"ok": True, "state": "published", "listing_url": LIVE["depop"],
                                                  "draft_url": "https://www.depop.com/sellinghub/drafts/edit/otherdraft9/"}}
 
@@ -1433,7 +1437,7 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
             self.assertEqual(native.reset(self.conv.id, "depop", self.db)["state"], "draft")
 
             async def mark_while_checking(job, kind, payload, timeout=None, answer=answer):
-                await in_worker_session(mark, self.conv.id, "depop", "listed", seller_link)
+                await in_worker_session(mark, conv_id, "depop", "listed", seller_link)
                 return {"finished": answer is not None, "result": answer}
 
             self.bridge.side_effect = mark_while_checking
