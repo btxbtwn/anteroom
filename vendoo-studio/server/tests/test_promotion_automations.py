@@ -551,17 +551,89 @@ class PromotionAutomationsTest(unittest.TestCase):
         saved = self.create({**OFFER, "scope": "items", "conversation_ids": [conv.id]})
         self.enable(saved["id"])
         self.likes[post] = 0
-        arrived = []
-        self.on_check = lambda: arrived.append(_now())
+        started = (_now() + timedelta(seconds=1)).replace(microsecond=123100)
+        arrived = started + timedelta(microseconds=500)
+        with patch.object(promotion_automations, "_now", return_value=started):
+            self.due(saved["id"])
+            self.tick()
+        check = self.db.query(ListingPromotion).filter_by(listing_id=post).one()
+        self.assertEqual(check.created_at, started)
+        self.assertLess(check.created_at, arrived)
+        # Match the Bridge's Date.toISOString(): the later like loses microseconds.
+        self.like_feed([{"listing_id": post, "at": arrived.isoformat(timespec="milliseconds") + "Z"}])
+        self.bridge.reset_mock()
+        with patch.object(promotion_automations, "_now", return_value=started + timedelta(seconds=1)):
+            self.assertEqual(self.check_likes(), 1)
+        self.assertEqual(self.checked(), [post])
+        # The later completed check suppresses that like on subsequent feed ticks.
+        self.bridge.reset_mock()
+        with patch.object(promotion_automations, "_now", return_value=started + timedelta(seconds=2)):
+            self.assertEqual(self.check_likes(), 0)
+        self.assertEqual(self.checked(), [])
+
+    def test_like_from_an_earlier_millisecond_is_already_checked(self):
+        conv, post = self.items[0]
+        saved = self.create({**OFFER, "scope": "items", "conversation_ids": [conv.id]})
+        self.enable(saved["id"])
+        self.likes[post] = 0
+        started = (_now() + timedelta(seconds=1)).replace(microsecond=123100)
+        with patch.object(promotion_automations, "_now", return_value=started):
+            self.due(saved["id"])
+            self.tick()
+        self.like_feed([{"listing_id": post, "at": (started - timedelta(milliseconds=1)).isoformat(timespec="milliseconds") + "Z"}])
+        self.bridge.reset_mock()
+        with patch.object(promotion_automations, "_now", return_value=started + timedelta(seconds=1)):
+            self.assertEqual(self.check_likes(), 0)
+        self.assertEqual(self.checked(), [])
+
+    def test_like_is_retried_after_chrome_disconnects_before_preview(self):
+        conv, post = self.items[0]
+        saved = self.create({**OFFER, "scope": "items", "conversation_ids": [conv.id]})
+        self.enable(saved["id"])
+        self.likes[post] = 0
+        at = _now() + timedelta(seconds=1)
+        events = [{"listing_id": post, "at": at.isoformat(timespec="milliseconds") + "Z"}]
+
+        async def disconnected(job, message_type, payload, timeout=0):
+            if message_type == "marketplace.like_events":
+                return {"ok": True, "events": events}
+            raise browser_bridge.BrowserBridgeError("Chrome disconnected")
+
+        self.bridge.side_effect = disconnected
+        with patch.object(promotion_automations, "_now", return_value=at + timedelta(seconds=1)):
+            self.check_likes()
+        self.like_feed(events)
+        self.bridge.reset_mock()
+        with patch.object(promotion_automations, "_now", return_value=at + timedelta(seconds=2)):
+            self.assertEqual(self.check_likes(), 1)
+        self.assertEqual(self.checked(), [post])
+        self.bridge.reset_mock()
+        with patch.object(promotion_automations, "_now", return_value=at + timedelta(seconds=3)):
+            self.assertEqual(self.check_likes(), 0)
+        self.assertEqual(self.checked(), [])
+
+    def test_price_recorded_during_preview_does_not_release_later_refusal(self):
+        (conv, item), = self.mercari_items(1)
+        saved = self.create({**OFFER, "marketplace": "mercari", "shipping_label": None, "scope": "items", "conversation_ids": [conv.id]})
+        self.enable(saved["id"])
+        refuse = self.mercari_refusal(price_cents=150)
+
+        async def record_then_refuse(job, message_type, payload, timeout=0):
+            if message_type == "marketplace.promotion_check":
+                MarketplaceListingRepo(self.db).save(conv.id, "mercari", {"listed_price": 25.0})
+            return await refuse(job, message_type, payload, timeout)
+
+        self.bridge.side_effect = record_then_refuse
         self.due(saved["id"])
         self.tick()
-        self.on_check = None
-        check = self.db.query(ListingPromotion).filter_by(listing_id=post).one()
-        self.assertLess(check.created_at, arrived[0])
-        self.like_feed([{"listing_id": post, "at": arrived[0].isoformat() + "Z"}])
+        refusal = self.db.query(ListingPromotion).filter_by(listing_id=item).one()
+        listing = self.db.query(MarketplaceListing).filter_by(conversation_id=conv.id, marketplace="mercari").one()
+        self.assertLess(refusal.created_at, listing.price_recorded_at)
+        self.assertLess(listing.price_recorded_at, refusal.finished_at)
         self.bridge.reset_mock()
-        self.check_likes()
-        self.assertEqual(self.checked(), [post])
+        self.due(saved["id"])
+        self.tick()
+        self.assertEqual(self.checked(), [])
 
     def mercari_refusal(self, *, refused=None, price_cents=None):
         original = self.answer

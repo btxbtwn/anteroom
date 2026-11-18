@@ -22,7 +22,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import cast
 
-from sqlalchemy import CursorResult, func, update
+from sqlalchemy import CursorResult, func, or_, update
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import SessionLocal
@@ -363,7 +363,7 @@ def _held_after_refusal(db: Session, row: PromotionAutomation, now: datetime, co
             MarketplaceListing.conversation_id, MarketplaceListing.listed_price, MarketplaceListing.price_recorded_at,
         ).filter(MarketplaceListing.conversation_id.in_(list(priced)), MarketplaceListing.marketplace == row.marketplace):
             promotion = priced[conversation_id]
-            if (listed_price is not None and price_recorded_at is not None and price_recorded_at > promotion.created_at
+            if (listed_price is not None and price_recorded_at is not None and price_recorded_at > (promotion.finished_at or promotion.created_at)
                     and round(listed_price * 100) != promotion.price_cents):
                 refused.pop(promotion.listing_id, None)
     if len(refused) > BROAD_REFUSALS and len(refused) * 2 > len(covered):
@@ -467,7 +467,7 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                 # per-listing activity journal. No send timestamp; a recognized
                 # Mercari eligibility refusal gates previews only.
                 send.listing_id = send.listing_id or listing_id
-                send.state, send.note = "skipped", _skip_reason(exc, send)
+                send.state, send.note = ("failed" if exc.code in ("chrome", "network") else "skipped"), _skip_reason(exc, send)
                 send.marketplace_message = scrub(send.marketplace_message)
                 send.finished_at = _now()
                 # The draft may have been deleted while Chrome was reading.
@@ -656,13 +656,15 @@ async def check_new_likes(db: Session, *, sleep=asyncio.sleep) -> int:
         covered = {target[1] for target in _covered(db, row)}
         # The feed is re-read from the same start every minute, so a like this
         # rule has already checked the listing for would otherwise read it again
-        # on every tick, whatever that check found. A newer like reads it.
+        # on every tick. Failed reads must retry. The Bridge truncates events to
+        # milliseconds: keep ties eligible until a check in a later millisecond.
         checked = dict(db.query(ListingPromotion.listing_id, func.max(ListingPromotion.created_at)).filter(
             ListingPromotion.automation_id == row.id, ListingPromotion.action == "offer",
             ListingPromotion.listing_id.in_(list(events)),
+            or_(ListingPromotion.state != "failed", ListingPromotion.sent_at.is_not(None)),
         ).group_by(ListingPromotion.listing_id).all()) if events else {}
         events = {key: at for key, at in events.items() if key in covered
-                  and not (key in checked and at <= checked[key])
+                  and not (key in checked and at < checked[key].replace(microsecond=checked[key].microsecond // 1000 * 1000))
                   and not promotions.blocking(db, row.marketplace, key, "offer", new_like_at=at)}
         if events:
             await run_round(db, row, sleep=sleep, like_events=events)
