@@ -70,9 +70,20 @@ struct BulkListingPlan: Equatable {
     }
 
     /// Drops a photo from the plan, and any item it leaves empty.
-    mutating func remove(_ photo: UUID) {
+    mutating func remove(_ photo: UUID, readingSizes: Set<UUID> = []) {
         loose.removeAll { $0 == photo }
-        for index in items.indices { items[index].photos.removeAll { $0 == photo } }
+        for index in items.indices where items[index].photos.contains(photo) {
+            items[index].photos.removeAll { $0 == photo }
+            if items[index].sizeSuggested {
+                items[index].sizeTag = ""
+                items[index].sizeSuggested = false
+                items[index].sizeNeedsReview = true
+                items[index].sizeNote = "A photo was removed, so the size read from it was cleared. Read size tags again or type the size."
+            } else if readingSizes.contains(items[index].id) {
+                items[index].sizeNeedsReview = items[index].sizeTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                items[index].sizeNote = "A photo was removed while reading. Read size tags again or type the size."
+            }
+        }
         items.removeAll { $0.photos.isEmpty }
         turns[photo] = nil
     }
@@ -188,11 +199,13 @@ struct BulkListingPlan: Equatable {
                 return
             }
             var filled: [String] = []
+            var accepted = false
             var byHand: [String] = []
             for field in garment.fields {
                 let typed = (item.measurements[field.key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 let read = reading.measurements[field.key]
                 if read?.status == "accepted", let value = read?.value {
+                    accepted = true
                     if typed.isEmpty {
                         item.measurements[field.key] = Self.inches(value)
                         filled.append(field.key)
@@ -202,7 +215,8 @@ struct BulkListingPlan: Equatable {
                 }
             }
             item.suggested.formUnion(filled)
-            var parts = [filled.isEmpty ? "The yardstick could not be read." : "Filled from the photos. Check them."]
+            let nothingNew = accepted ? "Nothing new could be read from the photos." : "The yardstick could not be read."
+            var parts = [filled.isEmpty ? nothingNew : "Filled from the photos. Check them."]
             if !byHand.isEmpty { parts.append("Measure by hand: \(byHand.joined(separator: ", ")).") }
             item.readNote = parts.joined(separator: " ")
         }

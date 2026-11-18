@@ -1,0 +1,52 @@
+import XCTest
+@testable import Anteroom
+
+final class BulkReadReviewRegressionTests: XCTestCase {
+    func testRemovingPhotoClearsItsUntouchedSizeSuggestion() throws {
+        var plan = BulkListingPlan()
+        let photos = [UUID(), UUID()]
+        plan.add(photos)
+        let item = try XCTUnwrap(plan.makeItem(from: Set(photos)))
+        plan.applySizeTag(.init(photosRead: 2, status: "accepted", size: "0", sizes: ["0"]), to: item.id)
+        plan.remove(photos[0])
+        XCTAssertEqual(plan.items[0].sizeTag, "")
+        XCTAssertFalse(plan.items[0].sizeSuggested)
+        XCTAssertTrue(plan.items[0].sizeNeedsReview)
+        XCTAssertEqual(plan.items[0].sizeNote, "A photo was removed, so the size read from it was cleared. Read size tags again or type the size.")
+    }
+
+    func testAcceptedMeasurementsWithNoBlankFieldsSayNothingNew() throws {
+        var plan = BulkListingPlan()
+        let photo = UUID()
+        plan.add([photo])
+        let item = try XCTUnwrap(plan.makeItem(from: [photo]))
+        for field in item.garment.fields { plan.setMeasurement(field.key, "20", for: item.id) }
+        plan.apply(.init(photosRead: 1, measurements: ["length": .init(status: "accepted", value: 27)]),
+                   garment: .top, to: item.id)
+        XCTAssertEqual(plan.items[0].readNote, "Nothing new could be read from the photos.")
+        XCTAssertEqual(plan.items[0].measurements["length"], "20")
+    }
+
+    func testRemovingPhotoDuringReadFlagsBlankSizeButKeepsManualZero() throws {
+        for size in ["", "0"] {
+            var plan = BulkListingPlan()
+            let photos = [UUID(), UUID()]
+            plan.add(photos)
+            let item = try XCTUnwrap(plan.makeItem(from: Set(photos)))
+            plan.setSizeTag(size, for: item.id)
+            plan.remove(photos[0], readingSizes: [item.id])
+            XCTAssertEqual(plan.items[0].sizeTag, size)
+            XCTAssertEqual(plan.items[0].sizeNeedsReview, size.isEmpty)
+            XCTAssertEqual(plan.items[0].sizeNote, "A photo was removed while reading. Read size tags again or type the size.")
+        }
+    }
+
+    func testUnacceptedMeasurementsKeepUnreadableCopyAndNameBlankFields() throws {
+        var plan = BulkListingPlan()
+        let photo = UUID()
+        plan.add([photo])
+        let item = try XCTUnwrap(plan.makeItem(from: [photo]))
+        plan.apply(.init(photosRead: 1, measurements: [:]), garment: .top, to: item.id)
+        XCTAssertEqual(plan.items[0].readNote, "The yardstick could not be read. Measure by hand: Pit to Pit, Length, Sleeve.")
+    }
+}

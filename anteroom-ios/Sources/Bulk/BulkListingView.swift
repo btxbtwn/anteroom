@@ -386,7 +386,7 @@ struct BulkListingView: View {
     }
 
     private func remove(_ id: UUID) {
-        plan.remove(id)
+        plan.remove(id, readingSizes: readingSizes)
         selection.remove(id)
         jpegs[id] = nil
         thumbnails[id] = nil
@@ -630,7 +630,9 @@ struct BulkItemEditor: View {
                     if index != 0 {
                         Button("Make cover", systemImage: "star") { plan.makeCover(photo, in: itemID) }
                     }
-                    Button("Remove photo", systemImage: "trash", role: .destructive) { plan.remove(photo) }
+                    Button("Remove photo", systemImage: "trash", role: .destructive) {
+                        plan.remove(photo, readingSizes: readingSize ? [itemID] : [])
+                    }
                 }
             }
             .onMove { plan.movePhotos(in: itemID, from: $0, to: $1) }

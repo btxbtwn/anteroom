@@ -2,6 +2,30 @@ import XCTest
 @testable import Anteroom
 
 final class EditorDraftTests: XCTestCase {
+    func testLegacyDraftRestoresUnsavedEditsWithoutSizeProperties() throws {
+        let baseline = SellerInputs(notes: #"{"size":"0","future":true}"#)
+        var form = ListingEditorModel.Form()
+        form.fields.title = "Unsaved title"
+        form.sellerInputs = baseline
+        form.sellerInputs.sku = "Unsaved SKU"
+        let draft = EditorDraft(listingID: "legacy", revisionID: "r1", baselineInputs: baseline,
+                                form: form, pending: [:], savedAt: .now)
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(draft)) as? [String: Any])
+        var oldBaseline = try XCTUnwrap(object["baselineInputs"] as? [String: Any])
+        oldBaseline.removeValue(forKey: "size")
+        object["baselineInputs"] = oldBaseline
+        var oldForm = try XCTUnwrap(object["form"] as? [String: Any])
+        var oldInputs = try XCTUnwrap(oldForm["sellerInputs"] as? [String: Any])
+        oldInputs.removeValue(forKey: "size")
+        oldForm["sellerInputs"] = oldInputs
+        object["form"] = oldForm
+        let restored = try JSONDecoder().decode(EditorDraft.self, from: JSONSerialization.data(withJSONObject: object))
+        XCTAssertTrue(restored.restores(revisionID: "r1", inputs: baseline))
+        XCTAssertEqual(restored.form.fields.title, "Unsaved title")
+        XCTAssertEqual(restored.form.sellerInputs.sku, "Unsaved SKU")
+        XCTAssertEqual(restored.form.sellerInputs.size, "0")
+    }
+
     func testDraftRoundTripsAndRestoresOnlyOnTheSameVersion() throws {
         var form = ListingEditorModel.Form()
         form.fields.title = "Blue linen shirt"
