@@ -5,6 +5,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'hosted-image-smoke.sh'
 DOCKER = r'''#!/usr/bin/env python3
@@ -58,7 +59,8 @@ class SmokeReadinessTests(unittest.TestCase):
             executable.write_text(source)
             executable.chmod(0o755)
         result = subprocess.run(['bash', str(SCRIPT)], cwd=root,
-                                env={**os.environ, 'PATH': str(binary) + os.pathsep + os.environ['PATH'],
+                                # Bash startup hooks and exported functions must not bypass the mocks.
+                                env={'PATH': str(binary) + os.pathsep + os.environ['PATH'],
                                      'SMOKE_MOCK_ROOT': str(root), 'SMOKE_MOCK_MODE': mode},
                                 check=False, capture_output=True, text=True, timeout=15)
         calls = [json.loads(line) for line in (root / 'calls.jsonl').read_text().splitlines()]
@@ -72,6 +74,21 @@ class SmokeReadinessTests(unittest.TestCase):
             self.assertIn(name, (root / 'image-validation' / filename).read_text())
             self.assertIn(name, calls[removal])
         self.assertIn(['network', 'rm', 'anteroom-image-smoke'], calls)
+
+    def test_inherited_bash_hooks_cannot_bypass_mocks(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            startup = Path(temporary) / 'bash-env'
+            startup.write_text('echo startup >> "$SMOKE_MOCK_ROOT/inherited-hook"\n')
+            hooks = {
+                'BASH_ENV': str(startup),
+                'BASH_FUNC_docker%%': '() { echo function >> "$SMOKE_MOCK_ROOT/inherited-hook"; return 97; }',
+            }
+            for name, value in hooks.items():
+                with self.subTest(hook=name), patch.dict(os.environ, {name: value}):
+                    root, result, calls = self.run_smoke('ready')
+                    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertFalse((root / 'inherited-hook').exists())
+                    self.assert_cleanup(root, calls)
 
     def test_socket_temporary_server_does_not_end_tcp_polling(self):
         root, result, calls = self.run_smoke('ready')
