@@ -95,6 +95,22 @@ def SessionLocal():
     return context.session_factory() if context is not None else _local_sessions()
 
 
+def end_read(db, keep=()) -> None:
+    """End a read-only transaction before calculating with what it read.
+
+    Postgres ends a transaction left idle past its deadline, so a read that
+    then calculates or waits for a lock returns its connection first. ``keep``
+    are entities the read loaded and the calculation still uses: they are
+    detached with their values loaded, so reading them takes no query, where a
+    rollback would expire them and each would be read again. Only for a session
+    that changed nothing; the next query starts a new transaction.
+    """
+    for row in keep:
+        if row in db:
+            db.expunge(row)
+    db.rollback()
+
+
 class Base(DeclarativeBase):
     pass
 

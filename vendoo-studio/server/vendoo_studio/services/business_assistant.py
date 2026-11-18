@@ -463,17 +463,23 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
 def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[str, Any]]]]:
     """The summary as text, and the tables a lookup reads."""
     from vendoo_studio.services import ad_spend, boxes, box_scout, scout
-    from vendoo_studio.services.inventory_analytics import analytics_ranges, load_rows
+    from vendoo_studio.database import end_read
+    from vendoo_studio.services.inventory_analytics import analytics_ranges, read_analytics_inputs, rows_from_inputs
 
-    rows = load_rows(db)
+    # Each read ends its transaction before calculating (end_read). A wait for
+    # the imported-sales archive lock or a large shop's calculations must not
+    # hold an idle transaction, which Postgres ends after its deadline.
+    inputs = read_analytics_inputs(db)
+    end_read(db, keep=[line for lines in inputs.sales.values() for line in lines])
+    rows = rows_from_inputs(inputs)
     ranges = analytics_ranges(db, ANALYTICS_RANGES, now=clock, rows=rows)
     everything = ranges["all"]
     records = _records(db, rows, clock)
     changes = _price_changes(db)
-    box_results = boxes.results(db, rows=rows)
+    box_results = boxes.results(db, rows=rows, release=True)
     ads = [ad_spend.entry_view(row) for row in ad_spend.list_entries(db)]
     events = _sale_events(db)
-    scout_sales = scout.outcomes(db)
+    scout_sales = scout.outcomes(db, rows)
     sourcing_state = box_scout.read_state()
     tab_boxes = sourcing_boxes.box_rows(sourcing_state, rows, clock)
     breakdowns = {

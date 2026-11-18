@@ -1,0 +1,1 @@
+- The assistant no longer loses its connection to your shop data when it has to wait or work through a large shop before answering on the web.
