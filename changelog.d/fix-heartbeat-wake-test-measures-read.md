@@ -1,0 +1,1 @@
+- Steadier automated checks for reading sales in the background.
