@@ -191,6 +191,13 @@ class LockedSizeGenerationTest(unittest.TestCase):
                 _follow_native_size_rows(listing, seed, "M")
                 self.assertEqual(listing["ebay_specifics"]["Size"], expected)
 
+    def test_a_blank_ebay_size_type_falls_back_to_the_general_size_type(self):
+        row = {**EBAY_ROW, "options": ["PM", "M"]}
+        self.seller_set("M", locks=("size", "sizeType"), sizeType="Petites", _native_forms={"ebay": {"fields": [row]}},
+                        ebay_specifics={"Size": "PM"})
+        parsed = self.generate(size="M", sizeType="Regular", ebay_specifics={"Size": "M", "sizeType": "   "})
+        self.assertEqual(parsed["ebay_specifics"]["Size"], "PM")
+
     def test_without_a_lock_the_generated_size_stands(self):
         self.seller_set("L", locks=())
         parsed = self.generate(poshmark_specifics={"size": "S"})
