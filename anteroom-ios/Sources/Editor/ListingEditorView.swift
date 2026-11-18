@@ -41,7 +41,6 @@ struct ListingEditorView: View {
             .alert("Unsaved changes", isPresented: draftNoticeShown) {
                 if model.recoveryDraft != nil {
                     Button("Review kept edits") { showingDraftRecovery = true }
-                    Button("Discard kept edits", role: .destructive) { model.discardKeptDraft() }
                     Button("Later", role: .cancel) {}
                 } else {
                     Button("OK", role: .cancel) {}
@@ -64,13 +63,14 @@ struct ListingEditorView: View {
             }
             .sheet(isPresented: $showingDraftRecovery) {
                 if let draft = model.recoveryDraft {
-                    DraftRecoveryView(current: model.form, draft: draft) {
+                    DraftRecoveryView(current: model.form, draft: draft, useKeptCopy: {
                         model.recoverKeptDraft()
                         showingDraftRecovery = false
-                    } discardKeptCopy: {
+                    }, discardKeptCopy: {
                         model.discardKeptDraft()
                         showingDraftRecovery = false
-                    }
+                    }, nextKeptCopy: model.recoveryDrafts.count > 1 ? { model.nextKeptDraft() } : nil,
+                                      canUseKeptCopy: model.canRecoverKeptDraft)
                 }
             }
     }
@@ -82,7 +82,9 @@ struct ListingEditorView: View {
             VStack(alignment: .leading, spacing: 16) {
                 if model.recoveryDraft != nil {
                     WorkspaceSection("Kept unsaved edits") {
-                        Text("A copy of your earlier edits is still on this phone.")
+                        Text(model.recoveryDrafts.count == 1
+                             ? "An earlier copy of your edits is still on this phone."
+                             : "\(model.recoveryDrafts.count) earlier copies of your edits are still on this phone.")
                         Button("Review kept edits") { showingDraftRecovery = true }
                     }
                 }

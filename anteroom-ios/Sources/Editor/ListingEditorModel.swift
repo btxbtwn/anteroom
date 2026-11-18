@@ -51,8 +51,10 @@ final class ListingEditorModel {
     var hasConflict = false
     /// Said once after opening: unsaved edits kept from last time came back, or were dropped.
     var draftNotice: String?
-    private(set) var recoveryDraft: EditorDraft?
-    private var usingRecoveredCopy = false
+    private(set) var recoveryDrafts: [EditorDraft] = []
+    var recoveryDraft: EditorDraft? { recoveryDrafts.first }
+    var canRecoverKeptDraft: Bool { hasLoaded && !isLoading && !isSaving }
+    private var activeRecoveredDraft: EditorDraft?
     private var checkedStash = false
     /// Each marketplace tab's state for the saved listing: ready, fields missing, listed or sold.
     private(set) var choices: [ListChoice] = []
@@ -108,6 +110,12 @@ final class ListingEditorModel {
     }
 
     private func apply(_ screen: ListingScreen) {
+        // A reload did not save the chosen values. Return that copy to recovery.
+        if let draft = activeRecoveredDraft {
+            if !recoveryDrafts.contains(draft) { recoveryDrafts.append(draft) }
+            activeRecoveredDraft = nil
+            draftNotice = "Your earlier unsaved edits are still kept on this phone. Review each kept copy before choosing what to keep."
+        }
         status = screen.conversation.status
         document = screen.listing.listing
         revisionID = screen.listing.currentRevisionID
@@ -150,44 +158,59 @@ final class ListingEditorModel {
     @discardableResult
     func stashEdits() -> Bool {
         // Keep current work separately from the unresolved copy.
-        guard hasChanges else { return false }
-        if let recoveryDraft, !EditorDraftStore.save(recoveryDraft, recovery: true) { return false }
+        guard hasLoaded, !isLoading, !isSaving else { return false }
+        guard hasChanges else {
+            if let current = EditorDraftStore.load(listingID),
+               !recoveryDrafts.contains(current), current != activeRecoveredDraft {
+                EditorDraftStore.remove(listingID)
+            }
+            return false
+        }
+        guard persistRecoveryCopies() else { return false }
         return EditorDraftStore.save(EditorDraft(listingID: listingID, revisionID: revisionID, baselineInputs: saved.sellerInputs,
-                                                form: form, pending: pending, savedAt: Date(), baselineForm: saved))
+                                                form: form, pending: pending, savedAt: Date(), baselineForm: saved,
+                                                recoveredCopySavedAt: activeRecoveredDraft?.savedAt))
     }
 
     func forgetStash() {
-        guard recoveryDraft == nil else { return }
+        guard persistRecoveryCopies() else { return }
         EditorDraftStore.remove(listingID)
-        if usingRecoveredCopy {
-            EditorDraftStore.remove(listingID, recovery: true)
-            usingRecoveredCopy = false
+        if let draft = activeRecoveredDraft, EditorDraftStore.removeRecovery(draft) {
+            activeRecoveredDraft = nil
         }
+    }
+
+    private func persistRecoveryCopies() -> Bool {
+        for draft in recoveryDrafts + [activeRecoveredDraft].compactMap({ $0 }) {
+            if !EditorDraftStore.keepForRecovery(draft) { return false }
+        }
+        return true
+    }
+
+    func nextKeptDraft() {
+        guard recoveryDrafts.count > 1 else { return }
+        recoveryDrafts.append(recoveryDrafts.removeFirst())
     }
 
     /// Explicit local recovery only; the seller still reviews and saves the editor.
     func recoverKeptDraft() {
-        guard let draft = recoveryDraft else { return }
+        guard canRecoverKeptDraft, let draft = recoveryDraft else { return }
         form = draft.recoveredForm(onto: saved)
         pending = draft.pending
-        recoveryDraft = nil
+        recoveryDrafts.removeFirst()
+        if let previous = activeRecoveredDraft { recoveryDrafts.append(previous) }
+        activeRecoveredDraft = draft
         draftNotice = nil
-        usingRecoveredCopy = true
-        if stashEdits() {
-            // The chosen edits now have a normal, recoverable stash with a fresh baseline.
-            EditorDraftStore.remove(listingID, recovery: true)
-            usingRecoveredCopy = false
-        }
+        stashEdits()
     }
 
     func discardKeptDraft() {
-        if let recoveryDraft, EditorDraftStore.load(listingID) == recoveryDraft {
+        guard let draft = recoveryDraft, EditorDraftStore.removeRecovery(draft) else { return }
+        if EditorDraftStore.load(listingID) == draft {
             EditorDraftStore.remove(listingID)
         }
-        EditorDraftStore.remove(listingID, recovery: true)
-        recoveryDraft = nil
+        recoveryDrafts.removeFirst()
         draftNotice = nil
-        forgetStash()
         stashEdits()
     }
 
@@ -195,30 +218,38 @@ final class ListingEditorModel {
     func discardChanges() {
         form = saved
         pending = [:]
-        if recoveryDraft != nil, EditorDraftStore.load(listingID) != recoveryDraft {
-            EditorDraftStore.remove(listingID)
-        }
         forgetStash()
     }
 
     /// Safe copies restore automatically; conflicts stay on disk for an explicit choice.
     private func restoreStash() {
-        recoveryDraft = EditorDraftStore.load(listingID, recovery: true)
+        recoveryDrafts = EditorDraftStore.recoveryCopies(listingID) ?? []
         guard let draft = EditorDraftStore.load(listingID) else {
             if recoveryDraft != nil { draftNotice = "Your earlier unsaved edits are still kept on this phone. Review the kept copy before choosing what to keep." }
             return
         }
         let when = draft.savedAt.formatted(date: .abbreviated, time: .shortened)
-        if draft != recoveryDraft, draft.restores(revisionID: revisionID, inputs: saved.sellerInputs, currentForm: saved) {
+        if !recoveryDrafts.contains(draft), draft.restores(revisionID: revisionID, inputs: saved.sellerInputs, currentForm: saved) {
             form = draft.recoveredForm(onto: saved)
             pending = draft.pending
+            if let chosenAt = draft.recoveredCopySavedAt {
+                let matches = recoveryDrafts.filter { $0.savedAt == chosenAt }
+                // Ambiguous references keep every copy rather than consuming the wrong one.
+                if matches.count == 1, let chosen = matches.first {
+                    activeRecoveredDraft = chosen
+                    recoveryDrafts.removeAll { $0 == chosen }
+                }
+            }
             draftNotice = "Your unsaved changes from \(when) are back. Save to keep them."
         } else {
-            if recoveryDraft == nil {
-                recoveryDraft = draft
-                EditorDraftStore.save(draft, recovery: true)
+            if !recoveryDrafts.contains(draft) {
+                recoveryDrafts.append(draft)
+                EditorDraftStore.keepForRecovery(draft)
             }
             draftNotice = "Your unsaved changes from \(when) are still kept on this phone. They couldn't be safely restored. Compare the kept copy with the current details before choosing what to keep."
+        }
+        if recoveryDraft != nil {
+            draftNotice = "Your earlier unsaved edits are still kept on this phone. Review each kept copy before choosing what to keep."
         }
     }
 

@@ -12,6 +12,8 @@ struct EditorDraft: Codable, Equatable {
     let savedAt: Date
     /// Unversioned listing edits need a field baseline as well as notes.
     var baselineForm: ListingEditorModel.Form? = nil
+    /// Which kept snapshot this current-work stash came from, if explicitly chosen.
+    var recoveredCopySavedAt: Date? = nil
 
     /// Also used after the seller explicitly chooses a conflicting kept copy.
     func recoveredForm(onto current: ListingEditorModel.Form) -> ListingEditorModel.Form {
@@ -39,10 +41,10 @@ enum EditorDraftStore {
     }
 
     @discardableResult
-    static func save(_ draft: EditorDraft, recovery: Bool = false) -> Bool {
+    static func save(_ draft: EditorDraft) -> Bool {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try JSONEncoder().encode(draft).write(to: file(draft.listingID, recovery: recovery), options: [.atomic, .completeFileProtection])
+            try JSONEncoder().encode(draft).write(to: file(draft.listingID), options: [.atomic, .completeFileProtection])
             return true
         } catch {
             // Keeping edits is a safety net; the editor still holds them while the app runs.
@@ -50,15 +52,47 @@ enum EditorDraftStore {
         return false
     }
 
-    static func load(_ listingID: String, recovery: Bool = false) -> EditorDraft? {
-        guard let data = try? Data(contentsOf: file(listingID, recovery: recovery)),
+    static func load(_ listingID: String) -> EditorDraft? {
+        guard let data = try? Data(contentsOf: file(listingID)),
               let draft = try? JSONDecoder().decode(EditorDraft.self, from: data),
               draft.listingID == listingID else { return nil }
         return draft
     }
 
-    static func remove(_ listingID: String, recovery: Bool = false) {
-        try? FileManager.default.removeItem(at: file(listingID, recovery: recovery))
+    static func remove(_ listingID: String) {
+        try? FileManager.default.removeItem(at: file(listingID))
+    }
+
+    /// Every conflicting snapshot remains available until individually resolved.
+    static func recoveryCopies(_ listingID: String) -> [EditorDraft]? {
+        let url = file(listingID, recovery: true)
+        guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+        guard let data = try? Data(contentsOf: url),
+              let copies = try? JSONDecoder().decode([EditorDraft].self, from: data),
+              copies.allSatisfy({ $0.listingID == listingID }) else { return nil }
+        return copies
+    }
+
+    @discardableResult
+    static func keepForRecovery(_ draft: EditorDraft) -> Bool {
+        guard var copies = recoveryCopies(draft.listingID) else { return false }
+        if copies.contains(draft) { return true }
+        copies.append(draft)
+        return writeRecoveryCopies(copies, listingID: draft.listingID)
+    }
+
+    @discardableResult
+    static func removeRecovery(_ draft: EditorDraft) -> Bool {
+        guard let copies = recoveryCopies(draft.listingID) else { return false }
+        return writeRecoveryCopies(copies.filter { $0 != draft }, listingID: draft.listingID)
+    }
+
+    private static func writeRecoveryCopies(_ copies: [EditorDraft], listingID: String) -> Bool {
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try JSONEncoder().encode(copies).write(to: file(listingID, recovery: true), options: [.atomic, .completeFileProtection])
+            return true
+        } catch { return false }
     }
 
     static func removeAll() {

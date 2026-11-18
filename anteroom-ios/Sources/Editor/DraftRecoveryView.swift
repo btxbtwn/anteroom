@@ -6,6 +6,8 @@ struct DraftRecoveryView: View {
     let draft: EditorDraft
     let useKeptCopy: () -> Void
     let discardKeptCopy: () -> Void
+    var nextKeptCopy: (() -> Void)? = nil
+    var canUseKeptCopy = true
     @Environment(\.dismiss) private var dismiss
     @State private var confirmDiscard = false
 
@@ -13,7 +15,9 @@ struct DraftRecoveryView: View {
         NavigationStack {
             List {
                 Section {
+                    Text("Kept \(draft.savedAt.formatted(date: .abbreviated, time: .shortened))")
                     Text("Compare your current details with the edits kept on this phone. Using the kept copy replaces the editor's values. Nothing is saved until you tap Save in the editor.")
+                    if let nextKeptCopy { Button("Review next kept copy", action: nextKeptCopy) }
                 }
                 ForEach(differences, id: \.label) { difference in
                     Section(difference.label) {
@@ -32,6 +36,8 @@ struct DraftRecoveryView: View {
                 }
                 Section {
                     Button("Use kept copy", action: useKeptCopy)
+                        .disabled(!canUseKeptCopy)
+                    if !canUseKeptCopy { Text("Wait for the current listing details to finish loading or saving.") }
                     Button("Discard kept edits", role: .destructive) { confirmDiscard = true }
                 }
             }
