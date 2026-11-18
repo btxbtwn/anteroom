@@ -14,6 +14,13 @@ class StartMove(BaseModel):
     password: str = Field(min_length=1, max_length=1024)
 
 
+@router.get('/destination')
+def account_destination():
+    """Navigation metadata only: no listing scan, account session or relay."""
+    from vendoo_studio.config import HOSTED_URL
+    return {'hosted_url': f'{HOSTED_URL}/?sign-in'}
+
+
 @router.get("")
 def move_status():
     return account_move.status()

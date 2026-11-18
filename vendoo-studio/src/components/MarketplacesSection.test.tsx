@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MarketplaceListings } from "../api/marketplaceListings";
 import type { ListingData } from "../api/types";
 import type { MissingField, NativeDraft, NativeDrafts, PreflightGap } from "../api/nativeMarketplaces";
-import { MarketplacesLayout, MarketplacesSection, askChatPrompt, deletable, listChoice, reconnectText, rowStatus, saidBesideList } from "./MarketplacesSection";
+import { ApiRequestError } from "../api/transport";
+import { MarketplacesLayout, MarketplacesSection, askChatPrompt, deletable, listChoice, markListedPrefill, relinkAfterDeletedRefusal, reconnectText, rowStatus, saidBesideList } from "./MarketplacesSection";
 import { readyMarketplaces } from "./ListEverywhereDialog";
 import { waitlist } from "./MarketplaceActivity";
 
@@ -605,6 +606,30 @@ it("disables only the agent's target row and labels it while other fields stay e
 });
 
 
+describe("Mark as listed prefill", () => {
+  const sellerLink = { url: "https://www.depop.com/products/seller-old-157e/", listing_id: "seller-old-157e", source: "seller", sold_here: false } as const;
+
+  it("offers the seller's own live link to correct it", () => {
+    expect(markListedPrefill({ ...sellerLink, state: "live" }, false)).toBe(sellerLink.url);
+  });
+
+  it("never offers a link Anteroom recorded as deleted", () => {
+    expect(markListedPrefill({ ...sellerLink, state: "deleted" }, false)).toBe("");
+  });
+
+  it("offers nothing while the last marketplace action is unconfirmed", () => {
+    // The seller is about to name the listing that is really there; an old link is one click from replacing it.
+    expect(markListedPrefill({ ...sellerLink, state: "live" }, true)).toBe("");
+  });
+
+  it("offers nothing for links Anteroom or Vendoo reported", () => {
+    expect(markListedPrefill({ ...sellerLink, source: "anteroom", state: "live" }, false)).toBe("");
+    expect(markListedPrefill({ ...sellerLink, source: "vendoo", state: "live" }, false)).toBe("");
+    expect(markListedPrefill(undefined, false)).toBe("");
+  });
+});
+
+
 describe("field re-check after a save", () => {
   it("keeps each row's line, saying Checking… instead of the previous revision's answer", () => {
     const preflight = { marketplaces: { depop: { ready: false, gaps: [
@@ -615,6 +640,35 @@ describe("field re-check after a save", () => {
     expect(checking).toContain("Checking…");
     expect(checking).not.toContain("to fill");
     expect(checking).not.toContain("Ready");
+  });
+});
+
+
+describe("linking a listing Anteroom delisted", () => {
+  const request = { marketplace: "depop" as const, state: "listed" as const, url: "https://www.depop.com/products/seller-old-157e/" };
+  const refusal = new ApiRequestError("Anteroom delisted this Depop listing. Paste the link to the listing that is live on Depop now, or confirm it is still there if you just checked.",
+    409, false, null, "deleted_listing");
+
+  it("asks the seller, and resends with their confirmation only when they say it is still live", async () => {
+    const confirm = vi.fn(async (_message: string, _options: { confirmLabel: string }) => true);
+    expect(await relinkAfterDeletedRefusal(refusal, request, confirm)).toEqual({ ...request, relinkDeleted: true });
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(confirm.mock.calls[0]?.[0]).toContain("Anteroom delisted this Depop listing.");
+    expect(confirm.mock.calls[0]?.[0]).toContain("Link it anyway only if you just saw it live on Depop.");
+  });
+
+  it("does nothing more when the seller cancels", async () => {
+    const confirm = vi.fn(async (_message: string, _options: { confirmLabel: string }) => false);
+    expect(await relinkAfterDeletedRefusal(refusal, request, confirm)).toBeNull();
+    expect(confirm).toHaveBeenCalledTimes(1);
+  });
+
+  it("never asks again for a request that already carried the confirmation, or for other refusals", async () => {
+    const confirm = vi.fn(async (_message: string, _options: { confirmLabel: string }) => true);
+    expect(await relinkAfterDeletedRefusal(refusal, { ...request, relinkDeleted: true }, confirm)).toBeNull();
+    expect(await relinkAfterDeletedRefusal(new ApiRequestError("Busy", 409, false, null, "marketplace_busy"), request, confirm)).toBeNull();
+    expect(await relinkAfterDeletedRefusal(new Error("Network"), request, confirm)).toBeNull();
+    expect(confirm).not.toHaveBeenCalled();
   });
 });
 

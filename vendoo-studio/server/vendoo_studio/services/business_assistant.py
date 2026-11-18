@@ -463,17 +463,14 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
 def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[str, Any]]]]:
     """The summary as text, and the tables a lookup reads."""
     from vendoo_studio.services import ad_spend, boxes, box_scout, scout
-    from vendoo_studio.services.inventory_analytics import inventory_analytics, load_rows
+    from vendoo_studio.services.inventory_analytics import analytics_ranges, load_rows
 
     rows = load_rows(db)
-    ranges = {
-        range_id: inventory_analytics(db, range_id=range_id, now=clock, rows=rows)
-        for range_id in ANALYTICS_RANGES
-    }
+    ranges = analytics_ranges(db, ANALYTICS_RANGES, now=clock, rows=rows)
     everything = ranges["all"]
     records = _records(db, rows, clock)
     changes = _price_changes(db)
-    box_results = boxes.results(db)
+    box_results = boxes.results(db, rows=rows)
     ads = [ad_spend.entry_view(row) for row in ad_spend.list_entries(db)]
     events = _sale_events(db)
     scout_sales = scout.outcomes(db)
