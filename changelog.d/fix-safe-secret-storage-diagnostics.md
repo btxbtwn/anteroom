@@ -1,0 +1,1 @@
+- Keep safe database failure details in error reports when saved account credentials cannot be read or updated, without exposing credentials.
