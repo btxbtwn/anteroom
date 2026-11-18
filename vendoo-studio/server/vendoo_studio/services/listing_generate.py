@@ -1416,6 +1416,7 @@ def persist_generated_listing(
     seed = revisions[0].listing_json if revisions else {}
     native_blocks = {market: copy.deepcopy(listing.get(f"{market}_specifics") or {})
                      for market in seed.get("_native_forms") or {}}
+    pinned_size: tuple[str, str | None] | None = None  # (the seller's tag size, the model's size)
     RegistryService(db).merge_learned_fields(listing)
     # Dimensions are a seller preference, not a model inference. Start every
     # generated listing from the saved default; an explicit per-listing value
@@ -1452,9 +1453,10 @@ def persist_generated_listing(
         # size slots that followed the model's size follow the seller's instead.
         size = seller_size(seller)
         if size and size != str(listing.get("size") or "").strip():
-            model_size = listing.get("size")
+            model_size = None if listing.get("size") is None else str(listing.get("size"))
             listing["size"] = size
-            align_size_fields(listing, previous_size=None if model_size is None else str(model_size))
+            align_size_fields(listing, previous_size=model_size)
+            pinned_size = (size, model_size)
         # Marketplace copies from the model must not override the seller's SKU.
         for key, value in listing.items():
             if key.endswith("_specifics") and isinstance(value, dict):
@@ -1485,6 +1487,10 @@ def persist_generated_listing(
 
     for market, block in native_blocks.items():
         listing[f"{market}_specifics"] = block
+    if pinned_size and native_blocks:
+        # The direct tabs' blocks were copied from the model before the tag size
+        # was set; the size slots that followed the model follow the seller too.
+        propagate_general_size(listing, previous_size=pinned_size[1])
     constrain_generated(listing, seed)
     cap_listing_description(listing)
     if revisions:

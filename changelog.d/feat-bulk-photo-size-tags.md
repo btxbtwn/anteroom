@@ -1,3 +1,3 @@
-- Bulk upload can read each item's size from the size tag in its photos with **Read size tags**. It fills only blank sizes, keeps a size you typed, and asks you to check a tag that is missing, unreadable or shows two sizes.
-- The size you enter in bulk upload is now the listing's Size, not a line in its notes.
+- Bulk upload in the Mac app and on the web can read each item's size from the size tag in its photos with **Read size tags**. It fills only blank sizes, keeps a size you typed, and asks you to check a tag that is missing, unreadable or shows two sizes.
+- The size you enter in bulk upload in the Mac app and on the web is now the listing's Size, not a line in its notes.
 - Notes for measurements and sizes read from photos no longer name the AI provider or model.

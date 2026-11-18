@@ -73,6 +73,8 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
   })));
   const [reading, setReading] = useState<{ done: number; total: number } | null>(null);
   const [sizeReading, setSizeReading] = useState<{ done: number; total: number } | null>(null);
+  // One announcement when a size-tag read finishes, not one per item; editing a size ends it.
+  const [announceSizes, setAnnounceSizes] = useState(false);
   const [dragFrom, setDragFrom] = useState<DragSpot | null>(null);
   const [dropOn, setDropOn] = useState<DragSpot | null>(null);
   const [zoom, setZoom] = useState<DragSpot | null>(null);
@@ -142,28 +144,35 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
   const readSizeTags = async () => {
     const todo = groups.map((_, index) => index).filter((index) => groups[index]!.files.length);
     setSizeReading({ done: 0, total: todo.length });
+    setAnnounceSizes(false);
     await readEach(todo, async (index) => {
       setRow(index, { sizeNote: "Reading the size tag…", sizeReview: false });
       try {
         const result = await api.sizeTags.read(groups[index]!.files);
         setRows((current) => current.map((row, i) => {
           if (i !== index) return row;
-          const outcome = applySizeTagReading(row.size, result);
+          // A size an earlier reading filled is replaced, not treated as typed.
+          const outcome = applySizeTagReading(row.sizeSuggested ? "" : row.size, result);
           return {
             ...row,
             size: outcome.size,
-            sizeSuggested: row.sizeSuggested || outcome.suggested,
+            sizeSuggested: outcome.suggested,
             sizeReview: outcome.needsReview,
             sizeNote: outcome.note || undefined,
           };
         }));
       } catch (error) {
         const message = error instanceof Error ? error.message : "Reading failed.";
-        setRow(index, { sizeNote: `${message} Type the size from the tag.` });
+        setRows((current) => current.map((row, i) => {
+          if (i !== index) return row;
+          const blank = row.size.trim() === "";
+          return { ...row, sizeReview: blank, sizeNote: blank ? `${message} Type the size from the tag.` : message };
+        }));
       }
       setSizeReading((current) => current && { ...current, done: current.done + 1 });
     });
     setSizeReading(null);
+    setAnnounceSizes(true);
   };
 
   const rotate = (file: File, degrees: 90 | -90) => setTurns((current) => (
@@ -313,7 +322,10 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
                       aria-describedby={row.sizeNote ? `bulk-size-note-${groupIndex}` : undefined}
                       title={row.sizeSuggested ? "Read from the size tag. Check it before creating." : undefined}
                       value={row.size}
-                      onChange={(event) => setRow(groupIndex, { size: event.target.value, sizeSuggested: false, sizeReview: false })}
+                      onChange={(event) => {
+                        setAnnounceSizes(false);
+                        setRow(groupIndex, { size: event.target.value, sizeSuggested: false, sizeReview: false });
+                      }}
                       onKeyDown={onInputKeyDown}
                     />
                   </label>
@@ -450,7 +462,6 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
                   <p
                     id={`bulk-size-note-${groupIndex}`}
                     className={`bulk-upload-help bulk-measure-note${row.sizeReview ? " needs-review" : ""}`}
-                    aria-live="polite"
                   >
                     {row.sizeNote}
                   </p>
@@ -460,6 +471,11 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
             );
           })}
         </ul>
+        <p className="sr-only" role="status">
+          {announceSizes
+            ? `Size tags read. ${rows.filter((row) => row.sizeSuggested).length} filled, ${rows.filter((row) => row.sizeReview).length} to check.`
+            : ""}
+        </p>
         <div className="confirm-dialog-footer">
           <button type="button" className="btn btn-ghost" onClick={onCancel}>
             Cancel

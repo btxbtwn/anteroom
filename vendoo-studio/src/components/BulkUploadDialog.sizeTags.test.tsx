@@ -87,6 +87,35 @@ it("fills blank sizes from agreed tags, keeps typed ones and leaves unclear tags
   }
 });
 
+it("replaces an earlier tag reading, flags a failed read and announces once", async () => {
+  const read = vi.spyOn(api.sizeTags, "read")
+    .mockResolvedValueOnce(tagReads.Shorts!).mockResolvedValueOnce(tagReads.Jeans!).mockResolvedValueOnce(tagReads.Tee!);
+  const { root, size, button } = await openDialog();
+  try {
+    await act(async () => button("Read size tags").click());
+    await settle(() => expect(size("Jeans").value).toBe("32 x 30"));
+    expect(document.querySelector('[role="status"]')!.textContent).toBe("Size tags read. 2 filled, 1 to check.");
+
+    // A second read of the same photos: the earlier suggestion is not "typed", so a conflict clears it.
+    read.mockReset();
+    read.mockImplementation(async (files) => {
+      if (files[0]!.name === "Tee.jpg") throw new Error("OpenRouter stopped answering while looking at the photos.");
+      return { photos_read: 1, status: "conflict", size: null, sizes: ["0", "2"] };
+    });
+    await act(async () => button("Read size tags").click());
+    await settle(() => expect(size("Shorts").value).toBe(""));
+    expect(size("Shorts").className).toContain("needs-review");
+    expect(size("Shorts").className).not.toContain("is-suggested");
+    // A failed read on a blank size asks for it and names the provider that failed.
+    expect(size("Tee").className).toContain("needs-review");
+    expect(document.getElementById(size("Tee").getAttribute("aria-describedby")!)!.textContent)
+      .toBe("OpenRouter stopped answering while looking at the photos. Type the size from the tag.");
+    expect(document.querySelector('[role="status"]')!.textContent).toBe("Size tags read. 0 filled, 3 to check.");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
 it("never shows the provider or model in reading notes", async () => {
   vi.spyOn(api.sizeTags, "read").mockResolvedValue(tagReads.Shorts!);
   // An older server still sends who read; the dialog must not show it.

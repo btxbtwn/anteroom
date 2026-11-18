@@ -24,6 +24,9 @@ describe("applySizeTagReading", () => {
     expect(applySizeTagReading("m", read({}))).toEqual({ size: "m", suggested: false, needsReview: false, note: "Size matches the tag." });
     expect(applySizeTagReading("L", read({ status: "not_found", size: null, sizes: [] })))
       .toEqual({ size: "L", suggested: false, needsReview: false, note: "" });
+    expect(applySizeTagReading("L", read({ status: "conflict", size: null, sizes: ["L", "XL"] }))).toEqual({
+      size: "L", suggested: false, needsReview: true, note: "The photos show different sizes (L, XL). Check the size you typed.",
+    });
   });
 
   it("asks the seller instead of guessing when the tag is missing, unreadable or conflicting", () => {

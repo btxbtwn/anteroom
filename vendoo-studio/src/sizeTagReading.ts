@@ -14,7 +14,8 @@ interface SizeTagOutcome {
 const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /**
- * Fold a size-tag reading into what the seller typed. A typed size always wins (0 is a
+ * Fold a size-tag reading into what the seller typed (pass "" for a size an earlier
+ * reading filled, so a new reading replaces it instead of being checked against it). A typed size always wins (0 is a
  * size, not a blank); only a blank Size takes the tag's size, and only when both reads
  * agreed. A missing, unreadable or conflicting tag leaves Size blank for the seller.
  */
@@ -25,7 +26,12 @@ export function applySizeTagReading(typed: string, result: SizeTagReadResult): S
     if (same(typed, result.size)) return { size: typed, suggested: false, needsReview: false, note: "Size matches the tag." };
     return { size: typed, suggested: false, needsReview: true, note: `The tag reads ${result.size}. Check the size you typed.` };
   }
-  if (hasTyped) return { size: typed, suggested: false, needsReview: false, note: "" };
+  if (hasTyped) {
+    // The typed size stays, but two different sizes on the tags is worth a look.
+    return result.status === "conflict" && result.sizes.length > 1
+      ? { size: typed, suggested: false, needsReview: true, note: `The photos show different sizes (${result.sizes.join(", ")}). Check the size you typed.` }
+      : { size: typed, suggested: false, needsReview: false, note: "" };
+  }
   const note = result.status === "conflict" && result.sizes.length > 1
     ? `The photos show different sizes (${result.sizes.join(", ")}). Check the tag and type the size.`
     : result.status === "not_found"

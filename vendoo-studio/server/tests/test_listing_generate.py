@@ -400,6 +400,21 @@ class PersistListingTest(unittest.TestCase):
         # Clothing size and the shipping package are separate facts.
         self.assertEqual(parsed["package_dimensions_in"], "13x10x3")
 
+    def test_tag_size_reaches_direct_tabs_on_regenerate(self):
+        """A draft with built marketplace forms keeps the model's blocks; their size still follows the tag."""
+        listing_persistence.save_revision(self.db, self.conv.id, {
+            **LISTING_JSON, "size": "M", "mercari_specifics": {"size": "M"},
+            "_native_forms": {"mercari": {"fields": [
+                {"path": "mercari_specifics.size", "label": "Size", "options": ["S", "M", "L"]},
+            ]}},
+        }, source="generate")
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M"}))
+        parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
+            **LISTING_JSON, "size": "S", "mercari_specifics": {"size": "S"},
+        })
+        self.assertEqual(parsed["size"], "M")
+        self.assertEqual(parsed["mercari_specifics"]["size"], "M")
+
     def test_tag_size_zero_is_a_size(self):
         for stored in ("0", 0):
             with self.subTest(stored=stored):

@@ -115,13 +115,14 @@ class ReadSizeTagsRouteTest(unittest.TestCase):
         self.assertEqual(self.post(FakeProvider([]), [_photo()] * 21).status_code, 400)
 
 
-class EditedSizeFollowsNotesTest(unittest.TestCase):
-    """A Size changed in the editor replaces the tag size in Item Details, so regenerating keeps it."""
+class EditedSizeLeavesTheTagTest(unittest.TestCase):
+    """Once Size changes in the editor the tag size no longer applies. The edit is a seller lock;
+    it is not recorded as a tag size, since chat, templates and normalizers edit Size too."""
 
-    def test_an_edited_size_moves_into_notes(self):
-        self.assertEqual(notes_for_listing_edits({"size": "M"}, {"size": "L"}), {"size": "L"})
-        self.assertEqual(notes_for_listing_edits({"size": "M"}, {"size": 0}), {"size": "0"})
-        self.assertEqual(notes_for_listing_edits({"size": "M"}, {}), {"size": ""})
+    def test_a_changed_size_clears_the_tag_size(self):
+        for submitted in ({"size": "L"}, {"size": 0}, {}):
+            with self.subTest(submitted=submitted):
+                self.assertEqual(notes_for_listing_edits({"size": "M"}, submitted), {"size": ""})
         self.assertEqual(notes_for_listing_edits({"size": "M"}, {"size": "M"}), {})
 
 
