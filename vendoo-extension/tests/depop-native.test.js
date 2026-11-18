@@ -566,8 +566,12 @@ test('a Depop status read that answers 404 confirms nothing from the shop withou
   assert.equal(status.complete, false);
   assert.equal(status.draft_posted, true);
   assert.equal(status.listing_url, undefined);
-  const known = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1', shop_before: [] });
+  const known = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1', shop_before: { seller_id: '42', urls: [] } });
   assert.equal(known.listing_url, 'https://www.depop.com/products/seller-columbia-xl/');
+  // Published from another Depop account than the one Chrome is signed in to now.
+  const switched = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1', shop_before: { seller_id: '7', urls: [] } });
+  assert.equal(switched.listing_url, undefined);
+  assert.equal(switched.draft_posted, true);
 });
 
 test('the Depop shop reading matches the locked Depop price the publish sent, and a repeating page is not a full reading', async () => {
@@ -587,7 +591,7 @@ test('the Depop shop reading matches the locked Depop price the publish sent, an
   };
   cursor = '';
   const read = await c.depopApiAction('shop_matches', { ...payload, listing: locked });
-  assert.deepEqual([...read.matches], ['https://www.depop.com/products/seller-locked-price/']);
+  assert.deepEqual({ ...read.matches, urls: [...read.matches.urls] }, { seller_id: '42', urls: ['https://www.depop.com/products/seller-locked-price/'] });
   // The same cursor twice: the scan stopped advancing, so it is not a full reading.
   cursor = 'stuck';
   const stuck = await c.depopApiAction('shop_matches', { ...payload, listing: locked });

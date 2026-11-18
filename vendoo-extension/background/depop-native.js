@@ -1470,9 +1470,10 @@ async function depopPublishEvidence(request, payload, draftPath, spent = () => f
   // Only a product that was not in the shop before this publish can be the one it made:
   // the seller may already have an identical listing live. Without that earlier
   // reading, nothing in the shop is evidence.
-  const before = Array.isArray(payload.shop_before) ? payload.shop_before : null;
+  const before = Array.isArray(payload.shop_before?.urls) && payload.shop_before.seller_id ? payload.shop_before : null;
   const after = before ? await depopShopMatches(request, payload) : null;
-  const made = after ? after.filter(url => !before.includes(url)) : [];
+  // Only the account that published: Chrome may be signed in to another Depop shop by now.
+  const made = after && after.seller_id === before.seller_id ? after.urls.filter(url => !before.urls.includes(url)) : [];
   return made.length === 1 ? { ...unavailable, complete: true, listing_url: made[0] } : { ...unavailable, draft_posted: true };
 }
 
@@ -1617,8 +1618,8 @@ async function depopShopUrl(request, payload) {
   return '';
 }
 
-// Every product link in the seller's shop that this listing's text and price match,
-// across every page read. Null when the shop could not be read in full.
+// Every product link in the signed-in seller's shop that this listing's text and price
+// match, across every page read, with that seller's id. Null when the shop could not be read in full.
 async function depopShopMatches(request, payload) {
   // The price the publish sent: a locked Depop price, else General's.
   const listing = { ...(payload.listing || {}), price: depopPrice(payload.listing || {}) };
@@ -1642,14 +1643,14 @@ async function depopShopMatches(request, payload) {
     for (const product of depopProductRows(page)) {
       if (depopShopProduct(product, scoped)) matches.add(depopListingUrl(product?.slug || product?.url));
     }
-    if (page?.meta?.end === true) return [...matches];
+    if (page?.meta?.end === true) return { seller_id: userId, urls: [...matches] };
     // A page or cursor that repeats means the scan stopped advancing: not read in full.
     const firstId = depopProductRows(page)[0]?.id;
     if (pageNumber && firstId != null && firstId === previousId) return null;
     previousId = firstId;
     const next = depopCursorToken(page?.meta?.last_offset_id);
     // More pages, but no cursor that reaches them: not read in full.
-    if (!next) return page?.meta?.end === false ? null : [...matches];
+    if (!next) return page?.meta?.end === false ? null : { seller_id: userId, urls: [...matches] };
     if (next === offset) return null;
     offset = next;
   }
