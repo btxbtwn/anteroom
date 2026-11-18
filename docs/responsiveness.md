@@ -11,6 +11,37 @@ and accounts must overlap; long work must leave navigation, input and unrelated
 drafts usable. This is a product requirement, not a promise of infinite hardware
 capacity or zero model/network latency.
 
+## Assistant shop read: shared range inputs, 2026-11-18
+
+Seller report: a hosted assistant answer ("What is selling best the last two
+months?") showed "Worked for 1m 21s". Its persisted turns, read seller-scoped
+without replay, were saved 06:03:21.005Z and 06:04:41.426Z UTC: 80.4 s from
+question to saved answer. That span covers queue wait, the shop read, every
+model round and lookup, and the save. Anteroom records no per-stage assistant
+timing, and the task row and journal were not reachable, so how the 80.4 s
+divides between them is unknown. The worker Machine was shared-CPU, 1 vCPU.
+
+Profiling the shop read found range-independent work repeated per range. Each
+of the eight Analytics ranges re-read sale events, ad spend and the full sale
+ledger (with the imported-sales archive check) and rebuilt the incomplete-sales
+list; box results reloaded every listing a second time. These are now read once
+per question (`inventory_analytics.analytics_ranges`, `boxes.results(rows=)`).
+The brief and every lookup row are identical on the same data.
+
+Local synthetic benchmark (SQLite, one process, this VPS, uncached read, median
+of 5 after a warm-up; 50% sold listings):
+
+| Listings | Before | After | SQL statements before → after |
+|---|---|---|---|
+| 300 | 449 ms | 172 ms | 53 → 24 |
+| 1,500 | 2,066 ms | 881 ms | 69 → 32 |
+
+These are local CPU and statement counts, not production latency. Hosted
+statements each cost a Postgres round trip (about 24 ms measured 2026-11-11),
+and the shared-CPU worker may run slower than this machine. This does not
+establish what part of the reported 80.4 s the shop read took; model rounds,
+lookups and queue wait remain unmeasured.
+
 ## eBay refused sign-in status, 2026-11-16
 
 An isolated saved-account fixture reproduces Settings reporting connected after
