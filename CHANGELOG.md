@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1017 — 2026-11-18
+
+- The sale calendar now says "1 item" and "1 sale event" instead of "1 items" and "1 sale events".
+
 ## 0.1.1016 — 2026-11-18
 
 - Refuse to restore an empty file or another program's database over your Anteroom data.

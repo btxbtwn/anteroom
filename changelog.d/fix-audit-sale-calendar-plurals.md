@@ -1,1 +1,0 @@
-- The sale calendar now says "1 item" and "1 sale event" instead of "1 items" and "1 sale events".
