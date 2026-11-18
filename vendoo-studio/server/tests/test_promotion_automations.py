@@ -248,11 +248,16 @@ class PromotionAutomationsTest(unittest.TestCase):
         row.like_events_since = _now() - timedelta(minutes=3)
         conv, post = self.items[0]
         send = listing_promotions.new_row(conv, "poshmark", "offer", "earlier", 20, row.id)
-        send.listing_id, send.state, send.sent_at = post, "unknown", _now() - timedelta(minutes=2)
+        send.listing_id, send.state = post, "unknown"
+        send.created_at = send.sent_at = _now() - timedelta(minutes=2)
         self.db.add(send)
         self.db.commit()
-        self.like_feed([{"listing_id": post, "at": (_now() - timedelta(minutes=1)).isoformat() + "Z"}])
-        self.assertEqual(self.check_likes(), 0)
+        at = _now() - timedelta(minutes=1)
+        self.like_feed([{"listing_id": post, "at": at.isoformat() + "Z"}])
+        with patch.object(listing_promotions, "blocking", wraps=listing_promotions.blocking) as blocking:
+            self.assertEqual(self.check_likes(), 0)
+        blocking.assert_called_once_with(self.db, "poshmark", post, "offer", new_like_at=at)
+        self.assertEqual(self.checked(), [])
         self.assertEqual(self.promoted(), [])
 
     def create(self, body):
