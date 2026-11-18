@@ -6,6 +6,18 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1033 — 2026-11-18
+
+- The assistant handles waits for sales history and calculations for analytics and boxes without losing its connection to your shop data.
+
+## 0.1.1032 — 2026-11-18
+
+- When a full-size photo cannot load, the photo viewer now says so and offers Retry, instead of showing an empty picture with only its label.
+
+## 0.1.1031 — 2026-11-18
+
+- When Mercari doesn't offer your saved shipping label, the note on the Mercari tab now says List uses USPS Ground Advantage instead, and that Mercari refuses the listing if it offers neither.
+
 ## 0.1.1030 — 2026-11-18
 
 - Mark as listed no longer suggests an old link Anteroom delisted, or any link while a marketplace action is unconfirmed, and pasting a link to a listing Anteroom delisted now asks you to confirm it is still live.

@@ -134,13 +134,21 @@ def _check_counts(box: SourceBox) -> None:
         raise BoxCountError(f"{box.unsellable} unsellable is more than the {box.pieces} pieces in the box")
 
 
-def results(db: Session, now: datetime | None = None, rows: list[AnalyticsItem] | None = None) -> dict[str, Any]:
+def results(
+    db: Session, now: datetime | None = None, rows: list[AnalyticsItem] | None = None, *, release: bool = False,
+) -> dict[str, Any]:
     """Every box with what it has returned so far, and the same per store.
 
-    ``rows`` lets a caller that already loaded the listings' analytics rows reuse them.
+    ``rows`` lets a caller that already loaded the listings' analytics rows
+    reuse them; with them and ``release``, the read transaction ends before
+    the boxes are calculated (``end_read``).
     """
     now = now or datetime.now(UTC)
     boxes = list_boxes(db)
+    if release and rows is not None:
+        from vendoo_studio.database import end_read
+
+        end_read(db, keep=boxes)
     items_by_box: dict[str, list[AnalyticsItem]] = {}
     for item in load_rows(db) if rows is None else rows:
         if item.box_id:
