@@ -150,6 +150,7 @@ def _vision_mask(img: Image.Image) -> Image.Image:
     if sys.platform != "darwin":
         raise BackgroundRemovalError("Background removal runs on a Mac.")
     try:
+        import objc
         import Quartz
         import Vision
         from Foundation import NSData
@@ -163,6 +164,8 @@ def _vision_mask(img: Image.Image) -> Image.Image:
     data = buffer.getvalue()
     handler = Vision.VNImageRequestHandler.alloc().initWithData_options_(NSData.dataWithBytes_length_(data, len(data)), None)
     request = Vision.VNGenerateForegroundInstanceMaskRequest.alloc().init()
+    if handler is None or request is None:
+        raise BackgroundRemovalError("Background removal could not initialize Apple Vision.")
     ok, error = handler.performRequests_error_([request], None)
     if not ok:
         raise BackgroundRemovalError(f"Background removal failed: {error}")
@@ -179,7 +182,10 @@ def _vision_mask(img: Image.Image) -> Image.Image:
         width = Quartz.CVPixelBufferGetWidth(buffer_ref)
         height = Quartz.CVPixelBufferGetHeight(buffer_ref)
         row = Quartz.CVPixelBufferGetBytesPerRow(buffer_ref)
-        raw = Quartz.CVPixelBufferGetBaseAddress(buffer_ref).as_buffer(row * height)
+        address = Quartz.CVPixelBufferGetBaseAddress(buffer_ref)
+        if not isinstance(address, objc.varlist):
+            raise BackgroundRemovalError("Background removal returned an empty pixel buffer.")
+        raw = address.as_buffer(row * height)
         # One 32-bit float per pixel, 0 = background, 1 = item.
         values = np.frombuffer(raw, dtype=np.float32).reshape(height, row // 4)[:, :width]
         mask = np.clip(values * 255 + 0.5, 0, 255).astype(np.uint8)

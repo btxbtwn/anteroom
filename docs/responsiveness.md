@@ -1004,3 +1004,34 @@ system or automatic navigation is introduced. Local status/model requests and
 production testing are out of scope. Concurrent-load p50/p95, interaction latency,
 Mac native behavior and desktop/phone screenshots remain pending the coordinated
 VPS validation slot; this note makes no production-readiness claim.
+
+### Inventory read-step diagnostics — 2026-11-17
+
+The deployed 0.1.1009 samples supplied by the coordinator place most elapsed
+inventory build time in `build_db_ms`. This is the transaction-bearing phase,
+including network, fetching/ORM, Python and transaction teardown, not summed
+server SQL execution time. Zero queue/wait fields and endpoint pool snapshots
+do not establish the absence of transient waits or identify a database cause.
+
+The next diagnostic adds fixed `inv_<step>_ms` and
+`inv_<step>_orm_calls` fields to the existing slow inventory response line:
+analytics, reconcile, conversations, covers, listings, direct, sales, unsent and
+assemble. The observer is local to the build's session and each step; it reads
+no statement text, parameters, identifiers, row contents or exception text and
+issues no query. It counts ORM execution attempts, including failed attempts,
+not all driver round trips or autoflush SQL. Counts saturate at 10,000 and
+elapsed milliseconds at 600,000; a saturated value is a lower bound. Step wall
+time includes work inside that block, not just database execution. Work between
+blocks and connection close is outside these step totals. Existing coarse
+build fields are unchanged. Cache hits report zeros; peer requests can report
+the shared build's measurements. A build that raises before completion has no
+completed-build measurements. No extra per-query log or global engine listener
+is installed. No performance improvement, production root cause or p50/p95
+claim follows from these counters.
+
+Verification uses deterministic clocks, synthetic private-looking parameters,
+failure cleanup, independent threaded sessions, cache-hit reset and the real
+inventory-response projection test. Production replay, database queries,
+query optimization and load benchmarks are outside this diagnostic's scope.
+Full selected local validation and hosted/Postgres coverage remain required
+before release; focused SQLite coverage alone is insufficient.

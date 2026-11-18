@@ -136,62 +136,72 @@ async def suggestions(request: Request):
 
 def inventory_response(db):
     from vendoo_studio.repositories.queries import ConversationRepo
+    from vendoo_studio.services.hosted_read_snapshots import inventory_step
 
     # The shared sidebar filters stored inventory status. Reconcile it from
     # listings and paid sales just as the desktop list endpoint does.
     from vendoo_studio.services.inventory_analytics import read_analytics_inputs, rows_from_inputs
 
-    analytics = read_analytics_inputs(db)
-    ConversationRepo(db).reconcile_item_statuses(
-        [row for row in db.scalars(select(Conversation).options(defer(Conversation.notes))).all()
-         if row.id in analytics.statuses],
-        {identity: notes for identity, _title, _status, notes, _box in analytics.conversations},
-        analytics.statuses)
+    with inventory_step(db, 'analytics'):
+        analytics = read_analytics_inputs(db)
+    with inventory_step(db, 'reconcile'):
+        ConversationRepo(db).reconcile_item_statuses(
+            [row for row in db.scalars(select(Conversation).options(defer(Conversation.notes))).all()
+             if row.id in analytics.statuses],
+            {identity: notes for identity, _title, _status, notes, _box in analytics.conversations},
+            analytics.statuses)
     # Keep the existing sidebar's complete-list contract; it filters and
     # virtualizes locally. No historical pointers or fallback file URLs escape.
-    rows = db.scalars(select(Conversation).options(defer(Conversation.notes)).order_by(Conversation.updated_at.desc(), Conversation.id.desc())).all()
+    with inventory_step(db, 'conversations'):
+        rows = db.scalars(select(Conversation).options(defer(Conversation.notes)).order_by(Conversation.updated_at.desc(), Conversation.id.desc())).all()
     reconciled = {row.id: row.status for row in rows}
     # Parsed once for analytics; the rows themselves leave notes unloaded.
     notes = {identity: parsed for identity, _title, _status, parsed, _box in analytics.conversations}
     # Another device may create or delete a draft between these committed reads.
     analytics.conversations = [(identity, title, reconciled.get(identity, status), notes, box)
                               for identity, title, status, notes, box in analytics.conversations]
-    ordered = select(Photo.conversation_id, Photo.id, Photo.checksum, func.row_number().over(
-        partition_by=Photo.conversation_id, order_by=(Photo.display_order, Photo.id)).label('position')).where(
-            Photo.marketplace.is_(None)).subquery()
-    covers = {identity: (photo_id, checksum) for identity, photo_id, checksum in db.execute(
-        select(ordered.c.conversation_id, ordered.c.id, ordered.c.checksum).where(ordered.c.position == 1))}
-    current = {}
-    for identity, sku, price, quantity in db.execute(select(Listing.conversation_id,
-            json_value(ListingRevision.inventory_fields, 'sku'), json_value(ListingRevision.inventory_fields, 'price'),
-            json_value(ListingRevision.inventory_fields, 'quantity')).join(
-            ListingRevision, (ListingRevision.id == Listing.current_revision_id)
-            & (ListingRevision.conversation_id == Listing.conversation_id)
-            & (ListingRevision.user_id == Listing.user_id))):
-        current[identity] = {'sku': sku, 'price': float(price) if price is not None else None,
-                             'quantity': int(quantity) if quantity is not None else None}
+    with inventory_step(db, 'covers'):
+        ordered = select(Photo.conversation_id, Photo.id, Photo.checksum, func.row_number().over(
+            partition_by=Photo.conversation_id, order_by=(Photo.display_order, Photo.id)).label('position')).where(
+                Photo.marketplace.is_(None)).subquery()
+        covers = {identity: (photo_id, checksum) for identity, photo_id, checksum in db.execute(
+            select(ordered.c.conversation_id, ordered.c.id, ordered.c.checksum).where(ordered.c.position == 1))}
+    with inventory_step(db, 'listings'):
+        current = {}
+        for identity, sku, price, quantity in db.execute(select(Listing.conversation_id,
+                json_value(ListingRevision.inventory_fields, 'sku'), json_value(ListingRevision.inventory_fields, 'price'),
+                json_value(ListingRevision.inventory_fields, 'quantity')).join(
+                ListingRevision, (ListingRevision.id == Listing.current_revision_id)
+                & (ListingRevision.conversation_id == Listing.conversation_id)
+                & (ListingRevision.user_id == Listing.user_id))):
+            current[identity] = {'sku': sku, 'price': float(price) if price is not None else None,
+                                 'quantity': int(quantity) if quantity is not None else None}
     from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 
-    direct = MarketplaceListingRepo(db).summaries()
+    with inventory_step(db, 'direct'):
+        direct = MarketplaceListingRepo(db).summaries()
     from vendoo_studio.services.sales_records import read_sale_lines, records_from_lines, missing_from_records
 
-    sales = read_sale_lines(db)
+    with inventory_step(db, 'sales'):
+        sales = read_sale_lines(db)
     from vendoo_studio.services.unsent_edits import unsent_edits
 
-    unsent = unsent_edits(db, rows, ConversationRepo(db).current_revision_ids())
+    with inventory_step(db, 'unsent'):
+        unsent = unsent_edits(db, rows, ConversationRepo(db).current_revision_ids())
     # Ledger validation, cost allocation and hashing are CPU work over loaded
     # values. Keep scarce connections available while that work runs.
     db.close()
-    missing = missing_from_records(records_from_lines(sales, rows_from_inputs(analytics)))
-    summaries = []
-    for row in rows:
-        summary = conversation_response(row, current.get(row.id), direct.get(row.id), notes=notes.get(row.id, {}), include_notes=False,
-                                        missing_sale_data=missing.get(row.id, []), sold=analytics.statuses.get(row.id))
-        summary['unsent_edits'] = row.id in unsent
-        if row.id in covers:
-            from vendoo_studio.services.photos import cover_thumb_url
-            summary['cover_photo_url'] = cover_thumb_url(*covers[row.id])
-        summaries.append(summary)
+    with inventory_step(db, 'assemble'):
+        missing = missing_from_records(records_from_lines(sales, rows_from_inputs(analytics)))
+        summaries = []
+        for row in rows:
+            summary = conversation_response(row, current.get(row.id), direct.get(row.id), notes=notes.get(row.id, {}), include_notes=False,
+                                            missing_sale_data=missing.get(row.id, []), sold=analytics.statuses.get(row.id))
+            summary['unsent_edits'] = row.id in unsent
+            if row.id in covers:
+                from vendoo_studio.services.photos import cover_thumb_url
+                summary['cover_photo_url'] = cover_thumb_url(*covers[row.id])
+            summaries.append(summary)
     return summaries
 
 
