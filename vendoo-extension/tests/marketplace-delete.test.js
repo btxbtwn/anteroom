@@ -228,11 +228,17 @@ test('Mercari never counts an unknown status, sign-in or timeout as already gone
     assert.deepEqual(s.operations, ['sellFetchItemsDetails'], status);
   }
   for (const [code, answer] of [['signed_out', [401, { errors: [{ message: 'Unauthorized' }] }]], ['network', timeout]]) {
-    const { c, requests } = worker({ 'POST www.mercari.com/v1/api': answer });
+    const operations = [];
+    const { c } = worker({ 'POST www.mercari.com/v1/api': (n, options) => {
+      operations.push(JSON.parse(options.body).operationName);
+      return typeof answer === 'function' ? answer() : answer;
+    } });
     const result = await c.runMarketplaceDelete({ marketplace: 'mercari', listing_id: MERCARI_ID, confirm: true });
     assert.equal(result.ok, false, code);
     assert.equal(result.already, undefined, code);
     assert.equal(result.error_code, code, `${code}: ${result.error}`);
-    assert.equal(requests.filter(r => r === 'POST www.mercari.com/v1/api').length >= 1, true, code);
+    // Only the read was tried; the delete was never sent.
+    assert.ok(operations.length >= 1, code);
+    assert.ok(operations.every(name => name === 'sellFetchItemsDetails'), `${code}: ${operations}`);
   }
 });

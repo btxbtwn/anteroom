@@ -16,6 +16,8 @@ from vendoo_studio.database import Base, get_db
 from vendoo_studio.main import app
 from vendoo_studio.models.marketplace_sale import MarketplaceSale
 from vendoo_studio.repositories.queries import ConversationRepo
+from vendoo_studio.services.marketplace_delist import _delete_ebay as REAL_DELETE_EBAY
+from vendoo_studio.services.marketplace_delist import _delete_etsy as REAL_DELETE_ETSY
 from vendoo_studio.services.marketplace_delist import listing_id
 from vendoo_studio.services.vendoo_import import merge_notes, parse_notes
 
@@ -415,6 +417,50 @@ class MarketplaceDelistTest(unittest.TestCase):
         self.assertEqual(self._sales(), sales)
         self.assertEqual(set(self._row()["removed_marketplaces"]), {"ebay", "poshmark", "mercari"})
 
+    def _delist_with_real_ebay_and_etsy(self, ebay_client, etsy_api):
+        """Delist eBay and Etsy through their real steps; only eBay's and Etsy's own APIs are faked."""
+        from vendoo_studio.services import marketplace_delist as d
+
+        self.ebay.side_effect = REAL_DELETE_EBAY
+        self.etsy.side_effect = REAL_DELETE_ETSY
+        with patch("vendoo_studio.services.ebay_client.EbayClient.connect", ebay_client), \
+                patch("vendoo_studio.services.etsy_listings.connected_shop_id", return_value="42"), \
+                patch.object(d.marketplace_accounts, "etsy_api", etsy_api):
+            response = self.client.post(f"{self.base}/delist", json={"marketplaces": ["ebay", "etsy"], "confirm": True})
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def test_the_real_ebay_and_etsy_steps_record_listings_already_gone_without_deleting(self):
+        from vendoo_studio.services.ebay_client import EbayFailure
+
+        self._sold_on_depop_with_imported_snapshot()
+        sales = self._sales()
+        # eBay has no read: ending an ended listing answers 1047. Etsy reads first and finds nothing.
+        client = SimpleNamespace(trading=AsyncMock(side_effect=EbayFailure("eBay rejected the listing request. Error code: 1047.")))
+        etsy_api = AsyncMock(side_effect=_etsy_status(404))
+        body = self._delist_with_real_ebay_and_etsy(AsyncMock(return_value=client), etsy_api)
+        self.assertEqual((body["ebay"]["state"], body["etsy"]["state"]), ("deleted", "deleted"))
+        self.assertEqual([call.args for call in etsy_api.await_args_list], [("GET", "listings/4578284433")])
+        client.trading.assert_awaited_once()
+        self.assertEqual(self._status(), "sold")
+        self.assertEqual(self._sales(), sales)
+        self.assertEqual(set(self._row()["removed_marketplaces"]), {"ebay", "etsy"})
+
+    def test_the_real_ebay_and_etsy_steps_keep_a_sign_in_failure_on_the_item(self):
+        from vendoo_studio.services.marketplace_accounts import SignInRequired
+
+        self._sold_on_depop_with_imported_snapshot()
+        sales = self._sales()
+        etsy_api = AsyncMock(side_effect=SignInRequired("Etsy isn't connected."))
+        body = self._delist_with_real_ebay_and_etsy(
+            AsyncMock(side_effect=SignInRequired("Connect eBay to use this workspace.")), etsy_api)
+        self.assertEqual((body["ebay"]["state"], body["etsy"]["state"]), ("failed", "failed"))
+        self.assertTrue(body["ebay"]["error"] and body["etsy"]["error"])
+        self.assertEqual(etsy_api.await_count, 1)
+        self.assertEqual(self._status(), "sold")
+        self.assertEqual(self._sales(), sales)
+        self.assertEqual(self._row()["removed_marketplaces"], [])
+
 
 class MarketplaceStepsTest(unittest.IsolatedAsyncioTestCase):
     async def test_etsy_checks_the_shop_then_deletes(self):
@@ -470,6 +516,36 @@ class MarketplaceStepsTest(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):
                 await d._delete_etsy("4578284433")
         self.assertEqual(api.await_count, 1)
+
+    async def test_etsy_never_counts_a_sign_in_or_relay_refusal_as_gone(self):
+        from vendoo_studio.services import marketplace_delist as d
+        from vendoo_studio.services.marketplace_accounts import SignInRequired
+        from vendoo_studio.services.relay_client import RelayError
+
+        for failure in (SignInRequired("Etsy isn't connected."), RelayError("Anteroom's relay refused this Mac.", 401)):
+            api = AsyncMock(side_effect=failure)
+            with patch("vendoo_studio.services.etsy_listings.connected_shop_id", return_value="42"), \
+                    patch.object(d.marketplace_accounts, "etsy_api", api):
+                with self.assertRaises(type(failure)):
+                    await d._delete_etsy("4578284433")
+            self.assertEqual(api.await_count, 1, repr(failure))
+
+    async def test_ebay_never_counts_a_sign_in_timeout_or_server_error_as_ended(self):
+        from vendoo_studio.services import marketplace_delist as d
+        from vendoo_studio.services.ebay_client import EbayFailure
+        from vendoo_studio.services.marketplace_accounts import SignInRequired
+
+        with patch("vendoo_studio.services.ebay_client.EbayClient.connect",
+                   AsyncMock(side_effect=SignInRequired("Connect eBay to use this workspace."))):
+            with self.assertRaises(SignInRequired):
+                await d._delete_ebay("377507697747")
+        request = httpx.Request("POST", "https://api.ebay.com/ws/api.dll")
+        for failure in (EbayFailure("eBay asked to sign in again.", 401, code="signed_out"),
+                        EbayFailure("eBay had a problem answering.", 503), httpx.ReadTimeout("timed out", request=request)):
+            client = SimpleNamespace(trading=AsyncMock(side_effect=failure))
+            with patch("vendoo_studio.services.ebay_client.EbayClient.connect", AsyncMock(return_value=client)):
+                with self.assertRaises(type(failure), msg=repr(failure)):
+                    await d._delete_ebay("377507697747")
 
     async def test_ebay_ends_the_item_and_treats_already_ended_as_done(self):
         from vendoo_studio.services import marketplace_delist as d
