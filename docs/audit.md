@@ -84,6 +84,18 @@ passing when it did not run.
 
 Every run, in this order:
 
+0. **Check disk and swap first:** run `df -h /` and `sysctl vm.swapusage`.
+   macOS keeps its swap files in the same APFS container as the data volume,
+   so memory pressure from the suite spends free disk too. On 2026-11-18 the
+   Mac started with 2.6 GB free and 14 GB of swap already in use, and the
+   backend suite's first minute added a 1 GB swap file. The seller's own app
+   writes to that disk and needs room to snapshot before a migration (it once
+   refused to start: "5.7 GB free, 5.8 GB needed"). If less than about 10 GB
+   is free, record the local suites, sandboxes and iPhone build as **not
+   run (disk)**, do the read-only steps (deploy check, log read, PR review),
+   and list freeing space under **Needs the seller**. Never delete files to
+   make room. Installing with `uv pip install` (APFS clones from uv's cache)
+   costs almost no disk; `pip` copies about 1 GB per venv.
 1. `./check.sh --all` in the audit worktree after setup
    (`cd vendoo-studio && python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]" && npm ci && npx playwright install chromium webkit`).
    Phone browser tests run in WebKit. After a Playwright bump, a Mac without
@@ -112,6 +124,12 @@ Every run, in this order:
    CI never builds the hosted image, so a base-image bump can pass CI and
    fail every deploy (2026-11-16: Python 3.15 from Dependabot's #1547 broke
    deploys for five hours). Report a failed latest run with its log line.
+   The deploy also waits for CI to pass on every merge since the commit
+   production runs, so one failed CI run on `main` blocks every later deploy
+   until that run is re-run, even when newer commits pass. On 2026-11-18 a
+   flaky Postgres test on `fa824f9a` kept production on `b73c5347` while 26
+   merges waited. Name the commit and the failing test in the report.
+   Re-running that CI run starts a deploy, so leave it for the seller.
 2. `cd vendoo-studio && npm run e2e` (local web, desktop and phone sizes).
 3. `cd vendoo-studio && npm run e2e:hosted` (hosted web, two sellers).
 4. `./anteroom-ios/test-sandbox.sh` (iPhone XCUITests in the Simulator). Run
@@ -248,6 +266,15 @@ names the code that moved focus.
   of three fix-branch `./check.sh --fast` runs that didn't touch the
   Assistant, then passed alone (2026-11-17). Likely a fixed wait on the
   streamed answer under load.
+- `test_hosted_assistant.py::test_shop_snapshot_survives_calculation_longer_than_the_idle_transaction_deadline`
+  (Postgres): `IdleInTransactionSessionTimeout` in `read_sale_lines`, under
+  `inventory_analytics`, before the slow size audit the test stands in for
+  had run. It failed in CI on `main` at `fa824f9a`, and that one run blocked
+  every hosted deploy; the commits just before and after passed
+  (2026-11-18). Likely cause: the test's 150 ms idle timeout covers all of
+  `read_shop`, so any ordinary pause on a loaded runner ends the transaction.
+  Production uses 30 s. Apply the short timeout only around the size audit,
+  or lengthen both the timeout and the sleep.
 - `e2e/photoReorder.e2e.ts` "photos on a marketplace form reorder by
   dragging" [desktop]: hit the 120 s test timeout before the order check,
   on two of four fix-branch `./check.sh` runs that did not touch photos;
