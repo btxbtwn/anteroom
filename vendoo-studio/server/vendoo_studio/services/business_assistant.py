@@ -463,20 +463,25 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
 def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[str, Any]]]]:
     """The summary as text, and the tables a lookup reads."""
     from vendoo_studio.services import ad_spend, boxes, box_scout, scout
-    from vendoo_studio.services.inventory_analytics import inventory_analytics, load_rows
+    from vendoo_studio.database import end_read
+    from vendoo_studio.services.inventory_analytics import analytics_ranges, read_analytics_inputs, rows_from_inputs
 
-    rows = load_rows(db)
-    ranges = {
-        range_id: inventory_analytics(db, range_id=range_id, now=clock, rows=rows)
-        for range_id in ANALYTICS_RANGES
-    }
+    # Analytics inputs release their transaction (end_read) before calculating.
+    # _records and boxes.results(release=True) also release it. The later ad,
+    # event and Scout reads reopen a transaction that stays open through the
+    # sourcing and summary calculations, _automation_lines and later Scout reads.
+    # Postgres can end that transaction after its idle deadline.
+    inputs = read_analytics_inputs(db)
+    end_read(db, keep=[line for lines in inputs.sales.values() for line in lines])
+    rows = rows_from_inputs(inputs)
+    ranges = analytics_ranges(db, ANALYTICS_RANGES, now=clock, rows=rows)
     everything = ranges["all"]
     records = _records(db, rows, clock)
     changes = _price_changes(db)
-    box_results = boxes.results(db)
+    box_results = boxes.results(db, rows=rows, release=True)
     ads = [ad_spend.entry_view(row) for row in ad_spend.list_entries(db)]
     events = _sale_events(db)
-    scout_sales = scout.outcomes(db)
+    scout_sales = scout.outcomes(db, rows)
     sourcing_state = box_scout.read_state()
     tab_boxes = sourcing_boxes.box_rows(sourcing_state, rows, clock)
     breakdowns = {

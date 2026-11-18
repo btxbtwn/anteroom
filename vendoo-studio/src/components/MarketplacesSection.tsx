@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangleIcon, BadgeDollarSignIcon, CheckCircle2Icon, CheckIcon, ChevronDownIcon, ChevronRightIcon, CircleIcon, ClockIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, SquarePenIcon, Trash2Icon, XCircleIcon } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { api } from "../api/client";
+import { ApiRequestError } from "../api/transport";
 import { pollMs } from "../api/polling";
 import type { DelistMarketplace, MarketplaceListing, MarketplaceListings, MarketplaceMark, SaleMarketplace, SellerSale } from "../api/marketplaceListings";
 import type { NativeDraft, NativeDrafts, NativeMarketplace, PreflightCheck, PreflightGap } from "../api/nativeMarketplaces";
@@ -119,6 +120,57 @@ const TONE_ICON: Record<Tone, ReactNode> = {
   failed: <XCircleIcon aria-hidden className="size-3.5 text-destructive" />,
   idle: <CircleIcon aria-hidden className="size-3.5 text-muted-foreground/60" />,
 };
+
+/**
+ * What Mark as listed offers to correct: the seller's own link, while it still
+ * names a listing. Never a link Anteroom deleted, and nothing while the last
+ * action is unconfirmed: the seller is about to paste the listing that is
+ * really there, and an old link would be one click from replacing it.
+ */
+export function markListedPrefill(entry: MarketplaceListing | undefined, unconfirmed: boolean): string {
+  if (unconfirmed || entry?.source !== "seller" || entry.state === "deleted") return "";
+  return entry.url ?? "";
+}
+
+interface MarkRequest { marketplace: Marketplace; state: MarketplaceMark; url?: string; relinkDeleted?: boolean }
+
+/**
+ * After the server refuses a link because Anteroom delisted that listing, the
+ * one way to link it anyway: the seller says they just saw it live. Returns the
+ * request to resend, or null. A request that already carried that answer, or
+ * any other refusal, is never asked about again.
+ */
+export async function relinkAfterDeletedRefusal(error: unknown, request: MarkRequest,
+  confirm: (message: string, options: { confirmLabel: string }) => Promise<boolean>): Promise<MarkRequest | null> {
+  if (!(error instanceof ApiRequestError) || error.reason !== "deleted_listing" || request.relinkDeleted) return null;
+  const name = marketplaceName(request.marketplace);
+  const approved = await confirm(`${error.message}\nLink it anyway only if you just saw it live on ${name}.`, { confirmLabel: "It's still live" });
+  return approved ? { ...request, relinkDeleted: true } : null;
+}
+
+/**
+ * Keeps a slot's last height while its content is re-checked for a new
+ * revision. The old answer is hidden (it may be stale), but the space stays,
+ * so the form below does not jump up and back while a tap is on its way.
+ */
+function HeldWhileChecking({ checking, holdKey, children }: { checking: boolean; holdKey: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [last, setLast] = useState<{ key: string; height: number } | null>(null);
+  useLayoutEffect(() => {
+    if (checking) return;
+    // Measured after each settled answer; an equal value leaves state as it is.
+    const height = ref.current?.offsetHeight ?? 0;
+    setLast((previous) => previous?.key === holdKey && previous.height === height ? previous
+      : height ? { key: holdKey, height } : null);
+  }, [checking, holdKey, children]);
+  const held = checking && last?.key === holdKey ? last.height : 0;
+  if (!children && !held) return null;
+  return (
+    <div ref={ref} aria-busy={checking || undefined} style={held ? { minHeight: held } : undefined}>
+      {children}
+    </div>
+  );
+}
 
 export function deletable(entry: MarketplaceListing | undefined): boolean {
   return Boolean(entry?.listing_id && !entry.sold_here && entry.state !== "deleted" && entry.state !== "deleting");
@@ -354,6 +406,9 @@ export function MarketplacesLayout({
     // arrives, so the pane above the form does not collapse and shift the form.
     placeholderData: (previous) => previous,
   });
+  // A re-check is running. The previous answer also stays as a placeholder while
+  // the query is off (no revision, no marketplace can act): nothing is checked then.
+  const rechecking = preflight.isPlaceholderData && preflight.isFetching;
 
   // Each marketplace tracks its own request, so starting one never locks the others.
   const [starting, setStarting] = useState<Partial<Record<NativeMarketplace, ActionKind>>>({});
@@ -426,10 +481,15 @@ export function MarketplacesLayout({
     },
   });
   const mark = useMutation({
-    mutationFn: ({ marketplace, state, url }: { marketplace: Marketplace; state: MarketplaceMark; url?: string }) =>
-      api.marketplaceListings.mark(convId, marketplace, state, url),
+    mutationFn: ({ marketplace, state, url, relinkDeleted }: MarkRequest) =>
+      api.marketplaceListings.mark(convId, marketplace, state, url, relinkDeleted),
     retry: false,
     onSuccess: (data) => { queryClient.setQueryData(liveKey, data); setLinking(null); },
+    onError: async (error, request) => {
+      // The pasted link is the listing Anteroom deleted. Link it only if the seller just saw it live.
+      const resend = await relinkAfterDeletedRefusal(error, request, confirmDialog);
+      if (resend) mark.mutate(resend);
+    },
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: liveKey });
       void queryClient.invalidateQueries({ queryKey: nativeKey });
@@ -588,7 +648,7 @@ export function MarketplacesLayout({
           {canDelist && <MenuItem variant="destructive" onClick={() => void runDelist([marketplace])}>Delist…</MenuItem>}
           {(canList || canUpdate || canDelist) && <MenuSeparator />}
           <MenuItem disabled={running(marketplace)}
-            onClick={() => setLinking({ marketplace, url: entry?.source === "seller" ? entry.url ?? "" : "" })}>Mark as listed…</MenuItem>
+            onClick={() => setLinking({ marketplace, url: markListedPrefill(entry, unconfirmed(marketplace)) })}>Mark as listed…</MenuItem>
           {!entry?.sold_here && <MenuItem disabled={running(marketplace)} onClick={() => startSale(marketplace)}>Mark as sold…</MenuItem>}
           {(entry || status.tone === "live" || unconfirmed(marketplace)) && (
             <MenuItem disabled={running(marketplace)} onClick={() => mark.mutate({ marketplace, state: "not_listed" })}>Mark as not listed</MenuItem>
@@ -746,7 +806,12 @@ export function MarketplacesLayout({
           <span className="min-w-0 text-pretty">{status.label}</span>
         </span>
       )}
-      {status && quiet && !check && <span className="sr-only">{status.label}</span>}
+      {status && quiet && !check && (rechecking
+        // The previous revision's answer is not this one's; keep the line, not the answer.
+        ? <span role="status" className="flex items-center gap-1 truncate text-xs text-muted-foreground">
+            <span className="sr-only">{status.label}. </span><span className="truncate">Checking…</span>
+          </span>
+        : <span className="sr-only">{status.label}</span>)}
       {check && (
         <span role="status" className={cn("flex items-center gap-1 truncate text-xs text-muted-foreground tabular-nums",
           missing > 0 && "text-warning-foreground")}>
@@ -821,7 +886,9 @@ export function MarketplacesLayout({
           )}
           {reconnectNotice(selectedMarketplace)}
           {errorActions(selectedMarketplace)}
-          {preflightNotice(selectedMarketplace)}
+          <HeldWhileChecking checking={rechecking} holdKey={selectedMarketplace}>
+            {preflightNotice(selectedMarketplace)}
+          </HeldWhileChecking>
           {settings(selectedMarketplace)}
           {linkForm(selectedMarketplace)}
           {(() => {

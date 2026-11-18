@@ -39,8 +39,13 @@ NOT_TAKEN, NO_REPLY = 'not_taken', 'no_reply'
 
 
 class MacUnavailable(RuntimeError):
-    def __init__(self):
-        super().__init__('Open Anteroom on your computer, sign into this account, and connect the selected subscription there. Keep the computer awake and online, then retry.')
+    def __init__(self, *, forwarding=False):
+        problem = ('Anteroom could not reach the Mac connection for this account.' if forwarding else
+                   'The selected subscription is not available through this account’s Mac connection.')
+        super().__init__(problem + ' Provider sign-in on the Mac and its Anteroom account connection are separate. '
+                         'On the Mac, open Account → My Account using the same Anteroom account, and check the selected '
+                         'subscription in Settings → Providers. Keep Anteroom open and the Mac awake and online. '
+                         'You do not need to copy or import listings to connect.')
 
 
 class MacCallFailed(RuntimeError):
@@ -154,14 +159,14 @@ class MacInference:
         try:
             target = await forward_target(self.owner, 'mac')
         except RoutingUnavailable:
-            raise MacUnavailable from None
+            raise MacUnavailable(forwarding=True) from None
         if target is not None:
             try:
                 payload = await post(target, '/internal/mac-inference/invoke', {
                     'user_id': self.owner, 'provider': provider, 'operation': operation, 'args': args, 'kwargs': kwargs,
                 }, timeout=INVOKE_DEADLINE_SEC + 10)
             except RoutingUnavailable:
-                raise MacUnavailable from None
+                raise MacUnavailable(forwarding=True) from None
             if not payload.get('ok'):
                 kind = payload.get('error')
                 if kind == NO_REPLY:
@@ -199,6 +204,12 @@ _relays = {}
 _lock = threading.Lock()
 
 
+def existing_relay(owner):
+    """Observe a relay without creating one, changing a heartbeat or starting work."""
+    with _lock:
+        return _relays.get(owner)
+
+
 def relay_for(owner):
     with _lock:
         relay = _relays.get(owner)
@@ -209,13 +220,24 @@ def relay_for(owner):
 
 
 class MacSubscriptionProvider:
-    def __init__(self, relay, provider):
-        self.relay = relay
+    def __init__(self, relay, provider, *, owner=None):
+        if relay is None and owner is None:
+            raise ValueError('A subscription provider needs its seller')
+        self._relay = relay
+        self._owner = owner
         self.name = provider
         self.base_url = 'https://api.openai.com/v1' if provider == 'chatgpt' else 'https://api.anthropic.com'
-        models = relay.models.get(provider, {})
+        models = relay.models.get(provider, {}) if relay is not None else {}
         self.vision_model = models.get('vision_model', '')
         self.listing_model = models.get('listing_model', '')
+
+    @property
+    def relay(self):
+        # Provider selection and Settings status only inspect metadata. Create
+        # a relay only when an explicitly requested operation uses it.
+        if self._relay is None:
+            self._relay = relay_for(self._owner)
+        return self._relay
 
     async def test_connection(self):
         # Exercise the selected subscription, rather than only its heartbeat.

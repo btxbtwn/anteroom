@@ -130,19 +130,31 @@ def test_heartbeat_before_first_poll_wakes_the_background_reader(cloud, signing_
             return asyncio.run(order_history.sync('poshmark'))
 
     import threading
-    queued = threading.Event()
+    queued, woken = threading.Event(), threading.Event()
+    replies = []
     relay = hosted_browser_relay.relay_for(USER_ID)
-    send = relay.deliver_local
+    send, read = relay.deliver_local, relay.read
 
     async def sent(message):
         result = await send(message)
         asyncio.get_running_loop().call_soon(queued.set)
         return result
 
+    async def answered(command, payload, timeout):
+        reply = await read(command, payload, timeout)
+        replies.append(reply)
+        woken.set()
+        return reply
+
     monkeypatch.setattr(relay, 'deliver_local', sent)
+    monkeypatch.setattr(relay, 'read', answered)
     thread, result = _in_background(check)
     assert queued.wait(5), 'The background command must be queued before the first poll'
     _answer(client, alice, {'ok': True, 'orders': []}, CAPABLE)
-    thread.join(1)
-    assert not thread.is_alive(), 'A browser reply must wake the background reader immediately'
+    # Time the wake-up itself: the reader's Chrome read resolving with the
+    # reply. Saving the result afterwards is database work, not the wake-up.
+    assert woken.wait(1), 'A browser reply must wake the background reader immediately'
+    assert replies == [{'ok': True, 'orders': []}]
+    thread.join(10)
+    assert not thread.is_alive()
     assert result['response']['ok'] is True
