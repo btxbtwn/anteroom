@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from vendoo_studio.services.comp_research import comps_search_messages
+from vendoo_studio.services.comp_research import SOLD, comps_search_messages
 from vendoo_studio.providers.chatgpt_codex import (
     ChatGPTCodexProvider,
     _messages_to_input,
@@ -284,7 +284,7 @@ class WebSearchRequestTest(unittest.IsolatedAsyncioTestCase):
             provider = ChatGPTCodexProvider()
         provider._web_search_once = AsyncMock(return_value={"answer": "{}", "sources": []})
 
-        await provider.web_search(comps_search_messages("Patagonia Nano Puff jacket M blue sold comps"))
+        await provider.web_search(comps_search_messages("Patagonia Nano Puff jacket M blue sold comps", SOLD))
 
         messages = provider._web_search_once.await_args.args[0]
         tools = provider._web_search_once.await_args.kwargs["tools"]
