@@ -8,9 +8,10 @@ Monorepo combining the `list-this` skill family, the Bridge Chrome extension, an
 patch bump per merged PR with a `changelog.d/` note), the macOS release build,
 and `deploy-hosted.yml`,
 which runs `alembic upgrade head` on the production database and deploys the
-hosted API to Fly.io. Agents queue every PR they open for auto-merge
-(`gh pr merge <n> --auto --merge`) right after opening it, then stay with it
-until CI is green and it merges. GitHub merges only a PR whose CI passed.
+hosted API to Fly.io. Agents open every PR ready for review and queue it for
+auto-merge (`gh pr merge <n> --auto --merge`) only once it is ready to merge
+(see **Pull requests**), then stay with it until it merges. GitHub checks only
+CI before merging a queued PR; everything else is the agent's to confirm first.
 
 **Invariant:** Automation must never publish listings. Generation, category
 resolution and draft creation run unattended and stop at a saved draft.
@@ -127,9 +128,9 @@ Every bug fix, feature and refactor follows the same loop. Component details
    changed, browser tests included (`--fast` skips those while iterating). For
    a visible change, look at it in the sandbox at desktop and phone sizes,
    put screenshots in the PR and show them to the seller in your reply.
-6. **Open the PR ready for review, not as a draft, and queue it** with
-   `gh pr merge <n> --auto --merge` (see **Pull requests** below). Stay with
-   it until CI is green and it merges.
+6. **Open the PR ready for review, not as a draft.** Queue it with
+   `gh pr merge <n> --auto --merge` only once it is ready to merge (see
+   **Pull requests** below). Stay with it until it merges.
 
 The type check in `./check.sh` uses CI's locked baseline mode. After fixing a
 recorded type error, regenerate the baseline with `basedpyright --writebaseline`,
@@ -263,15 +264,24 @@ CI (`.github/workflows/ci.yml`) runs these on every pull request and push to `ma
 - **Marketplace value matrix:** a change to how a General size, condition, color or category becomes a marketplace's value keeps `vendoo-studio/server/tests/test_marketplace_value_matrix.py` and `vendoo-extension/tests/marketplace-value-matrix.test.js` green. They run every General value through the production mapping against the option lists captured in `skills/list-this/references/`, so a refreshed form sweep that updates those lists is checked by the matrix too. Their known-gap lists only shrink: fix the mapping, then remove the entry.
 - **Secrets:** Do not track `.env`, key files, photos, or private exports. CI scans the working tree and the commits a change adds with gitleaks (`./check.sh` does too when gitleaks is installed).
 
-**Pull requests:** Open every PR ready for review, never as a draft: run `gh pr create` without `--draft`. The automatic reviews that run when a PR opens (Codex, CodeRabbit) skip drafts, and GitHub cannot queue a draft for auto-merge. Leave drafts that already exist as they are; mark one ready only when its own work is done. After creating or updating a PR, always check CI (`gh pr checks`) and fix failures before considering the work done. Do not stop while required checks are pending or red. PRs never bump the version or edit `CHANGELOG.md`; do not run `bump-version.sh` in a PR. A PR that changes `vendoo-studio/` adds one note file, `changelog.d/<branch-slug>.md`, holding `- ` bullets in the seller's words (`<slug>.minor.md` or `<slug>.major.md` only when the seller asks for that bump; see `changelog.d/README.md`). After merge, the **Version** workflow turns each merged PR's notes into one patch bump and a `## <version> — <YYYY-MM-DD>` section at the top of `CHANGELOG.md`, which the app shows under Settings → General → About → What's new, and then starts the macOS release build. The UI reads the version from the API; never hardcode it. CI's **Changelog** job (`vendoo-studio/scripts/check-changelog.py`) fails when a PR changes `VERSION` or `CHANGELOG.md`, or when a note is malformed; run it locally with `python vendoo-studio/scripts/check-changelog.py`.
+**Pull requests:** Open every PR ready for review, never as a draft: run `gh pr create` without `--draft`, so reviewers and review bots see it from the start (Codex's review on open does not run on drafts). Leave drafts that already exist as they are; mark one ready only when its own work is done. Ready for review is not ready to merge. After creating or updating a PR, always check CI (`gh pr checks`) and fix failures before considering the work done. Do not stop while required checks are pending or red. PRs never bump the version or edit `CHANGELOG.md`; do not run `bump-version.sh` in a PR. A PR that changes `vendoo-studio/` adds one note file, `changelog.d/<branch-slug>.md`, holding `- ` bullets in the seller's words (`<slug>.minor.md` or `<slug>.major.md` only when the seller asks for that bump; see `changelog.d/README.md`). After merge, the **Version** workflow turns each merged PR's notes into one patch bump and a `## <version> — <YYYY-MM-DD>` section at the top of `CHANGELOG.md`, which the app shows under Settings → General → About → What's new, and then starts the macOS release build. The UI reads the version from the API; never hardcode it. CI's **Changelog** job (`vendoo-studio/scripts/check-changelog.py`) fails when a PR changes `VERSION` or `CHANGELOG.md`, or when a note is malformed; run it locally with `python vendoo-studio/scripts/check-changelog.py`.
 
 When a check fails, read its log (`gh run view <run-id> --log-failed`), reproduce the failure locally with the same command or `./check.sh`, and fix the cause before pushing again. Do not push guesses at CI. Several Anteroom PRs are often open at once. Because none of them touch `VERSION` or `CHANGELOG.md`, they do not conflict over versions.
 
 `main` requires passing CI but does not require a branch to be up to date.
 Do not update a PR or restart CI solely because another PR merged. Update only
-for real conflicts, failed checks or a needed dependency. Queue every PR with
-`gh pr merge <n> --auto --merge` as soon as it is open; GitHub merges it when
-required checks pass. Do not automatically update other open PRs. Keep merge
+for real conflicts, failed checks or a needed dependency.
+
+Queue a PR with `gh pr merge <n> --auto --merge` only when all of these hold
+for its current head commit: `./check.sh` passed for the components it
+changes (and the native checks for Mac or iPhone changes), CI is green, an
+independent review found no blocker, and every review finding, human or bot,
+is fixed or answered on the PR. A push after queuing changes the head, so
+disable auto-merge (`gh pr merge <n> --disable-auto`) and queue again only
+when the new head meets the same bar. GitHub merges a queued PR as soon as the
+required `CI` check passes and checks nothing else.
+
+Do not automatically update other open PRs. Keep merge
 commits: release notes are grouped by them. CI on `main` checks the merged
 result for interactions between independently tested PRs: it runs every push
 to completion, and the hosted deploy waits for it to pass on the merge it
