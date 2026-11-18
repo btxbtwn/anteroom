@@ -100,13 +100,22 @@ class LockedSizeGenerationTest(unittest.TestCase):
         parsed = self.generate(brand="Acme", size="One Size", title="Acme One Size Vintage Hat")
         self.assertEqual(parsed["title"], "Acme M Vintage Hat")
 
-    def test_a_title_over_80_characters_drops_its_last_words_not_the_size(self):
+    def test_a_full_title_keeps_every_word_and_the_item_noun(self):
+        """Swapping S for XXL would pass 80 characters. No word is cut, the last one is the item
+        ("Tee"); only the overridden S goes, so the title never names a size against the lock."""
         title = "M&O GOLD S Graphic T-Shirt Green Tie-Dye Regular Fit Crew Neck Cotton Summer Tee"
         self.assertEqual(len(title), 80)
         self.seller_set("XXL")
         parsed = self.generate(title=title)
-        self.assertTrue(parsed["title"].startswith("M&O GOLD XXL Graphic T-Shirt"), parsed["title"])
-        self.assertLessEqual(len(parsed["title"]), 80)
+        self.assertEqual(parsed["size"], "XXL")
+        self.assertEqual(parsed["title"], "M&O GOLD Graphic T-Shirt Green Tie-Dye Regular Fit Crew Neck Cotton Summer Tee")
+        self.assertTrue(parsed["title"].endswith(" Tee"))
+        self.assertNotIn(" S ", f" {parsed['title']} ")
+
+    def test_a_title_with_room_takes_the_locked_size_and_keeps_its_item_noun(self):
+        self.seller_set("XXL")
+        parsed = self.generate(title="M&O GOLD S Graphic Tee")
+        self.assertEqual(parsed["title"], "M&O GOLD XXL Graphic Tee")
 
     def test_native_rows_follow_even_when_the_models_general_size_agreed(self):
         row = {**EBAY_ROW, "options": ["30", "32", "34"]}

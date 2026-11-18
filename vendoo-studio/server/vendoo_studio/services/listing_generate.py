@@ -972,8 +972,13 @@ def _replace_title_size(listing: dict, old: str, new: str) -> None:
     """Put ``new`` where the title carries the model's whole size ``old`` (One Size, 32x30).
 
     sync_title_size replaces one token, so a two-word size would keep half its
-    words beside the new size. When the swap passes 80 characters, the last words
-    go: the size the seller set is worth more than a trailing descriptor.
+    words beside the new size.
+
+    When the swap would push the title past 80 characters (eBay, Poshmark and
+    Mercari's limit), only the model's size is removed and no other word is cut:
+    that size is one the seller overrode, so it is provably wrong, while a
+    trailing word may be the item itself ("... Summer Tee"). The title gets
+    shorter, never longer, and never names a size that contradicts the lock.
     """
     title = str(listing.get("title") or "").strip()
     old_tokens, new_tokens = old.split(), new.split()
@@ -984,10 +989,11 @@ def _replace_title_size(listing: dict, old: str, new: str) -> None:
     slot = len(brand) if [token.casefold() for token in tokens[: len(brand)]] == brand else 0
     if [token.strip(",").casefold() for token in tokens[slot: slot + len(old_tokens)]] != [t.casefold() for t in old_tokens]:
         return
-    tokens[slot: slot + len(old_tokens)] = new_tokens
-    while len(" ".join(tokens)) > 80 and len(tokens) > slot + len(new_tokens):
-        tokens.pop()
-    listing["title"] = " ".join(tokens)
+    swapped = tokens[:slot] + new_tokens + tokens[slot + len(old_tokens):]
+    if len(" ".join(swapped)) <= max(80, len(title)):
+        listing["title"] = " ".join(swapped)
+    else:
+        listing["title"] = " ".join(tokens[:slot] + tokens[slot + len(old_tokens):])
 
 
 def _locked_size_type_paths(seed: dict) -> list[str]:
