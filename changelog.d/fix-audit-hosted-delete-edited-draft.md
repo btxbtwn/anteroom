@@ -1,0 +1,1 @@
+- Deleting a draft you had edited no longer fails with "Cloud data is temporarily unavailable" in your online account, alone or in a bulk delete.
