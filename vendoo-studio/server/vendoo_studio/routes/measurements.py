@@ -58,7 +58,7 @@ async def _write_uploads(files: list[UploadFile], workdir: str) -> list[Path]:
     return paths
 
 
-async def _explained(reading: Awaitable[dict], what: str) -> dict:
+async def _explained(reading: Awaitable[dict], what: str, provider=None) -> dict:
     """A reading's failure as a message the seller can act on.
 
     A provider that failed or stalled is named (502). Anything else is logged and
@@ -73,12 +73,16 @@ async def _explained(reading: Awaitable[dict], what: str) -> dict:
         raise HTTPException(502, str(exc)) from exc
     except Exception as exc:
         log.exception("reading %s from photos failed", what)
-        # Only what failed: each client adds its own next step after it.
-        raise HTTPException(500, f"Anteroom could not read the {what} in these photos.") from exc
+        # Name the provider that was reading (most failures here are its replies);
+        # only what failed: each client adds its own next step after it.
+        from vendoo_studio.services.provider_deadlines import provider_label, unwrap
+
+        who = provider_label(getattr(unwrap(provider), "name", None)) if provider is not None else "Anteroom"
+        raise HTTPException(500, f"{who} could not read the {what} in these photos.") from exc
 
 
 async def _read(provider, paths: list[Path], garment: str) -> dict:
-    return await _explained(measure_read.read_measurements(provider, paths, garment), "measurements")
+    return await _explained(measure_read.read_measurements(provider, paths, garment), "measurements", provider)
 
 
 @router.post("/api/measurements/read")
@@ -95,7 +99,7 @@ async def read_size_tags(files: list[UploadFile] = File(...)):
     provider = _photo_provider("size tags")
     with tempfile.TemporaryDirectory(prefix="size-tag-upload-") as workdir:
         paths = await _write_uploads(files, workdir)
-        return await _explained(size_tag_read.read_size_tag(provider, paths), "size")
+        return await _explained(size_tag_read.read_size_tag(provider, paths), "size", provider)
 
 
 @router.post("/api/conversations/{conv_id}/measurements/read")

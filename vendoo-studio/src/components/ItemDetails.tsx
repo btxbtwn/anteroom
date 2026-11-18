@@ -326,7 +326,7 @@ export function ItemDetails({ convId, part, garmentHint }: Props) {
               }}
             />
             <p id={`item-tag-size-help-${convId}`} className="mt-1 text-muted-foreground text-xs">
-              From the size tag. Generating uses it as the listing's Size.
+              From the size tag. Generating uses it unless you set Size yourself.
             </p>
           </div>
         ) : null}

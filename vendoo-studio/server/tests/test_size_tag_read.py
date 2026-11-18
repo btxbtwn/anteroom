@@ -114,6 +114,8 @@ class ReadSizeTagsRouteTest(unittest.TestCase):
     def test_an_unexpected_failure_is_explained_not_a_restart(self):
         """An unexplained 500 makes the client retry and blame a restart; this one says what failed."""
         class Broken:
+            name = "openrouter"
+
             async def vision_chat(self, messages):
                 raise KeyError("choices")
                 yield ""  # pragma: no cover
@@ -121,7 +123,7 @@ class ReadSizeTagsRouteTest(unittest.TestCase):
         with self.assertLogs("vendoo_studio.routes.measurements", "ERROR"):
             response = self.post(Broken(), [_photo()])
         self.assertEqual(response.status_code, 500)
-        self.assertEqual(response.json()["detail"], "Anteroom could not read the size in these photos.")
+        self.assertEqual(response.json()["detail"], "OpenRouter could not read the size in these photos.")
 
     def test_limits_photos_per_listing(self):
         self.assertEqual(self.post(FakeProvider([]), [_photo()] * 21).status_code, 400)

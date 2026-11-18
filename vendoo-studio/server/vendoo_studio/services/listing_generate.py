@@ -951,6 +951,19 @@ def propagate_general_size(listing: dict, *, previous_size: str | None = None) -
     return changed
 
 
+def _follow_ebay_native_size(listing: dict, size: str, model_size: str | None) -> None:
+    """eBay's direct form names its row ``Size``; set it when it still holds the model's size or nothing."""
+    from vendoo_studio.services.seller_overrides import field_locked
+
+    block = listing.get("ebay_specifics")
+    if not isinstance(block, dict) or "Size" not in block or field_locked(listing, "ebay", "Size"):
+        return
+    current = str(block.get("Size") or "").strip()
+    followed = {"", *(([model_size, ebay_size(listing, block, model_size)]) if model_size else [])}
+    if current in followed:
+        listing["ebay_specifics"] = {**block, "Size": ebay_size(listing, block, size)}
+
+
 def apply_send_readiness_fixes(listing: dict) -> bool:
     """Deterministic fixes so generated listings clear common Send blockers."""
     from vendoo_studio.services.validation import normalize_listing_dropdowns
@@ -1451,7 +1464,13 @@ def persist_generated_listing(
             listing.pop("sku", None)
         # The size the seller confirmed from the tag is General Size; marketplace
         # size slots that followed the model's size follow the seller's instead.
+        # A Size the seller set in the editor (locked) wins over the tag everywhere,
+        # not only on General after restore_locked.
+        from vendoo_studio.services.seller_overrides import is_locked as _is_locked
+
         size = seller_size(seller)
+        if size and _is_locked(seed, "size"):
+            size = ""
         if size and size != str(listing.get("size") or "").strip():
             model_size = None if listing.get("size") is None else str(listing.get("size"))
             listing["size"] = size
@@ -1491,6 +1510,7 @@ def persist_generated_listing(
         # The direct tabs' blocks were copied from the model before the tag size
         # was set; the size slots that followed the model follow the seller too.
         propagate_general_size(listing, previous_size=pinned_size[1])
+        _follow_ebay_native_size(listing, *pinned_size)
     constrain_generated(listing, seed)
     cap_listing_description(listing)
     if revisions:

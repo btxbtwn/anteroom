@@ -415,6 +415,30 @@ class PersistListingTest(unittest.TestCase):
         self.assertEqual(parsed["size"], "M")
         self.assertEqual(parsed["mercari_specifics"]["size"], "M")
 
+    def test_tag_size_reaches_ebays_direct_size_row(self):
+        listing_persistence.save_revision(self.db, self.conv.id, {
+            **LISTING_JSON, "size": "M", "ebay_specifics": {"Size": "M"},
+            "_native_forms": {"ebay": {"fields": [
+                {"path": "ebay_specifics.Size", "label": "Size", "options": ["S", "M", "L"]},
+            ]}},
+        }, source="generate")
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M"}))
+        parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
+            **LISTING_JSON, "size": "S", "ebay_specifics": {"Size": "S"},
+        })
+        self.assertEqual(parsed["ebay_specifics"]["Size"], "M")
+
+    def test_a_size_the_seller_set_wins_over_the_tag_everywhere(self):
+        listing_persistence.save_revision(self.db, self.conv.id, {
+            **LISTING_JSON, "size": "L", "poshmark_specifics": {"size": "L"}, "seller_fields": ["size"],
+        }, source="user_form")
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M"}))
+        parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
+            **LISTING_JSON, "size": "L", "poshmark_specifics": {"size": "L"},
+        })
+        self.assertEqual(parsed["size"], "L")
+        self.assertEqual(parsed["poshmark_specifics"]["size"], "L")
+
     def test_tag_size_zero_is_a_size(self):
         for stored in ("0", 0):
             with self.subTest(stored=stored):
