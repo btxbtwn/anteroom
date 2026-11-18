@@ -181,8 +181,8 @@ export function ListingSidebar({
   // Each filter row carries how many listings it would keep, counted over the
   // status tab in front of the reader rather than the whole inventory.
   const facetSource = useMemo(
-    () => searched.filter((listing) => inStatusTab(listing, filters.status)),
-    [searched, filters.status],
+    () => searched.filter((listing) => inStatusTab(listing, filters.status, Boolean(needle))),
+    [searched, filters.status, needle],
   );
   const filterMarketplaces = useMemo(
     () => marketplaceOptions(conversations || [], marketplaceSettings?.selected || [], filters.notListed),
@@ -198,7 +198,11 @@ export function ListingSidebar({
   const staleThreshold = uiPrefs?.stale_listing_days;
   const filterStaleCounts = useMemo(() => staleCounts(facetSource, undefined, staleThreshold), [facetSource, staleThreshold]);
   const filterUnsentCount = useMemo(() => unsentCount(facetSource), [facetSource]);
-  const filterMissingSaleCount = useMemo(() => missingSaleCount(facetSource), [facetSource]);
+  // The filter opens Sold, so its count is over the sold listings.
+  const filterMissingSaleCount = useMemo(
+    () => missingSaleCount(searched.filter((listing) => inStatusTab(listing, "sold"))),
+    [searched],
+  );
   const labels = useMemo(() => labelOptions(conversations || []), [conversations]);
   const settingsSearch = useSettingsSearch(settingsMode, onSettingsSearchResult);
   const {

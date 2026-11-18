@@ -32,6 +32,13 @@ struct InventoryTests {
         let soldNow = ConversationSummary(id: "s", title: "Sold tee", status: "sold", createdAt: "", updatedAt: "")
         precondition(!InventoryQuery.inTab(soldNow, .open) && InventoryQuery.inTab(soldNow, .open, searching: true))
         precondition(InventoryQuery.inTab(rows[0], .open) && InventoryQuery.inTab(rows[3], .open))
+        // A send in progress, or a status this build does not know, still has a tab.
+        let sending = ConversationSummary(id: "l", title: "Sending", status: "listing", createdAt: "", updatedAt: "")
+        let unknown = ConversationSummary(id: "u", title: "Unknown", status: "archived", createdAt: "", updatedAt: "")
+        precondition(sending.statusTab == "draft" && unknown.statusTab == "draft")
+        let open = InventoryQuery.counts(rows + [sending, soldNow], search: "")
+        precondition(open[.open] == 5 && open[.draft] == 3 && open[.sold] == 2)
+        precondition(open[.open] == (open[.draft] ?? 0) + (open[.active] ?? 0) + (open[.failed] ?? 0))
         filters.status = .sold
         precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["c"])
         filters.status = .open

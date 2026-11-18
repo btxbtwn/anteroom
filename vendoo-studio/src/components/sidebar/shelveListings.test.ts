@@ -6,7 +6,7 @@ import { shelveListings } from "./shelveListings";
 const open = (id: string, updated: string, extra: Partial<Listing> = {}): Listing =>
   ({ id, title: id, updated_at: updated, created_at: updated, ...extra });
 const sold = (id: string, settled: string, extra: Partial<Listing> = {}): Listing =>
-  ({ id, title: id, settled_at: settled, sold_at: settled, updated_at: settled, ...extra });
+  ({ id, title: id, status: "sold", settled_at: settled, sold_at: settled, updated_at: settled, ...extra });
 
 const rows = [
   open("old draft", "2026-01-01T00:00:00Z"),
@@ -19,7 +19,7 @@ describe("shelveListings", () => {
   it("shows open listings newest first and keeps finished ones off the working list", () => {
     const { shown, matched } = shelveListings(rows, "", DEFAULT_LISTING_FILTERS, null);
     expect(shown.map((row) => row.id)).toEqual(["new draft", "old draft"]);
-    expect(matched).toBe(4);
+    expect(matched).toBe(2);
   });
 
   it("finds finished listings while searching, below the open ones", () => {
@@ -42,6 +42,14 @@ describe("shelveListings", () => {
     const { shown, matched } = shelveListings(rows, "draft", DEFAULT_LISTING_FILTERS, "sold shirt");
     expect(shown.map((row) => row.id)).toEqual(["new draft", "old draft"]);
     expect(matched).toBe(2);
+  });
+
+  it("keeps a listing that sells while open on Open, without settling", () => {
+    const justSold = open("just sold", "2026-05-01T00:00:00Z", { status: "sold" });
+    const { shown } = shelveListings([...rows, justSold], "", DEFAULT_LISTING_FILTERS, "just sold");
+    expect(shown.map((row) => row.id)).toEqual(["just sold", "new draft", "old draft"]);
+    expect(shelveListings([...rows, justSold], "", DEFAULT_LISTING_FILTERS, null).shown.map((row) => row.id))
+      .toEqual(["new draft", "old draft"]);
   });
 
   it("reports no match for a search nothing fits", () => {

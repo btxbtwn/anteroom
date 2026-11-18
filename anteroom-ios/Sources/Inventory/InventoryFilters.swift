@@ -87,7 +87,7 @@ extension ListingSort {
 }
 
 enum StatusTab: String, CaseIterable, Identifiable, Sendable {
-    /// Open: everything not sold (drafts, in progress, active, failed).
+    /// Open: everything not sold (Draft + Active + Failed); with Sold it holds the whole inventory.
     case open, draft, active, sold, failed
 
     var id: String { rawValue }
@@ -259,7 +259,10 @@ extension ConversationSummary {
         return status
     }
 
-    var statusTab: String { ["in_progress", "inactive"].contains(inventoryStatus) ? "draft" : inventoryStatus }
+    /// Every listing has a tab: a send in progress ("listing"), a generation in
+    /// progress, an inactive listing and any status this build does not know
+    /// file under Draft, so Open is always Draft + Active + Failed.
+    var statusTab: String { ["active", "sold", "failed"].contains(inventoryStatus) ? inventoryStatus : "draft" }
     var statusLabel: String { inventoryStatus.replacingOccurrences(of: "_", with: " ").capitalized }
 
     fileprivate var activeAnchor: Double {

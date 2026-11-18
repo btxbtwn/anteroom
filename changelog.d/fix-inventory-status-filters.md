@@ -1,0 +1,2 @@
+- Inventory's Open tab now counts only unsold items, so it always equals Draft plus Active (and Failed). A sale you reopened no longer shows up under both Open and Sold.
+- A listing that's still sending to a marketplace now appears under Draft instead of under no tab, on the web and on iPhone.

@@ -96,6 +96,11 @@ describe("inventoryRows", () => {
   it("orders by recent activity and keeps finished listings out of All", () => {
     expect(inventoryRows(rows, "", "all", "recent").map((row) => row.id)).toEqual(["b", "a"]);
   });
+  it("keeps a sale out of Open even before it settles", () => {
+    const unsettledSale = { id: "d", title: "Reopened sale", status: "sold", updated_at: "2026-11-02T00:00:00Z" };
+    expect(inventoryRows([...rows, unsettledSale], "", "all", "recent").map((row) => row.id)).toEqual(["b", "a"]);
+    expect(inventoryRows([...rows, unsettledSale], "", "sold", "recent").map((row) => row.id)).toEqual(["d", "c"]);
+  });
   it("keeps the status tab, search and sort", () => {
     expect(inventoryRows(rows, "", "sold", "recent").map((row) => row.id)).toEqual(["c"]);
     expect(inventoryRows(rows, "boots", "all", "recent").map((row) => row.id)).toEqual(["c"]);

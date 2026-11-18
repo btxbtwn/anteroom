@@ -5,7 +5,7 @@ import { activeAnchorMs, settledAnchorMs, type Listing } from "./listingShelves"
  * The sidebar's rows for a search and filter set: open listings above
  * finished ones (unless another sort orders the whole list), finished ones
  * only while searching or on their own tab, and the listing that is open in
- * the editor kept on screen even when it is finished.
+ * the editor kept on screen even when it is finished or sold off the Open tab.
  */
 export function shelveListings(
   listings: Listing[],
@@ -19,7 +19,12 @@ export function shelveListings(
   const ordered = sortListings([...active, ...settled], filters.sort);
   const shown = ordered.filter((listing) => visibleInInventory(listing, filters.status, Boolean(needle)));
   if (openListingId && !shown.some((listing) => listing.id === openListingId)) {
-    const open = settled.find((listing) => listing.id === openListingId);
+    // A sale while the editor is open moves the item to Sold; Open keeps its
+    // row on screen until the seller opens something else.
+    const open = settled.find((listing) => listing.id === openListingId)
+      ?? (filters.status === "all"
+        ? filterListings(listings.filter((listing) => listing.id === openListingId), needle, { ...filters, status: "sold" })[0]
+        : undefined);
     if (open) shown.unshift(open);
   }
   return { shown, matched: ordered.length };

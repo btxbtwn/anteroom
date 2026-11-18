@@ -47,9 +47,10 @@ export const LISTING_STATUS_TABS = ["draft", "active", "sold", "failed"] as cons
 export type ListingStatusFilter = "all" | (typeof LISTING_STATUS_TABS)[number];
 
 /**
- * Tab names. "all" is the working list, drafts and active listings, so it reads
+ * Tab names. "all" is the working list, everything not sold, so it reads
  * "Open": sold listings sit under their own tab, and "All 4" beside "Sold 12"
- * looked like a miscount.
+ * looked like a miscount. Open is exactly Draft + Active (+ Failed), and Open
+ * and Sold together hold the whole inventory.
  */
 export const LISTING_STATUS_LABELS: Record<ListingStatusFilter, string> = {
   all: "Open",
@@ -109,20 +110,30 @@ export const DEFAULT_LISTING_FILTERS: ListingFilters = {
   sort: "recent",
 };
 
-/** The inventory tab a listing belongs to while preserving its detailed row status. */
-export function listingStatusTab(status?: string | null): string {
+/**
+ * The inventory tab a listing belongs to while preserving its detailed row
+ * status. Every listing has one: a send in progress ("listing"), a generation
+ * in progress, an inactive listing and any status this build does not know
+ * all file under Draft, so no listing is left without a tab.
+ */
+export function listingStatusTab(status?: string | null): (typeof LISTING_STATUS_TABS)[number] {
   const value = String(status || "draft");
-  return value === "in_progress" || value === "inactive" ? "draft" : value;
+  return (LISTING_STATUS_TABS as readonly string[]).includes(value)
+    ? value as (typeof LISTING_STATUS_TABS)[number]
+    : "draft";
 }
 
 /**
  * Whether a listing shows under a status tab. The tabs are lifecycle states and
  * nothing else: a live listing with unsent edits still belongs to Active, where
- * its unsent tag and the filter can explain it.
+ * its unsent tag and the filter can explain it. Open holds everything not sold;
+ * a search there spans the whole inventory, so a sold item is still found by
+ * its title or SKU.
  */
-export function inStatusTab(listing: FilterableListing, tab: ListingStatusFilter): boolean {
-  if (tab === "all") return true;
-  return listingStatusTab(inventoryStatus(listing)) === tab;
+export function inStatusTab(listing: FilterableListing, tab: ListingStatusFilter, searching = false): boolean {
+  const own = listingStatusTab(inventoryStatus(listing));
+  if (tab === "all") return searching || own !== "sold";
+  return own === tab;
 }
 
 function lower(value: string | null | undefined): string {
@@ -174,8 +185,9 @@ export function matchesFilters(
   listing: FilterableListing,
   filters: ListingFilters,
   now: number = Date.now(),
+  searching = false,
 ): boolean {
-  if (!inStatusTab(listing, filters.status)) return false;
+  if (!inStatusTab(listing, filters.status, searching)) return false;
   const listed = listedOn(listing);
   if (filters.notListed) {
     // Vendoo's "View Not Listed" asks for the items no marketplace carries.
@@ -202,7 +214,7 @@ export function filterListings<T extends FilterableListing>(
   now: number = Date.now(),
 ): T[] {
   return listings.filter(
-    (listing) => matchesSearch(listing, needle) && matchesFilters(listing, filters, now),
+    (listing) => matchesSearch(listing, needle) && matchesFilters(listing, filters, now, Boolean(needle)),
   );
 }
 
@@ -267,6 +279,14 @@ export function compareListings(sort: ListingSortId): ((left: FilterableListing,
 }
 
 /**
+ * Missing sale details is about sales, which sit under Sold: turning it on
+ * opens that tab, the way sorting by sale date does.
+ */
+export function statusForMissingSale(on: boolean, status: ListingStatusFilter): ListingStatusFilter {
+  return on ? "sold" : status;
+}
+
+/**
  * The status tab a sort belongs on. Only sold listings have a sale date, so
  * sorting by it opens the Sold tab; every other sort keeps the current tab.
  */
@@ -279,7 +299,10 @@ export function sortListings<T extends FilterableListing>(listings: T[], sort: L
   return compare ? [...listings].sort(compare) : listings;
 }
 
-/** Finished listings stay out of the working list, but remain findable in search and Sold. */
+/**
+ * Finished listings (sold ones, and duplicates merged into another item) stay
+ * out of the working list, but remain findable in search and Sold.
+ */
 export function visibleInInventory(
   listing: FilterableListing,
   tab: string,
@@ -296,9 +319,10 @@ export function statusCounts(
 ): Record<string, number> {
   const counts: Record<string, number> = { all: 0 };
   for (const listing of listings) {
-    if (visibleInInventory(listing, "all", searching, selectedId)) counts.all += 1;
     const status = listingStatusTab(inventoryStatus(listing));
-    if (visibleInInventory(listing, status, searching, selectedId)) counts[status] = (counts[status] || 0) + 1;
+    if (!visibleInInventory(listing, status, searching, selectedId)) continue;
+    counts[status] = (counts[status] || 0) + 1;
+    if (inStatusTab(listing, "all", searching) && visibleInInventory(listing, "all", searching, selectedId)) counts.all += 1;
   }
   return counts;
 }
