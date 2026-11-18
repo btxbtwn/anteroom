@@ -9,6 +9,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -25,13 +27,32 @@ class PostgresTimingArtifacts(unittest.TestCase):
         safe_path = '${{ runner.temp }}/pg-observations-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}/durations.json'
         self.assertIn(f'--input "{path}"', postgres)
         self.assertIn(f'--output "{safe_path}"', postgres)
-        self.assertIn(f'            {safe_path}', postgres)
-        self.assertNotIn(f'path: {path}', postgres)
+        steps = yaml.load(workflow, Loader=yaml.BaseLoader)['jobs']['studio-backend-postgres']['steps']
+        uploads = [step for step in steps if step.get('uses', '').startswith('actions/upload-artifact@')]
+        self.assertEqual(len(uploads), 1)
+        inventory_path = safe_path.removesuffix('durations.json') + 'inventory.json'
+        self.assert_hash_only_upload_paths(uploads[0]['with']['path'], [safe_path, inventory_path])
         self.assertIn('id: postgres-tests', postgres)
         self.assertIn("if: success() && steps.postgres-tests.outcome == 'success'", postgres)
         self.assertIn('actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9', postgres)
         self.assertIn('retention-days: 7', postgres)
         self.assertIn('--splits 2 --group ${{ matrix.group }}', postgres)
+
+    def assert_hash_only_upload_paths(self, value, allowed):
+        entries = [line.strip() for line in value.splitlines() if line.strip()]
+        self.assertCountEqual(entries, allowed)
+
+    def test_raw_paths_are_rejected_in_single_and_multiline_uploads(self):
+        raw = '/tmp/pg-durations.json'
+        safe = '/tmp/pg-observations/durations.json'
+        inventory = '/tmp/pg-observations/inventory.json'
+        for source in (f'path: {raw}\n',
+                       f'path: |\n  {safe}\n  {inventory}\n  {raw}\n'):
+            with self.subTest(source=source), self.assertRaises(AssertionError):
+                value = yaml.load(source, Loader=yaml.BaseLoader)['path']
+                self.assert_hash_only_upload_paths(value, [safe, inventory])
+        value = yaml.load(f'path: |\n  {safe}\n  {inventory}\n', Loader=yaml.BaseLoader)['path']
+        self.assert_hash_only_upload_paths(value, [safe, inventory])
 
     def test_xdist_controller_writes_exact_shard_union_and_safe_durations(self):
         with tempfile.TemporaryDirectory() as directory:
