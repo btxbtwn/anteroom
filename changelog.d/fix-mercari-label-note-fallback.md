@@ -1,0 +1,1 @@
+- When Mercari doesn't offer your saved shipping label, the note on the Mercari tab now says List uses USPS Ground Advantage instead, and that Mercari refuses the listing if it offers neither.
