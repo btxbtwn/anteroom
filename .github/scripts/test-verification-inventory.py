@@ -57,6 +57,14 @@ def test_skip():
 def test_xfail():
     assert False
 
+@pytest.fixture
+def teardown_skip():
+    yield
+    pytest.skip("synthetic teardown skip")
+
+def test_teardown_skip(teardown_skip):
+    assert True
+
 def test_subtests(subtests):
     with subtests.test(case="pass"):
         assert True
@@ -70,7 +78,7 @@ def test_subtests(subtests):
                 self.assertEqual(result.returncode, 0, result.stdout)
                 payloads.append(json.loads(path.read_text()))
             expected = {digest('test_sample.py::' + name) for name in
-                        ('test_pass', 'test_skip', 'test_xfail', 'test_subtests')}
+                        ('test_pass', 'test_skip', 'test_xfail', 'test_subtests', 'test_teardown_skip')}
             left, right = (set(p['selected']) for p in payloads)
             self.assertEqual(left | right, expected)
             self.assertFalse(left & right)
@@ -78,7 +86,8 @@ def test_subtests(subtests):
             passed = set().union(*(set(p['passed']) for p in payloads))
             skipped = set().union(*(set(p['skipped']) for p in payloads))
             self.assertEqual(passed, {digest('test_sample.py::test_pass'), digest('test_sample.py::test_subtests')})
-            self.assertEqual(skipped, {digest('test_sample.py::test_skip'), digest('test_sample.py::test_xfail')})
+            self.assertEqual(skipped, {digest('test_sample.py::test_skip'), digest('test_sample.py::test_xfail'),
+                                       digest('test_sample.py::test_teardown_skip')})
             self.assertTrue(all(p['target'] == self.git(root, 'rev-parse', 'HEAD') for p in payloads))
             self.assertTrue(all(p['tree'] == self.git(root, 'rev-parse', 'HEAD^{tree}') for p in payloads))
             self.assertTrue(all(p['run_id'] == '42' and p['attempt'] == '2' for p in payloads))
@@ -94,7 +103,22 @@ def test_subtests(subtests):
                 self.fixture(root, source)
                 path = root / 'must-not-exist.json'
                 result = self.run_fixture(root, path)
-                self.assertNotEqual(result.returncode, 0, result.stdout)
+                # Reject collector errors: a nonzero exit alone cannot prove that
+                # the intended pytest/xdist failure path was actually exercised.
+                if case == 'collection-error':
+                    self.assertIn(result.returncode, (1, 2), result.stdout)
+                    self.assertIn('ERROR collecting test_sample.py', result.stdout)
+                    self.assertIn('SyntaxError', result.stdout)
+                else:
+                    self.assertEqual(result.returncode, 1, result.stdout)
+                    if case == 'worker-loss':
+                        self.assertIn('crashed while running', result.stdout)
+                        self.assertIn('test_sample.py::test_crash', result.stdout)
+                    else:
+                        self.assertIn('AssertionError', result.stdout)
+                        self.assertIn('test_failure' if case == 'failed-test' else 'test_subtests', result.stdout)
+                self.assertNotIn('INTERNALERROR', result.stdout)
+                self.assertNotIn('AttributeError', result.stdout)
                 self.assertFalse(path.exists(), result.stdout)
 
 

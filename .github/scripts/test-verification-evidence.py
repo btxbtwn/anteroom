@@ -3,6 +3,8 @@ import importlib.util
 import os
 from pathlib import Path
 import sys
+import subprocess
+import tempfile
 from types import SimpleNamespace, ModuleType
 import unittest
 from unittest.mock import patch
@@ -140,7 +142,7 @@ class VerificationEvidence(unittest.TestCase):
         if args[0] == 'merge-base':
             return ''
         if args[:2] == ('diff', '--name-only'):
-            return 'anteroom-ios/Sources/Foo.swift\nserver/migrations/versions/new.py'
+            return 'anteroom-ios/Sources/Foo.swift\0server/migrations/versions/new.py\0'
         if args[:2] == ('rev-list', '--first-parent'):
             return TARGET
         return 'c'*40
@@ -155,6 +157,45 @@ class VerificationEvidence(unittest.TestCase):
         self.assertFalse(result['production_base_is_live_verified'])
         self.assertEqual(result['native_changes'], ['anteroom-ios/Sources/Foo.swift'])
         self.assertTrue(result['migration_changes'])
+
+    @patch.dict(os.environ, {'GITHUB_SHA': TARGET, 'GITHUB_REPOSITORY': 'owner/repo',
+                            'GITHUB_RUN_ID': '42', 'GITHUB_RUN_ATTEMPT': '2',
+                            'GITHUB_EVENT_NAME': 'workflow_dispatch'})
+    def test_impact_paths_preserve_unicode_whitespace_and_renamed_sources(self):
+        with tempfile.TemporaryDirectory(prefix='verification-paths-') as directory:
+            root = Path(directory)
+            def git(*args):
+                return subprocess.run(['git', '-C', str(root), *args], check=True,
+                                      capture_output=True, timeout=5).stdout.decode('utf-8', errors='surrogateescape')
+            git('init', '-q')
+            source = root / 'anteroom-ios/Sources/Foo.swift'
+            source.parent.mkdir(parents=True)
+            source.write_text('synthetic native source')
+            git('add', '.')
+            git('-c', 'user.name=Verification', '-c', 'user.email=verification@example.invalid',
+                '-c', 'commit.gpgsign=false', 'commit', '-qm', 'Base fixture')
+            base = git('rev-parse', 'HEAD').strip()
+            (root / 'archive').mkdir()
+            source.rename(root / 'archive/Foo.swift')
+            unusual = 'anteroom-ios/Sources/Café\nTail .swift '
+            (root / unusual).write_text('another synthetic source')
+            git('add', '.')
+            git('-c', 'user.name=Verification', '-c', 'user.email=verification@example.invalid',
+                '-c', 'commit.gpgsign=false', 'commit', '-qm', 'Rename and add unusual path')
+            # Pin rename/quoting settings so the old bug is demonstrated on all hosts.
+            git('config', 'diff.renames', 'true')
+            git('config', 'core.quotePath', 'true')
+            legacy = git('diff', '--name-only', f'{base}..HEAD').splitlines()
+            self.assertNotIn(unusual, legacy)
+            self.assertNotIn('anteroom-ios/Sources/Foo.swift', legacy)
+            def mixed_git(*args):
+                if args[0] == 'diff':
+                    self.assertEqual(args[1:4], ('--name-only', '--no-renames', '-z'))
+                    return git(*args[:-1], f'{base}..HEAD')
+                return self.fake_git(*args)
+            with patch.object(evidence, 'git', mixed_git):
+                result = evidence.prepare(TARGET, BASE)
+            self.assertEqual(set(result['native_changes']), {'anteroom-ios/Sources/Foo.swift', unusual})
 
     @patch.dict(os.environ, {'GITHUB_SHA': TARGET, 'GITHUB_EVENT_NAME': 'workflow_dispatch'})
     def test_wrong_target_nonfirstparent_same_or_reversed_span_fails(self):
@@ -232,9 +273,28 @@ class CollectorContract(unittest.TestCase):
         self.assertEqual(p.state.passed, {evidence.digest('one')})
         self.assertFalse(p.state.skipped)
 
+    def test_teardown_skip_replaces_pass_without_conflicting_outcomes(self):
+        p = self.plugin
+        p.pytest_runtest_logreport(SimpleNamespace(nodeid='one', when='call', passed=True, skipped=False))
+        p.pytest_runtest_logreport(SimpleNamespace(nodeid='one', when='teardown', passed=False, skipped=True))
+        self.assertFalse(p.state.passed)
+        self.assertEqual(p.state.skipped, {evidence.digest('one')})
+
+    def test_successful_teardown_keeps_call_pass(self):
+        p = self.plugin
+        p.pytest_runtest_logreport(SimpleNamespace(nodeid='one', when='call', passed=True, skipped=False))
+        p.pytest_runtest_logreport(SimpleNamespace(nodeid='one', when='teardown', passed=True, skipped=False))
+        self.assertEqual(p.state.passed, {evidence.digest('one')})
+        self.assertFalse(p.state.skipped)
+
+    def test_normal_worker_without_payload_invalidates_inventory(self):
+        self.plugin.pytest_testnodedown(SimpleNamespace(workeroutput={}), None)
+        self.assertTrue(self.plugin.state.invalid)
+        self.assertFalse(self.plugin.state.workers)
+
     def test_worker_loss_prevents_inventory(self):
         p = self.plugin
-        p.pytest_testnodedown(SimpleNamespace(workeroutput={}), 'worker died')
+        p.pytest_testnodedown(SimpleNamespace(), 'worker died')
         with patch.object(p, 'snapshot', side_effect=AssertionError('must not publish')):
             p.pytest_sessionfinish(SimpleNamespace(config=SimpleNamespace()), 0)
         self.assertTrue(p.state.invalid)

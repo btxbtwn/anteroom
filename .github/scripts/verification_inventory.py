@@ -38,6 +38,8 @@ def pytest_runtest_logreport(report):
     if report.when == 'call' and report.passed:
         state.passed.add(key)
     elif report.skipped:
+        # A fixture can skip during teardown after the test body passed.
+        state.passed.discard(key)
         state.skipped.add(key)
 
 
@@ -48,8 +50,12 @@ def snapshot():
 
 @pytest.hookimpl(optionalhook=True)
 def pytest_testnodedown(node, error):
-    payload = node.workeroutput.get('verification_inventory')
-    if error or payload is None:
+    # A crashed worker never sends workerfinished and may have no workeroutput.
+    if error:
+        state.invalid = True
+        return
+    payload = getattr(node, 'workeroutput', {}).get('verification_inventory')
+    if payload is None:
         state.invalid = True
     else:
         state.workers.append(payload)

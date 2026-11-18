@@ -27,7 +27,7 @@ def digest(value: str) -> str:
 
 
 def git(*args: str) -> str:
-    return subprocess.run(['git', *args], check=True, capture_output=True, text=True, timeout=15).stdout.strip()
+    return subprocess.run(['git', *args], check=True, capture_output=True, timeout=15).stdout.decode('utf-8', errors='surrogateescape').rstrip('\n')
 
 
 def require_sha(value: str) -> str:
@@ -48,7 +48,7 @@ def prepare(target: str, production: str) -> dict:
         raise ValueError('Production base must precede target on main first-parent history.')
     for ancestor in (HISTORICAL, CORRECTED):
         git('merge-base', '--is-ancestor', ancestor, target)
-    files = git('diff', '--name-only', f'{production}..{target}').splitlines()
+    files = [p for p in git('diff', '--name-only', '--no-renames', '-z', f'{production}..{target}').split('\0') if p]
     return {'schema': 1, 'repository': os.environ['GITHUB_REPOSITORY'], 'target': target,
             'tree': git('rev-parse', 'HEAD^{tree}'), 'production_base': production,
             'production_base_is_live_verified': False,
