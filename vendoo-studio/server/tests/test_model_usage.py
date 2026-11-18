@@ -35,6 +35,25 @@ def test_anthropic_stream_combines_uncached_cached_and_output_usage():
     assert calls[0]["cache_write_input_tokens"] == 30
 
 
+@pytest.mark.parametrize("usage", [
+    {"server_tool_use_details": {"web_search_requests": 6, "tool_calls_requested": 6}, "cost": 0.05},
+    {"server_tool_use": {"web_search_requests": 6}},
+])
+def test_web_search_requests_are_recorded_beside_tokens(usage):
+    with model_usage.capture() as calls:
+        with model_usage.observe("openrouter", "fixture") as call:
+            call.usage({"input_tokens": 9000, "output_tokens": 400, **usage})
+    assert calls[0]["web_search_requests"] == 6
+    assert calls[0]["input_tokens"] == 9000
+
+
+def test_calls_without_server_search_leave_the_search_count_unknown():
+    with model_usage.capture() as calls:
+        with model_usage.observe("openrouter", "fixture") as call:
+            call.usage({"input_tokens": 10, "server_tool_use_details": {"web_search_requests": -1}})
+    assert calls[0]["web_search_requests"] is None
+
+
 def test_sdk_cost_is_explicitly_an_estimate_and_zero_is_valid():
     with model_usage.capture() as calls:
         with model_usage.observe("claude", "fixture") as call:
