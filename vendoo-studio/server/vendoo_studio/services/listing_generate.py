@@ -951,6 +951,68 @@ def propagate_general_size(listing: dict, *, previous_size: str | None = None) -
     return changed
 
 
+def _locked_general_size(seed: dict) -> str:
+    """The General Size the seller set (locked) on the listing being regenerated, or ""."""
+    from vendoo_studio.services.seller_overrides import is_locked
+
+    if not isinstance(seed, dict) or not is_locked(seed, "size"):
+        return ""
+    return sanitize_size_value(seed.get("size"))
+
+
+def _size_key_locked(seed: dict, market: str, key: str) -> bool:
+    from vendoo_studio.services.seller_overrides import field_locked, is_locked
+
+    return is_locked(seed, f"{market}_specifics.{key}") or field_locked(seed, market, key)
+
+
+def _drop_unformed_size_ids(listing: dict, seed: dict) -> None:
+    """A marketplace size ID the model chose names its own size, not the seller's.
+
+    Without a native form row to choose it from, the ID is dropped and the
+    marketplace form derives it from the size label, which follows General Size.
+    """
+    rows = {str(row.get("path") or row.get("key") or "")
+            for contract in (seed.get("_native_forms") or {}).values() if isinstance(contract, dict)
+            for row in contract.get("fields") or [] if isinstance(row, dict)}
+    for key, block in list(listing.items()):
+        if not (key.endswith("_specifics") and isinstance(block, dict) and "nativeSizeId" in block):
+            continue
+        market = key[: -len("_specifics")]
+        if f"{key}.nativeSizeId" in rows or _size_key_locked(seed, market, "nativeSizeId"):
+            continue
+        listing[key] = {name: value for name, value in block.items() if name != "nativeSizeId"}
+
+
+def _follow_native_size_rows(listing: dict, seed: dict, size: str) -> None:
+    """Native form size rows take the seller's size from their own options, never as free text.
+
+    A row whose options do not offer that size is left empty, a gap for the seller,
+    rather than keeping the model's size or taking text the marketplace cannot accept.
+    """
+    from vendoo_studio.models.sizes import size_choice
+
+    for market, contract in (seed.get("_native_forms") or {}).items():
+        block = listing.get(f"{market}_specifics")
+        if not isinstance(contract, dict) or not isinstance(block, dict):
+            continue
+        prefix = f"{market}_specifics."
+        block = dict(block)
+        for row in contract.get("fields") or []:
+            path = str(row.get("path") or row.get("key") or "") if isinstance(row, dict) else ""
+            key = path[len(prefix):] if path.startswith(prefix) else ""
+            if not key or "." in key or key.casefold() not in {"size", "nativesizeid"} or _size_key_locked(seed, market, key):
+                continue
+            wanted = ebay_size(listing, block, size) if market == "ebay" else str(block.get("size") or size)
+            options = [str(option) for option in row.get("options") or []]
+            label = size_choice(wanted, options) if options else wanted
+            if label:
+                block[key] = (row.get("option_values") or {}).get(label, label)
+            else:
+                block.pop(key, None)
+        listing[f"{market}_specifics"] = block
+
+
 def apply_send_readiness_fixes(listing: dict) -> bool:
     """Deterministic fixes so generated listings clear common Send blockers."""
     from vendoo_studio.services.validation import normalize_listing_dropdowns
@@ -1414,6 +1476,15 @@ def persist_generated_listing(
         listing["zipCode"] = location
     elif str(listing.get("zipCode") or "") == "70125":
         listing.pop("zipCode", None)
+    # A General Size the seller set is restored at the end (restore_locked). Align to it
+    # now, so the marketplace sizes and the title follow it instead of the model's size.
+    locked_size = _locked_general_size(seed)
+    generated_size = sanitize_size_value(listing.get("size"))
+    follow_locked_size = bool(locked_size) and locked_size != generated_size
+    if follow_locked_size:
+        listing["size"] = locked_size
+        align_size_fields(listing, previous_size=generated_size or None)
+        _drop_unformed_size_ids(listing, seed)
     apply_send_readiness_fixes(listing)
     if revisions:
         selected = revisions[0].listing_json
@@ -1464,6 +1535,11 @@ def persist_generated_listing(
 
     for market, block in native_blocks.items():
         listing[f"{market}_specifics"] = block
+    if follow_locked_size and native_blocks:
+        # The direct tabs' blocks were copied from the model before alignment.
+        propagate_general_size(listing, previous_size=generated_size or None)
+        _follow_native_size_rows(listing, seed, sanitize_size_value(listing.get("size")) or locked_size)
+        _drop_unformed_size_ids(listing, seed)
     constrain_generated(listing, seed)
     cap_listing_description(listing)
     if revisions:
