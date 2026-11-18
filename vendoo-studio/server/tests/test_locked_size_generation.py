@@ -162,6 +162,24 @@ class LockedSizeGenerationTest(unittest.TestCase):
                 parsed = self.generate(size="M", ebay_specifics={"Size": "M" if expected == "PM" else "PM", "sizeType": other})
                 self.assertEqual(parsed["ebay_specifics"]["Size"], expected)
 
+    def test_another_marketplaces_locked_size_type_does_not_spell_ebays_size(self):
+        row = {**EBAY_ROW, "options": ["PM", "M"]}
+        self.seller_set("M", locks=("size", "mercari_specifics.sizeType"), _native_forms={"ebay": {"fields": [row]}},
+                        mercari_specifics={"sizeType": "Petite"}, ebay_specifics={"Size": "M", "sizeType": "Regular"})
+        parsed = self.generate(size="M", ebay_specifics={"Size": "PM", "sizeType": "Regular"})
+        self.assertEqual(parsed["ebay_specifics"]["Size"], "M")
+
+    def test_ebay_petite_size_matches_the_native_rows_own_option(self):
+        """The category cache may list only M; the saved native row offering PM decides."""
+        from unittest.mock import patch
+
+        row = {**EBAY_ROW, "options": ["PM", "PL"]}
+        self.seller_set("M", locks=("size", "ebay_specifics.sizeType"), _native_forms={"ebay": {"fields": [row]}},
+                        ebay_specifics={"Size": "PM", "sizeType": "Petites"})
+        with patch("vendoo_studio.services.listing_generate.ebay_size_choices", return_value=["M", "L"]):
+            parsed = self.generate(size="M", ebay_specifics={"Size": "PL", "sizeType": "Petites"})
+        self.assertEqual(parsed["ebay_specifics"]["Size"], "PM")
+
     def test_without_a_lock_the_generated_size_stands(self):
         self.seller_set("L", locks=())
         parsed = self.generate(poshmark_specifics={"size": "S"})

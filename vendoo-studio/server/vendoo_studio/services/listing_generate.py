@@ -1007,14 +1007,22 @@ def _apply_locked_size_types(listing: dict, seed: dict) -> None:
         set_path(listing, path, copy.deepcopy(get_path(seed, path)))
 
 
-def _locked_size_type(seed: dict) -> str:
+def _ebay_size_type(listing: dict, seed: dict, block: dict) -> str:
+    """eBay's effective Size Type: the seller's eBay lock, else the eBay block's, else General's.
+
+    Another marketplace's Size Type (Mercari's Petite) never decides eBay's spelling.
+    """
+    from vendoo_studio.services.ebay_fields import ebay_optional_raw
     from vendoo_studio.services.seller_overrides import get_path
 
     for path in _locked_size_type_paths(seed):
-        value = str(get_path(seed, path) or "").strip()
-        if value:
-            return value
-    return ""
+        if path.startswith("ebay_specifics."):
+            value = str(get_path(seed, path) or "").strip()
+            if value:
+                return value
+    value = ebay_optional_raw(block, "sizeType") or next(
+        (item for key, item in block.items() if key.replace(" ", "").casefold() == "sizetype"), None)
+    return str(value or listing.get("sizeType") or "").strip()
 
 
 def _drop_unformed_size_ids(listing: dict, seed: dict) -> None:
@@ -1055,8 +1063,10 @@ def _follow_native_size_rows(listing: dict, seed: dict, size: str) -> None:
             if not key or "." in key or key.casefold() not in {"size", "nativesizeid"} or _size_key_locked(seed, market, key):
                 continue
             if market == "ebay":
-                size_type = _locked_size_type(seed)
-                wanted = ebay_size(listing, {**block, "sizeType": size_type} if size_type else block, size)
+                # The saved native row's options decide, not the category cache: spell by Size Type only.
+                from vendoo_studio.services.ebay_fields import ebay_size_for_type
+
+                wanted = ebay_size_for_type(size, _ebay_size_type(listing, seed, block))
             else:
                 wanted = str(block.get("size") or size)
             options = [str(option) for option in row.get("options") or []]
