@@ -1479,6 +1479,12 @@ def persist_generated_listing(
     # A General Size the seller set is restored at the end (restore_locked). Align to it
     # now, so the marketplace sizes and the title follow it instead of the model's size.
     locked_size = _locked_general_size(seed)
+    # As the model wrote it: the restored native blocks still hold this spelling (32x30).
+    raw_generated_size = sanitize_size_value(listing.get("size"))
+    if locked_size:
+        # Men's bottoms: keep the model's inseam (32x30 stores 30 on eBay) before
+        # its waist is replaced by the seller's.
+        normalize_mens_bottoms_size(listing)
     generated_size = sanitize_size_value(listing.get("size"))
     follow_locked_size = bool(locked_size) and locked_size != generated_size
     if follow_locked_size:
@@ -1537,7 +1543,7 @@ def persist_generated_listing(
         listing[f"{market}_specifics"] = block
     if follow_locked_size and native_blocks:
         # The direct tabs' blocks were copied from the model before alignment.
-        propagate_general_size(listing, previous_size=generated_size or None)
+        propagate_general_size(listing, previous_size=raw_generated_size or generated_size or None)
         _follow_native_size_rows(listing, seed, sanitize_size_value(listing.get("size")) or locked_size)
         _drop_unformed_size_ids(listing, seed)
     constrain_generated(listing, seed)

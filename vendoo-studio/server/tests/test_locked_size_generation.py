@@ -85,6 +85,15 @@ class LockedSizeGenerationTest(unittest.TestCase):
         self.assertEqual(parsed["poshmark_specifics"]["size"], "L")
         self.assertNotIn("nativeSizeId", parsed["poshmark_specifics"])
 
+    def test_mens_bottoms_keep_the_models_inseam_under_a_locked_waist(self):
+        """32x30 from the model under a seller's 34: the waist is the seller's, the 30 inseam stays on eBay."""
+        jeans = {"department": "Men", "category_path": "Men > Jeans", "title": "Levi's 32x30 Jeans 505 Blue"}
+        self.seller_set("34", **{**jeans, "title": "Levi's 34 Jeans 505 Blue"})
+        parsed = self.generate(**jeans, brand="Levi's", size="32x30")
+        self.assertEqual(parsed["size"], "34")
+        self.assertEqual(parsed["ebay_specifics"]["inseam"], "30")
+        self.assertEqual(parsed["title"], "Levi's 34 Jeans 505 Blue")
+
     def test_without_a_lock_the_generated_size_stands(self):
         self.seller_set("L", locks=())
         parsed = self.generate(poshmark_specifics={"size": "S"})
