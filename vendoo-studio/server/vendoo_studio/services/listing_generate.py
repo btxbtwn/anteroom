@@ -990,6 +990,33 @@ def _replace_title_size(listing: dict, old: str, new: str) -> None:
     listing["title"] = " ".join(tokens)
 
 
+def _locked_size_type_paths(seed: dict) -> list[str]:
+    from vendoo_studio.services.seller_overrides import locked_paths
+
+    return sorted(path for path in locked_paths(seed)
+                  if path.split(".")[-1].replace(" ", "").casefold() == "sizetype")
+
+
+def _apply_locked_size_types(listing: dict, seed: dict) -> None:
+    """The Size Type the seller set, before sizes are spelled with it (Petites: M is PM)."""
+    import copy
+
+    from vendoo_studio.services.seller_overrides import get_path, set_path
+
+    for path in _locked_size_type_paths(seed):
+        set_path(listing, path, copy.deepcopy(get_path(seed, path)))
+
+
+def _locked_size_type(seed: dict) -> str:
+    from vendoo_studio.services.seller_overrides import get_path
+
+    for path in _locked_size_type_paths(seed):
+        value = str(get_path(seed, path) or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def _drop_unformed_size_ids(listing: dict, seed: dict) -> None:
     """A marketplace size ID the model chose names its own size, not the seller's.
 
@@ -1027,7 +1054,11 @@ def _follow_native_size_rows(listing: dict, seed: dict, size: str) -> None:
             key = path[len(prefix):] if path.startswith(prefix) else ""
             if not key or "." in key or key.casefold() not in {"size", "nativesizeid"} or _size_key_locked(seed, market, key):
                 continue
-            wanted = ebay_size(listing, block, size) if market == "ebay" else str(block.get("size") or size)
+            if market == "ebay":
+                size_type = _locked_size_type(seed)
+                wanted = ebay_size(listing, {**block, "sizeType": size_type} if size_type else block, size)
+            else:
+                wanted = str(block.get("size") or size)
             options = [str(option) for option in row.get("options") or []]
             label = size_choice(wanted, options) if options else wanted
             if label:
@@ -1111,7 +1142,7 @@ async def fill_validation_gaps(provider, listing: dict, *, analysis: str = "", n
     locked = locked_paths(listing)
     # Under a General Size the seller set, a marketplace size row left empty because
     # it does not offer that size is a gap for the seller, not the model's to fill.
-    size_locked = "size" in locked
+    size_locked = "size" in locked and bool(str(listing.get("size") or "").strip())
     protected = {"category_path", "category_id", "marketplace_categories", "marketplace_category_ids",
                  "marketplace_category_objects", "direct_category_ids", "sku", "seller_fields"}
     allowed = {}
@@ -1521,10 +1552,14 @@ def persist_generated_listing(
     if follow_locked_size:
         # Depop spells kids' sizes as ages by category; map with the saved category
         # when the model's answer left it out (constrain_generated restores it later).
-        saved_depop = (seed.get("direct_category_ids") or {}).get("depop") if isinstance(seed.get("direct_category_ids"), dict) else None
-        current_ids = listing.get("direct_category_ids") if isinstance(listing.get("direct_category_ids"), dict) else {}
-        if saved_depop and not current_ids.get("depop"):
-            listing["direct_category_ids"] = {**current_ids, "depop": saved_depop}
+        seed_ids = seed.get("direct_category_ids")
+        saved_depop = seed_ids.get("depop") if isinstance(seed_ids, dict) else None
+        if saved_depop:
+            current = listing.get("direct_category_ids")
+            current_ids = dict(current) if isinstance(current, dict) else {}
+            if current_ids.get("depop") != saved_depop:
+                listing["direct_category_ids"] = {**current_ids, "depop": saved_depop}
+        _apply_locked_size_types(listing, seed)
         if locked_size != raw_generated_size:
             _replace_title_size(listing, raw_generated_size, locked_size)
         if generated_size not in {raw_generated_size, locked_size}:
@@ -1591,6 +1626,7 @@ def persist_generated_listing(
             and not any(key.casefold() == "inseam" and str(value or "").strip() for key, value in restored_ebay.items()):
         listing["ebay_specifics"] = {**restored_ebay, "inseam": stored_inseam}
     if follow_locked_size and native_blocks:
+        _apply_locked_size_types(listing, seed)
         # The direct tabs' blocks were copied from the model before alignment.
         propagate_general_size(listing, previous_size=raw_generated_size or generated_size or None)
         _follow_native_size_rows(listing, seed, sanitize_size_value(listing.get("size")) or locked_size)

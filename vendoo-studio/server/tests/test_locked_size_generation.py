@@ -143,6 +143,25 @@ class LockedSizeGenerationTest(unittest.TestCase):
         parsed = self.generate(size="32x30", title="Levi's 32x30 Jeans", ebay_specifics={"Size": "34"}, **jeans)
         self.assertEqual(parsed["ebay_specifics"]["Inseam"], "32")
 
+    def test_depop_maps_with_the_saved_category_over_a_conflicting_model_category(self):
+        row = {"path": "depop_specifics.size", "label": "Size", "selection_only": True, "options": ["10 years", "16 years"]}
+        self.seller_set("M", _native_forms={"depop": {"fields": [row]}}, depop_specifics={"size": "10 years"},
+                        direct_category_ids={"depop": "kidswear_jackets"})
+        parsed = self.generate(size="XL (18/20)", depop_specifics={"size": "16 years"},
+                               direct_category_ids={"depop": "menswear_jackets"})
+        self.assertEqual(parsed["depop_specifics"]["size"], "10 years")
+
+    def test_ebay_native_size_is_spelled_with_the_sellers_locked_size_type(self):
+        row = {**EBAY_ROW, "options": ["PM", "M"]}
+        for size_type, expected in (("Petites", "PM"), ("Regular", "M")):
+            with self.subTest(size_type=size_type):
+                self.setUp()
+                self.seller_set("M", locks=("size", "ebay_specifics.sizeType"), _native_forms={"ebay": {"fields": [row]}},
+                                ebay_specifics={"Size": expected, "sizeType": size_type})
+                other = "Regular" if size_type == "Petites" else "Petites"
+                parsed = self.generate(size="M", ebay_specifics={"Size": "M" if expected == "PM" else "PM", "sizeType": other})
+                self.assertEqual(parsed["ebay_specifics"]["Size"], expected)
+
     def test_without_a_lock_the_generated_size_stands(self):
         self.seller_set("L", locks=())
         parsed = self.generate(poshmark_specifics={"size": "S"})
