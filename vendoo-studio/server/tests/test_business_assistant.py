@@ -1378,7 +1378,8 @@ def test_answer_commit_is_confirmed_before_blocked_refresh(workspace, monkeypatc
             [line] = timing_lines(caplog)
             assert f'outcome={expected} ' in line
             assert journals[0].saved_outcome == ('answered' if failure is None else None)
-            assert earlier_commits  # Memory (and possibly new thread) committed first.
+            # Memory only flushes; thread creation commits after the fence accepts.
+            assert bool(earlier_commits) is (failure != 'fence')
             if failure is None:
                 assert not save_closed.is_set(), 'cleanup must not wait for post-commit refresh'
         finally:
