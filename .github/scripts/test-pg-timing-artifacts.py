@@ -29,9 +29,18 @@ class PostgresTimingArtifacts(unittest.TestCase):
         self.assertIn(f'--output "{safe_path}"', postgres)
         steps = yaml.load(workflow, Loader=yaml.BaseLoader)['jobs']['studio-backend-postgres']['steps']
         uploads = [step for step in steps if step.get('uses', '').startswith('actions/upload-artifact@')]
-        self.assertEqual(len(uploads), 1)
+        timing_name = 'pg-duration-observations-${{ github.run_id }}-${{ matrix.group }}'
+        timing_uploads = [step for step in uploads if step['with']['name'] == timing_name]
+        self.assertEqual(len(timing_uploads), 1)
+        for step in uploads:
+            if step['with']['name'] != timing_name:
+                self.assertEqual(step['with']['name'],
+                                 'verification-inventory-postgres-${{ matrix.group }}-${{ github.run_id }}-${{ github.run_attempt }}')
+                self.assertEqual(step['if'], 'success() && inputs.full_verification')
+                self.assert_hash_only_upload_paths(step['with']['path'],
+                                                  ['${{ runner.temp }}/inventory-postgres-${{ matrix.group }}.json'])
         inventory_path = safe_path.removesuffix('durations.json') + 'inventory.json'
-        self.assert_hash_only_upload_paths(uploads[0]['with']['path'], [safe_path, inventory_path])
+        self.assert_hash_only_upload_paths(timing_uploads[0]['with']['path'], [safe_path, inventory_path])
         self.assertIn('id: postgres-tests', postgres)
         self.assertIn("if: success() && steps.postgres-tests.outcome == 'success'", postgres)
         self.assertIn('actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9', postgres)

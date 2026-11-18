@@ -87,7 +87,7 @@ class InventoryTests(unittest.TestCase):
             inventories, profiles = [], []
             for group in (1, 2):
                 inventory, durations = root / f'inventory-{group}.json', root / f'durations-{group}.json'
-                result = self.probe(root, inventory, durations, group)
+                result = self.probe(root, inventory, durations, group, verification=True)
                 self.assertEqual(result.returncode, 0, result.stdout)
                 self.assertNotIn('PRIVATE_SENTINEL', inventory.read_text())
                 item = json.loads(inventory.read_text())
@@ -95,6 +95,15 @@ class InventoryTests(unittest.TestCase):
                 hashed = {digest(key): value for key, value in raw.items()}
                 self.assertEqual(item['selected'], [digest(f'test_sample.py::test_sample[PRIVATE_SENTINEL{i}]')
                                                    for i in range((group - 1) * 4, group * 4)])
+                verification = json.loads((root / f'verification-{group}.json').read_text())
+                self.assertEqual(verification['expected'], sorted(item['full']))
+                self.assertEqual(verification['selected'], sorted(item['selected']))
+                self.assertEqual(verification['passed'], sorted(item['selected']))
+                self.assertEqual(verification['skipped'], [])
+                self.assertEqual(verification['target'], item['provenance']['commit'])
+                self.assertEqual(verification['run_id'], item['provenance']['run_id'])
+                self.assertEqual(verification['attempt'], item['provenance']['attempt'])
+                self.assertNotIn('PRIVATE_SENTINEL', (root / f'verification-{group}.json').read_text())
                 inventories.append(item)
                 profiles.append(hashed)
             self.assertEqual(validate_profile(inventories, profiles, inventories[0]['provenance']), 8)
@@ -166,9 +175,12 @@ class InventoryTests(unittest.TestCase):
         self.assertNotIn('run-id:', aggregate.split('      - name: Verify exact')[0].replace('# No token/repository/run-id override:', ''))
 
     @staticmethod
-    def probe(root, inventory, durations, group, workers=2):
+    def probe(root, inventory, durations, group, workers=2, verification=False):
         env = {**os.environ, 'PYTEST_DISABLE_PLUGIN_AUTOLOAD': '1', 'PYTHONPATH': str(SCRIPTS),
-               'PG_INVENTORY_PATH': str(inventory), 'GITHUB_RUN_ID': '1', 'GITHUB_RUN_ATTEMPT': '1'}
+               'PG_INVENTORY_PATH': str(inventory), 'GITHUB_RUN_ID': '1', 'GITHUB_RUN_ATTEMPT': '1',
+               'PYTEST_PLUGINS': 'verification_inventory' if verification else '',
+               'VERIFICATION_DATABASE': 'postgres', 'VERIFICATION_GROUP': str(group),
+               'VERIFICATION_INVENTORY_PATH': str(root / f'verification-{group}.json')}
         return subprocess.run([sys.executable, '-m', 'pytest', '-q', '-n', str(workers), '--max-worker-restart=1', '-p', 'xdist.plugin',
                                '-p', 'pytest_split.plugin', '-p', 'pg_inventory', '--splits', '2', '--group', str(group),
                                '--store-durations', '--clean-durations', '--durations-path', str(durations)],
