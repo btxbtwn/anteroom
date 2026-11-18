@@ -489,3 +489,97 @@ def test_mercari_cooldown_review_is_info_at_both_layers_and_does_not_queue_email
     finally:
         logger.removeHandler(alerts)
         alerts.close()
+
+
+
+def _driver_failure(route_file, route_name, parameter, depth=10):
+    """A driver error raised deep inside library code, called from one Anteroom site.
+
+    Code is compiled under realistic file names so the traceback carries the
+    same paths a production stack does, without importing the real libraries.
+    """
+    class QueryCanceled(Exception):
+        pass
+
+    QueryCanceled.__module__, QueryCanceled.__qualname__ = 'psycopg.errors', 'QueryCanceled'
+    library = {'QueryCanceled': QueryCanceled}
+    source = "def call_0(value):\n    raise QueryCanceled('canceling statement due to statement timeout: ' + value)\n"
+    for level in range(1, depth):
+        source += f"def call_{level}(value):\n    return call_{level - 1}(value)\n"
+    exec(compile(source, '/app/.venv/lib/python3.12/site-packages/sqlalchemy/engine/base.py', 'exec'), library)
+    route = {'execute': library[f'call_{depth - 1}']}
+    exec(compile(f"def {route_name}(value):\n    return execute(value)\n",
+                 f'/app/vendoo-studio/server/vendoo_studio/{route_file}', 'exec'), route)
+    try:
+        route[route_name](parameter)
+    except QueryCanceled:
+        record = logging.LogRecord('vendoo_studio.http', logging.ERROR, '/hosted.py', 1,
+                                   'Unhandled exception in GET %s', ('/api/x',), sys.exc_info())
+    return build_report(record)
+
+
+def test_driver_errors_from_different_app_operations_get_separate_groups():
+    # With more than eight library frames, the kept frames are all library
+    # code, so every route that hit the same driver error shared one group.
+    catalog = _driver_failure('routes/catalog.py', 'categories', "marketplace = 'ebay'")
+    inventory = _driver_failure('routes/hosted_workspace.py', 'inventory_response', "marketplace = 'ebay'")
+    assert catalog['exception']['type'] == inventory['exception']['type'] == 'psycopg.errors.QueryCanceled'
+    assert catalog['fingerprint'] != inventory['fingerprint']
+
+
+def test_repeats_from_one_app_operation_share_a_group_whatever_the_sql_values():
+    first = _driver_failure('routes/catalog.py', 'categories', "marketplace = 'ebay'")
+    again = _driver_failure('routes/catalog.py', 'categories', "marketplace = 'depop', seller 'a9b19dd3'")
+    assert first['fingerprint'] == again['fingerprint']
+
+
+def test_groups_that_already_show_an_app_frame_keep_their_fingerprint():
+    # A shallow library stack already keeps the Anteroom frame among its last
+    # eight. Its fingerprint must be the pre-fix one, so only collided groups split.
+    import hashlib
+
+    report = _driver_failure('routes/catalog.py', 'categories', "marketplace = 'ebay'", depth=3)
+    frames = [line.strip() for line in report['stack'].splitlines() if line.strip().startswith('File "')]
+    named = tuple((line.split('"')[1].rsplit('/', 1)[-1], line.rsplit(' in ', 1)[1]) for line in frames)
+    expected = hashlib.sha256(repr(('psycopg.errors.QueryCanceled', named[-8:])).encode()).hexdigest()[:12]
+    assert report['fingerprint'] == expected
+
+
+def test_pool_timeouts_through_a_session_keep_one_group_whatever_the_call_site():
+    # A pool timeout reached through a session sits under a dozen library
+    # frames. It must keep the pre-fix fingerprint, one group per incident,
+    # not split per Anteroom function that happened to wait for a connection.
+    import hashlib
+
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.exc import TimeoutError as PoolTimeout
+    from sqlalchemy.orm import Session
+
+    from vendoo_studio.database_pool import DiagnosticQueuePool
+
+    engine = create_engine('sqlite://', poolclass=DiagnosticQueuePool, pool_size=1, max_overflow=0, pool_timeout=0.001)
+
+    def timeout_from(route_file, route_name):
+        route = {'Session': Session, 'engine': engine, 'text': text}
+        exec(compile(f"def {route_name}():\n    with Session(engine) as db:\n        return db.execute(text('select 1'))\n",
+                     f'/app/vendoo-studio/server/vendoo_studio/{route_file}', 'exec'), route)
+        with engine.connect():
+            try:
+                route[route_name]()
+            except PoolTimeout:
+                record = logging.LogRecord('vendoo_studio.http', logging.ERROR, '/hosted.py', 1,
+                                           'Unhandled exception in GET %s', ('/api/x',), sys.exc_info())
+        return build_report(record)
+
+    try:
+        catalog = timeout_from('routes/catalog.py', 'categories')
+        inventory = timeout_from('routes/hosted_workspace.py', 'inventory_response')
+    finally:
+        engine.dispose()
+    assert catalog['fingerprint'] == inventory['fingerprint']
+    frames = [line.strip() for line in catalog['stack'].splitlines() if line.strip().startswith('File "')]
+    kept = [line for line in frames if not line.split('"')[1].endswith('/vendoo_studio/database_pool.py')]
+    named = tuple((line.split('"')[1].rsplit('/', 1)[-1], line.rsplit(' in ', 1)[1]) for line in kept)
+    assert not any('/vendoo_studio/' in line.split('"')[1] for line in kept[-8:]), 'the stack must be deep enough to matter'
+    expected = hashlib.sha256(repr(('sqlalchemy.exc.TimeoutError', named[-8:])).encode()).hexdigest()[:12]
+    assert catalog['fingerprint'] == expected

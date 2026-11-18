@@ -510,6 +510,33 @@ def test_an_ebay_line_saved_under_both_id_forms_counts_once(ledger):
     assert "short" not in ids and "long" in ids
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+def test_ebay_duplicate_index_preserves_suffix_and_order_boundaries(reverse):
+    from vendoo_studio.services.item_status import repeated_lines
+
+    class CountedId(str):
+        comparisons = 0
+
+        def endswith(self, *args):
+            CountedId.comparisons += 1
+            return super().endswith(*args)
+
+    def line(identity, order, line_id, marketplace="ebay", source="marketplace"):
+        return MarketplaceSale(id=identity, order_id=order, line_id=CountedId(line_id),
+                               marketplace=marketplace, source=source, received_at=datetime(2026, 1, 1))
+
+    lines = [line(str(i), "order", f"item-{i}") for i in range(100)]
+    lines += [line("bare", "order", "0"), line("nested", "order", "prefix-item-1"),
+              line("other-order", "different", "2"), line("other-market", "order", "3", "etsy"),
+              line("same-id", "order", "item-4"), line("partial", "order", "tem-5"),
+              line("import", "order", "6", source="manual")]
+    if reverse:
+        lines.reverse()
+    assert repeated_lines(lines) == {"bare", "1"}
+    # Bound pair comparisons without depending on wall-clock scheduling.
+    assert CountedId.comparisons <= 4 * len(lines)
+
+
 def test_a_vendoo_sale_from_before_a_relist_still_counts(ledger):
     from datetime import datetime as dt
 

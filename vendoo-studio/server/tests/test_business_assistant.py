@@ -131,6 +131,45 @@ def test_snapshot_size_audits_release_the_database_before_calculating(workspace,
     shop.lookups.close()
 
 
+def test_the_snapshot_waits_and_calculates_outside_a_database_transaction(workspace, monkeypatch):
+    """No idle transaction while the snapshot waits for the sales archive lock or calculates.
+
+    Postgres ends a transaction left idle past its deadline; a large shop's
+    totals, or a wait behind another thread's archive, can outlast it.
+    """
+    from vendoo_studio.services import inventory_analytics, sales_records, vendoo_sales_archive
+    from vendoo_studio.services.inventory_analytics import ANALYTICS_RANGES
+
+    db, _client = workspace
+    seed(db)
+    checked: dict[str, int] = {}
+
+    def outside_a_transaction(name, real):
+        def check(*args, **kwargs):
+            assert not db.in_transaction(), f"{name} ran inside an open database transaction"
+            checked[name] = checked.get(name, 0) + 1
+            return real(*args, **kwargs)
+        return check
+
+    for module, name in ((inventory_analytics, "rows_from_inputs"), (inventory_analytics, "summarize"),
+                         (sales_records, "records_from_lines"), (boxes, "_box_row")):
+        monkeypatch.setattr(module, name, outside_a_transaction(name, getattr(module, name)))
+    real_lock = vendoo_sales_archive._archive_lock
+
+    class Watched:
+        def __enter__(self):
+            outside_a_transaction("the archive lock wait", lambda: None)()
+            return real_lock.__enter__()
+
+        def __exit__(self, *exc):
+            return real_lock.__exit__(*exc)
+
+    monkeypatch.setattr(vendoo_sales_archive, "_archive_lock", Watched())
+    business_assistant.read_shop(db, now=NOW).lookups.close()
+    assert checked == {"the archive lock wait": 2, "rows_from_inputs": 1, "summarize": len(ANALYTICS_RANGES),
+                       "records_from_lines": 1, "_box_row": 1}
+
+
 def test_price_history_releases_the_database_before_calculating(workspace, monkeypatch):
     from vendoo_studio.services import inventory_analytics
 
@@ -845,3 +884,45 @@ def test_the_brief_reads_the_same_through_the_day_so_a_prompt_cache_can_keep_it(
     assert morning.brief == later.brief
     for shop in (morning, later):
         shop.lookups.close()
+
+
+def test_one_question_reads_each_part_of_the_shop_once(workspace, monkeypatch):
+    """Eight sales ranges share one read of the listings, the sale ledger, sale events and ad spend."""
+    from vendoo_studio.services import ad_spend, inventory_analytics, sale_events, sales_records
+
+    db, _client = workspace
+    seed(db)
+    calls: dict[str, int] = {}
+    for module, name in ((inventory_analytics, "read_analytics_inputs"), (sales_records, "read_sale_lines"),
+                         (sale_events, "windows"), (ad_spend, "list_entries")):
+        real = getattr(module, name)
+
+        def counted(*args, _real=real, _name=name, **kwargs):
+            calls[_name] = calls.get(_name, 0) + 1
+            return _real(*args, **kwargs)
+
+        monkeypatch.setattr(module, name, counted)
+
+    shop = business_assistant.read_shop(db, now=NOW)
+    shop.lookups.close()
+    # Ad spend is read once for the eight ranges and once for the seller's own entries table.
+    assert calls == {"read_analytics_inputs": 1, "read_sale_lines": 1, "windows": 1, "list_entries": 2}
+
+
+def test_every_range_the_assistant_reads_matches_analytics(workspace):
+    """Sharing the reads changes no figure: each range equals Analytics' own answer for it."""
+    from vendoo_studio.services import ad_spend
+    from vendoo_studio.services.inventory_analytics import ANALYTICS_RANGES, analytics_ranges, inventory_analytics, load_rows
+
+    db, _client = workspace
+    _box, jeans, _coat = seed(db)
+    add_listing(db, "Undated sale", {"price": 30}, {"vendooStatus": "sold", "vendooSale": {"marketplace": "ebay"}})
+    db.add(AdSpend(marketplace="ebay", start_date=date(2026, 9, 20), end_date=date(2026, 9, 29), spend=12.5))
+    db.commit()
+    assert ad_spend.list_entries(db)
+    rows = load_rows(db)
+    shared = analytics_ranges(db, ANALYTICS_RANGES, now=NOW, rows=rows)
+    for range_id in ANALYTICS_RANGES:
+        assert shared[range_id] == inventory_analytics(db, range_id=range_id, now=NOW, rows=rows), range_id
+    assert shared["all"]["incomplete_sales"] and shared["30d"]["ads"]["spend"]
+    assert jeans.id in {row.conversation_id for row in rows}

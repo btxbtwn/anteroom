@@ -529,6 +529,13 @@ private struct AssistantChatsSheet: View {
                         Task { await model.open(nil) }
                         dismiss()
                     }
+                    if let failure = model.deleteError {
+                        Section {
+                            Label(failure, systemImage: "exclamationmark.triangle")
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                        }
+                    }
                     if !model.threadsLoaded {
                         Section { ProgressView() }
                     } else if shown.isEmpty {

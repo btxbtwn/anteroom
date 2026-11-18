@@ -43,7 +43,8 @@ class Call:
             "provider": provider, "model": model, "started_at": datetime.now(UTC).isoformat(),
             "outcome": "running", "latency_ms": None, "input_tokens": None, "output_tokens": None,
             "cached_input_tokens": None, "cache_write_input_tokens": None,
-            "reasoning_tokens": None, "cost_usd": None, "cost_source": None,
+            "reasoning_tokens": None, "web_search_requests": None,
+            "cost_usd": None, "cost_source": None,
         }
         self.raw: dict = {}
 
@@ -73,6 +74,15 @@ class Call:
         details = raw.get("output_tokens_details") or raw.get("completion_tokens_details") or {}
         if isinstance(details, dict) and _number(details.get("reasoning_tokens")) is not None:
             self.record["reasoning_tokens"] = _number(details["reasoning_tokens"], integer=True)
+        # Server-side web searches are billed per request on top of tokens.
+        # OpenRouter reports them in ``server_tool_use_details``, Anthropic in
+        # ``server_tool_use``; without the count a cost cannot be split.
+        for key in ("server_tool_use_details", "server_tool_use"):
+            tool_use = raw.get(key)
+            searches = _number(tool_use.get("web_search_requests"), integer=True) if isinstance(tool_use, dict) else None
+            if searches is not None:
+                self.record["web_search_requests"] = searches
+                break
         sdk_price = _number(sdk_cost)
         if sdk_price is not None:
             self.record.update(cost_usd=float(sdk_price), cost_source="sdk_estimate")
