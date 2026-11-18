@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import traceback
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -166,15 +168,29 @@ def _prepare(question: str, attachments: list[dict] | None = None, thread_id: st
         db.close()
 
 
+def elapsed_ms_since(moment: datetime) -> int:
+    """Whole milliseconds since a stored time, never negative and capped like every timing field."""
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    seconds = (datetime.now(UTC) - moment).total_seconds()
+    return min(business_assistant.TIMING_CAP_MS, max(0, round(seconds * 1000)))
+
+
 async def _answer(
     run: GenerationRun, provider, question: str, attachments: list[dict] | None = None,
     thread_id: str | None = None, settle: Callable[[Session, str | None], None] | None = None,
+    queued_at: datetime | None = None,
 ) -> str | None:
     """Answer in the background and publish each piece to whoever is following.
 
     The answer belongs to Studio, not to the connection that asked: a phone
     that locks or drops off the network mid-answer finds it when it comes back.
+    One log line says where the time went (``AnswerTiming``), however it ends.
     """
+    timing = business_assistant.AnswerTiming()
+    if queued_at is not None:
+        timing.queue_wait_ms = elapsed_ms_since(queued_at)
+    outcome = "cancelled"
     answer = ""
     changes = None
     memory_block = None
@@ -187,8 +203,9 @@ async def _answer(
         messages, shop = await await_with_pulses(
             run, asyncio.to_thread(_prepare, question, attachments, thread_id), [],
         )
+        timing.prepare_ms = business_assistant.elapsed_ms(timing.started)
         preparing = False
-        async for item in iter_with_keepalives(business_assistant.answer(provider, messages, shop)):
+        async for item in iter_with_keepalives(business_assistant.answer(provider, messages, shop, timing)):
             if item is None:
                 # A comment alone does not keep some mobile connections open; pulse repeats the status too.
                 run.pulse()
@@ -225,9 +242,14 @@ async def _answer(
         if not answer.strip() and error is None:
             error = "The assistant returned an empty answer. Ask again."
             run.publish(sse_event("error", error))
+        outcome = "error" if error else "answered"
     except background_tasks.TaskLeaseExpired:
+        outcome = "lease_lost"
         raise
     except Exception as exc:
+        outcome = "error"
+        if preparing:
+            timing.prepare_ms = business_assistant.elapsed_ms(timing.started)
         _log_answer_failure(exc)
         # Provider/SQL exception bodies can include credentials and private shop
         # data. Only our deadline error has a controlled seller-facing message.
@@ -244,11 +266,18 @@ async def _answer(
         # Also reached when the seller presses Stop: keep what was written so far.
         # Off the event loop: a save that waits on SQLite's write lock must not
         # freeze every other request, or hold this answer's stream open.
-        if answer.strip():
-            await asyncio.to_thread(
-                _save_answer, provider, answer, changes, memory_block, automation_block, thread_id, settle,
-                error,
-            )
+        try:
+            if answer.strip():
+                save_started = time.monotonic()
+                await asyncio.to_thread(
+                    _save_answer, provider, answer, changes, memory_block, automation_block, thread_id, settle,
+                    error,
+                )
+                timing.save_ms = business_assistant.elapsed_ms(save_started)
+        finally:
+            total_ms = business_assistant.elapsed_ms(timing.started)
+            slow = total_ms >= business_assistant.SLOW_ANSWER_MS
+            log.log(logging.WARNING if slow else logging.INFO, "%s", timing.line(outcome, total_ms))
     return error
 
 
@@ -559,7 +588,7 @@ async def answer_task(task_id: str, token: str, task) -> bool:
         provider = _require_provider()
         work = asyncio.create_task(_answer(
             journal, provider, payload.get("question", ""), payload.get("attachments") or None,
-            task.assistant_thread_id, settle=settle,
+            task.assistant_thread_id, settle=settle, queued_at=task.created_at,
         ))
         while not work.done():
             await asyncio.wait({work}, timeout=background_tasks.EVENT_INTERVAL)

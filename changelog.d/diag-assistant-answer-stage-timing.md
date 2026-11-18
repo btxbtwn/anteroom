@@ -1,0 +1,1 @@
+- When an assistant answer is slow, Anteroom now records how long each step took (waiting its turn, reading your shop, each model reply, each lookup and saving), so a slow answer can be traced to the step that held it up.

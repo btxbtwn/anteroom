@@ -11,6 +11,26 @@ and accounts must overlap; long work must leave navigation, input and unrelated
 drafts usable. This is a product requirement, not a promise of infinite hardware
 capacity or zero model/network latency.
 
+## Assistant answer stage timing, 2026-11-18
+
+A hosted answer reported as "Worked for 1m 21s" (question to saved answer
+80.4 s, from persisted turn times) could not be attributed: Anteroom recorded no
+per-stage assistant timing. Each answer now logs one line, `assistant answer
+timing:`, with only fixed field names and whole milliseconds: `outcome`,
+`queue_wait_ms` (hosted task creation to the worker starting it, `-` on the
+Mac), `prepare_ms` (shop read and prompt), `rounds`, per-round
+`first_token_ms` (first piece including thinking, `-` when none arrived) and
+`round_ms`, `lookups`, `lookup_ms`, `save_ms` and `total_ms`. Values are capped
+at 600,000. No question, answer, query, provider or seller text is logged.
+
+Answers under 30 s log at INFO, which hosted logging drops; slower ones log at
+WARNING, which reaches Fly logs and joins the hourly batched operator report
+(grouped by call site, as `Slow response` lines are). `queue_wait_ms` compares
+the worker clock with the database's `created_at`; skew is clamped at zero, not
+corrected. Time between `total_ms` and the follower seeing `[DONE]` (journal
+polling) is not included. This line measures; it changes no answer behavior and
+proves no cause by itself.
+
 ## eBay refused sign-in status, 2026-11-16
 
 An isolated saved-account fixture reproduces Settings reporting connected after

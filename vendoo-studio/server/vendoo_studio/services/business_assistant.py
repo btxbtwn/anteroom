@@ -32,7 +32,7 @@ import statistics
 import time
 from collections import Counter
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -634,6 +634,47 @@ def build_messages(db: Session, question: str, shop: Shop, thread_id: str | None
     return [{"role": "system", "content": system}, *earlier]
 
 
+TIMING_CAP_MS = 600_000
+# An answer this slow logs its timing as a warning, which the hosted app keeps; faster ones log at INFO.
+SLOW_ANSWER_MS = 30_000
+
+
+def elapsed_ms(since: float) -> int:
+    """Whole milliseconds since a ``time.monotonic()`` reading, capped so a log line stays bounded."""
+    return min(TIMING_CAP_MS, max(0, round((time.monotonic() - since) * 1000)))
+
+
+@dataclass
+class AnswerTiming:
+    """Where one answer's time went, as numbers only: no question, answer, query or provider text.
+
+    Each model round is one provider call: the first answers the question, each
+    later one follows a lookup. ``first_token_ms`` is when the round's first
+    piece (thinking included) arrived, or None when none did.
+    """
+
+    started: float = field(default_factory=time.monotonic)
+    queue_wait_ms: int | None = None
+    prepare_ms: int = 0
+    first_token_ms: list[int | None] = field(default_factory=list)
+    round_ms: list[int] = field(default_factory=list)
+    lookups: int = 0
+    lookup_ms: int = 0
+    save_ms: int | None = None
+
+    def line(self, outcome: str, total_ms: int) -> str:
+        def shown(value: int | None) -> str:
+            return "-" if value is None else str(value)
+
+        return (
+            f"assistant answer timing: outcome={outcome} queue_wait_ms={shown(self.queue_wait_ms)} "
+            f"prepare_ms={self.prepare_ms} rounds={len(self.round_ms)} "
+            f"first_token_ms={','.join(shown(value) for value in self.first_token_ms)} "
+            f"round_ms={','.join(str(value) for value in self.round_ms)} lookups={self.lookups} "
+            f"lookup_ms={self.lookup_ms} save_ms={shown(self.save_ms)} total_ms={total_ms}"
+        )
+
+
 @dataclass
 class Lookup:
     """A lookup the model asked for: where its block sits in the reply, and what it holds."""
@@ -644,7 +685,9 @@ class Lookup:
     end: int
 
 
-async def answer(provider, messages: list[dict], shop: Shop) -> AsyncIterator[tuple[str, str]]:
+async def answer(
+    provider, messages: list[dict], shop: Shop, timing: AnswerTiming | None = None,
+) -> AsyncIterator[tuple[str, str]]:
     """Stream the answer as ``(kind, text)``: ``text``, ``thinking``, ``status``, ``error`` or ``changes``.
 
     A lookup block in a reply is run and fed back instead of shown, until the
@@ -653,7 +696,9 @@ async def answer(provider, messages: list[dict], shop: Shop) -> AsyncIterator[tu
     never with nothing. A memory block and a changes block the answer ends with
     are kept out of the text and handed over whole, last. Every web address in
     the text is checked against the ones Studio gave the model this turn.
+    ``timing``, when given, records each round and lookup as it happens.
     """
+    timing = timing or AnswerTiming()
     messages = list(messages)
     links = answer_links.LinkGuard(answer_links.message_texts(messages))
     viewed: list[str] = []
@@ -662,10 +707,16 @@ async def answer(provider, messages: list[dict], shop: Shop) -> AsyncIterator[tu
         reply = ""
         released = 0
         lead = "\n\n" if written else ""
+        round_started = time.monotonic()
+        timing.first_token_ms.append(None)
+        timing.round_ms.append(0)
         async for item in provider.chat(messages, stream=True):
             kind, text = unpack_stream_item(item)
             if not text:
                 continue
+            if timing.first_token_ms[-1] is None:
+                timing.first_token_ms[-1] = elapsed_ms(round_started)
+            timing.round_ms[-1] = elapsed_ms(round_started)
             if kind == "thinking":
                 yield "thinking", text
                 continue
@@ -678,6 +729,7 @@ async def answer(provider, messages: list[dict], shop: Shop) -> AsyncIterator[tu
                 if piece:
                     yield "text", lead + piece
                     lead, written = "", True
+        timing.round_ms[-1] = elapsed_ms(round_started)
         lookup = find_lookup(reply)
         if lookup is None:
             words, memory, changes, automation = assistant_memory.peel(reply)
@@ -703,7 +755,10 @@ async def answer(provider, messages: list[dict], shop: Shop) -> AsyncIterator[tu
             yield "error", "The assistant kept looking things up without answering. Ask again, or ask something narrower."
             return
         yield "status", lookup_label(lookup)
+        lookup_started = time.monotonic()
         result = await run_any_lookup(lookup, shop, viewed)
+        timing.lookups += 1
+        timing.lookup_ms = min(TIMING_CAP_MS, timing.lookup_ms + elapsed_ms(lookup_started))
         texts = [result] if isinstance(result, str) else [part["text"] for part in result if part.get("type") == "text"]
         links.allow(texts)
         if used == MAX_LOOKUPS - 1:

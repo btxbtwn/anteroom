@@ -845,3 +845,66 @@ def test_the_brief_reads_the_same_through_the_day_so_a_prompt_cache_can_keep_it(
     assert morning.brief == later.brief
     for shop in (morning, later):
         shop.lookups.close()
+
+
+TIMING = re.compile(
+    r"^assistant answer timing: outcome=(\w+) queue_wait_ms=(-|\d+) prepare_ms=(\d+) rounds=(\d+) "
+    r"first_token_ms=([\d,-]*) round_ms=([\d,]*) lookups=(\d+) lookup_ms=(\d+) save_ms=(-|\d+) total_ms=(\d+)$")
+
+
+def timing_lines(caplog):
+    return [record.getMessage() for record in caplog.records if record.getMessage().startswith("assistant answer timing")]
+
+
+def test_each_answer_logs_where_its_time_went_and_nothing_the_seller_wrote(workspace, monkeypatch, caplog):
+    db, client = workspace
+    seed(db)
+    caplog.set_level("INFO", logger="vendoo_studio.assistant")
+    ask_through(client, monkeypatch, (f"{FENCE}sql\n-- sizes\nSELECT size FROM listings WHERE status = 'sold'\n{FENCE}",),
+                ("Size 34 sold.",))
+    [line] = timing_lines(caplog)
+    match = TIMING.match(line)
+    assert match, line
+    outcome, queued, _prepare, rounds, first, each, lookups, _lookup, saved, _total = match.groups()
+    assert (outcome, queued, rounds, lookups) == ("answered", "-", "2", "1")
+    assert len(first.split(",")) == 2 and len(each.split(",")) == 2 and saved != "-"
+    for private in ("Which sizes sell?", "Size 34", "SELECT", "sizes", "Levi"):
+        assert private not in line
+
+
+def test_a_failed_answer_still_logs_its_timing(workspace, monkeypatch, caplog):
+    _db, client = workspace
+    caplog.set_level("INFO", logger="vendoo_studio.assistant")
+    monkeypatch.setattr(assistant_route, "get_listing_provider", lambda: Provider(("Half an",), fail=True))
+    client.post("/api/assistant/messages", json={"text": "Anything stale?"})
+    [line] = timing_lines(caplog)
+    assert TIMING.match(line) and " outcome=error " in line and " rounds=1 " in line
+
+
+def test_queue_wait_is_measured_from_when_the_question_was_queued(workspace, monkeypatch, caplog):
+    from datetime import timedelta
+
+    db, _client = workspace
+    caplog.set_level("INFO", logger="vendoo_studio.assistant")
+    thread = business_assistant.resolve_thread(db, None)
+    business_assistant.add_message(db, "user", "What sold?", thread_id=thread.id)
+    journal = assistant_route._Journal()
+    queued_at = datetime.now(UTC) - timedelta(seconds=3)
+    error = asyncio.run(assistant_route._answer(journal, Provider(), "What sold?", None, thread.id, queued_at=queued_at))
+    assert error is None
+    [line] = timing_lines(caplog)
+    waited = int(TIMING.match(line).group(2))
+    assert 3_000 <= waited < 60_000
+    # A clock that runs ahead of the database's never reports a negative wait; values are capped.
+    assert assistant_route.elapsed_ms_since(datetime.now(UTC) + timedelta(seconds=5)) == 0
+    assert assistant_route.elapsed_ms_since(datetime.now(UTC) - timedelta(days=2)) == 600_000
+
+
+def test_only_a_slow_answer_logs_its_timing_as_a_warning(workspace, monkeypatch, caplog):
+    _db, client = workspace
+    caplog.set_level("INFO", logger="vendoo_studio.assistant")
+    ask_through(client, monkeypatch, ("Quick.",))
+    monkeypatch.setattr(business_assistant, "SLOW_ANSWER_MS", 0)
+    ask_through(client, monkeypatch, ("Slow.",))
+    levels = [record.levelname for record in caplog.records if record.getMessage().startswith("assistant answer timing")]
+    assert levels == ["INFO", "WARNING"]
