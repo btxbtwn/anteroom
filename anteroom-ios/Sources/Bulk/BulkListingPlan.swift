@@ -166,6 +166,9 @@ struct BulkListingPlan: Equatable {
         update(id) { item in
             let typed = item.sizeSuggested ? "" : item.sizeTag.trimmingCharacters(in: .whitespacesAndNewlines)
             let size = result.size?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            // An inconclusive reread supplies no evidence to resolve an earlier warning.
+            if !typed.isEmpty, item.sizeNeedsReview,
+               result.status == "not_found" || result.status == "unreadable" { return }
             item.sizeSuggested = false
             item.sizeNeedsReview = false
             item.sizeNote = nil
@@ -197,8 +200,9 @@ struct BulkListingPlan: Equatable {
     mutating func failSizeTag(_ message: String, for id: Item.ID) {
         update(id) { item in
             if item.sizeSuggested { item.sizeTag = ""; item.sizeSuggested = false }
-            item.sizeNeedsReview = item.sizeTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            item.sizeNote = message + (item.sizeNeedsReview ? " Type the size from the tag." : "")
+            let blank = item.sizeTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            item.sizeNeedsReview = item.sizeNeedsReview || blank
+            item.sizeNote = message + (blank ? " Type the size from the tag." : "")
         }
     }
 

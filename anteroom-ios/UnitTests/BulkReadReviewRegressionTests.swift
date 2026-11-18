@@ -5,7 +5,7 @@ final class BulkReadReviewRegressionTests: XCTestCase {
     private struct ReadFailure: LocalizedError {
         var errorDescription: String? { "Read failed." }
     }
-    func testInconclusiveRereadOfTypedSizeFollowsFrozenContract() throws {
+    func testInconclusiveRereadKeepsEarlierWarningUntilNewEvidenceOrEditing() throws {
         for status in ["not_found", "unreadable", "failure"] {
             var plan = BulkListingPlan()
             let photo = UUID()
@@ -19,10 +19,23 @@ final class BulkReadReviewRegressionTests: XCTestCase {
                 XCTAssertEqual(plan.items[0].sizeNote, "Read failed.")
             } else {
                 plan.completeSizeRead(.success(.init(photosRead: 1, status: status, size: nil, sizes: [])), from: captured)
-                XCTAssertNil(plan.items[0].sizeNote)
+                XCTAssertEqual(plan.items[0].sizeNote, "The tag reads L. Check the size you typed.")
             }
             XCTAssertEqual(plan.items[0].sizeTag, "M")
+            XCTAssertTrue(plan.items[0].sizeNeedsReview)
+            plan.completeSizeRead(.success(.init(photosRead: 1, status: "accepted", size: "M", sizes: ["M"])), from: captured)
             XCTAssertFalse(plan.items[0].sizeNeedsReview)
+            XCTAssertEqual(plan.items[0].sizeNote, "Size matches the tag.")
+            plan.applySizeTag(.init(photosRead: 1, status: "accepted", size: "XL", sizes: ["XL"]), to: item.id)
+            XCTAssertEqual(plan.items[0].sizeNote, "The tag reads XL. Check the size you typed.")
+            plan.applySizeTag(.init(photosRead: 1, status: "conflict", size: nil, sizes: ["M", "XL"]), to: item.id)
+            XCTAssertTrue(plan.items[0].sizeNote?.contains("different sizes") == true)
+            plan.setSizeTag("0", for: item.id)
+            XCTAssertFalse(plan.items[0].sizeNeedsReview)
+            XCTAssertNil(plan.items[0].sizeNote)
+            plan.failSizeTag("Read failed.", for: item.id)
+            XCTAssertFalse(plan.items[0].sizeNeedsReview, "Unflagged manual input stays unflagged")
+            XCTAssertEqual(plan.items[0].sizeNote, "Read failed.")
         }
     }
     func testSizeReadSelectionStaysInPickingOrderAcrossCoverChanges() throws {
