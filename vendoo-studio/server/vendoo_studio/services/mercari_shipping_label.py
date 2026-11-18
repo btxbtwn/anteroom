@@ -15,6 +15,9 @@ from dataclasses import dataclass
 from typing import Literal
 
 PATH = "mercari_specifics.shippingClassId"
+# The label List picks when the listing names none and the saved carrier is not
+# offered (``mercariShippingListing`` in the extension; ``mercari_form.form``).
+AUTOMATIC = "USPS Ground Advantage"
 
 
 @dataclass(frozen=True)
@@ -30,7 +33,9 @@ def _dict(value) -> dict:
 
 
 def _label_id(value) -> str:
-    text = str(value if value is not None else "").strip()
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        return ""
+    text = str(value).strip()
     # Mercari's 0 means "ship on your own", never a prepaid label.
     return "" if text == "0" else text
 
@@ -50,7 +55,8 @@ def label_answer(snapshot: dict) -> LabelAnswer:
     resolved = _label_id(_dict(_dict(form.get("specifics")).get("shipping")).get("carrierId"))
     if resolved:
         return LabelAnswer("form", resolved)
-    saved = " ".join(str(_dict(form.get("mercari_shipping_label")).get("label") or "").split())
+    # Trimmed, as the extension matches it against Mercari's carrier names.
+    saved = str(_dict(form.get("mercari_shipping_label")).get("label") or "").strip()
     if saved:
         return LabelAnswer("default", saved)
     return LabelAnswer("none", "")
@@ -59,7 +65,12 @@ def label_answer(snapshot: dict) -> LabelAnswer:
 def unverified_default_message(label: str) -> str:
     """Said beside List while this package's labels have not been read."""
     return (f"Shipping label: List uses your saved label, {label}, if Mercari offers it for this package. "
-            "Open the Mercari tab to see the labels it offers.")
+            "Mercari's labels are checked when you list.")
+
+
+def automatic_instead_message(label: str) -> str:
+    return (f"Shipping label: Your saved label, {label}, isn't offered for this package. "
+            f"List uses {AUTOMATIC} unless you choose another label.")
 
 
 def unavailable_default_message(label: str) -> str:

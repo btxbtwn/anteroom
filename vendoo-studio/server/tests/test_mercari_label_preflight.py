@@ -47,6 +47,7 @@ def test_a_saved_carrier_is_not_reported_as_an_empty_required_label():
     assert found[0]["blocking"] is False and not found[0].get("required")
     # It says what List will try; it does not claim Mercari offers it for this package.
     assert "USPS Ground Advantage" in found[0]["message"] and "if Mercari offers it" in found[0]["message"]
+    assert "checked when you list" in found[0]["message"]
     assert not missing_label(listing)
 
 
@@ -75,7 +76,7 @@ def test_a_label_the_prepared_form_resolved_answers_the_row():
     assert label_gaps(listing) == []
 
 
-@pytest.mark.parametrize("value", [0, "0", "", None])
+@pytest.mark.parametrize("value", [0, "0", "", None, False, True, {"id": 1}])
 def test_ship_on_your_own_and_blank_ids_are_not_a_label(value):
     listing = snapshot(specifics={"shippingClassId": value})
 
@@ -124,6 +125,18 @@ def test_a_captured_form_that_does_not_offer_the_saved_carrier_says_so():
     assert len(found) == 1 and found[0]["blocking"] is True
     assert "USPS Ground Advantage" in found[0]["message"] and "isn't offered" in found[0]["message"]
     assert missing_label(listing)
+
+
+def test_a_captured_form_without_the_saved_carrier_says_list_uses_ground_advantage():
+    listing = with_contract(snapshot(form={"mercari_shipping_label": {"id": "2610", "label": "UPS Ground Saver"}}),
+                            label_row(**{"USPS Ground Advantage": "2553", "FedEx": "2700"}))
+
+    found = contract_label_gaps(listing)
+
+    # The form already shows Ground Advantage and List sends it, so this is said, not held.
+    assert len(found) == 1 and found[0]["blocking"] is False
+    assert "UPS Ground Saver" in found[0]["message"] and "List uses USPS Ground Advantage" in found[0]["message"]
+    assert not missing_label(listing)
 
 
 def test_a_captured_form_with_no_label_and_no_saved_carrier_is_still_empty():

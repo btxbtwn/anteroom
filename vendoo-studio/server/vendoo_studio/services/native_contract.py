@@ -552,9 +552,10 @@ def gaps(listing: dict, market: str) -> list[dict]:
         if value in (None, "", [], {}) and not is_locked(listing, path):
             value = settings_answer(listing, path)
         if value in (None, "", [], {}) and not is_locked(listing, path) and market == "mercari":
-            label_error, value = _mercari_label(listing, row, path, value)
-            if label_error:
-                found.append(gap(path, label_error, label=row.get("label")))
+            note, blocking, value = _mercari_label(listing, row, path, value)
+            if note:
+                found.append(gap(path, note, blocking=blocking, label=row.get("label")))
+            if note and blocking:
                 continue
         if account_resolved(row) and value in (None, "", [], {}):
             # List picks this from the seller's account, so the row is not
@@ -600,25 +601,32 @@ _SETTINGS_CHOICES = {"ebay_specifics.fulfillmentPolicyId": "fulfillment_policy_i
                      "ebay_specifics.merchantLocationKey": "merchant_location_key"}
 
 
-def _mercari_label(listing: dict, row: dict, path: str, value: Any) -> tuple[str | None, Any]:
-    """Mercari's empty label row answered the way List answers it: ``(error, value)``.
+def _mercari_label(listing: dict, row: dict, path: str, value: Any) -> tuple[str | None, bool, Any]:
+    """Mercari's empty label row answered the way List answers it: ``(note, blocking, value)``.
 
     A captured form holds the labels Mercari offered for this package, so a
     saved carrier counts only when that form offers it, under its id for this
-    weight tier. A label the prepared form resolved is checked like any value.
+    weight tier. When it does not, List sends USPS Ground Advantage if that is
+    offered, and the note says so; with neither, the seller has to choose. A
+    label the prepared form resolved is checked like any value.
     """
     from vendoo_studio.services import mercari_shipping_label as labels
 
     # Ship on your own asks for no label, so it has nothing to answer here.
     if path != labels.PATH or not row.get("required") or not labels.needs_label(listing):
-        return None, value
+        return None, False, value
     answer = labels.label_answer(listing)
     if answer.source == "form":
-        return None, answer.value
-    if answer.source == "default":
-        offered = labels.offered_id(row, answer.value)
-        return (None, offered) if offered else (labels.unavailable_default_message(answer.value), value)
-    return None, value
+        return None, False, answer.value
+    if answer.source != "default":
+        return None, False, value
+    offered = labels.offered_id(row, answer.value)
+    if offered:
+        return None, False, offered
+    automatic = labels.offered_id(row, labels.AUTOMATIC)
+    if automatic:
+        return labels.automatic_instead_message(answer.value), False, automatic
+    return labels.unavailable_default_message(answer.value), True, value
 
 
 def settings_answer(listing: dict, path: str) -> str | None:
