@@ -1070,7 +1070,7 @@ def test_failed_save_records_outcome_and_duration(workspace, monkeypatch, caplog
                asyncio.CancelledError() if failure_name == 'CancelledError' else
                getattr(background_tasks, failure_name)())
 
-    def fail_save(*_args):
+    def fail_save(*_args, **_kwargs):
         raise failure
 
     monkeypatch.setattr(assistant_route, '_save_answer', fail_save)
@@ -1187,7 +1187,8 @@ def test_concurrent_lease_loss_waits_for_save_confirmation(monkeypatch, caplog, 
             # The append took frames before settle started.
             settle(None, None)
             await asyncio.sleep(0)
-            journal.saved = saved
+            if saved:
+                journal.confirm_saved('answered')
             journal.timing_sample = (business_assistant.AnswerTiming(),
                                      'answered' if saved else 'lease_lost', 100)
 
@@ -1221,11 +1222,12 @@ def test_precommit_settle_does_not_confirm_answer_save(workspace, monkeypatch, c
     settled = []
     failure = RuntimeError('commit failed')
 
-    def save(_provider, _answer, _changes, _memory, _automation, _thread, settle, _error):
+    def save(_provider, _answer, _changes, _memory, _automation, _thread, settle, _error, *, on_committed):
         settle(None, None)
-        assert not journal.saved
+        assert journal.saved_outcome is None
         if commit_failed:
             raise failure
+        on_committed()
 
     monkeypatch.setattr(assistant_route, '_save_answer', save)
 
@@ -1240,7 +1242,7 @@ def test_precommit_settle_does_not_confirm_answer_save(workspace, monkeypatch, c
     else:
         assert asyncio.run(exercise()) is None
     assert settled == [True]
-    assert journal.saved is (not commit_failed)
+    assert journal.saved_outcome == (None if commit_failed else 'answered')
     assert journal.timing_sample[1] == ('error' if commit_failed else 'answered')
     assert timing_lines(caplog) == []  # Hosted emission belongs to answer_task.
 
@@ -1285,3 +1287,103 @@ def test_cleanup_cancels_unfinished_save_even_after_settle(monkeypatch, caplog, 
     [line] = timing_lines(caplog)
     assert f'outcome={stop or "interrupted"} ' in line
     assert other_task.task_outcome == {}  # Same seller, independent claimed-task state.
+
+
+@pytest.mark.parametrize('failure, expected', [
+    (None, 'answered'), ('commit', 'error'), ('fence', 'lease_lost'),
+])
+def test_answer_commit_is_confirmed_before_blocked_refresh(workspace, monkeypatch, caplog, failure, expected):
+    from threading import Event
+    from types import SimpleNamespace
+    from vendoo_studio.models.assistant import AssistantMessage
+    from vendoo_studio.services import background_tasks
+
+    caplog.set_level('INFO', logger='vendoo_studio.assistant')
+    append_started, save_terminal, release_refresh, save_closed = (Event() for _ in range(4))
+    factory = assistant_route.SessionLocal
+    journals = []
+    earlier_commits = []
+
+    class Journal(assistant_route._Journal):
+        def __init__(self):
+            super().__init__()
+            journals.append(self)
+
+    def sessions():
+        db = factory()
+        commit, refresh, close = db.commit, db.refresh, db.close
+
+        def commit_answer():
+            final = any(isinstance(row, AssistantMessage) for row in db.new)
+            assert journals[0].saved_outcome is None
+            if final and failure == 'commit':
+                save_terminal.set()
+                raise RuntimeError('final commit failed')
+            commit()  # Real SQLite commit, including any earlier thread creation.
+            if not final:
+                assert journals[0].saved_outcome is None
+                earlier_commits.append(True)
+
+        def refresh_answer(row, *args, **kwargs):
+            if isinstance(row, AssistantMessage):
+                # add_message has committed and confirmed, but has not returned.
+                assert journals[0].saved_outcome == 'answered'
+                save_terminal.set()
+                assert release_refresh.wait(5), 'test must release the save thread'
+            return refresh(row, *args, **kwargs)
+
+        def close_save():
+            try:
+                close()
+            finally:
+                save_closed.set()
+
+        monkeypatch.setattr(db, 'commit', commit_answer)
+        monkeypatch.setattr(db, 'refresh', refresh_answer)
+        monkeypatch.setattr(db, 'close', close_save)
+        return db
+
+    class WaitingProvider:
+        async def chat(self, *_args, **_kwargs):
+            yield 'Answer.'
+            assert await asyncio.to_thread(append_started.wait, 5)
+            yield '\n```memory\n[{"op":"add","text":"Prefers denim."}]\n```'
+
+    def append(*_args):
+        append_started.set()  # Takes pending frames while settled is still false.
+        assert save_terminal.wait(5), 'save must reach its terminal boundary'
+        if failure != 'commit':
+            raise background_tasks.TaskLeaseExpired()
+
+    def settle(*_args, **_kwargs):
+        if failure == 'fence':
+            save_terminal.set()
+            raise background_tasks.TaskLeaseExpired()
+
+    monkeypatch.setattr(assistant_route, '_Journal', Journal)
+    monkeypatch.setattr(assistant_route, 'SessionLocal', sessions)
+    monkeypatch.setattr(assistant_route, '_prepare', lambda *_: ([], SimpleNamespace(
+        lookups=SimpleNamespace(close=lambda: None))))
+    monkeypatch.setattr(assistant_route, '_require_provider', WaitingProvider)
+    monkeypatch.setattr(background_tasks, 'EVENT_INTERVAL', .001)
+    monkeypatch.setattr(background_tasks, 'append_events', append)
+    monkeypatch.setattr(background_tasks, 'complete_in', settle)
+    monkeypatch.setattr(background_tasks, 'finish', lambda *_, **kwargs: None)
+
+    async def exercise():
+        task = SimpleNamespace(payload={}, assistant_thread_id=None, created_at=datetime.now(UTC))
+        worker = asyncio.create_task(assistant_route.answer_task('task', 'token', task))
+        try:
+            await asyncio.wait_for(worker, 3)
+            [line] = timing_lines(caplog)
+            assert f'outcome={expected} ' in line
+            assert journals[0].saved_outcome == ('answered' if failure is None else None)
+            assert earlier_commits  # Memory (and possibly new thread) committed first.
+            if failure is None:
+                assert not save_closed.is_set(), 'cleanup must not wait for post-commit refresh'
+        finally:
+            release_refresh.set()
+            await asyncio.gather(worker, return_exceptions=True)
+            assert await asyncio.to_thread(save_closed.wait, 5)
+
+    asyncio.run(exercise())

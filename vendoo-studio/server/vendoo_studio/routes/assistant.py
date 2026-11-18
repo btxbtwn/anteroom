@@ -273,13 +273,16 @@ async def _answer(
         try:
             if answer.strip():
                 save_started = time.monotonic()
+                on_committed = None
+                if isinstance(run, _Journal):
+                    saved_outcome = outcome
+                    on_committed = lambda: run.confirm_saved(saved_outcome)
                 try:
                     await asyncio.to_thread(
                         _save_answer, provider, answer, changes, memory_block, automation_block, thread_id, settle,
                         error,
+                        on_committed=on_committed,
                     )
-                    if isinstance(run, _Journal):
-                        run.saved = True
                 except asyncio.CancelledError:
                     outcome = "cancelled"
                     raise
@@ -322,6 +325,7 @@ def _save_answer(
     provider, answer: str, changes: dict | None, memory_block: str | None,
     automation_block: str | None, thread_id: str | None, settle: Callable[[Session, str | None], None] | None = None,
     error: str | None = None,
+    on_committed: Callable[[], None] | None = None,
 ) -> None:
     save_db = SessionLocal()
     try:
@@ -350,6 +354,7 @@ def _save_answer(
             changes=changes,
             automation=automation,
             thread_id=thread_id,
+            on_committed=on_committed,
         )
     finally:
         save_db.close()
@@ -586,8 +591,11 @@ class _Journal(GenerationRun):
         super().__init__()
         self.pending: list[str] = []
         self.stop_outcome: str | None = None
-        self.saved = False
+        self.saved_outcome: str | None = None
         self.timing_sample: tuple[business_assistant.AnswerTiming, str, int] | None = None
+
+    def confirm_saved(self, outcome: str) -> None:
+        self.saved_outcome = outcome
 
     def publish(self, item: str, *, record: bool = True) -> None:
         # Pulses only keep a live connection open; followers poll the journal.
@@ -657,7 +665,9 @@ async def answer_task(task_id: str, token: str, task) -> bool:
             stop = journal.stop_outcome or (context.task_outcome.get("stop") if context else None)
             if stop is None and shutting_down:
                 stop = "interrupted"
-            if stop is not None and not journal.saved:
+            if journal.saved_outcome is not None:
+                outcome = journal.saved_outcome
+            elif stop is not None:
                 outcome = stop
             _emit_timing(timing, outcome, total_ms)
     return True

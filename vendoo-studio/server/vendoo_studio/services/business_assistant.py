@@ -31,7 +31,7 @@ import sqlite3
 import statistics
 import time
 from collections import Counter
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -378,6 +378,7 @@ def add_message(
     db: Session, role: str, text: str, *, provider: str | None = None, model: str | None = None,
     changes: dict[str, Any] | None = None, attachments: list[dict[str, Any]] | None = None,
     automation: dict[str, Any] | None = None, thread_id: str | None = None,
+    on_committed: Callable[[], None] | None = None,
 ):
     thread = resolve_thread(db, thread_id)
     row = AssistantMessage(
@@ -391,6 +392,10 @@ def add_message(
     thread.updated_at = utcnow()
     db.add(row)
     db.commit()
+    # This commit owns the message, unlike earlier memory/thread commits.
+    # Confirm before refresh: cancellation can abandon the caller's thread wait.
+    if on_committed is not None:
+        on_committed()
     db.refresh(row)
     return row
 

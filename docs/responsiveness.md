@@ -36,11 +36,12 @@ proposal processing and cleanup can leave time outside the named stages.
 
 Hosted timing is emitted once after journal settlement/cleanup so journal and
 heartbeat stop reasons can distinguish seller Stop (`cancelled`), lease loss
-(`lease_lost`) and ordinary shutdown (`interrupted`). A save is confirmed only
-when its await returns successfully, not when the pre-commit settle callback
-runs. Unfinished work is still cancelled during cleanup, including after that
-callback; a cancelled thread save may later commit, so its eventual persistence
-is unknown to this timing sample. A confirmed save retains its answer outcome
+(`lease_lost`) and ordinary shutdown (`interrupted`). The final message's commit
+confirms its answer outcome synchronously, before the post-commit row refresh;
+earlier memory/thread commits and the pre-commit settle callback do not confirm
+it. Unfinished work is still cancelled during cleanup, including after settle.
+A thread that commits only after the sample is emitted remains unconfirmed in
+that sample. A confirmed save retains its answer outcome
 despite a concurrent lease revocation. `total_ms` ends with the answer's cleanup
 wait, not the later journal settlement or log emission.
 
