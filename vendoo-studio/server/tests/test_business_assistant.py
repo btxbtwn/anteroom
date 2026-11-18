@@ -131,6 +131,45 @@ def test_snapshot_size_audits_release_the_database_before_calculating(workspace,
     shop.lookups.close()
 
 
+def test_the_snapshot_waits_and_calculates_outside_a_database_transaction(workspace, monkeypatch):
+    """No idle transaction while the snapshot waits for the sales archive lock or calculates.
+
+    Postgres ends a transaction left idle past its deadline; a large shop's
+    totals, or a wait behind another thread's archive, can outlast it.
+    """
+    from vendoo_studio.services import inventory_analytics, sales_records, vendoo_sales_archive
+    from vendoo_studio.services.inventory_analytics import ANALYTICS_RANGES
+
+    db, _client = workspace
+    seed(db)
+    checked: dict[str, int] = {}
+
+    def outside_a_transaction(name, real):
+        def check(*args, **kwargs):
+            assert not db.in_transaction(), f"{name} ran inside an open database transaction"
+            checked[name] = checked.get(name, 0) + 1
+            return real(*args, **kwargs)
+        return check
+
+    for module, name in ((inventory_analytics, "rows_from_inputs"), (inventory_analytics, "summarize"),
+                         (sales_records, "records_from_lines"), (boxes, "_box_row")):
+        monkeypatch.setattr(module, name, outside_a_transaction(name, getattr(module, name)))
+    real_lock = vendoo_sales_archive._archive_lock
+
+    class Watched:
+        def __enter__(self):
+            outside_a_transaction("the archive lock wait", lambda: None)()
+            return real_lock.__enter__()
+
+        def __exit__(self, *exc):
+            return real_lock.__exit__(*exc)
+
+    monkeypatch.setattr(vendoo_sales_archive, "_archive_lock", Watched())
+    business_assistant.read_shop(db, now=NOW).lookups.close()
+    assert checked == {"the archive lock wait": 2, "rows_from_inputs": 1, "summarize": len(ANALYTICS_RANGES),
+                       "records_from_lines": 1, "_box_row": 1}
+
+
 def test_price_history_releases_the_database_before_calculating(workspace, monkeypatch):
     from vendoo_studio.services import inventory_analytics
 

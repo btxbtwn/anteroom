@@ -59,12 +59,12 @@ def missing_counts(missing: list[list[str]]) -> list[dict]:
     return [{"label": label, "count": count} for label, count in counts.items() if count]
 
 
-def incomplete_sales(db: Session, rows: list[AnalyticsItem] | None = None) -> list[dict]:
-    """Every sale record, across all time, that Sales records' Missing sale data filter shows."""
+def incomplete_from(ledger: list[dict]) -> list[dict]:
+    """The records of ``ledger`` that Sales records' Missing sale data filter shows."""
     return sorted(
         ({"id": row["id"], "conversation_id": row["conversation_id"],
           "title": row["title"] or f"Order {row['order_id']}", "missing": row["missing_sale_data"]}
-         for row in records(db, analytics_rows=rows) if row["missing_sale_data"]),
+         for row in ledger if row["missing_sale_data"]),
         key=lambda row: (row["title"].casefold(), row["id"]),
     )
 
