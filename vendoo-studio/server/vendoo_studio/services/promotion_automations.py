@@ -659,10 +659,16 @@ async def check_new_likes(db: Session, *, sleep=asyncio.sleep) -> int:
         # rule has already checked the listing for would otherwise read it again
         # on every tick. Failed reads must retry. The Bridge truncates events to
         # milliseconds: keep ties eligible until a check in a later millisecond.
+        # A count-only skip cannot assess individual likers: a replacement liker
+        # may leave the count unchanged. Its journal reason distinguishes it
+        # from completed eligibility checks, including existing persisted rows.
         checked = dict(db.query(ListingPromotion.listing_id, func.max(ListingPromotion.created_at)).filter(
             ListingPromotion.automation_id == row.id, ListingPromotion.action == "offer",
             ListingPromotion.listing_id.in_(list(events)),
             or_(ListingPromotion.state != "failed", ListingPromotion.sent_at.is_not(None)),
+            or_(ListingPromotion.state != "skipped", ListingPromotion.sent_at.is_not(None),
+                ListingPromotion.note.is_(None),
+                ~ListingPromotion.note.startswith("no new likers since the last offer")),
         ).group_by(ListingPromotion.listing_id).all()) if events else {}
         events = {key: at for key, at in events.items() if key in covered
                   and not (key in checked and at < checked[key].replace(microsecond=checked[key].microsecond // 1000 * 1000))

@@ -46,11 +46,12 @@ docker network create --internal "$network" >/dev/null
 # Synthetic password and empty database, confined to this disposable network.
 docker run -d --name anteroom-image-smoke-pg --network "$network" \
   -e POSTGRES_PASSWORD=synthetic-smoke-password -e POSTGRES_DB=smoke postgres:16 >/dev/null
+# TCP stays unavailable during the entrypoint's temporary socket-only server.
 for attempt in $(seq 1 60); do
-  if docker exec anteroom-image-smoke-pg pg_isready -U postgres -d smoke; then break; fi
+  if docker exec anteroom-image-smoke-pg pg_isready -h 127.0.0.1 -U postgres -d smoke; then break; fi
   sleep 1
 done
-docker exec anteroom-image-smoke-pg pg_isready -U postgres -d smoke
+docker exec anteroom-image-smoke-pg pg_isready -h 127.0.0.1 -U postgres -d smoke
 database=postgresql://postgres:synthetic-smoke-password@anteroom-image-smoke-pg:5432/smoke
 docker run --name anteroom-image-smoke-init --network "$network" \
   -e ANTEROOM_DATABASE_URL="$database" "$image" \

@@ -586,6 +586,35 @@ class PromotionAutomationsTest(unittest.TestCase):
             self.assertEqual(self.check_likes(), 0)
         self.assertEqual(self.checked(), [])
 
+    def test_count_only_scan_skip_keeps_an_unseen_liker_eligible(self):
+        conv, post = self.items[0]
+        saved = self.create({**OFFER, "scope": "items", "conversation_ids": [conv.id]})
+        self.enable(saved["id"])
+        self.due(saved["id"])
+        self.tick()
+        original = self.db.query(ListingPromotion).filter_by(listing_id=post).one()
+        original.created_at = original.sent_at = _now() - timedelta(days=2)
+        at = _now() + timedelta(seconds=1)
+        rule = self.db.get(PromotionAutomation, saved["id"])
+        rule.like_events_since = at - timedelta(seconds=1)
+        self.db.commit()
+        # A replacement liker leaves the aggregate count unchanged.
+        with patch.object(promotion_automations, "_now", return_value=at + timedelta(seconds=1)):
+            self.due(saved["id"])
+            self.tick()
+        skipped = self.db.query(ListingPromotion).filter_by(listing_id=post, state="skipped").one()
+        self.assertIn("no new likers since the last offer", skipped.note)
+        self.like_feed([{"listing_id": post, "at": at.isoformat() + "Z"}])
+        self.bridge.reset_mock()
+        with patch.object(promotion_automations, "_now", return_value=at + timedelta(seconds=2)):
+            self.assertEqual(self.check_likes(), 1)
+        self.assertEqual(self.checked(), [post])
+        self.assertEqual(len(self.promoted()), 1)
+        self.bridge.reset_mock()
+        with patch.object(promotion_automations, "_now", return_value=at + timedelta(seconds=3)):
+            self.assertEqual(self.check_likes(), 0)
+        self.assertEqual(self.checked(), [])
+
     def test_like_is_retried_after_chrome_disconnects_before_preview(self):
         conv, post = self.items[0]
         saved = self.create({**OFFER, "scope": "items", "conversation_ids": [conv.id]})
@@ -602,6 +631,7 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.bridge.side_effect = disconnected
         with patch.object(promotion_automations, "_now", return_value=at + timedelta(seconds=1)):
             self.check_likes()
+        self.assertEqual(self.checked(), [post])
         failure = self.db.query(ListingPromotion).filter_by(listing_id=post).one()
         self.assertEqual(failure.state, "failed")
         self.assertIsNone(failure.sent_at)
