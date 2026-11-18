@@ -1,0 +1,1 @@
+- After an Anteroom update, the web no longer tells you to update Anteroom Bridge before Chrome has reconnected. It asks you to connect Chrome instead.
