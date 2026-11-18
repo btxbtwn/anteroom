@@ -42,10 +42,13 @@ class ChromePreflightTest(unittest.TestCase):
         self.assertFalse(any("clothing size" in item["message"]
                              for item in depop_requirements(listing, Context())))
         # A category whose native form has no Size row does not need one.
-        with patch("vendoo_studio.services.depop_form.catalog", return_value={"categories": []}):
+        listing["_native_forms"]["depop"]["fields"] = []
+        catalog = {"categories": [{"id": "womenswear_jeans", "fields": [{"id": "quantity"}]}]}
+        with patch("vendoo_studio.services.depop_form.catalog", return_value=catalog):
             listing["depop_specifics"]["size"] = ""
-            self.assertFalse(any(item["field"] == "depop_specifics.size"
-                                 for item in depop_requirements(listing, Context())))
+            found = depop_requirements(listing, Context())
+            self.assertFalse(any(item["field"] in {"depop_specifics.size", "depop_specifics.nativeSizeId"}
+                                 or "clothing size" in item["message"] for item in found))
 
     def test_missing_categories_block_every_direct_marketplace(self):
         from vendoo_studio.services.direct_preflight import blocking, gaps
