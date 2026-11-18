@@ -1354,9 +1354,15 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         stale = {"ok": False, "safe_to_retry": False, "error": "Depop refused the request (HTTP 404).",
                  "error_code": "uncertain", "marketplace_message": "HTTP 404"}
 
-        for answer in (stale, {"ok": True, "state": "published", "draft_url": record["draft_url"],
-                               "listing_url": "https://www.depop.com/products/some-other-listing-1234/"}):
-            async def bridge(job, kind, payload, timeout=None, answer=answer):
+        other = {"ok": True, "state": "published", "draft_url": record["draft_url"],
+                 "listing_url": "https://www.depop.com/products/some-other-listing-1234/"}
+        # DGK (c02f59cb2eb7): Mark as listed. Gear for Sports (b2d0b9f27f87): "I checked it
+        # myself" first, which rests the record as a draft, then Mark as listed.
+        for answer, reset_first in ((stale, False), (other, False), (stale, True)):
+            async def bridge(job, kind, payload, timeout=None, answer=answer, reset_first=reset_first):
+                if reset_first:
+                    rested = await in_worker_session(lambda db: native.reset(self.conv.id, "depop", db))
+                    self.assertEqual(rested["state"], "draft")
                 await in_worker_session(mark, self.conv.id, "depop", "listed", seller_link)
                 return {"finished": True, "result": answer}
 
