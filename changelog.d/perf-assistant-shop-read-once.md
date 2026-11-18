@@ -1,0 +1,1 @@
+- The assistant reads your shop faster before it answers: sales figures for every date range now share one read of your sales, sale events and ad spend.
