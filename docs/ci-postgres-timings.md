@@ -61,8 +61,7 @@ actual checkout `git rev-parse HEAD`, uv.lock SHA-256, run ID/attempt, Python an
 pytest/xdist/split versions and actual xdist worker count. Hashes remain
 pseudonymization; the sensitive-ID restrictions above still apply. Raw nodeids are never serialized by the observer.
 
-The existing aggregate CI job retains its original gate (including #1621's
-NEEDS_JSON validator when integrated). Only when backend checks were selected,
+The aggregate CI job retains main's NEEDS_JSON validator. Only when backend checks were selected,
 it downloads the two exact current-run/shard artifact names using the existing
 pinned download action. No token, repository, other-run override, pattern or
 shared cache is used. It requires matching provenance/full order, nonempty unique
@@ -93,11 +92,3 @@ artifact transfers and standard-library validation. There is no extra suite pass
 or collect-only command. The small synthetic regression adds several seconds to
 shard 1; runtime overhead must be measured in CI rather than assumed negligible.
 This prerequisite does not choose a balancing profile or establish savings.
-
-Stack/integration: this prerequisite is based on #1622. #1621 independently
-replaces the aggregate gate, so merging both currently conflicts at that tail.
-Resolve by retaining #1621's checkout and NEEDS_JSON validator, then appending
-only the two exact-name downloads and verification step from this prerequisite;
-do not replace the validator with the older shell gate or keep two checkouts.
-The combined form was exercised against all five legacy gate scenarios and
-#1621's eight contract regressions before publication.

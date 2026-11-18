@@ -146,9 +146,9 @@ class InventoryTests(unittest.TestCase):
     def test_workflow_keeps_gate_and_fences_current_run_downloads(self):
         text = (SCRIPTS.parent / 'workflows/ci.yml').read_text()
         aggregate = text.split('\n  ci:\n', 1)[1]
-        self.assertLess(aggregate.index('Require every job'), aggregate.index('actions/download-artifact@'))
+        self.assertLess(aggregate.index('run: python3 .github/scripts/required-checks.py'), aggregate.index('actions/download-artifact@'))
         self.assertEqual(aggregate.count('actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333'), 2)
-        self.assertEqual(aggregate.count("if: needs.changes.outputs.backend == 'true'"), 4)
+        self.assertEqual(aggregate.count("if: needs.changes.outputs.backend == 'true'"), 3)
         for shard in (1, 2):
             self.assertIn('name: pg-duration-observations-${{ github.run_id }}-' + str(shard), aggregate)
         postgres = text.split('  studio-backend-postgres:', 1)[1].split('  extension:', 1)[0]

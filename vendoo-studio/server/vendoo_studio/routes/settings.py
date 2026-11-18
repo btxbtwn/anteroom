@@ -120,8 +120,9 @@ class PreferredProviderConfig(BaseModel):
 def _chatgpt_status() -> ChatGPTStatus:
     from vendoo_studio.services.service_context import current
     if (context := current()) is not None:
-        from vendoo_studio.services.mac_inference import relay_for
-        return ChatGPTStatus(signed_in=relay_for(context.seller_id).ready('chatgpt'))
+        from vendoo_studio.services.mac_inference import existing_relay
+        connection = existing_relay(context.seller_id)
+        return ChatGPTStatus(signed_in=connection is not None and connection.ready('chatgpt'))
     from vendoo_studio.services import chatgpt_oauth
     from vendoo_studio.services.keychain import get_chatgpt_tokens
 
@@ -151,8 +152,9 @@ def get_provider():
 
     chatgpt = _chatgpt_status()
     if (context := current()) is not None:
-        from vendoo_studio.services.mac_inference import relay_for
-        claude = ClaudeStatus(installed=True, signed_in=relay_for(context.seller_id).ready('claude'), install_command="")
+        from vendoo_studio.services.mac_inference import existing_relay
+        connection = existing_relay(context.seller_id)
+        claude = ClaudeStatus(installed=True, signed_in=connection is not None and connection.ready('claude'), install_command="")
     else:
         claude = ClaudeStatus(**claude_auth.status())
     photo_provider = get_photo_provider_choice()

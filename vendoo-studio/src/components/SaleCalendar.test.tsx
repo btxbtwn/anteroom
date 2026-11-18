@@ -40,3 +40,11 @@ it("uses singular recovery copy when one sale has no price", () => {
 it("uses a singular selected item for a one-item event", () => {
   expect(calendar(1, 1, { selectedItem: true })).toContain("1/1 selected item sold");
 });
+
+it("counts one included item and one event on a day in the singular", () => {
+  const html = calendar(1, 1, { selectedItem: true });
+  expect(html).toContain(" · 1 item<");
+  expect(html).not.toContain("1 items");
+  expect(html).toContain(", 1 sale event\"");
+  expect(html).not.toContain("1 sale events");
+});

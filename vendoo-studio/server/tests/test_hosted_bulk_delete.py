@@ -50,3 +50,30 @@ def test_reviewed_bulk_delete_removes_only_owned_unsent_idle_drafts(cloud, signi
         assert client.get('/api/conversations/' + kept, headers=alice).status_code == 200
     assert client.get('/api/conversations/' + foreign, headers=bob).status_code == 200
     assert 'bulk_delete' in client.get('/api/runtime', headers=alice).json()['features']
+
+
+def test_an_edited_draft_can_be_deleted_alone_or_in_bulk(cloud, signing_keys):  # noqa: F811
+    from vendoo_studio.models.listing_evidence import ListingCorrection
+
+    client, engine = cloud
+    alice = headers(signing_keys)
+    single, bulk = (client.post('/api/conversations', headers=alice, json={'title': name}).json()['id']
+                    for name in ('Edited single', 'Edited bulk'))
+    with Session(engine) as db:
+        # An editor save records the seller's correction against the draft.
+        for identity in (single, bulk):
+            db.add(ListingCorrection(user_id=USER_ID, conversation_id=identity, revision_id='r1', category_path='',
+                                     brand='Levi', changes={'brand': {'before': 'Levis', 'after': 'Levi'}}))
+        db.commit()
+    removed = client.delete('/api/conversations/' + single, headers=alice)
+    assert removed.status_code == 200, removed.text
+    endpoint = '/api/listings/bulk-delete'
+    preview = client.post(endpoint + '/preview', headers=alice, json={'conversation_ids': [bulk]}).json()['rows'][0]
+    result = client.post(endpoint + '/delete', headers=alice, json={
+        'rows': [{'conversation_id': bulk, 'review_token': preview['review_token']}], 'confirm': True})
+    assert result.status_code == 200, result.text
+    assert result.json()['deleted'] == [bulk]
+    for identity in (single, bulk):
+        assert client.get('/api/conversations/' + identity, headers=alice).status_code == 404
+    with Session(engine) as db:
+        assert db.query(ListingCorrection).filter(ListingCorrection.conversation_id.in_([single, bulk])).count() == 0

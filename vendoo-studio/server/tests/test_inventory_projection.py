@@ -42,7 +42,20 @@ def test_inventory_reads_do_not_extract_large_marketplace_forms(migration_engine
         try:
             suggestion = _listing_rows(db)[0]
             analytics = load_rows(db)[0]
-            summary = inventory_response(db)[0]
+            from vendoo_studio.services import hosted_read_snapshots as snapshots
+
+            phases = {}
+            token = snapshots._build_phases.set(phases)
+            try:
+                summary = inventory_response(db)[0]
+            finally:
+                snapshots._build_phases.reset(token)
+            assert set(phases) == {f'step_{step}_{metric}' for step in snapshots.INVENTORY_STEPS
+                                   for metric in ('ms', 'orm_calls')}
+            assert phases['step_conversations_orm_calls'] == 1
+            assert phases['step_covers_orm_calls'] == 1
+            assert phases['step_assemble_orm_calls'] == 0
+            assert all(isinstance(value, int) and value >= 0 for value in phases.values())
         finally:
             event.remove(engine, "before_cursor_execute", capture)
         assert suggestion[3:] == ("Example", ["Men", "Coats"], ["Winter"], "Wool coat", "Coat", ["Wool"])

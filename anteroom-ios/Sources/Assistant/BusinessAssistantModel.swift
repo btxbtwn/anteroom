@@ -26,6 +26,8 @@ final class BusinessAssistantModel {
     private(set) var answersFailed = 0
     private(set) var answersStopped = 0
     var error: String?
+    /// Why the last chat delete failed, shown in the Chats list where it was asked.
+    var deleteError: String?
     var cardError: (id: String, message: String)?
     var text = ""
     var attachments: [ChatAttachment] = []
@@ -290,12 +292,13 @@ final class BusinessAssistantModel {
     }
 
     func delete(_ thread: AssistantThread) async {
+        deleteError = nil
         do {
             try await api.deleteAssistantThread(thread.id)
             threads.removeAll { $0.id == thread.id }
             if threadID == thread.id { await open(nil) }
         } catch {
-            self.error = error.localizedDescription
+            deleteError = AssistantFormat.deleteFailure(error.localizedDescription, status: (error as? APIError)?.status)
         }
     }
 

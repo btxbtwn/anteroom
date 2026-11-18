@@ -86,7 +86,11 @@ def vendoo_form(listing: dict[str, Any], marketplace: str) -> dict[str, Any]:
 
 
 def attach_form(snapshot: dict[str, Any], marketplace: str) -> dict[str, Any]:
-    from vendoo_studio.services.user_settings import get_mercari_shipping_label, get_ships_from_zip
+    from vendoo_studio.services.user_settings import (
+        apply_mercari_shoebox_default,
+        get_mercari_shipping_label,
+        get_ships_from_zip,
+    )
 
     resolve_category(snapshot, marketplace)
     form = ({"overrides": {"categoryV2": (snapshot.get("marketplace_category_objects") or {}).get("mercari") or {}},
@@ -105,5 +109,7 @@ def attach_form(snapshot: dict[str, Any], marketplace: str) -> dict[str, Any]:
         # The class id belongs to one weight tier, so the label is the preference;
         # the extension matches it against the labels this package can use.
         form["mercari_shipping_label"] = shipping_label
+    if marketplace == "mercari":
+        apply_mercari_shoebox_default(snapshot)
     snapshot["form"] = form
     return snapshot

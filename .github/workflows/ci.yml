@@ -86,6 +86,8 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
+      - name: Test the required-check contract
+        run: python3 .github/scripts/test-required-checks.py
       - name: Version sync
         run: python vendoo-studio/scripts/check-version-sync.py
       - name: Reject case-insensitive path and module collisions
@@ -505,29 +507,13 @@ jobs:
       - webhook-relay
     runs-on: ubuntu-latest
     steps:
-      # A job skips only when Changed components says its component did not
-      # change; if that job itself fails, every job after it skips too, so it
-      # has to succeed for a skip to count.
-      - name: Require every job to succeed or skip an unchanged component
-        env:
-          CHANGES: ${{ needs.changes.result }}
-          RESULTS: ${{ join(needs.*.result, ' ') }}
-        run: |
-          echo "Changed components: $CHANGES"
-          echo "Job results: $RESULTS"
-          [ "$CHANGES" = "success" ] || exit 1
-          for result in $RESULTS; do
-            case "$result" in
-              success|skipped) ;;
-              *) exit 1 ;;
-            esac
-          done
-      # Additive to the existing aggregate gate (including #1621's NEEDS_JSON
-      # validator when integrated). No artifact absence is accepted for selected PG.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: needs.changes.outputs.backend == 'true'
         with:
           persist-credentials: false
+      - name: Require every selected job to succeed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: python3 .github/scripts/required-checks.py
       # No token/repository/run-id override: download-artifact defaults to this run.
       # Stable run/shard slots retain successful reused dependencies across attempts.
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2

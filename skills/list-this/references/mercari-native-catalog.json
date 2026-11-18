@@ -144962,6 +144962,7 @@
       },
       "presentation": "radio",
       "help": "A standard shoebox measures 14” x 10” x 5”.",
+      "save_as_default": true,
       "section": "Shipping"
     },
     {
