@@ -197,8 +197,11 @@ def recent(db: Session) -> list[ScoutCheck]:
     return db.query(ScoutCheck).order_by(ScoutCheck.created_at.desc()).limit(RECENT).all()
 
 
-def outcomes(db: Session) -> dict[str, float]:
-    """Sold price for each check whose listing has sold."""
+def outcomes(db: Session, rows: list | None = None) -> dict[str, float]:
+    """Sold price for each check whose listing has sold.
+
+    ``rows`` lets a caller that already loaded the listings' analytics rows reuse them.
+    """
     from vendoo_studio.services.inventory_analytics import load_rows
 
     linked = {
@@ -211,7 +214,7 @@ def outcomes(db: Session) -> dict[str, float]:
         return {}
     return {
         linked[row.conversation_id]: row.sold_price
-        for row in load_rows(db)
+        for row in (load_rows(db) if rows is None else rows)
         if row.conversation_id in linked and row.status == "sold" and row.sold_price
     }
 
