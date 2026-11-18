@@ -32,6 +32,7 @@ struct BulkListingView: View {
     @State private var boxID: String?
     @State private var boxes: [SourceBox] = []
     @State private var reading: Set<UUID> = []
+    @State private var readingSizes: Set<UUID> = []
     @State private var creating = false
     @State private var progress = 0
     @State private var problems: [String] = []
@@ -72,7 +73,8 @@ struct BulkListingView: View {
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: UUID.self) { id in
                 BulkItemEditor(plan: $plan, itemID: id, number: (plan.items.firstIndex { $0.id == id } ?? 0) + 1,
-                               thumbnails: thumbnails, reading: reading.contains(id)) { read([id]) }
+                               thumbnails: thumbnails, reading: reading.contains(id), readingSize: readingSizes.contains(id),
+                               readSize: { readSizes([id]) }) { read([id]) }
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -206,6 +208,14 @@ struct BulkListingView: View {
 
     private var itemsSection: some View {
         Section {
+            Button { readSizes(plan.items.map(\.id)) } label: {
+                HStack {
+                    Label("Read all size tags", systemImage: "tag")
+                    if !readingSizes.isEmpty { Spacer(); ProgressView() }
+                }.frame(minHeight: 44)
+            }
+            .disabled(!readingSizes.isEmpty)
+            .accessibilityIdentifier("bulk-read-size-tags")
             ForEach(Array(plan.items.enumerated()), id: \.element.id) { index, item in
                 NavigationLink(value: item.id) {
                     itemRow(item, number: index + 1)
@@ -239,7 +249,7 @@ struct BulkListingView: View {
             HStack {
                 Text("Item \(number) · \(item.photos.count) \(item.photos.count == 1 ? "photo" : "photos")")
                     .font(.subheadline.weight(.medium))
-                if reading.contains(item.id) { ProgressView().controlSize(.small) }
+                if reading.contains(item.id) || readingSizes.contains(item.id) { ProgressView().controlSize(.small) }
             }
             HStack(spacing: 4) {
                 ForEach(item.photos.prefix(5), id: \.self) { photo in
@@ -252,6 +262,10 @@ struct BulkListingView: View {
             if let summary = summary(item) {
                 Text(summary).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
+            if item.sizeNeedsReview {
+                Label(item.sizeNote ?? "Check the clothing size.", systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(WorkspaceStyle.destructive)
+            }
         }
         .padding(.vertical, 2)
     }
@@ -259,7 +273,7 @@ struct BulkListingView: View {
     private func summary(_ item: BulkListingPlan.Item) -> String? {
         var parts: [String] = []
         let sizeTag = item.sizeTag.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !sizeTag.isEmpty { parts.append("Size tag: \(sizeTag)") }
+        if !sizeTag.isEmpty { parts.append("Size \(sizeTag)") }
         let sku = item.sku.trimmingCharacters(in: .whitespacesAndNewlines)
         if !sku.isEmpty { parts.append("SKU \(sku)") }
         let measured = item.typedMeasurements
@@ -280,12 +294,12 @@ struct BulkListingView: View {
                     Label("Create & generate \(plan.items.count)", systemImage: "sparkles").frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(!plan.loose.isEmpty || !reading.isEmpty)
+                .disabled(!plan.loose.isEmpty || !reading.isEmpty || !readingSizes.isEmpty)
                 Button { create(generate: false) } label: {
                     Text("Create \(plan.items.count) \(plan.items.count == 1 ? "draft" : "drafts")").frame(maxWidth: .infinity, minHeight: 44)
                 }
                 .buttonStyle(.bordered)
-                .disabled(!plan.loose.isEmpty || !reading.isEmpty)
+                .disabled(!plan.loose.isEmpty || !reading.isEmpty || !readingSizes.isEmpty)
             }
         } footer: {
             Text(createNote)
@@ -298,6 +312,7 @@ struct BulkListingView: View {
             return "Group or remove the \(plan.loose.count) remaining \(plan.loose.count == 1 ? "photo" : "photos") first."
         }
         if !reading.isEmpty { return "Waiting for the measurement reading to finish." }
+        if !readingSizes.isEmpty { return "Waiting for the size tag reading to finish." }
         return "Drafts are saved in Anteroom. Nothing is listed or sent to a marketplace."
     }
 
@@ -334,6 +349,36 @@ struct BulkListingView: View {
     }
 
     // MARK: Actions
+
+    private func readSizes(_ ids: [UUID]) {
+        let todo = ids.filter { !readingSizes.contains($0) }
+        guard !todo.isEmpty else { return }
+        readingSizes.formUnion(todo)
+        let lanes = (0..<min(Self.readConcurrency, todo.count)).map { lane in
+            stride(from: lane, to: todo.count, by: Self.readConcurrency).map { todo[$0] }
+        }
+        Task {
+            await withBackgroundTime("Read size tags") {
+                let workers = lanes.map { lane in
+                    Task { for id in lane { await readSize(id) } }
+                }
+                for worker in workers { await worker.value }
+            }
+        }
+    }
+
+    private func readSize(_ id: UUID) async {
+        defer { readingSizes.remove(id) }
+        guard let item = plan.items.first(where: { $0.id == id }) else { return }
+        do {
+            let result = try await api.readSizeTags(jpegs: item.photos.compactMap { jpegs[$0] })
+            guard plan.items.first(where: { $0.id == id })?.photos == item.photos else { return }
+            plan.applySizeTag(result, to: id)
+        } catch {
+            guard plan.items.first(where: { $0.id == id })?.photos == item.photos else { return }
+            plan.failSizeTag(error.localizedDescription, for: id)
+        }
+    }
 
     private func makeItem() {
         plan.makeItem(from: selection)
@@ -408,7 +453,7 @@ struct BulkListingView: View {
     /// notes and box, upload its photos in order, then turn the ones the
     /// seller turned. A failed item never stops the others.
     private func create(generate: Bool) {
-        guard !creating, plan.loose.isEmpty, !plan.items.isEmpty, reading.isEmpty else { return }
+        guard !creating, plan.loose.isEmpty, !plan.items.isEmpty, reading.isEmpty, readingSizes.isEmpty else { return }
         creating = true
         progress = 0
         problems = []
@@ -501,12 +546,14 @@ struct BulkThumbnail: View {
 }
 
 /// One item: photo order and cover, turning, SKU and measurements.
-private struct BulkItemEditor: View {
+struct BulkItemEditor: View {
     @Binding var plan: BulkListingPlan
     let itemID: UUID
     let number: Int
     let thumbnails: [UUID: UIImage]
     let reading: Bool
+    let readingSize: Bool
+    let readSize: () -> Void
     let read: () -> Void
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -516,15 +563,33 @@ private struct BulkItemEditor: View {
                 List {
                     Group {
                         photosSection(item)
-                        Section("Size tag") {
+                        Section {
                             TextField("e.g. XL, 32 × 30", text: Binding(
                                 get: { item.sizeTag },
                                 set: { plan.setSizeTag($0, for: itemID) }
                             ))
                             .autocorrectionDisabled()
                             .frame(minHeight: 44)
-                            .accessibilityLabel("Size tag")
+                            .accessibilityLabel("Size")
+                            .accessibilityHint(item.sizeNote ?? "Clothing size from the tag")
                             .accessibilityIdentifier("bulk-size-tag")
+                            Button(action: readSize) {
+                                HStack {
+                                    Label("Read size tag", systemImage: "tag")
+                                    if readingSize { Spacer(); ProgressView() }
+                                }.frame(minHeight: 44)
+                            }
+                            .disabled(readingSize)
+                            if let note = item.sizeNote {
+                                Label(note, systemImage: item.sizeNeedsReview ? "exclamationmark.triangle" : "tag")
+                                    .font(.footnote)
+                                    .foregroundStyle(item.sizeNeedsReview ? WorkspaceStyle.destructive : .secondary)
+                                    .accessibilityIdentifier("bulk-size-note")
+                            }
+                        } header: {
+                            Text(item.sizeSuggested ? "Size (from photos)" : "Size")
+                        } footer: {
+                            Text("Clothing size from the tag. Reading keeps sizes you type.")
                         }
                         Section("SKU") {
                             TextField("SKU (optional)", text: Binding(

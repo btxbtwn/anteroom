@@ -13,6 +13,44 @@ final class AnteroomAPITests: XCTestCase {
 
     // MARK: Request building
 
+    func testSizeTagReadUsesOrderedPhotosAndDecodesZero() async throws {
+        StubProtocol.answer(.init(status: 200, body: #"{"photos_read":2,"status":"accepted","size":"0","sizes":["0"]}"#))
+        let result = try await api.readSizeTags(jpegs: [Data("FIRST".utf8), Data("SECOND".utf8)])
+        XCTAssertEqual(result.size, "0")
+        let sent = try XCTUnwrap(StubProtocol.requests.first)
+        XCTAssertEqual(sent.url?.path, "/api/size-tags/read")
+        XCTAssertEqual(sent.timeoutInterval, 180)
+        XCTAssertEqual(sent.httpMethod, "POST")
+        XCTAssertTrue(sent.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("multipart/form-data; boundary=") == true)
+        let body = String(decoding: try XCTUnwrap(sent.httpBody), as: UTF8.self)
+        XCTAssertTrue(body.contains("name=\"files\"; filename=\"photo0.jpg\""))
+        XCTAssertTrue(body.contains("name=\"files\"; filename=\"photo1.jpg\""))
+        XCTAssertLessThan(try XCTUnwrap(body.range(of: "FIRST")?.lowerBound), try XCTUnwrap(body.range(of: "SECOND")?.lowerBound))
+        XCTAssertFalse(body.contains("name=\"garment\""))
+    }
+
+    func testSizeTagReadNamesAnOlderServer() async throws {
+        StubProtocol.answer(.init(status: 404, body: #"{"detail":"Not Found"}"#))
+        do { _ = try await api.readSizeTags(jpegs: []); XCTFail("Expected update guidance") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("Update Anteroom on the server")) }
+        XCTAssertEqual(StubProtocol.requests.count, 1)
+    }
+
+    func testSizeTagProviderDetailIsShownWithoutRetry() async throws {
+        StubProtocol.answer(.init(status: 502, body: #"{"detail":"Photo provider could not read the size in these photos."}"#))
+        do { _ = try await api.readSizeTags(jpegs: []); XCTFail("Expected provider error") }
+        catch { XCTAssertEqual(error.localizedDescription, "Photo provider could not read the size in these photos.") }
+        XCTAssertEqual(StubProtocol.requests.count, 1)
+    }
+
+    func testNoteSaveUsesChangedKeysOnly() async throws {
+        StubProtocol.answer(.init(status: 200, body: #"{"ok":true}"#))
+        try await api.saveNotes("a", changes: ["sku": .string("A")])
+        let json = try XCTUnwrap(StubProtocol.requests.first?.json)
+        XCTAssertNil(json["notes"])
+        XCTAssertEqual((json["note_changes"] as? [String: String]), ["sku": "A"])
+    }
+
     func testReadCarriesTokenAndPath() async throws {
         StubProtocol.answer(.init(status: 200, body: #"[{"id":"a","title":"Blue shirt","status":"draft","created_at":"2026-11-01T10:00:00","updated_at":"2026-11-01T10:00:00"}]"#))
         let rows = try await api.listings()

@@ -10,6 +10,9 @@ struct BulkListingPlan: Equatable {
         var photos: [UUID]
         var sku = ""
         var sizeTag = ""
+        var sizeSuggested = false
+        var sizeNeedsReview = false
+        var sizeNote: String?
         var garment: SellerInputs.Garment = .top
         /// Typed or read values, keyed like the garment's fields.
         var measurements: [String: String] = [:]
@@ -109,7 +112,52 @@ struct BulkListingPlan: Equatable {
     }
 
     mutating func setSizeTag(_ sizeTag: String, for id: Item.ID) {
-        update(id) { $0.sizeTag = sizeTag }
+        update(id) {
+            $0.sizeTag = sizeTag
+            $0.sizeSuggested = false
+            $0.sizeNeedsReview = false
+            $0.sizeNote = nil
+        }
+    }
+
+    mutating func applySizeTag(_ result: SizeTagReading, to id: Item.ID) {
+        update(id) { item in
+            let typed = item.sizeSuggested ? "" : item.sizeTag.trimmingCharacters(in: .whitespacesAndNewlines)
+            let size = result.size?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            item.sizeSuggested = false
+            item.sizeNeedsReview = false
+            item.sizeNote = nil
+            item.sizeTag = typed
+            if result.status == "accepted", !size.isEmpty, result.photosRead > 0 {
+                if typed.isEmpty {
+                    item.sizeTag = size
+                    item.sizeSuggested = true
+                    item.sizeNote = "Size filled from the tag. Check it."
+                } else if typed.caseInsensitiveCompare(size) == .orderedSame {
+                    item.sizeNote = "Size matches the tag."
+                } else {
+                    item.sizeNeedsReview = true
+                    item.sizeNote = "The tag reads \(size). Check the size you typed."
+                }
+            } else if result.status == "conflict" {
+                item.sizeNeedsReview = true
+                let next = typed.isEmpty ? "Check the tag and type the size." : "Check the size you typed."
+                item.sizeNote = "The photos show different sizes (\(result.sizes.joined(separator: ", "))). \(next)"
+            } else if typed.isEmpty {
+                item.sizeNeedsReview = true
+                item.sizeNote = result.status == "not_found" || result.photosRead == 0
+                    ? "No size tag found in the photos. Type the size from the tag."
+                    : "The size tag could not be read. Type the size from the tag."
+            }
+        }
+    }
+
+    mutating func failSizeTag(_ message: String, for id: Item.ID) {
+        update(id) { item in
+            if item.sizeSuggested { item.sizeTag = ""; item.sizeSuggested = false }
+            item.sizeNeedsReview = item.sizeTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            item.sizeNote = message + (item.sizeNeedsReview ? " Type the size from the tag." : "")
+        }
     }
 
     mutating func setGarment(_ garment: SellerInputs.Garment, for id: Item.ID) {
@@ -154,7 +202,7 @@ struct BulkListingPlan: Equatable {
                 }
             }
             item.suggested.formUnion(filled)
-            var parts = [filled.isEmpty ? "Nothing new could be read from the photos." : "Filled from the photos. Check them."]
+            var parts = [filled.isEmpty ? "The yardstick could not be read." : "Filled from the photos. Check them."]
             if !byHand.isEmpty { parts.append("Measure by hand: \(byHand.joined(separator: ", ")).") }
             item.readNote = parts.joined(separator: " ")
         }
@@ -183,7 +231,7 @@ struct BulkListingPlan: Equatable {
         inputs.addLabel(labels)
         inputs.sku = item.sku.trimmingCharacters(in: .whitespacesAndNewlines)
         let sizeTag = item.sizeTag.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !sizeTag.isEmpty { inputs.sellerNotes = "Size tag: \(sizeTag)" }
+        if !sizeTag.isEmpty { inputs.size = sizeTag }
         let measured = item.typedMeasurements
         if !measured.isEmpty {
             inputs.garment = item.garment
