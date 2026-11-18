@@ -51,7 +51,7 @@ class SettleTest(unittest.TestCase):
         self.assertEqual((result["status"], result["size"]), ("accepted", "32 x 30"))
 
     def test_a_nested_answer_is_not_a_size(self):
-        for sizes in ([["S", "XL"]], [{"size": "M"}]):
+        for sizes in ([["S", "XL"]], [{"size": "M"}], ["M", ["S", "XL"]], ["M", {"size": "M"}]):
             with self.subTest(sizes=sizes):
                 result = settle({"tag": "found", "sizes": sizes}, {"tag": "found", "sizes": sizes})
                 self.assertEqual((result["status"], result["size"]), ("unreadable", None))

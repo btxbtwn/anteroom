@@ -60,6 +60,9 @@ def _one_read(answer: dict) -> tuple[str, list[str]]:
     tag = str(answer.get("tag") or "").strip().casefold()
     raw = answer.get("sizes")
     values = raw if isinstance(raw, list) else [raw]
+    if any(isinstance(value, (list, tuple, dict)) for value in values):
+        # A malformed answer is not trusted in part: a plain size beside a nested one goes to the seller too.
+        return "unreadable", []
     sizes: list[str] = []
     for value in values:
         size = _size_text(value)
