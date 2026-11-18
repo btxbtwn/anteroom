@@ -50,6 +50,7 @@ from vendoo_studio.services.user_settings import (
 )
 
 log = logging.getLogger("vendoo_studio.assistant")
+timing_log = logging.getLogger("vendoo_studio.assistant.timing")
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 
@@ -277,6 +278,8 @@ async def _answer(
                         _save_answer, provider, answer, changes, memory_block, automation_block, thread_id, settle,
                         error,
                     )
+                    if isinstance(run, _Journal):
+                        run.saved = True
                 except asyncio.CancelledError:
                     outcome = "cancelled"
                     raise
@@ -292,12 +295,17 @@ async def _answer(
                 finally:
                     timing.save_ms = business_assistant.elapsed_ms(save_started)
         finally:
-            if isinstance(run, _Journal) and run.stop_outcome is not None:
-                outcome = run.stop_outcome
             total_ms = business_assistant.elapsed_ms(timing.started)
-            slow = total_ms >= business_assistant.SLOW_ANSWER_MS
-            log.log(logging.WARNING if slow else logging.INFO, "%s", timing.line(outcome, total_ms))
+            if isinstance(run, _Journal) and settle is not None:
+                run.timing_sample = (timing, outcome, total_ms)
+            else:
+                _emit_timing(timing, outcome, total_ms)
     return error
+
+
+def _emit_timing(timing: business_assistant.AnswerTiming, outcome: str, total_ms: int) -> None:
+    slow = total_ms >= business_assistant.SLOW_ANSWER_MS
+    timing_log.log(logging.WARNING if slow else logging.INFO, "%s", timing.line(outcome, total_ms))
 
 
 def _log_answer_failure(exc: Exception) -> None:
@@ -578,6 +586,8 @@ class _Journal(GenerationRun):
         super().__init__()
         self.pending: list[str] = []
         self.stop_outcome: str | None = None
+        self.saved = False
+        self.timing_sample: tuple[business_assistant.AnswerTiming, str, int] | None = None
 
     def publish(self, item: str, *, record: bool = True) -> None:
         # Pulses only keep a live connection open; followers poll the journal.
@@ -626,6 +636,7 @@ async def answer_task(task_id: str, token: str, task) -> bool:
         if isinstance(exc, background_tasks.TaskLeaseExpired):
             journal.stop_outcome = "cancelled" if isinstance(exc, background_tasks.TaskStopped) else "lease_lost"
         if not isinstance(exc, background_tasks.TaskLeaseExpired):
+            journal.stop_outcome = "error"
             _log_answer_failure(exc)
         try:
             await asyncio.to_thread(background_tasks.finish, task_id, token,
@@ -634,8 +645,20 @@ async def answer_task(task_id: str, token: str, task) -> bool:
             pass
     finally:
         if work is not None and not work.done():
-            work.cancel()
+            # settle() runs before commit. Let an in-flight save return so only
+            # confirmed persistence can override a concurrent lease revocation.
+            if not settled:
+                work.cancel()
             await asyncio.gather(work, return_exceptions=True)
+        if journal.timing_sample is not None:
+            from vendoo_studio.services.service_context import current
+
+            timing, outcome, total_ms = journal.timing_sample
+            context = current()
+            stop = journal.stop_outcome or (context.task_outcome.get("stop") if context else None)
+            if stop is not None and not journal.saved:
+                outcome = stop
+            _emit_timing(timing, outcome, total_ms)
     return True
 
 

@@ -146,7 +146,7 @@ class AppLogHandler(logging.Handler):
 
 def install_assistant_timings() -> None:
     """Keep hosted assistant warnings individually in the existing bounded disk log."""
-    logger = logging.getLogger("vendoo_studio.assistant")
+    logger = logging.getLogger("vendoo_studio.assistant.timing")
     if not any(isinstance(handler, AppLogHandler) for handler in logger.handlers):
         logger.addHandler(AppLogHandler(level=logging.WARNING))
 

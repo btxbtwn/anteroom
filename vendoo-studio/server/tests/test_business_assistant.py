@@ -1113,3 +1113,102 @@ def test_journal_stop_reason_survives_worker_cancellation(monkeypatch, caplog, s
     outcome = 'cancelled' if stopped else 'lease_lost'
     assert f'outcome={outcome} ' in line
     assert 'rounds=0 ' in line and 'lookups=0 ' in line and 'save_ms=- ' in line
+
+
+@pytest.mark.parametrize('failure_name, expected', [
+    (None, 'error'), ('TaskStopped', 'cancelled'), ('TaskLeaseExpired', 'lease_lost'),
+])
+def test_empty_hosted_answer_logs_after_finish(monkeypatch, caplog, failure_name, expected):
+    from types import SimpleNamespace
+    from vendoo_studio.services import background_tasks
+
+    caplog.set_level('INFO', logger='vendoo_studio.assistant')
+    monkeypatch.setattr(assistant_route, '_require_provider', Provider)
+    monkeypatch.setattr(assistant_route, '_prepare', lambda *_: ([], SimpleNamespace(
+        lookups=SimpleNamespace(close=lambda: None))))
+    monkeypatch.setattr(background_tasks, 'append_events', lambda *_: None)
+
+    async def empty(*_):
+        if False:
+            yield
+
+    def finish(*_, **kwargs):
+        assert timing_lines(caplog) == []
+        if failure_name:
+            raise getattr(background_tasks, failure_name)()
+        assert kwargs['error']
+
+    monkeypatch.setattr(business_assistant, 'answer', empty)
+    monkeypatch.setattr(background_tasks, 'finish', finish)
+    task = SimpleNamespace(payload={}, assistant_thread_id=None, created_at=datetime.now(UTC))
+    asyncio.run(assistant_route.answer_task('task', 'token', task))
+    [line] = timing_lines(caplog)
+    assert f'outcome={expected} ' in line
+
+
+def test_journal_database_failure_logs_error(monkeypatch, caplog):
+    from types import SimpleNamespace
+    from vendoo_studio.services import background_tasks
+
+    caplog.set_level('INFO', logger='vendoo_studio.assistant')
+
+    async def preparing(_run, work, *_):
+        work.close()
+        await asyncio.Future()
+
+    def fail(*_):
+        raise RuntimeError('database unavailable')
+
+    monkeypatch.setattr(assistant_route, 'await_with_pulses', preparing)
+    monkeypatch.setattr(assistant_route, '_require_provider', Provider)
+    monkeypatch.setattr(background_tasks, 'EVENT_INTERVAL', .001)
+    monkeypatch.setattr(background_tasks, 'append_events', fail)
+    monkeypatch.setattr(background_tasks, 'finish', lambda *_, **kwargs: None)
+    task = SimpleNamespace(payload={}, assistant_thread_id=None, created_at=datetime.now(UTC))
+    asyncio.run(assistant_route.answer_task('task', 'token', task))
+    [line] = timing_lines(caplog)
+    assert 'outcome=error ' in line
+
+
+@pytest.mark.parametrize('saved', [False, True])
+def test_concurrent_lease_loss_waits_for_save_confirmation(monkeypatch, caplog, saved):
+    from types import SimpleNamespace
+    from vendoo_studio.services import background_tasks
+
+    caplog.set_level('INFO', logger='vendoo_studio.assistant')
+
+    async def exercise():
+        saving, release = asyncio.Event(), asyncio.Event()
+
+        async def answer(journal, *_, settle, **kwargs):
+            journal.publish('data: answer\n\n')
+            saving.set()
+            await release.wait()
+            # The append took frames before settle started.
+            settle(None, None)
+            await asyncio.sleep(0)
+            journal.saved = saved
+            journal.timing_sample = (business_assistant.AnswerTiming(),
+                                     'answered' if saved else 'lease_lost', 100)
+
+        def append(*_):
+            asyncio.run_coroutine_threadsafe(unblock(), loop).result()
+            raise background_tasks.TaskLeaseExpired()
+
+        async def unblock():
+            release.set()
+            await asyncio.sleep(0)
+
+        loop = asyncio.get_running_loop()
+        monkeypatch.setattr(assistant_route, '_answer', answer)
+        monkeypatch.setattr(background_tasks, 'append_events', append)
+        monkeypatch.setattr(background_tasks, 'complete_in', lambda *_, **kwargs: None)
+        monkeypatch.setattr(background_tasks, 'finish', lambda *_, **kwargs: None)
+        task = SimpleNamespace(payload={}, assistant_thread_id=None, created_at=datetime.now(UTC))
+        await assistant_route.answer_task('task', 'token', task)
+
+    monkeypatch.setattr(assistant_route, '_require_provider', Provider)
+    monkeypatch.setattr(background_tasks, 'EVENT_INTERVAL', .001)
+    asyncio.run(exercise())
+    [line] = timing_lines(caplog)
+    assert f"outcome={'answered' if saved else 'lease_lost'} " in line
