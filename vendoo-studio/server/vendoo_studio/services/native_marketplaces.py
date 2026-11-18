@@ -951,6 +951,19 @@ def _keep_remembered(db: Session, conv_id: str, marketplace: str, remembered: li
 def _settle_check(db: Session, conv_id: str, marketplace: str, record: dict, check_job_id: str,
                   remembered: list[dict], result: dict | None) -> dict:
     _keep_remembered(db, conv_id, marketplace, remembered)
+    current = _record(db, conv_id, marketplace)
+    if (current.get("job_id") == record.get("job_id")
+            and ((record.get("state") in UNSETTLED_STATES and current.get("state") not in UNSETTLED_STATES)
+                 or current.get("listing_url") != record.get("listing_url"))):
+        # The seller settled the record while Chrome was answering (Mark as listed with
+        # the live link, or "I checked it myself"). What they saw is newer than this read.
+        repo = JobRepo(db)
+        if repo.get(record["job_id"]):
+            repo.add_event(record["job_id"], "native_check_superseded", f"native_{marketplace}_check", {
+                "marketplace": marketplace, "state": current.get("state"),
+                "answered": result.get("state") if isinstance(result, dict) else None})
+        repo.update_status(check_job_id, "completed")
+        return current
     if result is None:
         stored = _store(db, conv_id, marketplace, {**_CLEARED_ERROR, "state": "unknown", "error_code": "uncertain",
                                                    "error": CHROME_SILENT.format(name=NAMES[marketplace])})

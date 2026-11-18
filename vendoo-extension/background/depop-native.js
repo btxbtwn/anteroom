@@ -306,6 +306,8 @@ const DEPOP_MAX_DESCRIPTION = 1000;
 const DEPOP_MAX_HASHTAGS = 5;
 const DEPOP_PHOTO_HOSTS = ['.s3.amazonaws.com', '.s3-accelerate.amazonaws.com'];
 const DEPOP_WEBAPI = 'https://webapi.depop.com';
+// Reads of a draft Depop is still posting when its publish status read is unavailable.
+const DEPOP_UNAVAILABLE_STATUS_POLLS = 8;
 
 function depopBaseDescription(listing) {
   return String(marketplaceCopy(listing, 'depop', 'description') || '').trim();
@@ -1390,7 +1392,16 @@ async function depopApiAction(action, payload) {
     }
     if (action === 'publish_status') {
       if (!/^[A-Za-z0-9_-]+$/.test(String(payload.publish_job_id))) throw marketplaceError('A Depop publish receipt is required.');
-      const status = await request('GET', `/api/v3/drafts/products/${payload.publish_job_id}/status/`);
+      let status;
+      try {
+        status = await request('GET', `/api/v3/drafts/products/${payload.publish_job_id}/status/`);
+      } catch (error) {
+        // Since 2026-11-17 Depop answers this read with a bodiless 404 on every
+        // poll, after it has posted the item. A 404 on a read is not a refusal of
+        // the publish, which Depop already accepted. Read what the publish leaves.
+        if (error?.status !== 404) throw error;
+        return await depopPublishEvidence(request, payload, id ? path : '');
+      }
       // Only a count names an answer. A job Depop has accepted but not started yet
       // reports no counts at all, which is waiting, not a refusal.
       const counts = status?.count_by_status && typeof status.count_by_status === 'object' ? status.count_by_status : {};
@@ -1423,6 +1434,24 @@ async function depopApiAction(action, payload) {
   } catch (error) {
     return marketplaceFailure(error, !wrote);
   }
+}
+
+// The publish status read is unavailable. Posting consumes the draft, so a draft
+// that still reads is still queued (or was never posted), and a draft that is
+// gone is posted only when its one matching product is in the seller's shop.
+// Nothing here is a refusal: the publish was accepted, so the answer is either
+// the listing or unconfirmed.
+async function depopPublishEvidence(request, payload, draftPath) {
+  const unavailable = { complete: false, failed: false, counts: {}, status_unavailable: true };
+  if (!draftPath) return unavailable;
+  try {
+    await request('GET', draftPath);
+    return unavailable;
+  } catch (error) {
+    if (error?.status !== 404) throw error;
+  }
+  const listing_url = await depopShopUrl(request, payload);
+  return listing_url ? { ...unavailable, complete: true, listing_url } : { ...unavailable, draft_posted: true };
 }
 
 // Read only error containers: draft descriptions, addresses and other seller
@@ -1695,9 +1724,13 @@ async function runDepopNative(msg, recovery = false) {
     }
     if (!payload.publish_job_id) throw new Error('No confirmed Depop publish receipt is available. Review the native account.');
     let status = {};
+    let unavailable = 0;
     while (Date.now() < payload.deadline) {
       status = await depopAction('publish_status', payload);
       if (status.complete) return { ok: true, state: 'published', draft_url: payload.draft_url, ...(status.listing_url ? { listing_url: status.listing_url } : {}) };
+      // Without Depop's status read, each poll reads the draft, and the shop once the draft
+      // is gone. Bound them so a Check answers inside Anteroom's wait for Chrome.
+      if (status.status_unavailable && (unavailable += 1) >= (status.draft_posted ? 3 : DEPOP_UNAVAILABLE_STATUS_POLLS)) break;
       if (status.failed) {
         // Depop's job ended without posting this draft. The draft is untouched, so List can run again.
         return marketplaceFailure(marketplaceError(`Depop could not publish this listing.${status.reason ? ` ${status.reason}` : ''}`,
@@ -1708,8 +1741,15 @@ async function runDepopNative(msg, recovery = false) {
       // whether the item is live is unknown, so keep asking rather than guess.
       await marketplaceSleep(2000);
     }
+    if (status.draft_posted) {
+      // The draft left Depop's drafts, but no one product in the shop is this listing.
+      throw marketplaceError('Depop took this draft for publishing, but Anteroom could not find the new listing. '
+        + 'Check your Depop shop, then add the listing link here.',
+      { code: 'uncertain', rejected: false, marketplace_message: 'publish status: HTTP 404; draft: no longer in drafts; shop: no single matching listing' });
+    }
     throw marketplaceError('Depop has not confirmed publishing yet. Check its result later.',
-      { code: 'uncertain', rejected: false, marketplace_message: `counts: ${JSON.stringify(status.counts || {})}` });
+      { code: 'uncertain', rejected: false, marketplace_message: status.status_unavailable
+        ? 'publish status: HTTP 404; draft: still in drafts' : `counts: ${JSON.stringify(status.counts || {})}` });
   } catch (error) {
     if (depopDraftGone(error) && !replacedDraft) payload.draft_url = '';
     // A write may have landed and the reply was lost. Read Depop before answering

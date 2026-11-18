@@ -1333,6 +1333,44 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
 
 
 
+    def test_a_check_that_answers_after_the_seller_added_the_link_keeps_the_link(self):
+        # Production, 2026-11-18: Depop's publish was unconfirmed, a Check was asking
+        # Chrome, and the seller pasted the live link before Chrome answered.
+        from vendoo_studio.database import in_worker_session
+        from vendoo_studio.services.marketplace_delist import mark
+
+        async def publish_lost(job, kind, payload, timeout=None):
+            if kind == "marketplace.execute" and payload["action"] == "save_draft":
+                return {"ok": True, "state": "draft", "draft_url": URLS["depop"]}
+            if kind == "marketplace.execute":
+                raise BrowserBridgeError("lost")
+            return {"finished": False}
+
+        self.bridge.side_effect = publish_lost
+        with patch.object(native, "SETTLE_DEADLINE_S", 0):
+            record = self.list("depop")
+        self.assertEqual((record["state"], record["action"]), ("unknown", "publish"))
+        seller_link = "https://www.depop.com/products/seller-added-link-e2f1/"
+        stale = {"ok": False, "safe_to_retry": False, "error": "Depop refused the request (HTTP 404).",
+                 "error_code": "uncertain", "marketplace_message": "HTTP 404"}
+
+        for answer in (stale, {"ok": True, "state": "published", "draft_url": record["draft_url"],
+                               "listing_url": "https://www.depop.com/products/some-other-listing-1234/"}):
+            async def bridge(job, kind, payload, timeout=None, answer=answer):
+                await in_worker_session(mark, self.conv.id, "depop", "listed", seller_link)
+                return {"finished": True, "result": answer}
+
+            MarketplaceListingRepo(self.db).save(self.conv.id, "depop", {"state": "unknown", "listing_url": None,
+                                                                         "listing_id": None})
+            self.bridge.side_effect = bridge
+            checked = self.client.post(f"{self.base}/depop/check")
+            self.assertEqual(checked.status_code, 200, checked.text)
+            kept = self.record("depop")
+            self.assertEqual((kept["state"], kept["listing_url"]), ("published", seller_link))
+            self.assertIsNone(kept.get("error"))
+            events = [event.event_type for event in JobRepo(self.db).get_events(record["job_id"])]
+            self.assertIn("native_check_superseded", events)
+
     def test_a_pasted_draft_link_is_checked_without_repeating_the_write(self):
         self.bridge.side_effect = BrowserBridgeError("lost")
         with patch.object(native, "SETTLE_DEADLINE_S", 0):

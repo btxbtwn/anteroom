@@ -451,6 +451,88 @@ test('two Depop inventory rows for one listing do not pick a link', async () => 
   assert.equal(status.listing_url, undefined);
 });
 
+// Production, 2026-11-17 and 2026-11-18: Depop posted the item, then its publish
+// status read answered a bodiless HTTP 404 on every read, and Anteroom reported
+// "Depop refused the request (HTTP 404)" with the listing live.
+function publishWithStatus404(c, payload, { draftAfterPost, shopRows }) {
+  c.chrome.storage.local.get = async () => ({});
+  c.marketplaceSleep = async () => {};
+  const sent = { ...FULL, tags: [] };
+  const draft = {};
+  const requests = [];
+  let posted = false;
+  c.fetch = async (url, options = {}) => {
+    const { pathname } = new URL(url);
+    requests.push({ method: options.method || 'GET', pathname });
+    if (pathname.endsWith('/status/')) return reply(404, '');
+    if (options.method === 'POST' && pathname === '/presentation/api/v1/drafts/products/') { posted = true; return reply(200, { id: 'job-1' }); }
+    if (pathname === '/presentation/api/v1/drafts/123456/' && posted) return draftAfterPost();
+    if (pathname === '/presentation/api/v1/users/me/') return reply(200, { id: 42 });
+    if (pathname.includes('/by-status/selling/')) return reply(200, { objects: shopRows(sent) });
+    if (pathname === '/api/v1/shop/42/products/') return reply(200, { meta: { end: true }, products: [] });
+    return reply(200, draft);
+  };
+  withCatalog(c);
+  return { sent, draft, requests, run: async () => {
+    const fields = await c.depopResolvedFields({ listing: sent, deadline: Date.now() + 30000 });
+    Object.assign(draft, call(c, 'depopDraftWriteBody', sent, fields, [789]), { pictures: [{ id: 789 }], missing_fields: [] });
+    return c.runDepopNative({ payload: { ...payload, listing: sent, action: 'publish', confirm: true, operation_id: 'abc123' } });
+  } };
+}
+
+const publishPosts = requests => requests.filter(request => request.method === 'POST'
+  && request.pathname === '/presentation/api/v1/drafts/products/').length;
+
+test('a Depop publish whose status read answers 404 is confirmed by the posted product, not called a refusal', async () => {
+  const { c, payload } = page();
+  const { requests, run } = publishWithStatus404(c, payload, {
+    draftAfterPost: () => reply(404, { detail: 'Not found' }),
+    shopRows: sent => [{ slug: 'seller-corona-tee-5618', description: c.depopDescription(sent), price_amount: String(sent.price), user_id: 42 }],
+  });
+  const result = await run();
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.state, 'published');
+  assert.equal(result.listing_url, 'https://www.depop.com/products/seller-corona-tee-5618/');
+  assert.equal(result.draft_url, DRAFT);
+  assert.equal(publishPosts(requests), 1);
+});
+
+test('a Depop publish whose status read answers 404 stays unconfirmed while its draft is still there', async () => {
+  const { c, payload } = page();
+  let draftReads = 0;
+  const { draft, requests, run } = publishWithStatus404(c, payload, {
+    draftAfterPost: () => { draftReads += 1; return reply(200, draft); },
+    shopRows: () => [],
+  });
+  const result = await run();
+  assert.equal(result.ok, false);
+  assert.equal(result.safe_to_retry, false);
+  assert.equal(result.error_code, 'uncertain');
+  assert.equal(result.draft_url, DRAFT);
+  assert.doesNotMatch(result.error, /refused/);
+  assert.ok(draftReads > 1, 'the draft is re-read while Depop works through its queue');
+  assert.equal(publishPosts(requests), 1);
+});
+
+test('a Depop publish whose status read answers 404 and whose product cannot be found asks for the link, never a retry', async () => {
+  const { c, payload } = page();
+  const { requests, run } = publishWithStatus404(c, payload, {
+    draftAfterPost: () => reply(404, { detail: 'Could not find draft with id: 123456' }),
+    // Another product of the seller's, not this listing.
+    shopRows: () => [{ slug: 'other-item', description: 'Something else', price_amount: '9', user_id: 42 }],
+  });
+  const result = await run();
+  assert.equal(result.ok, false);
+  assert.equal(result.safe_to_retry, false);
+  assert.equal(result.error_code, 'uncertain');
+  assert.equal(result.listing_url, undefined);
+  // Keeps the draft link and never says the draft was deleted: Anteroom would save and publish a second copy.
+  assert.equal(result.draft_url, DRAFT);
+  assert.doesNotMatch(`${result.error} ${result.marketplace_message || ''}`, /could not find draft/i);
+  assert.match(result.error, /link/);
+  assert.equal(publishPosts(requests), 1);
+});
+
 test('an uncertain Depop mutation is never retried', async () => {
   const { c, requests, payload } = page();
   c.fetch = async (_url, options) => { requests.push(options); throw new Error('Disconnected'); };
