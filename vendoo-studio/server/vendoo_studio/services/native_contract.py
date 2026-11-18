@@ -479,8 +479,6 @@ def constrain_generated(listing: dict, seed: dict, *, freeze_categories: bool = 
     for market, contract in contracts.items():
         prefix = f"{market}_specifics"
         block = listing.get(prefix)
-        if not isinstance(block, dict):
-            continue
         if not isinstance(contract, dict) or contract.get("unavailable") or not contract.get("fields"):
             # A form that could not be loaded is unknown, not one with no
             # fields: nothing here can be checked. Keep the answers already
@@ -491,6 +489,8 @@ def constrain_generated(listing: dict, seed: dict, *, freeze_categories: bool = 
                 listing[prefix] = copy.deepcopy(saved)
             else:
                 listing.pop(prefix, None)
+            continue
+        if not isinstance(block, dict):
             continue
         rows = {path_of(row): row for row in contract.get("fields") or []}
         for path, value in list(_leaves(block, prefix, set(rows))):

@@ -70,6 +70,10 @@ class ConstrainGeneratedTest(unittest.TestCase):
         native_contract.constrain_generated(listing, {native_contract.KEY: {"mercari": {"unavailable": True}}},
                                             freeze_categories=False)
         self.assertNotIn("mercari_specifics", listing)
+        # A generated block that is not even an object is unchecked too.
+        listing = {**copy.deepcopy(seed), "mercari_specifics": ["Generated"]}
+        native_contract.constrain_generated(listing, seed, freeze_categories=False)
+        self.assertEqual(listing["mercari_specifics"], SAVED_MERCARI)
 
     def test_unavailable_contract_is_reported_as_needing_a_reload(self):
         listing = {"mercari_specifics": copy.deepcopy(SAVED_MERCARI), native_contract.KEY: {"mercari": {"unavailable": True}}}
