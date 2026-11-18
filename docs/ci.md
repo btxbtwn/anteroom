@@ -52,3 +52,52 @@ merged result. Pushes to `main` never cancel each other's CI, and the hosted
 deploy waits for CI to pass on every merge since the commit production runs
 (`.github/scripts/wait-for-tested-code.py`), so a broken combination stops
 before production even when a later merge's narrower checks pass. The automatic branch-update workflow is disabled.
+
+## Corrected-descendant verification (evidence only)
+
+`verify-corrected-descendant.yml` is a new, manual **Descendant verification**
+workflow. It calls the same CI jobs with `full_verification: true`: every
+Linux CI component runs, even for a release-only or narrowly selected target.
+Ordinary PR/push CI selection is unchanged. The opt-in pytest collector captures
+full collection before pytest-split and selected items afterward, hashes test
+IDs, and validates both shard unions against full collection for SQLite and
+Postgres. The historical assistant regression must actually pass on Postgres.
+Other declared skips/expected failures remain visible in the evidence.
+
+The operator must provide full `expected_target` and `production_base` SHAs.
+Target must equal the workflow event SHA and checkout, contain the historical
+failure and correcting merge #1653, and follow the base on main's first-parent
+line. Select a main ref resolving to that exact SHA; moving main causes a
+mismatch and failure, not an implicit update to a newer target. This workflow
+must first be present on the default branch before GitHub permits its initial
+manual dispatch. Do not merge this PR merely to obtain a verification run:
+merging is a release and requires separate authorization.
+
+Artifacts retained for 30 days bind repository, target/tree, declared production
+base, workflow/CI blobs, run/attempt, actual expanded GitHub jobs and backend
+shard inventories. API job pagination must be complete; skips, failed or
+cancelled jobs, missing shards, mismatched run attempts and a skipped historical
+regression fail closed. Archive the run and immutable artifact IDs/digests when
+using the evidence in a later review; expired/missing artifacts cannot serve as
+verification. The receipt is generated while its evidence job is still running,
+so future users must also confirm the **whole workflow's final success** via
+GitHub rather than treat the existence of a receipt as success.
+
+This is **Linux verification evidence, not a deployment approval/checkpoint**.
+The production base is supplied for the reviewed span, not independently
+verified as live. Native changes are listed and require separate pinned native
+receipts; hosted image validation, live schema/Machine reconciliation, backup
+readiness and production load measurements are not established by this run.
+There is no approval consumer, historical-CI override or deploy integration.
+No production secrets, write permissions, migration, image push or rollout are
+available to this workflow. Its name is different from CI, so it does not match
+Deploy hosted's workflow_run trigger. A CI workflow_dispatch also does not
+satisfy the existing push-only historical gate.
+
+Opening this implementation PR runs ordinary PR CI; its completion cannot
+execute deployment because Deploy hosted requires a successful **push** CI.
+Pushing this branch does not run Version, which listens to main. Merging is a
+separate consequential action and is not authorized by verification work.
+Historical `fa824f9a` remains failed. Clearing that gate, any production recovery,
+and the policy for subsequent queued automatic deploys require separate review
+and approval; see the [recovery proposal](proposals/historical-postgres-gate-recovery.md).
