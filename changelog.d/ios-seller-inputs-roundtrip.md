@@ -2,3 +2,4 @@
 - Check a photo-read size again after removing a photo, and keep measurement reading notes accurate when values are already filled.
 - Keep size-tag reading results when reordering photos or choosing a different cover.
 - Restore later unsaved edits after saving notes, and preserve unresolved size warnings when a reread is interrupted.
+- Keep size-tag photo selection stable when regrouping photos, and avoid restoring older listing details over changes saved elsewhere.

@@ -2,6 +2,23 @@ import XCTest
 @testable import Anteroom
 
 final class EditorDraftTests: XCTestCase {
+    func testUnversionedDraftRejectsChangedListingButAllowsOpaqueMetadata() {
+        var baseline = ListingEditorModel.Form()
+        baseline.fields.title = "Shirt"
+        var edited = baseline
+        edited.price = "20"
+        let draft = EditorDraft(listingID: "unversioned", revisionID: nil, baselineInputs: baseline.sellerInputs,
+                                form: edited, pending: [:], savedAt: .now, baselineForm: baseline)
+        var fresh = baseline
+        fresh.sellerInputs = SellerInputs(notes: #"{"future":true}"#)
+        XCTAssertTrue(draft.restores(revisionID: nil, inputs: fresh.sellerInputs, currentForm: fresh))
+        fresh.fields.title = "Linen Shirt"
+        XCTAssertFalse(draft.restores(revisionID: nil, inputs: fresh.sellerInputs, currentForm: fresh))
+        let legacy = EditorDraft(listingID: "legacy", revisionID: nil, baselineInputs: baseline.sellerInputs,
+                                 form: edited, pending: [:], savedAt: .now)
+        XCTAssertFalse(legacy.restores(revisionID: nil, inputs: baseline.sellerInputs, currentForm: baseline))
+    }
+
     func testLegacyDraftRestoresUnsavedEditsWithoutSizeProperties() throws {
         let baseline = SellerInputs(notes: #"{"size":"0","future":true}"#)
         // Frozen synthetic payload from the pre-size draft schema; do not regenerate with today's encoder.
@@ -45,6 +62,8 @@ final class EditorDraftTests: XCTestCase {
                                 form: form, pending: [:], savedAt: .now)
         let freshInputs = SellerInputs(notes: #"{"sku":"A"}"#)
         XCTAssertTrue(draft.restores(revisionID: "r1", inputs: freshInputs))
+        XCTAssertEqual(draft.form.sellerInputs.restoringNotesBaseline(from: freshInputs), freshInputs,
+                       "Listing-only edits keep the current notes baseline, avoiding phantom changes and empty PATCHes")
         XCTAssertFalse(draft.restores(revisionID: "r2", inputs: freshInputs))
         XCTAssertFalse(draft.restores(revisionID: "r1", inputs: SellerInputs(notes: #"{"sku":"B"}"#)))
     }

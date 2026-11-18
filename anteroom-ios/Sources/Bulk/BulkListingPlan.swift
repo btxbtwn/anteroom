@@ -26,10 +26,10 @@ struct BulkListingPlan: Equatable {
         /// What the last photo reading found, in plain words.
         var readNote: String?
 
-        init(id: UUID, photos: [UUID]) {
+        init(id: UUID, photos: [UUID], pickingOrder: [UUID]? = nil) {
             self.id = id
             self.photos = photos
-            pickingOrder = photos
+            self.pickingOrder = pickingOrder ?? photos
         }
 
         /// Only the chosen garment's values, with blanks dropped.
@@ -46,6 +46,7 @@ struct BulkListingPlan: Equatable {
     /// Picked photos not yet in an item, in picking order.
     private(set) var loose: [UUID] = []
     private(set) var items: [Item] = []
+    private var pickingOrder: [UUID] = []
     /// Quarter turns clockwise per photo. Photos upload as picked and the
     /// server turns them afterwards, as on the web.
     private(set) var turns: [UUID: Int] = [:]
@@ -54,7 +55,9 @@ struct BulkListingPlan: Equatable {
     static let photosPerItem = 30
 
     mutating func add(_ photos: [UUID]) {
-        loose += photos.filter { !contains($0) }
+        let added = photos.filter { !contains($0) }
+        loose += added
+        pickingOrder += added
     }
 
     /// Makes one item from the selected loose photos, keeping picking order.
@@ -63,7 +66,7 @@ struct BulkListingPlan: Equatable {
         let photos = loose.filter(selection.contains)
         guard !photos.isEmpty, photos.count <= Self.photosPerItem else { return nil }
         loose.removeAll(where: selection.contains)
-        let item = Item(id: UUID(), photos: photos)
+        let item = Item(id: UUID(), photos: photos, pickingOrder: pickingOrder.filter(selection.contains))
         items.append(item)
         return item
     }
@@ -98,6 +101,7 @@ struct BulkListingPlan: Equatable {
         }
         items.removeAll { $0.photos.isEmpty }
         turns[photo] = nil
+        pickingOrder.removeAll { $0 == photo }
     }
 
     /// Photos only move within their own item; the first one is the cover.

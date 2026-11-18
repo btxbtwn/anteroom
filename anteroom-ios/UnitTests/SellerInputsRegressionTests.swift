@@ -2,6 +2,18 @@ import XCTest
 @testable import Anteroom
 
 final class SellerInputsRegressionTests: XCTestCase {
+    func testOpaqueMeasurementGroupsDoNotChangeEffectiveValues() throws {
+        let empty = SellerInputs()
+        let metadata = SellerInputs(notes: #"{"measurements":{"top":{"futureField":true}}}"#)
+        XCTAssertTrue(empty.hasSameEffectiveValues(as: metadata))
+        XCTAssertEqual(empty.restoringNotesBaseline(from: metadata), metadata)
+        var edited = empty
+        edited.sku = "A"
+        let rebased = edited.restoringNotesBaseline(from: metadata)
+        XCTAssertEqual(rebased.sku, "A")
+        XCTAssertTrue(try rebased.encodedNotes().contains("futureField"))
+        XCTAssertFalse(empty.hasSameEffectiveValues(as: SellerInputs(notes: #"{"measurements":{"top":{"length":"20"}}}"#)))
+    }
     func testSavedNotesMatchFreshInputsForDraftRestoration() throws {
         var saved = SellerInputs()
         saved.sku = "A"

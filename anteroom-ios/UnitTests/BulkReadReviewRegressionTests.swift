@@ -5,18 +5,42 @@ final class BulkReadReviewRegressionTests: XCTestCase {
     private struct ReadFailure: LocalizedError {
         var errorDescription: String? { "Read failed." }
     }
+    func testInconclusiveRereadOfTypedSizeFollowsFrozenContract() throws {
+        for status in ["not_found", "unreadable", "failure"] {
+            var plan = BulkListingPlan()
+            let photo = UUID()
+            plan.add([photo])
+            let item = try XCTUnwrap(plan.makeItem(from: [photo]))
+            plan.setSizeTag("M", for: item.id)
+            plan.applySizeTag(.init(photosRead: 1, status: "accepted", size: "L", sizes: ["L"]), to: item.id)
+            let captured = plan.items[0]
+            if status == "failure" {
+                plan.completeSizeRead(.failure(ReadFailure()), from: captured)
+                XCTAssertEqual(plan.items[0].sizeNote, "Read failed.")
+            } else {
+                plan.completeSizeRead(.success(.init(photosRead: 1, status: status, size: nil, sizes: [])), from: captured)
+                XCTAssertNil(plan.items[0].sizeNote)
+            }
+            XCTAssertEqual(plan.items[0].sizeTag, "M")
+            XCTAssertFalse(plan.items[0].sizeNeedsReview)
+        }
+    }
     func testSizeReadSelectionStaysInPickingOrderAcrossCoverChanges() throws {
         var plan = BulkListingPlan()
         let photos = (0..<30).map { _ in UUID() }
         plan.add(photos)
         let item = try XCTUnwrap(plan.makeItem(from: Set(photos)))
-        let selected = Array(item.sizeReadPhotos.prefix(20))
+        let selected = Array(photos.prefix(20))
+        XCTAssertEqual(Array(item.sizeReadPhotos.prefix(20)), selected)
         plan.makeCover(photos[20], in: item.id)
         XCTAssertEqual(Array(plan.items[0].sizeReadPhotos.prefix(20)), selected)
         plan.movePhotos(in: item.id, from: IndexSet(integer: 0), to: 30)
         XCTAssertEqual(Array(plan.items[0].sizeReadPhotos.prefix(20)), selected)
         plan.remove(photos[0])
-        XCTAssertFalse(plan.items[0].sizeReadPhotos.contains(photos[0]))
+        XCTAssertEqual(Array(plan.items[0].sizeReadPhotos.prefix(20)), Array(photos.dropFirst().prefix(20)))
+        plan.ungroup(item.id)
+        let regrouped = try XCTUnwrap(plan.makeItem(from: Set(photos.dropFirst())))
+        XCTAssertEqual(Array(regrouped.sizeReadPhotos.prefix(20)), Array(photos.dropFirst().prefix(20)))
     }
     func testPhotoRemovalDuringRereadKeepsUnresolvedMismatch() throws {
         var plan = BulkListingPlan()

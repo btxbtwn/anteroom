@@ -148,7 +148,7 @@ final class ListingEditorModel {
     func stashEdits() {
         guard hasChanges else { return EditorDraftStore.remove(listingID) }
         EditorDraftStore.save(EditorDraft(listingID: listingID, revisionID: revisionID, baselineInputs: saved.sellerInputs,
-                                          form: form, pending: pending, savedAt: Date()))
+                                          form: form, pending: pending, savedAt: Date(), baselineForm: saved))
     }
 
     func forgetStash() {
@@ -168,8 +168,9 @@ final class ListingEditorModel {
         guard let draft = EditorDraftStore.load(listingID) else { return }
         EditorDraftStore.remove(listingID)
         let when = draft.savedAt.formatted(date: .abbreviated, time: .shortened)
-        if draft.restores(revisionID: revisionID, inputs: saved.sellerInputs) {
+        if draft.restores(revisionID: revisionID, inputs: saved.sellerInputs, currentForm: saved) {
             form = draft.form
+            form.sellerInputs = draft.form.sellerInputs.restoringNotesBaseline(from: saved.sellerInputs)
             pending = draft.pending
             draftNotice = "Your unsaved changes from \(when) are back. Save to keep them."
         } else {

@@ -10,10 +10,18 @@ struct EditorDraft: Codable, Equatable {
     let form: ListingEditorModel.Form
     let pending: [String: JSONValue]
     let savedAt: Date
+    /// Unversioned listing edits need a field baseline as well as notes.
+    var baselineForm: ListingEditorModel.Form? = nil
 
     /// Only edits made on the version still saved come back.
-    func restores(revisionID current: String?, inputs: SellerInputs) -> Bool {
-        revisionID == current && baselineInputs.hasSameEffectiveValues(as: inputs)
+    func restores(revisionID current: String?, inputs: SellerInputs, currentForm: ListingEditorModel.Form? = nil) -> Bool {
+        guard revisionID == current, baselineInputs.hasSameEffectiveValues(as: inputs) else { return false }
+        if current == nil {
+            guard var baseline = baselineForm, let currentForm else { return false }
+            baseline.sellerInputs = currentForm.sellerInputs
+            return baseline == currentForm
+        }
+        return true
     }
 }
 

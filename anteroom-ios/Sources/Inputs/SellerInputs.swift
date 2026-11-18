@@ -19,7 +19,7 @@ struct SellerInputs: Equatable, Sendable, Codable {
         }
     }
 
-    private let originalNotes: String
+    private var originalNotes: String
     var sku: String
     var size: String
     var sellerNotes: String
@@ -132,8 +132,16 @@ struct SellerInputs: Equatable, Sendable, Codable {
     }
 
     /// Raw notes preserve opaque server metadata; editable values govern draft restoration.
+    func restoringNotesBaseline(from fresh: Self) -> Self {
+        if hasSameEffectiveValues(as: fresh) { return fresh }
+        var restored = self
+        restored.originalNotes = fresh.originalNotes
+        return restored
+    }
+
     func hasSameEffectiveValues(as other: Self) -> Bool {
-        textChanges(from: other).isEmpty && garment == other.garment && measurements == other.measurements
+        textChanges(from: other).isEmpty && garment == other.garment
+            && measurements.filter { !$0.value.isEmpty } == other.measurements.filter { !$0.value.isEmpty }
     }
 
     /// Send only edited keys so a stale form cannot restore a server-cleared tag size.
