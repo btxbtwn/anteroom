@@ -1,0 +1,1 @@
+- Refuse to restore an empty file or another program's database over your Anteroom data.
