@@ -634,6 +634,15 @@ def reconcile_size_fields(previous: dict | None, submitted: dict) -> None:
                 # a category-reset blank) must not override that same choice.
                 block.pop("nativeSizeId", None)
                 locks = _unlock_field(locks, marketplace, "nativeSizeId")
+                category = (submitted.get("direct_category_ids") or {}).get("depop")
+                form = submitted.get("form")
+                aspects = form.get("aspects") if isinstance(form, dict) else None
+                if category and isinstance(aspects, dict):
+                    # The Bridge also reads this older coded answer before General.
+                    # Drop only this leaf's obsolete copy, alongside the native ID.
+                    aspect = f"{category}_size"
+                    aspects.pop(aspect, None)
+                    locks.discard(f"form.aspects.{aspect}")
         elif path in changed or owned_lock:
             locks.add(path)
     _write_locks(submitted, locks)

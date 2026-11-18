@@ -34,7 +34,9 @@ def test_depop_size_choice_survives_save_when_it_matches_general_and_a_blank_id_
             previous = {'title': 'Example garment', 'description': 'Example', 'size': '0',
                         'direct_category_ids': {'depop': category},
                         'depop_specifics': {'size': '', 'nativeSizeId': ''},
-                        'seller_fields': ['depop_specifics.size', 'depop_specifics.nativeSizeId']}
+                        'form': {'aspects': {f'{category}_size': '81', 'other_category_size': '99'}},
+                        'seller_fields': ['depop_specifics.size', 'depop_specifics.nativeSizeId',
+                                          f'form.aspects.{category}_size']}
             if captured_form:
                 previous['_native_forms'] = {'depop': {}}
             submitted = copy.deepcopy(previous)
@@ -42,6 +44,9 @@ def test_depop_size_choice_survives_save_when_it_matches_general_and_a_blank_id_
             saved = prepared_listing(previous, submitted)
             specifics = saved['depop_specifics']
             assert marketplace_text(saved, 'depop', 'size') == '0'
+            assert f'{category}_size' not in saved['form']['aspects']
+            assert saved['form']['aspects']['other_category_size'] == '99'
+            assert f'form.aspects.{category}_size' not in saved.get('seller_fields', [])
             # Posting checks a remaining native ID before falling back to General.
             # It is safe to retain it only while a label remains authoritative.
             assert 'size' in specifics or 'nativeSizeId' not in specifics
@@ -58,3 +63,16 @@ def test_depop_explicit_size_clear_keeps_its_blank_and_lock():
     saved = prepared_listing(previous, submitted)
     assert saved['depop_specifics']['size'] == ''
     assert 'depop_specifics.size' in saved['seller_fields']
+
+
+def test_depop_non_general_size_override_keeps_its_coded_aspect():
+    previous = {'title': 'Example garment', 'size': '0',
+                'direct_category_ids': {'depop': 'womenswear_tshirts'},
+                'depop_specifics': {'size': '', 'nativeSizeId': ''},
+                'form': {'aspects': {'womenswear_tshirts_size': '81'}}}
+    submitted = copy.deepcopy(previous)
+    submitted['depop_specifics']['size'] = '00'
+    saved = prepared_listing(previous, submitted)
+    assert saved['depop_specifics']['size'] == '00'
+    assert 'depop_specifics.size' in saved['seller_fields']
+    assert saved['form']['aspects']['womenswear_tshirts_size'] == '81'
