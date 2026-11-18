@@ -229,10 +229,12 @@ final class ListingEditorModel {
     /// Saves the listing, then the seller's notes. Returns true when both saved.
     func save() async -> Bool {
         var fields: GeneralFields
-        let notes: String
+        let noteChanges: [String: JSONValue]
         do {
             fields = try validatedFields()
-            notes = try form.sellerInputs.encodedNotes()
+            // A General Size edit supersedes the original photo tag, even when notes save too.
+            if fields.size != saved.fields.size { form.sellerInputs.size = "" }
+            noteChanges = try form.sellerInputs.noteChanges(since: saved.sellerInputs)
         } catch {
             saveError = error.localizedDescription
             return false
@@ -281,7 +283,7 @@ final class ListingEditorModel {
         forgetStash()
         if form.sellerInputs != saved.sellerInputs {
             do {
-                try await api.saveNotes(listingID, notes: notes)
+                try await api.saveNotes(listingID, changes: noteChanges)
                 saved.sellerInputs = form.sellerInputs
             } catch {
                 saveError = "Your listing saved, but your notes didn't: \(error.localizedDescription)"

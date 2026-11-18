@@ -1,0 +1,1 @@
+- Read clothing size tags from photos when making bulk listings on iPhone, with editable sizes and checks for unclear tags.

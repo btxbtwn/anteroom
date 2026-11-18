@@ -21,6 +21,7 @@ struct SellerInputs: Equatable, Sendable, Codable {
 
     private let originalNotes: String
     var sku: String
+    var size: String
     var sellerNotes: String
     var knownFlaws: String
     var descriptionMeasurements: String
@@ -35,6 +36,7 @@ struct SellerInputs: Equatable, Sendable, Codable {
         originalNotes = raw
         let object = Self.object(raw)
         sku = object?["sku"] as? String ?? ""
+        size = object?["size"] as? String ?? ""
         sellerNotes = object?["sellerNotes"] as? String ?? (object == nil ? raw : "")
         knownFlaws = object?["knownFlaws"] as? String ?? ""
         descriptionMeasurements = object?["descriptionMeasurements"] as? String ?? ""
@@ -74,6 +76,7 @@ struct SellerInputs: Equatable, Sendable, Codable {
         if self == baseline { return originalNotes }
         var object = Self.object(originalNotes) ?? (originalNotes.isEmpty ? [:] : ["sellerNotes": originalNotes])
         let textValues = [
+            ("size", size.trimmingCharacters(in: .whitespacesAndNewlines), baseline.size),
             ("sku", sku, baseline.sku), ("sellerNotes", sellerNotes, baseline.sellerNotes),
             ("knownFlaws", knownFlaws, baseline.knownFlaws),
             ("descriptionMeasurements", descriptionMeasurements, baseline.descriptionMeasurements),
@@ -91,6 +94,32 @@ struct SellerInputs: Equatable, Sendable, Codable {
         if measurements != baseline.measurements { object["measurements"] = all }
         let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
         return String(decoding: data, as: UTF8.self)
+    }
+
+    /// Send only edited keys so a stale form cannot restore a server-cleared tag size.
+    func noteChanges(since baseline: SellerInputs? = nil) throws -> [String: JSONValue] {
+        let encoded = try encodedNotes()
+        guard !encoded.isEmpty else { return [:] }
+        let after = (try? JSONDecoder().decode([String: JSONValue].self, from: Data(encoded.utf8)))
+            ?? ["sellerNotes": .string(encoded)]
+        let previousNotes = try baseline?.encodedNotes() ?? originalNotes
+        let before = (try? JSONDecoder().decode([String: JSONValue].self, from: Data(previousNotes.utf8)))
+            ?? (previousNotes.isEmpty ? [:] : ["sellerNotes": .string(previousNotes)])
+        var changes = after.filter { key, value in value != before[key] }
+        if case .object(let groups) = after["measurements"] {
+            let previous: [String: JSONValue]
+            if case .object(let value) = before["measurements"] { previous = value } else { previous = [:] }
+            var changedGroups: [String: JSONValue] = [:]
+            for (group, value) in groups {
+                guard case .object(let fields) = value else { continue }
+                let old: [String: JSONValue]
+                if case .object(let value) = previous[group] { old = value } else { old = [:] }
+                let edited = fields.filter { key, value in value != old[key] }
+                if !edited.isEmpty { changedGroups[group] = .object(edited) }
+            }
+            changes["measurements"] = changedGroups.isEmpty ? nil : .object(changedGroups)
+        }
+        return changes
     }
 
     private static func object(_ raw: String) -> [String: Any]? {

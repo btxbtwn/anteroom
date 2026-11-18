@@ -133,7 +133,8 @@ final class BulkListingPlanTests: XCTestCase {
         XCTAssertEqual(object["cog"] as? String, "4.50")
         XCTAssertEqual(object["vendooLabels"] as? String, "Spring, ready")
         XCTAssertEqual(object["sku"] as? String, "BX-1")
-        XCTAssertEqual(object["sellerNotes"] as? String, "Size tag: 32 × 30")
+        XCTAssertEqual(object["size"] as? String, "32 × 30")
+        XCTAssertNil(object["sellerNotes"])
         XCTAssertEqual(object["garment"] as? String, "pants")
         XCTAssertEqual((object["measurements"] as? [String: Any])?["pants"] as? [String: String], ["waist": "16"])
     }
@@ -144,13 +145,14 @@ final class BulkListingPlanTests: XCTestCase {
         XCTAssertNil(try BulkListingPlan.notes(cog: " ", labels: "", item: item))
     }
 
-    func testSizeTagUsesSellerNotesAndStaysWithItsItem() throws {
+    func testSizeTagUsesStructuredSizeAndStaysWithItsItem() throws {
         var plan = BulkListingPlan()
         plan.add([a, UUID()])
         plan.makeItemEach()
         plan.setSizeTag(" XL / TG ", for: plan.items[0].id)
         let notes = try XCTUnwrap(BulkListingPlan.notes(cog: "", labels: "", item: plan.items[0]))
-        XCTAssertEqual(SellerInputs(notes: notes).sellerNotes, "Size tag: XL / TG")
+        XCTAssertEqual(SellerInputs(notes: notes).size, "XL / TG")
+        XCTAssertEqual(SellerInputs(notes: notes).sellerNotes, "")
         XCTAssertNil(try BulkListingPlan.notes(cog: "", labels: "", item: plan.items[1]))
         plan.setSizeTag(" ", for: plan.items[0].id)
         XCTAssertNil(try BulkListingPlan.notes(cog: "", labels: "", item: plan.items[0]))
