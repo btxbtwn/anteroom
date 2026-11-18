@@ -25,6 +25,8 @@ const EMPTY_DEFAULTS: BulkUploadDefaults = { cog: "", labels: "" };
 
 type DragSpot = { group: number; photo: number };
 
+const READING_SIZE_NOTE = "Reading the size tag…";
+
 type Row = {
   sku: string;
   /** The clothing size on the tag (not the shipping package size); "0" is a size. */
@@ -150,7 +152,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
     setAnnounceSizes(false);
     await readEach(todo, async (index) => {
       const photoSet = rows[index]!.photoSet;
-      setRow(index, { sizeNote: "Reading the size tag…", sizeReview: false });
+      setRow(index, { sizeNote: READING_SIZE_NOTE, sizeReview: false });
       try {
         const result = await api.sizeTags.read(groups[index]!.files);
         setRows((current) => current.map((row, i) => {
@@ -199,7 +201,11 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
       const cleared = row.sizeSuggested
         ? { size: "", sizeSuggested: false, sizeReview: true,
           sizeNote: "A photo was removed, so the size read from it was cleared. Read size tags again or type the size." }
-        : {};
+        : row.sizeNote === READING_SIZE_NOTE
+          // Its reading is of the earlier photos and will be dropped; say so instead of "Reading…".
+          ? { sizeReview: row.size.trim() === "",
+            sizeNote: "A photo was removed while reading. Read size tags again or type the size." }
+          : {};
       return { ...row, ...cleared, photoSet: row.photoSet + 1 };
     }));
   };

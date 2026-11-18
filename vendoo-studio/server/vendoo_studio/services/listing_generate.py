@@ -1525,7 +1525,9 @@ def persist_generated_listing(
         # The direct tabs' blocks were copied from the model before the tag size
         # was set; the size slots that followed the model follow the seller too.
         propagate_general_size(listing, previous_size=pinned_size[1])
-        _follow_ebay_native_size(listing, pinned_size[0], [s for s in (pinned_size[1], generated_size) if s])
+        # General Size as aligned (men's bottoms: a 36x30 tag is a 36 waist), not the raw tag text.
+        aligned = str(listing.get("size") or "").strip() or pinned_size[0]
+        _follow_ebay_native_size(listing, aligned, [s for s in (pinned_size[1], generated_size) if s])
     constrain_generated(listing, seed)
     cap_listing_description(listing)
     if revisions:

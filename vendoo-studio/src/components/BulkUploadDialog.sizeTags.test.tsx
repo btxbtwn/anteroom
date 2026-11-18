@@ -145,16 +145,23 @@ it("clears a tag size when its photos change and ignores a reading of the earlie
     expect(size("Shorts").className).toContain("needs-review");
     expect(document.body.textContent).toContain("A photo was removed, so the size read from it was cleared.");
 
-    // A reading still running when a photo is removed is not applied: Jeans (item 2) loses a
-    // photo mid-read; its reading of the earlier photos comes back XL and is dropped.
+    // A reading still running when a photo is removed is not applied. Jeans (holding an earlier
+    // suggestion) and Tee (blank) each lose a photo mid-read; Shorts keeps its photos and is the control.
     read.mockImplementation(() => new Promise((resolve) => { pending.push(resolve); }));
     await act(async () => button("Read size tags").click());
     expect(pending).toHaveLength(3);
-    await act(async () => document.querySelectorAll<HTMLButtonElement>('[aria-label="Remove photo 2"]')[0]!.click());
+    for (let removed = 0; removed < 2; removed++) {
+      await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Remove photo 2"]')!.click());
+    }
     const xl: SizeTagReadResult = { photos_read: 2, status: "accepted", size: "XL", sizes: ["XL"] };
     await act(async () => { for (const resolve of pending) resolve(xl); });
-    await settle(() => expect(size("Tee").value).toBe("XL"));
+    await settle(() => expect(size("Shorts").value).toBe("XL"));
     expect(size("Jeans").value).toBe("");
+    expect(size("Tee").value).toBe("");
+    // The blank row's note says its reading was dropped, not "Reading…", and asks for the size.
+    expect(size("Tee").className).toContain("needs-review");
+    expect(document.getElementById(size("Tee").getAttribute("aria-describedby")!)!.textContent)
+      .toBe("A photo was removed while reading. Read size tags again or type the size.");
   } finally {
     await act(async () => root.unmount());
   }

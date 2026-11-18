@@ -64,8 +64,12 @@ def test_repair_changes_only_failed_fields_and_keeps_valid_json_payload(monkeypa
 @pytest.mark.parametrize("tag", ["XL / TG", "0"])
 def test_repair_never_fills_a_size_slot_when_the_tag_gave_one(monkeypatch, tag):
     listing = {**copy.deepcopy(BASE), "price": -1, "size": tag, "mercari_specifics": {"size": ""}, "ebay_specifics": {"Size": ""}}
-    monkeypatch.setattr(listing_generate, "_validation_blockers", lambda snapshot: [
-        {"field": "price"}, {"field": "size"}, {"field": "mercari_specifics.size"}, {"field": "ebay_specifics.Size"}])
+    def blockers(snapshot):
+        # The price blocker clears once the repair sets a valid price; the size gaps stay.
+        price = [] if (snapshot.get("price") or 0) > 0 else [{"field": "price", "message": "Price must be above 0."}]
+        return price + [{"field": path, "message": "Choose a size."}
+                        for path in ("size", "mercari_specifics.size", "ebay_specifics.Size")]
+    monkeypatch.setattr(listing_generate, "_validation_blockers", blockers)
     call = AsyncMock(return_value=json.dumps([{"op": "replace", "path": "/price", "value": 29}]))
     monkeypatch.setattr(listing_generate, "collect_provider_text", call)
     result = asyncio.run(listing_generate.fill_validation_gaps(object(), listing, notes=json.dumps({"size": tag})))
