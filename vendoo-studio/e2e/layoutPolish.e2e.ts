@@ -44,6 +44,8 @@ test.describe("layout", () => {
     await createListing(request, titleText);
     await page.goto("/");
     await page.getByRole("button", { name: "Inventory table" }).click();
+    // The table opens on Active; a new listing is a draft.
+    await page.getByRole("group", { name: "Listing status" }).getByRole("button", { name: /^Draft\b/ }).click();
     const table = page.getByRole("table", { name: "Inventory" });
     const title = table.getByRole("rowheader").filter({ hasText: titleText }).getByText(titleText, { exact: true });
     await expect(title).toBeVisible();

@@ -1,4 +1,4 @@
-import { createListing, expect, openForm, openListing, showStatusTab, test, titleBox } from "./fixtures";
+import { createListing, expect, openForm, openListing, test, titleBox } from "./fixtures";
 
 const SAMPLES = [
   "Levi's M Blue Cotton Crew Neck T-Shirt",
@@ -12,7 +12,7 @@ test("the inventory shows the sample listings", async ({ page, phone }) => {
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
   }
-  await showStatusTab(page, "Draft");
+  // The samples are live, so they are under Active, where the inventory opens.
   const listings = page.getByRole("list", { name: "Listings" });
   for (const title of SAMPLES) {
     await expect(listings.getByRole("link", { name: title, exact: true })).toBeVisible();

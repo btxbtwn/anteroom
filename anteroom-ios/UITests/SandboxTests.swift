@@ -381,7 +381,7 @@ final class EbayFormSandboxTests: XCTestCase {
         let app = XCUIApplication()
         app.launchEnvironment["ANTEROOM_SANDBOX_URL"] = "http://localhost:4320"
         launchSandbox(app)
-        showDrafts(app)
+        // The Levi's sample is live, under Active, where Inventory opens.
         let listing = app.staticTexts["Levi's M Blue Cotton Crew Neck T-Shirt"].firstMatch
         XCTAssertTrue(listing.waitForExistence(timeout: 30))
         listing.tap()
