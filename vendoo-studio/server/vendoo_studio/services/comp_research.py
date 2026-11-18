@@ -73,6 +73,12 @@ BRAVE_ACTIVE_QUERIES = 1
 
 SOLD = "sold"
 ACTIVE = "active"
+# Each side reads the shared rules, its own section and the answer shape from
+# the comp-research reference. Sending a side the other side's instructions
+# made the active search hunt sold comps that are then discarded, and the sold
+# search repeat the active search's work, each search a paid request.
+_SECTIONS = {SOLD: "Sold comps", ACTIVE: "Active listings"}
+_ANSWER = "Answer"
 _FOCUS = {
     SOLD: (
         "Find recently sold comps for: {query}\n"
@@ -88,16 +94,28 @@ _FOCUS = {
 _AGENTS = {SOLD: ("comps-sold", "Sold comps"), ACTIVE: ("comps-active", "Active listings")}
 
 
-def comps_search_messages(query: str, side: str | None = None) -> list[dict]:
-    """The comp-research prompt; ``side`` narrows it to sold or active listings."""
-    prompt = (skills_dir() / "list-this" / "references" / "comp-research.md").read_text(encoding="utf-8")
-    if side is None:
-        ask = f"Find recently sold comps and active marketplace listings for: {query}"
-    else:
-        ask = _FOCUS[side].format(query=query)
+def _reference_sections(text: str) -> tuple[str, dict[str, str]]:
+    """The reference's preamble and its ``## `` sections by heading."""
+    preamble, *rest = text.split("\n## ")
+    sections: dict[str, str] = {}
+    for block in rest:
+        heading, _, body = block.partition("\n")
+        sections[heading.strip()] = body.strip()
+    return preamble.strip(), sections
+
+
+def comps_search_prompt(side: str) -> str:
+    """The comp-research rules one side needs: shared, its own, and the answer."""
+    text = (skills_dir() / "list-this" / "references" / "comp-research.md").read_text(encoding="utf-8")
+    preamble, sections = _reference_sections(text)
+    return "\n\n".join((preamble, sections[_SECTIONS[side]], sections[_ANSWER]))
+
+
+def comps_search_messages(query: str, side: str) -> list[dict]:
+    """The comp-research prompt for one side: sold comps or active listings."""
     return [
-        {"role": "system", "content": prompt},
-        {"role": "user", "content": ask},
+        {"role": "system", "content": comps_search_prompt(side)},
+        {"role": "user", "content": _FOCUS[side].format(query=query)},
     ]
 
 
