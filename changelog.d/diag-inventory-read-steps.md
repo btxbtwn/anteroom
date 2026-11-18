@@ -1,1 +1,0 @@
-- Slow inventory reports now show which read step took time, helping diagnose delays without recording listing details.
