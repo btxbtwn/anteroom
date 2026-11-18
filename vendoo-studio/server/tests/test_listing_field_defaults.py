@@ -210,7 +210,7 @@ def test_mercari_direct_form_starts_with_the_saved_shoebox_answer(settings_file,
 
 
 @pytest.mark.parametrize(("saved", "own"), [
-    ("yes", "no"), ("no", "yes"), ("yes", "No"), ("no", "Yes"), ("yes", False), ("no", True),
+    ("yes", "no"), ("no", "yes"), ("yes", "No"), ("no", "Yes"), ("yes", " NO "), ("no", "YES"),
 ])
 def test_a_listing_that_answers_the_shoebox_question_keeps_its_answer(settings_file, saved, own):
     user_settings.set_listing_field_default(SHOEBOX, saved)
@@ -218,6 +218,15 @@ def test_a_listing_that_answers_the_shoebox_question_keeps_its_answer(settings_f
     snapshot = native_form.attach_form({"mercari_specifics": {"package": {"fitsShoebox": own}}}, "mercari")
 
     assert snapshot["mercari_specifics"]["package"]["fitsShoebox"] == own
+
+
+@pytest.mark.parametrize("own", [False, True, "maybe", "true", 0])
+def test_a_shoebox_value_every_reader_treats_as_unanswered_takes_the_default(settings_file, own):
+    user_settings.set_listing_field_default(SHOEBOX, "no")
+
+    snapshot = native_form.attach_form({"mercari_specifics": {"package": {"fitsShoebox": own}}}, "mercari")
+
+    assert snapshot["mercari_specifics"]["package"]["fitsShoebox"] == "no"
 
 
 def test_shoebox_default_applies_only_to_mercari(settings_file):

@@ -346,9 +346,10 @@ def apply_mercari_shoebox_default(listing: dict) -> bool:
     specifics = specifics if isinstance(specifics, dict) else {}
     package = specifics.get("package")
     package = package if isinstance(package, dict) else {}
-    held = package.get("fitsShoebox")
-    # "no" and False are answers; only a missing or blank one takes the default.
-    if held is not None and (not isinstance(held, str) or held.strip()):
+    # "No" is an answer as much as "Yes" is, in any case (#1303). Anything else
+    # (missing, blank, a stray boolean) reads as unanswered on the form, in
+    # preflight and in the extension, so it takes the default.
+    if str(package.get("fitsShoebox") or "").strip().casefold() in {"yes", "no"}:
         return False
     package["fitsShoebox"] = answer
     specifics["package"] = package
