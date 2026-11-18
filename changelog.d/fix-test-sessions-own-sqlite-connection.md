@@ -1,0 +1,1 @@
+- Steadier automated checks for listing generation, so a test-only crash no longer blocks updates.
