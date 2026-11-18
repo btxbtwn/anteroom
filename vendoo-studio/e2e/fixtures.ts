@@ -89,6 +89,10 @@ export async function openListing(page: Page, phone: boolean, title: string): Pr
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
   }
+  // Counts appear only after the inventory arrives; do not spend the Draft
+  // search window waiting for the initial request.
+  await expect(page.getByRole("tablist", { name: "Listing status" })
+    .getByRole("tab", { name: /^Active \d+$/ })).toBeVisible({ timeout: 30_000 });
   await page.getByRole("searchbox", { name: /^Search listings/ }).fill(title);
   const link = page.getByRole("list", { name: "Listings" }).getByRole("link", { name: title, exact: true });
   for (const tab of ["Draft", "Active", "Sold"] as const) {

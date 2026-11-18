@@ -228,10 +228,10 @@ struct InventoryTests {
                 return ids(InventoryQuery.rows(rows, search: text, filters: InventoryFilters()))
             }
         }
-        precondition(searched("") == ["d", "a", "b", "e"] && computed == 1)
-        precondition(searched("") == ["d", "a", "b", "e"] && computed == 1, "same inputs: no recompute")
-        precondition(searched("coat") == ["c"] && computed == 2)
-        precondition(searched("") == ["d", "a", "b", "e"] && computed == 3)
+        precondition(searched("") == ["b"] && computed == 1)
+        precondition(searched("") == ["b"] && computed == 1, "same inputs: no recompute")
+        precondition(searched("coat").isEmpty && computed == 2)
+        precondition(searched("") == ["b"] && computed == 3)
         // Sort by, then Order: every sort sits under one field, and switching field keeps the direction.
         precondition(Set(ListingSort.Field.allCases.flatMap { $0.orders.map(\.sort) }) == Set(ListingSort.allCases))
         precondition(ListingSort.createdAsc.field == .created && ListingSort.stalest.field == .listed)

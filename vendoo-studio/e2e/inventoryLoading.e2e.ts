@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { createListing, expect, showStatusTab, test, titleBox } from "./fixtures";
+import { createListing, expect, openListing, showStatusTab, test, titleBox } from "./fixtures";
 
 /** On a phone the inventory sits behind the navigation menu; home is the assistant. */
 async function showInventory(page: Page, phone: boolean) {
@@ -94,5 +94,22 @@ test("a new listing the seller typed into is kept", async ({ page, phone, reques
   } finally {
     if (fresh) await request.delete(`/api/conversations/${fresh}`);
     await request.delete(`/api/conversations/${other}`);
+  }
+});
+
+
+test("openListing finds a draft after a slow initial inventory load", async ({ page, phone, request }, info) => {
+  const title = `Slow draft ${info.project.name} ${Date.now()}`;
+  const id = await createListing(request, title);
+  try {
+    await page.route("**/api/conversations", async route => {
+      // Deliberately exceed the helper's former three-second Draft window.
+      if (route.request().method() === "GET") await new Promise(resolve => setTimeout(resolve, 4_000));
+      await route.continue();
+    });
+    await openListing(page, phone, title);
+    await expect(await titleBox(page, phone)).toHaveValue(title);
+  } finally {
+    await request.delete(`/api/conversations/${id}`);
   }
 });

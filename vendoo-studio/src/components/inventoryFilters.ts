@@ -299,10 +299,11 @@ export function statusCounts(
   listings: FilterableListing[],
   searching = false,
   selectedId: string | null = null,
+  retainedTab?: ListingStatusFilter,
 ): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const listing of listings) {
-    const status = listingStatusTab(inventoryStatus(listing));
+    const status = retainedTab && listing.id === selectedId ? retainedTab : listingStatusTab(inventoryStatus(listing));
     if (!visibleInInventory(listing, status, searching, selectedId)) continue;
     counts[status] = (counts[status] || 0) + 1;
   }
