@@ -44,8 +44,12 @@ class InventoryTests(unittest.TestCase):
         first, second = record([0, 1]), record([2, 3])
         profiles = [{key: .1 for key in item['selected']} for item in (first, second)]
         self.assertEqual(validate_profile([first, second], profiles, first['provenance']), 4)
-        for inventories, observations in [([first], profiles), ([first, first], profiles),
-                                         ([first, record([3])], profiles), ([first, second], []),
+        for case, inventories in [('overlap', [record([0, 1, 2]), second]),
+                                  ('incomplete', [first, record([3])])]:
+            observations = [dict.fromkeys(item['selected'], .1) for item in inventories]
+            with self.subTest(coverage=case), self.assertRaisesRegex(ValueError, '^Shard union is incomplete or overlaps$'):
+                validate_profile(inventories, observations, first['provenance'])
+        for inventories, observations in [([first], profiles), ([first, second], []),
                                          ([first, second], [{}, profiles[1]]),
                                          ([first, second], [{digest('unknown'): .1}, profiles[1]])]:
             with self.assertRaises(ValueError):
