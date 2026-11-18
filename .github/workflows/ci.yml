@@ -330,7 +330,6 @@ jobs:
       PYTHONPATH: ${{ github.workspace }}/.github/scripts
       VERIFICATION_DATABASE: sqlite
       VERIFICATION_GROUP: ${{ matrix.group }}
-      VERIFICATION_INVENTORY_PATH: ${{ runner.temp }}/inventory-sqlite-${{ matrix.group }}.json
     strategy:
       fail-fast: false
       matrix:
@@ -362,6 +361,7 @@ jobs:
           PYTEST_PLUGINS: ""
       - run: python -m pytest -q -n auto --splits 2 --group ${{ matrix.group }}
         env:
+          VERIFICATION_INVENTORY_PATH: ${{ runner.temp }}/inventory-sqlite-${{ matrix.group }}.json
           VENDOO_STUDIO_DATA_DIR: ${{ runner.temp }}/vendoo-studio-data
 
       - name: Retain complete backend collection evidence
@@ -383,7 +383,6 @@ jobs:
       PYTHONPATH: ${{ github.workspace }}/.github/scripts
       VERIFICATION_DATABASE: postgres
       VERIFICATION_GROUP: ${{ matrix.group }}
-      VERIFICATION_INVENTORY_PATH: ${{ runner.temp }}/inventory-postgres-${{ matrix.group }}.json
     strategy:
       fail-fast: false
       matrix:
@@ -437,6 +436,7 @@ jobs:
           --store-durations --clean-durations \
           --durations-path "${{ runner.temp }}/pg-durations-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}.json"
         env:
+          VERIFICATION_INVENTORY_PATH: ${{ runner.temp }}/inventory-postgres-${{ matrix.group }}.json
           VENDOO_STUDIO_DATA_DIR: ${{ runner.temp }}/vendoo-studio-data
           ANTEROOM_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
 

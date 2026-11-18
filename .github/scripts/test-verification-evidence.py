@@ -190,6 +190,9 @@ class VerificationEvidence(unittest.TestCase):
         self.assertIn('default: false', ci)
         self.assertIn('if [ "$FULL_VERIFICATION" = "true" ]; then base=""; fi', ci)
         self.assertEqual(ci.count('VERIFICATION_DATABASE:'), 2)
+        for job in ('studio-backend', 'studio-backend-postgres'):
+            block = ci.split('  ' + job + ':\n', 1)[1].split('    strategy:', 1)[0]
+            self.assertNotIn('runner.temp', block)
         self.assertEqual(ci.count('if: success() && inputs.full_verification'), 2)
         self.assertIn('python3 .github/scripts/test-verification-evidence.py', ci)
         self.assertIn('python ../.github/scripts/test-verification-inventory.py', ci)
