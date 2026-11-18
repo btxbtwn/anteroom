@@ -645,10 +645,9 @@ async def answer_task(task_id: str, token: str, task) -> bool:
             pass
     finally:
         if work is not None and not work.done():
-            # settle() runs before commit. Let an in-flight save return so only
-            # confirmed persistence can override a concurrent lease revocation.
-            if not settled:
-                work.cancel()
+            # settle() runs before commit and cannot prove persistence. Preserve
+            # cancellation even then; an unconfirmed thread save may finish later.
+            work.cancel()
             await asyncio.gather(work, return_exceptions=True)
         if journal.timing_sample is not None:
             from vendoo_studio.services.service_context import current
@@ -656,6 +655,8 @@ async def answer_task(task_id: str, token: str, task) -> bool:
             timing, outcome, total_ms = journal.timing_sample
             context = current()
             stop = journal.stop_outcome or (context.task_outcome.get("stop") if context else None)
+            if stop is None and shutting_down:
+                stop = "interrupted"
             if stop is not None and not journal.saved:
                 outcome = stop
             _emit_timing(timing, outcome, total_ms)

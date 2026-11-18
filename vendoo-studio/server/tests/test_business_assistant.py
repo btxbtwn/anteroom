@@ -1212,3 +1212,76 @@ def test_concurrent_lease_loss_waits_for_save_confirmation(monkeypatch, caplog, 
     asyncio.run(exercise())
     [line] = timing_lines(caplog)
     assert f"outcome={'answered' if saved else 'lease_lost'} " in line
+
+
+@pytest.mark.parametrize('commit_failed', [False, True])
+def test_precommit_settle_does_not_confirm_answer_save(workspace, monkeypatch, caplog, commit_failed):
+    caplog.set_level('INFO', logger='vendoo_studio.assistant')
+    journal = assistant_route._Journal()
+    settled = []
+    failure = RuntimeError('commit failed')
+
+    def save(_provider, _answer, _changes, _memory, _automation, _thread, settle, _error):
+        settle(None, None)
+        assert not journal.saved
+        if commit_failed:
+            raise failure
+
+    monkeypatch.setattr(assistant_route, '_save_answer', save)
+
+    async def exercise():
+        return await assistant_route._answer(
+            journal, Provider(), 'Question', settle=lambda *_: settled.append(True))
+
+    if commit_failed:
+        with pytest.raises(RuntimeError) as caught:
+            asyncio.run(exercise())
+        assert caught.value is failure
+    else:
+        assert asyncio.run(exercise()) is None
+    assert settled == [True]
+    assert journal.saved is (not commit_failed)
+    assert journal.timing_sample[1] == ('error' if commit_failed else 'answered')
+    assert timing_lines(caplog) == []  # Hosted emission belongs to answer_task.
+
+
+@pytest.mark.parametrize('stop', [None, 'cancelled', 'lease_lost'])
+def test_cleanup_cancels_unfinished_save_even_after_settle(monkeypatch, caplog, stop):
+    from types import SimpleNamespace
+    from vendoo_studio.services import background_tasks
+    from vendoo_studio.services.service_context import ServiceContext, use
+
+    caplog.set_level('INFO', logger='vendoo_studio.assistant')
+    context = ServiceContext('seller', lambda: None, None, None, None)
+    other_task = ServiceContext('seller', lambda: None, None, None, None)
+
+    async def exercise():
+        saving, cancelled = asyncio.Event(), asyncio.Event()
+
+        async def answer(journal, *_, settle, **kwargs):
+            settle(None, None)  # The callback ran, but the commit has not returned.
+            saving.set()
+            try:
+                await asyncio.Future()
+            finally:
+                cancelled.set()
+                journal.timing_sample = (business_assistant.AnswerTiming(), 'cancelled', 100)
+
+        monkeypatch.setattr(assistant_route, '_answer', answer)
+        task = SimpleNamespace(payload={}, assistant_thread_id=None, created_at=datetime.now(UTC))
+        with use(context):
+            worker = asyncio.create_task(assistant_route.answer_task('task', 'token', task))
+            await asyncio.wait_for(saving.wait(), 1)
+            if stop is not None:
+                context.task_outcome['stop'] = stop
+            worker.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(worker, 1)
+        assert cancelled.is_set()
+
+    monkeypatch.setattr(assistant_route, '_require_provider', Provider)
+    monkeypatch.setattr(background_tasks, 'complete_in', lambda *_, **kwargs: None)
+    asyncio.run(exercise())
+    [line] = timing_lines(caplog)
+    assert f'outcome={stop or "interrupted"} ' in line
+    assert other_task.task_outcome == {}  # Same seller, independent claimed-task state.

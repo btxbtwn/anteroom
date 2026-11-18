@@ -34,6 +34,16 @@ Preparation and save measure their awaited intervals, including thread dispatch;
 on cancellation a thread may still finish after the await ends. Parsing,
 proposal processing and cleanup can leave time outside the named stages.
 
+Hosted timing is emitted once after journal settlement/cleanup so journal and
+heartbeat stop reasons can distinguish seller Stop (`cancelled`), lease loss
+(`lease_lost`) and ordinary shutdown (`interrupted`). A save is confirmed only
+when its await returns successfully, not when the pre-commit settle callback
+runs. Unfinished work is still cancelled during cleanup, including after that
+callback; a cancelled thread save may later commit, so its eventual persistence
+is unknown to this timing sample. A confirmed save retains its answer outcome
+despite a concurrent lease revocation. `total_ms` ends with the answer's cleanup
+wait, not the later journal settlement or log emission.
+
 <!-- coderabbit-ai-generated:v1 -->
 
 <!-- coderabbit-ai-generated-section:v1:c16ae77c1fa266df95938d44689e61b2522ff68f559affd05d4c47994dd17247 -->
