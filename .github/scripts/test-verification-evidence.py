@@ -3,7 +3,6 @@ import importlib.util
 import os
 from pathlib import Path
 import sys
-import subprocess
 import tempfile
 from types import SimpleNamespace, ModuleType
 import unittest
@@ -164,10 +163,18 @@ class VerificationEvidence(unittest.TestCase):
     def test_impact_paths_preserve_unicode_whitespace_and_renamed_sources(self):
         with tempfile.TemporaryDirectory(prefix='verification-paths-') as directory:
             root = Path(directory)
+            # Inherited Git overrides must never redirect a disposable fixture.
+            git_env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+            production_git = evidence.git
             def git(*args):
-                return subprocess.run(['git', '-C', str(root), *args], check=True,
-                                      capture_output=True, timeout=5).stdout.decode('utf-8', errors='surrogateescape')
-            git('init', '-q')
+                with patch.dict(os.environ, git_env, clear=True):
+                    return production_git('-C', str(root), *args)
+            redirected = root / 'must-not-be-a-repository'
+            with patch.dict(os.environ, {'GIT_DIR': str(redirected), 'GIT_WORK_TREE': str(redirected),
+                                        'GIT_INDEX_FILE': str(redirected / 'index')}):
+                git('init', '-q')
+            self.assertTrue((root / '.git').is_dir())
+            self.assertFalse(redirected.exists())
             source = root / 'anteroom-ios/Sources/Foo.swift'
             source.parent.mkdir(parents=True)
             source.write_text('synthetic native source')
@@ -179,6 +186,11 @@ class VerificationEvidence(unittest.TestCase):
             source.rename(root / 'archive/Foo.swift')
             unusual = 'anteroom-ios/Sources/Café\nTail .swift '
             (root / unusual).write_text('another synthetic source')
+            expected_native = {'anteroom-ios/Sources/Foo.swift', unusual}
+            if sys.platform.startswith('linux'):
+                raw_name = os.fsdecode(b'anteroom-ios/Sources/byte-\xff.swift')
+                (root / raw_name).write_text('synthetic raw-byte filename')
+                expected_native.add(raw_name)
             git('add', '.')
             git('-c', 'user.name=Verification', '-c', 'user.email=verification@example.invalid',
                 '-c', 'commit.gpgsign=false', 'commit', '-qm', 'Rename and add unusual path')
@@ -195,7 +207,7 @@ class VerificationEvidence(unittest.TestCase):
                 return self.fake_git(*args)
             with patch.object(evidence, 'git', mixed_git):
                 result = evidence.prepare(TARGET, BASE)
-            self.assertEqual(set(result['native_changes']), {'anteroom-ios/Sources/Foo.swift', unusual})
+            self.assertEqual(set(result['native_changes']), expected_native)
 
     @patch.dict(os.environ, {'GITHUB_SHA': TARGET, 'GITHUB_EVENT_NAME': 'workflow_dispatch'})
     def test_wrong_target_nonfirstparent_same_or_reversed_span_fails(self):

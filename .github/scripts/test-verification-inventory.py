@@ -18,8 +18,9 @@ SCRIPTS = Path(__file__).resolve().parent
 
 class RealCollection(unittest.TestCase):
     def git(self, root, *args):
+        git_env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
         return subprocess.run(['git', '-C', str(root), *args], check=True, capture_output=True,
-                              text=True, timeout=10).stdout.strip()
+                              text=True, timeout=10, env=git_env).stdout.strip()
 
     def fixture(self, root, source):
         (root / 'test_sample.py').write_text(source)
@@ -29,7 +30,8 @@ class RealCollection(unittest.TestCase):
                  '-c', 'commit.gpgsign=false', 'commit', '-qm', 'Synthetic fixture')
 
     def run_fixture(self, root, output, group=None):
-        env = {**os.environ, 'PYTEST_DISABLE_PLUGIN_AUTOLOAD': '1',
+        env = {**{key: value for key, value in os.environ.items() if not key.startswith('GIT_')},
+               'PYTEST_DISABLE_PLUGIN_AUTOLOAD': '1',
                'PYTEST_PLUGINS': 'verification_inventory', 'PYTHONPATH': str(SCRIPTS),
                'VERIFICATION_DATABASE': 'sqlite', 'VERIFICATION_GROUP': str(group or 1),
                'VERIFICATION_INVENTORY_PATH': str(output), 'GITHUB_RUN_ID': '42',
