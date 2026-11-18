@@ -977,3 +977,30 @@ change does not claim reduced marketplace calls or fix minimum-price/404
 refusals. There were no production/credential/marketplace reads or mutations.
 Browser/native p50/p95 and concurrent seller latency remain unmeasured; these
 bounded fixtures measure severity and unchanged request counts only.
+
+### Account and subscription readiness copy (2026-11-18)
+
+Provider authentication on the local Mac, its Anteroom account session, and
+account-scoped hosted relay readiness are separate states. The local account
+entry point now offers account navigation before any explicit listing-copy
+flow; opening the guidance reads only the configured destination URL. It does
+not read listing-copy status or start a session. Navigation occurs only after
+the seller chooses Open My Account. Status handlers and hosted provider metadata
+selection leave an absent relay absent; actual requested operations establish
+relay state as before. Existing ten-second hosted Settings polling is unchanged.
+The hosted ready note reports the last check, rather than promising the next
+request will succeed. Photo reading may use a different configured provider.
+
+Bulk measurement errors retain photos and typed details and offer manual entry.
+Forwarding errors name the connection that could not be reached without claiming
+an unknown sign-out, sleep or offline cause. No timeout, capacity, credential
+storage, login/handshake or marketplace-action behavior is changed.
+
+Design follows descriptive errors and preserving seller effort from WCAG
+[Error Identification](https://www.w3.org/WAI/WCAG22/Understanding/error-identification)
+and NN/g [Visibility of System Status](https://www.nngroup.com/articles/visibility-system-status/),
+using existing Anteroom dialogs, buttons, notes and theme tokens. No new visual
+system or automatic navigation is introduced. Local status/model requests and
+production testing are out of scope. Concurrent-load p50/p95, interaction latency,
+Mac native behavior and desktop/phone screenshots remain pending the coordinated
+VPS validation slot; this note makes no production-readiness claim.

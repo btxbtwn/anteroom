@@ -40,6 +40,12 @@ export async function getAccountMove(): Promise<AccountMoveStatus> {
   return read(await studioFetch("/api/account-move"), "Could not read this Mac’s listings.");
 }
 
+export async function getAccountDestination(): Promise<{ hosted_url: string }> {
+  const response = await studioFetch("/api/account-move/destination");
+  if (!response.ok) throw new Error("Could not read the Anteroom account address.");
+  return response.json();
+}
+
 export async function startAccountMove(email: string, password: string): Promise<AccountMoveStatus> {
   return read(await studioFetch("/api/account-move", {
     method: "POST",
