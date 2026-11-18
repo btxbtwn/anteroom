@@ -9,7 +9,6 @@ import {
   marketplaceOptions,
   matchesSearch,
   sortListings,
-  statusForMissingSale,
   statusForSort,
   statusCounts,
   visibleInInventory,
@@ -346,6 +345,11 @@ describe("missing sale details", () => {
     expect(activeFilterCount({ ...DEFAULT_LISTING_FILTERS, missingSale: true })).toBe(1);
   });
 
+  it("keeps an active listing with a partial sale missing details on Open", () => {
+    const partial: FilterableListing = { ...tee, missing_sale_data: ["fees"] };
+    expect(filterListings([incomplete, partial], "", { ...DEFAULT_LISTING_FILTERS, missingSale: true })).toEqual([partial]);
+  });
+
   it("is off by default", () => {
     expect(filterListings([incomplete, complete, unsold], "", withFilters({ status: "sold" }))).toHaveLength(2);
   });
@@ -407,14 +411,6 @@ describe("Open", () => {
     const sold = filterListings(mixed, "", withFilters({ status: "sold" }));
     expect(open).not.toContain(reopenedSale);
     expect([...open, ...sold]).toHaveLength(mixed.length);
-  });
-});
-
-describe("statusForMissingSale", () => {
-  it("opens the Sold tab when turning the filter on, where the sales are", () => {
-    expect(statusForMissingSale(true, "all")).toBe("sold");
-    expect(statusForMissingSale(true, "active")).toBe("sold");
-    expect(statusForMissingSale(false, "all")).toBe("all");
   });
 });
 

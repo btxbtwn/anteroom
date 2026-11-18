@@ -279,14 +279,6 @@ export function compareListings(sort: ListingSortId): ((left: FilterableListing,
 }
 
 /**
- * Missing sale details is about sales, which sit under Sold: turning it on
- * opens that tab, the way sorting by sale date does.
- */
-export function statusForMissingSale(on: boolean, status: ListingStatusFilter): ListingStatusFilter {
-  return on ? "sold" : status;
-}
-
-/**
  * The status tab a sort belongs on. Only sold listings have a sale date, so
  * sorting by it opens the Sold tab; every other sort keeps the current tab.
  */

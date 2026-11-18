@@ -198,11 +198,7 @@ export function ListingSidebar({
   const staleThreshold = uiPrefs?.stale_listing_days;
   const filterStaleCounts = useMemo(() => staleCounts(facetSource, undefined, staleThreshold), [facetSource, staleThreshold]);
   const filterUnsentCount = useMemo(() => unsentCount(facetSource), [facetSource]);
-  // The filter opens Sold, so its count is over the sold listings.
-  const filterMissingSaleCount = useMemo(
-    () => missingSaleCount(searched.filter((listing) => inStatusTab(listing, "sold"))),
-    [searched],
-  );
+  const filterMissingSaleCount = useMemo(() => missingSaleCount(facetSource), [facetSource]);
   const labels = useMemo(() => labelOptions(conversations || []), [conversations]);
   const settingsSearch = useSettingsSearch(settingsMode, onSettingsSearchResult);
   const {

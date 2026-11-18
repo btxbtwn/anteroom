@@ -24,7 +24,6 @@ import {
   LISTING_SORTS,
   LISTING_STATUS_LABELS,
   LISTING_STATUS_TABS,
-  statusForMissingSale,
   activeFilterCount,
   compactCount,
   statusForSort,
@@ -228,11 +227,7 @@ export function ListingFilters({
               title="Sold listings whose sales records lack the price, fees, shipping, cost of goods or sale date"
               glyph={<Dot tone="warning" />}
               label="Missing sale details"
-              onSelect={() => onChange({
-                ...filters,
-                missingSale: !filters.missingSale,
-                status: statusForMissingSale(!filters.missingSale, filters.status),
-              })}
+              onSelect={() => onChange({ ...filters, missingSale: !filters.missingSale })}
             />
 
             <MenuSeparator />
