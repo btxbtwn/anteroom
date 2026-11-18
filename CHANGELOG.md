@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1010 — 2026-11-18
+
+- Steadier automated checks for listing generation, so a test-only crash no longer blocks updates.
+
 ## 0.1.1009 — 2026-11-17
 
 - Slow inventory loads in the cloud app now record where the time went, so they can be tracked down and fixed.
