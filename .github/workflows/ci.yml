@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      full_verification:
+        description: Run all components and retain backend collection evidence; never deploy.
+        type: boolean
+        default: false
 
 # A newer push to a pull request replaces its older run. Every push to main
 # runs to completion in its own group: main does not require PRs to be up to
@@ -43,6 +49,7 @@ jobs:
       - id: changes
         env:
           BEFORE: ${{ github.event.before }}
+          FULL_VERIFICATION: ${{ inputs.full_verification }}
         run: |
           case "$GITHUB_EVENT_NAME" in
             # checkout tests a merge; its first parent is the actual base.
@@ -50,6 +57,7 @@ jobs:
             push) base="$BEFORE" ;;
             *) base="" ;;
           esac
+          if [ "$FULL_VERIFICATION" = "true" ]; then base=""; fi
           python3 .github/scripts/changed-components.py --base "$base" >> "$GITHUB_OUTPUT"
 
   changelog:
@@ -86,6 +94,8 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
+      - name: Test verification evidence contract
+        run: python3 .github/scripts/test-verification-evidence.py
       - name: Test the required-check contract
         run: python3 .github/scripts/test-required-checks.py
       - name: Version sync
@@ -315,6 +325,11 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    env:
+      PYTEST_PLUGINS: ${{ inputs.full_verification && 'verification_inventory' || '' }}
+      PYTHONPATH: ${{ github.workspace }}/.github/scripts
+      VERIFICATION_DATABASE: sqlite
+      VERIFICATION_GROUP: ${{ matrix.group }}
     strategy:
       fail-fast: false
       matrix:
@@ -339,15 +354,35 @@ jobs:
           # pytest-split (in the dev extra) divides the suite between the
           # shards; the full suite still runs, each test exactly once per database.
           ./scripts/install-locked.sh python dev
+      - name: Exercise verification collector with real xdist and split
+        if: matrix.group == 1
+        run: python ../.github/scripts/test-verification-inventory.py
+        env:
+          PYTEST_PLUGINS: ""
       - run: python -m pytest -q -n auto --splits 2 --group ${{ matrix.group }}
         env:
+          VERIFICATION_INVENTORY_PATH: ${{ runner.temp }}/inventory-sqlite-${{ matrix.group }}.json
           VENDOO_STUDIO_DATA_DIR: ${{ runner.temp }}/vendoo-studio-data
+
+      - name: Retain complete backend collection evidence
+        if: success() && inputs.full_verification
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verification-inventory-sqlite-${{ matrix.group }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/inventory-sqlite-${{ matrix.group }}.json
+          if-no-files-found: error
+          retention-days: 30
 
   studio-backend-postgres:
     name: Studio backend Postgres (${{ matrix.group }}/2)
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    env:
+      PYTEST_PLUGINS: ${{ inputs.full_verification && 'verification_inventory' || '' }}
+      PYTHONPATH: ${{ github.workspace }}/.github/scripts
+      VERIFICATION_DATABASE: postgres
+      VERIFICATION_GROUP: ${{ matrix.group }}
     strategy:
       fail-fast: false
       matrix:
@@ -389,6 +424,8 @@ jobs:
       - name: Verify duration artifacts with xdist
         if: matrix.group == 1
         run: python ../.github/scripts/test-pg-timing-artifacts.py
+        env:
+          PYTEST_PLUGINS: ""
       # Each xdist worker creates its own database on this server.
       # A fresh, attempt-specific path supplies no input timings: assignments stay
       # unchanged. The controller records setup/call/teardown duration per nodeid.
@@ -399,6 +436,7 @@ jobs:
           --store-durations --clean-durations \
           --durations-path "${{ runner.temp }}/pg-durations-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}.json"
         env:
+          VERIFICATION_INVENTORY_PATH: ${{ runner.temp }}/inventory-postgres-${{ matrix.group }}.json
           VENDOO_STUDIO_DATA_DIR: ${{ runner.temp }}/vendoo-studio-data
           ANTEROOM_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
 
@@ -420,6 +458,15 @@ jobs:
           path: ${{ runner.temp }}/pg-duration-hashes-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}.json
           if-no-files-found: error
           retention-days: 7
+
+      - name: Retain complete backend collection evidence
+        if: success() && inputs.full_verification
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verification-inventory-postgres-${{ matrix.group }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/inventory-postgres-${{ matrix.group }}.json
+          if-no-files-found: error
+          retention-days: 30
 
   extension:
     name: Extension
