@@ -276,8 +276,8 @@ Queue a PR with `gh pr merge <n> --auto --merge` only when all of these hold
 for its current head commit: `./check.sh` passed for the components it
 changes (and the native checks for Mac or iPhone changes), CI is green, an
 independent review found no blocker, and every review finding, human or bot,
-is fixed or answered on the PR. A push after queuing changes the head, so
-disable auto-merge (`gh pr merge <n> --disable-auto`) and queue again only
+is fixed or answered on the PR. Before pushing to a queued PR, disable
+auto-merge (`gh pr merge <n> --disable-auto`). After the push, queue again only
 when the new head meets the same bar. GitHub merges a queued PR as soon as the
 required `CI` check passes and checks nothing else.
 
