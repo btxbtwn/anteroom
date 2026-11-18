@@ -1,2 +1,0 @@
-- Tell apart provider sign-in on your Mac and its connection to your Anteroom account, and keep opening your account separate from copying listings.
-- Keep bulk-upload details when measurement reading cannot reach your Mac, with clearer connection guidance.

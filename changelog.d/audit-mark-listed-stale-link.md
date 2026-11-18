@@ -1,1 +1,0 @@
-- Mark as listed no longer suggests an old link Anteroom delisted, or any link while a marketplace action is unconfirmed, and pasting a link to a listing Anteroom delisted now asks you to confirm it is still live.

@@ -6,6 +6,39 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1030 — 2026-11-18
+
+- Mark as listed no longer suggests an old link Anteroom delisted, or any link while a marketplace action is unconfirmed, and pasting a link to a listing Anteroom delisted now asks you to confirm it is still live.
+
+## 0.1.1029 — 2026-11-18
+
+- Tell apart provider sign-in on your Mac and its connection to your Anteroom account, and keep opening your account separate from copying listings.
+- Keep bulk-upload details when measurement reading cannot reach your Mac, with clearer connection guidance.
+
+## 0.1.1028 — 2026-11-18
+
+- The assistant reads your shop faster before it answers: sales figures for every date range now share one read of your sales, sale events and ad spend.
+
+## 0.1.1027 — 2026-11-18
+
+- Error emails for database timeouts now name the part of Anteroom that hit them, so different problems no longer share one email group.
+
+## 0.1.1026 — 2026-11-18
+
+- Delist now has tests showing that a listing another app already removed reads Delisted while the sale and Sold status stay, and that a sign-in problem, timeout or unclear answer never counts as removed.
+
+## 0.1.1025 — 2026-11-18
+
+- After an Anteroom update, the web no longer tells you to update Anteroom Bridge before Chrome has reconnected. It asks you to connect Chrome instead.
+
+## 0.1.1024 — 2026-11-18
+
+- Steadier automated checks for reading sales in the background.
+
+## 0.1.1023 — 2026-11-18
+
+- Fix two checks that could fail at random when they test that a delist waits for a sale undo. No change to the app.
+
 ## 0.1.1022 — 2026-11-18
 
 - A marketplace form no longer jumps while Anteroom re-checks its fields after a change, so tapping a photo right after reordering opens it.
