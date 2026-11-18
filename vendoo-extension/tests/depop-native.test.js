@@ -596,6 +596,11 @@ test('the Depop shop reading matches the locked Depop price the publish sent, an
   cursor = 'x'.repeat(221);
   const unusable = await c.depopApiAction('shop_matches', { ...payload, listing: locked });
   assert.equal(unusable.matches, null);
+  // A page in a shape Anteroom does not know is not an empty shop.
+  c.fetch = async (url) => (new URL(url).pathname === '/presentation/api/v1/users/me/'
+    ? reply(200, { id: 42 }) : reply(200, { meta: { end: true } }));
+  const unknown = await c.depopApiAction('shop_matches', { ...payload, listing: locked });
+  assert.equal(unknown.matches, null);
 });
 
 test('Depop publish evidence reads stop at their time budget and stay unconfirmed', async () => {

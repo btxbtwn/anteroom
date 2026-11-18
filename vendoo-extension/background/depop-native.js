@@ -1637,6 +1637,8 @@ async function depopShopMatches(request, payload) {
     if (!depopShopRead(path)) return null;
     let page;
     try { page = await request('GET', path); } catch { return null; }
+    // A page without a product list Anteroom knows is not an empty shop.
+    if (!['objects', 'products', 'data'].some(key => Array.isArray(page?.[key]))) return null;
     for (const product of depopProductRows(page)) {
       if (depopShopProduct(product, scoped)) matches.add(depopListingUrl(product?.slug || product?.url));
     }

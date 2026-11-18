@@ -935,20 +935,28 @@ def _open_check(db: Session, conv_id: str, marketplace: str, body: CheckRequest 
                else _result_context(db, conv_id, marketplace, record, snapshot, candidate))
     repo = JobRepo(db)
     with start_gate():
+        # Mark as listed and reset hold this gate. The record this Check settles against,
+        # and the seller's last mark, are read together under it.
+        if _record(db, conv_id, marketplace) != record:
+            raise NativeMarketplaceError(409, f"The {NAMES[marketplace]} listing changed while the check was starting. Check again.")
+        mark_before = _seller_mark(db, conv_id, marketplace)
         if blocking_job(repo, marketplace) is not None:
             raise NativeMarketplaceError(409, "Another automation job is running. Check again when it finishes.")
         # Reading Chrome's journal can open the marketplace tab: hold the slot like any other job.
         check_job = repo.create(conv_id, record.get("revision_id") or "", snapshot, status="dispatched",
                                 current_step=f"native_{marketplace}_check")
         claim_api_job(db, check_job.id)
-    return record, snapshot, candidate, context, check_job.id, _seller_mark(db, conv_id, marketplace)
+    return record, snapshot, candidate, context, check_job.id, mark_before
 
 
 def _seller_mark(db: Session, conv_id: str, marketplace: str) -> dict:
     """The seller's last Mark as listed or not listed here. Each mark carries its own time."""
     from vendoo_studio.services.vendoo_import import parse_notes
 
-    marks = parse_notes(_conversation(db, conv_id).notes).get("marketplaceMarks")
+    conv = _conversation(db, conv_id)
+    # The session may hold this conversation from an earlier read; a mark is committed elsewhere.
+    db.refresh(conv, attribute_names=["notes"])
+    marks = parse_notes(conv.notes).get("marketplaceMarks")
     mark = marks.get(marketplace) if isinstance(marks, dict) else None
     return mark if isinstance(mark, dict) else {}
 
