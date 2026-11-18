@@ -336,6 +336,9 @@ def test_reply_request_cancellation_does_not_resolve_while_its_worker_finishes(m
     from vendoo_studio.services import request_timing
 
     entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+    worker_released = []
+    clock = [10.0]
+    monkeypatch.setattr(request_timing, 'perf_counter', lambda: clock[0])
     details = {}
     token = request_timing._details.set(details)
     relay = MagicMock()
@@ -347,7 +350,7 @@ def test_reply_request_cancellation_does_not_resolve_while_its_worker_finishes(m
         if blocked_step == step:
             entered.set()
             try:
-                assert release.wait(3)
+                worker_released.append(release.wait(3))
             finally:
                 finished.set()
 
@@ -365,15 +368,18 @@ def test_reply_request_cancellation_does_not_resolve_while_its_worker_finishes(m
         task = asyncio.create_task(route.post_reply(route.Reply(request_id='b' * 32, payload={'private': 'reply'})))
         try:
             assert await asyncio.to_thread(entered.wait, 2)
+            clock[0] = 10.125
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
             assert details[f'relay_{blocked_step}_calls'] == 1
-            assert type(details[f'relay_{blocked_step}_ms']) is int
+            assert not finished.is_set()
+            assert details[f'relay_{blocked_step}_ms'] == 125
             relay.resolve_wait.assert_not_called()
         finally:
             release.set()
             assert await asyncio.to_thread(finished.wait, 2)
+            assert worker_released == [True]
             if not task.done():
                 task.cancel()
             await asyncio.gather(task, return_exceptions=True)
