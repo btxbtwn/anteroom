@@ -428,6 +428,30 @@ class PersistListingTest(unittest.TestCase):
         })
         self.assertEqual(parsed["ebay_specifics"]["Size"], "M")
 
+    def test_a_blank_ebay_size_row_takes_the_tag_size_when_the_model_agreed(self):
+        listing_persistence.save_revision(self.db, self.conv.id, {
+            **LISTING_JSON, "size": "M", "ebay_specifics": {"Size": ""},
+            "_native_forms": {"ebay": {"fields": [
+                {"path": "ebay_specifics.Size", "label": "Size", "options": ["S", "M", "L"]},
+            ]}},
+        }, source="generate")
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M"}))
+        parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
+            **LISTING_JSON, "size": "M", "ebay_specifics": {"Size": ""},
+        })
+        self.assertEqual(parsed["ebay_specifics"]["Size"], "M")
+
+    def test_ebays_row_follows_the_tag_from_the_models_unnormalized_size(self):
+        """Readiness writes men's bottoms as a waist (34x32 to 34); the copied eBay row still says 34x32."""
+        from vendoo_studio.services import listing_generate as generate
+
+        listing = {"size": "36", "ebay_specifics": {"Size": "34x32"}}
+        generate._follow_ebay_native_size(listing, "36", ["34", "34x32"])
+        self.assertEqual(listing["ebay_specifics"]["Size"], "36")
+        kept = {"size": "36", "ebay_specifics": {"Size": "L"}}
+        generate._follow_ebay_native_size(kept, "36", ["34", "34x32"])
+        self.assertEqual(kept["ebay_specifics"]["Size"], "L")
+
     def test_a_size_the_seller_set_wins_over_the_tag_everywhere(self):
         listing_persistence.save_revision(self.db, self.conv.id, {
             **LISTING_JSON, "size": "L", "poshmark_specifics": {"size": "L"}, "seller_fields": ["size"],

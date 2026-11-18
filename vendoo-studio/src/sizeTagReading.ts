@@ -11,7 +11,9 @@ interface SizeTagOutcome {
   note: string;
 }
 
-const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+/** One size however it is spaced or cased, and 32 x 30 is 32×30: the server's `_same` rule. */
+const sizeKey = (size: string) => size.trim().toLowerCase().replace(/\s+/g, " ").replace(/\s*[x×]\s*/g, "×");
+const same = (a: string, b: string) => sizeKey(a) === sizeKey(b);
 
 /**
  * Fold a size-tag reading into what the seller typed (pass "" for a size an earlier

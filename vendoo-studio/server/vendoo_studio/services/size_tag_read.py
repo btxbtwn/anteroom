@@ -38,8 +38,12 @@ _SPACES = re.compile(r"\s+")
 
 
 def _size_text(value) -> str:
-    """A size as text; 0 is a size, so only None and blanks are empty."""
-    if value is None or isinstance(value, bool):
+    """A size as text; 0 is a size, so only None and blanks are empty.
+
+    A list or object is not a size (a model nesting its answer); it reads as nothing,
+    so the item goes to the seller instead of a size like "['S', 'XL']".
+    """
+    if value is None or isinstance(value, (bool, list, tuple, dict)):
         return ""
     if isinstance(value, float) and value.is_integer():
         value = int(value)

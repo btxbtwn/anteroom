@@ -951,15 +951,19 @@ def propagate_general_size(listing: dict, *, previous_size: str | None = None) -
     return changed
 
 
-def _follow_ebay_native_size(listing: dict, size: str, model_size: str | None) -> None:
-    """eBay's direct form names its row ``Size``; set it when it still holds the model's size or nothing."""
+def _follow_ebay_native_size(listing: dict, size: str, model_sizes: list[str]) -> None:
+    """eBay's direct form names its row ``Size``; set it when it still holds the model's size or nothing.
+
+    ``model_sizes`` holds the model's General Size as it wrote it and as readiness
+    normalized it (34x32 and 34), since the copied native row keeps the former.
+    """
     from vendoo_studio.services.seller_overrides import field_locked
 
     block = listing.get("ebay_specifics")
     if not isinstance(block, dict) or "Size" not in block or field_locked(listing, "ebay", "Size"):
         return
     current = str(block.get("Size") or "").strip()
-    followed = {"", *(([model_size, ebay_size(listing, block, model_size)]) if model_size else [])}
+    followed = {""} | {spelling for model in model_sizes if model for spelling in (model, ebay_size(listing, block, model))}
     if current in followed:
         listing["ebay_specifics"] = {**block, "Size": ebay_size(listing, block, size)}
 
@@ -1449,6 +1453,8 @@ def persist_generated_listing(
         listing["zipCode"] = location
     elif str(listing.get("zipCode") or "") == "70125":
         listing.pop("zipCode", None)
+    # As the model wrote it, before readiness normalizes it: the copied native rows still hold this.
+    generated_size = None if listing.get("size") is None else str(listing.get("size")).strip()
     apply_send_readiness_fixes(listing)
     if revisions:
         selected = revisions[0].listing_json
@@ -1478,10 +1484,12 @@ def persist_generated_listing(
         size = seller_size(seller)
         if size and _is_locked(seed, "size"):
             size = ""
-        if size and size != str(listing.get("size") or "").strip():
-            model_size = None if listing.get("size") is None else str(listing.get("size"))
+        model_size = None if listing.get("size") is None else str(listing.get("size"))
+        if size and size != (model_size or "").strip():
             listing["size"] = size
             align_size_fields(listing, previous_size=model_size)
+        if size:
+            # Even when the model agreed, a direct tab it left blank takes the tag size.
             pinned_size = (size, model_size)
         # Marketplace copies from the model must not override the seller's SKU.
         for key, value in listing.items():
@@ -1517,7 +1525,7 @@ def persist_generated_listing(
         # The direct tabs' blocks were copied from the model before the tag size
         # was set; the size slots that followed the model follow the seller too.
         propagate_general_size(listing, previous_size=pinned_size[1])
-        _follow_ebay_native_size(listing, *pinned_size)
+        _follow_ebay_native_size(listing, pinned_size[0], [s for s in (pinned_size[1], generated_size) if s])
     constrain_generated(listing, seed)
     cap_listing_description(listing)
     if revisions:

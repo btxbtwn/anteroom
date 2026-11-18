@@ -35,6 +35,8 @@ type Row = {
   sizeReview: boolean;
   /** What the last size-tag reading found, in plain words. */
   sizeNote?: string;
+  /** Bumped when a photo is removed, so a reading of the earlier photos is not applied. */
+  photoSet: number;
   garment: Garment;
   measurements: Record<string, string>;
   /** Fields filled from the photos and not yet touched by the seller. */
@@ -67,6 +69,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
     size: "",
     sizeSuggested: false,
     sizeReview: false,
+    photoSet: 0,
     garment: guessGarment(listingTitleForFolder(group.folder)),
     measurements: {},
     suggested: [],
@@ -146,11 +149,12 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
     setSizeReading({ done: 0, total: todo.length });
     setAnnounceSizes(false);
     await readEach(todo, async (index) => {
+      const photoSet = rows[index]!.photoSet;
       setRow(index, { sizeNote: "Reading the size tag…", sizeReview: false });
       try {
         const result = await api.sizeTags.read(groups[index]!.files);
         setRows((current) => current.map((row, i) => {
-          if (i !== index) return row;
+          if (i !== index || row.photoSet !== photoSet) return row;
           // A size an earlier reading filled is replaced, not treated as typed.
           const outcome = applySizeTagReading(row.sizeSuggested ? "" : row.size, result);
           return {
@@ -164,9 +168,13 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
       } catch (error) {
         const message = error instanceof Error ? error.message : "Reading failed.";
         setRows((current) => current.map((row, i) => {
-          if (i !== index) return row;
+          if (i !== index || row.photoSet !== photoSet) return row;
           const blank = row.size.trim() === "";
-          return { ...row, sizeReview: blank, sizeNote: blank ? `${message} Type the size from the tag.` : message };
+          // A size an earlier reading filled was not confirmed by this one, so it is checked too.
+          if (blank || row.sizeSuggested) {
+            return { ...row, sizeReview: true, sizeNote: `${message} ${blank ? "Type the size from the tag." : "Check the size against the tag."}` };
+          }
+          return { ...row, sizeNote: message };
         }));
       }
       setSizeReading((current) => current && { ...current, done: current.done + 1 });
@@ -180,9 +188,21 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
   ));
 
   // A listing keeps at least one photo; there is nothing to generate from otherwise.
-  const removePhoto = (spot: DragSpot) => setGroups((current) => current.map((group, index) => (
-    index === spot.group ? { ...group, files: group.files.filter((_, photo) => photo !== spot.photo) } : group
-  )));
+  // A size read from the photos may have come from the one removed: it is cleared for the seller
+  // to read again or type, and a reading of the earlier photos still running is not applied.
+  const removePhoto = (spot: DragSpot) => {
+    setGroups((current) => current.map((group, index) => (
+      index === spot.group ? { ...group, files: group.files.filter((_, photo) => photo !== spot.photo) } : group
+    )));
+    setRows((current) => current.map((row, index) => {
+      if (index !== spot.group) return row;
+      const cleared = row.sizeSuggested
+        ? { size: "", sizeSuggested: false, sizeReview: true,
+          sizeNote: "A photo was removed, so the size read from it was cleared. Read size tags again or type the size." }
+        : {};
+      return { ...row, ...cleared, photoSet: row.photoSet + 1 };
+    }));
+  };
 
   useEffect(() => {
     const focusTimer = window.setTimeout(() => cogRef.current?.focus(), 0);

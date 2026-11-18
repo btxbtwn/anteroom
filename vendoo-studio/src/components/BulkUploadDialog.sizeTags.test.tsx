@@ -116,6 +116,67 @@ it("replaces an earlier tag reading, flags a failed read and announces once", as
   }
 });
 
+it("clears a tag size when its photos change and ignores a reading of the earlier photos", async () => {
+  const pending: Array<(result: SizeTagReadResult) => void> = [];
+  const read = vi.spyOn(api.sizeTags, "read")
+    .mockResolvedValueOnce(tagReads.Shorts!).mockResolvedValueOnce(tagReads.Jeans!).mockResolvedValueOnce(tagReads.Tee!);
+  const twoPhotos = groups.map((group) => ({ ...group, files: [...group.files, new File(["y"], `${group.folder}-2.jpg`, { type: "image/jpeg" })] }));
+  vi.spyOn(api.boxes, "list").mockResolvedValue({ boxes: [] } as never);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  await act(async () => root.render(
+    <WorkspaceRuntimeProvider value={desktopRuntime}>
+      <QueryClientProvider client={client}>
+        <BulkUploadDialog groups={twoPhotos} onCancel={vi.fn()} onConfirm={vi.fn()} />
+      </QueryClientProvider>
+    </WorkspaceRuntimeProvider>,
+  ));
+  const size = (title: string) => document.querySelector<HTMLInputElement>(`[aria-label="Size for ${title}"]`)!;
+  const button = (name: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === name)!;
+  try {
+    await act(async () => button("Read size tags").click());
+    await settle(() => expect(size("Shorts").value).toBe("0"));
+
+    // Removing a photo clears the size it may have come from.
+    await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Remove photo 2"]')!.click());
+    expect(size("Shorts").value).toBe("");
+    expect(size("Shorts").className).toContain("needs-review");
+    expect(document.body.textContent).toContain("A photo was removed, so the size read from it was cleared.");
+
+    // A reading still running when a photo is removed is not applied: Jeans (item 2) loses a
+    // photo mid-read; its reading of the earlier photos comes back XL and is dropped.
+    read.mockImplementation(() => new Promise((resolve) => { pending.push(resolve); }));
+    await act(async () => button("Read size tags").click());
+    expect(pending).toHaveLength(3);
+    await act(async () => document.querySelectorAll<HTMLButtonElement>('[aria-label="Remove photo 2"]')[0]!.click());
+    const xl: SizeTagReadResult = { photos_read: 2, status: "accepted", size: "XL", sizes: ["XL"] };
+    await act(async () => { for (const resolve of pending) resolve(xl); });
+    await settle(() => expect(size("Tee").value).toBe("XL"));
+    expect(size("Jeans").value).toBe("");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
+it("flags a size an earlier reading filled when a re-read fails", async () => {
+  const read = vi.spyOn(api.sizeTags, "read").mockImplementation(async (files) => tagReads[files[0]!.name.replace(".jpg", "")]!);
+  const { root, size, button } = await openDialog();
+  try {
+    await act(async () => button("Read size tags").click());
+    await settle(() => expect(size("Shorts").value).toBe("0"));
+    read.mockRejectedValue(new Error("OpenRouter stopped answering while looking at the photos."));
+    await act(async () => button("Read size tags").click());
+    await settle(() => expect(size("Shorts").className).toContain("needs-review"));
+    expect(size("Shorts").value).toBe("0");
+    expect(document.getElementById(size("Shorts").getAttribute("aria-describedby")!)!.textContent)
+      .toBe("OpenRouter stopped answering while looking at the photos. Check the size against the tag.");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
 it("never shows the provider or model in reading notes", async () => {
   vi.spyOn(api.sizeTags, "read").mockResolvedValue(tagReads.Shorts!);
   // An older server still sends who read; the dialog must not show it.

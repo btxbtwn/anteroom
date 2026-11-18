@@ -22,6 +22,10 @@ describe("applySizeTagReading", () => {
 
   it("keeps a typed size and only notes when it matches", () => {
     expect(applySizeTagReading("m", read({}))).toEqual({ size: "m", suggested: false, needsReview: false, note: "Size matches the tag." });
+    // The server counts these as one size; so does the comparison here.
+    expect(applySizeTagReading("32 x 30", read({ size: "32×30", sizes: ["32×30"] }))).toMatchObject({ needsReview: false, note: "Size matches the tag." });
+    expect(applySizeTagReading("32  X30", read({ size: "32 x 30", sizes: ["32 x 30"] })).needsReview).toBe(false);
+    expect(applySizeTagReading("32 x 32", read({ size: "32 x 30", sizes: ["32 x 30"] })).needsReview).toBe(true);
     expect(applySizeTagReading("L", read({ status: "not_found", size: null, sizes: [] })))
       .toEqual({ size: "L", suggested: false, needsReview: false, note: "" });
     expect(applySizeTagReading("L", read({ status: "conflict", size: null, sizes: ["L", "XL"] }))).toEqual({
