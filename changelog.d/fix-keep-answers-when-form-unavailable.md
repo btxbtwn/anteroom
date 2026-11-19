@@ -1,0 +1,1 @@
+- Your Mercari, Poshmark, Depop and eBay answers are no longer erased when a marketplace's fields can't be loaded during generation. That marketplace asks you to reload its fields before listing instead.

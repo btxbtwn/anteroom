@@ -479,6 +479,17 @@ def constrain_generated(listing: dict, seed: dict, *, freeze_categories: bool = 
     for market, contract in contracts.items():
         prefix = f"{market}_specifics"
         block = listing.get(prefix)
+        if not isinstance(contract, dict) or contract.get("unavailable") or not contract.get("fields"):
+            # A form that could not be loaded is unknown, not one with no
+            # fields: nothing here can be checked. Keep the answers already
+            # saved (seed) and drop anything new, which no form has checked.
+            # The seed also holds the seller's locked answers.
+            saved = seed.get(prefix)
+            if isinstance(saved, dict):
+                listing[prefix] = copy.deepcopy(saved)
+            else:
+                listing.pop(prefix, None)
+            continue
         if not isinstance(block, dict):
             continue
         rows = {path_of(row): row for row in contract.get("fields") or []}
