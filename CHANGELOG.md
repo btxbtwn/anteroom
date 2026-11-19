@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1035 — 2026-11-19
+
+- Your Mercari, Poshmark, Depop and eBay answers are no longer erased when a marketplace's fields can't be loaded during generation. That marketplace asks you to reload its fields before listing instead.
+
 ## 0.1.1034 — 2026-11-18
 
 - Stopping a listing chat no longer reports its rejected save as a new chat error.
