@@ -1,1 +1,0 @@
-- When you've set a listing's Size yourself, regenerating it keeps every marketplace's size and the title on your size, instead of leaving the AI's size there. Marketplace sizes you set yourself stay as they are, and a size a marketplace doesn't offer is left for you to choose.
