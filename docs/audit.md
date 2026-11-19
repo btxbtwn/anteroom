@@ -172,7 +172,10 @@ Every run, in this order:
 4. `./anteroom-ios/test-sandbox.sh` (iPhone XCUITests in the Simulator). Run
    it while nothing else heavy runs: under load its 5 to 30 second waits time
    out on different tests each run. Before reporting a failure, rerun it alone
-   and compare with the latest iPhone job on `main` (`gh run list --workflow ios.yml --branch main`).
+   and compare with the last full local run in the previous `audit` issue.
+   `ios.yml` was removed by #1488; Xcode Cloud's **iOS Verify** runs only the
+   Swift checks and unit tests, not these UI tests (`docs/xcode-cloud.md`), so
+   GitHub has no iPhone UI baseline.
    If several tests fail at their first step and the UI hierarchy shows the
    app still on the Assistant tab, the launch helper's tab tap was dropped
    (fixed by #1417); check that fix is on `main` before reporting them.
@@ -185,7 +188,10 @@ Every run, in this order:
    or updated (sandbox must keep logs under `VENDOO_STUDIO_DATA_DIR`). The
    seller's own app may be running and writing that log, so compare its size
    and time with `stat` and look for sandbox paths in any new lines. Also
-   read that log's `ERROR` lines since the last audit, read only: they show
+   read the `ERROR` lines since the last audit in that log and in
+   `logs/anteroom.jsonl` beside it (`"level": "error"`), read only. On
+   2026-11-19 the text log had been silent for a day while the app kept
+   writing the JSON log, so reading only `Anteroom.log` misses errors. They show
    live marketplace failures no sandbox can reproduce (on 2026-11-15 a
    Mercari HTTP 400 on every delist, #1539). Quote only the error, never
    buyer or listing details. `ebay eligible_items failed: Reconnect eBay`
