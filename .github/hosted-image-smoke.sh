@@ -7,6 +7,8 @@ git rev-parse HEAD | tee image-validation/source-sha.txt
 image=anteroom-image-smoke:ci
 network=anteroom-image-smoke
 cleanup() {
+  docker logs anteroom-image-smoke-pg >image-validation/postgres.log 2>&1 || true
+  docker logs anteroom-image-smoke-init >image-validation/init.log 2>&1 || true
   docker logs anteroom-image-smoke-app >image-validation/server.log 2>&1 || true
   docker rm -f anteroom-image-smoke-app anteroom-image-smoke-init anteroom-image-smoke-pg >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
@@ -46,11 +48,16 @@ docker network create --internal "$network" >/dev/null
 # Synthetic password and empty database, confined to this disposable network.
 docker run -d --name anteroom-image-smoke-pg --network "$network" \
   -e POSTGRES_PASSWORD=synthetic-smoke-password -e POSTGRES_DB=smoke postgres:16 >/dev/null
+# The official entrypoint's temporary initialization server is socket-only.
+# Wait for the final TCP listener instead of accepting that temporary server.
 for attempt in $(seq 1 60); do
-  if docker exec anteroom-image-smoke-pg pg_isready -U postgres -d smoke; then break; fi
+  if docker exec anteroom-image-smoke-pg pg_isready -h 127.0.0.1 -p 5432 -U postgres -d smoke; then break; fi
   sleep 1
 done
-docker exec anteroom-image-smoke-pg pg_isready -U postgres -d smoke
+if ! docker exec anteroom-image-smoke-pg pg_isready -h 127.0.0.1 -p 5432 -U postgres -d smoke; then
+  echo 'Postgres failed the final TCP readiness check after polling; see postgres.log.' >&2
+  exit 1
+fi
 database=postgresql://postgres:synthetic-smoke-password@anteroom-image-smoke-pg:5432/smoke
 docker run --name anteroom-image-smoke-init --network "$network" \
   -e ANTEROOM_DATABASE_URL="$database" "$image" \
