@@ -190,3 +190,170 @@ def test_hosted_inventory_names_the_marketplace_a_sold_item_sold_on(migration_en
     # One of two units sold: the Poshmark listing still has stock, so nothing is named sold.
     assert rows["tees"]["status"] == "active"
     assert rows["tees"]["sold_marketplaces"] == []
+
+
+def test_unsent_edits_uses_stored_normalized_hash_without_reading_listing_json(migration_engine):  # noqa: F811
+    from anteroom.services import listing_persistence, unsent_edits as unsent_module
+
+    engine = migration_engine
+    schema_migrations.ensure_schema(engine)
+    with Session(engine) as db:
+        db.add(Conversation(id="item", title="Coat"))
+        db.commit()
+        rev1 = listing_persistence.save_revision(
+            db, "item", {
+                "title": "Wool coat", "price": 42,
+                "poshmark_specifics": {"originalPrice": 50},
+                "marketplace_forms": {"unused": "x" * 1000},
+            }, "user_form",
+        )
+        rev2 = listing_persistence.save_revision(
+            db, "item", {
+                "title": "Wool coat", "price": 42,
+                "poshmark_specifics": {"originalPrice": 0},
+                "marketplace_forms": {"unused": "x" * 1000},
+            }, "user_form",
+        )
+        rev1_id = rev1.id
+        rev2_id = rev2.id
+        db.add(MarketplaceListing(
+            conversation_id="item", marketplace="ebay", state="published",
+            listing_url="https://www.ebay.com/itm/1", revision_id=rev1_id,
+        ))
+        db.commit()
+
+        assert db.get(ListingRevision, rev1_id).normalized_hash is not None
+        assert db.get(ListingRevision, rev2_id).normalized_hash == db.get(ListingRevision, rev1_id).normalized_hash
+
+        unsent_module._REVISIONS_MATCH.clear()
+        reads: list[str] = []
+
+        def capture(_connection, _cursor, statement, _parameters, _context, _many):
+            if statement.lstrip().upper().startswith("SELECT") and "listing_revisions" in statement:
+                reads.append(statement)
+
+        convs = db.query(Conversation).all()
+        event.listen(engine, "before_cursor_execute", capture)
+        try:
+            assert unsent_module.unsent_edits(db, convs, {"item": rev2_id}) == set()
+        finally:
+            event.remove(engine, "before_cursor_execute", capture)
+        assert reads
+        assert not any("listing_json" in sql for sql in reads)
+
+        # A real content edit is still flagged without reading listing_json.
+        rev3 = listing_persistence.save_revision(
+            db, "item", {
+                "title": "Wool coat", "price": 55,
+                "poshmark_specifics": {"originalPrice": 0},
+                "marketplace_forms": {"unused": "x" * 1000},
+            }, "user_form",
+        )
+        rev3_id = rev3.id
+        db.commit()
+        convs = db.query(Conversation).all()
+        unsent_module._REVISIONS_MATCH.clear()
+        reads.clear()
+        event.listen(engine, "before_cursor_execute", capture)
+        try:
+            assert unsent_module.unsent_edits(db, convs, {"item": rev3_id}) == {"item"}
+        finally:
+            event.remove(engine, "before_cursor_execute", capture)
+        assert reads
+        assert not any("listing_json" in sql for sql in reads)
+
+        # Legacy pre-migration rows with NULL normalized_hash backfill on first read,
+        # so the next cold start never reads listing_json for them again.
+        db.query(ListingRevision).update({"normalized_hash": None})
+        db.commit()
+        convs = db.query(Conversation).all()
+        unsent_module._REVISIONS_MATCH.clear()
+        assert unsent_module.unsent_edits(db, convs, {"item": rev3_id}) == {"item"}
+        db.expire_all()
+        assert db.get(ListingRevision, rev1_id).normalized_hash is not None
+        assert db.get(ListingRevision, rev3_id).normalized_hash is not None
+
+        convs = db.query(Conversation).all()
+        unsent_module._REVISIONS_MATCH.clear()
+        reads.clear()
+        event.listen(engine, "before_cursor_execute", capture)
+        try:
+            assert unsent_module.unsent_edits(db, convs, {"item": rev3_id}) == {"item"}
+        finally:
+            event.remove(engine, "before_cursor_execute", capture)
+        assert reads
+        assert not any("listing_json" in sql for sql in reads)
+
+
+def test_upgrade_adds_normalized_hash_to_existing_revisions(migration_engine):  # noqa: F811
+    engine = migration_engine
+    config = migration_config(engine)
+    command.upgrade(config, "26c67b32452c")
+    with engine.begin() as connection:
+        conversations = Table("conversations", MetaData(), autoload_with=connection)
+        revisions = Table("listing_revisions", MetaData(), autoload_with=connection)
+        connection.execute(conversations.insert().values(id="item", title="Coat"))
+        connection.execute(revisions.insert().values(
+            id="legacy-rev", conversation_id="item", source="test", listing_json={"title": "Coat", "price": 40},
+        ))
+    command.upgrade(config, "head")
+    with engine.begin() as connection:
+        assert connection.scalar(select(ListingRevision.normalized_hash).where(ListingRevision.id == "legacy-rev")) is None
+        assert connection.scalar(select(ListingRevision.listing_json).where(ListingRevision.id == "legacy-rev")) == {
+            "title": "Coat", "price": 40,
+        }
+
+
+def test_analytics_reads_paid_lines_once(migration_engine, monkeypatch):  # noqa: F811
+    from anteroom.services import inventory_analytics, item_status
+
+    engine = migration_engine
+    schema_migrations.ensure_schema(engine)
+    with Session(engine) as db:
+        db.add(Conversation(id="item", title="Coat"))
+        db.commit()
+        calls = 0
+        original = item_status.paid_lines
+
+        def counted(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(item_status, "paid_lines", counted)
+        inventory_analytics._read_analytics_inputs(db, None)
+        assert calls == 1
+
+
+def test_suggestions_reads_compact_columns_without_listing_json(migration_engine):  # noqa: F811
+    from anteroom.services.suggestions import list_suggestions
+
+    engine = migration_engine
+    schema_migrations.ensure_schema(engine)
+    with Session(engine) as db:
+        db.add(Conversation(id="item", title="Coat", status="draft"))
+        db.flush()
+        db.add(ListingRevision(id="rev", conversation_id="item", source="test", listing_json={
+            "title": "Wool coat", "brand": "Example",
+        }))
+        db.flush()
+        db.add(Listing(conversation_id="item", current_revision_id="rev", validation_status="error"))
+        db.commit()
+
+        statements: list[str] = []
+
+        def capture(_connection, _cursor, statement, _parameters, _context, _many):
+            if statement.lstrip().upper().startswith("SELECT"):
+                statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", capture)
+        try:
+            cards = list_suggestions(db)
+        finally:
+            event.remove(engine, "before_cursor_execute", capture)
+        assert [card["kind"] for card in cards] == ["fix_validation"]
+        assert not any("listing_json" in sql for sql in statements)
+        conv_queries = [sql for sql in statements if "conversations" in sql]
+        assert conv_queries
+        assert not any("updated_at" in sql or "box_id" in sql for sql in conv_queries)
+

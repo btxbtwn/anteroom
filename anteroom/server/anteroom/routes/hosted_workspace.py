@@ -12,8 +12,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import defer
 
-from anteroom.database import json_value
-
 from anteroom.models.conversation import Conversation, Message, Photo
 from anteroom.models.job import ACTIVE_JOB_STATUSES, Job
 from anteroom.models.listing import Listing, ListingRevision
@@ -180,14 +178,20 @@ def inventory_response(db):
             select(ordered.c.conversation_id, ordered.c.id, ordered.c.checksum).where(ordered.c.position == 1))}
     with snapshot_step(db, 'listings'):
         current = {}
-        for identity, sku, price, quantity in db.execute(select(Listing.conversation_id,
-                json_value(ListingRevision.inventory_fields, 'sku'), json_value(ListingRevision.inventory_fields, 'price'),
-                json_value(ListingRevision.inventory_fields, 'quantity')).join(
+        revisions: dict[str, str] = {}
+        for identity, revision_id, fields in db.execute(select(
+                Listing.conversation_id, Listing.current_revision_id, ListingRevision.inventory_fields).outerjoin(
                 ListingRevision, (ListingRevision.id == Listing.current_revision_id)
                 & (ListingRevision.conversation_id == Listing.conversation_id)
                 & (ListingRevision.user_id == Listing.user_id))):
-            current[identity] = {'sku': sku, 'price': float(price) if price is not None else None,
-                                 'quantity': int(quantity) if quantity is not None else None}
+            if revision_id:
+                revisions[identity] = revision_id
+            if isinstance(fields, dict):
+                price = fields.get('price')
+                quantity = fields.get('quantity')
+                current[identity] = {'sku': fields.get('sku'),
+                                     'price': float(price) if price is not None else None,
+                                     'quantity': int(quantity) if quantity is not None else None}
     from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
 
     with snapshot_step(db, 'direct'):
@@ -199,7 +203,7 @@ def inventory_response(db):
     from anteroom.services.unsent_edits import unsent_edits
 
     with snapshot_step(db, 'unsent'):
-        unsent = unsent_edits(db, rows, ConversationRepo(db).current_revision_ids())
+        unsent = unsent_edits(db, rows, revisions)
     # Ledger validation, cost allocation and hashing are CPU work over loaded
     # values. Keep scarce connections available while that work runs.
     db.close()
@@ -305,7 +309,10 @@ def save_listing(identity: str, body: contract.ListingSave, db=Depends(get_selle
     previous = before.listing_json if before else {}
     prepare_user_listing(previous, payload)
     match_general_category(db, previous, payload)
-    revision = ListingRevision(conversation_id=identity, listing_json=payload, source='user_form',
+    from anteroom.services.unsent_edits import normalized_listing_hash
+
+    revision = ListingRevision(conversation_id=identity, listing_json=payload,
+                               normalized_hash=normalized_listing_hash(payload), source='user_form',
                                parent_revision_id=before.id if before else None)
     db.add(revision)
     db.flush()

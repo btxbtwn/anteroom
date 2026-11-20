@@ -1,4 +1,10 @@
 """Compare current inventory content with saved marketplace revisions."""
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+
 from sqlalchemy.orm import Session
 
 from anteroom.repositories.queries import ListingRepo
@@ -10,6 +16,20 @@ from anteroom.repositories.queries import ListingRepo
 # every other request behind it.
 _REVISIONS_MATCH: dict[tuple[str, str], bool] = {}
 _REVISIONS_MATCH_MAX = 20_000
+
+
+def normalized_listing_hash(listing: dict | None) -> str | None:
+    """SHA-256 of ``listing`` after normalizing sizes and dropdowns, as revision saves do."""
+    if not isinstance(listing, dict):
+        return None
+    from anteroom.services.listing_generate import align_size_fields
+    from anteroom.services.validation import normalize_listing_dropdowns
+
+    shaped = copy.deepcopy(listing)
+    align_size_fields(shaped)
+    normalize_listing_dropdowns(shaped)
+    raw = json.dumps(shaped, sort_keys=True, default=str, separators=(",", ":"))
+    return hashlib.sha256(raw.encode()).hexdigest()
 
 
 def unsent_edits(db: Session, conversations: list, revisions: dict[str, str]) -> set[str]:
@@ -38,30 +58,22 @@ def unsent_edits(db: Session, conversations: list, revisions: dict[str, str]) ->
         _REVISIONS_MATCH.clear()
         unknown = wanted
     if unknown:
-        bodies = ListingRepo(db).revision_bodies({rev for pair in unknown for rev in pair})
+        needed = {rev for pair in unknown for rev in pair}
+        repo = ListingRepo(db)
+        hashes = repo.revision_hashes(needed)
+        missing = {rev for rev in needed if hashes.get(rev) is None}
+        if missing:
+            bodies = repo.revision_bodies(missing)
+            computed: dict[str, str] = {}
+            for rev_id, body in bodies.items():
+                digest = normalized_listing_hash(body)
+                if digest is not None:
+                    hashes[rev_id] = digest
+                    computed[rev_id] = digest
+            if computed and not (db.new or db.dirty or db.deleted):
+                repo.store_revision_hashes(computed)
+                db.commit()
         for current, sent in unknown:
-            _REVISIONS_MATCH[(current, sent)] = _listings_match(bodies.get(current), bodies.get(sent))
+            left = hashes.get(current)
+            _REVISIONS_MATCH[(current, sent)] = left is not None and left == hashes.get(sent)
     return {conv_id for conv_id, group in pairs.items() if not all(_REVISIONS_MATCH[pair] for pair in group)}
-
-
-def _listings_match(a: dict | None, b: dict | None) -> bool:
-    """Compare content after normalizing sizes and dropdowns, as revision saves do."""
-    import copy
-    import hashlib
-    import json
-
-    from anteroom.services.listing_generate import align_size_fields
-    from anteroom.services.validation import normalize_listing_dropdowns
-
-    if not isinstance(a, dict) or not isinstance(b, dict):
-        return False
-    shaped = []
-    for listing in (a, b):
-        listing = copy.deepcopy(listing)
-        align_size_fields(listing)
-        normalize_listing_dropdowns(listing)
-        raw = json.dumps(listing, sort_keys=True, default=str, separators=(",", ":"))
-        shaped.append(hashlib.sha256(raw.encode()).hexdigest())
-    return shaped[0] == shaped[1]
-
-

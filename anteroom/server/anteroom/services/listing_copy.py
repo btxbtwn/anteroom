@@ -153,7 +153,12 @@ def add_draft(db: Session, title: str, notes: dict, listing: dict, images: list[
     db.flush()
     for index, image in enumerate(images):
         db.add(Photo(conversation_id=conv.id, display_order=index, **image))
-    revision = ListingRevision(conversation_id=conv.id, listing_json=listing, source=source)
+    from anteroom.services.unsent_edits import normalized_listing_hash
+
+    revision = ListingRevision(
+        conversation_id=conv.id, listing_json=listing,
+        normalized_hash=normalized_listing_hash(listing), source=source,
+    )
     db.add(revision)
     db.flush()
     validation = validate_listing(listing, len(images), require_photos=True)

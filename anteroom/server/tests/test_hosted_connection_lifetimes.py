@@ -645,9 +645,9 @@ def test_inventory_derives_status_once_and_reconciles_stale_busy_rows(cloud, sig
     derive = item_status.statuses
     calls = []
 
-    def counted(db, conversations):
+    def counted(db, conversations, **kwargs):
         calls.append(len(conversations))
-        return derive(db, conversations)
+        return derive(db, conversations, **kwargs)
 
     monkeypatch.setattr(item_status, 'statuses', counted)
     response = client.get('/api/conversations', headers=alice)
