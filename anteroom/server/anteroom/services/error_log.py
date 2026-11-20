@@ -50,10 +50,10 @@ class ErrorLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         global _seq
         try:
-            message = redact(record.getMessage()[:MAX_MESSAGE_CHARS])
+            message = redact(record.getMessage())[:MAX_MESSAGE_CHARS]
             detail = None
             if record.exc_info:
-                detail = redact(logging.Formatter().formatException(record.exc_info)[-MAX_DETAIL_CHARS:])
+                detail = redact(logging.Formatter().formatException(record.exc_info))[-MAX_DETAIL_CHARS:]
             name = record.name
             source = name[len(_PREFIX):] if name.startswith(_PREFIX) else name
             with _lock:
@@ -130,7 +130,7 @@ class AppLogHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            message = redact(record.getMessage()[:MAX_MESSAGE_CHARS])
+            message = redact(record.getMessage())[:MAX_MESSAGE_CHARS]
             name = record.name
             source = name[len(_PREFIX):] if name.startswith(_PREFIX) else name
             entry = {

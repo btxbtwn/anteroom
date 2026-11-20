@@ -98,15 +98,15 @@ def get_automation(db: Session, automation_id: str) -> Automation:
     return row
 
 
-def create_automation(db: Session, body: dict, *, now: datetime | None = None) -> dict:
+def create_automation(db: Session, body: dict, *, now: datetime | None = None, commit: bool = True) -> dict:
     spec = compile_spec(body, now=now)
     if body.get("activate"):
         _require_ready(spec)
-    row = _insert(db, spec, activate=bool(body.get("activate")), now=now or utcnow())
+    row = _insert(db, spec, activate=bool(body.get("activate")), now=now or utcnow(), commit=commit)
     return view(row)
 
 
-def update_automation(db: Session, automation_id: str, body: dict, *, now: datetime | None = None) -> dict:
+def update_automation(db: Session, automation_id: str, body: dict, *, now: datetime | None = None, commit: bool = True) -> dict:
     row = get_automation(db, automation_id)
     merged = {
         "name": body.get("name", row.name),
@@ -148,17 +148,23 @@ def update_automation(db: Session, automation_id: str, body: dict, *, now: datet
     elif row.status == "active":
         row.next_run_at = _naive(first_due(spec["schedule"], spec["timezone"], moment))
     row.updated_at = _naive(moment)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(row)
     return view(row)
 
 
-def pause_automation(db: Session, automation_id: str) -> dict:
+def pause_automation(db: Session, automation_id: str, *, commit: bool = True) -> dict:
     row = get_automation(db, automation_id)
     if row.status != "active":
         raise AutomationError("Only a running automation can be paused.")
     row.status = "paused"
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return view(row)
 
 
@@ -256,11 +262,11 @@ def proposal_from_block(db: Session, block: str, *, now: datetime | None = None)
     return compile_spec(body, now=now, allow_incomplete=True)
 
 
-def confirm_proposal(db: Session, proposal: dict, *, now: datetime | None = None) -> dict:
+def confirm_proposal(db: Session, proposal: dict, *, now: datetime | None = None, commit: bool = True) -> dict:
     """Save a draft the seller just confirmed. Refuses anything still ambiguous."""
     op = proposal.get("op") or "create"
     if op == "pause":
-        return pause_automation(db, str(proposal.get("id") or ""))
+        return pause_automation(db, str(proposal.get("id") or ""), commit=commit)
     body = {key: proposal.get(key) for key in ("name", "prompt", "timezone", "schedule", "filters", "actions", "marketplaces", "price_repeat")}
     if op == "update":
         # Saves the task as the card showed it; a paused task stays paused. updated_at moves only
@@ -268,9 +274,9 @@ def confirm_proposal(db: Session, proposal: dict, *, now: datetime | None = None
         task = get_automation(db, str(proposal["id"]))
         if proposal.get("base_updated_at") != task.updated_at.isoformat():
             raise AutomationError("This automation changed after the assistant suggested this. Ask again.", 409)
-        return update_automation(db, task.id, body, now=now)
+        return update_automation(db, task.id, body, now=now, commit=commit)
     body["activate"] = True
-    return create_automation(db, body, now=now)
+    return create_automation(db, body, now=now, commit=commit)
 
 
 def brief_lines(db: Session) -> str:
@@ -852,7 +858,7 @@ def mark_retry(db: Session, run: AutomationRun, now: datetime, error: str) -> No
 # --- internals ---
 
 
-def _insert(db: Session, spec: dict, *, activate: bool, now: datetime) -> Automation:
+def _insert(db: Session, spec: dict, *, activate: bool, now: datetime, commit: bool = True) -> Automation:
     moment = as_utc(now)
     row = Automation(
         name=spec["name"], prompt=spec["prompt"] or None, status="active" if activate else "draft",
@@ -864,7 +870,10 @@ def _insert(db: Session, spec: dict, *, activate: bool, now: datetime) -> Automa
         created_at=_naive(moment), updated_at=_naive(moment),
     )
     db.add(row)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(row)
     return row
 

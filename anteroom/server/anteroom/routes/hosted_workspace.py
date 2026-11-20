@@ -5,7 +5,7 @@ or started, and no request accepts an owner, file path or operational identity.
 """
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -26,10 +26,17 @@ from anteroom.routes.hosted_direct_listing import ACTION_MARKETPLACES
 from anteroom.routes.suggestions import SuggestionsResponse
 from anteroom.services import user_settings
 from anteroom.services.hosted_database import get_seller_db
+from anteroom.services.hosted_limits import bounded_route_class
 from anteroom.services.hosted_listing_contract import editable_listing, stored_listing_fields
 from anteroom.version import app_version
 
-router = APIRouter(prefix='/api')
+# Listing saves, UI prefs, and metadata writes; photos upload through dedicated photo routes.
+MAX_WORKSPACE_BODY_BYTES = 2 * 1024 * 1024
+
+router = APIRouter(
+    prefix='/api',
+    route_class=bounded_route_class(lambda: MAX_WORKSPACE_BODY_BYTES, too_large_detail='Request body is too large'),
+)
 
 
 def conversation(db, identity, *, lock=False):
@@ -360,10 +367,10 @@ class UiInput(BaseModel):
     settled_shelf_expanded: bool | None = None
     stale_listing_days: int | None = Field(None, ge=15, le=120)
     recent_vendoo_labels: list[str] | None = Field(None, max_length=12)
-    remember_labels: str | list[str] | None = None
-    restore_labels: list[str] | None = None
-    forget_label: str | None = None
-    model_favorites: list[dict] | None = None
+    remember_labels: Annotated[str, Field(max_length=2000)] | Annotated[list[str], Field(max_length=200)] | None = None
+    restore_labels: list[str] | None = Field(None, max_length=500)
+    forget_label: str | None = Field(None, max_length=200)
+    model_favorites: list[dict] | None = Field(None, max_length=500)
     label_colors: dict[str, Literal["gray", "red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"]] | None = Field(None, max_length=200)
 
 

@@ -6,10 +6,38 @@ selection; this service owns the behavior surrounding those operations.
 from __future__ import annotations
 
 import copy
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 from anteroom.models.conversation import Conversation, Photo
 from anteroom.models.listing import Listing, ListingRevision
 from anteroom.repositories.queries import ConversationRepo, ListingRepo
+
+@event.listens_for(Session, "after_commit")
+def _publish_category_fills(db):
+    if db.in_nested_transaction():
+        return
+    from anteroom.services.native_field_fill import category_saved
+    for _transaction, args in db.info.pop("category_fills", []):
+        category_saved(*args)
+
+
+@event.listens_for(Session, "after_soft_rollback")
+def _rollback_category_fills(db, previous_transaction):
+    def rolled_back(transaction):
+        while transaction is not None:
+            if transaction is previous_transaction:
+                return True
+            transaction = transaction.parent
+        return False
+    db.info["category_fills"] = [(transaction, args) for transaction, args in db.info.get("category_fills", [])
+                                 if not rolled_back(transaction)]
+
+
+@event.listens_for(Session, "after_transaction_end")
+def _discard_category_fills(db, transaction):
+    if transaction.parent is None:
+        db.info.pop("category_fills", None)
+
 
 def _recheck_error_flag(db: Session, conv_id: str) -> None:
     """Re-check a listing a form save flagged, now that its inputs changed.
@@ -80,7 +108,7 @@ def _drop_fixed_marketplace_errors(db: Session, conv_id: str, before: dict, afte
             row.error = row.error_code = row.error_fields = row.marketplace_message = None
 
 
-def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None, *, expected_revision_id: str | None = None) -> ListingRevision:
+def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None, *, expected_revision_id: str | None = None, commit: bool = True) -> ListingRevision:
     """Save atomically; an empty expected id means no listing may exist yet."""
     repo = ListingRepo(db)
     from anteroom.services.native_field_fill import (
@@ -136,11 +164,19 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
         if conv and not parse_notes(conv.notes).get("titlePinned"):
             conv.title = title
 
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(revision)
     if source in FILL_ON_SOURCES:
         # A newly chosen marketplace category has new fields for the listing agent to fill.
-        category_saved(conv_id, before, listing_json, source)
+        if commit:
+            category_saved(conv_id, before, listing_json, source)
+        else:
+            db.info.setdefault("category_fills", []).append(
+                (db.get_nested_transaction() or db.get_transaction(),
+                 (conv_id, copy.deepcopy(before), copy.deepcopy(listing_json), source)))
     return revision
 
 

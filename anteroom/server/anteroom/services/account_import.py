@@ -157,14 +157,44 @@ def save_imported_photo(db, photo_id: str, field: str, key: str, data: bytes, wi
     return True
 
 
+# Known top-level seller settings persisted via user_settings. Mac-only keys
+# (such as backup_folder) and unknown keys are dropped on import.
+ALLOWED_SETTINGS_KEYS = frozenset({
+    'setup_guide_dismissed',
+    'listing_provider',
+    'photo_provider',
+    'ui',
+    'cursor_models',
+    'claude_models',
+    'key_provider_models',
+    'package_dimensions_in',
+    'ships_from_zip',
+    'mercari_shipping_label',
+    'listing_field_defaults',
+    'ebay_inventory_location',
+    'etsy_listing_defaults',
+    'ebay_listing_defaults',
+    'listing_formulas',
+    'sale_detection',
+    'sale_autodelist',
+    'business_note',
+    'marketplaces',
+    'hidden_fields',
+    'vendoo_sales_archived_at',
+    'brave_quota_exhausted',
+})
+
+
 def import_settings(values: dict) -> list[str]:
-    """Fill in settings the account does not have yet; the account's own choices win."""
+    """Fill in allowlisted settings the account does not have yet; the account's own choices win."""
     from anteroom.services.user_settings import update_settings
+    if not isinstance(values, dict):
+        raise HTTPException(422, 'Check the settings and try again')
     added: list[str] = []
 
     def fill(payload: dict) -> None:
         for name, value in values.items():
-            if name not in payload:
+            if name in ALLOWED_SETTINGS_KEYS and name not in payload:
                 payload[name] = value
                 added.append(name)
 
