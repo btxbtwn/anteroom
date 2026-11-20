@@ -166,11 +166,18 @@ class ConfigPathTest(unittest.TestCase):
             self.assertEqual(_read_sqlite_names(target), ["row-one"])
 
     def test_fresh_refusal_with_target_sidecar_blocks_empty_default_db(self):
-        """Legacy primary + foreign target WAL, no target primary: raise before open.
+        """Legacy primary + both WALs, no target primary: startup must not open a DB.
 
-        ``database.py`` calls ``adopt_legacy_database`` before ``make_engine``; a
-        raised error is what stops an empty ``anteroom.db`` from replacing listings.
+        Mirrors ``database.py`` (``adopt_legacy_database`` then ``make_engine``). The
+        raise must happen first so SQLite never creates ``anteroom.db`` or rewrites
+        the foreign target WAL.
         """
+        from anteroom.database import make_engine
+
+        def studio_sqlite_startup(root: Path) -> None:
+            config.adopt_legacy_database(root)
+            make_engine(f"sqlite:///{root / config.DATABASE_NAME}")
+
         with tempfile.TemporaryDirectory() as tmp:
             data = Path(tmp)
             legacy = data / "vendoo_studio.db"
@@ -178,14 +185,15 @@ class ConfigPathTest(unittest.TestCase):
             legacy_wal = data / "vendoo_studio.db-wal"
             if not legacy_wal.is_file():
                 legacy_wal.write_bytes(b"legacy-wal")
+            legacy_wal_before = legacy_wal.read_bytes()
             target_wal = data / "anteroom.db-wal"
             target_wal.write_bytes(b"foreign-wal")
             os.environ.pop("ANTEROOM_DATABASE_URL", None)
             with self.assertRaises(config.LegacyDatabaseAdoptionError):
-                config.adopt_legacy_database(data)
+                studio_sqlite_startup(data)
             self.assertTrue(legacy.is_file())
             self.assertFalse((data / "anteroom.db").exists())
-            self.assertTrue(legacy_wal.is_file())
+            self.assertEqual(legacy_wal.read_bytes(), legacy_wal_before)
             self.assertEqual(target_wal.read_bytes(), b"foreign-wal")
             self.assertFalse((data / config.LEGACY_DATABASE_ADOPTION_MARKER).exists())
             self.assertEqual(_read_sqlite_names(legacy), ["legacy-row"])
