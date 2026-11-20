@@ -411,3 +411,11 @@ def test_every_machine_in_every_process_group_must_run_the_new_image(machines: l
 def test_machine_image_falls_back_to_the_configured_image() -> None:
     check = _load_script("check-fly-machines")
     assert check.image_tag({"config": {"image": "registry.fly.io/app:v1-new@sha256:abc"}}) == "v1-new"
+
+
+def test_deploy_to_fly_retries_transient_errors() -> None:
+    steps = workflow("deploy-hosted.yml")["jobs"]["deploy"]["steps"]
+    deploy_step = next(step for step in steps if step.get("name") == "Deploy to Fly.io")
+    assert "for attempt in 1 2 3" in deploy_step["run"]
+    assert "flyctl deploy . --config deploy/fly/fly.toml --ha=false --image" in deploy_step["run"]
+

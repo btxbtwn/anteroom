@@ -14,8 +14,10 @@ permissions:
   actions: read
 
 jobs:
-  submit:
-    name: Package and submit
+  # Check whether the Bridge changed before joining the submission concurrency
+  # group so server-only runs cannot cancel a pending extension release.
+  check:
+    name: Check Bridge changes
     if: >-
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_run' &&
@@ -23,6 +25,33 @@ jobs:
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.changed.outputs.run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check whether the Bridge changed
+        id: changed
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || python3 .github/scripts/chrome-web-store.py changed --sha "$TARGET_SHA"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  submit:
+    name: Package and submit
+    needs: check
+    if: needs.check.outputs.run == 'true'
     # One submission at a time, never cancelled midway.
     concurrency:
       group: chrome-web-store

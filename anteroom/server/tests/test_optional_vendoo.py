@@ -258,3 +258,45 @@ def test_mode_checks_do_not_accept_the_old_enabled_flag(tmp_path, monkeypatch):
     assert listing_mode.read() == "direct"
     with pytest.raises(HTTPException):
         listing_mode.require("vendoo")
+
+
+def test_async_marketplace_clients_check_listing_mode_off_the_event_loop(monkeypatch):
+    import asyncio
+    import threading
+
+    from anteroom.routes import vendoo_api
+    from anteroom.services import ebay_client, marketplace_accounts
+
+    loop_thread = None
+    seen_threads: list[tuple[str, int]] = []
+
+    class StopEarly(RuntimeError):
+        pass
+
+    def fake_require(expected: str, db=None):
+        seen_threads.append((f"require:{expected}", threading.get_ident()))
+        raise StopEarly
+
+    def fake_read(db=None):
+        seen_threads.append(("read", threading.get_ident()))
+        return "vendoo"
+
+    monkeypatch.setattr(listing_mode, "require", fake_require)
+    monkeypatch.setattr(listing_mode, "read", fake_read)
+
+    async def exercise():
+        nonlocal loop_thread
+        loop_thread = threading.get_ident()
+        client = ebay_client.EbayClient("token", SimpleNamespace(user_id="s1"))
+        with pytest.raises(StopEarly):
+            await client.request("POST", "/sell/inventory/v1/offer")
+        with pytest.raises(StopEarly):
+            await marketplace_accounts.etsy_api("POST", "shops/1/listings")
+        assert await vendoo_api._with_live_schema({}, "ebay", []) == []
+
+    asyncio.run(exercise())
+    assert [label for label, _ in seen_threads] == ["require:direct", "require:direct", "read"]
+    assert all(tid != loop_thread for _, tid in seen_threads), (
+        f"listing_mode ran on the event loop thread {loop_thread}: {seen_threads}"
+    )
+

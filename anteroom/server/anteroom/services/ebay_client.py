@@ -158,7 +158,7 @@ class EbayClient:
                       raw: bool = False, binary: bytes | None = None) -> dict:
         if method.upper() not in {"GET", "HEAD"} and not app and not (xml is not None and call and call.startswith("Get")):
             from anteroom.services.listing_mode import require
-            require("direct")
+            await asyncio.to_thread(require, "direct")
         if not path.startswith(("/sell/", "/commerce/", "/buy/", "/ws/")) or ".." in path:
             raise EbayFailure("Invalid eBay operation.", 422)
         assert_identity(self.seller)

@@ -56,16 +56,27 @@ class StoreError(RuntimeError):
     pass
 
 
+def _is_packaged(relative: str) -> bool:
+    return not any(part in SKIP or part.startswith(".") for part in relative.split("/"))
+
+
 def tracked_files(root: Path = ROOT) -> list[str]:
     """The extension's files git tracks, relative to anteroom-extension/, minus what Chrome never loads."""
     listed = subprocess.run(["git", "ls-files", "-z", "--", EXTENSION], cwd=root, check=True,
                             capture_output=True).stdout.decode().split("\0")
-    files = []
-    for path in filter(None, listed):
-        relative = path.removeprefix(EXTENSION + "/")
-        if not any(part in SKIP or part.startswith(".") for part in relative.split("/")):
-            files.append(relative)
-    return sorted(files)
+    return sorted(relative for path in filter(None, listed)
+                  if _is_packaged(relative := path.removeprefix(EXTENSION + "/")))
+
+
+def extension_changed(sha: str, root: Path = ROOT) -> bool:
+    """Whether ``sha`` changed any packaged file under anteroom-extension/ compared to its first parent."""
+    parent = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"{sha}^1"], cwd=root,
+                            capture_output=True, text=True)
+    if parent.returncode != 0:
+        return True
+    diff = subprocess.run(["git", "diff", "--name-only", "--no-renames", "-z", f"{sha}^1", sha, "--", EXTENSION],
+                          cwd=root, check=True, capture_output=True).stdout.decode().split("\0")
+    return any(_is_packaged(path.removeprefix(EXTENSION + "/")) for path in filter(None, diff))
 
 
 def referenced_files(source: Path) -> set[str]:
@@ -207,11 +218,18 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("package").add_argument("--out", type=Path, required=True)
     commands.add_parser("release").add_argument("--package", type=Path, required=True)
+    changed = commands.add_parser("changed")
+    changed.add_argument("--sha", required=True)
     gate = commands.add_parser("verify-ci")
     gate.add_argument("--repo", required=True)
     gate.add_argument("--sha", required=True)
     args = parser.parse_args(argv)
     try:
+        if args.command == "changed":
+            if extension_changed(args.sha):
+                return 0
+            print(f"No packaged {EXTENSION}/ files changed in {args.sha}; skipping Chrome Web Store submission.")
+            return 1
         if args.command == "verify-ci":
             verify_ci(args.repo, args.sha)
             return 0
