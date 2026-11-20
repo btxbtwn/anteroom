@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
 import time
 import traceback
@@ -15,9 +16,26 @@ from anteroom.services.hosted_context import for_seller
 from anteroom.services.background_loop import BackgroundLoop
 from anteroom.services.service_context import current, use
 
+DEFAULT_WORKER_CONCURRENCY = 4
+
 # Handlers for queued work that is not a draft task, by kind. The assistant's
 # route registers its answer here, so this service never imports a route.
 _handlers = {}
+
+
+def _worker_concurrency(override: int | None = None) -> int:
+    if override is not None:
+        return max(1, int(override))
+    raw = os.environ.get("ANTEROOM_WORKER_CONCURRENCY")
+    if raw is None or not raw.strip():
+        return DEFAULT_WORKER_CONCURRENCY
+    try:
+        return max(1, int(raw.strip()))
+    except ValueError:
+        logging.getLogger(__name__).warning(
+            "Invalid ANTEROOM_WORKER_CONCURRENCY=%r; using default %d", raw, DEFAULT_WORKER_CONCURRENCY,
+        )
+        return DEFAULT_WORKER_CONCURRENCY
 
 
 def register(kind, handler):
@@ -154,31 +172,57 @@ async def run_claimed(task_id, owner, token, *, heartbeat_loop: BackgroundLoop):
             await asyncio.gather(*pending, return_exceptions=True)
 
 
-async def serve(engine, stopping):
-    active = set()
+async def serve(engine, stopping, *, max_concurrency: int | None = None):
+    limit = _worker_concurrency(max_concurrency)
+    slots = asyncio.Semaphore(limit)
+    active: set[asyncio.Task] = set()
     heartbeats = BackgroundLoop('anteroom-draft-leases')
 
     def settled(task):
         active.discard(task)
+        slots.release()
         if not task.cancelled() and task.exception() is not None:
             # Exception text can contain private database parameters.
             logging.getLogger(__name__).error('Draft task worker stopped unexpectedly')
 
     try:
         while not stopping.is_set():
-            try:
-                claimed = await asyncio.to_thread(queue.claim, engine)
-            except SQLAlchemyError:
-                # Retry queue availability, never a claimed task or marketplace action.
-                logging.getLogger(__name__).warning('Draft queue database is temporarily unavailable')
-                await asyncio.sleep(5)
+            # Acquire a concurrency slot before claiming so queued tasks stay
+            # unclaimed instead of sitting claimed and expiring their lease.
+            if slots.locked():
+                if active:
+                    if any(task.done() for task in active):
+                        await asyncio.sleep(0)
+                    else:
+                        await asyncio.wait(active, timeout=0.25, return_when=asyncio.FIRST_COMPLETED)
+                else:
+                    await asyncio.sleep(0)
                 continue
-            if claimed is None:
-                await asyncio.sleep(1)
-            else:
-                task = asyncio.create_task(run_claimed(*claimed, heartbeat_loop=heartbeats))
-                active.add(task)
-                task.add_done_callback(settled)
+            await slots.acquire()
+            handed_off = False
+            sleep_s = 0.0
+            try:
+                if stopping.is_set():
+                    break
+                try:
+                    claimed = await asyncio.to_thread(queue.claim, engine)
+                except SQLAlchemyError:
+                    # Retry queue availability, never a claimed task or marketplace action.
+                    logging.getLogger(__name__).warning('Draft queue database is temporarily unavailable')
+                    sleep_s = 5.0
+                    claimed = None
+                if claimed is None:
+                    sleep_s = sleep_s or 1.0
+                else:
+                    task = asyncio.create_task(run_claimed(*claimed, heartbeat_loop=heartbeats))
+                    active.add(task)
+                    task.add_done_callback(settled)
+                    handed_off = True
+            finally:
+                if not handed_off:
+                    slots.release()
+            if sleep_s:
+                await asyncio.sleep(sleep_s)
         # Stop claiming on shutdown, but let every claimed draft save first.
         await asyncio.gather(*active, return_exceptions=True)
     finally:

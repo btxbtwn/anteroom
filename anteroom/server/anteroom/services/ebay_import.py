@@ -122,7 +122,7 @@ def listing_snapshot(info: dict) -> dict:
             "ebay_specifics": {**specifics, **({"conditionDescription": info["conditionDescription"]} if info.get("conditionDescription") else {})}}
 
 
-async def import_listing(client: EbayClient, listing_id: str) -> dict:
+async def import_listing(client: EbayClient, listing_id: str, *, unless_matched: bool = False) -> dict:
     info = await ebay_actions.owned_listing(client, listing_id)
     if info.get("id") != listing_id:
         raise EbayFailure("eBay returned a different listing. Nothing was imported.", 409)
@@ -130,6 +130,7 @@ async def import_listing(client: EbayClient, listing_id: str) -> dict:
     try:
         return await inventory_import.save_owned_listing(
             "ebay", listing_id, snapshot, info.get("images", []), lambda: assert_identity(client.seller),
+            unless_matched=unless_matched,
         )
     except inventory_import.ImportConflict as exc:
         raise EbayFailure(str(exc), 409) from exc

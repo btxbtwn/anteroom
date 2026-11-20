@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
+from contextlib import asynccontextmanager
 
 from sqlalchemy.orm import Session
 
@@ -297,11 +299,43 @@ async def _regenerate_queued(conv_id: str) -> dict:
         await asyncio.sleep(1)
 
 
-_turns: dict[str, asyncio.Lock] = {}
+class _TurnEntry:
+    __slots__ = ("lock", "waiters")
+
+    def __init__(self) -> None:
+        self.lock = asyncio.Lock()
+        self.waiters = 0
 
 
-def _turn(marketplace: str) -> asyncio.Lock:
-    return _turns.setdefault(marketplace, asyncio.Lock())
+_turns_guard = threading.Lock()
+_turns: dict[tuple[int, str, str], _TurnEntry] = {}
+
+
+def _turn_owner() -> str:
+    from anteroom.services.service_context import current
+
+    context = current()
+    return context.seller_id if context is not None else "local"
+
+
+@asynccontextmanager
+async def _turn(marketplace: str):
+    """Serialize automation marketplace actions per (event loop, seller, marketplace)."""
+    key = (id(asyncio.get_running_loop()), _turn_owner(), marketplace)
+    with _turns_guard:
+        entry = _turns.get(key)
+        if entry is None:
+            entry = _TurnEntry()
+            _turns[key] = entry
+        entry.waiters += 1
+    try:
+        async with entry.lock:
+            yield
+    finally:
+        with _turns_guard:
+            entry.waiters -= 1
+            if entry.waiters == 0 and not entry.lock.locked() and _turns.get(key) is entry:
+                del _turns[key]
 
 
 def _blocked(db: Session, marketplace: str) -> bool:

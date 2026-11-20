@@ -52,10 +52,26 @@ const SOURCING_TABS = [
   { id: "scout", label: "Scout an item" },
 ] as const;
 
-export function SourcingPage({ onOpenListing }: Props) {
-  const [tab, setTab] = useState(() => localStorage.getItem(TAB_KEY) === "scout" ? "scout" : "boxes");
-  const choose = (next: "boxes" | "scout") => {
+function readSourcingTab(): "boxes" | "scout" {
+  try {
+    return localStorage.getItem(TAB_KEY) === "scout" ? "scout" : "boxes";
+  } catch {
+    return "boxes";
+  }
+}
+
+function saveSourcingTab(next: "boxes" | "scout"): void {
+  try {
     localStorage.setItem(TAB_KEY, next);
+  } catch {
+    /* private mode / quota — in-memory tab switch still works */
+  }
+}
+
+export function SourcingPage({ onOpenListing }: Props) {
+  const [tab, setTab] = useState<"boxes" | "scout">(readSourcingTab);
+  const choose = (next: "boxes" | "scout") => {
+    saveSourcingTab(next);
     setTab(next);
   };
   return (

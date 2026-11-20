@@ -35,6 +35,7 @@ import { SuggestionsPanel } from "../components/SuggestionsPanel";
 import { isConfirmDialogOpen } from "../ui/confirmDialog";
 import { dismissSetupGuide, isSetupGuideDismissed } from "../onboarding";
 import { toastManager } from "../components/ui/toast";
+import { clearComposerDraft } from "../components/chat/composerDrafts";
 import { takeMarketplaceSignIn } from "../lib/marketplaceSignIn";
 import { Button } from "../components/ui/button";
 import { Empty, EmptyContent, EmptyHeader, EmptyTitle } from "../components/ui/empty";
@@ -93,7 +94,12 @@ export function App() {
     initialOpenListing,
   );
   const selectedConvId = openListingState?.id ?? null;
-  const setSelectedConvId = useCallback((id: string) => dispatchOpenListing({ type: "open", id }), []);
+  const selectedConvIdRef = useRef(selectedConvId);
+  useLayoutEffect(() => { selectedConvIdRef.current = selectedConvId; }, [selectedConvId]);
+  const setSelectedConvId = useCallback((id: string) => {
+    selectedConvIdRef.current = id;
+    dispatchOpenListing({ type: "open", id });
+  }, []);
   const clearListingWorkspace = (id: string) => dispatchOpenListing({ type: "clear", id });
   const listingFromUrl = Boolean(new URLSearchParams(window.location.search).get("listing"));
   const [suggestionsVisited, setSuggestionsVisited] = useState(false);
@@ -509,7 +515,10 @@ export function App() {
   // without a photo or a typed word, it is discarded (see blankDraft.ts).
   const freshDraftId = useRef<string | null>(null);
   const discardFreshDraft = useCallback((id: string) => {
-    void discardBlankDraft(id, api.conversations.discardBlank).then((discarded) => {
+    void discardBlankDraft(id, api.conversations.discardBlank, {
+      // Navigation can reopen this listing while its last save or upload settles.
+      shouldDiscard: () => selectedConvIdRef.current !== id,
+    }).then((discarded) => {
       if (discarded) void queryClient.invalidateQueries({ queryKey: ["conversations"] });
     });
   }, [queryClient]);
@@ -538,11 +547,18 @@ export function App() {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       const previous = freshDraftId.current;
       freshDraftId.current = conv.id;
-      if (previous && previous !== conv.id) discardFreshDraft(previous);
       setSelectedConvId(conv.id);
+      if (previous && previous !== conv.id) discardFreshDraft(previous);
       goListings();
       setMobilePane(runtime.hosted ? "editor" : "workspace");
       setMobileSidebarOpen(false);
+    },
+    onError: (err: Error) => {
+      toastManager.add({
+        type: "error",
+        title: "Could not start a new listing",
+        description: err.message || "Check your connection and try again.",
+      });
     },
   });
   const createListing = () => {
@@ -649,6 +665,7 @@ export function App() {
   const { mutate: deleteConversation } = useMutation({
     mutationFn: (convId: string) => api.conversations.delete(convId),
     onSuccess: (_data, convId) => {
+      clearComposerDraft(`listing:${convId}`);
       dispatchOpenListing({ type: "close", id: convId });
       if (selectedConvId === convId) {
         setMobilePane(runtime.hosted ? "editor" : "workspace");
@@ -656,6 +673,13 @@ export function App() {
       }
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    },
+    onError: (err: Error) => {
+      toastManager.add({
+        type: "error",
+        title: "Could not delete the listing",
+        description: err.message || "Check your connection and try again.",
+      });
     },
   });
 

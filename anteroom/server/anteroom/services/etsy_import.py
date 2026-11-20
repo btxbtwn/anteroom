@@ -110,6 +110,8 @@ def _snapshot(item: dict, sku: str | None, quantity: int, price: float, properti
         details["styles"] = styles
     if type(item.get("is_supply")) is bool:
         details["what_is"] = "1" if item["is_supply"] else "0"
+    if type(item.get("should_auto_renew")) is bool:
+        details["renewalOption"] = "Automatic" if item["should_auto_renew"] else "Manual"
     details["listing_type"] = "physical"
     attributes = {}
     rows = properties.get("results")
@@ -129,7 +131,7 @@ def _snapshot(item: dict, sku: str | None, quantity: int, price: float, properti
             "direct_category_ids": {"etsy": str(item["taxonomy_id"])}, "etsy_specifics": details}
 
 
-async def import_listing(client: EtsyClient, listing_id: str) -> dict:
+async def import_listing(client: EtsyClient, listing_id: str, *, unless_matched: bool = False) -> dict:
     item = await client.listing(listing_id)
     if str(item.get("listing_id")) != listing_id or str(item.get("shop_id")) != client.shop_id:
         raise EtsyFailure("This listing does not belong to the connected Etsy shop.", 409)
@@ -150,6 +152,7 @@ async def import_listing(client: EtsyClient, listing_id: str) -> dict:
     try:
         return await inventory_import.save_owned_listing(
             "etsy", listing_id, snapshot, urls, client.assert_current, binding={"etsy_shop_id": client.shop_id},
+            unless_matched=unless_matched,
         )
     except inventory_import.ImportConflict as exc:
         raise EtsyFailure(str(exc), 409) from exc

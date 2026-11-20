@@ -25,6 +25,7 @@ import { linkOpenedElsewhere } from "./authMessages";
 import { followSellerChanges } from "./liveUpdates";
 import { StartupScreen } from "./StartupScreen";
 import { ConnectorPage } from "./ConnectorPage";
+import { clearImportAll } from "../importAll";
 import { DEVICE_BUSTER, DEVICE_MAX_AGE_MS, devicePersister, forgetDeviceWorkspace, keepReadsForDevice, keepsOnDevice, saveRuntime, savedRuntime } from "./deviceCache";
 import "./workspace.css";
 
@@ -94,14 +95,14 @@ function CloudApp() {
     return () => { active = false; subscription.unsubscribe(); };
   }, []);
   if (!ready) return <StartupScreen/>;
-  if (session && newPassword) return <div className="cloud-auth"><SetPassword client={supabase} onDone={() => setNewPassword(false)}/></div>;
+  if (session && newPassword) return <SetPassword client={supabase} onDone={() => setNewPassword(false)}/>;
   if (session && connectorMode) return <ConnectorPage email={session.user.email || "Your Anteroom account"} onSignOut={async () => {
     const { error } = await supabase.auth.signOut({ scope: "local" });
     if (error) throw error;
   }}/>;
   if (session) return <HostedWorkspace key={session.user.id} session={session}/>;
   if (!error && showsLanding(window.location.search, mac)) return <Landing/>;
-  return <div className="cloud-auth"><SignIn client={supabase} notice={error} sandbox={sandbox}/></div>;
+  return <SignIn client={supabase} notice={error} sandbox={sandbox}/>;
 }
 
 function HostedWorkspace({ session }: { session: Session }) {
@@ -118,6 +119,8 @@ function HostedWorkspace({ session }: { session: Session }) {
   }));
   const [runtime, setRuntime] = useState<HostedRuntime | null>(null);
   const [error, setError] = useState("");
+  // Import-all runs belong to this seller: none carries over to the next one signed in on this tab.
+  useEffect(() => () => clearImportAll(), []);
   useEffect(() => {
     const refresh = { active: true, fresh: false, shown: false };
     // Open on the workspace saved from the last visit while the server confirms it.

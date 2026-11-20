@@ -45,8 +45,8 @@ test("the General form keeps its category-first order and quiet field tools", as
     if (!phone) {
       // The rail says Etsy's state in full; the listing check below gives the reason once.
       const etsy = page.getByRole("navigation", { name: "Marketplaces" }).getByRole("listitem", { name: "Etsy" });
-      const status = etsy.getByRole("status");
-      await expect(status).toHaveText("May not qualify");
+      const status = etsy.getByText("May not qualify", { exact: true });
+      await expect(status).toBeVisible();
       expect(await status.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
       await expect(etsy.getByRole("button").first()).toHaveAttribute("title", "May not qualify");
     }

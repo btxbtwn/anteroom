@@ -18,8 +18,8 @@ import httpx
 
 from anteroom.services.photo_store import photo_store
 from anteroom.services.etsy_fields import (
-    sanitize_etsy_tags, etsy_eligible, etsy_when_made_code, etsy_when_options, etsy_when_raw, etsy_when_to_store, etsy_what_raw,
-    etsy_who_raw, is_etsy_digital_listing,
+    DEFAULT_ETSY_RENEWAL, sanitize_etsy_tags, etsy_eligible, etsy_renewal_raw, etsy_when_made_code, etsy_when_options,
+    etsy_when_raw, etsy_when_to_store, etsy_what_raw, etsy_who_raw, is_etsy_digital_listing,
 )
 from anteroom.services import marketplace_accounts, marketplace_schemas
 from anteroom.services.keychain import get_marketplace_accounts
@@ -113,6 +113,12 @@ def _matches(remote: dict, snapshot: dict) -> bool:
     try:
         from anteroom.services.seller_overrides import marketplace_text
 
+        details = snapshot.get("etsy_specifics")
+        wanted_renewal = etsy_renewal_raw(details) if isinstance(details, dict) else ""
+        if wanted_renewal:
+            remote_renewal = etsy_renewal_raw({"should_auto_renew": remote.get("should_auto_renew")})
+            if remote_renewal != wanted_renewal:
+                return False
         return (html.unescape(str(remote.get("title") or "")) == etsy_title(snapshot)
                 and html.unescape(str(remote.get("description") or "")) == marketplace_text(snapshot, "etsy", "description")
                 and _remote_price(remote) == _price(etsy_price(snapshot)))
@@ -214,7 +220,7 @@ def etsy_quantity(snapshot: dict) -> int:
     return quantity
 
 
-def draft_fields(snapshot: dict, *, creating: bool) -> dict:
+def draft_fields(snapshot: dict, *, creating: bool, default_renewal: str | None = None) -> dict:
     from anteroom.services.seller_overrides import marketplace_text
 
     title, description = etsy_title(snapshot), marketplace_text(snapshot, "etsy", "description")
@@ -226,11 +232,16 @@ def draft_fields(snapshot: dict, *, creating: bool) -> dict:
     fields = {"title": title, "description": description, "price": price}
     # Etsy takes list fields as comma-separated values.
     fields.update({key: ",".join(values) for key, values in list_fields(snapshot).items()})
+    details = snapshot.get("etsy_specifics")
+    if not isinstance(details, dict):
+        details = {}
+    renewal = etsy_renewal_raw(details)
     if not creating:
+        if renewal:
+            fields["should_auto_renew"] = "true" if renewal == "Automatic" else "false"
         return fields
     if is_etsy_digital_listing(snapshot):
         raise ValueError("This listing flow supports physical Etsy items. Prepare digital files in Etsy Shop Manager.")
-    details = snapshot.get("etsy_specifics") or {}
     who = _code(etsy_who_raw(details), _WHO)
     what = _code(etsy_what_raw(details), _WHAT)
     when = etsy_when_to_store(etsy_when_raw(details, snapshot), snapshot, etsy_when_options())
@@ -238,9 +249,11 @@ def draft_fields(snapshot: dict, *, creating: bool) -> dict:
     from anteroom.services.direct_categories import direct_category_id
 
     category = direct_category_id(snapshot, "etsy")
+    chosen_renewal = renewal or default_renewal or DEFAULT_ETSY_RENEWAL
     # Like the Vendoo path: is_supply is Etsy's "What is it?" answer, a supply or tool.
     fields.update(quantity=str(etsy_quantity(snapshot)), who_made=who or "", when_made=when, is_supply="true" if what == "1" else "false",
-                  taxonomy_id=category, type="physical", should_auto_renew="false")
+                  taxonomy_id=category, type="physical",
+                  should_auto_renew="true" if chosen_renewal == "Automatic" else "false")
     # Only use explicit seller-selected IDs. Preparation renames these to
     # Vendoo's camelCase; the listing may still have the snake_case spelling.
     # Shipping and processing can also be completed in the native draft; never
@@ -322,7 +335,8 @@ def _key(text: str) -> str:
 # Listing keys that are never category properties.
 _NOT_PROPERTIES = frozenset(_key(key) for key in (
     "who_made", "what_is", "when_made", "section", "materials", "tags", "styles", "style", "category_specifics",
-    "shipping_profile_id", "return_policy_id", "readiness_state_id", "listing_type", "renewal_option", "videoId"))
+    "shipping_profile_id", "return_policy_id", "readiness_state_id", "listing_type", "renewal_option",
+    "should_auto_renew", "videoId"))
 
 
 def _answers(snapshot: dict) -> dict[str, list[str]]:
@@ -452,6 +466,7 @@ def _success(remote: dict) -> dict:
 _FIELD_PATHS = {"shipping_profile_id": "etsy_specifics.shipping_profile_id", "readiness_state_id": "etsy_specifics.readiness_state_id",
                 "return_policy_id": "etsy_specifics.return_policy_id", "taxonomy_id": "direct_category_ids.etsy",
                 "who_made": "etsy_specifics.who_made", "when_made": "etsy_specifics.when_made", "is_supply": "etsy_specifics.what_is",
+                "should_auto_renew": "etsy_specifics.renewalOption",
                 "price": "price", "quantity": "quantity", "title": "title", "description": "description", "image": "photos"}
 
 
@@ -463,6 +478,7 @@ _PLAIN = {
     "who_made": "Etsy needs to know who made this item. Choose it under Who made it?",
     "when_made": "Etsy needs to know when this item was made. Choose it under When was it made?",
     "is_supply": "Etsy needs to know whether this is a finished item or a supply. Choose it under What is it?",
+    "should_auto_renew": "Etsy did not accept the renewal option. Choose Automatic or Manual under Renewal options.",
     "shipping_profile_id": "Etsy needs a shipping profile. Choose one in Settings → Connections.",
     "readiness_state_id": "Etsy needs a processing time. Choose one in Settings → Connections.",
     "return_policy_id": "Etsy needs a return policy. Choose one in Settings → Connections.",
@@ -718,7 +734,8 @@ async def _video_kept(item_id: str, snapshot: dict, binding: dict) -> bool:
 async def execute(action: str, snapshot: dict, photos: list, binding: dict,
                   record: Callable[[dict], None], active: Callable[[], bool], *, confirm: bool = False,
                   shipping_profile_id: str | None = None, readiness_state_id: str | None = None,
-                  return_policy_id: str | None = None, package: dict | None = None) -> dict:
+                  return_policy_id: str | None = None, package: dict | None = None,
+                  default_renewal: str | None = None) -> dict:
     attempted = False
     rejected = False
     try:
@@ -798,7 +815,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
         if action != "save_draft":
             raise ValueError("Unsupported Etsy API action.")
         creating = not binding.get("draft_url")
-        fields = draft_fields(snapshot, creating=True)
+        fields = draft_fields(snapshot, creating=True, default_renewal=default_renewal)
         taxonomy = fields["taxonomy_id"]
         properties = await marketplace_schemas.etsy_properties(taxonomy) if re.fullmatch(r"[1-9]\d*", taxonomy) else []
         assignments = property_values(snapshot, properties)

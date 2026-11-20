@@ -6,6 +6,9 @@
     var light = pref === "light" || (pref === "system" && matchMedia("(prefers-color-scheme: light)").matches);
     document.documentElement.classList.toggle("dark", !light);
     document.documentElement.style.colorScheme = light ? "light" : "dark";
-    document.querySelector('meta[name="color-scheme"]').setAttribute("content", light ? "light" : "dark");
+    var themeMeta = document.querySelector('meta[name="theme-color"]');
+    if (themeMeta) themeMeta.setAttribute("content", light ? "#ffffff" : "#000000");
+    var schemeMeta = document.querySelector('meta[name="color-scheme"]');
+    if (schemeMeta) schemeMeta.setAttribute("content", light ? "light" : "dark");
   } catch (e) {}
 })();
