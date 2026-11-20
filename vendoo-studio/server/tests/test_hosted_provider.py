@@ -70,6 +70,22 @@ def test_stream_and_request_errors_do_not_expose_credentials():
     asyncio.run(run())
 
 
+def test_hosted_provider_preserves_signature_without_exposing_wrapped():
+    import inspect
+
+    class SearchProvider:
+        name, vision_model, listing_model = 'openrouter', 'v', 'l'
+        api_key = 'fake-private-key'
+
+        async def web_search(self, messages, *, max_calls=None, allowed_domains=None):
+            return {'answer': '', 'sources': []}
+
+    hosted = HostedProvider(SearchProvider())
+    search = hosted.web_search
+    assert not hasattr(search, '__wrapped__')
+    assert set(inspect.signature(search).parameters) == {'messages', 'max_calls', 'allowed_domains'}
+
+
 def test_hosted_settings_http_uses_shared_handlers_without_local_signins(monkeypatch):
     from types import SimpleNamespace
     from fastapi.testclient import TestClient

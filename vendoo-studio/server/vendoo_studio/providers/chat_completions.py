@@ -391,8 +391,14 @@ def openrouter_sources(payload: dict) -> list[dict]:
     return sources
 
 
-# The most web searches one OpenRouter research request may run.
+# The most web searches one OpenRouter research request may run when the caller
+# does not pass a tighter budget, and OpenRouter's own per-request server cap.
 WEB_SEARCH_MAX_CALLS = 8
+OPENROUTER_WEB_SEARCH_CEILING = 30
+# Perplexity's search engine ($5/1K vs $10-$14/1K for native Google/OpenAI
+# grounding) returns real page excerpts, verified URLs, and honors
+# allowed_domains across every listing model.
+OPENROUTER_WEB_SEARCH_ENGINE = "perplexity"
 
 
 class OpenRouterProvider(ChatCompletionsProvider):
@@ -411,19 +417,35 @@ class OpenRouterProvider(ChatCompletionsProvider):
             provider["require_parameters"] = True
         return {**super()._body(messages, model, reasoning=reasoning, **extra), "provider": provider}
 
-    async def web_search(self, messages: list[dict]) -> dict:
+    async def web_search(
+        self,
+        messages: list[dict],
+        *,
+        max_calls: int | None = None,
+        allowed_domains: tuple[str, ...] | list[str] | None = None,
+    ) -> dict:
         from vendoo_studio.providers.chatgpt_codex import web_search_answer
 
+        cap = WEB_SEARCH_MAX_CALLS if max_calls is None else max_calls
+        if cap < 1:
+            raise ValueError("max_calls must be at least 1")
+        cap = min(cap, OPENROUTER_WEB_SEARCH_CEILING)
+        parameters: dict = {
+            "engine": OPENROUTER_WEB_SEARCH_ENGINE,
+            "max_uses": cap,
+        }
+        domains = [d.strip() for d in (allowed_domains or ()) if isinstance(d, str) and d.strip()]
+        if domains:
+            parameters["allowed_domains"] = domains
         body = self._body(messages, self.listing_model)
         body["input"] = body.pop("messages")
         # Unlike the one-search web plugin, the Responses server tool lets the
         # model refine queries, as the sold-comps research prompt asks.
         # https://openrouter.ai/docs/guides/features/server-tools/web-search
-        body["tools"] = [{"type": "openrouter:web_search"}]
+        body["tools"] = [{"type": "openrouter:web_search", "parameters": parameters}]
         # Each search is billed on top of the tokens its results add, and the
-        # server tool otherwise allows up to 30 per request. The research
-        # prompt asks for roughly eight; hold the model to that.
-        body["max_tool_calls"] = WEB_SEARCH_MAX_CALLS
+        # server tool otherwise allows up to 30 per request.
+        body["max_tool_calls"] = cap
         payload = await self._post(body, timeout=90, endpoint="responses")
         answer = web_search_answer(payload.get("output") or [])
         sources = openrouter_sources(payload)
