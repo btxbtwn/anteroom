@@ -23,6 +23,20 @@ LEGACY_SIGN_IDENTITY="${MACOS_LEGACY_SIGNING_IDENTITY:-}"
 BRIDGE="$RELEASE/bridge"
 LEGACY_SIGNED_APP="$BRIDGE/payload/Anteroom.app"
 
+PREBUILT=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --prebuilt)
+      PREBUILT=1
+      shift
+      ;;
+    *)
+      echo "Usage: package-macos-app.sh [--prebuilt]" >&2
+      exit 2
+      ;;
+  esac
+done
+
 SIGN_IDENTITY="${MACOS_SIGNING_IDENTITY:-}"
 if [[ -z "$SIGN_IDENTITY" || "$SIGN_IDENTITY" == "-" ]]; then
   echo "MACOS_SIGNING_IDENTITY must name a persistent code-signing certificate." >&2
@@ -42,12 +56,14 @@ fi
 }
 
 cd "$ROOT"
-# The exact packages uv.lock pins, hash-checked, so the app ships what CI tested.
-"$ROOT/scripts/install-locked.sh" "$PYTHON" package
-if [[ ! -d node_modules ]]; then
-  npm install
+if [[ "$PREBUILT" == 0 ]]; then
+  # The exact packages uv.lock pins, hash-checked, so the app ships what CI tested.
+  "$ROOT/scripts/install-locked.sh" "$PYTHON" package
+  if [[ ! -d node_modules ]]; then
+    npm ci
+  fi
+  npm run build
 fi
-npm run build
 if [[ ! -f dist/index.html ]]; then
   echo "Frontend build did not produce dist/index.html." >&2
   exit 1

@@ -1,0 +1,1 @@
+- Harden macOS release packaging, Chrome Bridge extension packaging, and hosted build checks.

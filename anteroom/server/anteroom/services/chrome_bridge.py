@@ -29,6 +29,7 @@ EXTENSION_SKIP = {
     "AGENTS.md",
     ".git",
     ".gitignore",
+    ".oxlintrc.json",
     ".playwright-mcp",
     "README.md",
     "__pycache__",
