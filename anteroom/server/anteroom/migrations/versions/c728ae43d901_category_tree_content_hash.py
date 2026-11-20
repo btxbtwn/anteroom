@@ -1,13 +1,13 @@
 """Version imported category node content independently of seed metadata.
 
 Revision ID: c728ae43d901
-Revises: a70c21f496e8
+Revises: c92e35f8b041
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "c728ae43d901"
-down_revision = "a70c21f496e8"
+down_revision = "c92e35f8b041"
 branch_labels = None
 depends_on = None
 

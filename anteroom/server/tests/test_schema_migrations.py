@@ -729,3 +729,24 @@ def test_hosted_preferences_upgrade_preserves_previous_release_database(engine, 
     from sqlalchemy import inspect
     assert any(constraint['column_names'] == ['user_id', 'key'] for constraint in inspect(engine).get_unique_constraints('user_preferences'))
 
+
+def test_category_tree_content_hash_upgrade_preserves_existing_trees(engine, snapshots):
+    from alembic import command
+
+    config = schema_migrations.alembic_config(str(engine.url))
+    command.upgrade(config, "c92e35f8b041")
+    with engine.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO category_trees (marketplace, roots_loaded, status, source) "
+            "VALUES ('mercari', true, 'ready', 'seed')"
+        ))
+    assert ensure_schema(engine) == head_revision()
+    with engine.connect() as connection:
+        row = connection.execute(text(
+            "SELECT marketplace, roots_loaded, status, source, content_hash "
+            "FROM category_trees WHERE marketplace = 'mercari'"
+        )).one()
+    assert row == ("mercari", 1, "ready", "seed", None)
+    assert inspect_database(engine.url.database).clean
+
+
