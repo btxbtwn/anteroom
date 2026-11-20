@@ -196,6 +196,19 @@ class ConfigPathTest(unittest.TestCase):
             self.assertEqual(_read_sqlite_names(data / "anteroom.db"), ["new"])
             self.assertEqual(_read_sqlite_names(data / "vendoo_studio.db"), ["old"])
 
+    def test_malformed_marker_bytes_do_not_block_startup_or_attach_sidecars(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            _write_sqlite_with_committed_row(data / "anteroom.db", "new-primary")
+            orphan = data / "vendoo_studio.db-wal"
+            orphan.write_bytes(b"orphan-wal")
+            (data / config.LEGACY_DATABASE_ADOPTION_MARKER).write_bytes(b"\xff")
+            os.environ.pop("ANTEROOM_DATABASE_URL", None)
+            config.adopt_legacy_database(data)
+            self.assertEqual(_read_sqlite_names(data / "anteroom.db"), ["new-primary"])
+            self.assertTrue(orphan.is_file())
+            self.assertEqual(orphan.read_bytes(), b"orphan-wal")
+
     def test_competing_wals_abandon_marker_so_later_start_cannot_attach(self):
         """After a WAL conflict, dropping the new WAL must not adopt the legacy one."""
         with tempfile.TemporaryDirectory() as tmp:

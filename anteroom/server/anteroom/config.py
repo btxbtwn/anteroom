@@ -122,9 +122,23 @@ def _legacy_database_paths(root: Path) -> tuple[Path, Path, Path]:
 
 def _is_legacy_database_adoption_marker(marker: Path) -> bool:
     try:
-        return marker.read_text(encoding="utf-8") == LEGACY_DATABASE_ADOPTION_MARKER_BODY
+        return marker.read_bytes() == LEGACY_DATABASE_ADOPTION_MARKER_BODY.encode("utf-8")
     except OSError:
         return False
+
+
+def _write_legacy_database_adoption_marker(marker: Path) -> None:
+    """Persist the adoption marker before any rename (file + directory fsync)."""
+    data = LEGACY_DATABASE_ADOPTION_MARKER_BODY.encode("utf-8")
+    with marker.open("wb") as handle:
+        handle.write(data)
+        handle.flush()
+        os.fsync(handle.fileno())
+    dir_fd = os.open(str(marker.parent), os.O_RDONLY)
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
 
 
 def _legacy_database_names_present(root: Path) -> bool:
@@ -168,16 +182,17 @@ def _finish_legacy_database_adoption(root: Path, target: Path, legacy: Path, mar
 def adopt_legacy_database(data_dir: Path | None = None) -> None:
     """Rename a pre-rename SQLite file (and its WAL/SHM siblings) to anteroom.db, once.
 
-    A transfer starts only when the legacy primary is alone. Before any rename a
-    marker file is written; only that marker proves an in-progress adoption, so a
-    later start can finish sidecars after a crash. ``anteroom.db`` existing is not
-    provenance: if both primaries exist, or a preexisting new primary sits beside
-    old-name sidecars without a valid marker, every file is left alone. A marked
-    transfer that hits competing primaries or sidecars abandons the marker and
-    leaves both file sets so a later start cannot attach an unresolved legacy WAL
-    after SQLite removes the new one. Historical interruptions from builds that
-    never wrote the marker cannot be identified safely and are not guessed. Never
-    opens the database; it only renames files.
+    A transfer starts only when the legacy primary is alone. Before any rename the
+    marker is written and fsynced (file and directory); only that exact marker
+    proves an in-progress adoption, so a later start can finish sidecars after a
+    crash. Malformed marker bytes are ignored so startup continues. ``anteroom.db``
+    existing is not provenance: if both primaries exist, or a preexisting new
+    primary sits beside old-name sidecars without a valid marker, every file is
+    left alone. A marked transfer that hits competing primaries or sidecars
+    abandons the marker and leaves both file sets so a later start cannot attach
+    an unresolved legacy WAL after SQLite removes the new one. Historical
+    interruptions from builds that never wrote the marker cannot be identified
+    safely and are not guessed. Never opens the database; it only renames files.
     """
     if os.environ.get("ANTEROOM_DATABASE_URL"):
         return
@@ -192,7 +207,7 @@ def adopt_legacy_database(data_dir: Path | None = None) -> None:
     if target.exists() or not legacy.is_file():
         return
 
-    marker.write_text(LEGACY_DATABASE_ADOPTION_MARKER_BODY, encoding="utf-8")
+    _write_legacy_database_adoption_marker(marker)
     _finish_legacy_database_adoption(root, target, legacy, marker)
 
 
