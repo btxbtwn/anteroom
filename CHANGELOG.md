@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1055 — 2026-11-20
+
+- Harden macOS release packaging, Chrome Bridge extension packaging, and hosted build checks.
+
 ## 0.1.1054 — 2026-11-20
 
 - Rename remaining internal Vendoo Studio and Vendoo extension identifiers, files, and local storage paths to Anteroom while preserving existing local databases, Keychain secrets, browser settings, and Chrome extension installs.
