@@ -1,1 +1,0 @@
-- Anteroom stays responsive while Sourcing checks in the background whether your buy list needs a refresh.

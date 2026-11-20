@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1071 — 2026-11-20
+
+- Anteroom stays responsive while Sourcing checks in the background whether your buy list needs a refresh.
+
 ## 0.1.1070 — 2026-11-20
 
 - Default hosted managed AI and Google Gemini providers to Gemini 3.1 Flash Lite (`google/gemini-3.1-flash-lite`) for faster, lower-cost listings.
