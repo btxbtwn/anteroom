@@ -953,6 +953,23 @@ def propagate_general_size(listing: dict, *, previous_size: str | None = None) -
     return changed
 
 
+def _follow_ebay_native_size(listing: dict, size: str, model_sizes: list[str]) -> None:
+    """eBay's direct form names its row ``Size``; set it when it still holds the model's size or nothing.
+
+    ``model_sizes`` holds the model's General Size as it wrote it and as readiness
+    normalized it (34x32 and 34), since the copied native row keeps the former.
+    """
+    from vendoo_studio.services.seller_overrides import field_locked
+
+    block = listing.get("ebay_specifics")
+    if not isinstance(block, dict) or "Size" not in block or field_locked(listing, "ebay", "Size"):
+        return
+    current = str(block.get("Size") or "").strip()
+    followed = {""} | {spelling for model in model_sizes if model for spelling in (model, ebay_size(listing, block, model))}
+    if current in followed:
+        listing["ebay_specifics"] = {**block, "Size": ebay_size(listing, block, size)}
+
+
 def _locked_general_size(seed: dict) -> str:
     """The General Size the seller set (locked) on the listing being regenerated, or ""."""
     from vendoo_studio.services.seller_overrides import is_locked
@@ -1073,6 +1090,11 @@ def _follow_native_size_rows(listing: dict, seed: dict, size: str) -> None:
                 from vendoo_studio.services.ebay_fields import ebay_size_for_type
 
                 wanted = ebay_size_for_type(size, _ebay_size_type(listing, seed, block))
+            elif market == "mercari" and _size_key_locked(seed, market, "size"):
+                from vendoo_studio.services.seller_overrides import marketplace_text
+
+                # Older saved size labels are restored later; their native ID must already follow them.
+                wanted = marketplace_text(seed, market, "size").strip()
             else:
                 wanted = str(block.get("size") or size)
             options = [str(option) for option in row.get("options") or []]
@@ -1156,6 +1178,11 @@ async def fill_validation_gaps(provider, listing: dict, *, analysis: str = "", n
 
     blockers = await asyncio.to_thread(validation_errors, listing)
     locked = locked_paths(listing)
+    # With a size read from the tag, no size slot is the model's to fill: one the
+    # tag's spelling could not fill stays a gap for the seller, never a guess.
+    from vendoo_studio.services.vendoo_import import parse_notes
+
+    tag_size = bool(seller_size(parse_notes(notes))) if notes else False
     # Under a General Size the seller set, a marketplace size row left empty because
     # it does not offer that size is a gap for the seller, not the model's to fill.
     size_locked = "size" in locked and bool(str(listing.get("size") or "").strip())
@@ -1168,7 +1195,7 @@ async def fill_validation_gaps(provider, listing: dict, *, analysis: str = "", n
             continue
         if any(field == path or field.startswith(path + ".") or path.startswith(field + ".") for path in locked):
             continue
-        if size_locked and field.split(".")[-1].casefold() in {"size", "nativesizeid"}:
+        if (tag_size or size_locked) and field.split(".")[-1].casefold() in {"size", "nativesizeid"}:
             continue
         # A container error does not authorize replacement of all its fields.
         value = listing
@@ -1335,6 +1362,17 @@ def _asking_price(notes: dict) -> float:
     return amount if amount > 0 else 0.0
 
 
+def seller_size(notes: dict) -> str:
+    """The clothing size the seller confirmed in Item Details. 0 is a size; only blank is none.
+
+    Not the shipping package size, which is ``packageDimensions``.
+    """
+    value = notes.get("size") if isinstance(notes, dict) else None
+    if value is None or isinstance(value, bool):
+        return ""
+    return str(value).strip()
+
+
 def seller_item_details(notes: str | None) -> str:
     if not notes:
         return ""
@@ -1357,6 +1395,9 @@ def seller_item_details(notes: str | None) -> str:
     sku = str(parsed.get("sku") or "").strip()
     if sku:
         lines.append(f"- SKU: {sku} (keep this exact SKU)")
+    size = seller_size(parsed)
+    if size:
+        lines.append(f"- Size: {size} (the clothing size on the item's tag, confirmed by the seller; use this exact size)")
     labels = str(parsed.get("vendooLabels") or "").strip()
     if labels:
         lines.append(f"- Labels: {labels}")
@@ -1540,6 +1581,7 @@ def persist_generated_listing(
     seed = revisions[0].listing_json if revisions else {}
     native_blocks = {market: copy.deepcopy(listing.get(f"{market}_specifics") or {})
                      for market in seed.get("_native_forms") or {}}
+    pinned_size: tuple[str, str | None] | None = None  # (the seller's tag size, the model's size)
     RegistryService(db).merge_learned_fields(listing)
     # Dimensions are a seller preference, not a model inference. Start every
     # generated listing from the saved default; an explicit per-listing value
@@ -1603,6 +1645,25 @@ def persist_generated_listing(
             listing["sku"] = seller_sku
         else:
             listing.pop("sku", None)
+        # The size the seller confirmed from the tag is General Size; marketplace
+        # size slots that followed the model's size follow the seller's instead.
+        # A Size the seller set in the editor (locked) wins over the tag everywhere,
+        # not only on General after restore_locked.
+        from vendoo_studio.services.seller_overrides import is_locked as _is_locked
+
+        size = seller_size(seller)
+        if size and _is_locked(seed, "size"):
+            size = ""
+        model_size = None if listing.get("size") is None else str(listing.get("size"))
+        if size and size != (model_size or "").strip():
+            _replace_title_size(listing, raw_generated_size, size)
+            if model_size and model_size != raw_generated_size:
+                _replace_title_size(listing, model_size, size)
+            listing["size"] = size
+            align_size_fields(listing, previous_size=model_size)
+        if size:
+            # Even when the model agreed, a direct tab it left blank takes the tag size.
+            pinned_size = (size, model_size)
         # Marketplace copies from the model must not override the seller's SKU.
         for key, value in listing.items():
             if key.endswith("_specifics") and isinstance(value, dict):
@@ -1646,6 +1707,16 @@ def persist_generated_listing(
         # The direct tabs' blocks were copied from the model before alignment.
         propagate_general_size(listing, previous_size=raw_generated_size or generated_size or None)
         _follow_native_size_rows(listing, seed, sanitize_size_value(listing.get("size")) or locked_size)
+        _drop_unformed_size_ids(listing, seed)
+    elif pinned_size and native_blocks:
+        # The direct tabs' blocks were copied from the model before the tag size
+        # was set; the size slots that followed the model follow the seller too.
+        propagate_general_size(listing, previous_size=pinned_size[1])
+        # General Size as aligned (men's bottoms: a 36x30 tag is a 36 waist), not the raw tag text.
+        aligned = str(listing.get("size") or "").strip() or pinned_size[0]
+        _follow_ebay_native_size(listing, aligned, [s for s in (pinned_size[1], generated_size) if s])
+    if pinned_size:
+        _follow_native_size_rows(listing, seed, sanitize_size_value(listing.get("size")) or pinned_size[0])
         _drop_unformed_size_ids(listing, seed)
     constrain_generated(listing, seed)
     cap_listing_description(listing)

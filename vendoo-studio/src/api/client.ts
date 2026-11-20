@@ -68,6 +68,7 @@ import type {
   AnalyticsRange,
   InventoryAnalytics,
   MeasurementReadResult,
+  SizeTagReadResult,
   ScoutCheck,
   ScoutState,
   SourceBoxInput,
@@ -239,6 +240,31 @@ async function followAssistant(
   return { error };
 }
 
+/**
+ * Post photos not saved yet for a model to read. A read can take minutes, so a
+ * deploy or restart can cut it off; that is tried once more. An error the server
+ * explains (a model that failed) is not.
+ */
+async function readPhotos<T>(path: string, form: FormData, button: string): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    let response: Response;
+    try {
+      response = await studioFetch(`${BASE}${path}`, { method: "POST", body: form });
+    } catch (error) {
+      if (error instanceof TypeError && attempt === 1) continue;
+      throw error;
+    }
+    const data = await response.json().catch(() => null);
+    if (response.ok) return data as T;
+    const explained = typeof data?.detail === "string" && data.detail.trim();
+    if (!explained && response.status >= 500) {
+      if (attempt === 1) continue;
+      throw new Error(`The server restarted while reading. Press ${button} again.`);
+    }
+    throw new Error(errorMessage(data, `Reading failed: ${response.status}`));
+  }
+}
+
 export const api = {
   vendooDraft: {
     check: (id: string) => request<VendooDraft>(`/conversations/${id}/vendoo-draft/check`, { method: "POST" }),
@@ -335,29 +361,11 @@ export const api = {
   },
   measurements: {
     /** Suggest measurements from an item's yardstick photos. Nothing is saved. */
-    read: async (files: File[], garment: string): Promise<MeasurementReadResult> => {
+    read: (files: File[], garment: string): Promise<MeasurementReadResult> => {
       const form = new FormData();
       files.forEach((file) => form.append("files", file));
       form.append("garment", garment);
-      // A read takes minutes, so a deploy or restart can cut it off. That is tried
-      // once more; an error the server explains (a model that failed) is not.
-      for (let attempt = 1; ; attempt++) {
-        let response: Response;
-        try {
-          response = await studioFetch(`${BASE}/measurements/read`, { method: "POST", body: form });
-        } catch (error) {
-          if (error instanceof TypeError && attempt === 1) continue;
-          throw error;
-        }
-        const data = await response.json().catch(() => null);
-        if (response.ok) return data as MeasurementReadResult;
-        const explained = typeof data?.detail === "string" && data.detail.trim();
-        if (!explained && response.status >= 500) {
-          if (attempt === 1) continue;
-          throw new Error("The server restarted while reading. Press Read measurements again.");
-        }
-        throw new Error(errorMessage(data, `Reading failed: ${response.status}`));
-      }
+      return readPhotos<MeasurementReadResult>("/measurements/read", form, "Read measurements");
     },
     /** The same, from a saved listing's photos. */
     readSaved: (convId: string, garment: string) =>
@@ -365,6 +373,14 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ garment }),
       }),
+  },
+  sizeTags: {
+    /** Suggest an item's clothing size from the size tag in its photos. Nothing is saved. */
+    read: (files: File[]): Promise<SizeTagReadResult> => {
+      const form = new FormData();
+      files.forEach((file) => form.append("files", file));
+      return readPhotos<SizeTagReadResult>("/size-tags/read", form, "Read size tags");
+    },
   },
   scout: {
     list: () => request<ScoutState>("/scout"),

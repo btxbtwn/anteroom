@@ -281,6 +281,20 @@
   margin: 0;
 }
 
+/* A size tag the seller has to check: missing, unreadable, conflicting or unlike the typed size. */
+.bulk-measure-size .input.needs-review {
+  border-color: var(--warning);
+}
+
+.bulk-measure-size .input.is-suggested {
+  border-color: var(--color-cobalt);
+  border-style: dashed;
+}
+
+.bulk-measure-note.needs-review {
+  color: var(--warning-foreground);
+}
+
 .bulk-measure-spacer {
   flex: 1 1 auto;
 }

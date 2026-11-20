@@ -10,6 +10,16 @@ struct BulkListingPlan: Equatable {
         var photos: [UUID]
         var sku = ""
         var sizeTag = ""
+        var sizeSuggested = false
+        var sizeNeedsReview = false
+        var sizeNote: String?
+        /// Tag evidence stays separate from transient request errors.
+        var sizeWarning: String?
+        private let pickingOrder: [UUID]
+        var sizeReadPhotos: [UUID] {
+            let present = Set(photos)
+            return pickingOrder.filter(present.contains)
+        }
         var garment: SellerInputs.Garment = .top
         /// Typed or read values, keyed like the garment's fields.
         var measurements: [String: String] = [:]
@@ -17,6 +27,12 @@ struct BulkListingPlan: Equatable {
         var suggested: Set<String> = []
         /// What the last photo reading found, in plain words.
         var readNote: String?
+
+        init(id: UUID, photos: [UUID], pickingOrder: [UUID]? = nil) {
+            self.id = id
+            self.photos = photos
+            self.pickingOrder = pickingOrder ?? photos
+        }
 
         /// Only the chosen garment's values, with blanks dropped.
         var typedMeasurements: [String: String] {
@@ -32,6 +48,7 @@ struct BulkListingPlan: Equatable {
     /// Picked photos not yet in an item, in picking order.
     private(set) var loose: [UUID] = []
     private(set) var items: [Item] = []
+    private var pickingOrder: [UUID] = []
     /// Quarter turns clockwise per photo. Photos upload as picked and the
     /// server turns them afterwards, as on the web.
     private(set) var turns: [UUID: Int] = [:]
@@ -40,7 +57,9 @@ struct BulkListingPlan: Equatable {
     static let photosPerItem = 30
 
     mutating func add(_ photos: [UUID]) {
-        loose += photos.filter { !contains($0) }
+        let added = photos.filter { !contains($0) }
+        loose += added
+        pickingOrder += added
     }
 
     /// Makes one item from the selected loose photos, keeping picking order.
@@ -49,7 +68,7 @@ struct BulkListingPlan: Equatable {
         let photos = loose.filter(selection.contains)
         guard !photos.isEmpty, photos.count <= Self.photosPerItem else { return nil }
         loose.removeAll(where: selection.contains)
-        let item = Item(id: UUID(), photos: photos)
+        let item = Item(id: UUID(), photos: photos, pickingOrder: pickingOrder.filter(selection.contains))
         items.append(item)
         return item
     }
@@ -67,11 +86,29 @@ struct BulkListingPlan: Equatable {
     }
 
     /// Drops a photo from the plan, and any item it leaves empty.
-    mutating func remove(_ photo: UUID) {
+    mutating func remove(_ photo: UUID, readingSizes: Set<UUID> = []) {
         loose.removeAll { $0 == photo }
-        for index in items.indices { items[index].photos.removeAll { $0 == photo } }
+        for index in items.indices where items[index].photos.contains(photo) {
+            items[index].photos.removeAll { $0 == photo }
+            if items[index].sizeSuggested {
+                items[index].sizeTag = ""
+                items[index].sizeSuggested = false
+                items[index].sizeWarning = nil
+                items[index].sizeNeedsReview = true
+                items[index].sizeNote = "A photo was removed, so the size read from it was cleared. Read size tags again or type the size."
+            } else if items[index].sizeWarning != nil {
+                items[index].sizeWarning = nil
+                items[index].sizeNeedsReview = true
+                items[index].sizeNote = "A photo was removed, so the earlier tag check no longer applies. Read size tags again or check the tag."
+            } else if readingSizes.contains(items[index].id) {
+                items[index].sizeNeedsReview = items[index].sizeNeedsReview
+                    || items[index].sizeTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                items[index].sizeNote = "A photo was removed while reading. Read size tags again or type the size."
+            }
+        }
         items.removeAll { $0.photos.isEmpty }
         turns[photo] = nil
+        pickingOrder.removeAll { $0 == photo }
     }
 
     /// Photos only move within their own item; the first one is the cover.
@@ -109,7 +146,79 @@ struct BulkListingPlan: Equatable {
     }
 
     mutating func setSizeTag(_ sizeTag: String, for id: Item.ID) {
-        update(id) { $0.sizeTag = sizeTag }
+        update(id) {
+            $0.sizeTag = sizeTag
+            $0.sizeSuggested = false
+            $0.sizeNeedsReview = false
+            $0.sizeNote = nil
+            $0.sizeWarning = nil
+        }
+    }
+
+    /// Photo identities determine size evidence; rearranging them does not invalidate a read.
+    private func matchesSizeRead(_ captured: Item) -> Bool {
+        guard let current = items.first(where: { $0.id == captured.id }) else { return false }
+        return Set(current.photos) == Set(captured.photos)
+    }
+
+    /// Both network completion paths use the same evidence check and current manual input.
+    mutating func completeSizeRead(_ result: Result<SizeTagReadResult, Error>, from captured: Item) {
+        guard matchesSizeRead(captured) else { return }
+        switch result {
+        case .success(let reading): applySizeTag(reading, to: captured.id)
+        case .failure(let error): failSizeTag(error.localizedDescription, for: captured.id)
+        }
+    }
+
+    mutating func applySizeTag(_ result: SizeTagReadResult, to id: Item.ID) {
+        update(id) { item in
+            let typed = item.sizeSuggested ? "" : item.sizeTag.trimmingCharacters(in: .whitespacesAndNewlines)
+            let size = result.size?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            // An inconclusive reread supplies no evidence to resolve an earlier warning.
+            if !typed.isEmpty, item.sizeNeedsReview,
+               result.status == "not_found" || result.status == "unreadable" {
+                if let warning = item.sizeWarning { item.sizeNote = warning }
+                return
+            }
+            item.sizeSuggested = false
+            item.sizeNeedsReview = false
+            item.sizeNote = nil
+            item.sizeWarning = nil
+            item.sizeTag = typed
+            if result.status == "accepted", !size.isEmpty, result.photosRead > 0 {
+                if typed.isEmpty {
+                    item.sizeTag = size
+                    item.sizeSuggested = true
+                    item.sizeNote = "Size filled from the tag. Check it."
+                } else if typed.caseInsensitiveCompare(size) == .orderedSame {
+                    item.sizeNote = "Size matches the tag."
+                } else {
+                    item.sizeNeedsReview = true
+                    item.sizeNote = "The tag reads \(size). Check the size you typed."
+                    item.sizeWarning = item.sizeNote
+                }
+            } else if result.status == "conflict" {
+                item.sizeNeedsReview = true
+                let next = typed.isEmpty ? "Check the tag and type the size." : "Check the size you typed."
+                item.sizeNote = "The photos show different sizes (\(result.sizes.joined(separator: ", "))). \(next)"
+                if !typed.isEmpty { item.sizeWarning = item.sizeNote }
+            } else if typed.isEmpty {
+                item.sizeNeedsReview = true
+                item.sizeNote = result.status == "not_found" || result.photosRead == 0
+                    ? "No size tag found in the photos. Type the size from the tag."
+                    : "The size tag could not be read. Type the size from the tag."
+            }
+        }
+    }
+
+    mutating func failSizeTag(_ message: String, for id: Item.ID) {
+        update(id) { item in
+            if item.sizeSuggested { item.sizeTag = ""; item.sizeSuggested = false }
+            let blank = item.sizeTag.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            item.sizeNeedsReview = item.sizeNeedsReview || blank
+            item.sizeNote = message + (blank ? " Type the size from the tag." : "")
+            if !blank, let warning = item.sizeWarning { item.sizeNote = "\(message) \(warning)" }
+        }
     }
 
     mutating func setGarment(_ garment: SellerInputs.Garment, for id: Item.ID) {
@@ -140,11 +249,13 @@ struct BulkListingPlan: Equatable {
                 return
             }
             var filled: [String] = []
+            var accepted = false
             var byHand: [String] = []
             for field in garment.fields {
                 let typed = (item.measurements[field.key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 let read = reading.measurements[field.key]
                 if read?.status == "accepted", let value = read?.value {
+                    accepted = true
                     if typed.isEmpty {
                         item.measurements[field.key] = Self.inches(value)
                         filled.append(field.key)
@@ -154,7 +265,8 @@ struct BulkListingPlan: Equatable {
                 }
             }
             item.suggested.formUnion(filled)
-            var parts = [filled.isEmpty ? "Nothing new could be read from the photos." : "Filled from the photos. Check them."]
+            let nothingNew = accepted ? "Nothing new could be read from the photos." : "The yardstick could not be read."
+            var parts = [filled.isEmpty ? nothingNew : "Filled from the photos. Check them."]
             if !byHand.isEmpty { parts.append("Measure by hand: \(byHand.joined(separator: ", ")).") }
             item.readNote = parts.joined(separator: " ")
         }
@@ -183,7 +295,7 @@ struct BulkListingPlan: Equatable {
         inputs.addLabel(labels)
         inputs.sku = item.sku.trimmingCharacters(in: .whitespacesAndNewlines)
         let sizeTag = item.sizeTag.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !sizeTag.isEmpty { inputs.sellerNotes = "Size tag: \(sizeTag)" }
+        if !sizeTag.isEmpty { inputs.size = sizeTag }
         let measured = item.typedMeasurements
         if !measured.isEmpty {
             inputs.garment = item.garment

@@ -272,6 +272,16 @@ export interface PhotoEdits {
   background?: string | null;
 }
 
+/** Clothing size from unsaved tag photos, never the shipping package size. */
+export interface SizeTagReadResult {
+  photos_read: number;
+  status: "accepted" | "not_found" | "unreadable" | "conflict";
+  /** Set only when two independent reads agree; otherwise check the tag. "0" is a size. */
+  size: string | null;
+  /** Every distinct size the reads saw, for reviewing a conflict. */
+  sizes: string[];
+}
+
 export interface ValidationError {
   loc: (string | number)[];
   msg: string;

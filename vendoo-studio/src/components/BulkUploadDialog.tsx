@@ -10,6 +10,7 @@ import { BOXES_QUERY_KEY, boxStoreName } from "./boxPurchases";
 import { GARMENTS, garmentFields, guessGarment, type Garment } from "./garmentMeasurements";
 import { dragHasFiles, listingTitleForFolder, moveItem, type PhotoFolderGroup } from "../photoDrop";
 import { applyReading, readEach } from "../measurementReading";
+import { applySizeTagReading } from "../sizeTagReading";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { StudioImage } from "./StudioImage";
 
@@ -24,9 +25,25 @@ const EMPTY_DEFAULTS: BulkUploadDefaults = { cog: "", labels: "" };
 
 type DragSpot = { group: number; photo: number };
 
+const READING_SIZE_NOTE = "Reading the size tag…";
+
 type Row = {
   sku: string;
-  sizeTag: string;
+  /** The clothing size on the tag (not the shipping package size); "0" is a size. */
+  size: string;
+  /** Size filled from the tag and not yet touched by the seller. */
+  sizeSuggested: boolean;
+  /** The tag was missing, unreadable, conflicting or disagrees with the typed size. */
+  sizeReview: boolean;
+  /** What the last size-tag reading found, in plain words; also progress and errors. */
+  sizeNote?: string;
+  /**
+   * The tag evidence against a typed size ("The tag reads M…"), kept apart from progress
+   * and errors so a failed or empty re-read cannot replace it. Editing the size clears it.
+   */
+  sizeWarning?: string;
+  /** Bumped when a photo is removed, so a reading of the earlier photos is not applied. */
+  photoSet: number;
   garment: Garment;
   measurements: Record<string, string>;
   /** Fields filled from the photos and not yet touched by the seller. */
@@ -38,7 +55,7 @@ type Row = {
 /**
  * Everything a bulk upload needs in one window, before anything is created:
  * photo order, the box, COG and labels every draft shares, and each item's
- * own size tag, SKU and measurements. Click a photo to read the tape in it, or to turn
+ * own size, SKU and measurements. Click a photo to read the tape in it, or to turn
  * it the right way up. Only the x and Cancel close it, so a stray click
  * outside cannot throw away what was typed.
  */
@@ -56,12 +73,18 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
   const [groups, setGroups] = useState(initialGroups);
   const [rows, setRows] = useState<Row[]>(() => initialGroups.map((group) => ({
     sku: "",
-    sizeTag: "",
+    size: "",
+    sizeSuggested: false,
+    sizeReview: false,
+    photoSet: 0,
     garment: guessGarment(listingTitleForFolder(group.folder)),
     measurements: {},
     suggested: [],
   })));
   const [reading, setReading] = useState<{ done: number; total: number } | null>(null);
+  const [sizeReading, setSizeReading] = useState<{ done: number; total: number } | null>(null);
+  // One announcement when a size-tag read finishes, not one per item; editing a size ends it.
+  const [announceSizes, setAnnounceSizes] = useState(false);
   const [dragFrom, setDragFrom] = useState<DragSpot | null>(null);
   const [dropOn, setDropOn] = useState<DragSpot | null>(null);
   const [zoom, setZoom] = useState<DragSpot | null>(null);
@@ -127,14 +150,85 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
     setReading(null);
   };
 
+  // Fills a blank Size from each item's size tag; a typed size stays. A missing,
+  // unreadable or conflicting tag is left for the seller, never guessed.
+  const readSizeTags = async () => {
+    const todo = groups.map((_, index) => index).filter((index) => groups[index]!.files.length);
+    setSizeReading({ done: 0, total: todo.length });
+    setAnnounceSizes(false);
+    await readEach(todo, async (index) => {
+      const { photoSet } = rows[index]!;
+      setRow(index, { sizeNote: READING_SIZE_NOTE });
+      try {
+        const result = await api.sizeTags.read(groups[index]!.files);
+        setRows((current) => current.map((row, i) => {
+          if (i !== index || row.photoSet !== photoSet) return row;
+          // A size an earlier reading filled is replaced, not treated as typed.
+          const outcome = applySizeTagReading(row.sizeSuggested ? "" : row.size, result);
+          // A re-read that saw nothing new (no tag, unreadable) keeps an earlier warning
+          // on a typed size: the earlier evidence still stands. Editing the size clears it.
+          if (!outcome.suggested && !outcome.needsReview && !outcome.note && row.sizeWarning) {
+            return { ...row, sizeReview: true, sizeNote: row.sizeWarning };
+          }
+          const typed = !outcome.suggested && outcome.size.trim() !== "";
+          return {
+            ...row,
+            size: outcome.size,
+            sizeSuggested: outcome.suggested,
+            sizeReview: outcome.needsReview,
+            sizeNote: outcome.note || undefined,
+            sizeWarning: typed && outcome.needsReview ? outcome.note : undefined,
+          };
+        }));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Reading failed.";
+        setRows((current) => current.map((row, i) => {
+          if (i !== index || row.photoSet !== photoSet) return row;
+          const blank = row.size.trim() === "";
+          // A size an earlier reading filled was not confirmed by this one, so it is checked too.
+          if (blank || row.sizeSuggested) {
+            return { ...row, sizeReview: true, sizeNote: `${message} ${blank ? "Type the size from the tag." : "Check the size against the tag."}` };
+          }
+          // The error is shown without dropping the tag evidence against the typed size.
+          return { ...row, sizeNote: row.sizeWarning ? `${message} ${row.sizeWarning}` : message };
+        }));
+      }
+      setSizeReading((current) => current && { ...current, done: current.done + 1 });
+    });
+    setSizeReading(null);
+    setAnnounceSizes(true);
+  };
+
   const rotate = (file: File, degrees: 90 | -90) => setTurns((current) => (
     new Map(current).set(file, ((current.get(file) || 0) + degrees / 90 + 4) % 4)
   ));
 
   // A listing keeps at least one photo; there is nothing to generate from otherwise.
-  const removePhoto = (spot: DragSpot) => setGroups((current) => current.map((group, index) => (
-    index === spot.group ? { ...group, files: group.files.filter((_, photo) => photo !== spot.photo) } : group
-  )));
+  // A size read from the photos may have come from the one removed: it is cleared for the seller
+  // to read again or type, and a reading of the earlier photos still running is not applied.
+  const removePhoto = (spot: DragSpot) => {
+    setGroups((current) => current.map((group, index) => (
+      index === spot.group ? { ...group, files: group.files.filter((_, photo) => photo !== spot.photo) } : group
+    )));
+    setRows((current) => current.map((row, index) => {
+      if (index !== spot.group) return row;
+      const cleared = row.sizeSuggested
+        ? { size: "", sizeSuggested: false, sizeReview: true,
+          sizeNote: "A photo was removed, so the size read from it was cleared. Read size tags again or type the size." }
+        : row.sizeWarning
+          // The tag evidence against the typed size may have come from the removed photo, and
+          // nothing records which photo it was: it no longer stands, so an empty re-read can't
+          // restore it. The size stays flagged until it is read again or checked.
+          ? { sizeWarning: undefined, sizeReview: true,
+            sizeNote: "A photo was removed, so the earlier tag check no longer applies. Read size tags again or check the tag." }
+          : row.sizeNote === READING_SIZE_NOTE
+            // Its reading is of the earlier photos and will be dropped; say so instead of "Reading…".
+            ? { sizeReview: row.size.trim() === "",
+              sizeNote: "A photo was removed while reading. Read size tags again or type the size." }
+            : {};
+      return { ...row, ...cleared, photoSet: row.photoSet + 1 };
+    }));
+  };
 
   useEffect(() => {
     const focusTimer = window.setTimeout(() => cogRef.current?.focus(), 0);
@@ -160,8 +254,8 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
         const degrees = rotationForTurns(turns.get(file) || 0);
         if (degrees) rotations.set(file, degrees);
       }
-      const { sku, sizeTag, garment, measurements } = rows[index]!;
-      return { ...group, sku, sizeTag, garment, measurements, rotations };
+      const { sku, size, garment, measurements } = rows[index]!;
+      return { ...group, sku, size, garment, measurements, rotations };
     }), generate && runtime.features.has("generation"));
   };
 
@@ -197,8 +291,8 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
             Set details for {count} listings
           </h2>
           <p className="confirm-dialog-description">
-            Box, COG and labels go on every draft. Add each item's size tag, SKU and measurements
-            below; check any measurements read from photos before creating.
+            Box, COG and labels go on every draft. Add each item's size, SKU and measurements
+            below; check anything read from photos before creating.
           </p>
         </div>
         <div className="bulk-upload-fields">
@@ -252,7 +346,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
             <span className="bulk-upload-help">Separate multiple labels with commas.</span>
           </label>
         </div>
-        <ul className="bulk-upload-groups" aria-label="Each listing's photos, size tag, SKU and measurements">
+        <ul className="bulk-upload-groups" aria-label="Each listing's photos, size, SKU and measurements">
           {groups.map((group, groupIndex) => {
             const title = listingTitleForFolder(group.folder);
             const row = rows[groupIndex]!;
@@ -264,15 +358,24 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
                     <span className="photo-tray-meta"> · {group.files.length} photos</span>
                   </span>
                   <label className="bulk-measure-size">
-                    <span className="label">Size tag</span>
+                    <span className="label">Size</span>
                     <input
-                      className="input"
+                      className={`input${row.sizeSuggested ? " is-suggested" : ""}${row.sizeReview ? " needs-review" : ""}`}
                       type="text"
                       autoComplete="off"
-                      placeholder="e.g. XL, 32 × 30"
-                      aria-label={`Size tag for ${title}`}
-                      value={row.sizeTag}
-                      onChange={(event) => setRow(groupIndex, { sizeTag: event.target.value })}
+                      placeholder="From the tag"
+                      aria-label={`Size for ${title}`}
+                      aria-describedby={row.sizeNote ? `bulk-size-note-${groupIndex}` : undefined}
+                      title={row.sizeSuggested ? "Read from the size tag. Check it before creating." : undefined}
+                      value={row.size}
+                      onChange={(event) => {
+                        setAnnounceSizes(false);
+                        // An edit settles the old warning; a running read's note stays so a photo removal can still void it.
+                        setRow(groupIndex, {
+                          size: event.target.value, sizeSuggested: false, sizeReview: false, sizeWarning: undefined,
+                          ...(row.sizeNote === READING_SIZE_NOTE ? {} : { sizeNote: undefined }),
+                        });
+                      }}
                       onKeyDown={onInputKeyDown}
                     />
                   </label>
@@ -405,16 +508,38 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
                     </label>
                   ))}
                 </div>
+                {row.sizeNote ? (
+                  <p
+                    id={`bulk-size-note-${groupIndex}`}
+                    className={`bulk-upload-help bulk-measure-note${row.sizeReview ? " needs-review" : ""}`}
+                  >
+                    {row.sizeNote}
+                  </p>
+                ) : null}
                 {row.readNote ? <p className="bulk-upload-help bulk-measure-note">{row.readNote}</p> : null}
               </li>
             );
           })}
         </ul>
+        <p className="sr-only" role="status">
+          {announceSizes
+            ? `Size tags read. ${rows.filter((row) => row.sizeSuggested).length} filled, ${rows.filter((row) => row.sizeReview).length} to check.`
+            : ""}
+        </p>
         <div className="confirm-dialog-footer">
           <button type="button" className="btn btn-ghost" onClick={onCancel}>
             Cancel
           </button>
           <span className="bulk-measure-spacer" />
+          <button
+            type="button"
+            className="btn btn-secondary"
+            disabled={sizeReading !== null || !runtime.features.has("generation")}
+            title="Fill blank sizes from the size tag in each item's photos"
+            onClick={() => void readSizeTags()}
+          >
+            {sizeReading ? `Reading tags ${sizeReading.done} of ${sizeReading.total}…` : "Read size tags"}
+          </button>
           <button
             type="button"
             className="btn btn-secondary"
@@ -424,10 +549,10 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
           >
             {reading ? `Reading ${reading.done} of ${reading.total}…` : "Read measurements"}
           </button>
-          <button type="button" className="btn btn-secondary" disabled={invalidCog || reading !== null} onClick={() => confirm(false)}>
+          <button type="button" className="btn btn-secondary" disabled={invalidCog || reading !== null || sizeReading !== null} onClick={() => confirm(false)}>
             Create drafts only
           </button>
-          {runtime.features.has("generation") && <button type="submit" className="btn btn-primary" disabled={invalidCog || reading !== null}>
+          {runtime.features.has("generation") && <button type="submit" className="btn btn-primary" disabled={invalidCog || reading !== null || sizeReading !== null}>
             Create and generate {count}
           </button>}
         </div>

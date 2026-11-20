@@ -22,6 +22,28 @@ def test_generated_contract_files_are_current():
     assert not stale, f"Out of date: {[str(path) for path in stale]}. Run: {api_contract.REGENERATE}"
 
 
+
+def test_size_tag_response_is_shared_and_generated():
+    contract = api_contract.contract(*api_contract._apps())
+    operation = contract["paths"]["/api/size-tags/read"]["post"]
+    assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/SizeTagReadResult"}
+    schema = contract["components"]["schemas"]["SizeTagReadResult"]
+    assert set(schema["required"]) == {"photos_read", "status", "size", "sizes"}
+    assert schema["properties"]["status"]["enum"] == ["accepted", "not_found", "unreadable", "conflict"]
+    assert 'export interface SizeTagReadResult' in api_contract.typescript(contract)
+    swift = api_contract.swift(contract)
+    assert 'struct SizeTagReadResult: Codable, Hashable, Sendable' in swift
+    assert 'var photosRead: Int' in swift
+    assert 'case photosRead = "photos_read"' in swift
+    assert "multipart/form-data" in operation["requestBody"]["content"]
+    generated = api_contract.outputs()
+    assert "interface SizeTagReadResult" in generated[api_contract.TYPESCRIPT]
+    assert "struct SizeTagReadResult" in generated[api_contract.SWIFT]
+    assert "Body_read_size_tags" not in generated[api_contract.TYPESCRIPT]
+    assert "Body_read_size_tags" not in generated[api_contract.SWIFT]
+
+
 def test_desktop_routes_that_drift_from_the_hosted_contract_fail():
     from fastapi import FastAPI
 

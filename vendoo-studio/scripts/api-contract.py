@@ -312,7 +312,7 @@ def swift(spec: dict) -> str:
         lines.append("")
         lines += _doc(schema.get("description"), "", "swift")
         lines.append(f"struct {name}: {', '.join(conformances)} {{")
-        for field, swift_field, kind, optional, default, value in fields:
+        for _field, swift_field, kind, optional, default, value in fields:
             lines += _doc(value.get("description") or _allowed(value), "    ", "swift")
             suffix = "?" if optional else (f" = {default}" if default is not None else "")
             lines.append(f"    var {swift_field}: {kind}{suffix}")
@@ -342,10 +342,18 @@ def swift(spec: dict) -> str:
 
 def outputs() -> dict[Path, str]:
     spec = contract(*_apps())
+    # Uploads are built as FormData/Data by the clients, not encoded JSON models.
+    # Keep their multipart bodies in OpenAPI, but generate only their responses.
+    client_paths = copy.deepcopy(spec["paths"])
+    for operations in client_paths.values():
+        for operation in operations.values():
+            if "multipart/form-data" in operation.get("requestBody", {}).get("content", {}):
+                operation.pop("requestBody")
+    client_spec = {**spec, "components": {"schemas": _schemas_used(spec, client_paths)}}
     return {
         SPEC: json.dumps(spec, indent=2, sort_keys=True) + "\n",
-        TYPESCRIPT: typescript(spec),
-        SWIFT: swift(spec),
+        TYPESCRIPT: typescript(client_spec),
+        SWIFT: swift(client_spec),
     }
 
 

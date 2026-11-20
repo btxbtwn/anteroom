@@ -18,6 +18,7 @@ export type {
   ListingSaveResult,
   ListingValidation,
   PhotoEdits,
+  SizeTagReadResult,
   WorkspaceRuntime,
 } from "./contract.gen";
 import type { ListingPhoto, ListingValidation } from "./contract.gen";
@@ -970,9 +971,8 @@ export interface MeasurementReadResult {
   photos_read: number;
   /** Keyed like the bulk upload's measurement fields (pitToPit, length, waist, legOpening, ...). */
   measurements: Record<string, MeasurementRead>;
-  /** The provider and model that read the photos, e.g. "OpenRouter (openrouter/auto)". */
-  reader?: string;
 }
+
 
 export interface ScoutCheck {
   id: string;

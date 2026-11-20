@@ -6,6 +6,7 @@ native form rows and the title kept the model's size, so the listing disagreed w
 """
 from __future__ import annotations
 
+import json
 import unittest
 
 from sqlalchemy import create_engine
@@ -212,6 +213,64 @@ class LockedSizeGenerationTest(unittest.TestCase):
         parsed = self.generate(poshmark_specifics={"size": "S"})
         self.assertEqual(parsed["size"], "S")
         self.assertEqual(parsed["poshmark_specifics"]["size"], "S")
+
+    def test_tag_native_size_ids_follow_the_tag_options_including_zero(self):
+        row = {**MERCARI_ROW, "options": ["S", "M", "0"], "option_values": {"S": "11", "M": "12", "0": "10"}}
+        for tag, expected in [("M", "12"), ("0", "10")]:
+            with self.subTest(tag=tag):
+                self.seller_set(tag, locks=(), _native_forms={"mercari": {"fields": [row]}})
+                ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": tag}))
+                parsed = self.generate(mercari_specifics={"nativeSizeId": "11"})
+                self.assertEqual(parsed["size"], tag)
+                self.assertEqual(parsed["mercari_specifics"]["nativeSizeId"], expected)
+
+    def test_tag_size_unoffered_by_the_native_row_clears_the_models_id(self):
+        self.seller_set("XL", locks=(), _native_forms={"mercari": {"fields": [MERCARI_ROW]}})
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "XL"}))
+        parsed = self.generate(mercari_specifics={"nativeSizeId": "11"})
+        self.assertNotIn("nativeSizeId", parsed.get("mercari_specifics", {}))
+
+    def test_tag_native_id_without_a_form_is_dropped_for_the_form_to_derive(self):
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M"}))
+        parsed = self.generate(mercari_specifics={"size": "S", "nativeSizeId": "11"})
+        self.assertEqual(parsed["mercari_specifics"]["size"], "M")
+        self.assertNotIn("nativeSizeId", parsed["mercari_specifics"])
+
+    def test_tag_alignment_preserves_a_native_id_the_seller_locked(self):
+        self.seller_set("M", locks=("mercari_specifics.nativeSizeId",),
+                        mercari_specifics={"nativeSizeId": "13"},
+                        _native_forms={"mercari": {"fields": [MERCARI_ROW]}})
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M"}))
+        parsed = self.generate(mercari_specifics={"nativeSizeId": "11"})
+        self.assertEqual(parsed["size"], "M")
+        self.assertEqual(parsed["mercari_specifics"]["nativeSizeId"], "13")
+
+    def test_tag_replaces_the_models_whole_multiword_title_size(self):
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M"}))
+        parsed = self.generate(brand="Acme", size="One Size", title="Acme One Size Cotton Top")
+        self.assertEqual(parsed["title"], "Acme M Cotton Top")
+
+    def test_tag_replaces_a_full_title_size_without_cutting_other_words(self):
+        title = "M&O GOLD S Graphic T-Shirt Green Tie-Dye Regular Fit Crew Neck Cotton Summer Tee"
+        self.assertEqual(len(title), 80)
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "XXL"}))
+        parsed = self.generate(title=title)
+        self.assertEqual(parsed["title"], title.replace(" S ", " "))
+        self.assertTrue(parsed["title"].endswith(" Tee"))
+
+    def test_tag_alignment_keeps_a_saved_legacy_mercari_size_effective(self):
+        row = {**MERCARI_ROW, "options": ["S", "M", "L", "0"],
+               "option_values": {**MERCARI_ROW["option_values"], "0": "10"}}
+        for saved, expected in [("L", "13"), ("0", "10")]:
+            with self.subTest(saved=saved):
+                self.seller_set("M", locks=("mercari_specifics.size",), mercari_specifics={"size": saved},
+                                _native_forms={"mercari": {"fields": [row]}})
+                ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M"}))
+                parsed = self.generate(mercari_specifics={"size": "S"})
+                block = parsed["mercari_specifics"]
+                effective = block.get("nativeSizeId") or row["option_values"].get(block.get("size"))
+                self.assertEqual(block["size"], saved)
+                self.assertEqual(effective, expected)
 
 
 if __name__ == "__main__":

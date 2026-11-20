@@ -8,10 +8,10 @@ function photo(name: string): File {
 }
 
 describe("bulkListingNotes", () => {
-  it("keeps the item's size tag in existing seller notes", () => {
-    expect(JSON.parse(bulkListingNotes({ cog: "", labels: "" }, { sizeTag: " XL / TG " })!))
-      .toEqual({ sellerNotes: "Size tag: XL / TG" });
-    expect(bulkListingNotes({ cog: "", labels: "" }, { sizeTag: "  " })).toBeUndefined();
+  it("saves the item's tag size as its structured Size, 0 included", () => {
+    expect(JSON.parse(bulkListingNotes({ cog: "", labels: "" }, { size: " XL " })!)).toEqual({ size: "XL" });
+    expect(JSON.parse(bulkListingNotes({ cog: "", labels: "" }, { size: "0" })!)).toEqual({ size: "0" });
+    expect(bulkListingNotes({ cog: "", labels: "" }, { size: "  " })).toBeUndefined();
   });
   it("stores normalized COG and labels in Item Details notes", () => {
     expect(JSON.parse(bulkListingNotes({ cog: " 12.50 ", labels: " To List, Bin 4, " }) || "{}"))
@@ -21,13 +21,13 @@ describe("bulkListingNotes", () => {
   it("adds the item's own SKU and typed measurements", () => {
     const notes = bulkListingNotes(
       { cog: "8", labels: "" },
-      { sku: " LEV-505 ", sizeTag: " 32 × 30 ", garment: "pants", measurements: { waist: "16", inseam: " ", rise: "11" } },
+      { sku: " LEV-505 ", size: " 32 × 30 ", garment: "pants", measurements: { waist: "16", inseam: " ", rise: "11" } },
     );
     expect(JSON.parse(notes || "{}")).toEqual({
       cog: "8",
       vendooLabels: "",
       sku: "LEV-505",
-      sellerNotes: "Size tag: 32 × 30",
+      size: "32 × 30",
       garment: "pants",
       measurements: { pants: { waist: "16", rise: "11" } },
     });

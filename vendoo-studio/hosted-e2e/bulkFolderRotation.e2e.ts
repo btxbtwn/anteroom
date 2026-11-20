@@ -47,7 +47,7 @@ test("hosted folder drafts keep a preview turn when the folder's first photo is 
     await page.locator("input[webkitdirectory]").setInputFiles(directory);
     const dialog = page.getByRole("dialog", { name: "Set details for 2 listings" });
     const coat = dialog.locator("li.bulk-upload-group")
-      .filter({ has: page.getByRole("textbox", { name: "Size tag for Coat", exact: true }) });
+      .filter({ has: page.getByRole("textbox", { name: "Size for Coat", exact: true }) });
     // The order inside a folder follows the file system, so read it from the preview:
     // refuse whichever photo is first and turn the second.
     const thumbs = coat.locator(".photo-thumb img");

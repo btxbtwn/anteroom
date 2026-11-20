@@ -19,8 +19,9 @@ struct SellerInputs: Equatable, Sendable, Codable {
         }
     }
 
-    private let originalNotes: String
+    private var originalNotes: String
     var sku: String
+    var size: String
     var sellerNotes: String
     var knownFlaws: String
     var descriptionMeasurements: String
@@ -30,11 +31,34 @@ struct SellerInputs: Equatable, Sendable, Codable {
     var garment: Garment
     private var measurements: [String: [String: String]]
 
+    private enum CodingKeys: String, CodingKey {
+        case originalNotes, sku, size, sellerNotes, knownFlaws, descriptionMeasurements
+        case cog, packageDimensions, vendooLabels, garment, measurements
+    }
+
+    /// Drafts saved before tag-size entry have every original field except size.
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        originalNotes = try values.decode(String.self, forKey: .originalNotes)
+        sku = try values.decode(String.self, forKey: .sku)
+        size = try values.decodeIfPresent(String.self, forKey: .size)
+            ?? (Self.object(originalNotes)?["size"] as? String ?? "")
+        sellerNotes = try values.decode(String.self, forKey: .sellerNotes)
+        knownFlaws = try values.decode(String.self, forKey: .knownFlaws)
+        descriptionMeasurements = try values.decode(String.self, forKey: .descriptionMeasurements)
+        cog = try values.decode(String.self, forKey: .cog)
+        packageDimensions = try values.decode(String.self, forKey: .packageDimensions)
+        vendooLabels = try values.decode(String.self, forKey: .vendooLabels)
+        garment = try values.decode(Garment.self, forKey: .garment)
+        measurements = try values.decode([String: [String: String]].self, forKey: .measurements)
+    }
+
     init(notes: String? = nil) {
         let raw = notes ?? ""
         originalNotes = raw
         let object = Self.object(raw)
         sku = object?["sku"] as? String ?? ""
+        size = object?["size"] as? String ?? ""
         sellerNotes = object?["sellerNotes"] as? String ?? (object == nil ? raw : "")
         knownFlaws = object?["knownFlaws"] as? String ?? ""
         descriptionMeasurements = object?["descriptionMeasurements"] as? String ?? ""
@@ -73,14 +97,7 @@ struct SellerInputs: Equatable, Sendable, Codable {
         let baseline = Self(notes: originalNotes)
         if self == baseline { return originalNotes }
         var object = Self.object(originalNotes) ?? (originalNotes.isEmpty ? [:] : ["sellerNotes": originalNotes])
-        let textValues = [
-            ("sku", sku, baseline.sku), ("sellerNotes", sellerNotes, baseline.sellerNotes),
-            ("knownFlaws", knownFlaws, baseline.knownFlaws),
-            ("descriptionMeasurements", descriptionMeasurements, baseline.descriptionMeasurements),
-            ("cog", cog, baseline.cog), ("packageDimensions", packageDimensions, baseline.packageDimensions),
-            ("vendooLabels", vendooLabels, baseline.vendooLabels),
-        ]
-        for (key, value, before) in textValues where value != before { object[key] = value }
+        for (key, value) in textChanges(from: baseline) { object[key] = value }
         if garment != baseline.garment || measurements != baseline.measurements { object["garment"] = garment.rawValue }
         var all = object["measurements"] as? [String: Any] ?? [:]
         for (group, fields) in measurements {
@@ -91,6 +108,62 @@ struct SellerInputs: Equatable, Sendable, Codable {
         if measurements != baseline.measurements { object["measurements"] = all }
         let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
         return String(decoding: data, as: UTF8.self)
+    }
+
+    /// Compare raw input before normalizing an edited size. Untouched tag text stays untouched.
+    private func textChanges(from baseline: Self) -> [(String, String)] {
+        let values = [
+            ("size", size, baseline.size),
+            ("sku", sku, baseline.sku), ("sellerNotes", sellerNotes, baseline.sellerNotes),
+            ("knownFlaws", knownFlaws, baseline.knownFlaws),
+            ("descriptionMeasurements", descriptionMeasurements, baseline.descriptionMeasurements),
+            ("cog", cog, baseline.cog), ("packageDimensions", packageDimensions, baseline.packageDimensions),
+            ("vendooLabels", vendooLabels, baseline.vendooLabels),
+        ]
+        return values.compactMap { key, value, before in
+            guard value != before else { return nil }
+            if key == "size" {
+                let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard normalized != before.trimmingCharacters(in: .whitespacesAndNewlines) else { return nil }
+                return (key, normalized)
+            }
+            return (key, value)
+        }
+    }
+
+    /// Raw notes preserve opaque server metadata; editable values govern draft restoration.
+    func restoringNotesBaseline(from fresh: Self) -> Self {
+        if hasSameEffectiveValues(as: fresh) { return fresh }
+        var restored = self
+        restored.originalNotes = fresh.originalNotes
+        return restored
+    }
+
+    func hasSameEffectiveValues(as other: Self) -> Bool {
+        textChanges(from: other).isEmpty && garment == other.garment
+            && measurements.filter { !$0.value.isEmpty } == other.measurements.filter { !$0.value.isEmpty }
+    }
+
+    /// Send only edited keys so a stale form cannot restore a server-cleared tag size.
+    func noteChanges(since baseline: SellerInputs? = nil) throws -> [String: JSONValue] {
+        let before = baseline ?? Self(notes: originalNotes)
+        var changes = Dictionary(uniqueKeysWithValues: textChanges(from: before).map { ($0.0, JSONValue.string($0.1)) })
+        let savedGarment = Self.object(try before.encodedNotes())?["garment"] != nil
+        if garment != before.garment || (measurements != before.measurements && !measurements.isEmpty && !savedGarment) {
+            changes["garment"] = .string(garment.rawValue)
+        }
+        var groups: [String: JSONValue] = [:]
+        for group in Set(measurements.keys).union(before.measurements.keys) {
+            let current = measurements[group] ?? [:]
+            let previous = before.measurements[group] ?? [:]
+            var edited: [String: JSONValue] = [:]
+            for key in Set(current.keys).union(previous.keys) where current[key] != previous[key] {
+                edited[key] = .string(current[key] ?? "")
+            }
+            if !edited.isEmpty { groups[group] = .object(edited) }
+        }
+        if !groups.isEmpty { changes["measurements"] = .object(groups) }
+        return changes
     }
 
     private static func object(_ raw: String) -> [String: Any]? {

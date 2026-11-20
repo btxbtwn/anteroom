@@ -388,6 +388,98 @@ class PersistListingTest(unittest.TestCase):
         )
         self.assertEqual(parsed["sku"], "BIN4-001")
 
+    def test_tag_size_from_bulk_upload_wins_and_marketplaces_follow(self):
+        """The bulk upload read Size from the tag; the model's guess does not replace it."""
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M", "packageDimensions": "13x10x3"}))
+        parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
+            **LISTING_JSON, "size": "S", "poshmark_specifics": {"size": "S"}, "mercari_specifics": {"size": "S"},
+        })
+        self.assertEqual(parsed["size"], "M")
+        self.assertEqual(parsed["poshmark_specifics"]["size"], "M")
+        self.assertEqual(parsed["mercari_specifics"]["size"], "M")
+        # Clothing size and the shipping package are separate facts.
+        self.assertEqual(parsed["package_dimensions_in"], "13x10x3")
+
+    def test_tag_size_reaches_direct_tabs_on_regenerate(self):
+        """A draft with built marketplace forms keeps the model's blocks; their size still follows the tag."""
+        listing_persistence.save_revision(self.db, self.conv.id, {
+            **LISTING_JSON, "size": "M", "mercari_specifics": {"size": "M"},
+            "_native_forms": {"mercari": {"fields": [
+                {"path": "mercari_specifics.size", "label": "Size", "options": ["S", "M", "L"]},
+            ]}},
+        }, source="generate")
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M"}))
+        parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
+            **LISTING_JSON, "size": "S", "mercari_specifics": {"size": "S"},
+        })
+        self.assertEqual(parsed["size"], "M")
+        self.assertEqual(parsed["mercari_specifics"]["size"], "M")
+
+    def test_tag_size_reaches_ebays_direct_size_row(self):
+        listing_persistence.save_revision(self.db, self.conv.id, {
+            **LISTING_JSON, "size": "M", "ebay_specifics": {"Size": "M"},
+            "_native_forms": {"ebay": {"fields": [
+                {"path": "ebay_specifics.Size", "label": "Size", "options": ["S", "M", "L"]},
+            ]}},
+        }, source="generate")
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M"}))
+        parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
+            **LISTING_JSON, "size": "S", "ebay_specifics": {"Size": "S"},
+        })
+        self.assertEqual(parsed["ebay_specifics"]["Size"], "M")
+
+    def test_a_blank_ebay_size_row_takes_the_tag_size_when_the_model_agreed(self):
+        listing_persistence.save_revision(self.db, self.conv.id, {
+            **LISTING_JSON, "size": "M", "ebay_specifics": {"Size": ""},
+            "_native_forms": {"ebay": {"fields": [
+                {"path": "ebay_specifics.Size", "label": "Size", "options": ["S", "M", "L"]},
+            ]}},
+        }, source="generate")
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M"}))
+        parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
+            **LISTING_JSON, "size": "M", "ebay_specifics": {"Size": ""},
+        })
+        self.assertEqual(parsed["ebay_specifics"]["Size"], "M")
+
+    def test_ebays_row_follows_the_tag_from_the_models_unnormalized_size(self):
+        """Readiness writes men's bottoms as a waist (34x32 to 34); the copied eBay row still says 34x32."""
+        from vendoo_studio.services import listing_generate as generate
+
+        listing = {"size": "36", "ebay_specifics": {"Size": "34x32"}}
+        generate._follow_ebay_native_size(listing, "36", ["34", "34x32"])
+        self.assertEqual(listing["ebay_specifics"]["Size"], "36")
+        kept = {"size": "36", "ebay_specifics": {"Size": "L"}}
+        generate._follow_ebay_native_size(kept, "36", ["34", "34x32"])
+        self.assertEqual(kept["ebay_specifics"]["Size"], "L")
+
+    def test_a_size_the_seller_set_wins_over_the_tag_everywhere(self):
+        listing_persistence.save_revision(self.db, self.conv.id, {
+            **LISTING_JSON, "size": "L", "poshmark_specifics": {"size": "L"}, "seller_fields": ["size"],
+        }, source="user_form")
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M"}))
+        parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
+            **LISTING_JSON, "size": "S", "poshmark_specifics": {"size": "S"},
+        })
+        self.assertEqual(parsed["size"], "L")
+        self.assertEqual(parsed["poshmark_specifics"]["size"], "L")
+
+    def test_tag_size_zero_is_a_size(self):
+        for stored in ("0", 0):
+            with self.subTest(stored=stored):
+                ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": stored}))
+                parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
+                    **LISTING_JSON, "size": "2", "poshmark_specifics": {"size": "2"},
+                })
+                self.assertEqual(parsed["size"], "0")
+                self.assertEqual(parsed["poshmark_specifics"]["size"], "0")
+                self.assertIn("- Size: 0 (", seller_item_details(json.dumps({"size": stored})))
+
+    def test_without_a_tag_size_the_generated_size_stays(self):
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": " "}))
+        parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={**LISTING_JSON, "size": "S"})
+        self.assertEqual(parsed["size"], "S")
+        self.assertNotIn("Size:", seller_item_details(json.dumps({"size": " ", "sku": "A1"})))
+
     def test_model_sku_is_dropped_without_a_seller_sku(self):
         parsed = persist_generated_listing(
             self.db, self.conv.id, "", parsed={**LISTING_JSON, "sku": "NIKE-M"},

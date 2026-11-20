@@ -2,6 +2,8 @@ import { GARMENTS, garmentForListing, type Garment, type Measurements } from "./
 
 export interface ItemDetailsData {
   sku: string;
+  /** The clothing size from the tag (bulk upload); generation keeps it as General Size. "0" is a size. */
+  size: string;
   sellerNotes: string;
   knownFlaws: string;
   descriptionMeasurements: string;
@@ -14,6 +16,7 @@ export interface ItemDetailsData {
 
 export const DEFAULTS: ItemDetailsData = {
   sku: "",
+  size: "",
   sellerNotes: "",
   knownFlaws: "",
   descriptionMeasurements: "",
@@ -79,6 +82,11 @@ function chooseGarment(saved: Garment | null, measurements: Measurements, listin
   return guess !== DEFAULTS.garment ? guess : saved ?? DEFAULTS.garment;
 }
 
+/** A tag size as text; 0 is a size, so only missing and blank are none. */
+function tagSize(value: unknown): string {
+  return typeof value === "number" ? String(value) : typeof value === "string" ? value : "";
+}
+
 /** The listing's category and title, which pick the garment until measurements are typed. */
 export interface ListingHint { category?: string; title?: string }
 
@@ -93,6 +101,7 @@ export function parseNotes(notes: string | null, defaultPackageDimensions = DEFA
     const measurements = parseMeasurements(parsed.measurements);
     return {
       sku: parsed.sku || "",
+      size: tagSize((parsed as { size?: unknown }).size),
       sellerNotes: parsed.sellerNotes || "",
       knownFlaws: parsed.knownFlaws || "",
       descriptionMeasurements: parsed.descriptionMeasurements || "",

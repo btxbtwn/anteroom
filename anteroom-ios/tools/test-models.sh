@@ -16,7 +16,7 @@ xcrun swiftc Sources/API/HistoryModels.swift Tests/HistoryModelsTests.swift -o "
 "$RUNNER_TEMP/history-tests"
 
 echo "Test seller input preservation"
-xcrun swiftc Sources/Inputs/SellerInputs.swift Tests/SellerInputsTests.swift -o "$RUNNER_TEMP/seller-input-tests"
+xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/Inputs/SellerInputs.swift Tests/SellerInputsTests.swift -o "$RUNNER_TEMP/seller-input-tests"
 "$RUNNER_TEMP/seller-input-tests"
 
 echo "Test inventory rules and lossless listing edits"

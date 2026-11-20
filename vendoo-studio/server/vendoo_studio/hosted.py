@@ -434,7 +434,10 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(edit_router)
     # Bulk listing reads photos not uploaded yet; a saved listing reads its photos from private storage.
     from vendoo_studio.routes import measurements
+    from vendoo_studio.routes.api_contract import SIZE_TAG_READ_ERRORS, SizeTagReadResult
     app.add_api_route('/api/measurements/read', measurements.read_measurements, methods=['POST'], tags=['measurements'])
+    app.add_api_route('/api/size-tags/read', measurements.read_size_tags, methods=['POST'], tags=['measurements'],
+                      response_model=SizeTagReadResult, responses=SIZE_TAG_READ_ERRORS)
     app.add_api_route('/api/conversations/{conv_id}/measurements/read', measurements.read_hosted_saved_measurements,
                       methods=['POST'], tags=['measurements'])
     from vendoo_studio.routes import listing_templates, listing_copies, similar_items, changelog

@@ -37,12 +37,12 @@ export function applyReading(
       byHand.push(field.label);
     }
   }
+  // Notes never name the provider or model: sellers paste them, and a model name
+  // does not belong in a listing. The server logs which one read.
   const parts: string[] = [];
-  const reader = result.reader;
-  if (suggested.length) {
-    parts.push(reader ? `Filled from the photos by ${reader}. Check them.` : "Filled from the photos. Check them.");
-  } else if (reader && !Object.values(result.measurements).some((read) => read.status === "accepted")) {
-    parts.push(`${reader} could not read the yardstick.`);
+  if (suggested.length) parts.push("Filled from the photos. Check them.");
+  else if (!Object.values(result.measurements).some((read) => read.status === "accepted")) {
+    parts.push("The yardstick could not be read.");
   } else parts.push("Nothing new could be read from the photos.");
   if (byHand.length) parts.push(`Measure by hand: ${byHand.join(", ")}.`);
   return { measurements, suggested, note: parts.join(" ") };

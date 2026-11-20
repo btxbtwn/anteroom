@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { MeasurementReadResult } from "./api/types";
 import { applyReading, readingSuggestion } from "./measurementReading";
 
 describe("applyReading", () => {
@@ -23,26 +24,22 @@ describe("applyReading", () => {
     expect(outcome.note).toBe("No yardstick photo found.");
   });
 
-  it("names the model when it could not read anything", () => {
+  it("says the yardstick could not be read, without naming the model", () => {
     const outcome = applyReading("top", {}, {
       photos_read: 1,
-      reader: "OpenRouter (openrouter/auto)",
       measurements: { pitToPit: { status: "cannot_read", reads: ["cannot read", "cannot read"] } },
     });
-    expect(outcome.note).toBe(
-      "OpenRouter (openrouter/auto) could not read the yardstick. Measure by hand: Pit to Pit, Length, Sleeve.",
-    );
+    expect(outcome.note).toBe("The yardstick could not be read. Measure by hand: Pit to Pit, Length, Sleeve.");
   });
 
-  it("names the model that filled fields", () => {
+  it("ignores a provider name an older server still sends", () => {
     const outcome = applyReading("top", {}, {
       photos_read: 1,
-      reader: "OpenRouter (openrouter/auto)",
+      reader: "OpenRouter (google/gemini-flash-latest)",
       measurements: { pitToPit: { status: "accepted", value: 20.5, reads: [20.5, 20.5] } },
-    });
-    expect(outcome.note).toBe(
-      "Filled from the photos by OpenRouter (openrouter/auto). Check them. Measure by hand: Length, Sleeve.",
-    );
+    } as MeasurementReadResult);
+    expect(outcome.note).toBe("Filled from the photos. Check them. Measure by hand: Length, Sleeve.");
+    expect(readingSuggestion("top", outcome)).not.toMatch(/openrouter|gemini|google/i);
   });
 });
 

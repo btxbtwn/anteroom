@@ -724,6 +724,12 @@ def notes_for_listing_edits(previous: dict, submitted: dict) -> dict[str, str]:
     updates: dict[str, str] = {}
     if _stable(previous.get("sku")) != _stable(submitted.get("sku")):
         updates["sku"] = str(submitted.get("sku") or "").strip()
+    if _stable(previous.get("size")) != _stable(submitted.get("size")):
+        # Item Details `size` is the size the bulk upload took from the tag. Once
+        # Size changes here it no longer applies; the edit itself is a seller lock.
+        # Not every edit is the seller reading a tag (chat, templates, normalizers),
+        # so the new value is not recorded as one.
+        updates["size"] = ""
     if _stable(previous.get("package_dimensions_in")) != _stable(submitted.get("package_dimensions_in")):
         updates["packageDimensions"] = str(submitted.get("package_dimensions_in") or "").strip()
     if _stable(previous.get("category_path")) != _stable(submitted.get("category_path")):

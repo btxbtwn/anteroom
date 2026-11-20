@@ -110,6 +110,26 @@ final class AnteroomAPI: Sendable {
         return try await decode(upload)
     }
 
+    /// Reads clothing tags from unsaved photos; no generation or marketplace writes.
+    func readSizeTags(jpegs: [Data]) async throws -> SizeTagReadResult {
+        let boundary = "anteroom-\(UUID().uuidString)"
+        var body = Data()
+        for (index, jpeg) in jpegs.prefix(20).enumerated() {
+            body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"files\"; filename=\"photo\(index).jpg\"\r\nContent-Type: image/jpeg\r\n\r\n".utf8))
+            body.append(jpeg)
+            body.append(Data("\r\n".utf8))
+        }
+        body.append(Data("--\(boundary)--\r\n".utf8))
+        var upload = try await request("POST", "api/size-tags/read")
+        upload.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        upload.httpBody = body
+        upload.timeoutInterval = 180
+        do { return try await decode(upload) }
+        catch let error as APIError where error.status == 404 {
+            throw APIError(status: 404, message: "Update Anteroom on the server to read size tags.")
+        }
+    }
+
     /// The editor's first read in one request: the listing, its notes and its photos.
     func listingScreen(_ id: String) async throws -> ListingScreen {
         try await decode(request("GET", "api/conversations/\(id)/screen"))
@@ -127,8 +147,8 @@ final class AnteroomAPI: Sendable {
         try await decode(request("PUT", "api/conversations/\(id)/listing", json: body))
     }
 
-    func saveNotes(_ id: String, notes: String) async throws {
-        _ = try await send(request("PATCH", "api/conversations/\(id)", json: ConversationInput(notes: notes)))
+    func saveNotes(_ id: String, changes: [String: JSONValue]) async throws {
+        _ = try await send(request("PATCH", "api/conversations/\(id)", json: ConversationInput(noteChanges: changes)))
     }
 
     func rename(_ id: String, title: String) async throws {
