@@ -159,7 +159,7 @@ async def ebay_aspects(client, category_id: str) -> list[dict]:
 async def ebay_conditions(client, category_id: str) -> dict:
     """``{"required", "conditions": [{"id", "label"}]}`` for the leaf. No conditions means eBay did not say."""
     category_id = _category(category_id)
-    cached = load_rows(EBAY_CONDITIONS, category_id)
+    cached = await asyncio.to_thread(load_rows, EBAY_CONDITIONS, category_id)
     if cached:
         return cached[0]
     body = await client.request("GET", "/sell/metadata/v1/marketplace/EBAY_US/get_item_condition_policies",
@@ -168,7 +168,7 @@ async def ebay_conditions(client, category_id: str) -> dict:
     answer = {"required": bool(policy.get("itemConditionRequired")),
               "conditions": [{"id": str(item["conditionId"]), "label": str(item.get("conditionDescription") or "")}
                              for item in policy.get("itemConditions") or [] if item.get("conditionId")]}
-    save_rows(EBAY_CONDITIONS, category_id, [answer])
+    await asyncio.to_thread(save_rows, EBAY_CONDITIONS, category_id, [answer])
     return answer
 
 
@@ -198,7 +198,7 @@ async def ebay_listing_types(client, category_id: str) -> dict[str, list[str]]:
     empty answer means eBay did not say.
     """
     category_id = _category(category_id)
-    cached = load_rows(EBAY_LISTING_TYPES, category_id)
+    cached = await asyncio.to_thread(load_rows, EBAY_LISTING_TYPES, category_id)
     if cached:
         return cached[0]
     body = await client.request("GET", "/sell/metadata/v1/marketplace/EBAY_US/get_listing_type_policies",
@@ -215,14 +215,14 @@ async def ebay_listing_types(client, category_id: str) -> dict[str, list[str]]:
                 answer[kind].append(duration)
     answer = {kind: values for kind, values in answer.items() if values}
     if answer:
-        save_rows(EBAY_LISTING_TYPES, category_id, [answer])
+        await asyncio.to_thread(save_rows, EBAY_LISTING_TYPES, category_id, [answer])
     return answer
 
 
 async def ebay_variations_supported(client, category_id: str) -> bool | None:
     """Whether eBay takes multi-variation listings in the leaf (``getListingStructurePolicies``). None: eBay did not say."""
     category_id = _category(category_id)
-    cached = load_rows(EBAY_LISTING_STRUCTURE, category_id)
+    cached = await asyncio.to_thread(load_rows, EBAY_LISTING_STRUCTURE, category_id)
     if cached:
         return bool(cached[0].get("variations"))
     body = await client.request("GET", "/sell/metadata/v1/marketplace/EBAY_US/get_listing_structure_policies",
@@ -231,7 +231,7 @@ async def ebay_variations_supported(client, category_id: str) -> bool | None:
     if policy is None or "variationsSupported" not in policy:
         return None
     supported = bool(policy["variationsSupported"])
-    save_rows(EBAY_LISTING_STRUCTURE, category_id, [{"variations": supported}])
+    await asyncio.to_thread(save_rows, EBAY_LISTING_STRUCTURE, category_id, [{"variations": supported}])
     return supported
 
 
@@ -252,13 +252,13 @@ async def etsy_properties(taxonomy_id: str) -> list[dict]:
     from anteroom.services import marketplace_accounts
 
     taxonomy_id = _category(taxonomy_id)
-    cached = load_rows(ETSY_PROPERTIES, taxonomy_id)
+    cached = await asyncio.to_thread(load_rows, ETSY_PROPERTIES, taxonomy_id)
     if cached is not None:
         return cached
     body = await marketplace_accounts.etsy_api("GET", f"seller-taxonomy/nodes/{taxonomy_id}/properties")
     fields = [_etsy_field(prop) for prop in body.get("results") or []
               if prop.get("property_id") is not None and prop.get("supports_attributes", True)]
-    save_rows(ETSY_PROPERTIES, taxonomy_id, fields)
+    await asyncio.to_thread(save_rows, ETSY_PROPERTIES, taxonomy_id, fields)
     return fields
 
 

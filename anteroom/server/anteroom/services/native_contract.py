@@ -23,7 +23,7 @@ SALE_FIELDS = re.compile(
     r"|availab|smartsell|smartpricing|boost|sellernotes|polic"
 )
 _SCHEMA_KEYS = ("path", "key", "label", "required", "multi", "selection_only", "options", "option_values",
-                "max_values", "max_length", "min_value", "max_value", "step", "input_type", "locked",
+                "choice_list", "max_values", "max_length", "min_value", "max_value", "step", "input_type", "locked",
                 "category_specific", "clears", "value_constraints", "help", "inventory_groups", "inventory_system",
                 "variation_aspects")
 _EDITOR_KEYS = ("section", "section_help", "width", "control_width", "presentation", "placeholder", "prefix", "suffix", "counter",
@@ -195,14 +195,19 @@ def changed_inputs(listing: dict, market: str, fields: list[dict], stored) -> se
 
 
 def capture(listing: dict, forms: dict[str, dict], markets) -> dict:
+    from anteroom.services import choice_lists
+
     contracts = {}
     for market in markets:
         form = forms.get(market)
         if not form or form.get("known") is False or not form.get("fields"):
             contracts[market] = {"unavailable": True}
             continue
+        compacted = choice_lists.compact_fields(
+            market, [row for row in form.get("fields") or [] if path_of(row)]
+        )
         fields = [{key: copy.deepcopy(row[key]) for key in (*_SCHEMA_KEYS, *_EDITOR_KEYS) if key in row}
-                  for row in form.get("fields") or [] if path_of(row)]
+                  for row in compacted]
         contracts[market] = {"category_id": form.get("category_id"), "fields": fields,
                              "page_labels": bool(form.get("page_labels")),
                              "inputs": inputs(listing, market, fields)}
@@ -215,6 +220,8 @@ def editor_form(listing: dict, market: str, *, values: dict | None = None) -> di
     A changed controlling choice needs a new definition; never show the old
     category's dropdowns as if they belonged to the new category.
     """
+    from anteroom.services import choice_lists
+
     contract = (listing.get(KEY) or {}).get(market)
     if not isinstance(contract, dict) or contract.get("unavailable") or "page_labels" not in contract:
         return None
@@ -225,7 +232,7 @@ def editor_form(listing: dict, market: str, *, values: dict | None = None) -> di
     rows = []
     definitions = {path_of(row): row for row in fields}
     for definition in fields:
-        row = copy.deepcopy(definition)
+        row = choice_lists.hydrate_row(copy.deepcopy(choice_lists.compact_row(market, definition)))
         path = path_of(row)
         value = get_path(values, path)
         if path == "price":
@@ -247,19 +254,21 @@ def editor_form(listing: dict, market: str, *, values: dict | None = None) -> di
 
 
 def prompt(contracts: dict) -> str:
+    from anteroom.services.choice_lists import hydrate_row
+    from anteroom.services.option_lookup import project_row
+
     # Presentation metadata belongs to the editor, not the generation context.
     def schema(row, contract):
-        definition = {key: value for key, value in row.items() if key in _SCHEMA_KEYS}
-        if (path_of(row).startswith("direct_category_ids.") ) and contract.get("category_id"):
+        hydrated = hydrate_row(row)
+        definition = {key: value for key, value in hydrated.items() if key in _SCHEMA_KEYS}
+        if path_of(hydrated).startswith("direct_category_ids.") and contract.get("category_id"):
             # Category selection already ran against the complete catalog.
             # Copy generation needs its chosen leaf, not thousands of siblings.
             category_id = str(contract["category_id"])
-            values = row.get("option_values") or {}
-            options = [label for label in row.get("options") or [] if str(values.get(label, label)) == category_id]
+            values = hydrated.get("option_values") or {}
+            options = [label for label in hydrated.get("options") or [] if str(values.get(label, label)) == category_id]
             definition["options"] = options
             definition["option_values"] = {label: values.get(label, label) for label in options}
-        from anteroom.services.option_lookup import project_row
-
         definition = project_row(definition)
         return definition
 
@@ -321,6 +330,10 @@ def value_error(row: dict, value) -> str | None:
             if len(str(item.get("sku") or "")) > 50:
                 return "Inventory SKUs must be at most 50 characters."
     if row.get("selection_only"):
+        if "choice_list" in row:
+            from anteroom.services.choice_lists import hydrate_row
+
+            row = hydrate_row(row)
         allowed = {str(item) for item in row.get("options") or []}
         allowed.update(str(item) for item in (row.get("option_values") or {}).values())
         if not allowed or any(str(item) not in allowed for item in values):
@@ -467,7 +480,9 @@ def constrain_generated(listing: dict, seed: dict, *, freeze_categories: bool = 
         listing.pop(KEY, None)
         listing.pop(EVIDENCE_KEY, None)
         return listing
-    listing[KEY] = copy.deepcopy(contracts)
+    from anteroom.services import choice_lists
+
+    listing[KEY] = copy.deepcopy(choice_lists.compact_contracts(contracts))
     if not keep_evidence:
         listing[EVIDENCE_KEY] = copy.deepcopy(seed.get(EVIDENCE_KEY) or {})
     if seed.get("seller_fields"):

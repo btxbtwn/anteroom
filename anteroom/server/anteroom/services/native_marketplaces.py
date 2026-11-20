@@ -651,13 +651,6 @@ class _JobRef:
         self.id = job_id
 
 
-def _release(db: Session) -> None:
-    """End the job's transaction before it waits on Chrome, so the wait does not hold a pooled
-    connection. Each running marketplace would otherwise pin one for minutes, and a few at
-    once leave none for the seller's own page requests."""
-    db.commit()
-
-
 async def _unless_cancelled(job_id: str, awaitable):
     """Await a Chrome call, giving up as soon as the seller presses Cancel."""
     task = asyncio.ensure_future(awaitable)
@@ -673,18 +666,16 @@ async def _unless_cancelled(job_id: str, awaitable):
     return task.result()
 
 
-async def _wait_for_chrome(db: Session, job, conv_id: str, marketplace: str, record: dict, snapshot: dict) -> dict:
+async def _wait_for_chrome(job_id: str, conv_id: str, marketplace: str, record: dict, snapshot: dict) -> dict:
     """Chrome's reply was lost or late. Stop the action, then hold the slot until Chrome reports what it did."""
     operation_id = record["operation_id"]
-    # Only the id is used while waiting: reading the job row again would reopen a transaction.
-    job = _JobRef(job.id)
+    job = _JobRef(job_id)
     await _send_cancel(operation_id)
     deadline = time.monotonic() + SETTLE_DEADLINE_S
-    context = _result_context(db, conv_id, marketplace, record, snapshot, record.get("draft_url"))
+    context = await in_worker_session(_result_context, conv_id, marketplace, record, snapshot, record.get("draft_url"))
     try:
         while time.monotonic() < deadline:
-            _progress(db, job.id, marketplace, "waiting")
-            _release(db)
+            await in_worker_session(_progress, job.id, marketplace, "waiting")
             try:
                 reply = await _unless_cancelled(job.id, browser_bridge.request(
                     job, "marketplace.result", {"marketplace": marketplace, "operation_id": operation_id, "context": context}, timeout=65))
@@ -692,7 +683,6 @@ async def _wait_for_chrome(db: Session, job, conv_id: str, marketplace: str, rec
                     return reply["result"]
             except browser_bridge.BrowserBridgeError:
                 pass
-            _release(db)
             await _unless_cancelled(job.id, asyncio.sleep(SETTLE_POLL_S))
     except _Cancelled:
         # The seller stopped waiting. Chrome may still have finished, so the result stays uncertain.
@@ -700,23 +690,42 @@ async def _wait_for_chrome(db: Session, job, conv_id: str, marketplace: str, rec
     return failure(CHROME_SILENT.format(name=NAMES[marketplace]), "uncertain", safe=False)
 
 
-async def _execute_step(db: Session, job, conv_id: str, marketplace: str, step: str, options: dict) -> dict:
+def _open_step(db: Session, job_id: str, conv_id: str, marketplace: str, index: int, step: str, total_steps: int):
+    repo = JobRepo(db)
+    job = repo.get(job_id)
+    if not job or not _active(db, job_id, conv_id, marketplace):
+        return None
+    if index:
+        # Each step has its own Chrome journal entry.
+        repo.update_status(job_id, "dispatched", f"native_{marketplace}_{step}")
+        _store(db, conv_id, marketplace, {"state": STEP_STATE[step], "action": step,
+                                          "operation_id": f"{job_id}-{index + 1}"})
+        _progress(db, job_id, marketplace, step, index, total_steps)
+        job = repo.get(job_id)
+        if not job:
+            return None
+    snapshot = job.listing_snapshot if isinstance(job.listing_snapshot, dict) else {}
+    binding = _record(db, conv_id, marketplace)
+    return snapshot, binding
+
+
+async def _execute_step(job_id: str, conv_id: str, marketplace: str, step: str, options: dict,
+                        snapshot: dict, binding: dict) -> dict:
     from anteroom.services import approved_photos
 
-    snapshot = job.listing_snapshot if isinstance(job.listing_snapshot, dict) else {}
     try:
         photos = await asyncio.to_thread(approved_photos.load, snapshot)
     except ValueError as exc:
         raise NativeMarketplaceError(409, str(exc)) from exc
     warning = snapshot.get("_approved_photo_warning") or ""
-    binding = _record(db, conv_id, marketplace)
+    job = _JobRef(job_id)
     if marketplace in API_MARKETPLACES:
-        def record(values: dict) -> None:
+        async def record(values: dict) -> None:
             binding.update(values)
-            _store(db, conv_id, marketplace, values)
+            await in_worker_session(_store, conv_id, marketplace, values)
 
-        def active() -> bool:
-            return _active(db, job.id, conv_id, marketplace)
+        async def active() -> bool:
+            return await in_worker_session(_active, job_id, conv_id, marketplace)
 
         if marketplace == "ebay":
             from anteroom.services import ebay_listings
@@ -725,25 +734,27 @@ async def _execute_step(db: Session, job, conv_id: str, marketplace: str, step: 
                                                  conversation_id=conv_id)
         else:
             result = await etsy_listings.execute(step, snapshot, photos, binding, record, active, confirm=step in {"list", "publish", "update"}, **options)
-        stored = _apply_result(db, conv_id, marketplace, job.id, step, result)
+        stored = await in_worker_session(_apply_result, conv_id, marketplace, job_id, step, result)
         if stored["state"] == "unknown":
             # A reply was lost. Read what the marketplace has now, while still holding the slot.
-            _progress(db, job.id, marketplace, "checking")
+            await in_worker_session(_progress, job_id, marketplace, "checking")
+
+            async def remember(values: dict) -> None:
+                await in_worker_session(_store, conv_id, marketplace, values)
+
             checked = await _read_result(
                 marketplace, stored, snapshot, stored.get("draft_url"), job, context=None,
-                remember=lambda values: _store(db, conv_id, marketplace, values))
+                remember=remember)
             if checked is not None:
-                stored = _apply_result(db, conv_id, marketplace, job.id, step, checked)
+                stored = await in_worker_session(_apply_result, conv_id, marketplace, job_id, step, checked)
         return stored
     payload = _execute_payload(marketplace, step, binding, snapshot, photos, warning)
-    job = _JobRef(job.id)
-    _release(db)
     try:
         result = await _unless_cancelled(job.id, browser_bridge.request(
             job, "marketplace.execute", payload, timeout=EXECUTE_TIMEOUT_S))
     except (browser_bridge.BrowserBridgeError, _Cancelled):
-        result = await _wait_for_chrome(db, job, conv_id, marketplace, binding, snapshot)
-    return _apply_result(db, conv_id, marketplace, job.id, step, result)
+        result = await _wait_for_chrome(job_id, conv_id, marketplace, binding, snapshot)
+    return await in_worker_session(_apply_result, conv_id, marketplace, job_id, step, result)
 
 
 def _finish_job(db: Session, job_id: str, conv_id: str, marketplace: str) -> None:
@@ -767,39 +778,30 @@ def _finish_job(db: Session, job_id: str, conv_id: str, marketplace: str) -> Non
 
 async def run_job(job_id: str, conv_id: str, marketplace: str, steps: list[str], options: dict) -> None:
     """Run a List or Update job's steps in order, holding the automation slot until the last answer."""
-    from anteroom.database import SessionLocal
-
-    db = SessionLocal()
     try:
         for index, step in enumerate(steps):
-            job = JobRepo(db).get(job_id)
-            if not job or not _active(db, job_id, conv_id, marketplace):
+            opened = await in_worker_session(_open_step, job_id, conv_id, marketplace, index, step, len(steps))
+            if opened is None:
                 break
-            if index:
-                # Each step has its own Chrome journal entry.
-                repo = JobRepo(db)
-                repo.update_status(job_id, "dispatched", f"native_{marketplace}_{step}")
-                _store(db, conv_id, marketplace, {"state": STEP_STATE[step], "action": step,
-                                                  "operation_id": f"{job_id}-{index + 1}"})
-                _progress(db, job_id, marketplace, step, index, len(steps))
-                job = repo.get(job_id)
-            record = await _execute_step(db, job, conv_id, marketplace, step, options)
+            snapshot, binding = opened
+            record = await _execute_step(job_id, conv_id, marketplace, step, options, snapshot, binding)
             if step == "save_draft" and not (record.get("state") == "draft" and not record.get("error") and record.get("draft_url")):
                 break
             # Depop's drafts have no Boost; its live edit does. A List the seller set to boost
             # turns it on with one edit of the listing it just posted.
             if (marketplace == "depop" and step == "publish" and "update" not in steps
-                    and ((job.listing_snapshot or {}).get("depop_specifics") or {}).get("boost") is True
+                    and (snapshot.get("depop_specifics") or {}).get("boost") is True
                     and record.get("state") == "published" and not record.get("error")):
                 from anteroom.services.marketplace_delist import listing_id
 
                 if live_id := listing_id(marketplace, record.get("listing_url")):
-                    _store(db, conv_id, marketplace, {"listing_id": live_id})
+                    await in_worker_session(_store, conv_id, marketplace, {"listing_id": live_id})
                     steps.append("update")
                 else:
                     # Listed, but Boost did not stick: shown on the live row, like Poshmark's Smart Pricing.
-                    _store(db, conv_id, marketplace, {"error": "Listed on Depop without Boost: Depop did not return the "
-                                                               "listing link. Turn Boost on with Update."})
+                    await in_worker_session(_store, conv_id, marketplace, {
+                        "error": "Listed on Depop without Boost: Depop did not return the "
+                                 "listing link. Turn Boost on with Update."})
             # A confirmed List found the saved draft deleted. Save a new one, then list that, in this same job.
             if (marketplace == "depop" and step == "publish" and "save_draft" not in steps
                     and _draft_gone(record)):
@@ -809,13 +811,11 @@ async def run_job(job_id: str, conv_id: str, marketplace: str, steps: list[str],
         pass
     except Exception:  # noqa: BLE001 - the job and record still have to end
         log.exception("Direct %s job %s failed", marketplace, job_id)
-        db.rollback()
     finally:
         try:
-            _finish_job(db, job_id, conv_id, marketplace)
+            await asyncio.shield(in_worker_session(_finish_job, job_id, conv_id, marketplace))
         finally:
             release_api_job(job_id)
-            db.close()
 
 
 async def cancel(conv_id: str, marketplace: Marketplace) -> dict:

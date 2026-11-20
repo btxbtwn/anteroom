@@ -50,16 +50,6 @@
                 }
             }
         ],
-        "./server/anteroom/services/native_marketplaces.py": [
-            {
-                "code": "reportOptionalMemberAccess",
-                "range": {
-                    "startColumn": 30,
-                    "endColumn": 46,
-                    "lineCount": 1
-                }
-            }
-        ],
         "./server/anteroom/services/sold_listings.py": [
             {
                 "code": "reportArgumentType",

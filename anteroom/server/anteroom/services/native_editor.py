@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import copy
 import logging
 import re
 
@@ -126,9 +125,11 @@ def save_refreshed_form(db: Session, conv_id: str, marketplace: str, revision_id
     revision = repo.get_revision(revision_id)
     if revision is None:
         raise NativeMarketplaceError(404, "Listing revision not found")
-    listing = copy.deepcopy(revision.listing_json)
+    from anteroom.services import choice_lists
+
+    listing = native_contract.copy_listing(revision.listing_json)
     listing[native_contract.KEY] = {
-        **(listing.get(native_contract.KEY) or {}),
+        **choice_lists.compact_contracts(listing.get(native_contract.KEY) or {}),
         **native_contract.capture(listing, {marketplace: form}, [marketplace]),
     }
     if listing != revision.listing_json:

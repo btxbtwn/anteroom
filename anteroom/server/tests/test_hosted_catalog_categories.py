@@ -95,3 +95,71 @@ def test_seller_index_state_persists_and_hosted_lookups_never_build_inline(monke
     with use(for_seller(alice)):
         assert catalog_index.ensure_catalog_index(None)['rebuilt'] is False
     assert kicked == [True]
+
+
+def test_complete_category_trees_are_cached_per_version_and_invalidated_on_reimport(
+    cloud, signing_keys, tmp_path, monkeypatch,  # noqa: F811
+):
+    from sqlalchemy import event
+
+    client, engine = cloud
+    alice = headers(signing_keys)
+    monkeypatch.setenv('ANTEROOM_TEST_MIGRATION_URL', engine.url.render_as_string(hide_password=False))
+    seed_path = seed(tmp_path)
+    assert category_trees_cli.main(['import', '--database-url-env', 'ANTEROOM_TEST_MIGRATION_URL', '--seed', str(seed_path)]) == 0
+
+    node_queries: list[str] = []
+
+    def count_node_queries(_conn, _cursor, statement, *_args):
+        if 'category_tree_nodes' in statement.lower():
+            node_queries.append(statement)
+
+    event.listen(engine, 'before_cursor_execute', count_node_queries)
+    try:
+        first = client.get('/api/catalog/categories?marketplace=ebay', headers=alice)
+        assert first.status_code == 200, first.text
+        etag = first.headers.get('etag')
+        assert etag
+        assert len(node_queries) == 1
+
+        second = client.get('/api/catalog/categories?marketplace=ebay', headers=alice)
+        assert second.status_code == 200
+        assert second.json() == first.json()
+        assert second.headers.get('etag') == etag
+        assert len(node_queries) == 1  # served from cache without scanning category_tree_nodes
+
+        not_modified = client.get(
+            '/api/catalog/categories?marketplace=ebay',
+            headers={**alice, 'If-None-Match': etag},
+        )
+        assert not_modified.status_code == 304
+        assert len(node_queries) == 1
+
+        # Re-importing a seed with a newer timestamp invalidates the cache.
+        updated = json.loads(seed_path.read_text())
+        updated['category_trees'] = [
+            {**row, 'updated_at': '2099-01-01 00:00:00'} for row in updated['category_trees']
+        ]
+        updated['category_tree_nodes'].append({
+            'marketplace': 'ebay',
+            'category_id': '999999',
+            'parent_id': 'ebay-root',
+            'path': 'Clothing, Shoes & Accessories > New Leaf',
+            'label': 'New Leaf',
+            'is_leaf': True,
+            'has_children': False,
+        })
+        seed_path2 = tmp_path / 'seed2.json'
+        seed_path2.write_text(json.dumps(updated))
+        assert category_trees_cli.main(['import', '--database-url-env', 'ANTEROOM_TEST_MIGRATION_URL', '--seed', str(seed_path2)]) == 0
+
+        refreshed = client.get(
+            '/api/catalog/categories?marketplace=ebay',
+            headers={**alice, 'If-None-Match': etag},
+        )
+        assert refreshed.status_code == 200
+        assert refreshed.headers.get('etag') != etag
+        assert '999999' in {node['id'] for node in refreshed.json()['nodes']}
+        assert len(node_queries) == 2
+    finally:
+        event.remove(engine, 'before_cursor_execute', count_node_queries)

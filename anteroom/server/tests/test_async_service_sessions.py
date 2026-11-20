@@ -13,9 +13,6 @@ STILL_ON_THE_LOOP = {
     "services/hosted_promotion_scheduler.py:check_seller",
     "services/listing_promotions.py:review",
     "services/marketplace_accounts.py:autodelist_for_sales",
-    "services/native_marketplaces.py:_execute_step",
-    "services/native_marketplaces.py:_wait_for_chrome",
-    "services/native_marketplaces.py:run_job",
     "services/promotion_automations.py:_timer",
     "services/promotion_automations.py:check_new_likes",
     "services/promotion_automations.py:run_round",
@@ -96,4 +93,71 @@ def test_saving_a_generated_listing_and_a_chat_reply_queries_off_the_event_loop(
         event.remove(engine, "checkout", checkout)
         engine.dispose()
     assert listing and listing["title"] == "Blue tee"
+    assert on_the_loop and not any(on_the_loop)
+
+
+def test_marketplace_schema_and_native_job_run_off_the_event_loop(monkeypatch):
+    """Schema cache reads and marketplace job DB updates must run in worker threads, never on the loop."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from sqlalchemy import event
+    from sqlalchemy.orm import Session
+
+    from anteroom.database import Base, load_models
+    from anteroom.repositories.queries import ConversationRepo, JobRepo
+    from anteroom.services import (
+        ebay_listings,
+        listing_persistence,
+        marketplace_accounts,
+        marketplace_schemas,
+        native_marketplaces,
+    )
+    from worker_sessions import memory_engine, worker_sessions
+
+    load_models()
+    engine = memory_engine()
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        conv = ConversationRepo(db).create(title="Tee")
+        rev = listing_persistence.save_revision(db, conv.id, {"title": "Blue tee", "price": 20}, "user_form")
+        job = JobRepo(db).create(
+            conv.id,
+            rev.id,
+            {"title": "Blue tee", "price": 20, "_approved_photos": []},
+            status="dispatched",
+            current_step="native_ebay_save_draft",
+        )
+        conv_id = conv.id
+        job_id = job.id
+    on_the_loop: list[bool] = []
+
+    def checkout(*_args):
+        on_the_loop.append(asyncio._get_running_loop() is not None)
+
+    async def fake_etsy_api(_method, _path, **_kwargs):
+        return {"results": [{"property_id": 100, "name": "Color", "is_required": False, "possible_values": []}]}
+
+    async def fake_ebay_execute(_action, _snapshot, _photos, _binding, record, active, **_kwargs):
+        assert await active() is True
+        await record({"ebay_sku": "ar-off-loop", "ebay_offer_id": "42", "ebay_inventory_written": True})
+        return {"ok": True, "state": "draft"}
+
+    monkeypatch.setattr(marketplace_accounts, "etsy_api", fake_etsy_api)
+    monkeypatch.setattr(ebay_listings, "execute", fake_ebay_execute)
+    monkeypatch.setattr(ebay_listings.EbayClient, "connect", AsyncMock())
+    event.listen(engine, "checkout", checkout)
+
+    async def run_both():
+        rows = await marketplace_schemas.etsy_properties("1234")
+        await native_marketplaces.run_job(job_id, conv_id, "ebay", ["save_draft"], {})
+        return rows
+
+    try:
+        with worker_sessions(engine):
+            rows = asyncio.run(run_both())
+    finally:
+        event.remove(engine, "checkout", checkout)
+        engine.dispose()
+    assert rows and rows[0]["name"] == "Color"
     assert on_the_loop and not any(on_the_loop)

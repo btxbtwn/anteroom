@@ -187,7 +187,13 @@ class NativeContractTest(unittest.TestCase):
             self.assertEqual(field["options_lookup"]["count"], 21697)
             self.assertEqual(contracts, before)
             self.assertLess(len(json.dumps(field)), 500)
-            self.assertEqual(len(next(row for row in contracts["depop"]["fields"]
+            stored_row = next(row for row in contracts["depop"]["fields"]
+                              if row["path"] == "depop_specifics.brand")
+            self.assertNotIn("options", stored_row)
+            self.assertEqual(stored_row["choice_list"]["name"], "depop-brands")
+            editor = contract.editor_form({**listing, contract.KEY: contracts}, "depop")
+            self.assertIsNotNone(editor)
+            self.assertEqual(len(next(row for row in editor["fields"]
                                       if row["path"] == "depop_specifics.brand")["options"]), 21697)
 
     def test_large_aspect_catalog_is_narrowed_without_changing_validation(self):
@@ -560,3 +566,54 @@ class NativeContractRevisionTest(unittest.TestCase):
         self.assertEqual(text.count("--- Authoritative native marketplace forms ---"), 1)
         self.assertIn("mercari_specifics.material", text)
         self.assertIn("Canonical prose rules", text)
+
+    def test_save_revision_compacts_legacy_uncompressed_native_forms(self):
+        from anteroom.services import depop_form
+
+        brands = depop_form.brand_choices()
+        self.assertGreater(len(brands["options"]), 1000)
+        legacy_forms = {
+            "depop": {
+                "category_id": "mens_tshirts",
+                "category_path": "Menswear > Tops > T-shirts",
+                "fields": [
+                    {
+                        "path": "depop_specifics.brand",
+                        "label": "Brand",
+                        "type": "select",
+                        "required": False,
+                        "multi": False,
+                        **brands,
+                    },
+                ],
+            },
+        }
+        current = self.repo.get_current(self.conv.id)
+        rev = self.repo.get_revision(current.current_revision_id)
+        rev.listing_json = {"title": "Vintage Tee", "price": 20, contract.KEY: legacy_forms}
+        self.db.commit()
+        saved = listing_persistence.save_revision(self.repo.db, self.conv.id, {"title": "Vintage Tee Updated", "price": 22}, "user_form")
+        stored_row = saved.listing_json[contract.KEY]["depop"]["fields"][0]
+        self.assertEqual(stored_row.get("choice_list", {}).get("name"), "depop-brands")
+        self.assertNotIn("options", stored_row)
+        self.assertNotIn("option_values", stored_row)
+
+    def test_job_repo_strips_native_forms_and_keeps_approved_photos(self):
+        from anteroom.repositories.queries import JobRepo
+
+        rev = listing_persistence.save_revision(self.db, self.conv.id, seed(), "user_form")
+        snapshot = {
+            "title": "Vintage Tee",
+            "_approved_photos": [{"id": "p1", "filename": "a.jpg"}],
+            contract.KEY: seed()[contract.KEY],
+        }
+        jobs = JobRepo(self.db)
+        job = jobs.create(self.conv.id, rev.id, snapshot)
+        self.assertNotIn(contract.KEY, job.listing_snapshot)
+        self.assertEqual(job.listing_snapshot["_approved_photos"], [{"id": "p1", "filename": "a.jpg"}])
+        source = jobs.photo_source(job.id)
+        self.assertEqual(source.conversation_id, self.conv.id)
+        self.assertEqual(source.approved_photos, [{"id": "p1", "filename": "a.jpg"}])
+        self.assertTrue(source.has_approved_photos)
+        # Original caller dict is not mutated.
+        self.assertIn(contract.KEY, snapshot)

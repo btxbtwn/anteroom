@@ -1540,7 +1540,7 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         from anteroom.services import ebay_listings
 
         async def execute(action, snapshot, photos, binding, record, active, **kwargs):
-            record({"ebay_sku": "ar-x", "ebay_offer_id": "9", "ebay_inventory_written": True})
+            await record({"ebay_sku": "ar-x", "ebay_offer_id": "9", "ebay_inventory_written": True})
             return {"ok": False, "safe_to_retry": False, "error": "eBay did not confirm the listing.", "error_code": "uncertain"}
 
         checked = AsyncMock(return_value={"ok": True, "state": "published", "listing_url": "https://www.ebay.com/itm/123456789012"})
@@ -1555,7 +1555,7 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         from anteroom.services import ebay_listings
 
         async def execute(action, snapshot, photos, binding, record, active, **kwargs):
-            record({"ebay_sku": "ar-x", "ebay_offer_id": "9", "ebay_inventory_written": True})
+            await record({"ebay_sku": "ar-x", "ebay_offer_id": "9", "ebay_inventory_written": True})
             return {"ok": False, "safe_to_retry": True, "error": "eBay returned HTTP 400.", "error_code": "rejected",
                     "marketplace_message": "25002: Color is missing."}
 
@@ -1571,7 +1571,7 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
 
         async def execute(action, snapshot, photos, binding, record, active, **kwargs):
             self.assertEqual((action, kwargs["confirm"]), ("save_draft", False))
-            record({"ebay_sku": "ar-x", "ebay_offer_id": "9", "ebay_inventory_written": True})
+            await record({"ebay_sku": "ar-x", "ebay_offer_id": "9", "ebay_inventory_written": True})
             return {"ok": True, "state": "draft"}
 
         checked = AsyncMock(return_value={"ok": True, "state": "draft"})

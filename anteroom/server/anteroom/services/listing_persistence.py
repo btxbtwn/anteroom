@@ -97,12 +97,12 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
     scope = activity.edit_fields.get()
     if scope is not None and source in FILL_ON_SOURCES:
         listing_json = activity.scoped_listing(before, listing_json, scope)
-    from anteroom.services import native_contract
+    from anteroom.services import choice_lists, native_contract
 
     if source != "native_schema" and native_contract.KEY in before:
-        listing_json = copy.deepcopy(listing_json)
+        listing_json = native_contract.copy_listing(listing_json)
         if source in FILL_ON_SOURCES:
-            listing_json[native_contract.KEY] = copy.deepcopy(before[native_contract.KEY])
+            listing_json[native_contract.KEY] = choice_lists.compact_contracts(before[native_contract.KEY])
             listing_json[native_contract.EVIDENCE_KEY] = copy.deepcopy(before.get(native_contract.EVIDENCE_KEY) or {})
             native_contract.invalidate_dependents(before, listing_json)
             if source != "user_form":
@@ -111,6 +111,11 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
             native_contract.constrain_generated(listing_json, before, freeze_categories=source not in {
                 "native_fields", "native_categories", "vendoo_prepare", "category_analysis", "category_schema_cache"},
                 keep_evidence=source == "native_fields")
+    elif native_contract.KEY in listing_json:
+        compacted = choice_lists.compact_contracts(listing_json[native_contract.KEY])
+        if compacted is not listing_json[native_contract.KEY]:
+            listing_json = native_contract.copy_listing(listing_json)
+            listing_json[native_contract.KEY] = compacted
     revision = repo.insert_revision(conv_id, listing_json, source, parent_revision_id)
 
     if source == "model_refinement":
