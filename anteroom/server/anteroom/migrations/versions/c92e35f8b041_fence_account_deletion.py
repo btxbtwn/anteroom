@@ -15,10 +15,16 @@ def upgrade() -> None:
     op.execute('''
         CREATE FUNCTION anteroom_private.account_write_allowed(p_owner text) RETURNS boolean
         LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+        DECLARE owner_uuid uuid;
         BEGIN
             PERFORM pg_advisory_xact_lock_shared(hashtextextended('anteroom-account-delete:' || p_owner, 0));
+            BEGIN
+                owner_uuid := p_owner::uuid;
+            EXCEPTION WHEN invalid_text_representation THEN
+                RETURN true;
+            END;
             RETURN NOT EXISTS (
-                SELECT 1 FROM anteroom_private.account_cleanup WHERE user_id::text = p_owner
+                SELECT 1 FROM anteroom_private.account_cleanup WHERE user_id = owner_uuid
             );
         END $$;
         REVOKE ALL ON FUNCTION anteroom_private.account_write_allowed(text) FROM PUBLIC;

@@ -383,6 +383,11 @@ def test_storage_trigger_serializes_with_deletion(migration_engine):  # noqa: F8
 
         pending = workers.submit(stage)
         assert started.wait(5)
+        with engine.begin() as probe:
+            assert probe.scalar(
+                text('SELECT pg_try_advisory_xact_lock(hashtextextended(:identity, 0))'),
+                {'identity': f'anteroom-account-delete:{ALICE}'},
+            ) is False
         assert not pending.done()
         writer.commit()
         assert pending.result(timeout=10) == [key]
