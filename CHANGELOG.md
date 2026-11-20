@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1053 — 2026-11-20
+
+- Show the item's title instead of "Untitled item" in the Marketplace activity tray on hosted accounts.
+
 ## 0.1.1052 — 2026-11-20
 
 - Choose which sections a generated description includes. The current formula stays on, and you can add or remove sections such as fit, material, trend, and care.
