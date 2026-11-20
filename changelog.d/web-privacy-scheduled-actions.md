@@ -1,1 +1,0 @@
-- Update the privacy policy to describe sale detection, delisting after a sale, scheduled shares and offers, and exactly which account and order details Anteroom keeps.

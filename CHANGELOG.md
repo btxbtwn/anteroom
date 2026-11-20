@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1048 — 2026-11-20
+
+- Remove the developer-only marketplace page inspection from Anteroom Bridge so the Chrome Web Store package carries only seller features.
+
+## 0.1.1047 — 2026-11-20
+
+- Update the privacy policy to describe sale detection, delisting after a sale, scheduled shares and offers, and exactly which account and order details Anteroom keeps.
+
 ## 0.1.1046 — 2026-11-20
 
 - Bulk upload in the Mac app and on the web can read each item's size from the size tag in its photos with **Read size tags**. It fills only blank sizes, keeps a size you typed, and asks you to check a tag that is missing, unreadable or shows two sizes.
