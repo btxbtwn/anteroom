@@ -67,6 +67,14 @@ describe("import all active listings", () => {
     expect(run).toMatchObject({ status: "done", imported: 1, failures: [{ id: "a", title: "Item a", message: "Poshmark did not answer." }] });
   });
 
+  it("keeps what an imported listing still needs, without counting it as a failure", async () => {
+    const { importer, importNew } = fakeImporter([{ total: 2, has_more: false, rows: [row("a"), row("b")] }]);
+    importNew.mockResolvedValueOnce(result("a", { warnings: ["Imported 2 of 4 photos. Add the missing photos before crosslisting."] }));
+    startImportAll("ebay:me", "ebay", importer, vi.fn());
+    expect(await finished("ebay:me")).toMatchObject({ imported: 2, failures: [],
+      warnings: [{ id: "a", title: "Item a", message: "Imported 2 of 4 photos. Add the missing photos before crosslisting." }] });
+  });
+
   it("counts a listing another tab already imported as already in Anteroom", async () => {
     const { importer, importNew } = fakeImporter([{ total: 1, has_more: false, rows: [row("a")] }]);
     importNew.mockResolvedValueOnce(result("a", { reused: true }));

@@ -129,7 +129,7 @@ export function InventoryImport({ marketplace, accountKey, onOpenListing }: { ma
           </div>
           {row.match && !localId ? <>
             <Button size="xs" variant="ghost" disabled={run.isPending} onClick={() => onOpenListing(row.match!.conversation_id)}>Compare</Button>
-            <Button size="xs" variant="outline" disabled={run.isPending} onClick={() => run.mutate([{ id: row.id, link: row.match!.conversation_id }])}>Link to this item</Button>
+            <Button size="xs" variant="outline" disabled={run.isPending || allBusy} onClick={() => run.mutate([{ id: row.id, link: row.match!.conversation_id }])}>Link to this item</Button>
           </> : null}
           {localId ? <Button size="xs" variant="outline" disabled={run.isPending} onClick={() => onOpenListing(localId)}>Open item</Button> : null}
         </li>;
@@ -159,12 +159,12 @@ function summary(run: ImportAllRun) {
     run.failures.length ? `${run.failures.length} failed` : ""].filter(Boolean).join(" · ");
 }
 
-/** One error per distinct message, so a dropped connection does not repeat for every listing. */
-function failureGroups(run: ImportAllRun | undefined) {
+/** One line per distinct message, so a dropped connection or a common gap does not repeat for every listing. */
+function grouped(entries: ImportAllRun["failures"], skip?: string | null) {
   const groups = new Map<string, string[]>();
-  for (const failure of run?.failures ?? []) groups.set(failure.message, [...(groups.get(failure.message) ?? []), failure.title]);
-  // The run's own error already says why it stopped.
-  return [...groups].filter(([message]) => message !== run?.error).map(([message, titles]) => ({ message, titles }));
+  for (const entry of entries) groups.set(entry.message, [...(groups.get(entry.message) ?? []), entry.title]);
+  return [...groups].filter(([message]) => message !== skip)
+    .map(([message, titles]) => ({ message, text: titles.length === 1 ? `${titles[0]}: ${message}` : `${titles.length} listings: ${message}` }));
 }
 
 /** Import every active listing at once; listings that look like existing items wait for the seller. */
@@ -187,8 +187,9 @@ function ImportAll({ name, run, busy, disabled, reviewing, results, onStart, onS
       <p role="status" className="tabular-nums text-muted-foreground">{status}</p>
     </div>
     {run?.error ? <PageError message={`${run.error} Listings already imported were kept; run it again to continue.`} /> : null}
-    {failureGroups(run).map(({ message, titles }) => <PageError key={message}
-      message={titles.length === 1 ? `${titles[0]}: ${message}` : `${titles.length} listings: ${message}`} />)}
+    {/* The run's own error already says why it stopped. */}
+    {grouped(run?.failures ?? [], run?.error).map(({ message, text }) => <PageError key={message} message={text} />)}
+    {grouped(run?.warnings ?? []).map(({ message, text }) => <PageNote key={message}>{text}</PageNote>)}
     {review.length ? <div className="space-y-1">
       <p className="text-sm font-medium">{review.length === 1 ? "1 listing looks like an item" : `${review.length} listings look like items`} already in Anteroom</p>
       <ul className="divide-y divide-border rounded-lg border border-border px-3">

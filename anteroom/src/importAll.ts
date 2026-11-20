@@ -42,6 +42,8 @@ export interface ImportAllRun {
   skipped: number;
   review: ImportAllReview[];
   failures: { id: string; title: string; message: string }[];
+  /** What an imported listing still needs, such as photos the marketplace did not provide. */
+  warnings: { id: string; title: string; message: string }[];
   /** Why the run ended early: a page of listings could not be read. */
   error: string | null;
 }
@@ -87,7 +89,7 @@ export function startImportAll(key: string, marketplace: ImportMarketplace, impo
   if (busy(runs.get(key))) return;
   counter += 1;
   const id = counter;
-  runs.set(key, { run: id, marketplace, status: "running", page: 1, imported: 0, alreadyIn: 0, skipped: 0, review: [], failures: [], error: null });
+  runs.set(key, { run: id, marketplace, status: "running", page: 1, imported: 0, alreadyIn: 0, skipped: 0, review: [], failures: [], warnings: [], error: null });
   notify();
   void walk(key, id, importer).finally(onFinish);
 }
@@ -164,7 +166,11 @@ async function walk(key: string, id: number, importer: Importer) {
             // Another import brought in a matching item after this page was read.
             const { match } = result;
             update(key, id, (run) => ({ review: [...run.review, { id: row.id, title: row.title, price: row.price, match }] }));
-          } else update(key, id, (run) => result.reused ? { alreadyIn: run.alreadyIn + 1 } : { imported: run.imported + 1 });
+          } else {
+            const warnings = result.warnings.map((warning) => ({ id: row.id, title: row.title, message: warning }));
+            update(key, id, (run) => ({ ...(result.reused ? { alreadyIn: run.alreadyIn + 1 } : { imported: run.imported + 1 }),
+              ...(warnings.length ? { warnings: [...run.warnings, ...warnings] } : {}) }));
+          }
           streak = 0;
         } catch (error) {
           streak += 1;

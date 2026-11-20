@@ -5,7 +5,6 @@ import asyncio
 from collections.abc import Awaitable, Callable
 
 import httpx
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from anteroom.config import MAX_PHOTO_COUNT
@@ -59,26 +58,24 @@ def _result(db: Session, conv_id: str, listing_id: str, *, reused: bool, warning
 _REUSED = "Already in Anteroom. Existing edits and photos were kept."
 
 
-def _match(db: Session, marketplace: str, snapshot: dict, compared: set[str] | None = None) -> tuple[dict | None, set[str]]:
+def _match(db: Session, marketplace: str, snapshot: dict,
+           compared: dict[str, str | None] | None = None) -> tuple[dict | None, dict[str, str | None]]:
     """An item that looks like this listing, which import all leaves for the seller instead of duplicating it.
 
-    Also returns the items it compared. Given ``compared``, only items added since are scored: the full
-    comparison runs before the import gate, and only this short one inside it.
+    Also returns each item's title as compared. Given ``compared``, only items added or retitled since are
+    scored: the full comparison runs before the import gate, and only this short one inside it.
     """
     from anteroom.models.conversation import Conversation
-    from anteroom.services.chrome_import import match_candidates, suggested_match, title_tokens
+    from anteroom.services.chrome_import import suggested_match, title_tokens
 
-    ids = set(db.scalars(select(Conversation.id)))
-    if compared is None:
-        items = match_candidates(db)
-    else:
-        fresh = ids - compared
-        rows = db.query(Conversation.id, Conversation.title).filter(Conversation.id.in_(fresh)).all() if fresh else []
-        items = [(conv_id, title, title_tokens(title)) for conv_id, title in rows if title and title.strip()]
+    titles: dict[str, str | None] = dict(db.query(Conversation.id, Conversation.title).all())
+    changed = titles.items() if compared is None else [(conv_id, title) for conv_id, title in titles.items()
+                                                       if conv_id not in compared or compared[conv_id] != title]
+    items = [(conv_id, title, title_tokens(title)) for conv_id, title in changed if title and title.strip()]
     value = snapshot.get("price")
     price = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
     match = suggested_match(db, marketplace, str(snapshot.get("title") or ""), price, items) if items else None
-    return match, ids
+    return match, titles
 
 
 def _held(listing_id: str, match: dict) -> dict:
@@ -91,11 +88,11 @@ def _reused(db: Session, marketplace: str, listing_id: str) -> dict | None:
 
 
 def _create(db: Session, marketplace: str, listing_id: str, snapshot: dict, urls: list[str], downloaded: list[dict],
-            binding: dict | None, target_id: str, kept: dict, compared: set[str] | None) -> dict:
+            binding: dict | None, target_id: str, kept: dict, compared: dict[str, str | None] | None) -> dict:
     with start_gate():
         if reused := _reused(db, marketplace, listing_id):
             return reused
-        # Checked again under the gate against items saved since: another import may have brought one in.
+        # Checked again under the gate against items saved or retitled since: another import may have brought one in.
         if compared is not None and (match := _match(db, marketplace, snapshot, compared)[0]):
             return _held(listing_id, match)
         conv = inventory_imports.create_import(db, marketplace, snapshot, listing_id, downloaded, binding, identity=target_id)

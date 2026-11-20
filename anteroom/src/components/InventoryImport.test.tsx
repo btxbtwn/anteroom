@@ -184,4 +184,23 @@ describe("import all active listings", () => {
     expect(html).toContain("Item c: Not your listing.");
     expect(html).toContain("3 failed");
   });
+
+  it("shows what imported listings still need, once per message", async () => {
+    const rows = ["a", "b"].map((id) => ({ id, title: `Item ${id}`, price: "10.00", quantity: 1, reason: null, conversation_id: null, match: null }));
+    const warning = "The marketplace did not provide photos. Add photos before crosslisting.";
+    const importNew = vi.fn(async (id: string) => ({ conversation_id: `local-${id}`, listing_id: id, reused: false, photo_count: 0, warnings: [warning] }));
+    startImportAll("etsy:me", "etsy", { candidates: async () => ({ total: 2, has_more: false, rows }), importListing: vi.fn(), importNew }, vi.fn());
+    await vi.waitFor(() => expect(importAllRun("etsy:me")?.status).toBe("done"));
+    const html = renderToStaticMarkup(<InventoryImport marketplace="etsy" accountKey="me" onOpenListing={vi.fn()} />);
+    expect(html).toContain(`2 listings: ${warning}`);
+    expect(html).toContain("2 imported");
+  });
+
+  it("pauses linking a page's suggested match while import all runs", () => {
+    useQuery.mockReturnValue({ isSuccess: true, data: { total: 1, has_more: false, rows: [{ id: "p1", title: "Coat", price: "40.00", quantity: 1,
+      reason: null, conversation_id: null, match: { conversation_id: "local-coat", title: "Wool coat", score: 0.9, price: 40, price_differs: false } }] } });
+    startImportAll("poshmark:me", "poshmark", never, vi.fn());
+    const html = renderToStaticMarkup(<InventoryImport marketplace="poshmark" accountKey="me" onOpenListing={vi.fn()} />);
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Link to this item/);
+  });
 });

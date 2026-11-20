@@ -142,7 +142,8 @@ def suggested_match(db: Session, marketplace: str, title: str, price: float | No
     words = title_tokens(title)
     # Only items that share a word are compared closely.
     scored = sorted(((title_similarity(title, local), conv_id, local) for conv_id, local, tokens in items if tokens & words), reverse=True)
-    for score, conv_id, local in scored[:5]:
+    # Items already on this marketplace are passed over before counting, so they never hide one that is not.
+    for score, conv_id, local in scored:
         if score < MATCH_THRESHOLD:
             break
         if marketplace in listings(db, conv_id):
