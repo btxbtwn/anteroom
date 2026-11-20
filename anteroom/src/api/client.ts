@@ -315,6 +315,7 @@ async function refreshMarketplaceForm(
         body: JSON.stringify({ revision_id: revisionId }),
         signal: options?.signal,
       });
+      if (response.ok) return await response.json();
     } catch (error) {
       if (options?.signal?.aborted) throw error;
       if (error instanceof TypeError) {
@@ -326,7 +327,6 @@ async function refreshMarketplaceForm(
       }
       throw error;
     }
-    if (response.ok) return response.json();
     const body = await response.json().catch(() => null);
     const explained = typeof body?.detail === "string" && body.detail.trim();
     if (!explained && UNAVAILABLE_STATUSES.has(response.status) && attempt === 1) {

@@ -32,21 +32,26 @@ async function openChoiceListCache(): Promise<Cache | null> {
 }
 
 async function readChoiceListFromDevice(name: string, version: string): Promise<ChoiceList | null> {
-  const cache = await openChoiceListCache();
-  if (!cache) return null;
+  if (typeof caches === "undefined") return null;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const response = await Promise.race([
-      cache.match(choiceListCacheKey(name, version)),
-      new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), CACHE_READ_TIMEOUT_MS); }),
-    ]);
+  const read = (async (): Promise<ChoiceList | null> => {
+    const cache = await openChoiceListCache();
+    if (!cache) return null;
+    const response = await cache.match(choiceListCacheKey(name, version));
     if (!response) return null;
     const data = (await response.json()) as ChoiceList;
     return data && typeof data === "object" ? data : null;
+  })();
+  try {
+    return await Promise.race([
+      read,
+      new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), CACHE_READ_TIMEOUT_MS); }),
+    ]);
   } catch {
     return null;
   } finally {
     if (timer !== undefined) clearTimeout(timer);
+    void read.catch(() => null);
   }
 }
 
@@ -239,7 +244,7 @@ export async function autoRefreshStaleForms(
       await client.invalidateQueries({ queryKey: ["listing", convId] });
       const current = client.getQueryData<ListingDocument>(["listing", convId]);
       const active = options?.activeMarket;
-      if (active && refreshed.includes(active) && current?.current_revision_id === currentRevision) {
+      if (!signal?.aborted && active && refreshed.includes(active) && current?.current_revision_id === currentRevision) {
         await client.fetchQuery({
           ...nativeFormOptions(convId, active, current.listing, currentRevision),
           staleTime: 0,

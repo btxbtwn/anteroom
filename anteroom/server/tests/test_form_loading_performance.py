@@ -164,7 +164,8 @@ class EbayFormConcurrencyAndCacheTest(unittest.IsolatedAsyncioTestCase):
             event.remove(self.engine, "before_cursor_execute", listen)
 
         self.assertEqual(nested_sessions, 0, f"Expected 0 nested SessionLocal checkouts, saw {nested_sessions}")
-        self.assertLessEqual(len(queries), 9, f"Expected <=9 SQL queries on warm eBay form, saw {len(queries)}: {queries}")
+        sql_queries = [q for q in queries if not q.startswith(("SAVEPOINT ", "RELEASE SAVEPOINT ", "ROLLBACK TO SAVEPOINT "))]
+        self.assertLessEqual(len(sql_queries), 9, f"Expected <=9 SQL queries on warm eBay form, saw {len(sql_queries)}: {sql_queries}")
         fields = {row["path"]: row for row in form["fields"]}
         self.assertEqual(fields["ebay_specifics.paymentPolicyId"]["value"], "p1")
         self.assertEqual(fields["ebay_specifics.Condition"]["value"], "3000")
@@ -553,6 +554,37 @@ def test_sync_builders_run_in_worker_with_context():
 
                 with patch(f"anteroom.services.{market}_form.form", side_effect=build):
                     assert await native_editor.build_form({"title": "test"}, {}, market) == {"title": "test"}
+
+        # Saved eBay contract rendering also runs off the event loop.
+        main_thread = threading.get_ident()
+
+        def saved_render(listing_json, marketplace, *, values=None):
+            assert threading.get_ident() != main_thread
+            return {"marketplace": marketplace, "fields": [], "saved": True}
+
+        with patch("anteroom.services.native_contract.editor_form", side_effect=saved_render):
+            rendered = await native_editor.build_form({"title": "test"}, {"_native_forms": {"ebay": {}}}, "ebay")
+            assert rendered["saved"] is True
+
+    asyncio.run(run())
+
+
+def test_mercari_failed_shipping_quote_cleans_up_generation_metadata():
+    """Failed shipping quote requests must not leak unbounded entries in _quote_generation."""
+    from anteroom.services import mercari_api, mercari_form
+
+    mercari_form.clear_quote_cache()
+
+    async def fail(*_args):
+        raise RuntimeError("mercari down")
+
+    async def run():
+        with patch.object(mercari_api, "shipping_quotes", side_effect=fail):
+            with pytest.raises(RuntimeError):
+                await mercari_form._cached_shipping_quotes(275, 16, (9.0, 7.0, 3.0))
+            with pytest.raises(RuntimeError):
+                await mercari_form._cached_shipping_quotes(275, 16, (9.0, 7.0, 3.0), refresh=True)
+        assert mercari_form._quote_generation == {}
 
     asyncio.run(run())
 

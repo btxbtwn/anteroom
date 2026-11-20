@@ -82,7 +82,8 @@ def tree_leaf(marketplace: str, path: str, *, db=None) -> dict[str, Any] | None:
 
     try:
         if db is not None:
-            found = read(db)
+            with db.begin_nested():
+                found = read(db)
         else:
             with SessionLocal() as session:
                 found = read(session)

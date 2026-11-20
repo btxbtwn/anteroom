@@ -271,4 +271,18 @@ describe("Reloading marketplace fields", () => {
       "Could not reach the server to reload fields. Check your connection and try again.",
     );
   });
+
+  it("retries once when the connection drops while reading a 200 response body", async () => {
+    const brokenBody = {
+      ok: true,
+      status: 200,
+      json: vi.fn().mockRejectedValue(new TypeError("Load failed")),
+    } as unknown as Response;
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(brokenBody)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: "r2" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(api.nativeMarketplaces.refreshForm("item", "mercari", "r1")).resolves.toEqual({ revision_id: "r2" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
 });

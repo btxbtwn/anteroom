@@ -295,7 +295,12 @@ async def _cached_shipping_quotes(
         _quote_inflight.pop(key, None)
 
     async def fetch_and_store() -> list[dict]:
-        quotes = await shipping_quotes(category, ounces, dimensions)
+        try:
+            quotes = await shipping_quotes(category, ounces, dimensions)
+        except BaseException:
+            if _quote_generation.get(key) == generation:
+                _quote_generation.pop(key, None)
+            raise
         if _quote_generation.get(key) == generation:
             _quote_cache.pop(key, None)
             _quote_cache[key] = (time.monotonic(), quotes)

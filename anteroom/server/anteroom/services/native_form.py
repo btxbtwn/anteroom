@@ -57,8 +57,13 @@ def _leaf_specs(marketplace: str, leaf_id: str, *, db=None):
     """Vendoo's cached field schema for the leaf, when one has been read."""
     from anteroom.services.category_fields import load_fields
 
+    if not leaf_id:
+        return None
     try:
-        return load_fields(marketplace, leaf_id, db=db) if leaf_id else None
+        if db is not None:
+            with db.begin_nested():
+                return load_fields(marketplace, leaf_id, db=db)
+        return load_fields(marketplace, leaf_id)
     except Exception:  # noqa: BLE001 - a missing cache only means fewer coded fields
         log.info("No cached %s schema for %s", marketplace, leaf_id)
         return None

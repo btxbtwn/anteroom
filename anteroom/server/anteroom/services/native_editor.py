@@ -147,7 +147,7 @@ async def build_form(snapshot: dict, listing_json: dict, marketplace: str, *, re
     if not refresh:
         from anteroom.services import native_contract
 
-        saved_form = native_contract.editor_form(listing_json, marketplace, values=snapshot)
+        saved_form = await asyncio.to_thread(native_contract.editor_form, listing_json, marketplace, values=snapshot)
         if saved_form is not None:
             return saved_form
         # Stale saved choices must be rebuilt from the current catalog below.

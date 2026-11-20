@@ -216,3 +216,49 @@ it("retries transient Load failed and unexplained 502 errors once when reading a
   expect(retry(0, new ApiRequestError("eBay disconnected", 502, false))).toBe(false);
 });
 
+it("falls back to the network if opening Cache Storage hangs past the read timeout", async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("caches", { open: vi.fn(() => new Promise(() => {})) });
+  const client = createStudioQueryClient();
+  vi.spyOn(api.nativeMarketplaces, "form").mockResolvedValue({
+    marketplace: "mercari",
+    fields: [{ key: "mercari_specifics.brand", path: "mercari_specifics.brand", label: "Brand", value: "",
+      choice_list: { name: "mercari-brands", version: "v-hang" } }],
+  } as never);
+  const list = vi.spyOn(api.catalog, "choiceList").mockResolvedValue({ options: ["Nike"], option_values: {} });
+  try {
+    const pending = prefetchListingForm(client, "hang", "mercari", {}, "r1");
+    await vi.advanceTimersByTimeAsync(600);
+    await pending;
+    expect(list).toHaveBeenCalledTimes(1);
+    const form = client.getQueryData(nativeFormOptions("hang", "mercari", {}, "r1").queryKey);
+    expect(form?.fields[0]?.options).toEqual(["Nike"]);
+  } finally {
+    vi.useRealTimers();
+    client.clear();
+  }
+});
+
+it("skips the follow-up active-tab form fetch if cancelled while invalidating listing state", async () => {
+  const client = createStudioQueryClient();
+  const controller = new AbortController();
+  vi.spyOn(api.nativeMarketplaces, "refreshForm").mockResolvedValue({ revision_id: "r2" });
+  client.setQueryData(["listing", "item"], { current_revision_id: "r2", listing: {} });
+  const fetchQuery = vi.spyOn(client, "fetchQuery");
+  const origInvalidate = client.invalidateQueries.bind(client);
+  vi.spyOn(client, "invalidateQueries").mockImplementation(async (filters, options) => {
+    if (Array.isArray(filters?.queryKey) && filters.queryKey[0] === "listing") {
+      controller.abort();
+    }
+    return origInvalidate(filters, options);
+  });
+  try {
+    const refreshed = await autoRefreshStaleForms(client, "item", ["mercari"], "r1", new Set(), {
+      signal: controller.signal,
+      activeMarket: "mercari",
+    });
+    expect(refreshed).toEqual(["mercari"]);
+    expect(fetchQuery).not.toHaveBeenCalled();
+  } finally { client.clear(); }
+});
+
