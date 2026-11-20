@@ -145,13 +145,31 @@ def test_a_committed_change_is_broadcast_once_on_the_sellers_private_channel(fee
 
 
 def joinable(engine, user, channel):
-    """Whether Realtime would let this signed-in seller join the private channel."""
+    """Whether Realtime would let this signed-in seller join the private channel.
+
+    Realtime's own check: an admin writes a probe message on the channel, then
+    the seller's session tries to read it back with realtime.topic set."""
     with engine.begin() as connection:
+        probe = connection.scalar(text(
+            "INSERT INTO realtime.messages (topic, extension, event, payload, private) "
+            "VALUES (:channel, 'broadcast', 'probe', '{}', true) RETURNING id"), {"channel": channel})
         connection.execute(text("SET LOCAL ROLE authenticated"))
         connection.execute(text("SELECT set_config('request.jwt.claims', :claims, true), "
                                 "set_config('realtime.topic', :channel, true)"),
                            {"claims": json.dumps({"sub": user, "role": "authenticated"}), "channel": channel})
-        return connection.scalar(text("SELECT count(*) FROM realtime.messages")) > 0
+        readable = connection.scalar(text("SELECT count(*) FROM realtime.messages WHERE id = :id"), {"id": probe})
+        connection.execute(text("RESET ROLE"))
+        connection.execute(text("DELETE FROM realtime.messages WHERE id = :id"), {"id": probe})
+        return readable == 1
+
+
+def visible_channels(engine, user):
+    with engine.begin() as connection:
+        connection.execute(text("SET LOCAL ROLE authenticated"))
+        connection.execute(text("SELECT set_config('request.jwt.claims', :claims, true), "
+                                "set_config('realtime.topic', :channel, true)"),
+                           {"claims": json.dumps({"sub": user}), "channel": f"seller-changes:{user}"})
+        return set(connection.scalars(text("SELECT topic FROM realtime.messages")))
 
 
 def test_a_seller_may_receive_only_its_own_channel_and_never_send(feed_engine):
@@ -162,6 +180,8 @@ def test_a_seller_may_receive_only_its_own_channel_and_never_send(feed_engine):
     assert joinable(feed_engine, ALICE, f"seller-changes:{ALICE}")
     assert not joinable(feed_engine, ALICE, f"seller-changes:{BOB}")
     assert not joinable(feed_engine, BOB, f"seller-changes:{ALICE}")
+    # Joined to its own channel, a session still reads only that channel's messages.
+    assert visible_channels(feed_engine, ALICE) == {f"seller-changes:{ALICE}"}
     with pytest.raises(DBAPIError), feed_engine.begin() as connection:
         connection.execute(text("SET LOCAL ROLE authenticated"))
         connection.execute(text("SELECT set_config('request.jwt.claims', :claims, true), "

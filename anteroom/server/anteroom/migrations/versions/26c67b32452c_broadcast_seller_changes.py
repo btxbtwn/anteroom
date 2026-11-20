@@ -28,7 +28,7 @@ depends_on = None
 
 # The subscriber's own channel: Realtime sets realtime.topic to the channel
 # being joined and request.jwt.claims to the device's session.
-OWN_CHANNEL = ("extension = 'broadcast' AND (SELECT realtime.topic()) = "
+OWN_CHANNEL = ("extension = 'broadcast' AND topic = (SELECT realtime.topic()) AND (SELECT realtime.topic()) = "
                "'seller-changes:' || (SELECT nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')")
 
 
@@ -80,13 +80,19 @@ def _create_realtime_stand_in() -> None:
         CREATE FUNCTION realtime.send(payload jsonb, event text, topic text, private boolean DEFAULT true)
         RETURNS void LANGUAGE plpgsql AS $$
         BEGIN
-            EXECUTE format('SET LOCAL realtime.topic TO %L', topic);
-            INSERT INTO realtime.messages (payload, event, topic, private, extension)
-            VALUES (payload, event, topic, private, 'broadcast');
+            -- Like Supabase's: a failed send warns and never fails the caller.
+            BEGIN
+                EXECUTE format('SET LOCAL realtime.topic TO %L', topic);
+                INSERT INTO realtime.messages (payload, event, topic, private, extension)
+                VALUES (payload, event, topic, private, 'broadcast');
+            EXCEPTION WHEN OTHERS THEN
+                RAISE WARNING 'WarnSendingBroadcastMessage: %', SQLERRM;
+            END;
         END $$""")
     if op.get_bind().scalar(sa.text("SELECT 1 FROM pg_roles WHERE rolname = 'authenticated'")):
         op.execute('GRANT USAGE ON SCHEMA realtime TO authenticated')
-        op.execute('GRANT SELECT ON realtime.messages TO authenticated')
+        # Supabase grants these too, so row security alone keeps a client from sending.
+        op.execute('GRANT SELECT, INSERT, UPDATE ON realtime.messages TO authenticated')
 
 
 def downgrade() -> None:
