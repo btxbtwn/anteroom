@@ -131,11 +131,11 @@ async def build_form(snapshot: dict, listing_json: dict, marketplace: str, *, re
     if marketplace == "poshmark":
         from anteroom.services.poshmark_form import form
 
-        return form(snapshot)
+        return await asyncio.to_thread(form, snapshot)
     if marketplace == "depop":
         from anteroom.services.depop_form import form
 
-        return form(snapshot)
+        return await asyncio.to_thread(form, snapshot)
     if marketplace == "mercari":
         from anteroom.services.mercari_form import editor_form as mercari_form
 

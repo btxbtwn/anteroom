@@ -204,6 +204,12 @@ describe("Requests while the server restarts", () => {
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "Not found" }), { status: 404 })));
     expect(await failure(() => api.suggestions.list())).toMatchObject({ status: 404, retryable: false, message: "Not found" });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<html>Bad Gateway</html>", { status: 502 })));
+    expect(await failure(() => api.suggestions.list())).toMatchObject({ status: 502, retryable: true });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "eBay is not connected." }), { status: 502 })));
+    expect(await failure(() => api.suggestions.list())).toMatchObject({ status: 502, retryable: false, message: "eBay is not connected." });
   });
 
   it("never marks a write as safe to repeat", async () => {

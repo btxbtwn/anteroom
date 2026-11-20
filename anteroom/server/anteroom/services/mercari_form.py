@@ -18,12 +18,15 @@ _QUOTE_MAX_ENTRIES = 512
 _QuoteKey = tuple[int, int, tuple[float, float, float]]
 _quote_cache: dict[_QuoteKey, tuple[float, list[dict]]] = {}
 _quote_inflight: dict[_QuoteKey, asyncio.Task[list[dict]]] = {}
+_quote_generation: dict[_QuoteKey, int] = {}
+_quote_seq = 0
 
 
 def clear_quote_cache() -> None:
     """Drop cached public Mercari shipping quotes (for tests)."""
     _quote_cache.clear()
     _quote_inflight.clear()
+    _quote_generation.clear()
 
 
 @lru_cache(maxsize=1)
@@ -270,6 +273,7 @@ async def _cached_shipping_quotes(
     refresh: bool = False,
 ) -> list[dict]:
     """Cache anonymous public shipping quotes by ``(category, ounces, dimensions)`` and coalesce concurrent reads."""
+    global _quote_seq
     from anteroom.services.mercari_api import shipping_quotes
 
     key: _QuoteKey = (category, ounces, (float(dimensions[0]), float(dimensions[1]), float(dimensions[2])))
@@ -284,12 +288,22 @@ async def _cached_shipping_quotes(
         if inflight is not None and not inflight.done() and inflight.get_loop() is asyncio.get_running_loop():
             return await asyncio.shield(inflight)
 
+    _quote_seq += 1
+    generation = _quote_seq
+    _quote_generation[key] = generation
+    if refresh:
+        _quote_inflight.pop(key, None)
+
     async def fetch_and_store() -> list[dict]:
         quotes = await shipping_quotes(category, ounces, dimensions)
-        _quote_cache.pop(key, None)
-        _quote_cache[key] = (time.monotonic(), quotes)
-        while len(_quote_cache) > _QUOTE_MAX_ENTRIES:
-            _quote_cache.pop(next(iter(_quote_cache)))
+        if _quote_generation.get(key) == generation:
+            _quote_cache.pop(key, None)
+            _quote_cache[key] = (time.monotonic(), quotes)
+            while len(_quote_cache) > _QUOTE_MAX_ENTRIES:
+                evicted = next(iter(_quote_cache))
+                _quote_cache.pop(evicted, None)
+                if evicted not in _quote_inflight:
+                    _quote_generation.pop(evicted, None)
         return quotes
 
     if refresh:

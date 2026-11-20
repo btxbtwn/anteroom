@@ -473,6 +473,7 @@ export function StructuredEditor({
   const vendoo = useListingMode().data?.listing_mode === "vendoo";
   const nativeTab = !vendoo && DIRECT_FORM_MARKETS.has(tab);
   const [autoReloadingMarket, setAutoReloadingMarket] = React.useState<string | null>(null);
+  const [autoReloadError, setAutoReloadError] = React.useState<{ market: string; revisionId: string; message: string } | null>(null);
   // The form's rows come from the category. A price, brand, format, or shipping
   // edit must not start a new read: that used to drop every row until the form
   // answered, leaving only the marketplace price on screen. A new category,
@@ -754,7 +755,11 @@ export function StructuredEditor({
   const reloadFields = useMutation({
     mutationFn: ({ market, revision }: { market: string; revision: string }) =>
       api.nativeMarketplaces.refreshForm(convId, market, revision),
+    onMutate: ({ market }) => {
+      setAutoReloadError((current) => (current?.market === market ? null : current));
+    },
     onSuccess: async (result, { market }) => {
+      setAutoReloadError((current) => (current?.market === market ? null : current));
       await queryClient.invalidateQueries({ queryKey: ["listing", convId] });
       // Use the returned revision even before React renders it. This also
       // refreshes notes when rebuilding did not change the saved definition.
@@ -781,6 +786,7 @@ export function StructuredEditor({
   React.useEffect(() => {
     if (autoReloadAttemptedRef.current.convId !== convId) {
       autoReloadAttemptedRef.current = { convId, keys: new Set() };
+      setAutoReloadError(null);
     }
     if (
       !nativeTab || disabled || saving || hasDrafts || generating || reloadFields.isPending
@@ -803,7 +809,21 @@ export function StructuredEditor({
         signal: controller.signal,
         activeMarket: tab,
         onMarketStart: (market) => {
-          if (!controller.signal.aborted) setAutoReloadingMarket(market);
+          if (!controller.signal.aborted) {
+            setAutoReloadingMarket(market);
+            if (market) {
+              setAutoReloadError((current) => (current?.market === market ? null : current));
+            }
+          }
+        },
+        onMarketError: (market, error) => {
+          if (controller.signal.aborted) return;
+          const detail = error instanceof Error && error.message.trim() ? error.message.trim() : "";
+          const name = marketplaceName(market);
+          const message = detail
+            ? `${name} fields could not be reloaded: ${detail} Press Reload fields to try again.`
+            : `${name} fields could not be reloaded. Press Reload fields to try again.`;
+          setAutoReloadError({ market, revisionId, message });
         },
       },
     ).finally(() => {
@@ -888,23 +908,28 @@ export function StructuredEditor({
     : nativeQuery.error instanceof Error
       ? nativeQuery.error.message
       : "The marketplace form could not be loaded. Reopen the listing to try again.";
+  const activeAutoReloadError = nativeTab && autoReloadError && autoReloadError.market === tab && autoReloadError.revisionId === revisionId
+    ? autoReloadError.message
+    : null;
   const formStatus = reloadingThisTab
     ? "Reloading fields…"
     : nativeTab && !nativeQuery.data && (nativeQuery.isFetching || autoReloadingMarket !== null)
       ? "Loading the marketplace’s category fields and choices…"
       : nativeTab && nativeQuery.isError && !nativeQuery.data
         ? formLoadError
-        : categoryStale
-          ? "Updating this category’s fields…"
-          : nativeTab && nativeQuery.isFetching
-            ? "Refreshing choices…"
-            : !nativeTab && formsQuery.isFetching
-              ? "Refreshing category fields and choices…"
-              : !nativeTab && (formsQuery.isError || dropdownQuery.isError)
-                ? "Some choices could not be refreshed. Check each field's choices before listing."
-                : categoryForm?.known === false
-                  ? "The full category form is unavailable. Reference choices are shown where available."
-                  : null;
+        : activeAutoReloadError
+          ? activeAutoReloadError
+          : categoryStale
+            ? "Updating this category’s fields…"
+            : nativeTab && nativeQuery.isFetching
+              ? "Refreshing choices…"
+              : !nativeTab && formsQuery.isFetching
+                ? "Refreshing category fields and choices…"
+                : !nativeTab && (formsQuery.isError || dropdownQuery.isError)
+                  ? "Some choices could not be refreshed. Check each field's choices before listing."
+                  : categoryForm?.known === false
+                    ? "The full category form is unavailable. Reference choices are shown where available."
+                    : null;
   // Renders its own hint beside the selected count.
   const multiSelectControl = (f: EditorField) => Boolean(f.multi)
     && !["inventory", "variations", "boolean", "textarea"].includes(String(f.type))

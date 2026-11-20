@@ -267,8 +267,6 @@ class EbayFormConcurrencyAndCacheTest(unittest.IsolatedAsyncioTestCase):
 
 def test_hosted_form_releases_db_connection_before_external_network_wait(migration_engine, jwks, signing_keys, monkeypatch):  # noqa: F811
     """Hosted form route must release its pooled Postgres connection before awaiting external APIs."""
-    import os
-
     import httpx
     from sqlalchemy import create_engine as sa_create_engine
     from test_hosted_drafts import headers
@@ -282,7 +280,7 @@ def test_hosted_form_releases_db_connection_before_external_network_wait(migrati
 
     # Single-connection pool proves no connection is held during the Mercari network wait:
     # while the form request waits on Mercari, a concurrent /api/status must succeed immediately.
-    tight_engine = sa_create_engine(os.environ["ANTEROOM_DATABASE_URL"], pool_size=1, max_overflow=0, pool_timeout=1.0)
+    tight_engine = sa_create_engine(migration_engine.url, pool_size=1, max_overflow=0, pool_timeout=1.0)
     monkeypatch.setattr("anteroom.database.engine", tight_engine)
     monkeypatch.setattr("anteroom.database.SessionLocal", sessionmaker(bind=tight_engine, autoflush=False, autocommit=False))
 
@@ -349,7 +347,6 @@ def test_hosted_form_releases_db_connection_before_external_network_wait(migrati
 def test_hosted_concurrent_multiseller_forms_coalesce_and_stay_responsive(migration_engine, jwks, signing_keys, monkeypatch):  # noqa: F811
     """Two sellers loading 24 forms + 16 listing reads concurrently on a 4-connection pool see 0 errors
     and coalesce identical public Mercari shipping quote requests."""
-    import os
     import time
 
     import httpx
@@ -363,7 +360,7 @@ def test_hosted_concurrent_multiseller_forms_coalesce_and_stay_responsive(migrat
         pytest.skip("Hosted data routes require PostgreSQL")
     schema_migrations.ensure_schema(migration_engine)
 
-    pooled_engine = sa_create_engine(os.environ["ANTEROOM_DATABASE_URL"], pool_size=4, max_overflow=0, pool_timeout=5.0)
+    pooled_engine = sa_create_engine(migration_engine.url, pool_size=4, max_overflow=0, pool_timeout=5.0)
     monkeypatch.setattr("anteroom.database.engine", pooled_engine)
     monkeypatch.setattr("anteroom.database.SessionLocal", sessionmaker(bind=pooled_engine, autoflush=False, autocommit=False))
 
@@ -450,3 +447,91 @@ def test_hosted_concurrent_multiseller_forms_coalesce_and_stay_responsive(migrat
         asyncio.run(run())
     finally:
         pooled_engine.dispose()
+
+
+def test_schema_session_shares_failed_ebay_connect_and_retries_next_request():
+    """Concurrent schema readers in one form request share a failed connect attempt instead of timing out sequentially."""
+    from anteroom.services import ebay_client, marketplace_schemas
+
+    attempts = 0
+    should_fail = True
+
+    async def connect():
+        nonlocal attempts
+        attempts += 1
+        await asyncio.sleep(0.02)
+        if should_fail:
+            raise TimeoutError("token refresh timed out")
+        return object()
+
+    async def run():
+        nonlocal should_fail
+        with patch.object(ebay_client.EbayClient, "connect", side_effect=connect):
+            with marketplace_schemas.schema_session():
+                results = await asyncio.gather(
+                    marketplace_schemas._ebay_client(None),
+                    marketplace_schemas._ebay_client(None),
+                    marketplace_schemas._ebay_client(None),
+                    marketplace_schemas._ebay_client(None),
+                    return_exceptions=True,
+                )
+            assert attempts == 1, f"Expected 1 shared failed connect attempt, saw {attempts}"
+            assert all(isinstance(err, TimeoutError) for err in results)
+
+            # A subsequent form request starts a new schema_session and retries cleanly.
+            should_fail = False
+            with marketplace_schemas.schema_session():
+                clients = await asyncio.gather(
+                    marketplace_schemas._ebay_client(None),
+                    marketplace_schemas._ebay_client(None),
+                )
+            assert attempts == 2
+            assert clients[0] is clients[1]
+
+    asyncio.run(run())
+
+
+def test_mercari_shipping_quote_stale_ordinary_request_does_not_overwrite_refresh():
+    """An older ordinary quote request finishing after an explicit refresh must not overwrite refreshed quotes."""
+    from anteroom.services import mercari_api, mercari_form
+
+    mercari_form.clear_quote_cache()
+    stale_quote = {"id": 2552, "fee": 799, "standardFee": 899, "etaForSeller": "1 - 7 days",
+                   "weightRange": {"min": 13, "max": 16}}
+    fresh_quote = {"id": 2552, "fee": 949, "standardFee": 999, "etaForSeller": "1 - 7 days",
+                   "weightRange": {"min": 13, "max": 16}}
+
+    async def run():
+        ordinary_started = asyncio.Event()
+        release_ordinary = asyncio.Event()
+        calls = 0
+
+        async def fake_quotes(_cat, _oz, _dims):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                ordinary_started.set()
+                await release_ordinary.wait()
+                return [stale_quote]
+            return [fresh_quote]
+
+        with patch.object(mercari_api, "shipping_quotes", side_effect=fake_quotes):
+            ordinary_task = asyncio.create_task(
+                mercari_form._cached_shipping_quotes(275, 16, (10.0, 8.0, 4.0))
+            )
+            await ordinary_started.wait()
+
+            refreshed = await mercari_form._cached_shipping_quotes(275, 16, (10.0, 8.0, 4.0), refresh=True)
+            assert refreshed == [fresh_quote]
+
+            release_ordinary.set()
+            ordinary_result = await ordinary_task
+            assert ordinary_result == [stale_quote]
+
+            # Subsequent ordinary read must return the refreshed quotes, not the late older fetch.
+            cached = await mercari_form._cached_shipping_quotes(275, 16, (10.0, 8.0, 4.0))
+            assert cached == [fresh_quote]
+            assert calls == 2
+
+    asyncio.run(run())
+

@@ -88,7 +88,7 @@ it("persists versioned choice lists in Cache Storage across reloads and prunes o
   try {
     await prefetchListingForm(client, "one", "mercari", {}, "r1");
     expect(list).toHaveBeenCalledTimes(1);
-    expect(entries.size).toBe(1);
+    await vi.waitFor(() => expect(entries.size).toBe(1));
 
     // Simulate a page reload: clear in-memory caches while keeping Cache Storage.
     resetChoiceListCacheForTests();
@@ -105,8 +105,10 @@ it("persists versioned choice lists in Cache Storage across reloads and prunes o
     client.clear();
     await prefetchListingForm(client, "three", "mercari", {}, "r1");
     expect(list).toHaveBeenCalledTimes(2);
-    expect(entries.size).toBe(1);
-    expect(Array.from(entries.keys())[0]).toContain("v2");
+    await vi.waitFor(() => {
+      expect(entries.size).toBe(1);
+      expect(Array.from(entries.keys())[0]).toContain("v2");
+    });
   } finally { client.clear(); }
 });
 
@@ -135,10 +137,11 @@ it("identifies stale or unavailable marketplace forms and prioritizes the active
   expect(staleFormMarketplaces(preflight, ["poshmark"])).toEqual([]);
 });
 
-it("auto-reloads stale marketplace forms sequentially, chaining revisions and preventing loops", async () => {
+it("auto-reloads stale marketplace forms sequentially, chaining revisions, reporting failures, and preventing loops", async () => {
   const client = createStudioQueryClient();
   const attempted = new Set<string>();
   const calls: Array<[string, string]> = [];
+  const errors: Array<[string, string]> = [];
   const refresh = vi.spyOn(api.nativeMarketplaces, "refreshForm").mockImplementation(async (_id, market, rev) => {
     calls.push([market, rev]);
     if (market === "ebay") throw new ApiRequestError("eBay disconnected", 502, false);
@@ -146,9 +149,12 @@ it("auto-reloads stale marketplace forms sequentially, chaining revisions and pr
   });
   const invalidate = vi.spyOn(client, "invalidateQueries");
   try {
-    const refreshed = await autoRefreshStaleForms(client, "item", ["mercari", "ebay", "poshmark"], "r1", attempted);
+    const refreshed = await autoRefreshStaleForms(client, "item", ["mercari", "ebay", "poshmark"], "r1", attempted, {
+      onMarketError: (market, err) => errors.push([market, err instanceof Error ? err.message : String(err)]),
+    });
     expect(calls).toEqual([["mercari", "r1"], ["ebay", "r2"], ["poshmark", "r2"]]);
     expect(refreshed).toEqual(["mercari", "poshmark"]);
+    expect(errors).toEqual([["ebay", "eBay disconnected"]]);
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["listing", "item"] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ["native-preflight", "item"] });
 
@@ -159,26 +165,54 @@ it("auto-reloads stale marketplace forms sequentially, chaining revisions and pr
   } finally { client.clear(); }
 });
 
-it("stops auto-reloading silently on 409 revision conflict so seller edits are never raced", async () => {
+it("stops auto-reloading on 409 revision conflict and invalidates listing and preflight queries", async () => {
   const client = createStudioQueryClient();
   const attempted = new Set<string>();
   const calls: string[] = [];
+  const onMarketError = vi.fn();
   vi.spyOn(api.nativeMarketplaces, "refreshForm").mockImplementation(async (_id, market) => {
     calls.push(market);
     throw new ApiRequestError("The listing changed while fields loaded.", 409, false);
   });
+  const invalidate = vi.spyOn(client, "invalidateQueries");
   try {
-    const refreshed = await autoRefreshStaleForms(client, "item", ["mercari", "poshmark"], "r1", attempted);
+    const refreshed = await autoRefreshStaleForms(client, "item", ["mercari", "poshmark"], "r1", attempted, { onMarketError });
     expect(refreshed).toEqual([]);
     expect(calls).toEqual(["mercari"]);
+    expect(onMarketError).not.toHaveBeenCalled();
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["listing", "item"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["native-preflight", "item"] });
   } finally { client.clear(); }
 });
 
-it("retries transient Load failed errors once when reading a native form but not explained 502s", () => {
+it("releases the attempt key when an auto-reload is aborted so returning to the tab retries", async () => {
+  const client = createStudioQueryClient();
+  const attempted = new Set<string>();
+  const controller = new AbortController();
+  const refresh = vi.spyOn(api.nativeMarketplaces, "refreshForm")
+    .mockImplementationOnce(async () => {
+      controller.abort();
+      throw new DOMException("Aborted", "AbortError");
+    })
+    .mockResolvedValueOnce({ revision_id: "r2" });
+  try {
+    const first = await autoRefreshStaleForms(client, "item", ["mercari"], "r1", attempted, { signal: controller.signal });
+    expect(first).toEqual([]);
+    expect(attempted.has("r1:mercari")).toBe(false);
+
+    const retry = await autoRefreshStaleForms(client, "item", ["mercari"], "r1", attempted);
+    expect(retry).toEqual(["mercari"]);
+    expect(refresh).toHaveBeenCalledTimes(2);
+  } finally { client.clear(); }
+});
+
+it("retries transient Load failed and unexplained 502 errors once when reading a native form but not explained 502s", () => {
   const opts = nativeFormOptions("item", "ebay", {}, "r1");
   const retry = opts.retry as (count: number, err: unknown) => boolean;
   expect(retry(0, new ApiRequestError("Load failed", 0, true))).toBe(true);
   expect(retry(1, new ApiRequestError("Load failed", 0, true))).toBe(false);
-  expect(retry(0, new ApiRequestError("eBay disconnected", 502, true))).toBe(false);
+  expect(retry(0, new ApiRequestError("Request failed: 502", 502, true))).toBe(true);
+  expect(retry(1, new ApiRequestError("Request failed: 502", 502, true))).toBe(false);
+  expect(retry(0, new ApiRequestError("eBay disconnected", 502, false))).toBe(false);
 });
 

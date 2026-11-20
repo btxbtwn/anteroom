@@ -79,7 +79,7 @@ async function loadChoiceList(name: string, version: string): Promise<ChoiceList
   const cached = await readChoiceListFromDevice(name, version);
   if (cached) return cached;
   const fresh = await api.catalog.choiceList(name, version);
-  await writeChoiceListToDevice(name, version, fresh);
+  void writeChoiceListToDevice(name, version, fresh);
   return fresh;
 }
 
@@ -142,7 +142,7 @@ export function nativeFormOptions(convId: string, tab: string, listing: ListingD
       failureCount < 1
       && error instanceof ApiRequestError
       && error.retryable
-      && (error.status === 0 || error.status === 503 || error.status === 504),
+      && (error.status === 0 || error.status === 502 || error.status === 503 || error.status === 504),
     retryDelay: 500,
   });
 }
@@ -181,6 +181,7 @@ export interface AutoRefreshStaleFormsOptions {
   signal?: AbortSignal;
   activeMarket?: string;
   onMarketStart?: (market: string | null) => void;
+  onMarketError?: (market: string, error: unknown) => void;
 }
 
 /**
@@ -201,6 +202,7 @@ export async function autoRefreshStaleForms(
   if (signal?.aborted || !markets.length || !revisionId) return [];
 
   let currentRevision = revisionId;
+  let sawConflict = false;
   const refreshed: string[] = [];
 
   try {
@@ -216,12 +218,17 @@ export async function autoRefreshStaleForms(
         attempted.add(`${currentRevision}:${market}`);
         refreshed.push(market);
       } catch (error) {
-        if (signal?.aborted) break;
+        if (signal?.aborted) {
+          attempted.delete(attemptKey);
+          break;
+        }
         if (error instanceof ApiRequestError && error.status === 409) {
           // A seller edit or background write moved the listing ahead; stop
           // this batch and let the new revision's preflight run cleanly.
+          sawConflict = true;
           break;
         }
+        options?.onMarketError?.(market, error);
         // Keep moving to any other stale marketplaces; this one stays marked
         // attempted for the current revision so it won't loop.
       }
@@ -239,6 +246,9 @@ export async function autoRefreshStaleForms(
         }).catch(() => {});
       }
       await Promise.all(["native-preflight", "revisions"].map((key) =>
+        client.invalidateQueries({ queryKey: [key, convId] })));
+    } else if (sawConflict) {
+      await Promise.all(["listing", "native-preflight", "revisions"].map((key) =>
         client.invalidateQueries({ queryKey: [key, convId] })));
     }
   }

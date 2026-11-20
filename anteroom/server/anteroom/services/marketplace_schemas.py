@@ -43,16 +43,26 @@ class _LazyEbayClient:
 
     def __init__(self) -> None:
         self._client: Any = None
+        self._error: Exception | None = None
         self._lock = asyncio.Lock()
 
     async def get(self):
         if self._client is not None:
             return self._client
+        if self._error is not None:
+            raise self._error
         async with self._lock:
-            if self._client is None:
-                from anteroom.services.ebay_client import EbayClient
+            if self._client is not None:
+                return self._client
+            if self._error is not None:
+                raise self._error
+            from anteroom.services.ebay_client import EbayClient
 
+            try:
                 self._client = await EbayClient.connect()
+            except Exception as exc:
+                self._error = exc
+                raise
             return self._client
 
 
