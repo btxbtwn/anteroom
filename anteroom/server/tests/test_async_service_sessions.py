@@ -161,3 +161,165 @@ def test_marketplace_schema_and_native_job_run_off_the_event_loop(monkeypatch):
         engine.dispose()
     assert rows and rows[0]["name"] == "Color"
     assert on_the_loop and not any(on_the_loop)
+
+
+def test_native_publish_holds_no_connection_across_awaits_and_offloads_io(tmp_path, monkeypatch):
+    """eBay/Etsy jobs hold zero DB connections across awaits (even after callbacks) and offload file/settings I/O."""
+    import asyncio
+    from io import BytesIO
+    import threading
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from PIL import Image
+    from sqlalchemy import event
+    from sqlalchemy.orm import Session
+
+    from anteroom.database import Base, load_models
+    from anteroom.repositories.queries import ConversationRepo, JobRepo
+    from anteroom.services import ebay_listings, etsy_listings, listing_persistence, native_marketplaces
+    from anteroom.services.photo_store import LocalPhotoStore
+    from worker_sessions import memory_engine, worker_sessions
+
+    load_models()
+    engine = memory_engine()
+    Base.metadata.create_all(engine)
+    store = LocalPhotoStore(str(tmp_path))
+    buf = BytesIO()
+    Image.new("RGB", (64, 64), (40, 90, 180)).save(buf, "JPEG")
+    jpg = buf.getvalue()
+    (tmp_path / "shot.jpg").write_bytes(jpg)
+    monkeypatch.setattr("anteroom.services.photo_store._store", store)
+
+    with Session(engine) as db:
+        conv = ConversationRepo(db).create(title="Jacket")
+        rev = listing_persistence.save_revision(db, conv.id, {"title": "Jacket", "price": 40}, "user_form")
+        ebay_job = JobRepo(db).create(
+            conv.id, rev.id, {"title": "Jacket", "price": 40, "_approved_photos": []},
+            status="dispatched", current_step="native_ebay_list",
+        )
+        native_marketplaces._store(db, conv.id, "ebay", {"state": "listing", "action": "list", "job_id": ebay_job.id})
+        etsy_job = JobRepo(db).create(
+            conv.id, rev.id, {"title": "Jacket", "price": 40, "_approved_photos": []},
+            status="dispatched", current_step="native_etsy_save_draft",
+        )
+        native_marketplaces._store(db, conv.id, "etsy", {"state": "saving_draft", "action": "save_draft", "job_id": etsy_job.id})
+        conv_id, ebay_job_id, etsy_job_id = conv.id, ebay_job.id, etsy_job.id
+
+    checked_out = 0
+    on_the_loop: list[bool] = []
+    observations: list[tuple[str, int]] = []
+
+    def checkout(*_args):
+        nonlocal checked_out
+        checked_out += 1
+        on_the_loop.append(asyncio._get_running_loop() is not None)
+
+    def checkin(*_args):
+        nonlocal checked_out
+        checked_out -= 1
+
+    async def fake_ebay_execute(_step, _snap, _photos, _binding, record, active, **_kwargs):
+        observations.append(("ebay_enter", checked_out))
+        await record({"ebay_sku": "sku-abc"})
+        observations.append(("ebay_after_record", checked_out))
+        assert await active() is True
+        observations.append(("ebay_after_active", checked_out))
+        return {"ok": False, "safe_to_retry": False, "error": "Reply lost"}
+
+    async def fake_ebay_check(_record, _snap, remember):
+        observations.append(("ebay_check_enter", checked_out))
+        await remember({"ebay_offer_id": "offer-42"})
+        observations.append(("ebay_after_remember", checked_out))
+        return {"ok": True, "state": "published", "listing_url": "https://www.ebay.com/itm/1234567890"}
+
+    async def fake_etsy_execute(_step, _snap, _photos, _binding, record, active, **_kwargs):
+        observations.append(("etsy_enter", checked_out))
+        await record({"etsy_shop_id": "999"})
+        observations.append(("etsy_after_record", checked_out))
+        assert await active() is True
+        observations.append(("etsy_after_active", checked_out))
+        return {"ok": False, "safe_to_retry": False, "error": "Reply lost"}
+
+    async def fake_etsy_check(_snap, _record, _candidate):
+        observations.append(("etsy_check_enter", checked_out))
+        return {"ok": True, "state": "draft", "draft_url": "https://www.etsy.com/your/shops/me/listing-editor/edit/123456"}
+
+    orig_etsy_check = etsy_listings.check
+    monkeypatch.setattr(ebay_listings, "execute", fake_ebay_execute)
+    monkeypatch.setattr(ebay_listings, "check", fake_ebay_check)
+    monkeypatch.setattr(etsy_listings, "execute", fake_etsy_execute)
+    monkeypatch.setattr(etsy_listings, "check", fake_etsy_check)
+
+    read_threads: list[int | None] = []
+    local_path_threads: list[int | None] = []
+    settings_threads: list[int | None] = []
+    shop_threads: list[int | None] = []
+    orig_read = store.read
+    orig_local_path = store.local_path
+    monkeypatch.setattr(store, "read", lambda name: (read_threads.append(threading.current_thread().ident), orig_read(name))[1])
+    monkeypatch.setattr(store, "local_path", lambda name: (local_path_threads.append(threading.current_thread().ident), orig_local_path(name))[1])
+
+    photo = SimpleNamespace(
+        id="p1", stored_filename="shot.jpg", original_filename="shot.jpg",
+        mime_type="image/jpeg", checksum="",
+    )
+    event.listen(engine, "checkout", checkout)
+    event.listen(engine, "checkin", checkin)
+
+    async def run_all():
+        loop_tid = threading.current_thread().ident
+        await native_marketplaces.run_job(ebay_job_id, conv_id, "ebay", ["list"], {"confirm": True})
+        observations.append(("after_ebay_job", checked_out))
+        await native_marketplaces.run_job(etsy_job_id, conv_id, "etsy", ["save_draft"], {})
+        observations.append(("after_etsy_job", checked_out))
+
+        fake_client = SimpleNamespace(request=AsyncMock(return_value={
+            "imageUrl": "https://i.ebayimg.com/images/g/abc/s-l1600.jpg",
+            "fulfillmentPolicies": [{"fulfillmentPolicyId": "f1"}],
+            "paymentPolicies": [{"paymentPolicyId": "p1"}],
+            "returnPolicies": [{"returnPolicyId": "r1"}],
+            "locations": [{"merchantLocationKey": "loc1", "merchantLocationStatus": "ENABLED"}],
+        }))
+        urls = await ebay_listings._image_urls(fake_client, [photo], {}, lambda _v: None, lambda: True)
+        assert urls == ["https://i.ebayimg.com/images/g/abc/s-l1600.jpg"]
+
+        monkeypatch.setattr(ebay_listings, "get_ebay_listing_defaults", lambda: (settings_threads.append(threading.current_thread().ident), {})[1])
+        choices = await ebay_listings.listing_choices(fake_client, {})
+        assert choices["merchantLocationKey"] == "loc1"
+
+        await etsy_listings._sync_photos(AsyncMock(return_value={"listing_image_id": 777}), "123", "456", {"images": []}, [photo], {}, lambda _v: None)
+
+        monkeypatch.setattr(etsy_listings, "connected_shop_id", lambda: (shop_threads.append(threading.current_thread().ident), "123")[1])
+        await native_marketplaces._require_etsy()
+        monkeypatch.setattr(etsy_listings, "find_draft", AsyncMock(return_value=None))
+        checked = await orig_etsy_check({}, {"action": "save_draft"}, None)
+        assert checked["safe_to_retry"] is True
+        assert read_threads and all(tid != loop_tid for tid in read_threads)
+        assert local_path_threads and all(tid != loop_tid for tid in local_path_threads)
+        assert settings_threads and all(tid != loop_tid for tid in settings_threads)
+        assert len(shop_threads) == 2 and all(tid != loop_tid for tid in shop_threads)
+
+    try:
+        with worker_sessions(engine):
+            asyncio.run(run_all())
+    finally:
+        event.remove(engine, "checkout", checkout)
+        event.remove(engine, "checkin", checkin)
+        engine.dispose()
+
+    assert on_the_loop and not any(on_the_loop)
+    assert observations == [
+        ("ebay_enter", 0),
+        ("ebay_after_record", 0),
+        ("ebay_after_active", 0),
+        ("ebay_check_enter", 0),
+        ("ebay_after_remember", 0),
+        ("after_ebay_job", 0),
+        ("etsy_enter", 0),
+        ("etsy_after_record", 0),
+        ("etsy_after_active", 0),
+        ("etsy_check_enter", 0),
+        ("after_etsy_job", 0),
+    ]
+

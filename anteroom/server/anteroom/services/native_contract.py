@@ -260,7 +260,7 @@ def prompt(contracts: dict) -> str:
     # Presentation metadata belongs to the editor, not the generation context.
     def schema(row, contract):
         hydrated = hydrate_row(row)
-        definition = {key: value for key, value in hydrated.items() if key in _SCHEMA_KEYS}
+        definition = {key: value for key, value in hydrated.items() if key in _SCHEMA_KEYS and key != "choice_list"}
         if path_of(hydrated).startswith("direct_category_ids.") and contract.get("category_id"):
             # Category selection already ran against the complete catalog.
             # Copy generation needs its chosen leaf, not thousands of siblings.
@@ -330,12 +330,14 @@ def value_error(row: dict, value) -> str | None:
             if len(str(item.get("sku") or "")) > 50:
                 return "Inventory SKUs must be at most 50 characters."
     if row.get("selection_only"):
-        if "choice_list" in row:
-            from anteroom.services.choice_lists import hydrate_row
+        ref = row.get("choice_list")
+        if isinstance(ref, dict) and "options" not in row:
+            from anteroom.services.choice_lists import allowed_values
 
-            row = hydrate_row(row)
-        allowed = {str(item) for item in row.get("options") or []}
-        allowed.update(str(item) for item in (row.get("option_values") or {}).values())
+            allowed: set[str] | frozenset[str] = allowed_values(str(ref.get("name") or ""))
+        else:
+            allowed = {str(item) for item in row.get("options") or []}
+            allowed.update(str(item) for item in (row.get("option_values") or {}).values())
         if not allowed or any(str(item) not in allowed for item in values):
             return NOT_AN_OPTION
     for item in values:

@@ -589,6 +589,14 @@ async def find_draft(shop_id: str, snapshot: dict) -> str | None:
     return edit_url(matches[0]) if matches else None
 
 
+def _photo_file(photo) -> tuple[str, bytes]:
+    try:
+        path = photo_store().local_path(photo.stored_filename)
+        return path.name, path.read_bytes()
+    except (FileNotFoundError, ValueError):
+        raise missing("An Etsy photo is missing from Anteroom. Restore it before continuing.", "photos") from None
+
+
 async def _sync_photos(write, shop_id: str, item_id: str, remote: dict, photos: list, binding: dict,
                        record: RecordFn) -> None:
     """Make the Etsy listing's photos the item's photos: upload new ones, remove dropped ones.
@@ -618,13 +626,9 @@ async def _sync_photos(write, shop_id: str, item_id: str, remote: dict, photos: 
     for rank, photo in enumerate(photos, start=1):
         if photo.id in images:
             continue
-        try:
-            path = photo_store().local_path(photo.stored_filename)
-        except (FileNotFoundError, ValueError):
-            raise missing("An Etsy photo is missing from Anteroom. Restore it before continuing.", "photos") from None
-        with path.open("rb") as image:
-            uploaded = await write("POST", f"shops/{shop_id}/listings/{item_id}/images", "photo",
-                                   data={"rank": str(rank)}, files={"image": (path.name, image, photo.mime_type)}, timeout=60)
+        name, data = await asyncio.to_thread(_photo_file, photo)
+        uploaded = await write("POST", f"shops/{shop_id}/listings/{item_id}/images", "photo",
+                               data={"rank": str(rank)}, files={"image": (name, data, photo.mime_type)}, timeout=60)
         image_id = str(uploaded.get("listing_image_id") or "")
         if not re.fullmatch(r"[1-9]\d*", image_id):
             raise ValueError("Etsy did not confirm a photo ID. Check the draft before another upload.")

@@ -378,12 +378,7 @@ def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequest) -
             raise NativeMarketplaceError(400, str(exc)) from exc
     if active_generation(conv_id) or activity.running(conv_id):
         raise NativeMarketplaceError(409, "Wait for generation to finish.")
-    if marketplace == "etsy":
-        try:
-            etsy_listings.connected_shop_id()
-        except ValueError as exc:
-            raise NativeMarketplaceError(409, str(exc)) from exc
-    elif marketplace != "ebay" and (refusal := marketplace_actions_refusal()):
+    if marketplace not in API_MARKETPLACES and (refusal := marketplace_actions_refusal()):
         raise NativeMarketplaceError(409, refusal)
     photos, warning = _photos(db, conv_id, snapshot, marketplace)
     snapshot["_approved_photo_warning"] = warning
@@ -400,6 +395,13 @@ async def _require_ebay() -> None:
         raise NativeMarketplaceError(409, str(exc)) from exc
 
 
+async def _require_etsy() -> None:
+    try:
+        await asyncio.to_thread(etsy_listings.connected_shop_id)
+    except ValueError as exc:
+        raise NativeMarketplaceError(409, str(exc)) from exc
+
+
 def _photos(db: Session, conv_id: str, snapshot: dict, marketplace: str) -> tuple[list, str]:
     """This marketplace's photos for the listing being sent, and a warning when its limit leaves some off."""
     return marketplace_media.photos_for(snapshot, ConversationRepo(db).get_all_photos(conv_id), marketplace)
@@ -411,6 +413,8 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str) -
     snapshot, photos, deleted_here = await in_worker_session(_check_start, conv_id, marketplace, body, kind)
     if marketplace == "ebay":
         await _require_ebay()
+    elif marketplace == "etsy":
+        await _require_etsy()
     from anteroom.services.chrome_catalog import live_preview
 
     preview = await live_preview(snapshot) if marketplace in {"poshmark", "depop"} else None

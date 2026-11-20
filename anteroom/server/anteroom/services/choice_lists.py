@@ -26,40 +26,68 @@ def _sources() -> dict[str, tuple[str, str, Callable[[], dict]]]:
 
 
 @cache
-def choice_list(name: str) -> tuple[bytes, str] | None:
-    """The list as JSON and its version, or None for an unknown name."""
+def payload(name: str) -> dict | None:
+    """The cached choices dict for a shared list name, or None for an unknown name."""
     source = _sources().get(name)
     if source is None:
         return None
-    body = json.dumps(source[2](), ensure_ascii=False, separators=(",", ":")).encode()
+    return source[2]()
+
+
+@cache
+def choice_list(name: str) -> tuple[bytes, str] | None:
+    """The list as JSON and its version, or None for an unknown name."""
+    data = payload(name)
+    if data is None:
+        return None
+    body = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode()
     return body, hashlib.sha256(body).hexdigest()[:16]
 
 
-def _named_sources() -> dict[tuple[str, str], tuple[str, Callable[[], dict]]]:
-    return {(marketplace, path): (name, load) for name, (marketplace, path, load) in _sources().items()}
+@cache
+def allowed_values(name: str) -> frozenset[str]:
+    """Every label and stored value allowed by a shared choice list."""
+    data = payload(name)
+    if data is None:
+        return frozenset()
+    allowed = {str(item) for item in data.get("options") or []}
+    allowed.update(str(item) for item in (data.get("option_values") or {}).values())
+    return frozenset(allowed)
 
 
-def _compact_row(marketplace: str, row: dict, named: dict[tuple[str, str], tuple[str, Callable[[], dict]]]) -> dict:
+def _named_sources() -> dict[tuple[str, str], str]:
+    return {(marketplace, path): name for name, (marketplace, path, _load) in _sources().items()}
+
+
+def _strip_identity_option_values(row: dict) -> dict:
+    """Omit redundant identity label->label option_values maps while preserving non-identity IDs."""
+    option_values = row.get("option_values")
+    options = row.get("options")
+    if (isinstance(option_values, dict) and option_values and isinstance(options, list)
+            and all(isinstance(key, str) and value == key for key, value in option_values.items())
+            and set(option_values) <= {str(option) for option in options}):
+        return {key: value for key, value in row.items() if key != "option_values"}
+    return row
+
+
+def _compact_row(marketplace: str, row: dict, named: dict[tuple[str, str], str]) -> dict:
     if not isinstance(row, dict):
         return row
-    found = named.get((str(marketplace or ""), str(row.get("path") or row.get("key") or "")))
-    if not found:
-        return row
-    name, load = found
-    listed = choice_list(name)
-    if listed is None:
-        return row
-    existing = row.get("choice_list")
-    if isinstance(existing, dict) and existing.get("name") == name and "options" not in row and "option_values" not in row:
-        if existing.get("version") == listed[1]:
-            return row
-        return {**row, "choice_list": {"name": name, "version": listed[1]}}
-    payload = load()
-    if all(row.get(key) == value for key, value in payload.items()):
-        compacted = {key: value for key, value in row.items() if key not in payload}
-        compacted["choice_list"] = {"name": name, "version": listed[1]}
-        return compacted
-    return row
+    name = named.get((str(marketplace or ""), str(row.get("path") or row.get("key") or "")))
+    if name:
+        listed = choice_list(name)
+        if listed is not None:
+            existing = row.get("choice_list")
+            if isinstance(existing, dict) and existing.get("name") == name and "options" not in row and "option_values" not in row:
+                if existing.get("version") == listed[1]:
+                    return row
+                return {**row, "choice_list": {"name": name, "version": listed[1]}}
+            data = payload(name)
+            if data and all(row.get(key) == value for key, value in data.items()):
+                compacted = {key: value for key, value in row.items() if key not in data}
+                compacted["choice_list"] = {"name": name, "version": listed[1]}
+                return compacted
+    return _strip_identity_option_values(row)
 
 
 def compact_row(marketplace: str, row: dict) -> dict:
@@ -112,14 +140,13 @@ def hydrate_row(row: dict) -> dict:
     name = ref.get("name")
     if not isinstance(name, str):
         return row
-    source = _sources().get(name)
-    if source is None:
+    data = payload(name)
+    if data is None:
         return row
-    payload = source[2]()
-    if all(key in row for key in payload):
+    if all(key in row for key in data):
         return row
     hydrated = {key: value for key, value in row.items() if key != "choice_list"}
-    hydrated.update(payload)
+    hydrated.update(data)
     return hydrated
 
 
