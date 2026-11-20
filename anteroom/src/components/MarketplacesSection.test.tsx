@@ -30,7 +30,7 @@ function render(drafts: NativeDrafts, listings: MarketplaceListings = {}, { erro
   preflight = { marketplaces: {} } as { marketplaces: Record<string, { ready: boolean; gaps: PreflightGap[]; missing?: MissingField[] }> } | undefined,
   preflightMissing = false, preflightPlaceholder = false, preflightError = false, preflightFetching = undefined as boolean | undefined,
   nativeFields = [] as { key: string; path: string; label: string; value: string; required: boolean; options: string[] }[],
-  listing = {} as ListingData, agentLocks = [] as string[] } = {}) {
+  listing = {} as ListingData, agentLocks = [] as string[], revisionId = "current" as string | null } = {}) {
   useQuery.mockImplementation(({ queryKey }: { queryKey: string[] }) =>
     queryKey[0] === "native-marketplaces" ? { data: drafts, error, isError: Boolean(error), isPending: false }
     : queryKey[0] === "native-editor-form" ? { data: { marketplace: selected, native: true, fields: nativeFields, notes: notes ?? [] } }
@@ -45,7 +45,7 @@ function render(drafts: NativeDrafts, listings: MarketplaceListings = {}, { erro
       <StructuredEditor convId="item" listing={listing} tab={selected} target={null} onChange={() => {}} onAskChat={onAskChat} agentLocks={agentLocks} />
     </MarketplacesLayout>,
   );
-  return renderToStaticMarkup(<MarketplacesSection convId="item" revisionId="current" title="Tee" disabled={false} etsyEligible={etsyEligible}
+  return renderToStaticMarkup(<MarketplacesSection convId="item" revisionId={revisionId} title="Tee" disabled={false} etsyEligible={etsyEligible}
     selected={selected} onAskChat={onAskChat} onEditField={onEditField} />);
 }
 
@@ -70,6 +70,20 @@ describe("marketplaces section", () => {
     expect(html).toContain("Not listed");
     expect(html).toContain("Depop needs a parcel size.");
     expect(html).toMatch(/<details open=""[^>]*>.*Depop said: parcel_size is required/s);
+  });
+
+  it("waits for the saved listing before offering List or Save draft", () => {
+    // A slow listing read leaves no revision to send yet; List must not answer "Fill in the listing first."
+    const loading = render({}, {}, { selected: "ebay", revisionId: null });
+    expect(disabledButton(loading, "List…")).toBe(true);
+    expect(disabledButton(loading, "Save draft")).toBe(true);
+    const loaded = render({}, {}, { selected: "ebay" });
+    expect(enabledButton(loaded, "List…")).toBe(true);
+    expect(enabledButton(loaded, "Save draft")).toBe(true);
+    // List everywhere stays in place, disabled, rather than disappearing while the listing loads.
+    const listEverywhere = /<button[^>]*title="List on [^"]*"[^>]*>/;
+    expect(loading.match(listEverywhere)?.[0]).toContain('disabled=""');
+    expect(loaded.match(listEverywhere)?.[0]).not.toContain('disabled=""');
   });
 
   it("keeps List available when local field checks are incomplete or unavailable", () => {

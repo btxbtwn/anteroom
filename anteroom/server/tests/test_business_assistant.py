@@ -1388,3 +1388,32 @@ def test_answer_commit_is_confirmed_before_blocked_refresh(workspace, monkeypatc
             assert await asyncio.to_thread(save_closed.wait, 5)
 
     asyncio.run(exercise())
+
+
+def test_listing_details_are_read_a_batch_at_a_time(workspace, monkeypatch):
+    """A big shop's listings are many megabytes: one statement for all of them ran past
+    the hosted statement timeout under load, so each statement reads a bounded batch."""
+    from sqlalchemy import event
+    from anteroom.services.inventory_analytics import load_rows
+
+    db, _client = workspace
+    for n in range(5):
+        add_listing(db, f"Tee {n}", {"price": 10 + n, "description": f"Shirt number {n}"})
+    db.commit()
+    monkeypatch.setattr(business_assistant, "LISTING_BATCH", 2)
+    statements = []
+
+    def seen(_conn, _cursor, statement, *_args):
+        if "listing_revisions.listing_json" in statement and "FROM listings JOIN listing_revisions" in statement:
+            statements.append(statement)
+
+    engine = db.get_bind()
+    event.listen(engine, "before_cursor_execute", seen)
+    try:
+        records = business_assistant._records(db, load_rows(db), NOW)
+    finally:
+        event.remove(engine, "before_cursor_execute", seen)
+
+    assert len(statements) == 3 and all("LIMIT" in statement for statement in statements)
+    assert sorted(json.loads(record["details"])["description"] for record in records) == [
+        f"Shirt number {n}" for n in range(5)]
