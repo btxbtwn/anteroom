@@ -25,16 +25,20 @@ function busy(id: string) {
 export async function discardBlankDraft(
   id: string,
   discard: Discard,
-  { deadlineMs = SETTLE_DEADLINE_MS, pollMs = SETTLE_POLL_MS }: { deadlineMs?: number; pollMs?: number } = {},
+  {
+    deadlineMs = SETTLE_DEADLINE_MS,
+    pollMs = SETTLE_POLL_MS,
+    shouldDiscard = () => true,
+  }: { deadlineMs?: number; pollMs?: number; shouldDiscard?: () => boolean } = {},
 ): Promise<boolean> {
   // A field typed into but not yet blurred saves now, so the server sees it.
   commitUnsavedWork();
   const until = Date.now() + deadlineMs;
   while (busy(id)) {
-    if (Date.now() >= until) return false;
+    if (!shouldDiscard() || Date.now() >= until) return false;
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
-  if (hasComposerDraft(`listing:${id}`)) return false;
+  if (!shouldDiscard() || hasComposerDraft(`listing:${id}`)) return false;
   try {
     const discarded = (await discard(id)).discarded;
     if (discarded) clearComposerDraft(`listing:${id}`);

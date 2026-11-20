@@ -49,6 +49,19 @@ describe("discardBlankDraft", () => {
     expect(discard).toHaveBeenCalledOnce();
   });
 
+  it("keeps a reopened draft after its pending upload settles", async () => {
+    let finish!: () => void;
+    let selected = false;
+    const upload = trackPhotoUpload("new", () => new Promise<void>((resolve) => { finish = resolve; }));
+    const discard = vi.fn(async () => ({ discarded: true }));
+    const done = discardBlankDraft("new", discard, { pollMs: 1, shouldDiscard: () => !selected });
+    selected = true;
+    finish();
+    await upload;
+    await expect(done).resolves.toBe(false);
+    expect(discard).not.toHaveBeenCalled();
+  });
+
   it("keeps the draft when a save never lands before the deadline", async () => {
     cleanups.push(registerUnsavedWork({ pending: () => true }));
     const discard = vi.fn(async () => ({ discarded: true }));

@@ -94,7 +94,12 @@ export function App() {
     initialOpenListing,
   );
   const selectedConvId = openListingState?.id ?? null;
-  const setSelectedConvId = useCallback((id: string) => dispatchOpenListing({ type: "open", id }), []);
+  const selectedConvIdRef = useRef(selectedConvId);
+  useLayoutEffect(() => { selectedConvIdRef.current = selectedConvId; }, [selectedConvId]);
+  const setSelectedConvId = useCallback((id: string) => {
+    selectedConvIdRef.current = id;
+    dispatchOpenListing({ type: "open", id });
+  }, []);
   const clearListingWorkspace = (id: string) => dispatchOpenListing({ type: "clear", id });
   const listingFromUrl = Boolean(new URLSearchParams(window.location.search).get("listing"));
   const [suggestionsVisited, setSuggestionsVisited] = useState(false);
@@ -510,7 +515,10 @@ export function App() {
   // without a photo or a typed word, it is discarded (see blankDraft.ts).
   const freshDraftId = useRef<string | null>(null);
   const discardFreshDraft = useCallback((id: string) => {
-    void discardBlankDraft(id, api.conversations.discardBlank).then((discarded) => {
+    void discardBlankDraft(id, api.conversations.discardBlank, {
+      // Navigation can reopen this listing while its last save or upload settles.
+      shouldDiscard: () => selectedConvIdRef.current !== id,
+    }).then((discarded) => {
       if (discarded) void queryClient.invalidateQueries({ queryKey: ["conversations"] });
     });
   }, [queryClient]);
@@ -539,8 +547,8 @@ export function App() {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       const previous = freshDraftId.current;
       freshDraftId.current = conv.id;
-      if (previous && previous !== conv.id) discardFreshDraft(previous);
       setSelectedConvId(conv.id);
+      if (previous && previous !== conv.id) discardFreshDraft(previous);
       goListings();
       setMobilePane(runtime.hosted ? "editor" : "workspace");
       setMobileSidebarOpen(false);
