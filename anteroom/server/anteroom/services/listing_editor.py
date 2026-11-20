@@ -1,0 +1,167 @@
+"""The listing editor's shared local preparation and revision save."""
+from __future__ import annotations
+
+import copy
+
+from fastapi import HTTPException
+from sqlalchemy.orm import Session
+
+from anteroom.services import listing_persistence
+from anteroom.services.etsy_fields import etsy_eligible
+from anteroom.services.validation import normalize_listing_dropdowns, validate_listing
+from anteroom.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
+
+CORRUPT_SPECIFIC_KEYS = (
+    "ebay_specifics",
+    "depop_specifics",
+    "etsy_specifics",
+    "poshmark_specifics",
+    "mercari_specifics",
+)
+
+
+def reject_corrupt_listing(listing: dict) -> None:
+    if not isinstance(listing, dict):
+        raise HTTPException(422, "Listing must be an object")
+    for key in CORRUPT_SPECIFIC_KEYS:
+        value = listing.get(key)
+        if value is not None and not isinstance(value, dict):
+            raise HTTPException(422, f"{key} must be an object")
+
+
+def prepared_listing(previous: dict, listing: dict, *, notes: dict | None = None) -> dict:
+    from anteroom.services.chrome_catalog import keep_direct_categories
+    from anteroom.services.depop_category import align_depop_category
+    from anteroom.services.listing_generate import align_size_fields, sanitize_listing_sizes
+    from anteroom.services.seller_overrides import fold_key, is_price_path, lock_native_edits, prepare_user_listing, preserving_locks
+
+    updated = copy.deepcopy(listing)
+    reject_corrupt_listing(updated)
+    keep_direct_categories(previous, updated)
+    align_depop_category(updated, previous)
+    native_blocks = {market: copy.deepcopy(updated.get(f"{market}_specifics") or {})
+                     for market in updated.get("_native_forms") or {}}
+    prepare_user_listing(previous, updated, notes=notes)
+    general_changes = {fold_key(key) for key, value in listing.items()
+                       if not isinstance(value, (dict, list)) and value != previous.get(key)}
+    for market, original in native_blocks.items():
+        key = f"{market}_specifics"
+        prior = previous.get(key) or {}
+        reconciled = copy.deepcopy(updated.get(key) or {})
+        # Preserve the seller's actual native edits, not stale generated copies
+        # that reconciliation removed because General changed.
+        for field, value in original.items():
+            inherited_changed = ("price" in general_changes if is_price_path(f"{key}.{field}")
+                                 else fold_key(field) in general_changes)
+            if field not in prior or value != prior[field] or not inherited_changed:
+                reconciled[field] = value
+        native_blocks[market] = reconciled
+    sanitize_listing_sizes(updated)
+    previous_size = None if previous.get("size") is None else str(previous.get("size"))
+
+    def _normalize(current: dict) -> None:
+        align_size_fields(current, previous_size=previous_size)
+        normalize_listing_dropdowns(current)
+
+    preserving_locks(updated, _normalize)
+    for market, block in native_blocks.items():
+        updated[f"{market}_specifics"] = block
+    lock_native_edits(previous, updated, native_blocks)
+    return updated
+
+
+def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: str = "user_form", expected_revision_id: str | None = None):
+
+    conv_repo = ConversationRepo(db)
+    conv = conv_repo.get(conv_id)
+    if not conv:
+        raise HTTPException(404, "Conversation not found")
+
+    listing_repo = ListingRepo(db)
+    current = listing_repo.get_current(conv_id)
+    if current:
+        db.refresh(current)
+    current_id = (current.current_revision_id or "") if current else ""
+    if expected_revision_id is not None and expected_revision_id != current_id:
+        raise RevisionConflict("This listing changed since you reviewed it")
+    expected_revision_id = current_id
+
+    photo_count = len(conv_repo.get_photos(conv_id))
+    reject_corrupt_listing(listing_data)
+    from anteroom.services.listing_evidence import explicit_changes, record_correction
+
+    previous = listing_repo.get_revision(current.current_revision_id) if current and current.current_revision_id else None
+    previous_json = previous.listing_json if previous and isinstance(previous.listing_json, dict) else {}
+    changes = explicit_changes(previous_json, listing_data)
+    from anteroom.services import activity
+
+    if activity.edit_fields.get() is None:
+        locked = [target for target in activity.locked_fields(conv_id)
+                  if activity.field_value(previous_json, target) != activity.field_value(listing_data, target)]
+        if locked:
+            raise HTTPException(409, "The agent is editing: " + ", ".join(sorted(set(locked))))
+    from anteroom.services.vendoo_import import parse_notes
+
+    listing_data = prepared_listing(previous_json, listing_data, notes=parse_notes(conv.notes))
+    from anteroom.services.agent_categories import map_general_category
+
+    map_general_category(db, previous_json, listing_data)
+    from anteroom.services.seller_overrides import capture_locked, restore_locked
+
+    # Validation rewrites dropdown keys. A value the seller owns is put back.
+    locked = capture_locked(listing_data)
+    validation = validate_listing(listing_data, photo_count, require_photos=True)
+    restore_locked(listing_data, locked)
+    from anteroom.services.vendoo_marketplace_fields import best_offer_error
+
+    offer_problem = best_offer_error(listing_data)
+    if offer_problem:
+        raise HTTPException(400, offer_problem)
+
+    # Generation pins the SKU in Item Details over the model's, so a SKU the
+    # seller edits here goes there too, or Regenerate would bring the old one back.
+    revisions = listing_repo.get_revisions(conv_id)
+    previous_sku = str((revisions[0].listing_json if revisions else {}).get("sku") or "").strip()
+    sku = str(listing_data.get("sku") or "").strip()
+
+    revision = listing_persistence.save_revision(listing_repo.db,
+        conv_id=conv_id,
+        listing_json=listing_data,
+        source=source,
+        parent_revision_id=current.current_revision_id if current else None,
+        expected_revision_id=expected_revision_id,
+    )
+
+    from anteroom.services.seller_overrides import notes_for_listing_edits
+
+    note_updates = notes_for_listing_edits(previous_json, listing_data)
+    if sku != previous_sku:
+        note_updates["sku"] = sku
+    # Item Details feeds snapshots and regeneration. Keep explicitly changed
+    # costs and labels level with the same fields saved by the editor.
+    if listing_data.get("cost") != previous_json.get("cost"):
+        note_updates["cog"] = "" if listing_data.get("cost") is None else str(listing_data["cost"])
+    if listing_data.get("labels") != previous_json.get("labels"):
+        note_updates["vendooLabels"] = ", ".join(str(label) for label in listing_data.get("labels") or [])
+    if note_updates:
+        from anteroom.services.vendoo_import import merge_notes
+
+        conv_repo.write_notes(conv_id, merge_notes(conv.notes, note_updates))
+
+
+    record_correction(db, conv_id, revision.id, listing_data, changes, source="template" if source == "template" else "user_form")
+
+    if current:
+        current.validation_status = "valid" if validation.valid else "error"
+        current.validation_errors = validation.errors + validation.warnings
+
+    db.commit()
+
+    return {
+        "ok": True,
+        "revision_id": revision.id,
+        "listing": revision.listing_json,
+        "etsy_eligible": etsy_eligible(revision.listing_json),
+        "validation": {**validation.model_dump(), "can_send": validation.can_send},
+    }
+

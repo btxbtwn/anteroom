@@ -1,6 +1,6 @@
 # Listing JSON contract
 
-Anteroom, the listing skills, and the extension share a listing payload. This abbreviated example shows the structure; `ebay_specifics` keys use camelCase where shown. Category-dependent fields and allowed dropdown values come from the [canonical template](../skills/list-this/references/vendoo_listing_template.md) and [listing skill](../skills/list-this/SKILL.md).
+Anteroom, the listing skills, and the extension share a listing payload. This abbreviated example shows the structure; `ebay_specifics` keys use camelCase where shown. Category-dependent fields and allowed dropdown values come from the [canonical template](../skills/list-this/references/anteroom_listing_template.md) and [listing skill](../skills/list-this/SKILL.md).
 
 <details>
 <summary>Example listing JSON</summary>
@@ -60,7 +60,7 @@ The complete template covers marketplace-specific fields beyond this example. Li
 
 On the web, the seller's Anteroom tab carries a few fixed commands from the
 hosted API to Anteroom Bridge (`services/hosted_browser_relay.py`,
-`vendoo-extension/cloud-marketplace-protocol.js`). Each one is exactly
+`anteroom-extension/cloud-marketplace-protocol.js`). Each one is exactly
 `{type, job_id, message_id, payload}`, with a 32-hex `message_id` that
 `payload.request_id` repeats. The Bridge rejects anything else.
 

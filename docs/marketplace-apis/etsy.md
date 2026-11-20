@@ -23,7 +23,7 @@ Saving a draft writes properties, verifies them, uploads media, then verifies th
 draft. Activation is a separate approved action. Resume a retained draft URL rather
 than create another draft after a partial save.
 
-Implementation: [listing service](../../vendoo-studio/server/vendoo_studio/services/etsy_listings.py),
-[account transport](../../vendoo-studio/server/vendoo_studio/services/marketplace_accounts.py),
+Implementation: [listing service](../../anteroom/server/anteroom/services/etsy_listings.py),
+[account transport](../../anteroom/server/anteroom/services/marketplace_accounts.py),
 [relay](../../webhook-relay/src/etsy.js).
-Regression coverage: [listing tests](../../vendoo-studio/server/tests/test_etsy_listings.py).
+Regression coverage: [listing tests](../../anteroom/server/tests/test_etsy_listings.py).

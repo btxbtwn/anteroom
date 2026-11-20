@@ -1,0 +1,682 @@
+from __future__ import annotations
+
+import json
+import os
+import shlex
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import unittest
+import zipfile
+from pathlib import Path
+from unittest.mock import patch
+
+import httpx
+
+from anteroom.services import packaged_updates
+
+
+class PackagedUpdateTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.info = root / "build_info.json"
+        self.info.write_text(json.dumps({"version": "0.1.0", "sha": "aaa1111", "short_sha": "aaa1111", "ref": "main"}), encoding="utf-8")
+        self._packaged = os.environ.get("ANTEROOM_PACKAGED")
+        self._info = os.environ.get("ANTEROOM_BUILD_INFO")
+        self._data = os.environ.get("ANTEROOM_DATA_DIR")
+        self._app = os.environ.get("ANTEROOM_APP_PATH")
+        self._skip_codesign = os.environ.get("ANTEROOM_SKIP_CODESIGN")
+        os.environ["ANTEROOM_PACKAGED"] = "1"
+        os.environ["ANTEROOM_BUILD_INFO"] = str(self.info)
+
+    def tearDown(self) -> None:
+        if self._packaged is None:
+            os.environ.pop("ANTEROOM_PACKAGED", None)
+        else:
+            os.environ["ANTEROOM_PACKAGED"] = self._packaged
+        if self._info is None:
+            os.environ.pop("ANTEROOM_BUILD_INFO", None)
+        else:
+            os.environ["ANTEROOM_BUILD_INFO"] = self._info
+        if self._data is None:
+            os.environ.pop("ANTEROOM_DATA_DIR", None)
+        else:
+            os.environ["ANTEROOM_DATA_DIR"] = self._data
+        if self._app is None:
+            os.environ.pop("ANTEROOM_APP_PATH", None)
+        else:
+            os.environ["ANTEROOM_APP_PATH"] = self._app
+        if self._skip_codesign is None:
+            os.environ.pop("ANTEROOM_SKIP_CODESIGN", None)
+        else:
+            os.environ["ANTEROOM_SKIP_CODESIGN"] = self._skip_codesign
+        self.tmp.cleanup()
+
+    def test_local_build_info_reads_stamp(self):
+        info = packaged_updates.local_build_info()
+        self.assertEqual(info["sha"], "aaa1111")
+
+    def test_release_asset_url_uses_download_cdn(self):
+        url = packaged_updates.release_asset_url("build_info.json")
+        self.assertEqual(
+            url,
+            "https://github.com/btxbtwn/anteroom/releases/download/studio-macos/build_info.json",
+        )
+
+    def test_normalize_build_info_formats_every_pull_request(self):
+        info = packaged_updates._normalize_build_info(
+            {
+                "sha": "bbb2222",
+                "pull_requests": [
+                    {"number": 42, "title": "Newest change", "url": "https://example.test/42"},
+                    {"number": 41, "title": "Earlier change", "url": "https://example.test/41"},
+                ],
+            }
+        )
+        self.assertEqual(
+            info["commits"],
+            ["#42 — Newest change", "#41 — Earlier change"],
+        )
+
+    def test_normalize_build_info_reads_this_zips_digest(self):
+        # zip_sha256 is the digest of the zip builds from before the rename
+        # download; this build has to check its own zip against its own digest.
+        info = packaged_updates._normalize_build_info(
+            {
+                "sha": "bbb2222",
+                "zip_sha256": "aa" * 32,
+                "zips": {"Anteroom-macos.zip": "BB" * 32, "List-This-Studio-macos.zip": "aa" * 32},
+            }
+        )
+        self.assertEqual(info["zip_sha256"], "bb" * 32)
+        self.assertIsNone(packaged_updates._normalize_build_info({"sha": "b", "zip_sha256": "aa" * 32})["zip_sha256"])
+
+    def test_version_list_leaves_out_the_bridge_for_older_installs(self):
+        releases = [
+            {"tag_name": "studio-macos-v0.1.953-oldcert1793526", "published_at": "2026-11-12T05:00:00Z"},
+            {"tag_name": "studio-macos-v0.1.953-1793526", "published_at": "2026-11-12T05:00:00Z"},
+            {"tag_name": "studio-macos", "published_at": "2026-11-12T05:00:00Z"},
+        ]
+        response = httpx.Response(200, json=releases, request=httpx.Request("GET", "https://api.github.com/x"))
+        client = type("Client", (), {"get": lambda self, *a, **k: response})()
+        versions = packaged_updates.list_published_versions(client=client)
+        self.assertEqual([item["tag"] for item in versions], ["studio-macos-v0.1.953-1793526"])
+
+    def test_api_headers_include_optional_token(self):
+        with patch.dict(os.environ, {"GITHUB_TOKEN": "secret-token"}, clear=False):
+            headers = packaged_updates._headers(api=True)
+        self.assertEqual(headers["Authorization"], "Bearer secret-token")
+        self.assertEqual(headers["Accept"], "application/vnd.github+json")
+        download_headers = packaged_updates._headers()
+        self.assertNotIn("Authorization", download_headers)
+
+    @patch.object(
+        packaged_updates,
+        "fetch_remote_build_info",
+        return_value={
+            "sha": "bbb2222",
+            "short_sha": "bbb2222",
+            "version": "0.1.0",
+            "ref": "main",
+            "zip_sha256": "ab" * 32,
+            "title": "",
+        },
+    )
+    def test_newer_github_sha_is_available(self, _remote):
+        status = packaged_updates.check_for_packaged_update()
+        self.assertTrue(status["available"])
+        self.assertTrue(status["packaged"])
+        self.assertEqual(status["remote_sha"], "bbb2222")
+        self.assertEqual(
+            status["download_url"],
+            "https://github.com/btxbtwn/anteroom/releases/download/studio-macos/Anteroom-macos.zip",
+        )
+        self.assertEqual(status["sha256"], "ab" * 32)
+        self.assertEqual(status["summary"], "")
+
+    @patch.object(
+        packaged_updates,
+        "fetch_remote_build_info",
+        return_value={
+            "sha": "bbb2222",
+            "short_sha": "bbb2222",
+            "version": "0.1.0",
+            "ref": "main",
+            "zip_sha256": "ab" * 32,
+            "title": "Prompt to pull when Vendoo is saved",
+        },
+    )
+    def test_summary_prefers_published_title(self, _remote):
+        status = packaged_updates.check_for_packaged_update()
+        self.assertTrue(status["available"])
+        self.assertEqual(status["summary"], "Prompt to pull when Vendoo is saved")
+        self.assertEqual(status["commits"], ["Prompt to pull when Vendoo is saved"])
+
+    @patch.object(
+        packaged_updates,
+        "fetch_remote_build_info",
+        return_value={
+            "sha": "bbb2222",
+            "short_sha": "bbb2222",
+            "version": "0.1.0",
+            "ref": "main",
+            "zip_sha256": "ab" * 32,
+            "title": "Newest change",
+            "commits": ["#42 — Newest change", "#41 — Earlier change"],
+        },
+    )
+    def test_packaged_update_includes_every_published_pull_request(self, _remote):
+        status = packaged_updates.check_for_packaged_update()
+        self.assertEqual(status["behind"], 2)
+        self.assertEqual(status["summary"], "#42 — Newest change")
+        self.assertEqual(
+            status["commits"],
+            ["#42 — Newest change", "#41 — Earlier change"],
+        )
+
+    @patch.object(
+        packaged_updates,
+        "fetch_remote_build_info",
+        return_value={
+            "sha": "aaa1111",
+            "short_sha": "aaa1111",
+            "version": "0.1.0",
+            "ref": "main",
+            "zip_sha256": "ab" * 32,
+            "title": "Same build",
+        },
+    )
+    def test_same_sha_is_current(self, _remote):
+        status = packaged_updates.check_for_packaged_update()
+        self.assertFalse(status["available"])
+        self.assertEqual(status["local_sha"], "aaa1111")
+        self.assertEqual(status["summary"], "")
+        self.assertIsNone(status["error"])
+
+    def test_older_published_build_is_not_an_update(self):
+        for version in ("0.0.9", "not-a-version"):
+            remote = {"sha": "bbb2222", "short_sha": "bbb2222", "version": version, "ref": "main",
+                      "zip_sha256": "ab" * 32, "title": "Older build"}
+            with patch.object(packaged_updates, "fetch_remote_build_info", return_value=remote):
+                status = packaged_updates.check_for_packaged_update()
+            self.assertFalse(status["available"], version)
+            self.assertEqual(status["commits"], [])
+
+    def test_newer_version_is_an_update(self):
+        remote = {"sha": "bbb2222", "short_sha": "bbb2222", "version": "0.1.10", "ref": "main",
+                  "zip_sha256": "ab" * 32, "title": "Newer build"}
+        with patch.object(packaged_updates, "fetch_remote_build_info", return_value=remote):
+            self.assertTrue(packaged_updates.check_for_packaged_update()["available"])
+
+    def test_check_surfaces_cdn_errors(self):
+        with patch.object(
+            packaged_updates,
+            "fetch_remote_build_info",
+            side_effect=packaged_updates.PackagedUpdateError("Could not reach GitHub releases: boom"),
+        ):
+            status = packaged_updates.check_for_packaged_update()
+        self.assertFalse(status["available"])
+        self.assertIn("Could not reach GitHub releases", status["error"])
+
+    def test_rate_limit_message_from_api_response(self):
+        response = type(
+            "Response",
+            (),
+            {
+                "status_code": 403,
+                "text": "API rate limit exceeded for 1.2.3.4",
+            },
+        )()
+        message = packaged_updates._rate_limit_message(response)
+        self.assertIsNotNone(message)
+        self.assertIn("rate limit", message.lower())
+
+    def test_extract_app_finds_keepparent_bundle(self):
+        archive = Path(self.tmp.name) / "Anteroom-macos.zip"
+        with zipfile.ZipFile(archive, "w") as bundle:
+            bundle.writestr("Anteroom.app/Contents/Info.plist", "plist")
+        extracted = packaged_updates._extract_app(archive, Path(self.tmp.name) / "unpacked")
+        self.assertTrue(extracted.is_dir())
+        self.assertEqual(extracted.name, "Anteroom.app")
+
+    def test_extract_app_finds_bundle_next_to_how_to_open(self):
+        archive = Path(self.tmp.name) / "Anteroom-macos.zip"
+        with zipfile.ZipFile(archive, "w") as bundle:
+            bundle.writestr("How to Open.txt", "open me")
+            bundle.writestr("Anteroom.app/Contents/Info.plist", "plist")
+        extracted = packaged_updates._extract_app(archive, Path(self.tmp.name) / "unpacked-guide")
+        self.assertEqual(extracted.name, "Anteroom.app")
+
+    def test_extract_rejects_traversal_before_ditto(self):
+        archive = Path(self.tmp.name) / "unsafe.zip"
+        with zipfile.ZipFile(archive, "w") as bundle:
+            bundle.writestr("../outside.txt", "unsafe")
+        with patch("subprocess.run") as run:
+            with self.assertRaises(packaged_updates.PackagedUpdateError):
+                packaged_updates._extract_app(archive, Path(self.tmp.name) / "unsafe-output")
+        run.assert_not_called()
+
+    def test_extract_rejects_escaping_symbolic_links_before_ditto(self):
+        archive = Path(self.tmp.name) / "symlink.zip"
+        link = zipfile.ZipInfo("Anteroom.app/Contents/link")
+        link.create_system = 3
+        link.external_attr = (stat.S_IFLNK | 0o777) << 16
+        with zipfile.ZipFile(archive, "w") as bundle:
+            # Three levels up leaves the extract root (app → payload → destination → parent).
+            bundle.writestr(link, "../../../outside")
+        with patch("subprocess.run") as run:
+            with self.assertRaisesRegex(packaged_updates.PackagedUpdateError, "unsafe symbolic link"):
+                packaged_updates._extract_app(archive, Path(self.tmp.name) / "symlink-output")
+        run.assert_not_called()
+
+    def test_extract_rejects_absolute_symbolic_links_before_ditto(self):
+        archive = Path(self.tmp.name) / "abs-symlink.zip"
+        link = zipfile.ZipInfo("Anteroom.app/Contents/link")
+        link.create_system = 3
+        link.external_attr = (stat.S_IFLNK | 0o777) << 16
+        with zipfile.ZipFile(archive, "w") as bundle:
+            bundle.writestr(link, "/etc/passwd")
+        with patch("subprocess.run") as run:
+            with self.assertRaisesRegex(packaged_updates.PackagedUpdateError, "unsafe symbolic link"):
+                packaged_updates._extract_app(archive, Path(self.tmp.name) / "abs-symlink-output")
+        run.assert_not_called()
+
+    def test_validate_allows_relative_in_bundle_symbolic_links(self):
+        archive = Path(self.tmp.name) / "safe-symlink.zip"
+        link = zipfile.ZipInfo("Anteroom.app/Contents/Frameworks/Python.framework/Versions/Current")
+        link.create_system = 3
+        link.external_attr = (stat.S_IFLNK | 0o777) << 16
+        with zipfile.ZipFile(archive, "w") as bundle:
+            bundle.writestr("Anteroom.app/Contents/Info.plist", "plist")
+            bundle.writestr(link, "3.12")
+        destination = Path(self.tmp.name) / "safe-symlink-output"
+        destination.mkdir()
+        # Must not raise — PyInstaller macOS zips ship dozens of in-bundle relative links.
+        packaged_updates._validate_zip_members(archive, destination)
+
+    def test_extract_app_accepts_archive_with_relative_symbolic_links(self):
+        archive = Path(self.tmp.name) / "safe-symlink-extract.zip"
+        link = zipfile.ZipInfo("Anteroom.app/Contents/Frameworks/Current")
+        link.create_system = 3
+        link.external_attr = (stat.S_IFLNK | 0o777) << 16
+        with zipfile.ZipFile(archive, "w") as bundle:
+            bundle.writestr("Anteroom.app/Contents/Info.plist", "plist")
+            bundle.writestr("Anteroom.app/Contents/Frameworks/3.12/marker", "ok")
+            bundle.writestr(link, "3.12")
+        extracted = packaged_updates._extract_app(archive, Path(self.tmp.name) / "safe-symlink-extract-output")
+        self.assertEqual(extracted.name, "Anteroom.app")
+        self.assertTrue((extracted / "Contents" / "Info.plist").is_file())
+
+    def test_prepare_app_bundle_makes_launcher_executable(self):
+        app = Path(self.tmp.name) / "Anteroom.app"
+        launcher = app / "Contents" / "MacOS" / "Anteroom"
+        launcher.parent.mkdir(parents=True)
+        launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+        launcher.chmod(0o644)
+        packaged_updates._prepare_app_bundle(app)
+        self.assertTrue(os.access(launcher, os.X_OK))
+
+    def _fake_codesign(self, display: str, verify_code: int = 0, verify_err: str = ""):
+        calls = []
+
+        def fake_run(args, capture_output=True, text=True):
+            calls.append(args)
+            if args[:2] == ["/usr/bin/codesign", "-dv"]:
+                return type("Result", (), {"returncode": 0, "stdout": "", "stderr": display})()
+            self.assertEqual(args[:4], ["/usr/bin/codesign", "--verify", "--deep", "--strict"])
+            self.assertTrue(args[4].startswith("-R="), args[4])
+            return type(
+                "Result", (), {"returncode": verify_code, "stdout": "", "stderr": verify_err}
+            )()
+
+        return fake_run, calls
+
+    def test_verify_app_signature_accepts_certificate_signature(self):
+        app = Path(self.tmp.name) / "Anteroom.app"
+        app.mkdir()
+        fake_run, calls = self._fake_codesign(
+            "Identifier=local.listthis.studio\nAuthority=Developer ID Application: Cristian Canizares (JWN57LH9PU)\n"
+        )
+        with patch.object(packaged_updates.subprocess, "run", side_effect=fake_run):
+            packaged_updates._verify_app_signature(app)
+        self.assertEqual(len(calls), 2)
+        # Passed through verbatim and attached with =, the only form codesign
+        # reads as the requirement rather than as a path.
+        self.assertEqual(calls[-1][4], f"-R={packaged_updates.UPDATE_REQUIREMENT}")
+        self.assertEqual(calls[-1][5], str(app))
+
+    def test_update_requirement_accepts_developer_id_and_the_old_certificate(self):
+        """Installs signed with either certificate accept a build signed with the other.
+
+        Releases through 0.1.947 were signed with a self-signed certificate and
+        their updater only accepts that certificate. The copy signed with it
+        carries this updater, which must then accept the Developer ID build,
+        and a Developer ID install must still be able to go back to an older
+        self-signed build during the transition.
+        """
+        requirement = packaged_updates.UPDATE_REQUIREMENT
+        self.assertTrue(requirement.startswith('identifier "local.listthis.studio" and ('))
+        self.assertIn("anchor apple generic", requirement)
+        self.assertIn('certificate leaf[subject.OU] = "JWN57LH9PU"', requirement)
+        # The Developer ID Application marker, so another certificate type from
+        # the same team (an App Store or development one) is not enough.
+        self.assertIn("certificate leaf[field.1.2.840.113635.100.6.1.13] exists", requirement)
+        self.assertIn('certificate leaf = H"bf5bb813af4efd5e4d73209a2ee50f669ee28bbb"', requirement)
+        self.assertIn(") or (", requirement)
+        self.assertEqual(requirement.count("("), requirement.count(")"))
+
+    def test_verify_app_signature_does_not_depend_on_the_installed_app(self):
+        # An install signed with the old certificate would otherwise demand that
+        # certificate and refuse every Developer ID build.
+        app = Path(self.tmp.name) / "Anteroom.app"
+        app.mkdir()
+        os.environ["ANTEROOM_APP_PATH"] = str(Path(self.tmp.name) / "missing" / "Anteroom.app")
+        fake_run, calls = self._fake_codesign("Authority=Developer ID Application\n")
+        with patch.object(packaged_updates.subprocess, "run", side_effect=fake_run):
+            packaged_updates._verify_app_signature(app)
+        self.assertFalse(any(str(Path(self.tmp.name) / "missing") in " ".join(call) for call in calls))
+
+    def test_verify_app_signature_rejects_adhoc(self):
+        app = Path(self.tmp.name) / "Anteroom.app"
+        app.mkdir()
+        fake_run, _ = self._fake_codesign("Signature=adhoc\nIdentifier=local.listthis.studio\n")
+        with patch.object(packaged_updates.subprocess, "run", side_effect=fake_run):
+            with self.assertRaisesRegex(packaged_updates.PackagedUpdateError, "certificate"):
+                packaged_updates._verify_app_signature(app)
+
+    def test_verify_app_signature_rejects_another_publishers_valid_signature(self):
+        app = Path(self.tmp.name) / "Foreign.app"
+        app.mkdir()
+        fake_run, calls = self._fake_codesign(
+            "Authority=Developer ID Application: Another Publisher\n",
+            verify_code=1,
+            verify_err="code failed to satisfy specified code requirement(s)",
+        )
+        with patch.object(packaged_updates.subprocess, "run", side_effect=fake_run):
+            with self.assertRaisesRegex(packaged_updates.PackagedUpdateError, "signing identity"):
+                packaged_updates._verify_app_signature(app)
+        self.assertIn('"JWN57LH9PU"', calls[-1][4])
+
+    @unittest.skipUnless(sys.platform == "darwin", "codesign is macOS only")
+    def test_update_requirement_is_one_codesign_can_parse(self):
+        """Guard the exact regression: a requirement codesign cannot read refuses every update."""
+        with tempfile.TemporaryDirectory() as tmp:
+            compiled = subprocess.run(
+                ["/usr/bin/csreq", f"-r={packaged_updates.UPDATE_REQUIREMENT}", "-b", str(Path(tmp) / "req.bin")],
+                capture_output=True, text=True,
+            )
+            self.assertEqual(compiled.returncode, 0, compiled.stderr)
+            app = Path(tmp) / "Anteroom.app"
+            (app / "Contents" / "MacOS").mkdir(parents=True)
+            launcher = app / "Contents" / "MacOS" / "Anteroom"
+            launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+            launcher.chmod(0o755)
+            signed = subprocess.run(["/usr/bin/codesign", "--force", "-s", "-", str(app)],
+                                    capture_output=True, text=True)
+            self.assertEqual(signed.returncode, 0, signed.stderr)
+            # An ad-hoc signature is read, and refused for the requirement, not
+            # for a malformed one.
+            verify = subprocess.run(["/usr/bin/codesign", "--verify", "--deep", "--strict",
+                                     f"-R={packaged_updates.UPDATE_REQUIREMENT}", str(app)],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(verify.returncode, 0)
+            self.assertIn("failed to satisfy", verify.stderr)
+
+    def test_verify_app_signature_rejects_broken_seal(self):
+        app = Path(self.tmp.name) / "Anteroom.app"
+        app.mkdir()
+        fake_run, _ = self._fake_codesign(
+            "Authority=List This Studio Signing\n",
+            verify_code=1,
+            verify_err=f"{app}: a sealed resource is missing or invalid",
+        )
+        with patch.object(packaged_updates.subprocess, "run", side_effect=fake_run):
+            with self.assertRaisesRegex(packaged_updates.PackagedUpdateError, "damaged"):
+                packaged_updates._verify_app_signature(app)
+
+    def test_verify_app_signature_rejects_unsigned(self):
+        app = Path(self.tmp.name) / "Anteroom.app"
+        app.mkdir()
+
+        def fake_run(args, capture_output=True, text=True):
+            return type(
+                "Result",
+                (),
+                {
+                    "returncode": 1,
+                    "stdout": "",
+                    "stderr": f"{app}: code object is not signed at all",
+                },
+            )()
+
+        with patch.object(packaged_updates.subprocess, "run", side_effect=fake_run):
+            with self.assertRaisesRegex(packaged_updates.PackagedUpdateError, "not signed"):
+                packaged_updates._verify_app_signature(app)
+
+    def test_force_reinstall_downloads_even_when_current(self):
+        archive = Path(self.tmp.name) / "payload.zip"
+        archive.write_bytes(b"zip-bytes")
+        app = Path(self.tmp.name) / "installed" / "Anteroom.app"
+        (app / "Contents" / "MacOS").mkdir(parents=True)
+        (app / "Contents" / "MacOS" / "Anteroom").write_text("old", encoding="utf-8")
+        new_app = Path(self.tmp.name) / "fresh" / "Anteroom.app"
+        (new_app / "Contents" / "MacOS").mkdir(parents=True)
+        os.environ["ANTEROOM_APP_PATH"] = str(app)
+        os.environ["ANTEROOM_DATA_DIR"] = str(Path(self.tmp.name) / "data")
+        os.environ["ANTEROOM_SKIP_CODESIGN"] = "1"
+
+        def fake_download(_client, _url, destination: Path, _progress_callback=None) -> None:
+            destination.write_bytes(archive.read_bytes())
+
+        remote = {
+            "sha": "aaa1111",
+            "short_sha": "aaa1111",
+            "version": "0.1.0",
+            "ref": "main",
+            "zip_sha256": "ab" * 32,
+            "title": "Current",
+        }
+        with (
+            patch.object(packaged_updates, "fetch_remote_build_info", return_value=remote),
+            patch.object(packaged_updates, "_download", side_effect=fake_download),
+            patch.object(packaged_updates, "_sha256_file", return_value="ab" * 32),
+            patch.object(packaged_updates, "_extract_app", return_value=new_app),
+            patch.object(packaged_updates, "_verify_app_signature"),
+            patch.object(packaged_updates, "_prepare_app_bundle"),
+            patch.object(packaged_updates.subprocess, "Popen") as popen,
+        ):
+            skipped = packaged_updates.apply_packaged_update()
+            progress = []
+            prepared = packaged_updates.prepare_packaged_update(force=True, progress_callback=progress.append)
+            popen.assert_not_called()
+            installed = packaged_updates.install_prepared_packaged_update()
+            forced = packaged_updates.reinstall_packaged_app()
+        self.assertFalse(skipped["updated"])
+        self.assertTrue(prepared["prepared"])
+        self.assertTrue(installed["updated"])
+        # Phase markers keep the meter moving even when the download stub is silent.
+        self.assertEqual(progress[0], 1.0)
+        self.assertEqual(progress[-1], 100.0)
+        self.assertGreater(max(progress), 90.0)
+        self.assertTrue(forced["updated"])
+        self.assertTrue(forced["reinstalled"])
+        self.assertEqual(popen.call_count, 2)
+
+    def test_map_download_progress_stays_inside_the_download_band(self):
+        self.assertEqual(packaged_updates.map_download_progress(0), packaged_updates.DOWNLOAD_PROGRESS_FLOOR)
+        self.assertEqual(packaged_updates.map_download_progress(100), packaged_updates.DOWNLOAD_PROGRESS_CEILING)
+        mid = packaged_updates.map_download_progress(50)
+        self.assertGreater(mid, packaged_updates.DOWNLOAD_PROGRESS_FLOOR)
+        self.assertLess(mid, packaged_updates.DOWNLOAD_PROGRESS_CEILING)
+
+    def test_unknown_size_download_progress_climbs_without_content_length(self):
+        self.assertEqual(packaged_updates.unknown_size_download_progress(0), 0.0)
+        early = packaged_updates.unknown_size_download_progress(1024 * 1024)
+        later = packaged_updates.unknown_size_download_progress(50 * 1024 * 1024)
+        self.assertGreater(early, 0.0)
+        self.assertGreater(later, early)
+        self.assertLess(later, 100.0)
+
+    def test_download_reports_progress_with_and_without_content_length(self):
+        import http.server
+        import threading
+
+        payload = b"x" * (200 * 1024)
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                if self.path.endswith("no-cl"):
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/octet-stream")
+                    self.end_headers()
+                    self.wfile.write(payload)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                # Write in pieces so iter_bytes yields more than one chunk.
+                for index in range(0, len(payload), 16 * 1024):
+                    self.wfile.write(payload[index : index + 16 * 1024])
+
+            def log_message(self, *_args):
+                return
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        port = server.server_address[1]
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                with_cl: list[float] = []
+                dest = Path(self.tmp.name) / "with-cl.zip"
+                packaged_updates._download(
+                    client,
+                    f"http://127.0.0.1:{port}/file.zip",
+                    dest,
+                    with_cl.append,
+                )
+                self.assertTrue(dest.is_file())
+                self.assertGreater(len(with_cl), 1)
+                self.assertEqual(with_cl[-1], packaged_updates.DOWNLOAD_PROGRESS_CEILING)
+                self.assertGreater(with_cl[0], packaged_updates.DOWNLOAD_PROGRESS_FLOOR - 0.01)
+
+                no_cl: list[float] = []
+                dest2 = Path(self.tmp.name) / "no-cl.zip"
+                packaged_updates._download(
+                    client,
+                    f"http://127.0.0.1:{port}/no-cl",
+                    dest2,
+                    no_cl.append,
+                )
+                self.assertTrue(dest2.is_file())
+                self.assertGreater(len(no_cl), 0)
+                self.assertEqual(no_cl[-1], packaged_updates.DOWNLOAD_PROGRESS_CEILING)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_download_retries_missing_asset_during_release_upload(self):
+        attempts = []
+
+        def respond(request):
+            attempts.append(request.url)
+            if len(attempts) < 3:
+                return httpx.Response(404)
+            return httpx.Response(200, content=b"complete archive")
+
+        destination = Path(self.tmp.name) / "retried.zip"
+        progress = []
+        with (
+            httpx.Client(transport=httpx.MockTransport(respond)) as client,
+            patch.object(packaged_updates.time, "sleep") as sleep,
+        ):
+            packaged_updates._download(client, "https://example.test/update.zip", destination, progress.append)
+        self.assertEqual(destination.read_bytes(), b"complete archive")
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [2, 4])
+        self.assertEqual(progress[-1], packaged_updates.DOWNLOAD_PROGRESS_CEILING)
+
+    def test_download_stops_retrying_missing_asset_with_actionable_error(self):
+        requests = []
+
+        def respond(request):
+            requests.append(request)
+            return httpx.Response(404)
+
+        destination = Path(self.tmp.name) / "missing.zip"
+        with (
+            httpx.Client(transport=httpx.MockTransport(respond)) as client,
+            patch.object(packaged_updates.time, "sleep") as sleep,
+        ):
+            with self.assertRaisesRegex(packaged_updates.PackagedUpdateError, "Wait a minute"):
+                packaged_updates._download(client, "https://example.test/update.zip", destination)
+        self.assertEqual(len(requests), packaged_updates.DOWNLOAD_ATTEMPTS)
+        self.assertEqual(sleep.call_count, packaged_updates.DOWNLOAD_ATTEMPTS - 1)
+        self.assertFalse(destination.exists())
+
+    def test_download_does_not_retry_other_http_errors(self):
+        destination = Path(self.tmp.name) / "forbidden.zip"
+        with (
+            httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(403))) as client,
+            patch.object(packaged_updates.time, "sleep") as sleep,
+        ):
+            with self.assertRaises(httpx.HTTPStatusError):
+                packaged_updates._download(client, "https://example.test/update.zip", destination)
+        sleep.assert_not_called()
+        self.assertFalse(destination.exists())
+
+    def test_replacer_clears_quarantine_before_relaunch(self):
+        root = Path(self.tmp.name)
+        app = root / "Anteroom.app"
+        new_app = root / "new" / "Anteroom.app"
+        (app / "Contents" / "MacOS").mkdir(parents=True)
+        os.environ["ANTEROOM_DATA_DIR"] = str(root / "data")
+        script = packaged_updates._write_replacer(app, new_app, 12345)
+        text = script.read_text(encoding="utf-8")
+        self.assertIn("xattr -cr", text)
+        self.assertIn("chmod -R u+x", text)
+        self.assertIn("/usr/bin/open", text)
+
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("ditto"), "needs macOS ditto")
+    def test_replacer_swaps_in_a_clean_bundle(self):
+        # Files left over from the old build break the code seal, and Keychain
+        # then asks for the password on every launch.
+        root = Path(self.tmp.name)
+        app = root / "Anteroom.app"
+        new_app = root / "new" / "Anteroom.app"
+        (app / "Contents" / "Resources").mkdir(parents=True)
+        (app / "Contents" / "Resources" / "stale.js").write_text("old", encoding="utf-8")
+        (new_app / "Contents" / "MacOS").mkdir(parents=True)
+        (new_app / "Contents" / "MacOS" / "Anteroom").write_text("new", encoding="utf-8")
+        os.environ["ANTEROOM_DATA_DIR"] = str(root / "data")
+        script = packaged_updates._write_replacer(app, new_app, 999999)
+        text = script.read_text(encoding="utf-8").replace("/usr/bin/open ", "/usr/bin/true ")
+        subprocess.run(["/bin/bash", "-c", text], check=True)
+        self.assertFalse((app / "Contents" / "Resources" / "stale.js").exists())
+        self.assertEqual((app / "Contents" / "MacOS" / "Anteroom").read_text(encoding="utf-8"), "new")
+        self.assertFalse(app.with_name(f"{app.name}.updating").exists())
+        self.assertFalse(app.with_name(f"{app.name}.previous").exists())
+
+
+    @unittest.skipUnless(sys.platform == "darwin" and shutil.which("ditto"), "needs macOS ditto")
+    def test_replacer_moves_a_pre_rename_install_to_the_new_name(self):
+        root = Path(self.tmp.name)
+        app = root / "List This Studio.app"
+        new_app = root / "new" / "Anteroom.app"
+        (app / "Contents" / "MacOS").mkdir(parents=True)
+        (app / "Contents" / "MacOS" / "ListThisStudio").write_text("old", encoding="utf-8")
+        (new_app / "Contents" / "MacOS").mkdir(parents=True)
+        (new_app / "Contents" / "MacOS" / "Anteroom").write_text("new", encoding="utf-8")
+        os.environ["ANTEROOM_DATA_DIR"] = str(root / "data")
+        script = packaged_updates._write_replacer(app, new_app, 999999)
+        text = script.read_text(encoding="utf-8")
+        self.assertIn(f"/usr/bin/open {shlex.quote(str(root / 'Anteroom.app'))}", text)
+        subprocess.run(["/bin/bash", "-c", text.replace("/usr/bin/open ", "/usr/bin/true ")], check=True)
+        self.assertFalse(app.exists())
+        self.assertFalse(app.with_name(f"{app.name}.previous").exists())
+        installed = root / "Anteroom.app"
+        self.assertEqual((installed / "Contents" / "MacOS" / "Anteroom").read_text(encoding="utf-8"), "new")

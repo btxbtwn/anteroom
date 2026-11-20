@@ -1,6 +1,6 @@
 # Listing generation evaluations
 
-The synthetic cases in `vendoo-studio/server/tests/fixtures/generation_cases.json`
+The synthetic cases in `anteroom/server/tests/fixtures/generation_cases.json`
 cover readable and unreadable tags, seller flaws and measurements, men's bottoms,
 marketplace choices, deliberate clears, a seller's price, and separate category IDs.
 They contain no seller photos or private exports.
@@ -11,7 +11,7 @@ value. Keep output artifacts outside the repository. Record the provider, model,
 reasoning setting, prompt revision, latency, and input/output token usage alongside
 the artifact when the provider exposes them. Use identical cases when comparing runs.
 
-From `vendoo-studio`, with the project's environment active:
+From `anteroom`, with the project's environment active:
 
 ```bash
 python scripts/evaluate-generation.py --outputs /path/to/captured-outputs.json

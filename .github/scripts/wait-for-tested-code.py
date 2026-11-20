@@ -236,6 +236,18 @@ def checkpoint_eligible(
     return True, ""
 
 
+def _version_at(run_git, sha: str) -> str:
+    """Read VERSION at a commit, falling back to the pre-rename path for historical commits."""
+    for path in ("anteroom/VERSION", "vendoo-studio/VERSION"):
+        try:
+            version = run_git("show", f"{sha}:{path}").strip()
+        except (KeyError, RuntimeError, subprocess.SubprocessError):
+            continue
+        if version:
+            return version
+    return ""
+
+
 def verify_historical_checkpoint(
     repo: str,
     head: str,
@@ -256,7 +268,7 @@ def verify_historical_checkpoint(
         raise ValueError(reason)
     assert pin is not None
 
-    expected_version = run_git("show", f"{pin.production_base}:vendoo-studio/VERSION").strip()
+    expected_version = _version_at(run_git, pin.production_base)
     if not expected_version:
         raise ValueError("Could not read expected VERSION for the pinned production base.")
     live_version = (live_version_fn or live_health_version)(health_url)
@@ -365,7 +377,7 @@ def reconcile_live_production_base(
     repo: str,
     *,
     fly_app: str,
-    alembic_cwd: str | Path = "vendoo-studio",
+    alembic_cwd: str | Path = "anteroom",
     health_url: str = "",
     pin: recovery_evidence.EvidencePin | None = HISTORICAL_RECOVERY_CHECKPOINT,
     expected_fly_app: str = HISTORICAL_BASE_FLY_APP,
@@ -394,7 +406,7 @@ def reconcile_live_production_base(
         )
 
     run_git = git_fn or _read_git
-    expected_version = run_git("show", f"{pin.production_base}:vendoo-studio/VERSION").strip()
+    expected_version = _version_at(run_git, pin.production_base)
     if not expected_version:
         raise ValueError("Could not read expected VERSION for the pinned production base.")
     live_version = (live_version_fn or live_health_version)(health_url)
@@ -443,7 +455,7 @@ def main() -> int:
     parser.add_argument("--health-url", default=os.environ.get("HEALTH_URL", ""))
     parser.add_argument("--reconcile-live-base", action="store_true")
     parser.add_argument("--fly-app", default=os.environ.get("FLY_APP", ""))
-    parser.add_argument("--alembic-cwd", default="vendoo-studio")
+    parser.add_argument("--alembic-cwd", default="anteroom")
     args = parser.parse_args()
 
     if args.reconcile_live_base:

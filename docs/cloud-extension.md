@@ -79,7 +79,7 @@ Frontend transport tests cover request correlation, rejected foreign replies,
 identity-only payloads, timeout and unsupported origins. Run the complete extension
 and frontend suites before shipping.
 
-`node vendoo-studio/scripts/check-bridge-connection.mjs` uses real Chromium, the
+`node anteroom/scripts/check-bridge-connection.mjs` uses real Chromium, the
 actual extension popup and a disposable profile. Network access is blocked and
 the trusted site is served from memory. It verifies approval survives tab/page
 reloads, browser restarts and a Bridge version update across restart, and

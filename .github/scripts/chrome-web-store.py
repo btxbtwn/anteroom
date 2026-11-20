@@ -3,7 +3,7 @@
     chrome-web-store.py package --out bridge.zip
     chrome-web-store.py release --package bridge.zip
 
-``package`` zips the tracked files of vendoo-extension/ that Chrome loads (the
+``package`` zips the tracked files of anteroom-extension/ that Chrome loads (the
 same files the Mac app copies, chrome_bridge.EXTENSION_SKIP) and checks that
 everything the manifest and background.js load is inside.
 
@@ -36,7 +36,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-EXTENSION = "vendoo-extension"
+EXTENSION = "anteroom-extension"
 ITEM_ID = "empinkdlhndpfoigoipbiiofaeepcheo"
 API = "https://chromewebstore.googleapis.com"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -57,7 +57,7 @@ class StoreError(RuntimeError):
 
 
 def tracked_files(root: Path = ROOT) -> list[str]:
-    """The extension's files git tracks, relative to vendoo-extension/, minus what Chrome never loads."""
+    """The extension's files git tracks, relative to anteroom-extension/, minus what Chrome never loads."""
     listed = subprocess.run(["git", "ls-files", "-z", "--", EXTENSION], cwd=root, check=True,
                             capture_output=True).stdout.decode().split("\0")
     files = []

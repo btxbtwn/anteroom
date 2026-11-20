@@ -1,36 +1,36 @@
 # Allow only application source and deployment files into hosted builds.
 *
 !CHANGELOG.md
-!vendoo-studio/
-vendoo-studio/*
-!vendoo-studio/pyproject.toml
-!vendoo-studio/uv.lock
-!vendoo-studio/VERSION
-!vendoo-studio/server/
-vendoo-studio/server/*
-!vendoo-studio/server/vendoo_studio/
-!vendoo-studio/server/vendoo_studio/**
+!anteroom/
+anteroom/*
+!anteroom/pyproject.toml
+!anteroom/uv.lock
+!anteroom/VERSION
+!anteroom/server/
+anteroom/server/*
+!anteroom/server/anteroom/
+!anteroom/server/anteroom/**
 !deploy/
 !deploy/fly/
 !deploy/fly/**
 # Public cloud UI source and build metadata (never local data or settings).
-!vendoo-studio/package.json
-!vendoo-studio/package-lock.json
-!vendoo-studio/cloud.html
-!vendoo-studio/index.html
-!vendoo-studio/vite.config.ts
-!vendoo-studio/tsconfig.json
-!vendoo-studio/src/
-!vendoo-studio/src/**
+!anteroom/package.json
+!anteroom/package-lock.json
+!anteroom/cloud.html
+!anteroom/index.html
+!anteroom/vite.config.ts
+!anteroom/tsconfig.json
+!anteroom/src/
+!anteroom/src/**
 # The browser tab icon the hosted server serves at /favicon.png.
-!vendoo-studio/public/
-vendoo-studio/public/*
-!vendoo-studio/public/favicon.png
-!vendoo-studio/public/privacy.html
+!anteroom/public/
+anteroom/public/*
+!anteroom/public/favicon.png
+!anteroom/public/privacy.html
 # The startup screen shows the app icon.
-!vendoo-studio/desktop/
-vendoo-studio/desktop/*
-!vendoo-studio/desktop/AppIcon.png
+!anteroom/desktop/
+anteroom/desktop/*
+!anteroom/desktop/AppIcon.png
 # Hosted generation and native forms use the same canonical public rules.
 !skills/
 skills/*
@@ -47,9 +47,9 @@ skills/list-this/references/*
 !skills/box-scout/
 !skills/box-scout/**
 # The site compares Chrome's Anteroom Bridge with this version.
-!vendoo-extension/
-vendoo-extension/*
-!vendoo-extension/manifest.json
+!anteroom-extension/
+anteroom-extension/*
+!anteroom-extension/manifest.json
 # Keep private/runtime files excluded after every source allow rule.
 **/__pycache__/
 **/*.pyc
