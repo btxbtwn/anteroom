@@ -28,7 +28,7 @@ _UNQUOTED_HEADER = re.compile(
     re.IGNORECASE,
 )
 _POSTGRES_DSN = re.compile(
-    r"""\bpostgres(?:ql)?(?:\+[\w.-]+)?://[^\s/?#"',)]+""",
+    r"""\bpostgres(?:ql)?(?:\+[\w.-]+)?://[^\s/?#"'<>]+""",
     re.IGNORECASE,
 )
 _JWT = re.compile(r"\beyJ[\w-]{6,}\.[\w-]+\.[\w-]+")

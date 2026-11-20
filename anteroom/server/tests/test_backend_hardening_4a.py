@@ -424,6 +424,7 @@ def test_hosted_account_import_allows_four_concurrent_same_seller_photo_uploads(
     def slow_storage_call(method, _key, _token, _image=None):
         nonlocal in_flight, max_in_flight
         assert method == "POST"
+        assert threading.current_thread().name.startswith("import-storage")
         with lock:
             in_flight += 1
             max_in_flight = max(max_in_flight, in_flight)
@@ -573,6 +574,12 @@ def test_redaction_masks_postgres_dsns_and_sensitive_headers():
     redacted_short = redaction.redact(short_dsn)
     assert "u:pw@" not in redacted_short
     assert "postgres://u:…(masked)@localhost/db" == redacted_short
+
+    comma_dsn = "postgres://alice:first,second@db.example/app"
+    redacted_comma = redaction.redact(comma_dsn)
+    assert "first,second" not in redacted_comma
+    assert redacted_comma == "postgres://alice:…(masked)@db.example/app"
+    assert redaction.redact("(postgres://alice:pa)ss@db.example/app)") == "(postgres://alice:…(masked)@db.example/app)"
 
     raw_headers = (
         "Authorization: Basic dXNlcjpzZWNyZXQ=\n"

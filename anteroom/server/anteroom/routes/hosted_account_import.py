@@ -1,5 +1,7 @@
 """Moving a Mac's listings, photos, settings and keys into the signed-in account."""
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from weakref import WeakKeyDictionary
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -7,11 +9,42 @@ from sqlalchemy import func, select
 
 from anteroom.services import account_import, hosted_photos
 from anteroom.services.hosted_database import get_seller_db, in_seller_session
-from anteroom.services.hosted_limits import bounded_route_class, hold_upload_slot, read_bounded_body
+from anteroom.services.hosted_limits import (
+    UPLOAD_WAIT_SECONDS,
+    bounded_route_class,
+    hold_upload_slot,
+    read_bounded_body,
+)
 
 # Up to MAX_ROWS records of listing JSON per batch, and bounded config payloads.
 MAX_ROWS_BYTES = 16 * 1024 * 1024
 MAX_CONFIG_BYTES = 1 * 1024 * 1024
+# Keep Storage HTTP I/O off the event loop's default executor (shared with DB work)
+# while still permitting parallel same-seller photo migration (4 concurrent uploads).
+STORAGE_UPLOAD_SLOTS = 12
+_storage_executor = ThreadPoolExecutor(max_workers=STORAGE_UPLOAD_SLOTS, thread_name_prefix='import-storage')
+_storage_semaphores: WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = WeakKeyDictionary()
+
+
+async def _run_storage_call(method: str, key: str, token: str, body: bytes | None = None):
+    loop = asyncio.get_running_loop()
+    sem = _storage_semaphores.get(loop)
+    if sem is None:
+        sem = asyncio.Semaphore(STORAGE_UPLOAD_SLOTS)
+        _storage_semaphores[loop] = sem
+    try:
+        async with asyncio.timeout(UPLOAD_WAIT_SECONDS):
+            await sem.acquire()
+    except TimeoutError:
+        raise HTTPException(
+            503, 'Photo storage uploads are busy right now. Try again in a moment.',
+            headers={'Retry-After': '5'},
+        ) from None
+    try:
+        return await loop.run_in_executor(_storage_executor, hosted_photos.storage_call, method, key, token, body)
+    finally:
+        sem.release()
+
 
 router = APIRouter(prefix='/api/account-import')
 _rows_router = APIRouter(
@@ -86,7 +119,7 @@ async def photo(photo_id: str, field: str, request: Request):
         del data
     token = request.headers['authorization'].partition(' ')[2]
     key = hosted_photos.new_key(request.state.seller.user_id, draft_id)
-    await asyncio.to_thread(hosted_photos.storage_call, 'POST', key, token, image)
+    await _run_storage_call('POST', key, token, image)
     try:
         saved = await in_seller_session(request, _save_photo, photo_id, field, key, image, width, height)
     except BaseException:
@@ -101,7 +134,7 @@ async def photo(photo_id: str, field: str, request: Request):
 async def _forget(key, token):
     """Delete an uploaded object no row points at."""
     try:
-        await asyncio.to_thread(hosted_photos.storage_call, 'DELETE', key, token)
+        await _run_storage_call('DELETE', key, token)
     except HTTPException:
         pass
 
