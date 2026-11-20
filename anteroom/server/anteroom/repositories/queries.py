@@ -368,7 +368,6 @@ class ConversationRepo:
         photo.width = meta["width"]
         photo.height = meta["height"]
         self.db.commit()
-        self.db.refresh(photo)
         return photo
 
     def reorder_photos(self, conv_id: str, ordered_ids: list[str]) -> list[Photo]:

@@ -49,6 +49,16 @@ def require_idle(db, conversation_id):
                             headers={'X-Anteroom-Reason': 'draft_busy'})
 
 
+def check_idle(db, conversation_id):
+    """Unlocked pre-check before slow I/O; pair with require_idle inside the short commit transaction."""
+    if db.scalar(select(Conversation.id).where(Conversation.id == conversation_id)) is None:
+        raise HTTPException(404, 'Listing not found')
+    if db.scalar(select(BackgroundTask.id).where(
+            BackgroundTask.conversation_id == conversation_id, BackgroundTask.status.in_(ACTIVE)).limit(1)):
+        raise HTTPException(409, 'Wait for the draft task to finish, or stop it before editing.',
+                            headers={'X-Anteroom-Reason': 'draft_busy'})
+
+
 def draft_payload(db, conversation_id, text='', attachments=()):
     """The inputs a draft task checks again before it starts, so a changed draft is never overwritten."""
     from anteroom.repositories.queries import ConversationRepo
