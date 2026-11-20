@@ -55,7 +55,7 @@ def prepare(target: str, production: str) -> dict:
             'historical_failure': HISTORICAL, 'correcting_merge': CORRECTED,
             'span': git('rev-list', '--first-parent', '--reverse', f'{production}..{target}').splitlines(),
             'native_changes': [p for p in files if p.startswith(('anteroom-ios/', 'contracts/'))
-                               or p == 'vendoo-studio/server/vendoo_studio/desktop.py'],
+                               or p == 'anteroom/server/anteroom/desktop.py'],
             'migration_changes': [p for p in files if '/migrations/' in p],
             'workflow': WORKFLOW,
             'workflow_blob': git('rev-parse', f'HEAD:{WORKFLOW}'),

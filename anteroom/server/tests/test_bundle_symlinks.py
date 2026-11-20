@@ -1,0 +1,89 @@
+from __future__ import annotations
+
+import stat
+import tempfile
+import unittest
+import zipfile
+from pathlib import Path
+
+from anteroom.services import bundle_symlinks, packaged_updates
+
+
+class BundleSymlinkTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_flatten_replaces_relative_symlinks(self):
+        app = self.root / "Anteroom.app" / "Contents"
+        versions = app / "Frameworks" / "Python.framework" / "Versions"
+        real = versions / "3.12"
+        real.mkdir(parents=True)
+        (real / "Python").write_text("bin", encoding="utf-8")
+        current = versions / "Current"
+        current.symlink_to("3.12")
+        count = bundle_symlinks.flatten_symlinks(self.root / "Anteroom.app")
+        self.assertEqual(count, 1)
+        self.assertFalse(current.is_symlink())
+        self.assertTrue(current.is_dir())
+        self.assertEqual((current / "Python").read_text(encoding="utf-8"), "bin")
+
+    def test_flatten_rejects_external_symlinks(self):
+        app = self.root / "app"
+        app.mkdir()
+        outside = self.root / "outside.txt"
+        outside.write_text("nope", encoding="utf-8")
+        link = app / "escape"
+        link.symlink_to(outside)
+        with self.assertRaises(bundle_symlinks.BundleSymlinkError):
+            bundle_symlinks.flatten_symlinks(app)
+
+    def test_flattened_tree_zips_without_symlink_members(self):
+        app = self.root / "Anteroom.app" / "Contents" / "MacOS"
+        app.mkdir(parents=True)
+        (app / "Anteroom").write_text("bin", encoding="utf-8")
+        sibling = self.root / "Anteroom.app" / "Contents" / "Resources"
+        sibling.mkdir(parents=True)
+        (sibling / "marker").write_text("ok", encoding="utf-8")
+        link = self.root / "Anteroom.app" / "Contents" / "Frameworks"
+        link.symlink_to("Resources")
+        bundle_symlinks.flatten_symlinks(self.root / "Anteroom.app")
+
+        archive = self.root / "out.zip"
+        with zipfile.ZipFile(archive, "w") as zf:
+            base = self.root / "Anteroom.app"
+            for path in base.rglob("*"):
+                if path.is_dir():
+                    continue
+                zf.write(path, path.relative_to(self.root).as_posix())
+
+        bundle_symlinks.assert_zip_has_no_symlinks(archive)
+        packaged_updates._validate_zip_members(archive, self.root / "extract")
+
+    def test_assert_zip_has_no_symlinks_fails_on_link_member(self):
+        archive = self.root / "linked.zip"
+        link = zipfile.ZipInfo("Anteroom.app/Contents/Current")
+        link.create_system = 3
+        link.external_attr = (stat.S_IFLNK | 0o777) << 16
+        with zipfile.ZipFile(archive, "w") as zf:
+            zf.writestr("Anteroom.app/Contents/Info.plist", "plist")
+            zf.writestr(link, "3.12")
+        with self.assertRaises(bundle_symlinks.BundleSymlinkError):
+            bundle_symlinks.assert_zip_has_no_symlinks(archive)
+
+
+class PackageMacosScriptTest(unittest.TestCase):
+    def test_package_script_signs_inside_out_without_flatten(self):
+        """Keep framework symlinks and sign every binary with one identity, inside-out."""
+        scripts = Path(__file__).resolve().parents[2] / "scripts"
+        for name in ("package-macos-app.sh", "package-connector.sh"):
+            text = (scripts / name).read_text(encoding="utf-8")
+            self.assertNotIn("flatten_symlinks", text)
+            # Apple discourages --deep for signing; it is only used to verify.
+            self.assertNotIn("codesign --force --deep", text)
+            self.assertIn("scripts/sign_macos_bundle.py", text)
+            self.assertIn("notarize-macos-app.sh", text)
+        self.assertIn("_validate_zip_members", (scripts / "package-macos-app.sh").read_text(encoding="utf-8"))

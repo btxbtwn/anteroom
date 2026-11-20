@@ -1,7 +1,7 @@
 import Foundation
 
 /// How the listing assistant chat shows a saved assistant turn. Matches
-/// `vendoo-studio/src/components/chat/assistantDisplay.ts`: listing JSON,
+/// `anteroom/src/components/chat/assistantDisplay.ts`: listing JSON,
 /// patches and `missing_fields` payloads stay in storage, but the bubble
 /// shows a short seller-facing summary instead of the raw JSON.
 enum AssistantDisplay {

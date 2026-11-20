@@ -36,7 +36,7 @@ bundle on 2026-10-26, so Update edits the live listing in place and keeps its
 likes, views and listing age. Each one checks that the listing belongs to the
 signed-in account and is live, writes once, and reads the listing back. A lost
 reply is answered by reading the listing, never by writing again. All three have
-request-level tests with fakes (`vendoo-extension/tests/live-update.test.js`)
+request-level tests with fakes (`anteroom-extension/tests/live-update.test.js`)
 only; none has run against a real listing yet.
 
 - **Mercari.** The sell page's edit route (`/sell/edit/[itemId]`, build

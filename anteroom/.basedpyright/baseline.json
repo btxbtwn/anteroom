@@ -1,0 +1,74 @@
+{
+    "files": {
+        "./server/anteroom/routes/listing_commands.py": [
+            {
+                "code": "reportOptionalMemberAccess",
+                "range": {
+                    "startColumn": 87,
+                    "endColumn": 92,
+                    "lineCount": 1
+                }
+            }
+        ],
+        "./server/anteroom/services/automation_actions.py": [
+            {
+                "code": "reportArgumentType",
+                "range": {
+                    "startColumn": 42,
+                    "endColumn": 46,
+                    "lineCount": 1
+                }
+            }
+        ],
+        "./server/anteroom/services/listing_promotions.py": [
+            {
+                "code": "reportArgumentType",
+                "range": {
+                    "startColumn": 35,
+                    "endColumn": 81,
+                    "lineCount": 1
+                }
+            }
+        ],
+        "./server/anteroom/services/marketplace_delist.py": [
+            {
+                "code": "reportArgumentType",
+                "range": {
+                    "startColumn": 35,
+                    "endColumn": 81,
+                    "lineCount": 1
+                }
+            }
+        ],
+        "./server/anteroom/services/mercari_api.py": [
+            {
+                "code": "reportAttributeAccessIssue",
+                "range": {
+                    "startColumn": 60,
+                    "endColumn": 65,
+                    "lineCount": 1
+                }
+            }
+        ],
+        "./server/anteroom/services/native_marketplaces.py": [
+            {
+                "code": "reportOptionalMemberAccess",
+                "range": {
+                    "startColumn": 30,
+                    "endColumn": 46,
+                    "lineCount": 1
+                }
+            }
+        ],
+        "./server/anteroom/services/sold_listings.py": [
+            {
+                "code": "reportArgumentType",
+                "range": {
+                    "startColumn": 71,
+                    "endColumn": 93,
+                    "lineCount": 1
+                }
+            }
+        ]
+    }
+}

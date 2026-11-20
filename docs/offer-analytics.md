@@ -136,7 +136,7 @@ evidence.
 ## Bounded Poshmark acceptance feasibility check (2026-11-16)
 
 Read-only code inspection only; no mailbox ingestion or live marketplace read.
-`vendoo-extension/background/marketplace-order-history.js:167` projects
+`anteroom-extension/background/marketplace-order-history.js:167` projects
 `order.id`, `line_items[].id`, `line_items[].product_id`, line `price_amount`,
 `state`, `cancelled_on`, `inventory_booked_at`, total/fee/commission/shipping
 amounts and the summary's `display_status`. Non-cancelled orders become paid;

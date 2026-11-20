@@ -14,8 +14,8 @@ operations and `/v1/initialize` for the current session. Operation names include
 The operation registry in the native module owns the query hashes; do not copy
 those hashes into documentation as a second source of truth.
 
-Implementation: [native requests and operation registry](../../vendoo-extension/background/mercari-native.js),
-[imports](../../vendoo-extension/background/marketplace-import.js),
-[server API helper](../../vendoo-studio/server/vendoo_studio/services/mercari_api.py),
-[native form](../../vendoo-studio/server/vendoo_studio/services/mercari_form.py).
-Coverage: [native tests](../../vendoo-extension/tests/mercari-native.test.js).
+Implementation: [native requests and operation registry](../../anteroom-extension/background/mercari-native.js),
+[imports](../../anteroom-extension/background/marketplace-import.js),
+[server API helper](../../anteroom/server/anteroom/services/mercari_api.py),
+[native form](../../anteroom/server/anteroom/services/mercari_form.py).
+Coverage: [native tests](../../anteroom-extension/tests/mercari-native.test.js).

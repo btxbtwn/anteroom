@@ -21,7 +21,7 @@ These override everything below.
 - Sandboxes only: `./sandbox.sh`, `./sandbox.sh --hosted`,
   `anteroom-ios/test-sandbox.sh`, and the Mac app with `ANTEROOM_SANDBOX=1`
   and a temporary data folder. Never touch the seller's real data folder
-  (`vendoo-studio/data/`, `~/Library/Application Support/Anteroom`), the real
+  (`anteroom/data/`, `~/Library/Application Support/Anteroom`), the real
   app on port 4318, production Supabase or Fly.
 - Never publish, delist, update or delete a live listing. The sandbox refuses
   those routes, and the audit confirms that it does. Never call a real
@@ -39,7 +39,7 @@ These override everything below.
   with `defaults read /Applications/Anteroom.app/Contents/Info.plist CFBundleShortVersionString`,
   and start the app only through `smoke-packaged-sandbox.py`.
 - Run one sandbox at a time, or give each its own ports
-  (`VENDOO_STUDIO_PORT`, `VENDOO_STUDIO_WEB_PORT`). The iPhone script always uses
+  (`ANTEROOM_PORT`, `ANTEROOM_WEB_PORT`). The iPhone script always uses
   4320, so stop the hosted sandbox before running it. If a developer's sandbox
   already holds a port, pick other ports; do not stop their process.
 - Run heavy suites one at a time. On 2026-11-12, four fix branches running
@@ -48,7 +48,7 @@ These override everything below.
   out, and the backend run took two hours. Finish the smoke first, then
   check fix branches one after another.
 - A fix worktree can reuse the audit worktree's installs: symlink
-  `vendoo-studio/.venv` and `vendoo-studio/node_modules` to them, and add
+  `anteroom/.venv` and `anteroom/node_modules` to them, and add
   both paths to `$(git rev-parse --git-common-dir)/info/exclude`, or
   `check.sh` counts the untracked symlinks as changes. pytest still imports
   the fix worktree's code, because `pyproject.toml` puts `server` first on
@@ -124,13 +124,13 @@ Every run, in this order:
    (2026-11-18). Use the tool's own background mode, or run it in the
    foreground.
 1. `./check.sh --all` in the audit worktree after setup
-   (`cd vendoo-studio && python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]" && npm ci && npx playwright install chromium webkit`).
+   (`cd anteroom && python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]" && npm ci && npx playwright install chromium webkit`).
    Phone browser tests run in WebKit. After a Playwright bump, a Mac without
    that version's WebKit fails every `phone-webkit` test in 0 ms ("Executable
    doesn't exist"), and the failed `npm run e2e` then skips `npm run e2e:hosted`
    (2026-11-16).
    Use Python 3.12, CI's version: a newer `python3` (3.14 on the seller's Mac)
-   cannot install `pgserver`. Put `vendoo-studio/.venv/bin` first on `PATH`.
+   cannot install `pgserver`. Put `anteroom/.venv/bin` first on `PATH`.
    This also runs `npm run e2e` (local web, desktop and phone),
    `npm run e2e:hosted` (hosted web, two sellers) and, on macOS,
    `./anteroom-ios/test-sandbox.sh`, so steps 2 to 4 need no separate run
@@ -172,8 +172,8 @@ Every run, in this order:
    handoff, main was `ffe66259` (0.1.1033), while live health was reported as
    0.1.1011: merged is not deployed. Record fresh evidence during a future audit
    rather than treating those versions as current indefinitely.
-2. `cd vendoo-studio && npm run e2e` (local web, desktop and phone sizes).
-3. `cd vendoo-studio && npm run e2e:hosted` (hosted web, two sellers).
+2. `cd anteroom && npm run e2e` (local web, desktop and phone sizes).
+3. `cd anteroom && npm run e2e:hosted` (hosted web, two sellers).
 4. `./anteroom-ios/test-sandbox.sh` (iPhone XCUITests in the Simulator). Run
    it while nothing else heavy runs: under load its 5 to 30 second waits time
    out on different tests each run. Before reporting a failure, rerun it alone
@@ -194,12 +194,12 @@ Every run, in this order:
    app still on the Assistant tab, the launch helper's tab tap was dropped
    (fixed by #1417); check that fix is on `main` before reporting them.
 5. Mac app:
-   `vendoo-studio/.venv/bin/python vendoo-studio/scripts/smoke-packaged-sandbox.py /Applications/Anteroom.app`.
+   `anteroom/.venv/bin/python anteroom/scripts/smoke-packaged-sandbox.py /Applications/Anteroom.app`.
    This checks the installed release in sandbox mode on a temporary data
    folder. Note its version. The release may be behind `main`; that is expected.
    Before and after, check that
    `~/Library/Application Support/Anteroom/logs/Anteroom.log` was not created
-   or updated (sandbox must keep logs under `VENDOO_STUDIO_DATA_DIR`). The
+   or updated (sandbox must keep logs under `ANTEROOM_DATA_DIR`). The
    seller's own app may be running and writing that log, so compare its size
    and time with `stat` and look for sandbox paths in any new lines. Also
    read the `ERROR` lines since the last audit in that log and in
@@ -211,7 +211,7 @@ Every run, in this order:
    buyer or listing details. `ebay eligible_items failed: Reconnect eBay`
    every 15 minutes means the seller's eBay sign-in expired: list it once
    under **Needs the seller**, not as a finding (2026-11-17). Unset
-   any leftover `VENDOO_STUDIO_PORT` / `ANTEROOM_SANDBOX` from that run before
+   any leftover `ANTEROOM_PORT` / `ANTEROOM_SANDBOX` from that run before
    starting `./sandbox.sh --hosted` (hosted defaults to 4320; an inherited
    `4321` makes it fail to bind).
 6. One core journey on each surface: create a draft, add photos, generate,
@@ -219,7 +219,7 @@ Every run, in this order:
    `node docs/audit/journey.mjs <local|hosted> <desktop|phone> <out-dir>` runs
    it on web against the running sandbox. It prints one JSON line (edit kept,
    publish statuses, Bob's isolation on hosted, page errors) and saves a
-   screenshot per step. Run it from a worktree with `vendoo-studio/node_modules`
+   screenshot per step. Run it from a worktree with `anteroom/node_modules`
    installed. Fix the script when the UI changes, in the same PR as the
    change if you can. Drive by hand only what it doesn't cover. Surfaces:
    - local web (`./sandbox.sh`, UI 5174) at desktop and phone sizes. If the
@@ -290,7 +290,7 @@ list remembers.
 | Wednesday | Photos: upload, drop, reorder, crop and edit, thumbnails, camera on iPhone, measurements from ruler photos | `src/components/Photo*`, `anteroom-ios/Sources/Photos/` |
 | Thursday | Assistant and listing chat, automations, suggestions, similar items, previous versions and history | `src/components/Assistant*`, `Automations*`, `ListingHistory.tsx`, `anteroom-ios/Sources/Assistant/`, `Automations/`, `History/` |
 | Friday | Settings, providers, labels, sign-in, sign-up, password reset, account menu, analytics, sales records, mark sold; Mac app first run, backups and restore, migration of a database from the previous release | `src/components/SettingsPage.tsx`, `src/components/settings/`, `src/cloud/`, `anteroom-ios/Sources/Settings/`, `Session/`, `Analytics/`, `services/backups.py` |
-| Saturday | Concurrency and speed: several sellers generating several drafts at once while navigating and typing. Record p50/p95 input and navigation latency and errors against the targets in `docs/responsiveness.md`. Run the hosted load test (`vendoo-studio/README.md`, **Hosted load test**) with the sandbox log redirected to a file, then search that log for `QueuePool`, `Traceback` and `TaskStopped`. "Etsy isn't connected" tracebacks are expected there; lease-ended lines are expected only after the harness starts cancelling (`generate/cancel` in the log) | `e2e/concurrentGeneration.e2e.ts`, `scripts/hosted-load-test.py`, `docs/responsiveness.md` |
+| Saturday | Concurrency and speed: several sellers generating several drafts at once while navigating and typing. Record p50/p95 input and navigation latency and errors against the targets in `docs/responsiveness.md`. Run the hosted load test (`anteroom/README.md`, **Hosted load test**) with the sandbox log redirected to a file, then search that log for `QueuePool`, `Traceback` and `TaskStopped`. "Etsy isn't connected" tracebacks are expected there; lease-ended lines are expected only after the harness starts cancelling (`generate/cancel` in the log) | `e2e/concurrentGeneration.e2e.ts`, `scripts/hosted-load-test.py`, `docs/responsiveness.md` |
 | Sunday | Safety sweep: every publish, delist, update, set-price push, bulk marketplace and automation-approval route without `confirm` and without named marketplaces must be refused. Saving a marketplace draft takes no `confirm` by design (`services/native_marketplaces.py`, `save_draft`): check instead that it names one draft-capable marketplace and can never publish. The sandbox answers 403 before any route checks `confirm`, so the confirm gate is proven by the pytest suite and by reading the code, not by sandbox calls; search for any code path where automation, retries, queues or bulk actions could reach them. Seller isolation: Alice and Bob never see each other's drafts or photos. Live updates and stale-edit protection between web and iPhone on the same draft | `routes/native_marketplaces.py`, `routes/marketplace_listings.py`, `routes/listing_commands.py` (set-price push), `cli/catalog.py` and `cli/execute.py` (the CLI's confirm gate), `docs/seller-isolation.md` |
 
 ## Feature checks
@@ -344,7 +344,7 @@ Follow **How to Work on a Change** in `AGENTS.md` for each bug:
   cause, run `./check.sh`, then open the PR from its own branch and worktree
   (`fix/audit-<short-name>`).
 - UI fixes go to web and iPhone in the same PR.
-- A PR that changes `vendoo-studio/` adds `changelog.d/<branch-slug>.md`.
+- A PR that changes `anteroom/` adds `changelog.d/<branch-slug>.md`.
 - Stay with each PR until CI is green or you have recorded why it is not.
 - Do not open a PR for a guess. If you cannot find the root cause, report the
   bug with reproduction steps instead.
@@ -356,7 +356,7 @@ Follow **How to Work on a Change** in `AGENTS.md` for each bug:
     recorded in the PR;
   - it changes nothing in publishing, delisting or marketplace actions
     (`routes/native_marketplaces.py`, `routes/marketplace_listings.py`,
-    `vendoo-extension/background/`), in deploys or releases (`.github/`,
+    `anteroom-extension/background/`), in deploys or releases (`.github/`,
     `deploy/`, `fly.toml`), or in the database schema (`migrations/`, models);
   - `./check.sh` passed locally.
 

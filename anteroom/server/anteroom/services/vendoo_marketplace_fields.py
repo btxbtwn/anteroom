@@ -1,0 +1,512 @@
+"""The marketplace-specific pieces of a Vendoo item.
+
+Form defaults this seller expects on every listing (eBay Best Offer, Etsy's
+codes and tags, Poshmark Smart Sell, Mercari's Ground Advantage label,
+Facebook's shipping and offers), the brand each form reads,
+and Depop's option codes.
+"""
+
+from __future__ import annotations
+
+import math
+from typing import Any
+
+from anteroom.services.etsy_fields import sanitize_etsy_tags
+from anteroom.models.facebook_shipping import package_weight_label
+from anteroom.models.mercari_shipping import (
+    DEFAULT_PACKAGE_OUNCES,
+    ground_advantage,
+    package_ounces,
+)
+from anteroom.models.schema import DEPOP_OPTION_CODES
+from anteroom.services.vendoo_item_shape import (
+    SPECIFICS_SOURCES,
+    _clean,
+    _norm,
+    _num_str,
+    _string_list,
+)
+
+# Etsy form codes (display labels overwrite these and leave the dropdown blank).
+ETSY_WHO_CODES = {
+    "another company or person": "someone_else",
+    "someone else": "someone_else",
+    "a member of my shop": "collective",
+    "i did": "i_did",
+}
+ETSY_WHAT_CODES = {
+    "a finished product": "0",
+    "a supply or tool to make things": "1",
+}
+# Vendoo's listingStateOptions: draft = Draft Listing, active = Live Listing, edit = Inactive.
+ETSY_LIVE_LISTING = "active"
+
+# Marketplace form brand fields live on overrides, not categorySpecifics. The
+# Chrome filler writes `#listings.<mp>.overrides.brand`; create must too.
+_BRAND_OVERRIDE_MARKETPLACES = frozenset({"ebay", "etsy", "poshmark", "mercari", "depop"})
+
+# Values that mean "there is no brand" on Mercari — check No Brand/Not sure.
+_MERCARI_NO_BRAND_TOKENS = frozenset({
+    "", "unbranded", "no brand", "not sure", "no brand not sure", "no brand/not sure",
+    "none", "n a", "na", "unknown",
+})
+
+
+def _listing_brand(listing: dict[str, Any], marketplace: str) -> str:
+    """Brand for one marketplace form: specifics override, else general brand."""
+    raw = listing.get(SPECIFICS_SOURCES.get(marketplace, f"{marketplace}_specifics"))
+    if isinstance(raw, dict):
+        specific = _clean(raw.get("brand"))
+        if specific:
+            return specific
+    return _clean(listing.get("brand")) or ""
+
+
+# Offer floors from the list-this PRICING formula (skills/list-this/SKILL.md):
+# auto-accept offers at list - $2, turn down anything under list - $4. Offers in
+# between wait for the seller.
+AUTO_ACCEPT_BELOW_LIST = 2
+MINIMUM_BELOW_LIST = 4
+
+
+def offer_floors(price: Any) -> tuple[str, str] | None:
+    """(auto-accept, minimum) offer in whole dollars, or None without a usable price.
+
+    Below $5 the minimum would reach $0, so there is no floor and every offer
+    waits for the seller.
+    """
+    try:
+        amount = float(str(price or "").replace("$", "").replace(",", "").strip() or 0)
+    except (TypeError, ValueError):
+        return None
+    whole = int(round(amount))
+    if whole - MINIMUM_BELOW_LIST < 1:
+        return None
+    return str(whole - AUTO_ACCEPT_BELOW_LIST), str(whole - MINIMUM_BELOW_LIST)
+
+
+def best_offer_enabled(chosen: dict[str, Any] | None) -> bool:
+    """Best Offer stays on unless the seller turned it off."""
+    if not isinstance(chosen, dict) or "enabled" not in chosen:
+        return True
+    flag = chosen.get("enabled")
+    if isinstance(flag, str):
+        return flag.strip().casefold() not in {"no", "false", "off", "0"}
+    return bool(flag)
+
+
+def _offer_amount(chosen: dict[str, Any], *keys: str):
+    """The seller's number, None when they left it blank, or '' when it is not a number."""
+    from decimal import Decimal, InvalidOperation
+
+    for key in keys:
+        if key not in chosen:
+            continue
+        raw = chosen.get(key)
+        if raw is None or str(raw).strip() == "":
+            continue
+        try:
+            return Decimal(str(raw).replace("$", "").replace(",", "").strip())
+        except (InvalidOperation, ValueError):
+            return ""
+    return None
+
+
+def best_offer_error(listing: dict[str, Any] | None) -> str | None:
+    """The seller's Best Offer must be minimum < auto-accept < price. Blank uses the formula."""
+    if not isinstance(listing, dict):
+        return None
+    ebay = listing.get("ebay_specifics")
+    if not isinstance(ebay, dict):
+        ebay = {}
+    chosen = ebay.get("bestOffer")
+    if not isinstance(chosen, dict):
+        chosen = {}
+    if not chosen or not best_offer_enabled(chosen):
+        return None
+    accept = _offer_amount(chosen, "autoAcceptPrice")
+    minimum = _offer_amount(chosen, "minimumOfferPrice", "autoDeclinePrice")
+    if accept == "" or minimum == "":
+        return "Enter Best Offer prices as numbers."
+    if accept is None and minimum is None:
+        return None
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        price = Decimal(str(listing.get("price") or "").replace("$", "").replace(",", "").strip())
+    except (InvalidOperation, ValueError):
+        price = Decimal(0)
+    if price <= 0:
+        return "Set the item price before Best Offer prices."
+    if accept is not None and not (0 < accept < price):
+        return "The auto-accept price must be below the item price."
+    if minimum is not None and not (0 < minimum < price):
+        return "The minimum offer must be below the item price."
+    if accept is not None and minimum is not None and not minimum < accept:
+        return "Best Offer needs the minimum offer below the auto-accept price, and the auto-accept price below the item price."
+    # A blank side stays on the formula. It is checked when the offer is built, so the
+    # seller can save the auto-accept price before typing the minimum.
+    return None
+
+
+def whole_price(price: Any) -> str:
+    """The listing price as whole dollars, or "" without a usable price.
+
+    list-this prices at comp x 1.35 rounded to the nearest dollar, and Poshmark
+    only takes whole dollars. The floors are whole dollars off the same number,
+    so a fractional price would leave them describing a price the form cannot
+    show.
+    """
+    try:
+        amount = float(str(price or "").replace("$", "").replace(",", "").strip() or 0)
+    except (TypeError, ValueError):
+        return ""
+    if amount <= 0:
+        return ""
+    return str(int(round(amount)))
+
+
+def poshmark_smart_sell(price: Any) -> dict[str, bool | str]:
+    """Smart Sell accepts offers down to the same minimum as eBay, or stays off."""
+    floors = offer_floors(price)
+    return {"enabled": floors is not None, "minPrice": floors[1] if floors else ""}
+
+
+def ebay_offer_terms(price: Any, chosen: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Best Offer terms for ``price``, with the seller's own settings on top.
+
+    Create and update both write this, so a draft can't keep floors from an
+    earlier price — a $30 item repriced to $16 that kept its $28 auto-accept
+    made eBay reject the offer (the auto-accept sat above the item price) and
+    the form refuse to save.
+
+    ``chosen`` is the seller's Best Offer block from the eBay form. When they
+    turned Best Offer off it stays off and both floors are cleared; when they
+    typed their own floors those win over the formula, exactly as create does.
+    """
+    chosen = chosen if isinstance(chosen, dict) else {}
+    if not best_offer_enabled(chosen):
+        return {"allowBestOffer": False, "acceptOffersOfAtLeast": "", "declineOffersLowerThan": ""}
+    accept, minimum = offer_floors(price) or ("", "")
+    seller_accept = _num_str(chosen.get("autoAcceptPrice"))
+    seller_minimum = _num_str(chosen.get("minimumOfferPrice") or chosen.get("autoDeclinePrice"))
+    accept = seller_accept or accept
+    minimum = seller_minimum or minimum
+    if accept and minimum:
+        from decimal import Decimal, InvalidOperation
+
+        try:
+            ordered = Decimal(minimum) < Decimal(accept)
+        except (InvalidOperation, ValueError):
+            ordered = False
+        if not ordered:
+            # A formula floor that sits on the wrong side of the seller's price is left off.
+            if not seller_minimum:
+                minimum = ""
+            if not seller_accept:
+                accept = ""
+    return {"allowBestOffer": True, "acceptOffersOfAtLeast": accept, "declineOffersLowerThan": minimum}
+
+
+def _listing_price(listing: dict[str, Any], general: dict[str, Any]) -> str:
+    return _num_str(listing.get("price") or general.get("price"))
+
+
+def _apply_ebay_pricing(
+    known: dict[str, Any],
+    general: dict[str, Any],
+    listing: dict[str, Any],
+) -> None:
+    """Force Fixed Price with Best Offer Auto-accept + minimum offer."""
+    known["pricingFormat"] = "FixedPriceItem"
+    details = known.get("pricingFormatDetails")
+    if not isinstance(details, dict):
+        details = {}
+        known["pricingFormatDetails"] = details
+    fixed = details.get("fixedPrice")
+    if not isinstance(fixed, dict):
+        fixed = {}
+        details["fixedPrice"] = fixed
+    price = whole_price(_listing_price(listing, general))
+    if price:
+        fixed["buyItNowPrice"] = price
+    fixed["duration"] = _clean(fixed.get("duration")) or "GTC"
+    ebay = listing.get("ebay_specifics")
+    if not isinstance(ebay, dict):
+        ebay = {}
+    chosen = ebay.get("bestOffer")
+    if not isinstance(chosen, dict):
+        chosen = {}
+    fixed.update(ebay_offer_terms(price or fixed.get("buyItNowPrice"), chosen))
+
+
+def _etsy_who_code(raw: Any) -> str:
+    text = _clean(raw) or ""
+    if not text:
+        return "someone_else"
+    if text in {"someone_else", "collective", "i_did"}:
+        return text
+    return ETSY_WHO_CODES.get(_norm(text), "someone_else")
+
+
+def _etsy_what_code(raw: Any) -> str:
+    text = _clean(raw) or ""
+    if not text:
+        return "0"
+    if text in {"0", "1"}:
+        return text
+    return ETSY_WHAT_CODES.get(_norm(text), "0")
+
+
+# Etsy's when_made codes, which Vendoo's form stores, by Studio's dropdown label.
+_ETSY_WHEN_CODES = {
+    "Made To Order (Not Yet Made)": "made_to_order",
+    "2020 - 2026 (Recently)": "2020_2026",
+    "2010 - 2019 (Recently)": "2010_2019",
+    "2007 - 2009 (Recently)": "2007_2009",
+    "Before 2007 (Vintage)": "before_2007",
+    "2000 - 2006 (Vintage)": "2000_2006",
+    "1990s (Vintage)": "1990s",
+    "1980s (Vintage)": "1980s",
+    "1970s (Vintage)": "1970s",
+    "1960s (Vintage)": "1960s",
+    "1950s (Vintage)": "1950s",
+    "1940s (Vintage)": "1940s",
+    "1930s (Vintage)": "1930s",
+    "1920s (Vintage)": "1920s",
+    "1910s (Vintage)": "1910s",
+    "1900 - 1909 (Vintage)": "1900s",
+    "1800s (Vintage)": "1800s",
+    "1700s (Vintage)": "1700s",
+    "Before 1700 (Vintage)": "before_1700",
+}
+_ETSY_WHEN_CODE_VALUES = frozenset(_ETSY_WHEN_CODES.values())
+
+
+def _etsy_when_code(raw: Any) -> str:
+    """The form's code for a when-made label; a vintage decade stays that decade.
+
+    Made To Order is not selected. An already-made item gets a year range.
+    Anything unreadable falls to the recent bucket.
+    """
+    from anteroom.services.etsy_fields import etsy_when_options, etsy_when_to_store
+
+    text = _clean(raw) or ""
+    if not text:
+        return "2020_2026"
+    if text in _ETSY_WHEN_CODE_VALUES and text != "made_to_order":
+        return text
+    return _ETSY_WHEN_CODES.get(etsy_when_to_store(text, options=etsy_when_options()), "2020_2026")
+
+
+def _ebay_brand_label(brand: str) -> str:
+    """eBay's Brand dropdown matches ``Unbranded``, not a lowercased free-text."""
+    text = _clean(brand) or ""
+    if _norm(text) == "unbranded":
+        return "Unbranded"
+    return text
+
+
+def _apply_etsy_listing_codes(known: dict[str, Any], listing: dict[str, Any]) -> None:
+    """Map Studio's Etsy display labels onto the codes the form stores."""
+    raw = listing.get("etsy_specifics")
+    raw = raw if isinstance(raw, dict) else {}
+    who = known.get("whoMade") or raw.get("who_made") or raw.get("whoMade")
+    what = known.get("whatIsIt") or raw.get("what_is") or raw.get("whatIsIt")
+    when = known.get("whenMade") or raw.get("when_made") or raw.get("whenMade")
+    known["whoMade"] = _etsy_who_code(who)
+    known["whatIsIt"] = _etsy_what_code(what)
+    known["whenMade"] = _etsy_when_code(when)
+    # Finished-product resale is a supply of someone else's work.
+    known["isSupply"] = _etsy_what_code(what) == "0" or bool(known.get("isSupply", True))
+    # Always "Live Listing"; the form stores the code, not the label.
+    known["listingState"] = ETSY_LIVE_LISTING
+
+
+def _apply_etsy_tags(known: dict[str, Any], general: dict[str, Any]) -> None:
+    """Etsy Tags come from the general form's Tags.
+
+    Vendoo's form save copies them over; an API write has to do it itself or
+    the Etsy form shows no tags. Strip characters Etsy rejects (#, /, &, …).
+    """
+    tags = sanitize_etsy_tags(_string_list(general.get("tags")))
+    if tags:
+        known["tags"] = tags
+
+
+def _apply_poshmark_original_price(known: dict[str, Any]) -> None:
+    """Poshmark original price is always 0. No compare-at price."""
+    known["originalPrice"] = "0"
+
+
+def _apply_poshmark_smart_sell(
+    known: dict[str, Any],
+    general: dict[str, Any],
+    listing: dict[str, Any],
+) -> None:
+    """Smart Sell accepts offers down to the same minimum as eBay, or stays off."""
+    known["smartSell"] = poshmark_smart_sell(_listing_price(listing, general))
+
+
+def _apply_mercari_smart_pricing(known: dict[str, Any]) -> None:
+    """Leave Mercari Smart Pricing off.
+
+    The seller lists at the price they set. Vendoo turns Smart Pricing on by
+    default, and that demands a floor price the form then blocks on
+    ("Missing Floor Price"). A listing that asks for it, or a draft that
+    already has it, is turned back off on every save.
+    """
+    known["smartPricing"] = False
+    known["floorPrice"] = ""
+
+
+def _apply_mercari_shipping(
+    known: dict[str, Any],
+    weight: dict[str, Any] | None = None,
+    overrides: dict[str, Any] | None = None,
+) -> None:
+    """Always select the prepaid USPS Ground Advantage label for this weight.
+
+    The form lists only the tiers that carry the package, so the id has to
+    match the listing's weight — a fixed one sits outside the list and shows
+    as an empty Shipping Label. A weightless listing is the same story: the
+    form offers no tier at all, so it is given the default half-pound package
+    the tier is picked from. Non-GA labels from a previous draft are
+    overwritten: after Regenerate + API save the seller expects Ground
+    Advantage every time.
+    """
+    ounces = package_ounces((weight or {}).get("pounds"), (weight or {}).get("ounces"))
+    if ounces <= 0:
+        ounces = DEFAULT_PACKAGE_OUNCES
+        if isinstance(overrides, dict):
+            overrides["weight"] = {"pounds": "0", "ounces": str(DEFAULT_PACKAGE_OUNCES)}
+    carrier_id, tier_label = ground_advantage(ounces)
+    known["shippingLabel"] = tier_label
+    shipping = known.get("shipping")
+    if not isinstance(shipping, dict):
+        shipping = {}
+        known["shipping"] = shipping
+    shipping["deliveryMethod"] = "mercari_shipping"
+    shipping["payerId"] = 1
+    shipping["carrierId"] = carrier_id
+    if not str(known.get("mercariLocalInformation") or "").strip():
+        from anteroom.services.user_settings import get_ships_from_zip
+
+        zip_code = get_ships_from_zip()
+        if zip_code:
+            # Vendoo's own "Ships From" control on the Mercari form.
+            known["mercariLocalInformation"] = zip_code
+
+
+def _learned(schema: dict[str, Any] | None, marketplace: str, name: str) -> dict[str, Any]:
+    table = (((schema or {}).get("marketplaces") or {}).get(marketplace) or {}).get(name)
+    return table if isinstance(table, dict) else {}
+
+
+def _apply_facebook_shipping(
+    known: dict[str, Any],
+    weight: dict[str, Any] | None,
+    schema: dict[str, Any] | None,
+    unresolved: list[dict[str, str]] | None,
+) -> None:
+    """Pick Facebook's Package weight from the weight, and the carrier the seller uses.
+
+    Delivery method, shipping option and free shipping are the account's
+    defaults and are left alone. The carrier is whatever the seller chose on
+    their own Facebook forms for this tier — Facebook decides which carriers a
+    tier offers — or their only carrier when they have only ever used one.
+    """
+    label = package_weight_label(weight)
+    if not label:
+        return
+    known["packageWeightLabel"] = label
+    carriers = _learned(schema, "facebook", "shippingCarrier")
+    carrier = carriers.get(label)
+    if not carrier and len(set(carriers.values())) == 1:
+        carrier = next(iter(carriers.values()))
+    if carrier:
+        known["carrier"] = carrier
+    elif unresolved is not None:
+        unresolved.append({"field": "facebook:Shipping carrier", "value": ""})
+
+
+def _apply_facebook_offers(known: dict[str, Any], price: Any) -> None:
+    """Turn Allow Offers on, with the lowest Minimum price Facebook accepts.
+
+    Facebook refuses a minimum under half the price, so the floor is half,
+    rounded up to a whole dollar.
+    """
+    known["allowOffers"] = True
+    try:
+        amount = float(_num_str(price))
+    except ValueError:
+        return
+    if amount > 0:
+        known["minimumPrice"] = str(math.ceil(amount / 2))
+def _mercari_wants_no_brand(brand: str) -> bool:
+    return _norm(brand) in _MERCARI_NO_BRAND_TOKENS
+
+
+def _apply_marketplace_brand(
+    section: dict[str, Any],
+    marketplace: str,
+    listing: dict[str, Any],
+) -> None:
+    """Put brand where Vendoo's forms actually read it — ``overrides.brand``.
+
+    Mercari has no catch-all brand option: an empty or unlisted brand is the
+    No Brand/Not sure checkbox (``overrides.noBrand``), not a typed value.
+    Depop's catch-all is the ``Other`` option.
+    """
+    if marketplace not in _BRAND_OVERRIDE_MARKETPLACES:
+        return
+    brand = _listing_brand(listing, marketplace)
+    overrides = section.setdefault("overrides", {})
+    if marketplace == "mercari":
+        if _mercari_wants_no_brand(brand):
+            overrides["noBrand"] = True
+            overrides.pop("brand", None)
+        elif brand:
+            overrides["brand"] = brand
+            overrides["noBrand"] = False
+        return
+    if marketplace == "depop" and _mercari_wants_no_brand(brand):
+        overrides["brand"] = "Other"
+        return
+    if not brand:
+        return
+    if marketplace == "ebay":
+        brand = _ebay_brand_label(brand)
+    overrides["brand"] = brand
+
+
+def depop_option_codes(field: str, value: Any) -> tuple[list[str], list[str]]:
+    """Encode Depop style/age/source labels (or codes) as Vendoo's codes.
+
+    Returns ``(codes, unknown)``; Vendoo's Depop mapper would drop the unknown
+    ones anyway, so they are reported rather than sent.
+    """
+    lookup: dict[str, str] = {}
+    for label, code in DEPOP_OPTION_CODES[field].items():
+        lookup[_norm(label)] = code
+        lookup[_norm(code)] = code
+    codes: list[str] = []
+    unknown: list[str] = []
+    for item in _string_list(value):
+        code = lookup.get(_norm(item))
+        if code is None:
+            unknown.append(item)
+        elif code not in codes:
+            codes.append(code)
+    return codes, unknown
+
+
+def _apply_depop_option_codes(
+    known: dict[str, Any], unresolved: list[dict[str, str]] | None
+) -> None:
+    for field in DEPOP_OPTION_CODES:
+        codes, unknown = depop_option_codes(field, known.get(field))
+        known[field] = codes
+        if unresolved is not None:
+            for item in unknown:
+                unresolved.append({"field": f"depop:{field}", "value": item})
