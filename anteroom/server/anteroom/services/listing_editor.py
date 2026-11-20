@@ -70,7 +70,7 @@ def prepared_listing(previous: dict, listing: dict, *, notes: dict | None = None
     return updated
 
 
-def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: str = "user_form", expected_revision_id: str | None = None):
+def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: str = "user_form", expected_revision_id: str | None = None, commit: bool = True):
 
     conv_repo = ConversationRepo(db)
     conv = conv_repo.get(conv_id)
@@ -130,6 +130,7 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
         source=source,
         parent_revision_id=current.current_revision_id if current else None,
         expected_revision_id=expected_revision_id,
+        commit=commit,
     )
 
     from anteroom.services.seller_overrides import notes_for_listing_edits
@@ -146,7 +147,7 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
     if note_updates:
         from anteroom.services.vendoo_import import merge_notes
 
-        conv_repo.write_notes(conv_id, merge_notes(conv.notes, note_updates))
+        conv_repo.write_notes(conv_id, merge_notes(conv.notes, note_updates), commit=commit)
 
 
     record_correction(db, conv_id, revision.id, listing_data, changes, source="template" if source == "template" else "user_form")
@@ -155,7 +156,10 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
         current.validation_status = "valid" if validation.valid else "error"
         current.validation_errors = validation.errors + validation.warnings
 
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
     return {
         "ok": True,

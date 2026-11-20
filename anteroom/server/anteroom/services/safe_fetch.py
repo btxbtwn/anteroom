@@ -113,6 +113,7 @@ async def fetch_public(
     accept: Callable[[str], bool] | None = None,
     max_bytes: int = MAX_DOWNLOAD_BYTES,
     headers: dict[str, str] | None = None,
+    timeout: float | None = None,
 ) -> tuple[bytes, str, str]:
     """GET a public URL, connecting only to the address it was checked against.
 
@@ -122,55 +123,57 @@ async def fetch_public(
     on the response's content type; a response it refuses raises
     ``UnsafeURLError``. Returns ``(body, content_type, final_url)``.
     """
+    deadline = DOWNLOAD_TIMEOUT_SEC if timeout is None else timeout
     current = str(url or "").strip()
-    for _ in range(MAX_REDIRECTS + 1):
-        current, addresses = await resolve_fetch_target(current, allow_http=allow_http)
-        parsed = urlparse(current)
-        host = str(parsed.hostname or "")
-        host_header = f"[{host}]" if ":" in host else host
-        if parsed.port is not None:
-            host_header = f"{host_header}:{parsed.port}"
-
-        response = None
-        last_connect_error = None
-        for address in addresses:
-            pinned_host = f"[{address}]" if ":" in address else address
+    async with asyncio.timeout(deadline):
+        for _ in range(MAX_REDIRECTS + 1):
+            current, addresses = await resolve_fetch_target(current, allow_http=allow_http)
+            parsed = urlparse(current)
+            host = str(parsed.hostname or "")
+            host_header = f"[{host}]" if ":" in host else host
             if parsed.port is not None:
-                pinned_host = f"{pinned_host}:{parsed.port}"
-            pinned_url = urlunparse(parsed._replace(netloc=pinned_host))
-            request = client.build_request(
-                "GET",
-                pinned_url,
-                headers={**(headers or {}), "Host": host_header, "Connection": "close"},
-                extensions={"sni_hostname": host},
-            )
-            try:
-                response = await client.send(request, stream=True, follow_redirects=False)
-                break
-            except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-                last_connect_error = exc
-        if response is None:
-            if last_connect_error is not None:
-                raise last_connect_error
-            raise UnsafeURLError(f"Could not connect to {host}")
+                host_header = f"{host_header}:{parsed.port}"
 
-        try:
-            if response.is_redirect:
-                location = response.headers.get("location")
-                if not location:
-                    raise UnsafeURLError("Redirect was missing a Location header")
-                current = urljoin(current, location)
-                continue
-            response.raise_for_status()
-            content_type = (response.headers.get("content-type") or "").split(";")[0].strip().lower()
-            if accept is not None and not accept(content_type):
-                raise UnsafeURLError(f"URL did not return an accepted type ({content_type or 'none given'})")
-            content = bytearray()
-            async for chunk in response.aiter_bytes():
-                content.extend(chunk)
-                if len(content) > max_bytes:
-                    raise UnsafeURLError("Download exceeded the size limit")
-            return bytes(content), content_type, current
-        finally:
-            await response.aclose()
-    raise UnsafeURLError("Too many redirects")
+            response = None
+            last_connect_error = None
+            for address in addresses:
+                pinned_host = f"[{address}]" if ":" in address else address
+                if parsed.port is not None:
+                    pinned_host = f"{pinned_host}:{parsed.port}"
+                pinned_url = urlunparse(parsed._replace(netloc=pinned_host))
+                request = client.build_request(
+                    "GET",
+                    pinned_url,
+                    headers={**(headers or {}), "Host": host_header, "Connection": "close"},
+                    extensions={"sni_hostname": host},
+                )
+                try:
+                    response = await client.send(request, stream=True, follow_redirects=False)
+                    break
+                except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                    last_connect_error = exc
+            if response is None:
+                if last_connect_error is not None:
+                    raise last_connect_error
+                raise UnsafeURLError(f"Could not connect to {host}")
+
+            try:
+                if response.is_redirect:
+                    location = response.headers.get("location")
+                    if not location:
+                        raise UnsafeURLError("Redirect was missing a Location header")
+                    current = urljoin(current, location)
+                    continue
+                response.raise_for_status()
+                content_type = (response.headers.get("content-type") or "").split(";")[0].strip().lower()
+                if accept is not None and not accept(content_type):
+                    raise UnsafeURLError(f"URL did not return an accepted type ({content_type or 'none given'})")
+                content = bytearray()
+                async for chunk in response.aiter_bytes():
+                    content.extend(chunk)
+                    if len(content) > max_bytes:
+                        raise UnsafeURLError("Download exceeded the size limit")
+                return bytes(content), content_type, current
+            finally:
+                await response.aclose()
+        raise UnsafeURLError("Too many redirects")

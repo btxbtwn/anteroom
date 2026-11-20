@@ -434,7 +434,7 @@ async def video_frames(client: httpx.AsyncClient, url: str, count: int = FRAMES_
     try:
         contents, _, _ = await asyncio.wait_for(
             fetch_public(client, url, accept=_is_video_type, max_bytes=VIDEO_MAX_BYTES,
-                         headers={"User-Agent": USER_AGENT}),
+                         headers={"User-Agent": USER_AGENT}, timeout=VIDEO_TIMEOUT_SEC),
             VIDEO_TIMEOUT_SEC,
         )
     except TimeoutError:
