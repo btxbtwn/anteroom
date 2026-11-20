@@ -1470,7 +1470,7 @@
     }
   },
   "info": {
-    "description": "Generated from vendoo_studio/routes/api_contract.py by python vendoo-studio/scripts/api-contract.py. Do not edit.",
+    "description": "Generated from anteroom/routes/api_contract.py by python anteroom/scripts/api-contract.py. Do not edit.",
     "title": "Anteroom listing API contract",
     "version": "1"
   },

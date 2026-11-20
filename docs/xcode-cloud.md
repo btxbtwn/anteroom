@@ -25,7 +25,7 @@ its removal before proving the cloud replacement.
    build can use them. Use Xcode 26.6 and the corresponding available macOS.
 3. Create **iOS Verify**: trigger relevant pull requests and main changes;
    include `anteroom-ios/`, `contracts/`, backend API code and
-   `vendoo-studio/VERSION`. Add a required Test action on one iPhone simulator.
+   `anteroom/VERSION`. Add a required Test action on one iPhone simulator.
    Select **AnteroomCloud**, with scheme settings. A Test action already
    builds the app; do not add a duplicate Build action. No distribution
    post-action or production credentials are needed.
@@ -76,7 +76,7 @@ offers `AnteroomCloud`.
 
 ## Before each TestFlight release
 
-Install the normal backend developer dependencies in `vendoo-studio/.venv`.
+Install the normal backend developer dependencies in `anteroom/.venv`.
 Choose an available iPad destination in Xcode and run, from the repository root:
 
 ```sh

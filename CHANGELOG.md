@@ -6,6 +6,22 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1055 — 2026-11-20
+
+- Harden macOS release packaging, Chrome Bridge extension packaging, and hosted build checks.
+
+## 0.1.1054 — 2026-11-20
+
+- Rename remaining internal Vendoo Studio and Vendoo extension identifiers, files, and local storage paths to Anteroom while preserving existing local databases, Keychain secrets, browser settings, and Chrome extension installs.
+
+## 0.1.1053 — 2026-11-20
+
+- Show the item's title instead of "Untitled item" in the Marketplace activity tray on hosted accounts.
+
+## 0.1.1052 — 2026-11-20
+
+- Choose which sections a generated description includes. The current formula stays on, and you can add or remove sections such as fit, material, trend, and care.
+
 ## 0.1.1051 — 2026-11-20
 
 - Lower OpenRouter sold-comps research costs by using Perplexity search restricted to resale marketplaces, with tighter per-side search limits (4 sold, 2 active).

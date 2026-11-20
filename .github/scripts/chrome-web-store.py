@@ -3,7 +3,7 @@
     chrome-web-store.py package --out bridge.zip
     chrome-web-store.py release --package bridge.zip
 
-``package`` zips the tracked files of vendoo-extension/ that Chrome loads (the
+``package`` zips the tracked files of anteroom-extension/ that Chrome loads (the
 same files the Mac app copies, chrome_bridge.EXTENSION_SKIP) and checks that
 everything the manifest and background.js load is inside.
 
@@ -36,13 +36,13 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-EXTENSION = "vendoo-extension"
+EXTENSION = "anteroom-extension"
 ITEM_ID = "empinkdlhndpfoigoipbiiofaeepcheo"
 API = "https://chromewebstore.googleapis.com"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 SCOPE = "https://www.googleapis.com/auth/chromewebstore"
 # Top-level names Chrome never loads; kept equal to chrome_bridge.EXTENSION_SKIP by a test.
-SKIP = frozenset({"AGENTS.md", ".git", ".gitignore", ".playwright-mcp", "README.md", "__pycache__",
+SKIP = frozenset({"AGENTS.md", ".git", ".gitignore", ".oxlintrc.json", ".playwright-mcp", "README.md", "__pycache__",
                   "node_modules", "sample-listing.json", "studio-build.js", "tests", "tools"})
 # Written by the Mac app beside its own copy; background.js loads it only if present.
 OPTIONAL = frozenset({"studio-build.js"})
@@ -57,13 +57,13 @@ class StoreError(RuntimeError):
 
 
 def tracked_files(root: Path = ROOT) -> list[str]:
-    """The extension's files git tracks, relative to vendoo-extension/, minus what Chrome never loads."""
+    """The extension's files git tracks, relative to anteroom-extension/, minus what Chrome never loads."""
     listed = subprocess.run(["git", "ls-files", "-z", "--", EXTENSION], cwd=root, check=True,
                             capture_output=True).stdout.decode().split("\0")
     files = []
     for path in filter(None, listed):
         relative = path.removeprefix(EXTENSION + "/")
-        if not any(part in SKIP for part in relative.split("/")):
+        if not any(part in SKIP or part.startswith(".") for part in relative.split("/")):
             files.append(relative)
     return sorted(files)
 

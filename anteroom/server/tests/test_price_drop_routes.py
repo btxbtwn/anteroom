@@ -1,0 +1,351 @@
+from __future__ import annotations
+
+import json
+import unittest
+from unittest.mock import patch
+
+from fastapi.testclient import TestClient
+
+from anteroom.services import listing_persistence
+from anteroom.database import SessionLocal
+from anteroom.main import app
+from anteroom.repositories.queries import ConversationRepo, JobRepo, ListingRepo
+from anteroom.services import live_trace
+from anteroom.services.comp_research import CompsEvent
+from anteroom.services.price_drop import PRICE_DROP_SOURCE
+
+
+class PriceDropRouteTest(unittest.TestCase):
+    def setUp(self):
+        # Sold items are read from the whole database, which parallel tests
+        # share. Matching sales written by another test would turn the default
+        # percent suggestion into a sell-through price, so start from none.
+        outcomes = patch("anteroom.services.sell_through.collect_outcomes", return_value=[])
+        outcomes.start()
+        self.addCleanup(outcomes.stop)
+        self.db = SessionLocal()
+        self.client = TestClient(app)
+        self.conv = ConversationRepo(self.db).create(title="Price drop")
+        listing_persistence.save_revision(self.db,
+            self.conv.id,
+            {
+                "title": "Nike Tee",
+                "description": "Soft tee.",
+                "price": 48,
+                "brand": "Nike",
+                "category_path": "Tops > T-Shirts",
+                "condition": "Pre-Owned - Good",
+                "quantity": 1,
+            },
+            source="generation",
+        )
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_preview_and_apply(self):
+        with patch("anteroom.services.price_drop.comps_search_available", return_value=False):
+            preview = self.client.post(f"/api/conversations/{self.conv.id}/price-drop/preview")
+        self.assertEqual(preview.status_code, 200, preview.text)
+        body = preview.json()
+        self.assertEqual(body["current_price"], 48)
+        self.assertEqual(body["suggested_price"], 43)
+
+        apply = self.client.post(
+            f"/api/conversations/{self.conv.id}/price-drop",
+            json={"price": 41, "percent": 15, "mode": "percent", "expected_revision_id": body["revision_id"]},
+        )
+        self.assertEqual(apply.status_code, 200, apply.text)
+        payload = apply.json()
+        self.assertEqual(payload["price"], 41)
+        self.assertEqual(payload["previous_price"], 48)
+
+        revisions = ListingRepo(self.db).get_revisions(self.conv.id)
+        self.assertEqual(revisions[0].source, PRICE_DROP_SOURCE)
+        self.assertEqual(revisions[0].listing_json["price"], 41)
+
+        listing = self.client.get(f"/api/conversations/{self.conv.id}/listing")
+        self.assertEqual(listing.json()["listing"]["price"], 41)
+
+    def test_price_changes_keep_a_direct_actions_sent_revision_and_video(self):
+        revision = ListingRepo(self.db).get_revisions(self.conv.id)[0]
+        snapshot = {**revision.listing_json, "_native_video": {"id": "clip", "checksum": "original"}}
+        job = JobRepo(self.db).create(self.conv.id, revision.id, snapshot, status="failed", current_step="native_poshmark_save_draft")
+        response = self.client.post(f"/api/conversations/{self.conv.id}/price-drop", json={"price": 41, "mode": "percent", "percent": 15, "expected_revision_id": revision.id})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.db.refresh(job)
+        self.assertEqual(job.listing_snapshot, snapshot)
+        self.assertEqual(ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json["price"], 41)
+
+    def test_stale_price_drop_preserves_a_newer_edit(self):
+        old = ListingRepo(self.db).get_revisions(self.conv.id)[0]
+        listing_persistence.save_revision(self.db, self.conv.id,
+            {**old.listing_json, "price": 60}, source="edit")
+        response = self.client.post(f"/api/conversations/{self.conv.id}/price-drop",
+            json={"price": 43, "percent": 10, "mode": "percent", "expected_revision_id": old.id})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(self.client.get(f"/api/conversations/{self.conv.id}/listing").json()["listing"]["price"], 60)
+
+    def test_every_price_drop_requires_a_nonempty_review_revision(self):
+        for revision in (None, ""):
+            body = {"price": 5}
+            if revision is not None:
+                body["expected_revision_id"] = revision
+            single = self.client.post(f"/api/conversations/{self.conv.id}/price-drop", json=body)
+            batch = self.client.post("/api/price-drop/batch", json={"drops": [
+                {**body, "conversation_id": self.conv.id}]})
+            self.assertEqual(single.status_code, 422, single.text)
+            self.assertEqual(batch.status_code, 422, batch.text)
+        self.assertEqual(self.client.get(f"/api/conversations/{self.conv.id}/listing").json()["listing"]["price"], 48)
+
+    def test_price_drop_fences_the_final_save_not_only_the_initial_read(self):
+        old = ListingRepo(self.db).get_revisions(self.conv.id)[0]
+        save = listing_persistence.save_revision
+
+        def another_edit_before_save(db, **kwargs):
+            save(db, self.conv.id, {**old.listing_json, "price": 60}, source="edit")
+            return save(db, **kwargs)
+
+        with patch.object(listing_persistence, "save_revision", side_effect=another_edit_before_save):
+            response = self.client.post(f"/api/conversations/{self.conv.id}/price-drop",
+                json={"price": 43, "expected_revision_id": old.id})
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(self.client.get(f"/api/conversations/{self.conv.id}/listing").json()["listing"]["price"], 60)
+        self.assertFalse(any(row.source == PRICE_DROP_SOURCE for row in ListingRepo(self.db).get_revisions(self.conv.id)))
+
+    def test_comps_stream_reports_sources_then_the_preview(self):
+        comps = (
+            "Sold comps:\n"
+            "Query: Nike T-Shirts sold comps\n"
+            "Source: ChatGPT + Cursor\n"
+            "\n"
+            "- $20 · eBay · Nike Tee\n"
+            "  https://www.ebay.com/itm/1\n"
+            "- $18 · Poshmark · Nike Tee\n"
+            "  https://poshmark.com/listing/2\n"
+            "- $22 · Mercari · Nike Tee\n"
+            "  https://www.mercari.com/item/3\n"
+        )
+
+        async def fake_stream(_analysis, evidence):
+            self.assertEqual(evidence["brand"], "Nike")
+            live_trace.emit("step", "Cursor searched: nike tee sold")
+            yield CompsEvent("source", source="Cursor", state="searching")
+            yield CompsEvent("source", source="Cursor", state="done", sold=3, live=0)
+            yield CompsEvent("done", text=comps)
+
+        with (
+            patch("anteroom.services.price_drop.comps_search_available", return_value=True),
+            patch("anteroom.services.comp_research.stream_sold_comps", new=fake_stream),
+        ):
+            res = self.client.post(f"/api/conversations/{self.conv.id}/price-drop/comps")
+        self.assertEqual(res.status_code, 200, res.text)
+        events = [
+            (block.split("\n", 1)[0].removeprefix("event: "), block.split("data: ", 1)[1])
+            for block in res.text.strip().split("\n\n")
+            if block.startswith("event:")
+        ]
+        self.assertEqual(events[0], ("step", "Cursor searched: nike tee sold"))
+        self.assertEqual(json.loads(events[1][1])["state"], "searching")
+        self.assertEqual(json.loads(events[2][1])["sold"], 3)
+        preview = json.loads(events[-1][1])
+        self.assertEqual(preview["revision_id"], ListingRepo(self.db).get_revisions(self.conv.id)[0].id)
+        self.assertEqual(events[-1][0], "preview")
+        self.assertEqual(preview["comps"]["target_price"], 27)
+        self.assertEqual(preview["suggested_mode"], "comps")
+        self.assertTrue(res.text.rstrip().endswith("data: [DONE]"))
+
+    def test_comps_stream_shows_agent_progress_and_results_as_steps(self):
+        async def fake_stream(_analysis, evidence):
+            async with live_trace.agent("comps-sold", "Sold comps") as agent:
+                live_trace.emit("step", "Claude searched: nike tee sold")
+                agent.result("Found 8 sold comps")
+            try:
+                async with live_trace.agent("comps-brave", "Brave search"):
+                    raise RuntimeError("Brave HTTP 402")
+            except RuntimeError:
+                pass
+            yield CompsEvent("done", text="Sold comps:\nQuery: Nike tee sold comps\n")
+
+        with (
+            patch("anteroom.services.price_drop.comps_search_available", return_value=True),
+            patch("anteroom.services.comp_research.stream_sold_comps", new=fake_stream),
+        ):
+            res = self.client.post(f"/api/conversations/{self.conv.id}/price-drop/comps")
+        self.assertEqual(res.status_code, 200, res.text)
+        steps = [
+            block.split("data: ", 1)[1]
+            for block in res.text.strip().split("\n\n")
+            if block.startswith("event: step")
+        ]
+        # Progress, the done result and the failure reason, each once.
+        self.assertEqual(steps, ["Claude searched: nike tee sold", "Found 8 sold comps", "Brave HTTP 402"])
+
+    def test_rejects_raise_or_missing_price(self):
+        bad = self.client.post(
+            f"/api/conversations/{self.conv.id}/price-drop",
+            json={"price": 60, "mode": "custom", "expected_revision_id": ListingRepo(self.db).get_revisions(self.conv.id)[0].id},
+        )
+        self.assertEqual(bad.status_code, 400)
+
+        empty = ConversationRepo(self.db).create(title="Empty")
+        missing = self.client.post(f"/api/conversations/{empty.id}/price-drop/preview")
+        self.assertEqual(missing.status_code, 400)
+
+
+class BatchMarkdownRouteTest(unittest.TestCase):
+    def setUp(self):
+        self.db = SessionLocal()
+        self.client = TestClient(app)
+        self.convs = ConversationRepo(self.db)
+        self.listings = ListingRepo(self.db)
+        self.tee = self._listing("Stale tee", 48)
+        self.coat = self._listing("Stale coat", 120)
+
+    def tearDown(self):
+        self.db.close()
+
+    def _listing(self, title: str, price, *, synced: bool = True):
+        conv = self.convs.create(title=title)
+        listing = {"title": title, "description": "Soft.", "condition": "Pre-Owned - Good", "quantity": 1}
+        if price is not None:
+            listing["price"] = price
+        revision = listing_persistence.save_revision(self.listings.db, conv.id, listing, source="generation")
+        if synced:
+            conv.notes = json.dumps({"vendooSyncedRevision": revision.id})
+            self.db.commit()
+        return conv
+
+    def _preview(self, *ids):
+        with patch("anteroom.services.price_drop.comps_search_available", return_value=False):
+            res = self.client.post("/api/price-drop/batch/preview", json={"conversation_ids": list(ids)})
+        self.assertEqual(res.status_code, 200, res.text)
+        return {row["conversation_id"]: row for row in res.json()["rows"]}
+
+    def test_preview_suggests_each_listing_and_reports_the_ones_it_cannot_drop(self):
+        empty = self._listing("No price", None)
+        busy = self._listing("Sending", 30)
+        revision = self.listings.get_revisions(busy.id)[0]
+        JobRepo(self.db).create(busy.id, revision.id, revision.listing_json, status="dispatched")
+
+        with patch("anteroom.services.sell_through.collect_outcomes", return_value=[]) as outcomes:
+            rows = self._preview(self.tee.id, self.coat.id, empty.id, busy.id, "missing")
+        outcomes.assert_called_once()
+
+        tee = rows[self.tee.id]
+        self.assertEqual(tee["title"], "Stale tee")
+        self.assertEqual(tee["current_price"], 48)
+        self.assertEqual(tee["suggested_price"], 43)
+        self.assertTrue(tee["suggested_reason"])
+        self.assertIsNone(tee["skip_reason"])
+        self.assertEqual(tee["revision_id"], self.listings.get_revisions(self.tee.id)[0].id)
+        self.assertEqual(rows[self.coat.id]["suggested_price"], 108)
+        self.assertEqual(rows[empty.id]["skip_reason"], "Listing has no price to drop")
+        self.assertEqual(rows[busy.id]["skip_reason"], "Anteroom is generating or sending this listing")
+        self.assertEqual(rows["missing"]["skip_reason"], "It is no longer in Anteroom")
+        self.assertEqual(self.listings.get_revisions(self.tee.id)[0].source, "generation")
+
+    def test_apply_saves_price_drop_revisions_and_never_queues_a_send(self):
+        rows = self._preview(self.tee.id, self.coat.id)
+        res = self.client.post("/api/price-drop/batch", json={"drops": [
+            {"conversation_id": self.tee.id, "price": 40, "expected_revision_id": rows[self.tee.id]["revision_id"]},
+            {"conversation_id": self.coat.id, "price": 99.6, "expected_revision_id": rows[self.coat.id]["revision_id"]},
+        ]})
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        self.assertEqual(body["skipped"], [])
+        applied = {row["conversation_id"]: row for row in body["applied"]}
+        self.assertEqual(applied[self.tee.id]["price"], 40)
+        self.assertEqual(applied[self.tee.id]["previous_price"], 48)
+        self.assertEqual(applied[self.coat.id]["price"], 100)
+
+        self.db.expire_all()
+        for conv, price in ((self.tee, 40), (self.coat, 100)):
+            latest = self.listings.get_revisions(conv.id)[0]
+            self.assertEqual(latest.source, PRICE_DROP_SOURCE)
+            self.assertEqual(latest.listing_json["price"], price)
+            self.assertEqual(JobRepo(self.db).list_by_conversation(conv.id), [])
+
+        listed = {row["id"]: row for row in self.client.get("/api/conversations").json()}
+        self.assertEqual(listed[self.tee.id]["price"], 40)
+        self.assertEqual(listed[self.coat.id]["price"], 100)
+
+    def test_apply_skips_what_cannot_drop_and_saves_the_rest(self):
+        rows = self._preview(self.tee.id, self.coat.id)
+        stale_revision = rows[self.coat.id]["revision_id"]
+        self.client.post(f"/api/conversations/{self.coat.id}/price-drop", json={"price": 110, "expected_revision_id": stale_revision})
+        empty = self._listing("No price", None)
+
+        res = self.client.post("/api/price-drop/batch", json={"drops": [
+            {"conversation_id": self.tee.id, "price": 48, "expected_revision_id": rows[self.tee.id]["revision_id"]},
+            {"conversation_id": self.coat.id, "price": 90, "expected_revision_id": stale_revision},
+            {"conversation_id": empty.id, "price": 5, "expected_revision_id": self.listings.get_revisions(empty.id)[0].id},
+            {"conversation_id": "missing", "price": 5, "expected_revision_id": "missing"},
+        ]})
+        self.assertEqual(res.status_code, 200, res.text)
+        body = res.json()
+        self.assertEqual(body["applied"], [])
+        self.assertEqual({row["conversation_id"]: row["reason"] for row in body["skipped"]}, {
+            self.tee.id: "New price must be lower than the current price",
+            self.coat.id: "This listing changed since you reviewed it",
+            empty.id: "Listing has no price to drop",
+            "missing": "Conversation not found",
+        })
+        self.db.expire_all()
+        self.assertEqual(self.listings.get_revisions(self.coat.id)[0].listing_json["price"], 110)
+
+    def test_apply_skips_a_listing_studio_is_sending(self):
+        revision = self.listings.get_revisions(self.tee.id)[0]
+        JobRepo(self.db).create(self.tee.id, revision.id, revision.listing_json, status="queued")
+        res = self.client.post("/api/price-drop/batch", json={"drops": [
+            {"conversation_id": self.tee.id, "price": 40, "expected_revision_id": revision.id},
+            {"conversation_id": self.coat.id, "price": 100, "expected_revision_id": self.listings.get_revisions(self.coat.id)[0].id},
+        ]})
+        body = res.json()
+        self.assertEqual([row["conversation_id"] for row in body["applied"]], [self.coat.id])
+        self.assertEqual(body["skipped"], [
+            {"conversation_id": self.tee.id, "reason": "Anteroom is generating or sending this listing"},
+        ])
+
+    def test_preview_reads_a_fixed_number_of_small_rows(self):
+        """On the hosted database every query is a network round trip, and a
+        listing's full marketplace forms can be hundreds of KB. The review sheet
+        reads a fixed number of queries for any batch and never the full forms."""
+        from sqlalchemy import event
+
+        from anteroom.database import engine
+
+        def statements(*ids):
+            seen: list[str] = []
+
+            def record(_conn, _cursor, statement, *_args):
+                seen.append(statement)
+
+            event.listen(engine, "before_cursor_execute", record)
+            try:
+                rows = self._preview(*ids)
+            finally:
+                event.remove(engine, "before_cursor_execute", record)
+            return rows, seen
+
+        more = [self._listing(f"Stale {n}", 20 + n) for n in range(6)]
+        for conv in more:
+            listing_persistence.save_revision(self.db, conv.id, {"title": conv.title, "price": 18},
+                                              source=PRICE_DROP_SOURCE)
+        with patch("anteroom.services.sell_through.collect_outcomes", return_value=[]):
+            _rows, two = statements(self.tee.id, self.coat.id)
+            rows, eight = statements(self.tee.id, self.coat.id, *(conv.id for conv in more))
+
+        self.assertEqual(len(eight), len(two))
+        self.assertFalse([sql for sql in eight if "listing_revisions.listing_json" in sql])
+        # A prior drop is still read from the small fields: 18 after 20 is a 10% cut.
+        self.assertEqual(rows[more[0].id]["current_price"], 18)
+        self.assertEqual(rows[self.tee.id]["suggested_price"], 43)
+
+    def test_empty_batches_are_rejected(self):
+        self.assertEqual(self.client.post("/api/price-drop/batch/preview", json={"conversation_ids": []}).status_code, 422)
+        self.assertEqual(self.client.post("/api/price-drop/batch", json={"drops": []}).status_code, 422)
+
+
+if __name__ == "__main__":
+    unittest.main()

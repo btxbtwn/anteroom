@@ -16,7 +16,7 @@ web import reads `/api/v1/shop/{id}/products/` and
 `/presentation/api/v1/products/by-slug/{slug}/`. Do not substitute partner request
 schemas into the web transport. Draft creation and activation are separate actions.
 
-Implementation: [native requests](../../vendoo-extension/background/depop-native.js),
-[imports](../../vendoo-extension/background/marketplace-import.js),
-[native form](../../vendoo-studio/server/vendoo_studio/services/depop_form.py).
-Coverage: [native tests](../../vendoo-extension/tests/depop-native.test.js).
+Implementation: [native requests](../../anteroom-extension/background/depop-native.js),
+[imports](../../anteroom-extension/background/marketplace-import.js),
+[native form](../../anteroom/server/anteroom/services/depop_form.py).
+Coverage: [native tests](../../anteroom-extension/tests/depop-native.test.js).

@@ -82,7 +82,7 @@ def expected_source(pin, git):
             'historical_failure': evidence.HISTORICAL, 'correcting_merge': evidence.CORRECTED,
             'span': span,
             'native_changes': [p for p in files if p.startswith(('anteroom-ios/', 'contracts/'))
-                               or p == 'vendoo-studio/server/vendoo_studio/desktop.py'],
+                               or p == 'anteroom/server/anteroom/desktop.py'],
             'migration_changes': [p for p in files if '/migrations/' in p],
             'workflow': evidence.WORKFLOW, 'workflow_blob': pin.workflow_blob, 'ci_blob': pin.ci_blob,
             'run_id': str(pin.run_id), 'attempt': str(pin.attempt), 'event': 'workflow_dispatch',

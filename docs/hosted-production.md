@@ -409,7 +409,7 @@ Drafts are claimed row by row and run on either Machine. The lease lasts 30 s
 and is renewed every 10 s (`services/process_handoff.py`).
 
 Fly sends SIGTERM with a 300-second grace period. On the signal
-(`vendoo_studio.hosted_server`) the old Machine at once stops claiming drafts
+(`anteroom.hosted_server`) the old Machine at once stops claiming drafts
 and stops its schedulers, then releases the lease and its Mac and Chrome
 routes, so the new Machine takes them over within about 10 s. Uvicorn then
 allows active requests 120 seconds, and the current draft has up to 120
@@ -473,7 +473,7 @@ openssl pkey -in bridge-signing.pem -pubout | sed '1d;$d' | tr -d '\n'; echo
 ```
 
 The last command prints the public key. Put that one line in
-`BRIDGE_APPROVAL_PUBLIC_KEY` in `vendoo-extension/background/cloud-approvals.js`.
+`BRIDGE_APPROVAL_PUBLIC_KEY` in `anteroom-extension/background/cloud-approvals.js`.
 The two must be a pair: a Bridge with another key, or none, refuses every write
 from the web and tells the seller why. Keep the PEM file in the team's password
 manager, not on disk. Every API Machine needs the same secret.
@@ -507,7 +507,7 @@ current Bridge refuses.
 ## Operator error emails
 
 Every distinct error in the hosted app is emailed to `ccanizares@myanteroom.com`
-by `vendoo-studio/server/vendoo_studio/services/error_alerts.py`, switched on by
+by `anteroom/server/anteroom/services/error_alerts.py`, switched on by
 `ANTEROOM_ERROR_EMAIL = '1'` in `deploy/fly/fly.toml`. Sandboxes and the Mac app
 never send.
 
