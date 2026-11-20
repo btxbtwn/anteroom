@@ -88,9 +88,20 @@ async function readBody(request, limit = MAX_BODY_BYTES) {
   return new TextDecoder().decode(bytes);
 }
 
+async function readJson(request, limit = MAX_BODY_BYTES) {
+  const raw = await readBody(request, limit);
+  if (raw === null) return { tooLarge: true, body: null };
+  try {
+    return { tooLarge: false, body: JSON.parse(raw) };
+  } catch {
+    return { tooLarge: false, body: null };
+  }
+}
+
 // eBay stamps each delivery attempt with publishDate. A signed notification
-// older than this is a replay, not a retry.
+// older than this is a replay, not a retry; one far in the future is bogus.
 const EBAY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const EBAY_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000;
 
 function ebayNotificationAge(payload) {
   const stamp = payload?.notification?.publishDate ?? payload?.notification?.eventDate;
@@ -155,6 +166,7 @@ async function handleEbayNotification(request, env) {
   const age = ebayNotificationAge(payload);
   if (age === null) return json({ error: "notification has no date" }, 400);
   if (age > EBAY_MAX_AGE_MS) return json({ error: "notification is too old" }, 412);
+  if (age < -EBAY_MAX_FUTURE_SKEW_MS) return json({ error: "notification date is in the future" }, 412);
   const userId = event.ids.userId?.[0];
   const dir = directory(env);
   const deviceId = userId ? await dir.deviceForAccount("ebay", userId) : null;
@@ -326,7 +338,7 @@ async function handleOAuthCallback(env, marketplace, url) {
       marketplace === "ebay"
         ? await completeEbay(env, url, code)
         : await completeEtsy(env, url, code, session.verifier);
-    const link = [{ marketplace, accountId: done.accountId, label: done.label }];
+    const link = [{ marketplace, accountId: done.accountId, label: done.label, ...(done.userId ? { etsyUserId: done.userId } : {}) }];
     if (done.userId) link.push({ marketplace: "etsy-user", accountId: done.userId, label: done.label });
     const claim = randomToken(24);
     await dir.finishSession(state, { link, result: done.result }, await sha256Hex(claim));
@@ -347,7 +359,8 @@ async function handleOAuthCallback(env, marketplace, url) {
 // so a refresh token on its own is not enough to mint access tokens. Anteroom
 // answers 401 by asking the seller to sign in again, which relinks the account.
 async function handleOAuthRefresh(request, env, deviceId, marketplace) {
-  const body = await request.json().catch(() => null);
+  const { tooLarge, body } = await readJson(request);
+  if (tooLarge) return json({ error: "body too large" }, 413);
   const refreshToken = typeof body?.refreshToken === "string" ? body.refreshToken : "";
   if (!refreshToken) return json({ error: "refreshToken is required" }, 400);
   const notLinked = () => json({ error: "sign in again" }, 401);
@@ -356,6 +369,8 @@ async function handleOAuthRefresh(request, env, deviceId, marketplace) {
   try {
     if (marketplace === "ebay") {
       if (!ebayConfigured(env)) return json({ error: "eBay is not configured" }, 503);
+      const accounts = await directory(env).accountsForDevice(deviceId);
+      if (!accounts.some((account) => account.marketplace === "ebay")) return notLinked();
       // eBay refresh tokens are opaque and are not rotated: refresh, then check whose they are.
       const tokens = await ebayRefresh(env, refreshToken);
       const user = await ebayUser(env, tokens.access_token);
@@ -419,7 +434,8 @@ async function handleStudio(request, env, url, deviceId) {
     return json({ events: await box.list(after, limit) });
   }
   if (pathname === "/studio/ack" && request.method === "POST") {
-    const body = await request.json().catch(() => null);
+    const { tooLarge, body } = await readJson(request);
+    if (tooLarge) return json({ error: "body too large" }, 413);
     if (!Number.isInteger(body?.through)) return json({ error: "through must be an integer" }, 400);
     return json({ pending: await box.ack(body.through) });
   }

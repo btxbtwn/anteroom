@@ -61,7 +61,7 @@ fi
 database=postgresql://postgres:synthetic-smoke-password@anteroom-image-smoke-pg:5432/smoke
 docker run --name anteroom-image-smoke-init --network "$network" \
   -e ANTEROOM_DATABASE_URL="$database" "$image" \
-  python -c 'from vendoo_studio.database import init_db; init_db(); print("PASS disposable database migrations")'
+  python -c 'from anteroom.database import init_db; init_db(); print("PASS disposable database migrations")'
 docker run -d --name anteroom-image-smoke-app --network "$network" \
   -e ANTEROOM_DATABASE_URL="$database" \
   -e SUPABASE_URL=https://image-smoke.invalid \
@@ -86,7 +86,7 @@ with httpx.Client(base_url='http://127.0.0.1:8080', timeout=3, trust_env=False) 
     assert response.json()['status'] == 'ok'
     health = client.get('/api/health').raise_for_status().json()
     assert health['service'] == 'anteroom-hosted'
-    assert health['version'] == Path('/app/vendoo-studio/VERSION').read_text().strip()
+    assert health['version'] == Path('/app/anteroom/VERSION').read_text().strip()
     assert client.get('/api/account').status_code == 401
     assert client.get('/api/auth-config').json()['supabase_url'] == 'https://image-smoke.invalid'
     assert 'text/html' in client.get('/').raise_for_status().headers['content-type']

@@ -1,0 +1,330 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+from datetime import UTC, datetime
+
+import httpx
+
+from anteroom.services import live_trace
+from anteroom.services.keychain import get_brave_api_key
+from anteroom.services.user_settings import read_settings, update_settings
+from anteroom.services.sold_comps import SoldCompsReport, listings_from_web_results
+
+log = logging.getLogger("anteroom.brave_search")
+
+BRAVE_SEARCH_URL = "https://api.search.brave.com/res/v1/web/search"
+ITEM_FIELDS = ("brand", "category", "style", "graphic", "size", "color", "material", "pattern", "department")
+MARKETPLACE_SITES = ("ebay.com", "poshmark.com", "mercari.com", "depop.com", "etsy.com")
+# Brave caps count at 20. One 8-result query across five sites usually came back
+# with one or two priced listing URLs; per-site queries spread the budget.
+BRAVE_RESULT_COUNT = 20
+# Brave's free tier allows roughly one request per second, so stagger the fan-out
+# rather than firing every query at once.
+BRAVE_QUERY_STAGGER_SEC = 0.6
+BRAVE_RETRY_SEC = 1.5
+# A 402 (USAGE_LIMIT_EXCEEDED) means the plan's monthly quota is spent, and it
+# stays spent until the month rolls over. Retrying hourly still cost a request
+# on every listing, so the month it ran out is remembered in settings.json —
+# across restarts — and Brave is skipped until the next calendar month (UTC),
+# or until the seller saves a key or a connection test succeeds.
+QUOTA_SETTING = "brave_quota_exhausted"
+_ANALYSIS_FIELD_RE = re.compile(
+    r"^-\s*(brand|category|style|graphic|size|color|material|pattern|department):\s*(.+?)(?:\s+\(source:.*\))?$",
+    re.I | re.M,
+)
+
+
+def fields_from_evidence(evidence: dict | None) -> dict[str, str]:
+    found: dict[str, str] = {}
+    if not isinstance(evidence, dict):
+        return found
+    for key in ITEM_FIELDS:
+        value = evidence.get(key)
+        if isinstance(value, dict):
+            raw = value.get("value")
+        else:
+            raw = value
+        text = str(raw or "").strip()
+        if text:
+            found[key] = text
+    return found
+
+
+def fields_from_analysis(text: str | None) -> dict[str, str]:
+    found: dict[str, str] = {}
+    for match in _ANALYSIS_FIELD_RE.finditer(text or ""):
+        value = match.group(2).strip()
+        if value:
+            found[match.group(1).lower()] = value
+    return found
+
+
+def item_fields(analysis_text: str | None, evidence: dict | None = None) -> dict[str, str]:
+    fields = fields_from_analysis(analysis_text)
+    fields.update(fields_from_evidence(evidence))
+    return fields
+
+
+# A marketplace title is short: brand, what is printed on it, item type, who it
+# is for, size. Web search needs most query words to match, so a query built
+# from the whole photo analysis ("with scoop neck and side hem slit", "65%
+# polyester, 35% cotton") matches no listing at all. Longer values are dropped
+# rather than trimmed, since the first few words of a sentence are rarely the
+# ones a seller would type.
+MAX_STYLE_WORDS = 3
+MAX_GRAPHIC_WORDS = 4
+_DEPARTMENT_TERMS = {"women": "women's", "men": "men's", "girls": "girls", "boys": "boys", "baby": "baby"}
+
+
+def _short(value: str, max_words: int) -> str:
+    value = " ".join(value.split())
+    return value if value and len(value.split()) <= max_words else ""
+
+
+def _contains_words(text: str, words: str) -> bool:
+    return re.search(rf"\b{re.escape(words.lower())}\b", text.lower()) is not None
+
+
+def _query_core(fields: dict[str, str]) -> list[str]:
+    """Brand, printed graphic and item type: what identifies the item."""
+    brand = fields.get("brand", "").strip()
+    graphic = _short(fields.get("graphic", ""), MAX_GRAPHIC_WORDS)
+    # Category arrives as a taxonomy path ("Tops > T-Shirts"); search the leaf.
+    category = fields.get("category", "").split(">")[-1].strip()
+    style = _short(fields.get("style", ""), MAX_STYLE_WORDS)
+    parts: list[str] = []
+    for part in (brand, graphic, style, category):
+        if part and not any(_contains_words(kept, part) for kept in parts):
+            parts.append(part)
+    return parts
+
+
+def _query_details(fields: dict[str, str]) -> list[str]:
+    """Department and size, the two details sellers put in nearly every title."""
+    department = _DEPARTMENT_TERMS.get(fields.get("department", "").strip().lower(), "")
+    size = _short(fields.get("size", ""), 2)
+    return [part for part in (department, size) if part]
+
+
+def sold_comps_query(fields: dict[str, str]) -> str:
+    parts = _query_core(fields)
+    if not parts:
+        return ""
+    return " ".join([*parts, *_query_details(fields), "sold comps"])
+
+
+def _site_filter() -> str:
+    return "(" + " OR ".join(f"site:{site}" for site in MARKETPLACE_SITES) + ")"
+
+
+def brave_sold_query(fields: dict[str, str]) -> str:
+    parts = _query_core(fields)
+    if not parts:
+        return ""
+    return f"{' '.join([*parts, *_query_details(fields)])} sold {_site_filter()}"
+
+
+def brave_sold_queries(fields: dict[str, str]) -> list[str]:
+    """The broad query, one per marketplace, then a looser one without size.
+
+    The looser query is what finds comps when the exact size never sold.
+    """
+    broad = brave_sold_query(fields)
+    if not broad:
+        return []
+    core = " ".join(_query_core(fields))
+    tight = " ".join([core, *_query_details(fields)])
+    queries = [broad]
+    queries.extend(f"{tight} sold listing site:{site}" for site in MARKETPLACE_SITES)
+    if tight != core:
+        queries.append(f"{core} sold {_site_filter()}")
+    return queries
+
+
+def brave_active_queries(fields: dict[str, str]) -> list[str]:
+    """Search current competition separately from sold-item queries."""
+    core = " ".join(_query_core(fields))
+    if not core:
+        return []
+    tight = " ".join([core, *_query_details(fields)])
+    return [f"{tight} site:{site}" for site in MARKETPLACE_SITES]
+
+
+def comp_identities(fields: dict[str, str]) -> tuple[str, ...]:
+    """Names a comp must mention: the brand, or the licensed graphic on it.
+
+    Character and franchise tees are often titled by the character alone
+    ("Snoopy Woodstock tee") without the licensing brand ("Peanuts").
+    """
+    brand = fields.get("brand", "").strip()
+    graphic = _short(fields.get("graphic", ""), MAX_GRAPHIC_WORDS)
+    if not brand:
+        return ()
+    return (brand, graphic) if graphic else (brand,)
+
+
+def _brave_error(resp: httpx.Response) -> str:
+    text = (resp.text or "").strip()
+    try:
+        payload = resp.json()
+    except Exception:
+        payload = None
+    if isinstance(payload, dict):
+        error = payload.get("error") or payload.get("message") or payload.get("detail")
+        if isinstance(error, dict):
+            text = str(error.get("message") or error.get("code") or error)
+        elif isinstance(error, str) and error.strip():
+            text = error.strip()
+    text = " ".join(text.split())
+    if len(text) > 240:
+        text = text[:237] + "..."
+    return f"Brave HTTP {resp.status_code}: {text}" if text else f"Brave HTTP {resp.status_code}"
+
+
+def comp_report(
+    query: str,
+    results: list[dict],
+    *,
+    source: str = "Brave",
+    expected_names: tuple[str, ...] = (),
+) -> SoldCompsReport:
+    comps, live = listings_from_web_results(results, expected_names=expected_names)
+    return SoldCompsReport(query=query, source=source, comps=comps, live=live)
+
+
+async def search_web(query: str, api_key: str, *, count: int = 8) -> list[dict]:
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.get(
+            BRAVE_SEARCH_URL,
+            headers={
+                "Accept": "application/json",
+                "X-Subscription-Token": api_key,
+            },
+            params={
+                "q": query[:400],
+                "count": count,
+                "country": "US",
+                "search_lang": "en",
+                # Sold prices age quickly. Brave defines `py` as pages dated in
+                # the last 365 days; disabling spellcheck also preserves exact
+                # brand/model spellings instead of silently rewriting them.
+                "freshness": "py",
+                "result_filter": "web",
+                "spellcheck": "false",
+                "extra_snippets": "true",
+            },
+        )
+        if resp.status_code >= 400:
+            error = _brave_error(resp)
+            if resp.status_code == 402 or "USAGE_LIMIT" in error.upper():
+                _note_quota_exhausted(error)
+            raise RuntimeError(error)
+        payload = resp.json()
+    web = payload.get("web") if isinstance(payload, dict) else None
+    results = web.get("results") if isinstance(web, dict) else None
+    if not isinstance(results, list):
+        return []
+    return [item for item in results if isinstance(item, dict)]
+
+
+def _month(now: datetime | None = None) -> str:
+    return (now or datetime.now(UTC)).astimezone(UTC).strftime("%Y-%m")
+
+
+def _note_quota_exhausted(error: str, now: datetime | None = None) -> None:
+    month = _month(now)
+
+    def mutator(payload: dict) -> None:
+        payload[QUOTA_SETTING] = {"month": month, "error": error}
+
+    try:
+        update_settings(mutator)
+    except OSError:
+        log.warning("could not remember the spent Brave quota", exc_info=True)
+
+
+def quota_exhausted(now: datetime | None = None) -> str | None:
+    """The quota error while this calendar month's quota is spent, else None."""
+    state = read_settings().get(QUOTA_SETTING)
+    if not isinstance(state, dict) or state.get("month") != _month(now):
+        return None
+    return str(state.get("error") or "Brave HTTP 402: USAGE_LIMIT_EXCEEDED")
+
+
+def reset_quota_backoff() -> None:
+    def mutator(payload: dict) -> None:
+        payload.pop(QUOTA_SETTING, None)
+
+    if QUOTA_SETTING in read_settings():
+        update_settings(mutator)
+
+
+async def test_brave_connection(api_key: str | None = None) -> tuple[bool, str | None]:
+    key = (api_key or get_brave_api_key() or "").strip()
+    if not key:
+        return False, "Add a Brave Search API key in Settings."
+    try:
+        await search_web("ebay sold listings", key, count=1)
+    except Exception as exc:
+        return False, str(exc)
+    reset_quota_backoff()
+    return True, None
+
+
+async def _search_one(query: str, api_key: str, *, delay: float) -> list[dict]:
+    """One staggered query; a 429 from the per-second cap gets a single retry."""
+    if delay:
+        await asyncio.sleep(delay)
+    # An earlier query in this fan-out may have just spent the quota.
+    if spent := quota_exhausted():
+        raise RuntimeError(spent)
+    try:
+        results = await search_web(query, api_key, count=BRAVE_RESULT_COUNT)
+    except Exception as exc:
+        if "429" not in str(exc):
+            raise
+        await asyncio.sleep(BRAVE_RETRY_SEC)
+        results = await search_web(query, api_key, count=BRAVE_RESULT_COUNT)
+    live_trace.emit("step", f"Searched Brave: {query}")
+    return results
+
+
+async def search_all(queries: list[str], api_key: str) -> tuple[list[dict], list[str]]:
+    """Run every query, keep whatever came back, and report the failures."""
+    gathered = await asyncio.gather(
+        *(
+            _search_one(query, api_key, delay=index * BRAVE_QUERY_STAGGER_SEC)
+            for index, query in enumerate(queries)
+        ),
+        return_exceptions=True,
+    )
+    results: list[dict] = []
+    errors: list[str] = []
+    for query, outcome in zip(queries, gathered, strict=False):
+        if isinstance(outcome, BaseException):
+            log.info("Brave sold-comps query failed (%s): %s", query, outcome)
+            errors.append(str(outcome))
+            continue
+        results.extend(outcome)
+    return results, errors
+
+
+async def research_brave_report(
+    queries: str | list[str], *, expected_names: tuple[str, ...] = ()
+) -> SoldCompsReport:
+    """Sold comps and live listings from Brave. Raises when no query got through."""
+    api_key = get_brave_api_key()
+    if not api_key:
+        raise RuntimeError("Add a Brave Search API key in Settings.")
+    if spent := quota_exhausted():
+        raise RuntimeError(spent)
+    query_list = [queries] if isinstance(queries, str) else list(queries)
+    query_list = [query for query in query_list if query]
+    if not query_list:
+        raise RuntimeError("No Brave query to run.")
+    results, errors = await search_all(query_list, api_key)
+    if not results and errors:
+        raise RuntimeError(errors[0])
+    return comp_report(query_list[0], results, expected_names=expected_names)

@@ -1,0 +1,1204 @@
+from __future__ import annotations
+
+import json
+import re
+import threading
+from pathlib import Path
+from typing import Literal
+
+from anteroom.config import user_data_root
+from anteroom.services.ai_key_catalog import KEY_PROVIDER_IDS, key_provider
+
+_lock = threading.Lock()
+SETUP_GUIDE_DISMISSED_KEY = "setup_guide_dismissed"
+LISTING_PROVIDER_KEY = "listing_provider"
+PHOTO_PROVIDER_KEY = "photo_provider"
+UI_PREFS_KEY = "ui"
+RECENT_LABELS_KEY = "recent_vendoo_labels"
+SETTLED_SHELF_KEY = "settled_shelf_expanded"
+HIDDEN_LABELS_KEY = "hidden_vendoo_labels"
+THEME_KEY = "theme"
+LISTING_NAMES_KEY = "listing_names"
+MODEL_FAVORITES_KEY = "model_favorites"
+STALE_DAYS_KEY = "stale_listing_days"
+LABEL_COLORS_KEY = "label_colors"
+# Vendoo lets sellers pick 15 to 120 days; 60 was Anteroom's fixed threshold.
+STALE_DAYS_MIN, STALE_DAYS_MAX, DEFAULT_STALE_DAYS = 15, 120, 60
+LABEL_COLORS = ("gray", "red", "orange", "yellow", "green", "teal", "blue", "purple", "pink")
+MAX_LABEL_COLORS = 200
+MAX_MODEL_FAVORITES = 100
+MAX_MODEL_SLUG_LENGTH = 200
+LISTING_NAME_CHOICES = frozenset({"title", "sku"})
+MAX_RECENT_LABELS = 12
+MAX_HIDDEN_LABELS = 200
+SIGN_IN_PROVIDER_CHOICES = ("chatgpt", "claude", "mimo", "cursor")
+LISTING_PROVIDER_CHOICES = frozenset({*SIGN_IN_PROVIDER_CHOICES, *KEY_PROVIDER_IDS})
+LISTING_FALLBACK_CHOICES = frozenset({*LISTING_PROVIDER_CHOICES, "none"})
+# "same" reads photos with whichever provider writes the listing.
+PHOTO_PROVIDER_CHOICES = frozenset({"same", *LISTING_PROVIDER_CHOICES})
+_PROVIDER_NAMES = ", ".join(f'"{choice}"' for choice in (*SIGN_IN_PROVIDER_CHOICES, *KEY_PROVIDER_IDS))
+THEME_CHOICES = frozenset({"dark", "light", "system"})
+DEFAULT_LISTING_PROVIDER = "chatgpt"
+DEFAULT_LISTING_FALLBACK = "mimo"
+CURSOR_MODELS_KEY = "cursor_models"
+CLAUDE_MODELS_KEY = "claude_models"
+KEY_PROVIDER_MODELS_KEY = "key_provider_models"
+DEFAULT_CLAUDE_MODEL = "sonnet"
+DEFAULT_CURSOR_MODEL = "composer-2.5"
+AUTO_CURSOR_MODEL = "auto"
+DEFAULT_SETTLED_SHELF_EXPANDED = True
+PACKAGE_DIMENSIONS_KEY = "package_dimensions_in"
+SHIPS_FROM_ZIP_KEY = "ships_from_zip"
+MERCARI_SHIPPING_LABEL_KEY = "mercari_shipping_label"
+LISTING_FIELD_DEFAULTS_KEY = "listing_field_defaults"
+EBAY_INVENTORY_LOCATION_KEY = "ebay_inventory_location"
+MAX_SHIPPING_CLASS_ID = 40
+MAX_SHIPPING_LABEL = 120
+MAX_LISTING_FIELD_DEFAULT = 120
+# Per-field answers the seller wants every listing to start with. Mercari ZIP
+# and shipping label keep their own settings so one value is never stored twice;
+# the other answers live under LISTING_FIELD_DEFAULTS_KEY.
+MERCARI_SHOEBOX_PATH = "mercari_specifics.package.fitsShoebox"
+LISTING_FIELD_DEFAULTS = frozenset({
+    "mercari_specifics.shipsFrom",
+    "mercari_specifics.shippingClassId",
+    MERCARI_SHOEBOX_PATH,
+    "etsy_specifics.whoMade",
+    "etsy_specifics.whatIsIt",
+})
+# Stored value → the label the form shows for it. Mercari's shoebox radio
+# stores "yes" or "no" under the labels "Yes" and "No"; Etsy stores its labels.
+_STORED_FIELD_DEFAULT_CHOICES: dict[str, dict[str, str]] = {
+    MERCARI_SHOEBOX_PATH: {"yes": "Yes", "no": "No"},
+    "etsy_specifics.whoMade": {label: label for label in (
+        "Another company or person",
+        "A member of my shop",
+        "I did",
+    )},
+    "etsy_specifics.whatIsIt": {label: label for label in (
+        "A finished product",
+        "A supply or tool to make things",
+    )},
+}
+# Editor path → listing JSON keys that already answer the same Etsy question.
+_ETSY_FIELD_DEFAULT_KEYS = {
+    "etsy_specifics.whoMade": ("who_made", "whoMade", "whoMadeIt"),
+    "etsy_specifics.whatIsIt": ("what_is", "whatIs", "whatIsIt"),
+}
+DEFAULT_EBAY_INVENTORY_LOCATION = "70125"
+_INVENTORY_LOCATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,'#-]{0,79}$")
+DEFAULT_PACKAGE_DIMENSIONS = {"length": 13, "width": 10, "height": 3}
+DEFAULT_THEME: Literal["dark", "light", "system"] = "system"
+
+# Any id in LISTING_PROVIDER_CHOICES; key providers come from ai_key_catalog.
+ListingProviderChoice = str
+ListingFallbackChoice = str
+PhotoProviderChoice = str
+ThemeChoice = Literal["dark", "light", "system"]
+
+
+def _package_dimension(value: object, name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"Package {name} must be a whole number from 1 to 120 inches.")
+    try:
+        number = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Package {name} must be a whole number from 1 to 120 inches.") from exc
+    if number < 1 or number > 120 or str(value).strip() not in {str(number), f"{number}.0"}:
+        raise ValueError(f"Package {name} must be a whole number from 1 to 120 inches.")
+    return number
+
+
+def get_package_dimensions() -> dict[str, int]:
+    raw = read_settings().get(PACKAGE_DIMENSIONS_KEY)
+    if not isinstance(raw, dict):
+        return dict(DEFAULT_PACKAGE_DIMENSIONS)
+    try:
+        return {
+            name: _package_dimension(raw.get(name), name)
+            for name in ("length", "width", "height")
+        }
+    except ValueError:
+        return dict(DEFAULT_PACKAGE_DIMENSIONS)
+
+
+def set_package_dimensions(*, length: object, width: object, height: object) -> dict[str, int]:
+    dimensions = {
+        "length": _package_dimension(length, "length"),
+        "width": _package_dimension(width, "width"),
+        "height": _package_dimension(height, "height"),
+    }
+
+    def mutator(payload: dict) -> None:
+        payload[PACKAGE_DIMENSIONS_KEY] = dimensions
+
+    update_settings(mutator)
+    return dimensions
+
+
+def get_ships_from_zip() -> str:
+    """The five-digit ZIP the seller ships from on every marketplace; empty until they set it.
+
+    Sellers who saved a ZIP only for eBay, before the two settings became one,
+    get that ZIP here too.
+    """
+    settings = read_settings()
+    for raw in (settings.get(SHIPS_FROM_ZIP_KEY), settings.get(EBAY_INVENTORY_LOCATION_KEY)):
+        match = re.fullmatch(r"(\d{5})(?:-\d{4})?", str(raw or "").strip())
+        if match:
+            return match.group(1)
+    return ""
+
+
+def set_ships_from_zip(value: object) -> str:
+    """Save the one ships-from ZIP: Mercari and Depop use it, and so does eBay's inventory location."""
+    text = str(value or "").strip()
+    if text and not re.fullmatch(r"\d{5}", text):
+        raise ValueError("A ZIP code is five digits.")
+
+    def mutator(payload: dict) -> None:
+        payload[SHIPS_FROM_ZIP_KEY] = text
+        payload[EBAY_INVENTORY_LOCATION_KEY] = text
+
+    update_settings(mutator)
+    return text
+
+
+def get_mercari_shipping_label() -> dict[str, str] | None:
+    """The Mercari label the seller wants every listing to start with, if any."""
+    raw = read_settings().get(MERCARI_SHIPPING_LABEL_KEY)
+    if not isinstance(raw, dict):
+        return None
+    class_id = str(raw.get("id") or "").strip()
+    label = " ".join(str(raw.get("label") or "").split())
+    if not class_id or not label:
+        return None
+    if len(class_id) > MAX_SHIPPING_CLASS_ID or len(label) > MAX_SHIPPING_LABEL:
+        return None
+    return {"id": class_id, "label": label}
+
+
+def set_mercari_shipping_label(*, class_id: object, label: object) -> dict[str, str]:
+    clean_id = str(class_id or "").strip()
+    clean_label = " ".join(str(label or "").split())
+    if not clean_id or len(clean_id) > MAX_SHIPPING_CLASS_ID:
+        raise ValueError("Choose a Mercari shipping label first.")
+    if not clean_label or len(clean_label) > MAX_SHIPPING_LABEL:
+        raise ValueError("The Mercari shipping label needs a name.")
+    saved = {"id": clean_id, "label": clean_label}
+
+    def mutator(payload: dict) -> None:
+        payload[MERCARI_SHIPPING_LABEL_KEY] = saved
+
+    update_settings(mutator)
+    return saved
+
+
+def clear_mercari_shipping_label() -> None:
+    def mutator(payload: dict) -> None:
+        payload.pop(MERCARI_SHIPPING_LABEL_KEY, None)
+
+    update_settings(mutator)
+
+
+def get_listing_field_defaults() -> dict[str, dict[str, str]]:
+    """Saved defaults for listing fields, keyed by the listing JSON path."""
+    defaults: dict[str, dict[str, str]] = {}
+    zip_code = get_ships_from_zip()
+    if zip_code:
+        defaults["mercari_specifics.shipsFrom"] = {"value": zip_code, "label": zip_code}
+    shipping_label = get_mercari_shipping_label()
+    if shipping_label:
+        defaults["mercari_specifics.shippingClassId"] = {
+            "value": shipping_label["id"],
+            "label": shipping_label["label"],
+        }
+    for path, saved in _stored_listing_field_defaults().items():
+        defaults[path] = saved
+    return defaults
+
+
+def _listing_field_default_key(path: object) -> str:
+    key = str(path or "").strip()
+    if key not in LISTING_FIELD_DEFAULTS:
+        raise ValueError("That field cannot be saved as a default.")
+    return key
+
+
+def _stored_choice(path: str, value: object) -> str | None:
+    """The stored value a saved or submitted answer means, or None when it is not a current choice.
+
+    Mercari's radio is saved as "yes", but a label ("Yes") is the same answer.
+    """
+    text = " ".join(str(value if value is not None else "").split())
+    choices = _STORED_FIELD_DEFAULT_CHOICES[path]
+    if text in choices:
+        return text
+    return next((stored for stored, label in choices.items()
+                 if text.casefold() in (stored.casefold(), label.casefold())), None) if text else None
+
+
+def _stored_listing_field_defaults() -> dict[str, dict[str, str]]:
+    raw = read_settings().get(LISTING_FIELD_DEFAULTS_KEY)
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict[str, str]] = {}
+    for path, choices in _STORED_FIELD_DEFAULT_CHOICES.items():
+        row = raw.get(path)
+        if not isinstance(row, dict):
+            continue
+        value = _stored_choice(path, row.get("value"))
+        if value is None:
+            continue
+        out[path] = {"value": value, "label": choices[value]}
+    return out
+
+
+def _set_stored_listing_field_default(path: str, value: object) -> None:
+    clean_value = _stored_choice(path, value)
+    if clean_value is None:
+        raise ValueError("Choose one of the current answers for that field.")
+    saved = {"value": clean_value, "label": _STORED_FIELD_DEFAULT_CHOICES[path][clean_value]}
+
+    def mutator(payload: dict) -> None:
+        held = payload.get(LISTING_FIELD_DEFAULTS_KEY)
+        rows = dict(held) if isinstance(held, dict) else {}
+        rows[path] = saved
+        payload[LISTING_FIELD_DEFAULTS_KEY] = rows
+
+    update_settings(mutator)
+
+
+def _clear_stored_listing_field_default(path: str) -> None:
+    def mutator(payload: dict) -> None:
+        held = payload.get(LISTING_FIELD_DEFAULTS_KEY)
+        if not isinstance(held, dict) or path not in held:
+            return
+        rows = dict(held)
+        rows.pop(path, None)
+        if rows:
+            payload[LISTING_FIELD_DEFAULTS_KEY] = rows
+        else:
+            payload.pop(LISTING_FIELD_DEFAULTS_KEY, None)
+
+    update_settings(mutator)
+
+
+def set_listing_field_default(path: object, value: object, label: object = None) -> dict[str, dict[str, str]]:
+    """Save one field's value as the default every listing starts with."""
+    key = _listing_field_default_key(path)
+    if key == "mercari_specifics.shipsFrom":
+        set_ships_from_zip(value)
+    elif key == "mercari_specifics.shippingClassId":
+        set_mercari_shipping_label(class_id=value, label=label)
+    else:
+        _set_stored_listing_field_default(key, value)
+    return get_listing_field_defaults()
+
+
+def clear_listing_field_default(path: object) -> dict[str, dict[str, str]]:
+    """Stop starting new listings with one saved field value."""
+    key = _listing_field_default_key(path)
+    if key == "mercari_specifics.shipsFrom":
+        set_ships_from_zip("")
+    elif key == "mercari_specifics.shippingClassId":
+        clear_mercari_shipping_label()
+    else:
+        _clear_stored_listing_field_default(key)
+    return get_listing_field_defaults()
+
+
+def apply_listing_field_defaults(listing: dict) -> bool:
+    """Fill empty Etsy who/what/type answers from the seller's saved defaults."""
+    if not isinstance(listing, dict):
+        return False
+    defaults = _stored_listing_field_defaults()
+    if not any(path in defaults for path in _ETSY_FIELD_DEFAULT_KEYS):
+        return False
+    specifics = listing.get("etsy_specifics")
+    specifics = dict(specifics) if isinstance(specifics, dict) else {}
+    changed = False
+    for path, aliases in _ETSY_FIELD_DEFAULT_KEYS.items():
+        saved = defaults.get(path)
+        if not saved:
+            continue
+        if any(str(specifics.get(alias) or "").strip() for alias in aliases):
+            continue
+        specifics[aliases[0]] = saved["label"]
+        changed = True
+    if changed:
+        listing["etsy_specifics"] = specifics
+    return changed
+
+
+def get_mercari_shoebox_default() -> str | None:
+    """The saved answer to Mercari's "Will your item fit in a shoebox?", "yes" or "no"."""
+    saved = _stored_listing_field_defaults().get(MERCARI_SHOEBOX_PATH)
+    return saved["value"] if saved else None
+
+
+def apply_mercari_shoebox_default(listing: dict) -> bool:
+    """Answer an unanswered shoebox question from the saved default. Any answer the listing holds wins."""
+    answer = get_mercari_shoebox_default()
+    if answer is None or not isinstance(listing, dict):
+        return False
+    specifics = listing.get("mercari_specifics")
+    specifics = specifics if isinstance(specifics, dict) else {}
+    package = specifics.get("package")
+    package = package if isinstance(package, dict) else {}
+    # "No" is an answer as much as "Yes" is, in any case (#1303). Anything else
+    # (missing, blank, a stray boolean) reads as unanswered on the form, in
+    # preflight and in the extension, so it takes the default.
+    if str(package.get("fitsShoebox") or "").strip().casefold() in {"yes", "no"}:
+        return False
+    package["fitsShoebox"] = answer
+    specifics["package"] = package
+    listing["mercari_specifics"] = specifics
+    return True
+
+
+def normalize_ebay_inventory_location(value: object) -> str:
+    """ZIP or place name eBay stores as the ship-from location."""
+    text = " ".join(str(value or "").split())
+    if not text:
+        raise ValueError("Enter a ZIP code or place name for the eBay inventory location.")
+    if not _INVENTORY_LOCATION_RE.fullmatch(text):
+        raise ValueError("Inventory location must be a ZIP code or place name, up to 80 characters.")
+    return text
+
+
+def get_ebay_inventory_location() -> str:
+    """Where eBay listings ship from: the ships-from ZIP, else a place name saved before
+    the eBay setting moved into it. Empty until one is saved."""
+    zip_code = get_ships_from_zip()
+    if zip_code:
+        return zip_code
+    raw = read_settings().get(EBAY_INVENTORY_LOCATION_KEY)
+    if raw is None or not str(raw).strip():
+        return ""
+    try:
+        return normalize_ebay_inventory_location(raw)
+    except ValueError:
+        return ""
+
+
+def listing_inventory_location(listing: dict | None) -> str:
+    """Ship-from location for one listing: its own ZIP, else the saved eBay setting."""
+    if isinstance(listing, dict):
+        for key in ("zipCode", "zip_code"):
+            text = " ".join(str(listing.get(key) or "").split())
+            if not text:
+                continue
+            try:
+                return normalize_ebay_inventory_location(text)
+            except ValueError:
+                return text[:80]
+        ebay = listing.get("ebay_specifics")
+        shipping = ebay.get("shipping") if isinstance(ebay, dict) else None
+        if isinstance(shipping, dict):
+            text = " ".join(str(shipping.get("location") or "").split())
+            if text:
+                try:
+                    return normalize_ebay_inventory_location(text)
+                except ValueError:
+                    return text[:80]
+    return get_ebay_inventory_location()
+
+
+def package_dimensions_string() -> str:
+    dimensions = get_package_dimensions()
+    return "x".join(str(dimensions[name]) for name in ("length", "width", "height"))
+
+
+def settings_path() -> Path:
+    return user_data_root() / "settings.json"
+
+
+def _read_unlocked() -> dict:
+    path = settings_path()
+    try:
+        payload = json.loads(path.read_text())
+    except FileNotFoundError:
+        return {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _write_unlocked(payload: dict) -> None:
+    path = settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    tmp.replace(path)
+
+
+def read_settings() -> dict:
+    from anteroom.services.service_context import current
+    context = current()
+    if context is not None:
+        return context.settings.read()
+    with _lock:
+        return _read_unlocked()
+
+
+def update_settings(mutator) -> dict:
+    from anteroom.services.service_context import current
+    context = current()
+    if context is not None:
+        return context.settings.update(mutator)
+    with _lock:
+        payload = _read_unlocked()
+        mutator(payload)
+        _write_unlocked(payload)
+        return payload
+
+
+ETSY_LISTING_DEFAULTS_KEY = "etsy_listing_defaults"
+ETSY_LISTING_DEFAULT_FIELDS = ("shipping_profile_id", "readiness_state_id", "return_policy_id")
+EBAY_LISTING_DEFAULTS_KEY = "ebay_listing_defaults"
+EBAY_LISTING_DEFAULT_FIELDS = ("fulfillment_policy_id", "payment_policy_id", "return_policy_id", "merchant_location_key")
+
+
+def _listing_defaults(key: str, names: tuple[str, ...], pattern: str) -> dict[str, str]:
+    value = read_settings().get(key)
+    value = value if isinstance(value, dict) else {}
+    return {name: value[name] for name in names if isinstance(value.get(name), str) and re.fullmatch(pattern, value[name])}
+
+
+def _set_listing_defaults(key: str, values: dict[str, str]) -> None:
+    def mutator(payload: dict) -> None:
+        payload[key] = {name: value for name, value in values.items() if value}
+
+    update_settings(mutator)
+
+
+def get_etsy_listing_defaults() -> dict[str, str]:
+    """The shop's shipping, processing and return profiles every new Etsy listing uses."""
+    return _listing_defaults(ETSY_LISTING_DEFAULTS_KEY, ETSY_LISTING_DEFAULT_FIELDS, r"\d+")
+
+
+def set_etsy_listing_defaults(*, shipping_profile_id: str, readiness_state_id: str, return_policy_id: str) -> dict[str, str]:
+    _set_listing_defaults(ETSY_LISTING_DEFAULTS_KEY, {"shipping_profile_id": shipping_profile_id,
+                                                     "readiness_state_id": readiness_state_id, "return_policy_id": return_policy_id})
+    return get_etsy_listing_defaults()
+
+
+def get_ebay_listing_defaults() -> dict[str, str]:
+    """The business policies and inventory location new eBay listings use when the account has several."""
+    return _listing_defaults(EBAY_LISTING_DEFAULTS_KEY, EBAY_LISTING_DEFAULT_FIELDS, r"[A-Za-z0-9_.:-]{1,64}")
+
+
+def set_ebay_listing_defaults(values: dict[str, str]) -> dict[str, str]:
+    _set_listing_defaults(EBAY_LISTING_DEFAULTS_KEY, {name: values.get(name) or "" for name in EBAY_LISTING_DEFAULT_FIELDS})
+    return get_ebay_listing_defaults()
+
+
+def setup_guide_dismissed() -> bool:
+    return bool(read_settings().get(SETUP_GUIDE_DISMISSED_KEY))
+
+
+def dismiss_setup_guide() -> dict:
+    def mutator(payload: dict) -> None:
+        payload[SETUP_GUIDE_DISMISSED_KEY] = True
+
+    update_settings(mutator)
+    return {"ok": True, "dismissed": True}
+
+
+def normalize_listing_provider(value: object) -> ListingProviderChoice:
+    if isinstance(value, str):
+        choice = value.strip().lower()
+        if choice in LISTING_PROVIDER_CHOICES:
+            return choice  # type: ignore[return-value]
+    return DEFAULT_LISTING_PROVIDER
+
+
+def normalize_listing_fallback(value: object, *, primary: ListingProviderChoice) -> ListingFallbackChoice:
+    if isinstance(value, str):
+        choice = value.strip().lower()
+        if choice == "none":
+            return "none"
+        if choice in LISTING_PROVIDER_CHOICES and choice != primary:
+            return choice  # type: ignore[return-value]
+    return _other_provider(primary)
+
+
+def _other_provider(primary: ListingProviderChoice) -> ListingProviderChoice:
+    if primary == "chatgpt":
+        return "mimo"
+    if primary == "mimo":
+        return "chatgpt"
+    return "chatgpt"
+
+
+def get_listing_provider_order() -> tuple[ListingProviderChoice, ListingFallbackChoice]:
+    raw = read_settings().get(LISTING_PROVIDER_KEY)
+    if isinstance(raw, dict):
+        primary = normalize_listing_provider(raw.get("primary"))
+        fallback = normalize_listing_fallback(raw.get("fallback"), primary=primary)
+        return primary, fallback
+    # Legacy: listing_provider was a single preferred string.
+    primary = normalize_listing_provider(raw)
+    return primary, _other_provider(primary)
+
+
+def set_listing_provider_order(
+    primary: object,
+    fallback: object | None = None,
+) -> dict[str, str]:
+    if not isinstance(primary, str) or primary.strip().lower() not in LISTING_PROVIDER_CHOICES:
+        raise ValueError(f"Primary listing provider must be one of {_PROVIDER_NAMES}.")
+    primary_choice = normalize_listing_provider(primary)
+
+    if fallback is None:
+        fallback_choice: ListingFallbackChoice = _other_provider(primary_choice)
+    elif isinstance(fallback, str):
+        cleaned = fallback.strip().lower()
+        if cleaned == "none":
+            fallback_choice = "none"
+        elif cleaned in LISTING_PROVIDER_CHOICES:
+            if cleaned == primary_choice:
+                raise ValueError('Fallback must differ from primary, or be "none".')
+            fallback_choice = cleaned  # type: ignore[assignment]
+        else:
+            raise ValueError(f'Fallback must be one of {_PROVIDER_NAMES}, or "none".')
+    else:
+        raise ValueError(f'Fallback must be one of {_PROVIDER_NAMES}, or "none".')
+
+    def mutator(payload: dict) -> None:
+        payload[LISTING_PROVIDER_KEY] = {
+            "primary": primary_choice,
+            "fallback": fallback_choice,
+        }
+
+    update_settings(mutator)
+    return {"primary": primary_choice, "fallback": fallback_choice}
+
+
+def get_photo_provider_choice() -> PhotoProviderChoice:
+    value = read_settings().get(PHOTO_PROVIDER_KEY)
+    if isinstance(value, str) and value.strip().lower() in PHOTO_PROVIDER_CHOICES:
+        return value.strip().lower()  # type: ignore[return-value]
+    return "same"
+
+
+def set_photo_provider_choice(choice: object) -> PhotoProviderChoice:
+    if not isinstance(choice, str) or choice.strip().lower() not in PHOTO_PROVIDER_CHOICES:
+        raise ValueError(f'Photo analysis provider must be "same" or one of {_PROVIDER_NAMES}.')
+    cleaned = choice.strip().lower()
+
+    def mutator(payload: dict) -> None:
+        payload[PHOTO_PROVIDER_KEY] = cleaned
+
+    update_settings(mutator)
+    return cleaned  # type: ignore[return-value]
+
+
+def _clean_cursor_model_slug(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    slug = value.strip()
+    if not slug:
+        return None
+    # Keep Auto and dotted Composer IDs as the SDK expects them.
+    return slug
+
+
+def get_cursor_models() -> dict[str, str]:
+    raw = read_settings().get(CURSOR_MODELS_KEY)
+    models: dict[str, str] = {}
+    if isinstance(raw, dict):
+        vision = _clean_cursor_model_slug(raw.get("vision_model"))
+        listing = _clean_cursor_model_slug(raw.get("listing_model"))
+        if vision:
+            models["vision_model"] = vision
+        if listing:
+            models["listing_model"] = listing
+    return models
+
+
+def set_cursor_models(
+    *,
+    vision_model: str | None = None,
+    listing_model: str | None = None,
+) -> dict[str, str]:
+    current = get_cursor_models()
+    vision = _clean_cursor_model_slug(vision_model)
+    listing = _clean_cursor_model_slug(listing_model)
+    if vision:
+        current["vision_model"] = vision
+    if listing:
+        current["listing_model"] = listing
+    if not current:
+        raise ValueError("Choose a vision model or listing model.")
+
+    def mutator(payload: dict) -> None:
+        saved = payload.get(CURSOR_MODELS_KEY)
+        reasoning = saved.get("reasoning") if isinstance(saved, dict) else None
+        payload[CURSOR_MODELS_KEY] = {**current, "reasoning": reasoning} if reasoning else current
+
+    update_settings(mutator)
+    return current
+
+
+def get_cursor_reasoning() -> dict[str, str] | None:
+    """The saved reasoning choice: ``{"model", "param", "value"}``.
+
+    Cursor models each name their own reasoning parameter, so the choice is
+    kept with the model it was made for and only applies to that model.
+    """
+    raw = read_settings().get(CURSOR_MODELS_KEY)
+    reasoning = raw.get("reasoning") if isinstance(raw, dict) else None
+    if not isinstance(reasoning, dict):
+        return None
+    cleaned = {key: reasoning.get(key) for key in ("model", "param", "value")}
+    if not all(isinstance(item, str) and item.strip() for item in cleaned.values()):
+        return None
+    return {key: str(item).strip() for key, item in cleaned.items()}
+
+
+def set_cursor_reasoning(*, model: str, param: str, value: str) -> dict[str, str]:
+    reasoning = {"model": model.strip(), "param": param.strip(), "value": value.strip()}
+    if not all(reasoning.values()):
+        raise ValueError("Choose a reasoning level.")
+
+    def mutator(payload: dict) -> None:
+        saved = payload.get(CURSOR_MODELS_KEY)
+        payload[CURSOR_MODELS_KEY] = {**(saved if isinstance(saved, dict) else {}), "reasoning": reasoning}
+
+    update_settings(mutator)
+    return reasoning
+
+
+def resolved_cursor_models() -> tuple[str, str]:
+    prefs = get_cursor_models()
+    vision = prefs.get("vision_model") or DEFAULT_CURSOR_MODEL
+    listing = prefs.get("listing_model") or DEFAULT_CURSOR_MODEL
+    return vision, listing
+
+
+def get_claude_models() -> dict[str, str]:
+    """Saved Claude choices: ``vision_model``, ``listing_model`` and ``effort``."""
+    raw = read_settings().get(CLAUDE_MODELS_KEY)
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        key: value.strip()
+        for key in ("vision_model", "listing_model", "effort")
+        if isinstance((value := raw.get(key)), str) and value.strip()
+    }
+
+
+def set_claude_models(
+    *,
+    vision_model: str | None = None,
+    listing_model: str | None = None,
+    effort: str | None = None,
+) -> dict[str, str]:
+    choices = {"vision_model": vision_model, "listing_model": listing_model, "effort": effort}
+    changes = {key: value.strip() for key, value in choices.items() if value and value.strip()}
+    if not changes:
+        raise ValueError("Choose a photo model, listing model, or effort level.")
+    current = {**get_claude_models(), **changes}
+    # "default" hands effort back to Claude Code's own default for the model.
+    if current.get("effort") == "default":
+        del current["effort"]
+
+    def mutator(payload: dict) -> None:
+        payload[CLAUDE_MODELS_KEY] = current
+
+    update_settings(mutator)
+    return current
+
+
+def resolved_claude_models() -> tuple[str, str]:
+    prefs = get_claude_models()
+    return (
+        prefs.get("vision_model") or DEFAULT_CLAUDE_MODEL,
+        prefs.get("listing_model") or DEFAULT_CLAUDE_MODEL,
+    )
+
+
+def _key_provider_entry(provider_id: str) -> dict:
+    raw = read_settings().get(KEY_PROVIDER_MODELS_KEY)
+    entry = raw.get(provider_id) if isinstance(raw, dict) else None
+    return entry if isinstance(entry, dict) else {}
+
+
+def get_key_provider_models(provider_id: str) -> dict[str, str]:
+    """Saved models for one API-key provider: ``vision_model`` and ``listing_model``."""
+    entry = _key_provider_entry(provider_id)
+    return {
+        key: value.strip()
+        for key in ("vision_model", "listing_model")
+        if isinstance((value := entry.get(key)), str) and value.strip()
+    }
+
+
+def get_key_provider_reasoning(provider_id: str) -> dict[str, str] | None:
+    """The saved reasoning choice: ``{"model", "value"}``, kept with its model."""
+    reasoning = _key_provider_entry(provider_id).get("reasoning")
+    if not isinstance(reasoning, dict):
+        return None
+    cleaned = {key: reasoning.get(key) for key in ("model", "value")}
+    if not all(isinstance(item, str) and item.strip() for item in cleaned.values()):
+        return None
+    return {key: str(item).strip() for key, item in cleaned.items()}
+
+
+def set_key_provider_reasoning(provider_id: str, *, model: str, value: str) -> dict[str, str]:
+    key_provider(provider_id)
+    reasoning = {"model": model.strip(), "value": value.strip()}
+    if not all(reasoning.values()):
+        raise ValueError("Choose a reasoning level.")
+
+    def mutator(payload: dict) -> None:
+        models = payload.get(KEY_PROVIDER_MODELS_KEY)
+        models = models if isinstance(models, dict) else {}
+        entry = models.get(provider_id)
+        entry = dict(entry) if isinstance(entry, dict) else {}
+        entry["reasoning"] = reasoning
+        models[provider_id] = entry
+        payload[KEY_PROVIDER_MODELS_KEY] = models
+
+    update_settings(mutator)
+    return reasoning
+
+
+def clear_key_provider_reasoning(provider_id: str) -> None:
+    key_provider(provider_id)
+
+    def mutator(payload: dict) -> None:
+        models = payload.get(KEY_PROVIDER_MODELS_KEY)
+        if not isinstance(models, dict) or not isinstance(models.get(provider_id), dict):
+            return
+        entry = dict(models[provider_id])
+        entry.pop("reasoning", None)
+        models[provider_id] = entry
+        payload[KEY_PROVIDER_MODELS_KEY] = models
+
+    update_settings(mutator)
+
+
+def set_key_provider_models(
+    provider_id: str,
+    *,
+    vision_model: str | None = None,
+    listing_model: str | None = None,
+) -> dict[str, str]:
+    key_provider(provider_id)
+    choices = {"vision_model": vision_model, "listing_model": listing_model}
+    changes = {key: value.strip() for key, value in choices.items() if value and value.strip()}
+    if not changes:
+        raise ValueError("Choose a photo model or a listing model.")
+    for value in changes.values():
+        if len(value) > MAX_MODEL_SLUG_LENGTH:
+            raise ValueError("Model name is too long.")
+    current = {**get_key_provider_models(provider_id), **changes}
+    reasoning = _key_provider_entry(provider_id).get("reasoning")
+
+    def mutator(payload: dict) -> None:
+        models = payload.get(KEY_PROVIDER_MODELS_KEY)
+        models = models if isinstance(models, dict) else {}
+        models[provider_id] = {**current, **({"reasoning": reasoning} if reasoning else {})}
+        payload[KEY_PROVIDER_MODELS_KEY] = models
+
+    update_settings(mutator)
+    return current
+
+
+def resolved_key_provider_models(provider_id: str) -> tuple[str, str]:
+    spec = key_provider(provider_id)
+    prefs = get_key_provider_models(provider_id)
+    return (
+        prefs.get("vision_model") or spec.vision_model,
+        prefs.get("listing_model") or spec.listing_model,
+    )
+
+
+def resolved_key_provider_reasoning(provider_id: str) -> str | None:
+    """The saved effort for the current listing model, or None for its default."""
+    _, listing = resolved_key_provider_models(provider_id)
+    saved = get_key_provider_reasoning(provider_id)
+    if saved and saved["model"] == listing and saved["value"] != "default":
+        return saved["value"]
+    return None
+
+
+def _ui_prefs(settings: dict | None = None) -> dict:
+    payload = settings if settings is not None else read_settings()
+    raw = payload.get(UI_PREFS_KEY)
+    return raw if isinstance(raw, dict) else {}
+
+
+def _clean_recent_labels(value: object, limit: int = MAX_RECENT_LABELS) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    seen: set[str] = set()
+    labels: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        label = " ".join(item.split()).strip()
+        if not label:
+            continue
+        key = label.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        labels.append(label)
+        if len(labels) >= limit:
+            break
+    return labels
+
+
+def _clean_hidden_labels(value: object) -> list[str]:
+    return _clean_recent_labels(value, MAX_HIDDEN_LABELS)
+
+
+def _model_favorite(item: object) -> dict[str, str] | None:
+    if not isinstance(item, dict):
+        return None
+    provider = item.get("provider")
+    model = item.get("model")
+    if provider not in LISTING_PROVIDER_CHOICES or not isinstance(model, str):
+        return None
+    model = model.strip()
+    if not model or len(model) > MAX_MODEL_SLUG_LENGTH:
+        return None
+    return {"provider": provider, "model": model}
+
+
+def _clean_model_favorites(value: object, *, strict: bool = False) -> list[dict[str, str]]:
+    """The composer model picker's starred models, in the order they were starred."""
+    if not isinstance(value, list):
+        if strict:
+            raise ValueError("model_favorites must be a list")
+        return []
+    seen: set[tuple[str, str]] = set()
+    favorites: list[dict[str, str]] = []
+    for item in value:
+        favorite = _model_favorite(item)
+        if favorite is None:
+            if strict:
+                raise ValueError(
+                    "model_favorites entries need a provider (chatgpt, claude, cursor or mimo) "
+                    f"and a model of 1-{MAX_MODEL_SLUG_LENGTH} characters"
+                )
+            continue
+        key = (favorite["provider"], favorite["model"])
+        if key in seen:
+            continue
+        seen.add(key)
+        favorites.append(favorite)
+    return favorites[:MAX_MODEL_FAVORITES]
+
+
+def _clean_stale_days(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not STALE_DAYS_MIN <= value <= STALE_DAYS_MAX:
+        return DEFAULT_STALE_DAYS
+    return value
+
+
+def _clean_label_colors(value: object, *, strict: bool = False) -> dict[str, str]:
+    """Label → color name. A label is matched without regard to case."""
+    if not isinstance(value, dict):
+        if strict:
+            raise ValueError("label_colors must map labels to colors")
+        return {}
+    colors: dict[str, str] = {}
+    seen: set[str] = set()
+    for raw, color in value.items():
+        label = " ".join(str(raw).split()).strip()
+        if not label or len(label) > 120 or color not in LABEL_COLORS:
+            if strict:
+                raise ValueError(f"Label colors must be one of: {', '.join(LABEL_COLORS)}")
+            continue
+        if label.casefold() in seen:
+            continue
+        seen.add(label.casefold())
+        colors[label] = color
+    if strict and len(colors) > MAX_LABEL_COLORS:
+        raise ValueError(f"At most {MAX_LABEL_COLORS} labels can have a color")
+    return dict(list(colors.items())[:MAX_LABEL_COLORS])
+
+
+def get_stale_listing_days() -> int:
+    """Days a listing can stay up unsold before Suggestions and Analytics call it stale."""
+    return _clean_stale_days(_ui_prefs().get(STALE_DAYS_KEY))
+
+
+def normalize_theme(value: object) -> ThemeChoice:
+    if isinstance(value, str):
+        choice = value.strip().lower()
+        if choice in THEME_CHOICES:
+            return choice  # type: ignore[return-value]
+    return DEFAULT_THEME
+
+
+def get_ui_prefs() -> dict:
+    ui = _ui_prefs()
+    settled = ui.get(SETTLED_SHELF_KEY)
+    names = ui.get(LISTING_NAMES_KEY)
+    return {
+        RECENT_LABELS_KEY: _clean_recent_labels(ui.get(RECENT_LABELS_KEY)),
+        SETTLED_SHELF_KEY: DEFAULT_SETTLED_SHELF_EXPANDED if not isinstance(settled, bool) else settled,
+        HIDDEN_LABELS_KEY: _clean_hidden_labels(ui.get(HIDDEN_LABELS_KEY)),
+        THEME_KEY: normalize_theme(ui.get(THEME_KEY)),
+        # The sidebar names each listing by its title, or by its SKU where it has one.
+        LISTING_NAMES_KEY: names if names in LISTING_NAME_CHOICES else "title",
+        "listing_mode": "vendoo" if ui.get("listing_mode") == "vendoo" else "direct",
+        MODEL_FAVORITES_KEY: _clean_model_favorites(ui.get(MODEL_FAVORITES_KEY)),
+        STALE_DAYS_KEY: _clean_stale_days(ui.get(STALE_DAYS_KEY)),
+        LABEL_COLORS_KEY: _clean_label_colors(ui.get(LABEL_COLORS_KEY)),
+    }
+
+
+def set_ui_prefs(
+    *,
+    recent_vendoo_labels: object | None = None,
+    settled_shelf_expanded: object | None = None,
+    theme: object | None = None,
+    listing_names: object | None = None,
+    model_favorites: object | None = None,
+    stale_listing_days: object | None = None,
+    label_colors: object | None = None,
+    listing_mode: object | None = None,
+) -> dict:
+    if (
+        recent_vendoo_labels is None
+        and settled_shelf_expanded is None
+        and theme is None
+        and listing_names is None
+        and model_favorites is None
+        and stale_listing_days is None
+        and label_colors is None
+        and listing_mode is None
+    ):
+        return get_ui_prefs()
+    favorites = _clean_model_favorites(model_favorites, strict=True) if model_favorites is not None else None
+    colors = _clean_label_colors(label_colors, strict=True) if label_colors is not None else None
+    if stale_listing_days is not None and _clean_stale_days(stale_listing_days) != stale_listing_days:
+        raise ValueError(f"stale_listing_days must be a whole number from {STALE_DAYS_MIN} to {STALE_DAYS_MAX}")
+
+    def mutator(payload: dict) -> None:
+        ui = dict(_ui_prefs(payload))
+        if listing_mode is not None:
+            if listing_mode not in {"direct", "vendoo"}:
+                raise ValueError("listing_mode must be direct or vendoo")
+            ui["listing_mode"] = listing_mode
+        if recent_vendoo_labels is not None:
+            ui[RECENT_LABELS_KEY] = _clean_recent_labels(recent_vendoo_labels)
+        if settled_shelf_expanded is not None:
+            if not isinstance(settled_shelf_expanded, bool):
+                raise ValueError("settled_shelf_expanded must be a boolean")
+            ui[SETTLED_SHELF_KEY] = settled_shelf_expanded
+        if theme is not None:
+            if not isinstance(theme, str) or theme.strip().lower() not in THEME_CHOICES:
+                raise ValueError("theme must be dark, light, or system")
+            ui[THEME_KEY] = theme.strip().lower()
+        if listing_names is not None:
+            if listing_names not in LISTING_NAME_CHOICES:
+                raise ValueError("listing_names must be title or sku")
+            ui[LISTING_NAMES_KEY] = listing_names
+        if favorites is not None:
+            ui[MODEL_FAVORITES_KEY] = favorites
+        if stale_listing_days is not None:
+            ui[STALE_DAYS_KEY] = stale_listing_days
+        if colors is not None:
+            ui[LABEL_COLORS_KEY] = colors
+        payload[UI_PREFS_KEY] = ui
+
+    update_settings(mutator)
+    return get_ui_prefs()
+
+
+def remember_vendoo_labels(raw: object, restore: object = None) -> list[str]:
+    """Push labels to the front of the history.
+
+    Labels the seller removed from the history stay hidden unless they are in
+    ``restore`` (labels newly typed into a listing), which un-hides them.
+    """
+    if isinstance(raw, str):
+        candidates: object = [part.strip() for part in raw.split(",")]
+    elif isinstance(raw, list):
+        candidates = raw
+    else:
+        candidates = []
+    incoming = _clean_recent_labels(candidates)
+    restored = {label.casefold() for label in _clean_hidden_labels(restore)}
+    if not incoming and not restored:
+        return get_ui_prefs()[RECENT_LABELS_KEY]
+
+    def mutator(payload: dict) -> None:
+        ui = dict(_ui_prefs(payload))
+        hidden = [
+            label for label in _clean_hidden_labels(ui.get(HIDDEN_LABELS_KEY))
+            if label.casefold() not in restored
+        ]
+        hidden_keys = {label.casefold() for label in hidden}
+        fresh = [label for label in incoming if label.casefold() not in hidden_keys]
+        existing = _clean_recent_labels(ui.get(RECENT_LABELS_KEY))
+        remembered = {label.casefold() for label in fresh}
+        merged = [
+            *fresh,
+            *[label for label in existing if label.casefold() not in remembered],
+        ]
+        ui[RECENT_LABELS_KEY] = merged[:MAX_RECENT_LABELS]
+        ui[HIDDEN_LABELS_KEY] = hidden
+        payload[UI_PREFS_KEY] = ui
+
+    update_settings(mutator)
+    return get_ui_prefs()[RECENT_LABELS_KEY]
+
+
+def forget_vendoo_label(raw: object) -> dict:
+    """Drop a label from the history and keep it out of future suggestions."""
+    cleaned = _clean_recent_labels([raw]) if isinstance(raw, str) else []
+    if not cleaned:
+        raise ValueError("forget_label must be a non-empty string")
+    label = cleaned[0]
+    key = label.casefold()
+
+    def mutator(payload: dict) -> None:
+        ui = dict(_ui_prefs(payload))
+        ui[RECENT_LABELS_KEY] = [
+            item for item in _clean_recent_labels(ui.get(RECENT_LABELS_KEY))
+            if item.casefold() != key
+        ]
+        hidden = [
+            item for item in _clean_hidden_labels(ui.get(HIDDEN_LABELS_KEY))
+            if item.casefold() != key
+        ]
+        ui[HIDDEN_LABELS_KEY] = [label, *hidden][:MAX_HIDDEN_LABELS]
+        payload[UI_PREFS_KEY] = ui
+
+    update_settings(mutator)
+    return get_ui_prefs()
+
+
+LISTING_FORMULAS_KEY = "listing_formulas"
+MAX_FORMULA_CHARS = 4000
+
+
+def get_listing_formulas() -> dict[str, str]:
+    raw = read_settings().get(LISTING_FORMULAS_KEY)
+    if not isinstance(raw, dict):
+        return {}
+    cleaned: dict[str, str] = {}
+    for key in ("title", "description"):
+        value = raw.get(key)
+        if isinstance(value, str) and value.strip():
+            cleaned[key] = value.strip()
+    return cleaned
+
+
+def set_listing_formulas(*, title: object = None, description: object = None) -> dict[str, str]:
+    """Set or clear a custom title/description formula. Pass "" to reset that formula to the default."""
+
+    def clean(value: object) -> str | None:
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            raise ValueError("Formula must be text")
+        text = value.strip()
+        if len(text) > MAX_FORMULA_CHARS:
+            raise ValueError(f"Formula must be {MAX_FORMULA_CHARS} characters or fewer")
+        return text
+
+    title_clean = clean(title)
+    description_clean = clean(description)
+
+    def mutator(payload: dict) -> None:
+        raw = payload.get(LISTING_FORMULAS_KEY)
+        current = dict(raw) if isinstance(raw, dict) else {}
+        if title_clean is not None:
+            if title_clean:
+                current["title"] = title_clean
+            else:
+                current.pop("title", None)
+        if description_clean is not None:
+            if description_clean:
+                current["description"] = description_clean
+            else:
+                current.pop("description", None)
+        if current:
+            payload[LISTING_FORMULAS_KEY] = current
+        else:
+            payload.pop(LISTING_FORMULAS_KEY, None)
+
+    update_settings(mutator)
+    return get_listing_formulas()
+
+
+SALE_DETECTION_KEY = "sale_detection"
+SALE_DETECTION_MARKETS = ("ebay", "etsy", "poshmark", "mercari", "depop")
+
+
+def get_sale_detection() -> dict[str, bool]:
+    """Whether each marketplace should record a sale. Missing means on."""
+    raw = read_settings().get(SALE_DETECTION_KEY)
+    stored = raw if isinstance(raw, dict) else {}
+    return {market: stored.get(market) is not False for market in SALE_DETECTION_MARKETS}
+
+
+def sale_detection_enabled(marketplace: str) -> bool:
+    return get_sale_detection().get(marketplace, True)
+
+
+def set_sale_detection(marketplace: str, enabled: bool) -> dict[str, bool]:
+    if marketplace not in SALE_DETECTION_MARKETS:
+        raise ValueError("Unknown marketplace")
+
+    def mutator(payload: dict) -> None:
+        current = payload.get(SALE_DETECTION_KEY)
+        stored = dict(current) if isinstance(current, dict) else {}
+        stored[marketplace] = bool(enabled)
+        payload[SALE_DETECTION_KEY] = stored
+
+    update_settings(mutator)
+    return get_sale_detection()
+
+
+AUTODELIST_KEY = "sale_autodelist"
+
+
+def autodelist_enabled() -> bool:
+    """The seller asked Anteroom to delist the other marketplaces after a sale. Off unless saved."""
+    return read_settings().get(AUTODELIST_KEY) is True
+
+
+def set_autodelist(enabled: bool) -> bool:
+    def mutator(payload: dict) -> None:
+        payload[AUTODELIST_KEY] = bool(enabled)
+
+    update_settings(mutator)
+    return autodelist_enabled()
+
+
+BUSINESS_NOTE_KEY = "business_note"
+MAX_BUSINESS_NOTE_CHARS = 4000
+
+
+def get_business_note() -> str:
+    """What the seller told the business assistant about how they run the shop."""
+    raw = read_settings().get(BUSINESS_NOTE_KEY)
+    return raw.strip() if isinstance(raw, str) else ""
+
+
+def set_business_note(note: object) -> str:
+    if not isinstance(note, str):
+        raise ValueError("Note must be text")
+    text = note.strip()
+    if len(text) > MAX_BUSINESS_NOTE_CHARS:
+        raise ValueError(f"Note must be {MAX_BUSINESS_NOTE_CHARS} characters or fewer")
+
+    def mutator(payload: dict) -> None:
+        if text:
+            payload[BUSINESS_NOTE_KEY] = text
+        else:
+            payload.pop(BUSINESS_NOTE_KEY, None)
+
+    update_settings(mutator)
+    return text

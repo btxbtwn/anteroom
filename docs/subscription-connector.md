@@ -34,7 +34,7 @@ files. Automatic generation still stops at a saved draft.
 
 ## Build and verify
 
-Run `vendoo-studio/scripts/package-connector.sh` with the same persistent
+Run `anteroom/scripts/package-connector.sh` with the same persistent
 `MACOS_SIGNING_IDENTITY` used by the existing macOS release. It signs the
 connector inside-out with the hardened runtime and, when an App Store Connect
 API key is set (`NOTARY_API_KEY_PATH`, `NOTARY_API_KEY_ID`,
@@ -53,7 +53,7 @@ throwaway data, without reading credentials, accessing the network, or
 starting a listing database. The probe can also be run directly:
 
 ```sh
-.venv/bin/python -m vendoo_studio.connector --smoke
+.venv/bin/python -m anteroom.connector --smoke
 "release/Anteroom Connector.app/Contents/MacOS/Anteroom Connector" --smoke
 ```
 

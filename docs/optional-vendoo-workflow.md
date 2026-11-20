@@ -44,7 +44,7 @@ the old unbounded item polling or full network-payload logging.
   gates, active-job switching, upload/create/readback order and reserved-ID recovery.
 - `server/tests/test_hosted_vendoo_mode.py`: authenticated, account-scoped settings
   and inventory access through the actual hosted routes.
-- `vendoo-extension/tests/vendoo-api.test.js`: dormant transport while off,
+- `anteroom-extension/tests/vendoo-api.test.js`: dormant transport while off,
   credential handling, photo sequencing, account matching and write retries.
 - `e2e/optionalVendoo.e2e.ts`: Settings toggle, manual edits, draft review controls,
   reload and switching back on desktop and phone. Vendoo responses are intercepted;

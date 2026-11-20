@@ -1,0 +1,197 @@
+"""SKU, price, labels and listed marketplaces — what the sidebar filters on."""
+
+from __future__ import annotations
+
+import json
+import unittest
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from anteroom.services import inventory_facets
+from anteroom.services import listing_persistence
+from anteroom.database import Base
+from anteroom.models.fill_log import FillLogEntry  # noqa: F401
+from anteroom.models.marketplace_listing import MarketplaceListing  # noqa: F401
+from anteroom.models.registry import FieldRegistry  # noqa: F401
+from anteroom.repositories.queries import ConversationRepo, ListingRepo
+from anteroom.routes.conversations import _conv_response, _extras
+from anteroom.services.vendoo_import import split_vendoo_labels
+
+
+class ListingFacetsTest(unittest.TestCase):
+    def setUp(self):
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine)
+        self.db = sessionmaker(bind=engine)()
+        self.convs = ConversationRepo(self.db)
+        self.listings = ListingRepo(self.db)
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_facets_read_sku_and_price_from_the_current_revision(self):
+        conv = self.convs.create(title="Nike tee")
+        listing_persistence.save_revision(self.listings.db, conv.id, {"title": "Nike tee", "sku": "NIKE-TEE-M", "price": 24.5}, "test")
+        facets = inventory_facets.listing_facets(self.convs.db)
+        expected = {"sku": "NIKE-TEE-M", "price": 24.5, "etsy_eligible": False}
+        self.assertEqual(facets[conv.id], expected)
+        self.assertEqual(inventory_facets.listing_facet(self.convs.db, conv.id), expected)
+
+    def test_facets_are_empty_without_a_listing(self):
+        conv = self.convs.create(title="Bare draft")
+        self.assertNotIn(conv.id, inventory_facets.listing_facets(self.convs.db))
+        # Nothing known about the item: no reason to hide Etsy.
+        self.assertEqual(inventory_facets.listing_facet(self.convs.db, conv.id), {"sku": None, "price": None, "etsy_eligible": True})
+
+    def test_facets_read_etsy_eligibility_from_the_listing(self):
+        modern = self.convs.create(title="Modern tee")
+        listing_persistence.save_revision(self.listings.db, modern.id, {"title": "Tee", "etsy_specifics": {
+            "who_made": "Another company or person", "when_made": "2010 - 2019 (Recently)",
+        }}, "test")
+        vintage = self.convs.create(title="90s tee")
+        listing_persistence.save_revision(self.listings.db, vintage.id, {"title": "Tee", "etsy_specifics": {
+            "who_made": "someone_else", "when_made": "1990s",
+        }}, "test")
+        dated_by_ebay = self.convs.create(title="80s tee")
+        listing_persistence.save_revision(self.listings.db, dated_by_ebay.id, {
+            "title": "Tee",
+            "etsy_specifics": {"who_made": "Another company or person"},
+            "ebay_specifics": {"yearManufactured": "1985"},
+        }, "test")
+        facets = inventory_facets.listing_facets(self.convs.db)
+        self.assertFalse(facets[modern.id]["etsy_eligible"])
+        self.assertTrue(facets[vintage.id]["etsy_eligible"])
+        self.assertTrue(facets[dated_by_ebay.id]["etsy_eligible"])
+        self.assertFalse(_conv_response(modern, _extras(None, facets[modern.id])).etsy_eligible)
+        self.assertTrue(_conv_response(vintage, _extras(None, facets[vintage.id])).etsy_eligible)
+        self.assertTrue(_conv_response(modern).etsy_eligible)
+
+    def test_response_carries_labels_marketplaces_sku_and_price(self):
+        conv = self.convs.create(title="Nike tee")
+        conv.notes = json.dumps({
+            "vendooLabels": "A19, To List",
+            "vendooMarketplaces": ["ebay", "etsy"],
+        })
+        self.db.commit()
+        listing_persistence.save_revision(self.listings.db, conv.id, {"title": "Nike tee", "sku": "NIKE-TEE-M", "price": 24.5}, "test")
+        response = _conv_response(conv, _extras(None, inventory_facets.listing_facet(self.convs.db, conv.id)))
+        self.assertEqual(response.sku, "NIKE-TEE-M")
+        self.assertEqual(response.price, 24.5)
+        self.assertEqual(response.vendoo_labels, ["A19", "To List"])
+        self.assertEqual(response.vendoo_marketplaces, ["ebay", "etsy"])
+        self.assertEqual(response.direct_marketplaces, [])
+
+    def test_response_names_marketplaces_anteroom_published(self):
+        from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
+
+        conv = self.convs.create(title="Columbia")
+        conv.status = "draft"
+        conv.notes = json.dumps({"vendooStatus": "draft", "vendooMarketplaces": []})
+        self.db.commit()
+        records = MarketplaceListingRepo(self.db)
+        records.save(conv.id, "depop", {"state": "published", "listing_url": "https://www.depop.com/products/fixture-shirt-123/"})
+        records.save(conv.id, "etsy", {"state": "not_saved"})
+        records.save(conv.id, "mercari", {"state": "pending_review"})
+        direct = records.summaries()
+        response = _conv_response(conv, _extras(None, None, None, False, direct[conv.id]))
+        self.assertEqual(sorted(response.direct_marketplaces), ["depop", "mercari"])
+        self.assertEqual(response.vendoo_marketplaces, [])
+        self.assertEqual(response.status, "draft")
+
+    def test_no_link_publication_is_not_counted_as_a_live_inventory_marketplace(self):
+        from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
+
+        conv = self.convs.create(title="Unconfirmed fixture")
+        records = MarketplaceListingRepo(self.db)
+        records.save(conv.id, "depop", {"state": "published"})
+        response = _conv_response(conv, _extras(None, None, None, False, records.summaries()[conv.id]))
+        self.assertEqual(response.direct_records["depop"].state, "unknown")
+        self.assertTrue(response.direct_records["depop"].failed)
+        self.assertEqual(response.direct_marketplaces, [])
+
+    def test_ebay_identity_record_is_not_reclassified_by_depop_recovery(self):
+        from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
+
+        conv = self.convs.create(title="eBay fixture")
+        records = MarketplaceListingRepo(self.db)
+        saved = records.save(conv.id, "ebay", {"state": "published", "ebay_listing_id": "123456789012"})
+        self.assertEqual(saved["state"], "published")
+        self.assertEqual(records.summaries()[conv.id]["ebay"]["state"], "published")
+        self.assertIn(conv.id, records.live_revisions())
+
+    def test_response_carries_each_marketplace_record_for_the_inventory_table(self):
+        from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
+
+        conv = self.convs.create(title="Levi's 501")
+        other = self.convs.create(title="Untouched")
+        records = MarketplaceListingRepo(self.db)
+        records.save(conv.id, "ebay", {"state": "published", "listing_url": "https://www.ebay.com/itm/1", "listed_price": 42.5})
+        records.save(conv.id, "poshmark", {"state": "not_saved", "error": "Fix 2 fields", "error_fields": [
+            {"field": "size", "message": "Required"}, {"field": "brand", "message": "Required"}]})
+        records.save(conv.id, "depop", {"state": "draft", "draft_url": "https://www.depop.com/drafts/1"})
+        direct = records.summaries()
+        self.assertNotIn(other.id, direct)
+        self.assertEqual(records.summaries(conv.id), {conv.id: direct[conv.id]})
+        response = _conv_response(conv, _extras(None, None, None, False, direct[conv.id]))
+        self.assertEqual(response.direct_records["ebay"].model_dump(),
+                         {"state": "published", "listing_url": "https://www.ebay.com/itm/1", "failed": False, "fields": 0,
+                          "price": 42.5, "listed_at": None})
+        self.assertEqual(response.direct_records["poshmark"].model_dump(),
+                         {"state": "not_saved", "listing_url": None, "failed": True, "fields": 2, "price": None, "listed_at": None})
+        self.assertEqual(response.direct_records["depop"].state, "draft")
+        self.assertEqual(response.direct_marketplaces, ["ebay"])
+
+    def test_response_names_marketplaces_anteroom_delisted(self):
+        from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
+
+        conv = self.convs.create(title="Columbia")
+        conv.status = "active"
+        conv.notes = json.dumps({
+            "vendooStatus": "active",
+            "vendooMarketplaces": ["depop", "ebay", "mercari"],
+            "vendooListingUrls": {
+                "ebay": "https://www.ebay.com/itm/123456789012",
+                "depop": "https://www.depop.com/products/seller-columbia-jacket/",
+                "mercari": "https://www.mercari.com/us/item/m12345678901/",
+            },
+            "marketplaceDelists": {
+                "ebay": {"state": "deleted", "listing_id": "123456789012"},
+                "depop": {"state": "deleted", "listing_id": "seller-columbia-jacket"},
+                # Relisted on Mercari since: a newer listing is live again.
+                "mercari": {"state": "deleted", "listing_id": "m99999999999"},
+            },
+            "marketplaceMarks": {"poshmark": {"state": "not_listed"}},
+        })
+        self.db.commit()
+        records = MarketplaceListingRepo(self.db)
+        # Anteroom republished on Depop after the delete.
+        records.save(conv.id, "depop", {"state": "published",
+                                        "listing_url": "https://www.depop.com/products/seller-columbia-jacket-2/"})
+        response = _conv_response(conv, _extras(None, None, None, False, records.summaries()[conv.id]))
+        self.assertEqual(response.removed_marketplaces, ["ebay", "poshmark"])
+        self.assertEqual(response.status, "active")
+
+
+
+
+
+    def test_response_carries_listing_urls(self):
+        conv = self.convs.create(title="Nike tee")
+        conv.notes = json.dumps({"vendooListingUrls": {"ebay": "https://www.ebay.com/itm/123", "etsy": ""}})
+        self.db.commit()
+        response = _conv_response(conv)
+        self.assertEqual(response.vendoo_listing_urls, {"ebay": "https://www.ebay.com/itm/123"})
+
+    def test_labels_split_on_commas(self):
+        self.assertEqual(split_vendoo_labels(" A19 , To List ,"), ["A19", "To List"])
+        self.assertEqual(split_vendoo_labels(None), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

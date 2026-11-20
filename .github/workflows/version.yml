@@ -49,13 +49,13 @@ jobs:
           for attempt in 1 2 3; do
             git fetch --quiet origin main
             git reset --quiet --hard origin/main
-            versions="$(python vendoo-studio/scripts/release-changelog.py)"
+            versions="$(python anteroom/scripts/release-changelog.py)"
             if [ -z "$versions" ]; then
               echo "No pending notes in changelog.d/."
               exit 0
             fi
-            python vendoo-studio/scripts/check-version-sync.py
-            python vendoo-studio/scripts/check-changelog.py
+            python anteroom/scripts/check-version-sync.py
+            python anteroom/scripts/check-changelog.py
             version="$(tail -n 1 <<< "$versions")"
             git add -A
             git commit --quiet -m "Release Anteroom $version" -m "Versions: $(paste -sd ' ' <<< "$versions")"

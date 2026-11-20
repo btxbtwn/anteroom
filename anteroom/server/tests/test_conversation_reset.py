@@ -1,0 +1,335 @@
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+import unittest
+from contextlib import contextmanager
+from pathlib import Path
+from unittest.mock import patch
+
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from anteroom.services import listing_persistence
+from anteroom.services.photo_store import LocalPhotoStore
+from anteroom.database import Base, get_db
+from anteroom.main import app
+from anteroom.models.diagnostics import DiagnosticRun, FieldObservation  # noqa: F401
+from anteroom.models.fill_log import FillLogEntry  # noqa: F401
+from anteroom.models.job import Job, VendooDraftCache
+from anteroom.models.listing import Listing, ListingRevision  # noqa: F401
+from anteroom.models.registry import FieldRegistry  # noqa: F401
+from anteroom.repositories.queries import ConversationRepo, JobRepo, ListingRepo
+from anteroom.services import hidden_fields
+
+
+JPEG_BYTES = bytes([
+    0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
+    0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xD9,
+])
+
+
+@contextmanager
+def photos_dir(path: str):
+    """Point both the photo routes and the wipe at a throwaway directory."""
+    with (
+        patch("anteroom.services.photo_store._store", LocalPhotoStore(path)),
+    ):
+        yield
+
+
+class ConversationResetTest(unittest.TestCase):
+    def setUp(self):
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine)
+        self.Session = sessionmaker(bind=engine)
+        self.db = self.Session()
+        self.photos_tmp = tempfile.TemporaryDirectory()
+        self.data_tmp = tempfile.TemporaryDirectory()
+        self._data = os.environ.get("ANTEROOM_DATA_DIR")
+        os.environ["ANTEROOM_DATA_DIR"] = self.data_tmp.name
+
+        self.conv = ConversationRepo(self.db).create(title="Nike tee", notes=json.dumps({"condition": "Good"}))
+        ConversationRepo(self.db).update_status(self.conv.id, "completed")
+        ConversationRepo(self.db).add_message(self.conv.id, "user", "make it cheaper")
+        stored = "front.jpg"
+        (Path(self.photos_tmp.name) / stored).write_bytes(JPEG_BYTES)
+        listing_persistence.add_photo(self.db,
+            self.conv.id,
+            "front.jpg",
+            stored,
+            "image/jpeg",
+            len(JPEG_BYTES),
+        )
+        revision = listing_persistence.save_revision(self.db,
+            self.conv.id,
+            {"title": "Nike tee", "description": "Soft cotton", "price": 20},
+            "generate",
+        )
+        JobRepo(self.db).create(
+            self.conv.id,
+            revision.id,
+            revision.listing_json,
+            status="dispatched",
+            current_step="filling_fields",
+        )
+        hidden_fields.hide_field("ebay", "Department", "always", label="Department")
+        hidden_fields.hide_field(
+            "depop",
+            "Source",
+            "listing",
+            conversation_id=self.conv.id,
+            label="Source",
+        )
+
+        def override_get_db():
+            yield self.db
+
+        app.dependency_overrides[get_db] = override_get_db
+        self.sessions = patch("anteroom.database.SessionLocal", self.Session)
+        self.sessions.start()
+        self.client = TestClient(app)
+
+    def tearDown(self):
+        self.sessions.stop()
+        app.dependency_overrides.clear()
+        self.db.close()
+        self.photos_tmp.cleanup()
+        self.data_tmp.cleanup()
+        if self._data is None:
+            os.environ.pop("ANTEROOM_DATA_DIR", None)
+        else:
+            os.environ["ANTEROOM_DATA_DIR"] = self._data
+
+    def test_reset_drops_vendoo_draft_cache_before_the_job(self):
+        """A synced draft row references the job. Wipe must delete it first.
+
+        Otherwise DELETE FROM jobs raises a foreign-key error and Regenerate
+        never leaves "Clearing chat and generated fields".
+        """
+        job = self.db.query(Job).filter(Job.conversation_id == self.conv.id).one()
+        self.db.add(VendooDraftCache(job_id=job.id, item_id="QVzIZuKs", source="watch"))
+        self.db.commit()
+
+        with photos_dir(self.photos_tmp.name):
+            response = self.client.post(f"/api/conversations/{self.conv.id}/reset")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.db.expire_all()
+        self.assertEqual(self.db.query(VendooDraftCache).count(), 0)
+        self.assertEqual(self.db.query(Job).filter(Job.conversation_id == self.conv.id).count(), 0)
+
+    def test_clear_drops_old_corrections_but_regenerate_keeps_them(self):
+        from anteroom.models.listing_evidence import ListingCorrection
+        from anteroom.services.listing_evidence import corrections_context
+
+        revision = ListingRepo(self.db).get_revisions(self.conv.id)[0]
+        self.db.add(ListingCorrection(
+            conversation_id=self.conv.id, revision_id=revision.id, source="user_form",
+            category_path="Men > Jeans", brand="Nike",
+            changes={"size": {"before": "27", "after": "32"}},
+        ))
+        self.db.commit()
+        with photos_dir(self.photos_tmp.name):
+            response = self.client.post(f"/api/conversations/{self.conv.id}/reset", json={"keep_inputs": True})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIn("size", corrections_context(self.db, self.conv.id, {})["current_item_corrections"])
+            response = self.client.post(f"/api/conversations/{self.conv.id}/reset", json={"keep_inputs": False})
+            self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(corrections_context(self.db, self.conv.id, {})["current_item_corrections"], {})
+
+    def test_reset_wipes_listing_and_keeps_conversation(self):
+        with photos_dir(self.photos_tmp.name):
+            response = self.client.post(f"/api/conversations/{self.conv.id}/reset")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["id"], self.conv.id)
+        self.assertEqual(body["title"], "New Listing")
+        self.assertIsNone(body["notes"])
+        self.assertEqual(body["status"], "draft")
+        self.assertIsNone(body["settled_at"])
+
+        self.db.expire_all()
+        self.assertEqual(ConversationRepo(self.db).get_photos(self.conv.id), [])
+        self.assertEqual(ConversationRepo(self.db).get_messages(self.conv.id), [])
+        self.assertEqual(ListingRepo(self.db).get_revisions(self.conv.id), [])
+        self.assertIsNone(ListingRepo(self.db).get_current(self.conv.id))
+        self.assertEqual(self.db.query(Job).filter(Job.conversation_id == self.conv.id).count(), 0)
+        self.assertFalse((Path(self.photos_tmp.name) / "front.jpg").exists())
+
+        listing = self.client.get(f"/api/conversations/{self.conv.id}/listing")
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(listing.json()["listing"], {})
+
+        hidden = hidden_fields.hidden_fields(self.conv.id)
+        self.assertEqual(len(hidden["always"]), 1)
+        self.assertEqual(hidden["listing"], [])
+
+
+
+
+    def test_reset_keep_inputs_keeps_photos_and_notes(self):
+        notes = json.dumps({
+            "vendooItemId": "QVzIZuKs",
+            "condition": "Good",
+            "categoryOverride": "Men > Tops",
+        })
+        self.conv.notes = notes
+        self.db.commit()
+
+        with photos_dir(self.photos_tmp.name):
+            response = self.client.post(
+                f"/api/conversations/{self.conv.id}/reset",
+                json={"keep_inputs": True},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["title"], "New Listing")
+        self.assertEqual(body["status"], "draft")
+        # Item Details survive, plus the listing's price so the rewrite reuses it.
+        self.assertEqual(
+            json.loads(body["notes"]),
+            {**json.loads(notes), "askingPrice": "20.00"},
+        )
+
+        self.db.expire_all()
+        self.assertEqual(len(ConversationRepo(self.db).get_photos(self.conv.id)), 1)
+        self.assertTrue((Path(self.photos_tmp.name) / "front.jpg").exists())
+        self.assertEqual(ConversationRepo(self.db).get_messages(self.conv.id), [])
+        # Regeneration does not create any automation job.
+        self.assertEqual(JobRepo(self.db).list_by_conversation(self.conv.id), [])
+        revisions = ListingRepo(self.db).get_revisions(self.conv.id)
+        self.assertEqual(revisions, [])
+
+    def test_reset_keep_inputs_carries_listing_facts_into_item_details(self):
+        self.conv.notes = json.dumps({"condition": "Good"})
+        listing_persistence.save_revision(self.db,
+            self.conv.id,
+            {
+                "title": "Nike tee",
+                "description": (
+                    "Cozy oversized grunge tee.\n\n"
+                    "Flaws: small stain near the hem.\n\n"
+                    'Measurements: Pit to pit 20"; Length 27"'
+                ),
+                "cost": 1.5,
+                "sku": "NIKE-TEE-M",
+                "package_dimensions_in": "12x10x2",
+                "poshmark_specifics": {"originalPrice": 45},
+                "labels": ["Bin 4"],
+                "internal_notes": "Bought at the bins",
+            },
+            "generate",
+        )
+        self.db.commit()
+
+        with photos_dir(self.photos_tmp.name):
+            response = self.client.post(
+                f"/api/conversations/{self.conv.id}/reset",
+                json={"keep_inputs": True},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        notes = json.loads(response.json()["notes"])
+        self.assertEqual(notes["sku"], "NIKE-TEE-M")
+        self.assertEqual(notes["packageDimensions"], "12x10x2")
+        self.assertNotIn("poshmarkOriginalPrice", notes)
+        self.assertEqual(notes["cog"], "1.50")
+        self.assertEqual(notes["vendooLabels"], "Bin 4")
+        self.assertEqual(notes["sellerNotes"], "Bought at the bins")
+        self.assertEqual(notes["knownFlaws"], "small stain near the hem")
+        self.assertEqual(notes["descriptionMeasurements"], 'Pit to pit 20"; Length 27"')
+
+        self.db.expire_all()
+        self.assertEqual(ListingRepo(self.db).get_revisions(self.conv.id), [])
+
+    def test_regenerate_details_shows_carried_facts_without_saving_them(self):
+        self.conv.notes = json.dumps({"condition": "Good", "sku": "TYPED-1"})
+        listing_persistence.save_revision(self.db,
+            self.conv.id,
+            {"title": "Jean shorts", "description": 'Measurements: Waist 16"; Inseam 5"',
+             "cost": 2, "sku": "A23", "labels": ["To List", "Bin 4"]},
+            "generate",
+        )
+        self.db.commit()
+
+        response = self.client.get(f"/api/conversations/{self.conv.id}/regenerate-details")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        notes = json.loads(response.json()["notes"])
+        self.assertEqual(notes["sku"], "TYPED-1")  # What the seller typed wins.
+        self.assertEqual(notes["cog"], "2.00")
+        self.assertEqual(notes["vendooLabels"], "To List, Bin 4")
+        self.assertEqual(notes["descriptionMeasurements"], 'Waist 16"; Inseam 5"')
+        self.db.expire_all()
+        self.assertEqual(json.loads(self.db.get(type(self.conv), self.conv.id).notes),
+                         {"condition": "Good", "sku": "TYPED-1"})
+        self.assertEqual(self.client.get("/api/conversations/missing/regenerate-details").status_code, 404)
+
+    def test_reset_without_keep_inputs_carries_nothing(self):
+        listing_persistence.save_revision(self.db,
+            self.conv.id,
+            {"title": "Nike tee", "description": "Flaws: small stain near the hem.", "cost": 1.5},
+            "generate",
+        )
+        self.db.commit()
+
+        with photos_dir(self.photos_tmp.name):
+            response = self.client.post(f"/api/conversations/{self.conv.id}/reset")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIsNone(response.json()["notes"])
+
+    def test_renamed_listing_keeps_its_name_through_saves_and_regenerate(self):
+        renamed = self.client.patch(f"/api/conversations/{self.conv.id}", json={"title": "SKU-0042"})
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        self.assertTrue(json.loads(renamed.json()["notes"])["titlePinned"])
+
+        listing_persistence.save_revision(self.db, self.conv.id, {"title": "Nike Tee Mens M"}, "user_form")
+        self.db.expire_all()
+        self.assertEqual(ConversationRepo(self.db).get(self.conv.id).title, "SKU-0042")
+
+        with photos_dir(self.photos_tmp.name):
+            regenerated = self.client.post(
+                f"/api/conversations/{self.conv.id}/reset", json={"keep_inputs": True},
+            )
+        self.assertEqual(regenerated.status_code, 200, regenerated.text)
+        self.assertEqual(regenerated.json()["title"], "SKU-0042")
+
+        listing_persistence.save_revision(self.db, self.conv.id, {"title": "Nike Tee Mens M"}, "generate")
+        self.db.expire_all()
+        self.assertEqual(ConversationRepo(self.db).get(self.conv.id).title, "SKU-0042")
+
+    def test_clear_drops_a_pinned_name(self):
+        self.client.patch(f"/api/conversations/{self.conv.id}", json={"title": "SKU-0042"})
+
+        with photos_dir(self.photos_tmp.name):
+            cleared = self.client.post(f"/api/conversations/{self.conv.id}/reset")
+        self.assertEqual(cleared.json()["title"], "New Listing")
+
+        self.db.expire_all()  # the reset saved through its own session
+        listing_persistence.save_revision(self.db, self.conv.id, {"title": "Nike Tee Mens M"}, "generate")
+        self.db.expire_all()
+        self.assertEqual(ConversationRepo(self.db).get(self.conv.id).title, "Nike Tee Mens M")
+
+    def test_unrenamed_listing_follows_its_title(self):
+        listing_persistence.save_revision(self.db, self.conv.id, {"title": "Nike Tee Mens M"}, "user_form")
+        self.db.expire_all()
+        self.assertEqual(ConversationRepo(self.db).get(self.conv.id).title, "Nike Tee Mens M")
+
+    def test_reset_missing_conversation_is_404(self):
+        response = self.client.post("/api/conversations/missing/reset")
+        self.assertEqual(response.status_code, 404)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -4,24 +4,24 @@ on:
   push:
     branches: [main]
     paths:
-      - "vendoo-studio/**"
-      - "vendoo-extension/**"
+      - "anteroom/**"
+      - "anteroom-extension/**"
       - "skills/list-this/**"
       - "skills/measure-this/**"
       - ".github/workflows/studio-macos.yml"
   pull_request:
     paths:
-      - "vendoo-studio/scripts/package-macos-app.sh"
-      - "vendoo-studio/scripts/package-connector.sh"
-      - "vendoo-studio/scripts/sign_macos_bundle.py"
-      - "vendoo-studio/scripts/notarize-macos-app.sh"
-      - "vendoo-studio/server/vendoo_studio/services/packaged_updates.py"
-      - "vendoo-studio/server/vendoo_studio/connector.py"
-      - "vendoo-studio/server/vendoo_studio/services/connector.py"
-      - "vendoo-studio/server/vendoo_studio/sandbox.py"
-      - "vendoo-studio/scripts/smoke-packaged-sandbox.py"
-      - "vendoo-studio/desktop/**"
-      - "vendoo-studio/server/vendoo_studio/services/bundle_symlinks.py"
+      - "anteroom/scripts/package-macos-app.sh"
+      - "anteroom/scripts/package-connector.sh"
+      - "anteroom/scripts/sign_macos_bundle.py"
+      - "anteroom/scripts/notarize-macos-app.sh"
+      - "anteroom/server/anteroom/services/packaged_updates.py"
+      - "anteroom/server/anteroom/connector.py"
+      - "anteroom/server/anteroom/services/connector.py"
+      - "anteroom/server/anteroom/sandbox.py"
+      - "anteroom/scripts/smoke-packaged-sandbox.py"
+      - "anteroom/desktop/**"
+      - "anteroom/server/anteroom/services/bundle_symlinks.py"
       - ".github/workflows/studio-macos.yml"
   workflow_dispatch:
 
@@ -84,7 +84,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: vendoo-studio/package-lock.json
+          cache-dependency-path: anteroom/package-lock.json
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.12.13"
@@ -188,9 +188,9 @@ jobs:
           chmod 600 "$RUNNER_TEMP/notary/AuthKey.p8"
           echo "NOTARY_API_KEY_PATH=$RUNNER_TEMP/notary/AuthKey.p8" >> "$GITHUB_ENV"
       - name: Package app
-        working-directory: vendoo-studio
+        working-directory: anteroom
         env:
-          PYTHON: ${{ github.workspace }}/vendoo-studio/.venv/bin/python
+          PYTHON: ${{ github.workspace }}/anteroom/.venv/bin/python
           NOTARY_API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
           NOTARY_API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
         run: |
@@ -198,7 +198,7 @@ jobs:
           "$PYTHON" -m pip install -U pip
           ./scripts/package-macos-app.sh
       - name: Package standalone subscription connector
-        working-directory: vendoo-studio
+        working-directory: anteroom
         env:
           NOTARY_API_KEY_ID: ${{ secrets.NOTARY_API_KEY_ID }}
           NOTARY_API_ISSUER_ID: ${{ secrets.NOTARY_API_ISSUER_ID }}
@@ -207,7 +207,7 @@ jobs:
         # Both signed copies run under the hardened runtime: the Developer ID
         # one, and the one signed with the older certificate (or, on pull
         # requests, the two test certificates).
-        working-directory: vendoo-studio
+        working-directory: anteroom
         run: |
           for app in release/Anteroom.app release/bridge/payload/Anteroom.app; do
             if [[ -d "$app" ]]; then
@@ -225,7 +225,7 @@ jobs:
           codesign -d --entitlements - "$NODE"
           "$NODE" -e 'let total = 0; for (let i = 0; i < 5e7; i++) total += i % 7; console.log("Bundled Node runs JIT code:", total)'
       - name: Verify native Keychain updates preserve the existing item
-        working-directory: vendoo-studio
+        working-directory: anteroom
         run: |
           .venv/bin/python - <<'PY'
           import uuid
@@ -235,11 +235,11 @@ jobs:
               kSecAttrAccount, kSecAttrLabel, kSecReturnAttributes,
               kSecReturnData, kSecValueData,
           )
-          from vendoo_studio.services.macos_keychain import set_password
+          from anteroom.services.macos_keychain import set_password
 
           query = {
               kSecClass: kSecClassGenericPassword,
-              kSecAttrService: f"vendoo-studio-ci-{uuid.uuid4()}",
+              kSecAttrService: f"anteroom-ci-{uuid.uuid4()}",
               kSecAttrAccount: "test-only",
           }
           try:
@@ -258,9 +258,9 @@ jobs:
               SecItemDelete(query)
           PY
       - name: Verify update zip symlinks are safe
-        working-directory: vendoo-studio
+        working-directory: anteroom
         env:
-          PYTHON: ${{ github.workspace }}/vendoo-studio/.venv/bin/python
+          PYTHON: ${{ github.workspace }}/anteroom/.venv/bin/python
         run: |
           for archive in release/Anteroom-macos.zip release/List-This-Studio-macos.zip release/bridge/Anteroom-macos.zip; do
           [[ -f "$archive" ]] || continue
@@ -268,8 +268,8 @@ jobs:
           import sys
           import tempfile
           from pathlib import Path
-          from vendoo_studio.services.bundle_symlinks import zip_symlink_members
-          from vendoo_studio.services.packaged_updates import PackagedUpdateError, _validate_zip_members
+          from anteroom.services.bundle_symlinks import zip_symlink_members
+          from anteroom.services.packaged_updates import PackagedUpdateError, _validate_zip_members
 
           archive = Path(sys.argv[1])
           links = zip_symlink_members(archive)
@@ -285,7 +285,7 @@ jobs:
           PY
           done
       - name: Verify packaged app signature
-        working-directory: vendoo-studio
+        working-directory: anteroom
         run: |
           set -euo pipefail
           APP="release/Anteroom.app"
@@ -316,7 +316,7 @@ jobs:
           fi
           # Same check the updater runs before it installs a download, with the
           # requirement it demands.
-          REQUIREMENT="$(.venv/bin/python -c 'from vendoo_studio.services.packaged_updates import UPDATE_REQUIREMENT; print(UPDATE_REQUIREMENT)')"
+          REQUIREMENT="$(.venv/bin/python -c 'from anteroom.services.packaged_updates import UPDATE_REQUIREMENT; print(UPDATE_REQUIREMENT)')"
           csreq -r="$REQUIREMENT" -b "$RUNNER_TEMP/update-requirement.bin"
           codesign --verify --deep --strict --verbose=1 "$APP"
           echo "OK: packaged app has an intact deep code signature with the hardened runtime"
@@ -329,7 +329,7 @@ jobs:
               codesign --verify --deep --strict -R="$REQUIREMENT" "$BRIDGE_APP"
               # The designated requirement every install through 0.1.947
               # checks a download against.
-              OLD_REQUIREMENT="$(.venv/bin/python -c 'from vendoo_studio.services.packaged_updates import BUNDLE_IDENTIFIER, _OLD_CERTIFICATE; print(f"identifier \"{BUNDLE_IDENTIFIER}\" and {_OLD_CERTIFICATE}")')"
+              OLD_REQUIREMENT="$(.venv/bin/python -c 'from anteroom.services.packaged_updates import BUNDLE_IDENTIFIER, _OLD_CERTIFICATE; print(f"identifier \"{BUNDLE_IDENTIFIER}\" and {_OLD_CERTIFICATE}")')"
               codesign --verify --deep --strict -R="$OLD_REQUIREMENT" "$BRIDGE_APP"
               echo "OK: the bridge copy satisfies what installs through 0.1.947 require"
             fi
@@ -342,12 +342,12 @@ jobs:
         with:
           name: studio-macos-release
           path: |
-            vendoo-studio/release/Anteroom-macos.zip
-            vendoo-studio/release/List-This-Studio-macos.zip
-            vendoo-studio/release/Anteroom-Connector-macos.zip
-            vendoo-studio/release/build_info.json
-            vendoo-studio/release/bridge/Anteroom-macos.zip
-            vendoo-studio/release/bridge/build_info.json
+            anteroom/release/Anteroom-macos.zip
+            anteroom/release/List-This-Studio-macos.zip
+            anteroom/release/Anteroom-Connector-macos.zip
+            anteroom/release/build_info.json
+            anteroom/release/bridge/Anteroom-macos.zip
+            anteroom/release/bridge/build_info.json
           if-no-files-found: error
           retention-days: 1
       - name: Remove signing material
@@ -373,9 +373,9 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: studio-macos-release
-          path: vendoo-studio/release
+          path: anteroom/release
       - name: Publish GitHub release
-        working-directory: vendoo-studio
+        working-directory: anteroom
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: ./scripts/publish-macos-release.sh

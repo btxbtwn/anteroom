@@ -5,7 +5,7 @@ For current production requirements and known deployment gaps, follow
 The incremental feature descriptions below include earlier rollout stages;
 the hosted entry point's registered routes define the current API surface.
 
-This deploys `vendoo_studio.hosted:app`, not the desktop API. The cloud UI provides email-and-password accounts (sign in, create account, password reset) and private draft inventory, General listing fields and photos. `GET /api/health` is public; `/api/account` and every `/api/drafts` route
+This deploys `anteroom.hosted:app`, not the desktop API. The cloud UI provides email-and-password accounts (sign in, create account, password reset) and private draft inventory, General listing fields and photos. `GET /api/health` is public; `/api/account` and every `/api/drafts` route
 require a verified seller session. Job and marketplace routes are not exposed. Chrome, Keychain
 and desktop timers do not run in this container.
 
@@ -38,7 +38,7 @@ Then, in order, it:
    retrying the first connection for a couple of minutes when the session
    pooler is full;
 4. re-imports the shared category trees unless the database already holds
-   exactly the rows of `vendoo-studio/data/category-trees-seed.json.gz`
+   exactly the rows of `anteroom/data/category-trees-seed.json.gz`
    (`category-trees.sh import --if-changed` compares them row for row);
 5. deploys the image built in step 2 (`flyctl deploy --image`);
 6. waits for `https://myanteroom.com/api/health` to report the new version
@@ -157,7 +157,7 @@ changes:
 
 ```sh
 export ANTEROOM_MIGRATION_DATABASE_URL='<migration login session-pooler URI>'
-cd vendoo-studio && ./scripts/category-trees.sh import --database-url-env ANTEROOM_MIGRATION_DATABASE_URL
+cd anteroom && ./scripts/category-trees.sh import --database-url-env ANTEROOM_MIGRATION_DATABASE_URL
 ```
 
 The command takes the URL from that variable so it never appears in arguments or

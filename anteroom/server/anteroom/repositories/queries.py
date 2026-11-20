@@ -1,0 +1,1119 @@
+from __future__ import annotations
+from typing import cast as type_cast
+from sqlalchemy.engine import CursorResult
+
+from types import SimpleNamespace
+import logging
+from typing import Any
+
+from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from anteroom.database import json_value
+from anteroom.models.conversation import (
+    Conversation,
+    Message,
+    Photo,
+    new_id,
+    utcnow,
+)
+from anteroom.models.diagnostics import DiagnosticRun, FieldObservation
+from anteroom.models.fill_log import FillLogEntry
+from anteroom.models.job import (
+    ACTIVE_JOB_STATUSES,
+    RUNNING_JOB_STATUSES,
+    Job,
+    JobEvent,
+    VendooDraftCache,
+)
+from anteroom.models.listing import Listing, ListingRevision
+from anteroom.models.registry import FieldRegistry
+
+# Keys the extension sends with a step result that are only useful while the
+# message is being handled: the item, the discovered schema, the fill log and
+# the verification are all stored somewhere of their own. Kept in the event as
+# well they are the largest rows in the database and nothing reads them.
+BULKY_EVENT_KEYS = ("item", "schema", "fill_log", "verification")
+SANITIZED_EVENT_TYPES = ("step_completed", "step_failed")
+# One row each: the newest progress is the only progress worth having, and the
+# stored review already carries every schema section read so far.
+UPSERT_EVENT_TYPES = ("progress", "native_progress")
+
+BUSY_LISTING_STATUSES = ("in_progress", "listing")
+# An item's inventory labels (``services/item_status.py``).
+LISTING_STATUSES = ("draft", "active", "sold")
+
+
+def _settle(conv: Conversation, when, *, backfill: bool = False, force: bool = False) -> bool:
+    if conv.settled_at is not None:
+        return False
+    if not force and conv.unsettled_at is not None:
+        return False
+    conv.settled_at = conv.updated_at if backfill and conv.updated_at else when
+    conv.settled_by_seller = False
+    conv.unsettled_at = None
+    return True
+
+
+def _unsettle(conv: Conversation, when) -> bool:
+    if conv.settled_at is None:
+        return False
+    conv.settled_at = None
+    conv.settled_by_seller = False
+    conv.unsettled_at = when
+    return True
+
+
+def _sync_settlement(conv: Conversation, status: str | None, *, backfill: bool = False) -> bool:
+    now = utcnow()
+    if status in BUSY_LISTING_STATUSES:
+        return _unsettle(conv, now)
+    if status == "sold":
+        return _settle(conv, now, backfill=backfill, force=not backfill)
+    return False
+
+
+# What ``_facet`` reads from a revision, extracted inside the database.
+def _facet_columns() -> tuple:
+    doc = ListingRevision.listing_json
+    return (
+        json_value(doc, "sku"),
+        json_value(doc, "price"),
+        json_value(doc, "etsy_specifics"),
+        func.coalesce(
+            json_value(doc, "ebay_specifics.yearManufactured"),
+            json_value(doc, "ebay_specifics.year_manufactured"),
+        ),
+    )
+
+
+class ConversationRepo:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def create(
+        self, title: str | None = None, notes: str | None = None, box_id: str | None = None,
+    ) -> Conversation:
+        conv = Conversation(title=title, notes=notes, box_id=box_id or None)
+        self.db.add(conv)
+        self.db.commit()
+        self.db.refresh(conv)
+        return conv
+
+    def get(self, conv_id: str) -> Conversation | None:
+        return self.db.query(Conversation).filter(Conversation.id == conv_id).first()
+
+    def list_all(self) -> list[Conversation]:
+        return self.db.query(Conversation).order_by(Conversation.updated_at.desc()).all()
+
+    def listing_facet_rows(self) -> list:
+        """SKU, price and Etsy inputs extracted inside the database.
+
+        Loading whole revisions to reach these inputs would haul the inventory's listing JSON into
+        Python on every sidebar read, so SQLite extracts them instead.
+        """
+        rows = (
+            self.db.query(Listing.conversation_id, *_facet_columns())
+            .join(ListingRevision, ListingRevision.id == Listing.current_revision_id)
+            .all()
+        )
+        return rows
+
+
+    def current_revision_ids(self) -> dict[str, str]:
+        """Each listing's current revision, for the sidebar in one query.
+
+        The row compares this against the revision Vendoo was last level with,
+        which is how "edited here, not sent yet" is told without loading a
+        single listing body.
+        """
+        rows = self.db.query(Listing.conversation_id, Listing.current_revision_id).all()
+        return {conv_id: revision_id for conv_id, revision_id in rows if revision_id}
+
+    def current_revision_id(self, conv_id: str) -> str | None:
+        row = (
+            self.db.query(Listing.current_revision_id)
+            .filter(Listing.conversation_id == conv_id)
+            .first()
+        )
+        return row[0] if row else None
+
+    def listing_facet_row(self, conv_id: str):
+        row = (
+            self.db.query(*_facet_columns())
+            .join(Listing, ListingRevision.id == Listing.current_revision_id)
+            .filter(Listing.conversation_id == conv_id)
+            .first()
+        )
+        return row
+
+
+    def cover_photos(self, conv_ids: list[str] | None = None) -> dict[str, tuple[str, str | None]]:
+        """Map each conversation (or just ``conv_ids``) to its first photo's id and checksum, for thumbnails."""
+        ranked = self.db.query(
+            Photo.conversation_id, Photo.id, Photo.checksum,
+            func.row_number().over(
+                partition_by=Photo.conversation_id,
+                order_by=(Photo.display_order, Photo.created_at, Photo.id),
+            ).label("position"),
+        )
+        ranked = ranked.filter(Photo.marketplace.is_(None))
+        if conv_ids is not None:
+            ranked = ranked.filter(Photo.conversation_id.in_(conv_ids))
+        ranked = ranked.subquery()
+        rows = self.db.query(
+            ranked.c.conversation_id, ranked.c.id, ranked.c.checksum,
+        ).filter(ranked.c.position == 1).all()
+        return {conv_id: (photo_id, checksum) for conv_id, photo_id, checksum in rows}
+
+    def cover_photo(self, conv_id: str) -> tuple[str, str | None] | None:
+        row = (
+            self.db.query(Photo.id, Photo.checksum)
+            .filter(Photo.conversation_id == conv_id, Photo.marketplace.is_(None))
+            .order_by(Photo.display_order, Photo.created_at, Photo.id)
+            .first()
+        )
+        return (row[0], row[1]) if row else None
+
+    def write_notes(
+        self,
+        conv_id: str,
+        notes: str,
+        *,
+        bump_updated_at: bool = True,
+    ) -> Conversation | None:
+        """Store notes, optionally leaving ``updated_at`` where it was.
+
+        Vendoo bookkeeping — the inventory label sweep — writes notes for
+        listings the seller never touched. Restamping those would make every
+        swept item look like recent activity and reshuffle the sidebar under
+        the reader, so the quiet path keeps the stamp the listing already had.
+        """
+        conv = self.get(conv_id)
+        if not conv:
+            return None
+        if conv.notes == notes:
+            return conv
+        values: dict[str, Any] = {"notes": notes}
+        # Naming updated_at in the UPDATE suppresses the column's own onupdate.
+        if not bump_updated_at:
+            values["updated_at"] = conv.updated_at
+        self.db.query(Conversation).filter(Conversation.id == conv_id).update(
+            type_cast(dict, values), synchronize_session=False
+        )
+        self.db.commit()
+        self.db.refresh(conv)
+        return conv
+
+    def update_status(
+        self,
+        conv_id: str,
+        status: str,
+        *,
+        touch_updated_at: bool = False,
+    ) -> Conversation | None:
+        conv = self.get(conv_id)
+        if not conv:
+            return None
+        conv.status = status
+        if touch_updated_at:
+            conv.updated_at = utcnow()
+        _sync_settlement(conv, status)
+        self.db.commit()
+        self.db.refresh(conv)
+        return conv
+
+    def settle(self, conv_id: str) -> Conversation | None:
+        # Finish owns the decision even if Sold already finished the item.
+        # Evaluate the timestamp in this write: SQLite cannot lock a preceding
+        # read, and a concurrent sale undo may have reopened it in between.
+        result = self.db.execute(update(Conversation).where(Conversation.id == conv_id).values(
+            settled_at=func.coalesce(Conversation.settled_at, utcnow()),
+            settled_by_seller=True, unsettled_at=None,
+        ).execution_options(synchronize_session=False))
+        self.db.commit()
+        if type_cast(CursorResult, result).rowcount != 1:
+            return None
+        return self.db.query(Conversation).filter(Conversation.id == conv_id).populate_existing().first()
+
+    def unsettle(self, conv_id: str) -> Conversation | None:
+        conv = self.get(conv_id)
+        if not conv:
+            return None
+        _unsettle(conv, utcnow())
+        self.db.commit()
+        self.db.refresh(conv)
+        return conv
+
+    def reconcile_job_statuses(self) -> None:
+        """Keep each listing's label in step with its listings and its sales.
+
+        A listing wears its own inventory label (draft / active / sold, see
+        ``services/item_status.py``), except while it is generating.
+        """
+        from anteroom.services.vendoo_import import parse_notes
+        from anteroom.services.item_status import statuses
+
+        conversations = self.db.query(Conversation).all()
+        notes = {conv.id: parse_notes(conv.notes) for conv in conversations}
+        own = statuses(self.db, list(notes.items()))
+        self.reconcile_item_statuses(conversations, notes, own)
+
+    def reconcile_item_statuses(self, conversations, notes, own) -> None:
+        """Persist already-derived inventory statuses without repeating their reads."""
+        from anteroom.services import activity
+        from anteroom.services.streaming import active_generation
+
+        changed = False
+        for conv in conversations:
+            if conv.status == "in_progress" and (
+                active_generation(conv.id) is not None or activity.running(conv.id)
+            ):
+                if _sync_settlement(conv, conv.status):
+                    changed = True
+                continue
+            item_status = own[conv.id].status
+            # Nothing is generating, so a leftover busy label goes; so does a
+            # label the item's own records disagree with.
+            if conv.status != item_status and (
+                conv.status not in LISTING_STATUSES or own[conv.id].own
+                or notes[conv.id].get("vendooStatus") in LISTING_STATUSES
+            ):
+                conv.status = item_status
+                changed = True
+            if _sync_settlement(conv, conv.status, backfill=True):
+                changed = True
+        if changed:
+            self.db.commit()
+
+    def add_message(
+        self,
+        conv_id: str,
+        role: str,
+        text: str,
+        provider: str | None = None,
+        model: str | None = None,
+        attachments: list[dict] | None = None,
+        photo_fingerprint: str | None = None,
+    ) -> Message:
+        msg = Message(
+            conversation_id=conv_id, role=role, text=text, provider=provider, model=model,
+            attachments=attachments or None,
+            photo_fingerprint=photo_fingerprint,
+        )
+        self.db.add(msg)
+        # ``created_at`` is a column default, so it exists only once the INSERT
+        # is flushed. Reading it before that stamped the conversation's
+        # updated_at with NULL, which drops the listing out of the sidebar's
+        # recency order and makes sync_statuses skip its job-status guard.
+        self.db.flush()
+        conv = self.db.query(Conversation).filter(Conversation.id == conv_id).first()
+        if conv:
+            conv.updated_at = msg.created_at or utcnow()
+        self.db.commit()
+        return msg
+
+    def get_messages(self, conv_id: str) -> list[Message]:
+        return self.db.query(Message).filter(Message.conversation_id == conv_id).order_by(Message.created_at).all()
+
+    def insert_photo(self, conv_id: str, original_filename: str, stored_filename: str, mime_type: str, size_bytes: int, checksum: str | None = None, width: int | None = None, height: int | None = None, marketplace: str | None = None) -> Photo:
+        # One past the highest position, not the count: after a delete the count
+        # can land on or ahead of a photo the seller already has.
+        own = Photo.marketplace.is_(None) if marketplace is None else Photo.marketplace == marketplace
+        highest = (self.db.query(func.max(Photo.display_order))
+                   .filter(Photo.conversation_id == conv_id, own).scalar())
+        max_order = 0 if highest is None else highest + 1
+        photo = Photo(
+            conversation_id=conv_id,
+            original_filename=original_filename,
+            stored_filename=stored_filename,
+            mime_type=mime_type,
+            size_bytes=size_bytes,
+            display_order=max_order,
+            checksum=checksum,
+            width=width,
+            height=height,
+            marketplace=marketplace,
+        )
+        self.db.add(photo)
+        return photo
+
+
+    def get_photos(self, conv_id: str) -> list[Photo]:
+        """The item's photos, in item order. Photos added on one marketplace's form are not among them."""
+        return (self.db.query(Photo).filter(Photo.conversation_id == conv_id, Photo.marketplace.is_(None))
+                .order_by(Photo.display_order).all())
+
+    def get_all_photos(self, conv_id: str) -> list[Photo]:
+        """The item's photos, then each marketplace's own, in the order they were added."""
+        return (self.db.query(Photo).filter(Photo.conversation_id == conv_id)
+                .order_by(Photo.marketplace.is_not(None), Photo.display_order).all())
+
+    def remove_photo(self, conv_id: str, photo_id: str) -> bool:
+        photo = self.db.query(Photo).filter(Photo.id == photo_id, Photo.conversation_id == conv_id).first()
+        if not photo:
+            return False
+        self.db.delete(photo)
+        return True
+
+
+    def replace_photo_file(self, photo: Photo, meta: dict, *, source_filename: str | None, edits: dict | None) -> Photo:
+        """Point a photo at a rendered edit of its source, or back at the source."""
+        photo.source_filename = source_filename
+        photo.edits = edits
+        photo.stored_filename = meta["stored_filename"]
+        photo.size_bytes = meta["size_bytes"]
+        photo.checksum = meta["checksum"]
+        photo.width = meta["width"]
+        photo.height = meta["height"]
+        self.db.commit()
+        self.db.refresh(photo)
+        return photo
+
+    def reorder_photos(self, conv_id: str, ordered_ids: list[str]) -> list[Photo]:
+        for idx, photo_id in enumerate(ordered_ids):
+            photo = self.db.query(Photo).filter(Photo.id == photo_id, Photo.conversation_id == conv_id,
+                                                Photo.marketplace.is_(None)).first()
+            if photo:
+                photo.display_order = idx
+        self.db.commit()
+        return self.get_photos(conv_id)
+
+
+class RevisionConflict(ValueError):
+    pass
+
+
+class ListingRepo:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def get_current(self, conv_id: str) -> Listing | None:
+        return self.db.query(Listing).filter(Listing.conversation_id == conv_id).first()
+
+    def insert_revision(self, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None) -> ListingRevision:
+        revision = ListingRevision(
+            conversation_id=conv_id,
+            listing_json=listing_json,
+            source=source,
+            parent_revision_id=parent_revision_id,
+        )
+        self.db.add(revision)
+        self.db.flush()
+        return revision
+
+    def set_current_revision(self, conv_id: str, revision_id: str, *, expected_revision_id: str | None = None) -> None:
+        listing = self.db.query(Listing).filter(Listing.conversation_id == conv_id).first()
+        if expected_revision_id == "":
+            if listing is not None and listing.current_revision_id is not None:
+                self.db.rollback()
+                raise RevisionConflict("This listing changed since you reviewed it")
+            if listing is None:
+                listing = Listing(conversation_id=conv_id, current_revision_id=revision_id)
+                self.db.add(listing)
+                try:
+                    self.db.flush()
+                except IntegrityError as exc:
+                    self.db.rollback()
+                    raise RevisionConflict("This listing changed since you reviewed it") from exc
+            else:
+                result = self.db.execute(update(Listing).where(
+                    Listing.conversation_id == conv_id, Listing.current_revision_id.is_(None),
+                ).values(current_revision_id=revision_id))
+                if type_cast(CursorResult, result).rowcount != 1:
+                    self.db.rollback()
+                    raise RevisionConflict("This listing changed since you reviewed it")
+        elif expected_revision_id is not None:
+            result = self.db.execute(update(Listing).where(
+                Listing.conversation_id == conv_id, Listing.current_revision_id == expected_revision_id,
+            ).values(current_revision_id=revision_id))
+            if type_cast(CursorResult, result).rowcount != 1:
+                self.db.rollback()
+                raise RevisionConflict("This listing changed since you reviewed it")
+        elif listing:
+            listing.current_revision_id = revision_id
+        else:
+            listing = Listing(conversation_id=conv_id, current_revision_id=revision_id)
+            self.db.add(listing)
+
+
+    def revision_bodies(self, revision_ids: set[str]) -> dict[str, dict]:
+        """Listing JSON for several revisions in one query."""
+        if not revision_ids:
+            return {}
+        rows = (
+            self.db.query(ListingRevision.id, ListingRevision.listing_json)
+            .filter(ListingRevision.id.in_(revision_ids))
+            .all()
+        )
+        return {rev_id: body for rev_id, body in rows if isinstance(body, dict)}
+
+    def get_revision(self, revision_id: str | None) -> ListingRevision | None:
+        return self.db.query(ListingRevision).filter(ListingRevision.id == revision_id).first()
+
+    def get_revisions(self, conv_id: str) -> list[ListingRevision]:
+        return self.db.query(ListingRevision).filter(ListingRevision.conversation_id == conv_id).order_by(ListingRevision.created_at.desc()).all()
+
+    def latest_revision(self, conv_id: str) -> ListingRevision | None:
+        return (self.db.query(ListingRevision).filter(ListingRevision.conversation_id == conv_id)
+                .order_by(ListingRevision.created_at.desc()).first())
+
+    def revision_count(self, conv_id: str) -> int:
+        return self.db.query(func.count(ListingRevision.id)).filter(ListingRevision.conversation_id == conv_id).scalar()
+
+
+def _draft_cache_response(row: VendooDraftCache) -> dict:
+    """A cache row in the shape the draft endpoints and the sidebar read."""
+    payload = row.payload if isinstance(row.payload, dict) else {}
+    return {
+        "ok": True,
+        "source": row.source or "cache",
+        "item_id": row.item_id,
+        "url": row.url,
+        "item": payload.get("item"),
+        "form": payload.get("form"),
+        "statuses": payload.get("statuses"),
+    }
+
+
+class JobRepo:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def create(
+        self,
+        conv_id: str,
+        approved_revision_id: str,
+        listing_snapshot: dict,
+        *,
+        status: str = "queued",
+        current_step: str | None = None,
+    ) -> Job:
+        job = Job(
+            conversation_id=conv_id,
+            approved_revision_id=approved_revision_id,
+            listing_snapshot=listing_snapshot,
+            status=status,
+            current_step=current_step if current_step is not None else ("queued" if status == "queued" else status),
+        )
+        self.db.add(job)
+        self.db.commit()
+        self.db.refresh(job)
+        return job
+
+    def get(self, job_id: str) -> Job | None:
+        return self.db.query(Job).filter(Job.id == job_id).first()
+
+    def photo_source(self, job_id: str):
+        # A listing snapshot can contain megabytes of marketplace catalogs.
+        # Photo downloads need only the pinned manifest, not those catalogs.
+        manifest = json_value(Job.listing_snapshot, "_approved_photos")
+        # JSON null is still an explicitly pinned manifest, never permission
+        # to fall back to the conversation's current photographs.
+        present = (func.json_type(Job.listing_snapshot, '$._approved_photos').isnot(None)
+                   if self.db.get_bind().dialect.name == 'sqlite' else manifest.isnot(None))
+        return self.db.query(
+            Job.conversation_id,
+            manifest.label("approved_photos"), present.label("has_approved_photos"),
+        ).filter(Job.id == job_id).first()
+
+    def get_active(self) -> list[Job]:
+        return (
+            self.db.query(Job)
+            .filter(Job.status.in_(ACTIVE_JOB_STATUSES))
+            .order_by(Job.created_at.asc())
+            .all()
+        )
+
+    def get_running(self) -> list[Job]:
+        """Jobs currently using Chrome (excludes waiting queue entries)."""
+        return (
+            self.db.query(Job)
+            .filter(Job.status.in_(RUNNING_JOB_STATUSES))
+            .order_by(Job.created_at.asc())
+            .all()
+        )
+
+    def list_all(self) -> list[Job]:
+        return self.db.query(Job).order_by(Job.created_at.desc()).limit(50).all()
+
+    def list_summaries(self, conv_id: str | None = None) -> list[SimpleNamespace]:
+        columns = [column for column in Job.__table__.columns if column.name != "listing_snapshot"]
+        query = self.db.query(
+            *columns,
+            json_value(Job.listing_snapshot, "title").label("listing_title"),
+            json_value(Job.listing_snapshot, "_schema_probe").label("schema_probe"),
+        ).order_by(Job.created_at.desc())
+        if conv_id:
+            query = query.filter(Job.conversation_id == conv_id)
+        else:
+            query = query.limit(50)
+        summaries = []
+        for row in query.all():
+            values = dict(row._mapping)
+            values["listing_snapshot"] = {
+                "title": values.pop("listing_title") or "",
+                "_schema_probe": values.pop("schema_probe"),
+            }
+            summaries.append(SimpleNamespace(**values))
+        return summaries
+
+    def list_by_conversation(self, conv_id: str) -> list[Job]:
+        return self.db.query(Job).filter(Job.conversation_id == conv_id).order_by(Job.created_at.desc()).all()
+
+    def update_status(self, job_id: str, status: str, current_step: str | None = None, error: str | None = None) -> Job | None:
+        from anteroom.models.job import is_terminal_job_status
+
+        job = self.db.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            return None
+        if is_terminal_job_status(job.status) and status != job.status:
+            self.db.refresh(job)
+            return job
+        newly_failed = status == "failed" and job.status != "failed"
+        job.status = status
+        if current_step is not None:
+            job.current_step = current_step
+        if error is not None:
+            job.last_error = error
+        self.db.commit()
+        self.db.refresh(job)
+        if newly_failed:
+            logging.getLogger("anteroom.jobs").error(
+                "Job %s failed at %s (seller %s): %s", job.id, job.current_step,
+                job.user_id, job.last_error or "No failure detail was recorded.")
+        return job
+
+    def _next_sequence(self, job_id: str) -> int:
+        top = (
+            self.db.query(func.max(JobEvent.sequence))
+            .filter(JobEvent.job_id == job_id)
+            .scalar()
+        )
+        return int(top) + 1 if top is not None else 0
+
+    def add_event(self, job_id: str, event_type: str, step: str | None = None, payload: dict | None = None) -> JobEvent:
+        if event_type in SANITIZED_EVENT_TYPES and isinstance(payload, dict):
+            payload = {key: value for key, value in payload.items() if key not in BULKY_EVENT_KEYS}
+        if event_type in UPSERT_EVENT_TYPES:
+            return self._upsert_event(job_id, event_type, step, payload)
+        event = JobEvent(
+            id=new_id(),
+            job_id=job_id,
+            sequence=self._next_sequence(job_id),
+            event_type=event_type,
+            step=step,
+            payload=payload,
+        )
+        self.db.add(event)
+        self.db.commit()
+        return event
+
+    def _upsert_event(self, job_id: str, event_type: str, step: str | None, payload: dict | None) -> JobEvent:
+        """Keep one row of this type per job, moved to the end of the timeline."""
+        existing = (
+            self.db.query(JobEvent)
+            .filter(JobEvent.job_id == job_id, JobEvent.event_type == event_type)
+            .order_by(JobEvent.sequence.desc())
+            .all()
+        )
+        if not existing:
+            event = JobEvent(
+                id=new_id(),
+                job_id=job_id,
+                sequence=self._next_sequence(job_id),
+                event_type=event_type,
+                step=step,
+                payload=payload,
+            )
+            self.db.add(event)
+            self.db.commit()
+            return event
+
+        latest = existing[0]
+        stale = [event.id for event in existing[1:]]
+        if stale:
+            self.db.query(JobEvent).filter(JobEvent.id.in_(stale)).delete(synchronize_session=False)
+        latest.sequence = self._next_sequence(job_id)
+        latest.step = step
+        latest.payload = payload
+        latest.created_at = utcnow()
+        self.db.commit()
+        self.db.refresh(latest)
+        return latest
+
+    def prune_duplicate_upsert_events(self) -> int:
+        """Drop every all-but-newest progress and review row left by older builds."""
+        deleted = 0
+        for event_type in UPSERT_EVENT_TYPES:
+            newest = (
+                self.db.query(
+                    JobEvent.job_id.label("job_id"),
+                    func.max(JobEvent.sequence).label("sequence"),
+                )
+                .filter(JobEvent.event_type == event_type)
+                .group_by(JobEvent.job_id)
+                .subquery()
+            )
+            keep = select(JobEvent.id).join(
+                newest,
+                and_(
+                    JobEvent.job_id == newest.c.job_id,
+                    JobEvent.sequence == newest.c.sequence,
+                    JobEvent.event_type == event_type,
+                ),
+            )
+            deleted += (
+                self.db.query(JobEvent)
+                .filter(JobEvent.event_type == event_type, JobEvent.id.notin_(keep))
+                .delete(synchronize_session=False)
+            ) or 0
+        self.db.commit()
+        return int(deleted)
+
+    def get_events(self, job_id: str) -> list[JobEvent]:
+        return self.db.query(JobEvent).filter(JobEvent.job_id == job_id).order_by(JobEvent.sequence).all()
+
+    def latest_event(self, job_id: str, event_type: str) -> JobEvent | None:
+        return (
+            self.db.query(JobEvent)
+            .filter(JobEvent.job_id == job_id, JobEvent.event_type == event_type)
+            .order_by(JobEvent.sequence.desc())
+            .first()
+        )
+
+    def latest_vendoo_drafts(self, job_ids: list[str]) -> dict[str, dict]:
+        """Cached Vendoo status for many jobs at once.
+
+        The sidebar badges every rendered row, so a whole inventory would
+        otherwise mean one query per listing on each refresh. Rows with nothing
+        to say about a marketplace are left out so the caller can fall back to
+        what the import recorded.
+        """
+        from anteroom.services.draft_cache import draft_has_status_signal
+
+        if not job_ids:
+            return {}
+        rows = (
+            self.db.query(VendooDraftCache)
+            .filter(VendooDraftCache.job_id.in_(job_ids))
+            .all()
+        )
+        return {
+            row.job_id: _draft_cache_response(row)
+            for row in rows
+            if draft_has_status_signal(row.payload)
+        }
+
+    def prune_stale_vendoo_drafts(self) -> int:
+        """Drop the ``vendoo_draft`` events earlier builds appended per pull."""
+        deleted = (
+            self.db.query(JobEvent)
+            .filter(JobEvent.event_type == "vendoo_draft")
+            .delete(synchronize_session=False)
+        )
+        self.db.commit()
+        return int(deleted or 0)
+
+class DiagnosticRepo:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def save_observation(self, payload: dict) -> DiagnosticRun | None:
+        observation_id = payload.get("observation_id")
+        if not observation_id:
+            return None
+
+        existing = self.db.query(DiagnosticRun).filter(
+            DiagnosticRun.observation_id == observation_id
+        ).first()
+        if existing:
+            return existing
+
+        run = DiagnosticRun(
+            observation_id=observation_id,
+            job_id=payload.get("job_id", ""),
+            step=payload.get("step", ""),
+            collector_version=payload.get("collector_version", "unknown"),
+            mode=payload.get("mode", "unknown"),
+            url=payload.get("url", ""),
+            title=payload.get("title", ""),
+            timestamp=payload.get("timestamp", ""),
+            field_count=payload.get("field_count", 0),
+            dropdown_count=payload.get("dropdown_count", 0),
+            dropdowns_with_options=payload.get("dropdowns_with_options", 0),
+            live_dropdowns_with_options=payload.get("live_dropdowns_with_options", 0),
+            total_dropdown_options=payload.get("total_dropdown_options", 0),
+            expanded_sections=payload.get("expanded_sections", []),
+            headings=payload.get("headings", []),
+        )
+        self.db.add(run)
+        self.db.flush()
+
+        fields = payload.get("fields", [])
+        for f in fields:
+            obs = FieldObservation(
+                diagnostic_run_id=run.id,
+                observation_id=observation_id,
+                label=f.get("label", ""),
+                label_sources=f.get("label_sources", []),
+                section_path=f.get("section_path", []),
+                selector=f.get("selector", ""),
+                tag=f.get("tag", ""),
+                control_type=f.get("control_type", ""),
+                role=f.get("role", ""),
+                name=f.get("name", ""),
+                control_id=f.get("control_id", ""),
+                placeholder=f.get("placeholder", ""),
+                classes=f.get("classes", ""),
+                is_dropdown=1 if f.get("is_dropdown") else 0,
+                option_count=f.get("option_count", 0),
+                options=f.get("options", []),
+                options_source=f.get("options_source", "unknown"),
+            )
+            self.db.add(obs)
+
+        self.db.commit()
+        self.db.refresh(run)
+
+        self._upsert_registry(payload)
+
+        return run
+
+
+    def _upsert_registry(self, payload: dict):
+        step = payload.get("step", "")
+        marketplace = _step_to_marketplace(step)
+        category_path = payload.get("category_path", "") or None
+
+        registry_repo = RegistryRepo(self.db)
+
+        for f in payload.get("fields", []):
+            label = _normalize_label(f.get("label", ""))
+            if not label:
+                continue
+
+            known = registry_repo.get_by_identity(marketplace, category_path, label)
+            selectors = _build_selector_entry(f, known)
+
+            if known:
+                known.control_type = f.get("control_type") or known.control_type
+                known.is_dropdown = 1 if f.get("is_dropdown") else known.is_dropdown
+                known.known_selectors = _merge_selectors(
+                    known.known_selectors or [], selectors
+                )
+                known.known_options = sorted(set(
+                    (known.known_options or []) + (f.get("options") or [])
+                ))
+                known.observation_count = (known.observation_count or 0) + 1
+            else:
+                registry_repo.create(
+                    marketplace=marketplace,
+                    category_path=category_path,
+                    normalized_label=label,
+                    control_type=f.get("control_type"),
+                    is_dropdown=1 if f.get("is_dropdown") else 0,
+                    known_selectors=selectors,
+                    known_options=f.get("options") or [],
+                )
+        self.db.commit()
+
+
+def _step_to_marketplace(step: str) -> str:
+    for mp in ("general", "ebay", "etsy", "poshmark", "mercari", "depop", "facebook", "whatnot", "shopify"):
+        if mp in step.lower():
+            return mp
+    return "unknown"
+
+
+def _normalize_label(label: str) -> str:
+    normalized = label.strip().lower()
+    for suffix in (" (required)", " (optional)", " *", "*"):
+        if normalized.endswith(suffix):
+            normalized = normalized[:-len(suffix)]
+    return normalized.strip()
+
+
+def _build_selector_entry(field: dict, known) -> list[dict]:
+    selector = field.get("selector", "")
+    if not selector:
+        return known.known_selectors if known else []
+    return [{"selector": selector, "success_count": 0, "failure_count": 0}]
+
+
+def _merge_selectors(existing: list, new: list) -> list[dict]:
+    merged = list(existing)
+    for entry in new:
+        sel = entry["selector"]
+        found = False
+        for m in merged:
+            if m["selector"] == sel:
+                found = True
+                break
+        if not found:
+            merged.append(entry)
+    return merged[:20]
+
+
+class RegistryRepo:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def get_by_identity(self, marketplace: str, category_path: str | None, normalized_label: str) -> FieldRegistry | None:
+        if category_path:
+            entry = self.db.query(FieldRegistry).filter(
+                FieldRegistry.marketplace == marketplace,
+                FieldRegistry.category_path == category_path,
+                FieldRegistry.normalized_label == normalized_label,
+            ).first()
+            if entry:
+                return entry
+        return self.db.query(FieldRegistry).filter(
+            FieldRegistry.marketplace == marketplace,
+            FieldRegistry.category_path.is_(None),
+            FieldRegistry.normalized_label == normalized_label,
+        ).first()
+
+    def create(self, marketplace: str, category_path: str | None, normalized_label: str, **kwargs) -> FieldRegistry:
+        entry = FieldRegistry(
+            marketplace=marketplace,
+            category_path=category_path,
+            normalized_label=normalized_label,
+            **kwargs,
+        )
+        self.db.add(entry)
+        self.db.flush()
+        return entry
+
+    def get_valid_options(self, marketplace: str, field_label: str, category_path: str | None = None) -> list[str]:
+        return self.valid_options(category_path).get((marketplace, _normalize_label(field_label)), [])
+
+    def valid_options(self, category_path: str | None = None) -> dict[tuple[str, str], list[str]]:
+        """Every marketplace's known choices by (marketplace, label), in one query.
+        The category's own entry wins over the general one."""
+        scope = FieldRegistry.category_path.is_(None)
+        if category_path:
+            scope = or_(scope, FieldRegistry.category_path == category_path)
+        rows = self.db.query(FieldRegistry.marketplace, FieldRegistry.normalized_label, FieldRegistry.category_path,
+                             FieldRegistry.known_options).filter(scope).all()
+        options: dict[tuple[str, str], list[str]] = {}
+        for marketplace, label, _path, known in sorted(rows, key=lambda row: row[2] is not None):
+            options[(marketplace, label)] = sorted(known or [])
+        return options
+
+    def upsert_schema_fields(
+        self,
+        marketplace: str,
+        category_path: str | None,
+        fields: list[dict],
+    ) -> int:
+        """Merge schema-probe fields (with live dropdown options) into the registry.
+
+        Unlike the diagnostics path this is keyed by an explicit marketplace, because
+        one probe walks every marketplace panel in a single step.
+        """
+        touched = 0
+        for field in fields or []:
+            if not isinstance(field, dict):
+                continue
+            label = _normalize_label(str(field.get("label") or ""))
+            if not label or label == "category":
+                continue
+
+            options = [
+                str(option.get("label") or "").strip() if isinstance(option, dict) else str(option).strip()
+                for option in (field.get("options") or [])
+            ]
+            options = [option for option in options if option]
+            source = str(field.get("options_source") or "").strip() or None
+            # A complete read of an open menu is ground truth: replace rather than
+            # union, so options Vendoo has removed stop being offered as matches.
+            authoritative = bool(options) and source in {"live-dropdown", "native-select"}
+
+            known = self.get_by_identity(marketplace, category_path, label)
+            selectors = _build_selector_entry(field, known)
+
+            if known and known.category_path == category_path:
+                known.known_selectors = _merge_selectors(known.known_selectors or [], selectors)
+                if field.get("is_dropdown"):
+                    known.is_dropdown = 1
+                if authoritative:
+                    known.known_options = sorted(set(options))
+                    known.options_source = source
+                elif options:
+                    known.known_options = sorted(set((known.known_options or []) + options))
+                    known.options_source = known.options_source or source
+                known.observation_count = (known.observation_count or 0) + 1
+            else:
+                # Category-specific option sets differ from the category-less entry,
+                # so a probe for a new category creates its own row.
+                self.create(
+                    marketplace=marketplace,
+                    category_path=category_path,
+                    normalized_label=label,
+                    is_dropdown=1 if field.get("is_dropdown") else 0,
+                    known_selectors=selectors,
+                    known_options=sorted(set(options)),
+                    options_source=source,
+                    observation_count=1,
+                )
+            touched += 1
+
+        self.db.commit()
+        return touched
+
+    def options_by_label(
+        self,
+        marketplace: str,
+        category_path: str | None = None,
+    ) -> dict[str, list[str]]:
+        """Known dropdown options for a marketplace, keyed by normalized label."""
+        entries = self.list_fields(marketplace, category_path)
+
+        # Category-less rows first so category-specific ones overwrite them.
+        result: dict[str, list[str]] = {}
+        for entry in sorted(entries, key=lambda e: 1 if e.category_path else 0):
+            if not entry.known_options:
+                continue
+            result[entry.normalized_label] = sorted(entry.known_options)
+        return result
+
+
+    def record_fill_result(self, marketplace: str, field_label: str, selector: str, success: bool, category_path: str | None = None):
+        label = _normalize_label(field_label)
+        if not label or not selector:
+            return
+        entry = self.get_by_identity(marketplace, category_path, label)
+        if not entry:
+            self.create(
+                marketplace=marketplace,
+                category_path=category_path,
+                normalized_label=label,
+                known_selectors=[{
+                    "selector": selector,
+                    "success_count": 1 if success else 0,
+                    "failure_count": 0 if success else 1,
+                }],
+            )
+            self.db.commit()
+            return
+        selectors = list(entry.known_selectors or [])
+        found = False
+        for s in selectors:
+            if s.get("selector") == selector:
+                if success:
+                    s["success_count"] = (s.get("success_count") or 0) + 1
+                else:
+                    s["failure_count"] = (s.get("failure_count") or 0) + 1
+                found = True
+                break
+        if not found:
+            selectors.append({
+                "selector": selector,
+                "success_count": 1 if success else 0,
+                "failure_count": 0 if success else 1,
+            })
+        entry.known_selectors = selectors
+        self.db.commit()
+
+    def ensure_field(self, marketplace: str, field_label: str, selector: str = "", category_path: str | None = None):
+        label = _normalize_label(field_label)
+        if not label:
+            return
+        entry = self.get_by_identity(marketplace, category_path, label)
+        if not entry:
+            selectors = [{"selector": selector, "success_count": 0, "failure_count": 0}] if selector else []
+            self.create(
+                marketplace=marketplace,
+                category_path=category_path,
+                normalized_label=label,
+                known_selectors=selectors,
+            )
+            self.db.commit()
+            return
+        if selector:
+            selectors = list(entry.known_selectors or [])
+            if not any(s.get("selector") == selector for s in selectors):
+                selectors.append({"selector": selector, "success_count": 0, "failure_count": 0})
+                entry.known_selectors = selectors
+                self.db.commit()
+
+    def list_fields(
+        self,
+        marketplace: str | None = None,
+        category_path: str | None = None,
+        *,
+        all_categories: bool = False,
+    ) -> list[FieldRegistry]:
+        query = self.db.query(FieldRegistry)
+        if marketplace:
+            query = query.filter(FieldRegistry.marketplace == marketplace)
+        if category_path:
+            query = query.filter(
+                (FieldRegistry.category_path == category_path) |
+                (FieldRegistry.category_path.is_(None))
+            )
+        elif not all_categories:
+            query = query.filter(FieldRegistry.category_path.is_(None))
+        return query.order_by(
+            FieldRegistry.marketplace,
+            FieldRegistry.category_path,
+            FieldRegistry.normalized_label,
+        ).all()
+
+
+class FillLogRepo:
+    def __init__(self, db: Session):
+        self.db = db
+
+    def replace_step(
+        self,
+        job_id: str,
+        conversation_id: str,
+        step: str,
+        marketplace: str,
+        entries: list[dict],
+    ) -> list[FillLogEntry]:
+        self.db.query(FillLogEntry).filter(
+            FillLogEntry.job_id == job_id,
+            FillLogEntry.step == step,
+        ).delete(synchronize_session=False)
+        saved = []
+        for item in entries:
+            entry = FillLogEntry(
+                job_id=job_id,
+                conversation_id=conversation_id,
+                step=step,
+                marketplace=item.get("marketplace") or marketplace,
+                field=item["field"],
+                status=item["status"],
+                reason=item.get("reason") or "",
+                selector=item.get("selector") or "",
+                value_preview=item.get("value_preview") or "",
+            )
+            self.db.add(entry)
+            saved.append(entry)
+        self.db.commit()
+        for entry in saved:
+            self.db.refresh(entry)
+            if entry.status in {"failed", "invalid", "not_found", "uncertain"}:
+                logging.getLogger("anteroom.marketplaces").error(
+                    "%s field %s %s during %s (job %s): %s", entry.marketplace, entry.field,
+                    entry.status, step, job_id, entry.reason or "No failure detail was recorded.")
+        return saved
+
+
+    def list_for_job(self, job_id: str) -> list[FillLogEntry]:
+        return self.db.query(FillLogEntry).filter(
+            FillLogEntry.job_id == job_id
+        ).order_by(FillLogEntry.created_at, FillLogEntry.field).all()
+
+    def list_for_conversation(self, conversation_id: str) -> list[FillLogEntry]:
+        return self.db.query(FillLogEntry).filter(
+            FillLogEntry.conversation_id == conversation_id
+        ).order_by(FillLogEntry.created_at.desc()).all()
+
+    def delete_for_job(self, job_id: str) -> None:
+        self.db.query(FillLogEntry).filter(FillLogEntry.job_id == job_id).delete(synchronize_session=False)
+        self.db.commit()

@@ -1,0 +1,866 @@
+from __future__ import annotations
+
+import unittest
+
+from anteroom.models.mercari_shipping import DEFAULT_SHIPPING_LABEL
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from anteroom.database import Base
+from anteroom.models.conversation import Conversation
+from anteroom.models.fill_log import FillLogEntry  # noqa: F401
+from anteroom.models.job import Job  # noqa: F401
+from anteroom.models.registry import FieldRegistry  # noqa: F401
+from anteroom.repositories.queries import RegistryRepo
+from anteroom.services.registry import (
+    DEPOP_WOMEN_BLOUSE,
+    DEPOP_WOMEN_SHIRT,
+    DEPOP_WOMEN_TEE,
+    ETSY_WOMEN_BLOUSE,
+    ETSY_WOMEN_TEE,
+    MEN_TSHIRT_PATH,
+    POSHMARK_MEN_SHORT_TEE,
+    POSHMARK_WOMEN_BLOUSE,
+    POSHMARK_WOMEN_SHORT_TEE,
+    MERCARI_WOMEN_BLOUSE,
+    MERCARI_WOMEN_TEE,
+    WOMEN_TOPS_PATH,
+    RegistryService,
+    align_listing_gender,
+    is_account_managed_field,
+    is_learned_listing_field,
+    label_to_json_key,
+    map_depop_category_path,
+    map_etsy_category_path,
+    map_mercari_category_path,
+    map_poshmark_category_path,
+    map_vendoo_category_path,
+)
+
+
+class LabelHelpersTest(unittest.TestCase):
+    def test_label_to_json_key(self):
+        self.assertEqual(label_to_json_key("Fabric Weight"), "fabricWeight")
+        self.assertEqual(label_to_json_key("MPN"), "mpn")
+        self.assertEqual(label_to_json_key("Character"), "character")
+        self.assertEqual(label_to_json_key("Clothing style"), "clothingStyle")
+        self.assertEqual(label_to_json_key("Fabric pattern"), "fabricPattern")
+
+    def test_seller_settings_and_size_are_not_listing_fields(self):
+        self.assertFalse(is_learned_listing_field("ebay", "Allow Best Offer"))
+        self.assertFalse(is_learned_listing_field("ebay", "Return Within"))
+        self.assertFalse(is_learned_listing_field("ebay", "Return Payed By"))
+        self.assertFalse(is_learned_listing_field("ebay", "Starting Price"))
+        self.assertFalse(is_learned_listing_field("poshmark", "Size"))
+        self.assertFalse(is_learned_listing_field("etsy", "Worldwide Shipping"))
+        self.assertTrue(is_learned_listing_field("ebay", "Character"))
+        self.assertTrue(is_learned_listing_field("etsy", "Holiday"))
+
+    def test_shipping_is_account_managed_except_on_depop_and_mercari(self):
+        self.assertTrue(is_account_managed_field("etsy", "Shipping Profile"))
+        self.assertTrue(is_account_managed_field("etsy", "Processing Time"))
+        self.assertTrue(is_account_managed_field("ebay", "Shipping Service"))
+        self.assertTrue(is_account_managed_field("poshmark", "Discounted Shipping"))
+        self.assertFalse(is_learned_listing_field("etsy", "Shipping Profile"))
+        self.assertFalse(is_account_managed_field("depop", "Parcel Size"))
+        self.assertFalse(is_account_managed_field("mercari", "Shipping Label"))
+        self.assertFalse(is_account_managed_field("mercari", "Delivery Method"))
+        self.assertTrue(is_learned_listing_field("depop", "Parcel Size"))
+
+    def test_policies_are_account_managed_on_every_marketplace(self):
+        for marketplace in ("ebay", "etsy", "poshmark", "mercari", "depop"):
+            self.assertTrue(is_account_managed_field(marketplace, "Return Policy"), marketplace)
+            self.assertTrue(is_account_managed_field(marketplace, "Payment Policy"), marketplace)
+        self.assertFalse(is_account_managed_field("ebay", "Material"))
+        # The general weight feeds Depop's parcel tier, so it is still filled.
+        self.assertFalse(is_account_managed_field("general", "Weight (lbs)"))
+        self.assertFalse(is_account_managed_field("general", "Length"))
+
+
+class RegistryMergeTest(unittest.TestCase):
+    def setUp(self):
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        self.db = sessionmaker(bind=engine)()
+        self.conv = Conversation(title="Tee")
+        self.db.add(self.conv)
+        self.db.commit()
+        self.repo = RegistryRepo(self.db)
+        self.service = RegistryService(self.db)
+        self.category = "Clothing, Shoes & Accessories > Women > Women's Clothing > Tops"
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_merge_adds_item_fields_and_skips_settings(self):
+        for label in ("Character", "Fabric Weight", "Allow Best Offer", "Size"):
+            self.repo.ensure_field("ebay", label, category_path=self.category)
+        self.repo.ensure_field("etsy", "Holiday", category_path=self.category)
+        self.repo.ensure_field("poshmark", "Style Tags", category_path=self.category)
+
+        listing = {
+            "title": "Tee",
+            "category_path": self.category,
+            "size": "S",
+            "ebay_specifics": {"type": "T-Shirt", "character": "Does Not Apply"},
+        }
+        added = self.service.merge_learned_fields(listing)
+
+        self.assertIn("ebay_specifics.fabricWeight", added)
+        self.assertNotIn("ebay_specifics.character", added)
+        self.assertEqual(listing["ebay_specifics"]["character"], "Does Not Apply")
+        self.assertEqual(listing["ebay_specifics"]["fabricWeight"], "")
+        self.assertNotIn("allowBestOffer", listing["ebay_specifics"])
+        self.assertNotIn("size", listing["ebay_specifics"])
+        self.assertEqual(listing["etsy_specifics"]["holiday"], "")
+        self.assertEqual(listing["poshmark_specifics"]["styleTags"], "")
+
+    def test_generation_context_lists_learned_keys(self):
+        self.repo.ensure_field("ebay", "Character", category_path=self.category)
+        self.repo.ensure_field("ebay", "Allow Best Offer", category_path=self.category)
+        text = self.service.generation_context(self.category)
+        self.assertIn("character", text)
+        self.assertNotIn("allow best offer", text.lower())
+        self.assertIn("ebay", text)
+
+
+class CategoryMappingTest(unittest.TestCase):
+    def test_maps_abbreviated_womens_tee_path_using_title(self):
+        mapped = map_vendoo_category_path(
+            "Clothing > Women",
+            {"title": "Unknown S Southwestern Graphic T-Shirt", "department": "Women"},
+        )
+        self.assertEqual(mapped, WOMEN_TOPS_PATH)
+
+    def test_maps_mercari_style_womens_tshirt_path(self):
+        mapped = map_vendoo_category_path("Women > Clothing > Tops > T-shirts")
+        self.assertEqual(mapped, WOMEN_TOPS_PATH)
+
+    def test_maps_shirts_and_blouses_alias(self):
+        mapped = map_vendoo_category_path("Women's Shirts & Blouses")
+        self.assertEqual(mapped, WOMEN_TOPS_PATH)
+
+    def test_keeps_womens_dresses_path(self):
+        mapped = map_vendoo_category_path(
+            "Clothing > Women > Dresses",
+            {"title": "Floral Midi Dress", "department": "Women"},
+        )
+        self.assertEqual(mapped, "Clothing > Women > Dresses")
+
+    def test_keeps_mens_sweatshirt_path_when_title_contains_sweatshirt(self):
+        path = "Clothing, Shoes & Accessories > Men > Men's Clothing > Sweaters"
+        mapped = map_vendoo_category_path(
+            path,
+            {
+                "title": "Fruit of the Loom M Retro Graphic Sweatshirt Blue",
+                "department": "Men",
+                "ebay_specifics": {"department": "Men", "type": "Sweatshirt"},
+            },
+        )
+        self.assertEqual(mapped, path)
+
+    def test_keeps_sweatshirt_leaf_even_when_ebay_type_is_still_tshirt(self):
+        path = "Clothing, Shoes & Accessories > Men > Men's Clothing > Sweatshirts & Hoodies"
+        mapped = map_vendoo_category_path(
+            path,
+            {
+                "title": "Fruit of the Loom M Retro Graphic Sweatshirt",
+                "department": "Men",
+                "ebay_specifics": {"department": "Men", "type": "T-Shirt"},
+            },
+        )
+        self.assertEqual(mapped, path)
+
+    def test_align_keeps_sweatshirt_category_from_chat_patch(self):
+        path = "Clothing, Shoes & Accessories > Men > Men's Clothing > Sweaters"
+        listing = {
+            "title": "Fruit of the Loom M Retro Graphic Sweatshirt Blue",
+            "department": "Men",
+            "category_path": MEN_TSHIRT_PATH,
+            "ebay_specifics": {"department": "Men", "type": "T-Shirt"},
+        }
+        listing["category_path"] = path
+        listing["ebay_specifics"]["type"] = "Sweatshirt"
+        align_listing_gender(listing, [
+            {"op": "replace", "path": "/category_path", "value": path},
+            {"op": "replace", "path": "/ebay_specifics/type", "value": "Sweatshirt"},
+        ])
+        self.assertEqual(listing["category_path"], path)
+
+    def test_maps_mens_tee_from_listing_type(self):
+        mapped = map_vendoo_category_path(
+            "Clothing > Men",
+            {"title": "Nike Tee", "ebay_specifics": {"department": "Men", "type": "T-Shirt"}},
+        )
+        self.assertEqual(mapped, MEN_TSHIRT_PATH)
+
+    def test_restores_separators_when_mens_tee_path_is_glued_together(self):
+        """'Shoes' in the Clothing, Shoes & Accessories root must not block a tee remap."""
+        glued = "Clothing, Shoes & AccessoriesMen's ClothingShirtsT-Shirts"
+        mapped = map_vendoo_category_path(
+            glued,
+            {
+                "title": "Hanes XL Casual Graphic Tee Black Regular",
+                "department": "Men",
+                "ebay_specifics": {"department": "Men", "type": "T-Shirt"},
+            },
+        )
+        self.assertEqual(mapped, MEN_TSHIRT_PATH)
+        self.assertIn(" > ", mapped)
+
+    def test_mens_department_wins_over_womens_path(self):
+        mapped = map_vendoo_category_path(
+            WOMEN_TOPS_PATH,
+            {
+                "title": "Casa San Bord M Graphic T-Shirt Maroon Crewneck Cotton",
+                "department": "Men",
+            },
+        )
+        self.assertEqual(mapped, MEN_TSHIRT_PATH)
+
+    def test_keeps_mens_path_when_ebay_department_still_women(self):
+        mapped = map_vendoo_category_path(
+            MEN_TSHIRT_PATH,
+            {
+                "title": "Casa San Bord M Graphic T-Shirt",
+                "department": "Men",
+                "ebay_specifics": {"department": "Women", "type": "T-Shirt"},
+            },
+        )
+        self.assertEqual(mapped, MEN_TSHIRT_PATH)
+
+    def test_ensure_listing_defaults_rewrites_womens_path_for_mens_tee(self):
+        from anteroom.services.job_snapshot import ensure_listing_defaults
+
+        listing = {
+            "title": "Casa San Bord M Graphic T-Shirt Maroon Crewneck Cotton",
+            "category_path": WOMEN_TOPS_PATH,
+            "department": "Men",
+            "condition": "Good",
+        }
+        ensure_listing_defaults(listing)
+        self.assertEqual(listing["category_path"], MEN_TSHIRT_PATH)
+
+    def test_align_listing_gender_rewrites_category_from_department_patch(self):
+        listing = {
+            "title": "Casa San Bord M Graphic T-Shirt Maroon Crewneck Cotton",
+            "department": "Women",
+            "category_path": WOMEN_TOPS_PATH,
+            "ebay_specifics": {"department": "Women", "type": "T-Shirt"},
+        }
+        align_listing_gender(listing, [
+            {"op": "replace", "path": "/department", "value": "Men"},
+        ])
+        self.assertEqual(listing["department"], "Men")
+        self.assertEqual(listing["ebay_specifics"]["department"], "Men")
+        self.assertEqual(listing["category_path"], MEN_TSHIRT_PATH)
+
+    def test_ensure_listing_defaults_rewrites_category(self):
+        from anteroom.services.job_snapshot import ensure_listing_defaults
+
+        listing = {
+            "title": "Unknown S Southwestern Graphic T-Shirt",
+            "category_path": "Clothing > Women",
+            "department": "Women",
+            "condition": "Good",
+        }
+        ensure_listing_defaults(listing)
+        self.assertEqual(listing["category_path"], WOMEN_TOPS_PATH)
+        self.assertEqual(listing["mercari_specifics"]["shippingLabel"], DEFAULT_SHIPPING_LABEL)
+
+
+class PoshmarkCategoryMappingTest(unittest.TestCase):
+    def test_maps_mens_vendoo_tee_path(self):
+        mapped = map_poshmark_category_path(
+            MEN_TSHIRT_PATH,
+            {"title": "Amplife L Graphic T-Shirt", "ebay_specifics": {"department": "Men", "type": "T-Shirt"}},
+        )
+        self.assertEqual(mapped, POSHMARK_MEN_SHORT_TEE)
+
+    def test_maps_womens_graphic_tee_to_short_sleeve(self):
+        mapped = map_poshmark_category_path(
+            WOMEN_TOPS_PATH,
+            {"title": "Southwestern Graphic T-Shirt", "department": "Women"},
+        )
+        self.assertEqual(mapped, POSHMARK_WOMEN_SHORT_TEE)
+
+    def test_maps_blouse_type_to_blouses(self):
+        mapped = map_poshmark_category_path(
+            WOMEN_TOPS_PATH,
+            {"title": "Silk Blouse", "ebay_specifics": {"department": "Women", "type": "Blouse"}},
+        )
+        self.assertEqual(mapped, POSHMARK_WOMEN_BLOUSE)
+
+    def test_keeps_explicit_matching_poshmark_path(self):
+        mapped = map_poshmark_category_path(
+            WOMEN_TOPS_PATH,
+            {
+                "title": "Silk Blouse",
+                "department": "Women",
+                "poshmark_specifics": {"categoryPath": ["Women", "Tops", "Blouses"]},
+            },
+        )
+        self.assertEqual(mapped, POSHMARK_WOMEN_BLOUSE)
+
+    def test_ignores_stale_womens_poshmark_path_for_mens_tee(self):
+        mapped = map_poshmark_category_path(
+            MEN_TSHIRT_PATH,
+            {
+                "title": "Amplife Graphic T-Shirt",
+                "ebay_specifics": {"department": "Men", "type": "T-Shirt"},
+                "poshmark_specifics": {"categoryPath": ["Women", "Tops"]},
+            },
+        )
+        self.assertEqual(mapped, POSHMARK_MEN_SHORT_TEE)
+
+    def test_maps_mens_tee_when_vendoo_path_is_still_womens(self):
+        mapped = map_poshmark_category_path(
+            WOMEN_TOPS_PATH,
+            {
+                "title": "Casa San Bord M Graphic T-Shirt Maroon Crewneck Cotton",
+                "department": "Men",
+                "ebay_specifics": {"type": "T-Shirt"},
+            },
+        )
+        self.assertEqual(mapped, POSHMARK_MEN_SHORT_TEE)
+
+    def test_remaps_stale_tank_tops_for_short_sleeve_tee(self):
+        mapped = map_poshmark_category_path(
+            "Women > Tops > Tank Tops",
+            {
+                "title": "Faded Glory L Graphic T-Shirt Short Sleeve",
+                "department": "Women",
+                "ebay_specifics": {"type": "T-Shirt", "sleeveLength": "Short Sleeve"},
+                "marketplace_categories": {"poshmark": "Women > Tops > Tank Tops"},
+                "poshmark_specifics": {"categoryPath": ["Women", "Tops", "Tank Tops"]},
+            },
+        )
+        self.assertEqual(mapped, POSHMARK_WOMEN_SHORT_TEE)
+
+    def test_keeps_tank_tops_for_sleeveless_tank(self):
+        mapped = map_poshmark_category_path(
+            "Women > Tops > Tank Tops",
+            {
+                "title": "Faded Glory Sleeveless Tank Top",
+                "department": "Women",
+                "ebay_specifics": {"type": "Tank", "sleeveLength": "Sleeveless"},
+                "poshmark_specifics": {"categoryPath": ["Women", "Tops", "Tank Tops"]},
+            },
+        )
+        self.assertEqual(mapped, "Women > Tops > Tank Tops")
+
+    def test_does_not_map_sweatshirt_to_poshmark_tee(self):
+        """An eBay type of T-Shirt does not make a sweatshirt a tee."""
+        mapped = map_poshmark_category_path(
+            "Clothing, Shoes & Accessories > Men > Men's Clothing > Sweaters",
+            {
+                "title": "Fruit of the Loom M Retro Graphic Sweatshirt",
+                "department": "Men",
+                "ebay_specifics": {"department": "Men", "type": "T-Shirt"},
+            },
+        )
+        self.assertEqual(mapped, "Men > Shirts > Sweatshirts & Hoodies")
+        self.assertNotEqual(mapped, POSHMARK_MEN_SHORT_TEE)
+
+
+class MercariCategoryMappingTest(unittest.TestCase):
+    def test_maps_button_up_blouse_to_mercari_blouses(self):
+        mapped = map_mercari_category_path(
+            WOMEN_TOPS_PATH,
+            {
+                "title": "Notations XL Retro Short Sleeve Button-Up Shirt",
+                "department": "Women",
+                "ebay_specifics": {"department": "Women", "type": "Blouse"},
+            },
+        )
+        self.assertEqual(mapped, MERCARI_WOMEN_BLOUSE)
+
+    def test_maps_graphic_tee_to_mercari_tshirts(self):
+        mapped = map_mercari_category_path(
+            WOMEN_TOPS_PATH,
+            {"title": "Southwestern Graphic T-Shirt", "department": "Women"},
+        )
+        self.assertEqual(mapped, MERCARI_WOMEN_TEE)
+
+    def test_remaps_vendoo_default_blouse_leaf_for_a_tee(self):
+        mapped = map_mercari_category_path(
+            MERCARI_WOMEN_BLOUSE,
+            {
+                "title": "Southwestern Graphic T-Shirt",
+                "department": "Women",
+                "mercari_specifics": {
+                    "categoryPath": ["Women", "Tops & blouses", "Blouse"],
+                },
+            },
+        )
+        self.assertEqual(mapped, MERCARI_WOMEN_TEE)
+
+    def test_keeps_mercari_tank_tops_for_a_sleeveless_tee(self):
+        path = "Women > Tops & blouses > Tank Tops"
+        mapped = map_mercari_category_path(
+            path,
+            {
+                "title": "Southwestern Graphic Tank Top",
+                "department": "Women",
+                "ebay_specifics": {"department": "Women", "type": "T-Shirt"},
+            },
+        )
+        self.assertEqual(mapped, path)
+
+
+class TopKindMappingTest(unittest.TestCase):
+    """Each kind of top lands on that marketplace's own leaf for it."""
+
+    CASES = {
+        "tank": (
+            {"title": "Old Navy M Ribbed Tank Top White",
+             "ebay_specifics": {"department": "Women", "type": "Tank Top"}},
+            {"poshmark": "Women > Tops > Tank Tops",
+             "mercari": "Women > Tops & blouses > Tank Tops",
+             "depop": "Women > Tops > Tank tops and camis",
+             "etsy": "Clothing > Women's Clothing > Tops & Tees > Tanks"},
+        ),
+        "sleeveless tee": (
+            {"title": "Hanes M Sleeveless Graphic Tank Top Tee",
+             "ebay_specifics": {"department": "Women", "type": "T-Shirt"}},
+            {"poshmark": "Women > Tops > Tank Tops",
+             "mercari": "Women > Tops & blouses > Tank Tops",
+             "depop": "Women > Tops > Tank tops and camis",
+             "etsy": "Clothing > Women's Clothing > Tops & Tees > Tanks"},
+        ),
+        "polo": (
+            {"title": "Izod M Navy Polo Shirt",
+             "ebay_specifics": {"department": "Women", "type": "Polo Shirt"}},
+            {"mercari": "Women > Tops & blouses > Polo shirt",
+             "depop": "Women > Tops > Polo shirts",
+             "etsy": "Clothing > Women's Clothing > Tops & Tees > Polos"},
+        ),
+        "crop": (
+            {"title": "Forever 21 S Graphic Crop Top T-Shirt",
+             "ebay_specifics": {"department": "Women", "type": "T-Shirt"}},
+            {"poshmark": "Women > Tops > Crop Tops",
+             "depop": "Women > Tops > Crop tops",
+             "etsy": "Clothing > Women's Clothing > Tops & Tees > Crop & Tube Tops > Crop Tops",
+             # Mercari has no crop leaf, so a crop tee is still a tee there.
+             "mercari": MERCARI_WOMEN_TEE},
+        ),
+        "button-up": (
+            {"title": "Notations XL Plaid Button-Up Shirt",
+             "ebay_specifics": {"department": "Women", "type": "Button-Up Shirt"}},
+            {"poshmark": "Women > Tops > Button Down Shirts",
+             "mercari": "Women > Tops & blouses > Button down shirt",
+             "depop": DEPOP_WOMEN_SHIRT,
+             # Etsy has no button-down leaf; Blouses is the nearest it offers.
+             "etsy": ETSY_WOMEN_BLOUSE},
+        ),
+        "tunic": (
+            {"title": "Notations XL Floral Tunic Top",
+             "ebay_specifics": {"department": "Women", "type": "Blouse", "style": "Tunic"}},
+            {"poshmark": "Women > Tops > Tunics",
+             "mercari": "Women > Tops & blouses > Tunic",
+             "etsy": "Clothing > Women's Clothing > Tops & Tees > Tunics",
+             # Depop has no tunic leaf.
+             "depop": DEPOP_WOMEN_BLOUSE},
+        ),
+    }
+
+    def test_each_kind_of_top_gets_its_own_leaf(self):
+        mappers = {
+            "poshmark": map_poshmark_category_path,
+            "mercari": map_mercari_category_path,
+            "depop": map_depop_category_path,
+            "etsy": map_etsy_category_path,
+        }
+        for kind, (listing, wanted) in self.CASES.items():
+            for marketplace, path in wanted.items():
+                with self.subTest(kind=kind, marketplace=marketplace):
+                    mapped = mappers[marketplace](
+                        WOMEN_TOPS_PATH, {"department": "Women", **listing},
+                    )
+                    self.assertEqual(mapped, path)
+
+    def test_a_sleeved_tee_is_not_read_as_a_tank(self):
+        """"Short Sleeve" next to a Tank Tops leaf is the mapper, not the seller."""
+        mapped = map_mercari_category_path(
+            "Women > Tops & blouses > Tank Tops",
+            {
+                "title": "Faded Glory L Graphic T-Shirt Short Sleeve",
+                "department": "Women",
+                "ebay_specifics": {"type": "T-Shirt", "sleeveLength": "Short Sleeve"},
+            },
+        )
+        self.assertEqual(mapped, MERCARI_WOMEN_TEE)
+
+    def test_a_kind_the_marketplace_lacks_is_left_to_vendoo(self):
+        """Mercari has no women's sweatshirt leaf; Sweaters > Hooded is not one."""
+        listing = {
+            "title": "Fruit of the Loom M Retro Graphic Sweatshirt",
+            "department": "Women",
+            "ebay_specifics": {"department": "Women", "type": "Sweatshirt"},
+        }
+        self.assertEqual(map_mercari_category_path(WOMEN_TOPS_PATH, listing), WOMEN_TOPS_PATH)
+        self.assertEqual(
+            map_etsy_category_path(WOMEN_TOPS_PATH, listing),
+            "Clothing > Women's Clothing > Hoodies & Sweatshirts > Sweatshirts",
+        )
+
+
+class UnisexDepartmentTest(unittest.TestCase):
+    """No marketplace has a unisex clothing branch, so one side has to be picked."""
+
+    UNISEX_TEE = {
+        "title": "District S Casual Graphic T-Shirt White Crewneck",
+        "department": "Unisex",
+        "category_path": (
+            "Clothing, Shoes & Accessories > Unisex > Unisex Adult Clothing > Tops > T-Shirts"
+        ),
+        "ebay_specifics": {"department": "Unisex", "type": "T-Shirt"},
+    }
+
+    def test_a_unisex_listing_goes_to_the_mens_branch(self):
+        wanted = {
+            map_poshmark_category_path: POSHMARK_MEN_SHORT_TEE,
+            map_mercari_category_path: "Men > Tops > T-shirts",
+            map_depop_category_path: "Men > Tops > T-shirts",
+            map_etsy_category_path: "Clothing > Men's Clothing > Shirts & Tees > T-shirts",
+        }
+        for mapper, path in wanted.items():
+            with self.subTest(mapper=mapper.__name__):
+                self.assertEqual(mapper(self.UNISEX_TEE["category_path"], self.UNISEX_TEE), path)
+
+    def test_an_explicit_gender_still_wins_over_unisex(self):
+        listing = {
+            **self.UNISEX_TEE,
+            "department": "Women",
+            "ebay_specifics": {"department": "Women", "type": "T-Shirt"},
+        }
+        self.assertEqual(
+            map_depop_category_path(listing["category_path"], listing), DEPOP_WOMEN_TEE,
+        )
+
+    def test_a_unisex_general_path_becomes_a_selectable_leaf(self):
+        """Vendoo's General tree has no adult unisex clothing to resolve against."""
+        self.assertEqual(
+            map_vendoo_category_path(self.UNISEX_TEE["category_path"], self.UNISEX_TEE),
+            MEN_TSHIRT_PATH,
+        )
+
+    def test_a_listing_naming_no_department_is_left_to_vendoo(self):
+        listing = {"title": "Graphic T-Shirt", "ebay_specifics": {"type": "T-Shirt"}}
+        path = "Clothing, Shoes & Accessories > Tops"
+        self.assertEqual(map_depop_category_path(path, listing), path)
+
+
+class NonTopGarmentTest(unittest.TestCase):
+    """The tops mappers must keep their hands off everything else."""
+
+    def _dress(self):
+        return {
+            "title": "Southwestern Graphic T-Shirt Dress",
+            "department": "Women",
+            "ebay_specifics": {"department": "Women", "type": "Dress"},
+        }
+
+    def test_a_tshirt_dress_keeps_its_dress_leaf(self):
+        for mapper, path in (
+            (map_mercari_category_path, "Women > Dresses > Other"),
+            (map_depop_category_path, "Women > Dresses > Casual dresses"),
+            (map_etsy_category_path, "Clothing > Women's Clothing > Dresses"),
+        ):
+            with self.subTest(mapper=mapper.__name__):
+                self.assertEqual(mapper(path, self._dress()), path)
+
+    def test_a_dress_is_never_filed_under_tops(self):
+        """A dress reaches a dress leaf, or none at all — never a tops leaf."""
+        for mapper in (
+            map_mercari_category_path,
+            map_depop_category_path,
+            map_etsy_category_path,
+            map_poshmark_category_path,
+        ):
+            with self.subTest(mapper=mapper.__name__):
+                mapped = mapper(WOMEN_TOPS_PATH, self._dress())
+                if mapped == WOMEN_TOPS_PATH:
+                    continue  # Left for Vendoo, which is the other safe answer.
+                self.assertIn("Dress", mapped)
+                self.assertNotIn("Top", mapped.rsplit(" > ", 1)[-1])
+
+    def test_a_cut_nobody_named_keeps_vendoos_leaf(self):
+        """Mercari's Other is a real answer; a guessed Maxi is not."""
+        plain = {
+            "title": "Old Navy M Floral Dress",
+            "department": "Women",
+            "ebay_specifics": {"department": "Women", "type": "Dress"},
+        }
+        self.assertEqual(
+            map_mercari_category_path("Women > Dresses > Other", plain),
+            "Women > Dresses > Other",
+        )
+        self.assertEqual(map_mercari_category_path(WOMEN_TOPS_PATH, plain), WOMEN_TOPS_PATH)
+
+    def test_a_dress_shirt_is_still_a_shirt(self):
+        mapped = map_depop_category_path(
+            WOMEN_TOPS_PATH,
+            {
+                "title": "Notations XL Plaid Dress Shirt",
+                "department": "Women",
+                "ebay_specifics": {"department": "Women", "type": "Button-Up Shirt"},
+            },
+        )
+        self.assertEqual(mapped, DEPOP_WOMEN_SHIRT)
+
+    def test_a_cropped_trucker_jacket_is_not_a_crop_top(self):
+        """'Cropped' is a hem length on a jacket, not a Crop Tops cue."""
+        listing = {
+            "title": "Finity 8 Cropped Trucker Jacket Black Slim",
+            "department": "Women",
+            "category_path": (
+                "Clothing, Shoes & Accessories > Women > Women's Clothing "
+                "> Coats, Jackets & Vests"
+            ),
+            "ebay_specifics": {
+                "department": "Women",
+                "style": "Basic Jacket",
+                "sleeveLength": "Long Sleeve",
+            },
+            "description": "Y2K cropped trucker jacket stretch cotton twill.",
+        }
+        general = listing["category_path"]
+        self.assertEqual(
+            map_poshmark_category_path(general, listing),
+            "Women > Jackets & Coats > Jean Jackets",
+        )
+        self.assertEqual(
+            map_mercari_category_path(general, listing),
+            "Women > Coats & jackets > Jean jacket",
+        )
+        self.assertEqual(
+            map_etsy_category_path(general, listing),
+            "Clothing > Women's Clothing > Jackets & Coats",
+        )
+        self.assertEqual(
+            map_depop_category_path(general, listing),
+            "Women > Coats and jackets > Jackets",
+        )
+        # Already-wrong tops leaves from an earlier generate must remap too.
+        self.assertEqual(
+            map_poshmark_category_path("Women > Tops > Crop Tops", listing),
+            "Women > Jackets & Coats > Jean Jackets",
+        )
+        self.assertEqual(
+            map_mercari_category_path("Women > Tops & blouses > T-shirts", listing),
+            "Women > Coats & jackets > Jean jacket",
+        )
+        self.assertEqual(
+            map_etsy_category_path(
+                "Clothing > Women's Clothing > Tops & Tees > Crop & Tube Tops > Crop Tops",
+                listing,
+            ),
+            "Clothing > Women's Clothing > Jackets & Coats",
+        )
+
+
+class DepopCategoryMappingTest(unittest.TestCase):
+    def test_maps_graphic_tee_to_depop_tshirts(self):
+        mapped = map_depop_category_path(
+            WOMEN_TOPS_PATH,
+            {"title": "Southwestern Graphic T-Shirt", "department": "Women"},
+        )
+        self.assertEqual(mapped, DEPOP_WOMEN_TEE)
+
+    def test_cotton_jersey_fabric_does_not_file_a_tee_as_a_jersey(self):
+        """Jersey knit is the cloth a t-shirt is made of, not Depop's Jerseys leaf."""
+        listing = {
+            "title": "Unbranded S Y2K Casual Graphic T-Shirt Black",
+            "department": "Women",
+            "description": "Soft cotton jersey, short sleeve crewneck.",
+            "ebay_specifics": {"department": "Women", "type": "T-Shirt", "material": "Jersey"},
+        }
+        self.assertEqual(map_depop_category_path(WOMEN_TOPS_PATH, listing), DEPOP_WOMEN_TEE)
+        self.assertEqual(
+            map_poshmark_category_path(WOMEN_TOPS_PATH, listing),
+            POSHMARK_WOMEN_SHORT_TEE,
+        )
+
+    def test_photo_analysis_material_jersey_stays_a_tshirt(self):
+        analysis = (
+            "Photo analysis:\n"
+            "- material: jersey\n"
+            "- category: t-shirt\n"
+            "- department: Women\n"
+        )
+        listing = {"title": analysis, "department": "Women", "description": ""}
+        self.assertEqual(
+            map_depop_category_path("Women > Tops > Other", listing),
+            DEPOP_WOMEN_TEE,
+        )
+
+    def test_a_jerseys_leaf_already_chosen_for_a_tee_is_replaced(self):
+        listing = {
+            "title": "Unbranded S Graphic T-Shirt",
+            "department": "Women",
+            "description": "Cotton jersey knit.",
+            "depop_specifics": {"categoryPath": ["Women", "Tops", "Jerseys"]},
+        }
+        self.assertEqual(
+            map_depop_category_path("Women > Tops > Jerseys", listing),
+            DEPOP_WOMEN_TEE,
+        )
+
+    def test_a_sports_jersey_stays_on_the_jerseys_leaf(self):
+        listing = {
+            "title": "Nike M Vintage Basketball Jersey White",
+            "department": "Women",
+            "ebay_specifics": {"department": "Women", "type": "Jersey"},
+        }
+        self.assertEqual(
+            map_depop_category_path(WOMEN_TOPS_PATH, listing),
+            "Women > Tops > Jerseys",
+        )
+        self.assertEqual(
+            map_poshmark_category_path(WOMEN_TOPS_PATH, listing),
+            "Women > Tops > Jerseys",
+        )
+
+    def test_mens_cotton_jersey_tee_is_not_a_rugby_shirt(self):
+        listing = {
+            "title": "Gildan M Graphic T-Shirt",
+            "department": "Men",
+            "description": "Cotton jersey.",
+            "ebay_specifics": {"department": "Men", "type": "T-Shirt"},
+        }
+        self.assertEqual(
+            map_mercari_category_path(MEN_TSHIRT_PATH, listing),
+            "Men > Tops > T-shirts",
+        )
+
+    def test_remaps_vendoo_default_other_leaf_for_a_tee(self):
+        mapped = map_depop_category_path(
+            "Women > Tops > Other",
+            {
+                "title": "Southwestern Graphic T-Shirt",
+                "department": "Women",
+                "depop_specifics": {"categoryPath": ["Women", "Tops", "Other"]},
+            },
+        )
+        self.assertEqual(mapped, DEPOP_WOMEN_TEE)
+
+    def test_maps_blouse_and_button_up_apart(self):
+        self.assertEqual(
+            map_depop_category_path(
+                WOMEN_TOPS_PATH,
+                {"title": "Notations XL Floral Blouse", "department": "Women"},
+            ),
+            DEPOP_WOMEN_BLOUSE,
+        )
+        self.assertEqual(
+            map_depop_category_path(
+                WOMEN_TOPS_PATH,
+                {"title": "Notations XL Plaid Button-Up Shirt", "department": "Women"},
+            ),
+            DEPOP_WOMEN_SHIRT,
+        )
+
+    def test_keeps_a_depop_leaf_the_listing_asked_for(self):
+        path = "Women > Tops > Crop tops"
+        mapped = map_depop_category_path(
+            path,
+            {"title": "Southwestern Graphic Crop Top T-Shirt", "department": "Women"},
+        )
+        self.assertEqual(mapped, path)
+
+
+class EtsyCategoryMappingTest(unittest.TestCase):
+    def test_maps_button_up_blouse_to_etsy_blouses(self):
+        mapped = map_etsy_category_path(
+            WOMEN_TOPS_PATH,
+            {
+                "title": "Notations XL Floral Short Sleeve Button-Up Blouse",
+                "department": "Women",
+                "ebay_specifics": {
+                    "department": "Women",
+                    "type": "Blouse",
+                    "style": "Button-Up",
+                },
+            },
+        )
+        self.assertEqual(mapped, ETSY_WOMEN_BLOUSE)
+
+    def test_remaps_stale_tunics_for_button_up_blouse(self):
+        mapped = map_etsy_category_path(
+            ETSY_WOMEN_BLOUSE.replace("Blouses", "Tunics"),
+            {
+                "title": "Notations XL Floral Button-Up Blouse",
+                "department": "Women",
+                "ebay_specifics": {
+                    "department": "Women",
+                    "type": "Blouse",
+                    "style": "Button-Up",
+                },
+                "marketplace_categories": {
+                    "etsy": "Clothing > Women's Clothing > Tops & Tees > Tunics",
+                },
+                "etsy_specifics": {
+                    "categoryPath": [
+                        "Clothing", "Women's Clothing", "Tops & Tees", "Tunics",
+                    ],
+                },
+            },
+        )
+        self.assertEqual(mapped, ETSY_WOMEN_BLOUSE)
+
+    def test_keeps_tunics_when_style_is_tunic(self):
+        path = "Clothing > Women's Clothing > Tops & Tees > Tunics"
+        mapped = map_etsy_category_path(
+            path,
+            {
+                "title": "Notations XL Floral Tunic Top",
+                "department": "Women",
+                "ebay_specifics": {
+                    "department": "Women",
+                    "type": "Blouse",
+                    "style": "Tunic",
+                },
+                "etsy_specifics": {
+                    "categoryPath": [
+                        "Clothing", "Women's Clothing", "Tops & Tees", "Tunics",
+                    ],
+                },
+            },
+        )
+        self.assertEqual(mapped, path)
+
+    def test_maps_graphic_tee_to_etsy_tshirts(self):
+        mapped = map_etsy_category_path(
+            WOMEN_TOPS_PATH,
+            {"title": "Southwestern Graphic T-Shirt", "department": "Women"},
+        )
+        self.assertEqual(mapped, ETSY_WOMEN_TEE)
+
+    def test_remaps_vendoo_default_tunics_leaf_for_a_tee(self):
+        mapped = map_etsy_category_path(
+            "Clothing > Women's Clothing > Tops & Tees > Tunics",
+            {
+                "title": "Southwestern Graphic T-Shirt",
+                "department": "Women",
+                "etsy_specifics": {
+                    "categoryPath": [
+                        "Clothing", "Women's Clothing", "Tops & Tees", "Tunics",
+                    ],
+                },
+            },
+        )
+        self.assertEqual(mapped, ETSY_WOMEN_TEE)
+
+    def test_keeps_etsy_polos_for_a_polo_tee(self):
+        path = "Clothing > Women's Clothing > Tops & Tees > Polos"
+        mapped = map_etsy_category_path(
+            path,
+            {
+                "title": "Izod M Navy Polo Shirt",
+                "department": "Women",
+                "ebay_specifics": {"department": "Women", "type": "T-Shirt"},
+            },
+        )
+        self.assertEqual(mapped, path)
