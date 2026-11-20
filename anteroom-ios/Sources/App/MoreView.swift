@@ -29,7 +29,7 @@ struct MoreView: View {
             .navigationDestination(for: Destination.self) { destination in
                 switch destination {
                 case .automations: AutomationsView(api: api, canApprove: features.contains("marketplace_actions"), showsEbayOffers: features.contains("ebay_offers"), showsPromotions: features.contains("marketplace_sessions"))
-                case .settings: SettingsRootView(api: api, canDeleteAccount: features.contains("account_deletion"))
+                case .settings: SettingsRootView(api: api, canDeleteAccount: features.contains("account_deletion"), managedAI: features.contains("managed_ai"))
                 }
             }
         }

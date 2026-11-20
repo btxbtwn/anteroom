@@ -168,7 +168,7 @@ export function ChatComposer({
                   data-chat-composer-controls="left"
                   className="relative -m-1 -ms-3.5 flex min-w-0 flex-1 items-center gap-1 overflow-x-auto p-1 ps-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                 >
-                  <ComposerModelControls disabled={busy} />
+                  {runtime.features.has("managed_ai") ? null : <ComposerModelControls disabled={busy} />}
                 </div>
                 <div data-chat-composer-actions="right" className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
                   {runtime.features.has("chat_attachments") && <ComposerAttachButton onFiles={addImages} />}

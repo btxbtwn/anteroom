@@ -6,6 +6,8 @@ struct SettingsRootView: View {
     let api: AnteroomAPI
     /// The server offers account deletion (`account_deletion` in `/api/runtime`).
     let canDeleteAccount: Bool
+    /// The server manages the AI provider (`managed_ai` in `/api/runtime`), so AI providers is hidden.
+    var managedAI: Bool = false
     @Environment(SessionStore.self) private var session
     @State private var confirmSignOut = false
     @State private var signingOut = false
@@ -26,8 +28,10 @@ struct SettingsRootView: View {
                         NavigationLink { ListingsSettingsView(api: api) } label: {
                             Label("Listings", systemImage: "tag")
                         }
-                        NavigationLink { ProvidersSettingsView(api: api) } label: {
-                            Label("AI providers", systemImage: "sparkles")
+                        if !managedAI {
+                            NavigationLink { ProvidersSettingsView(api: api) } label: {
+                                Label("AI providers", systemImage: "sparkles")
+                            }
                         }
                     }
                     Section {

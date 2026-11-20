@@ -48,8 +48,8 @@ export function SettingsPage({
   onTargetHandled?: () => void;
   onOpenSetupGuide?: () => void;
 }) {
-  const { hosted } = useWorkspaceRuntime();
-  section = settingsSectionFor(section, hosted);
+  const { hosted, features } = useWorkspaceRuntime();
+  section = settingsSectionFor(section, hosted, features.has("managed_ai"));
   useEffect(() => {
     if (!targetId) return;
     const frame = window.requestAnimationFrame(() => {

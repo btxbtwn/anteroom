@@ -54,8 +54,23 @@ def _instance(provider_id: str):
     return provider
 
 
+def _hosted_managed_ai() -> bool:
+    from vendoo_studio.services.service_context import current
+    if current() is None:
+        return False
+    from vendoo_studio.services.hosted_provider import managed_ai_enabled
+    return managed_ai_enabled()
+
+
+def _guard_managed_ai() -> None:
+    if _hosted_managed_ai():
+        raise HTTPException(403, "AI is managed automatically for hosted accounts.")
+
+
 @key_router.get("")
 def list_ai_keys():
+    if _hosted_managed_ai():
+        return {"providers": []}
     from vendoo_studio.services.keychain import get_ai_keys, mask_secret
     from vendoo_studio.services.user_settings import resolved_key_provider_models
 
@@ -79,6 +94,7 @@ def list_ai_keys():
 
 @key_router.put("/{provider_id}")
 def set_ai_key(provider_id: str, config: AIKeyConfig):
+    _guard_managed_ai()
     from vendoo_studio.services.keychain import set_ai_key as save_key
 
     _spec(provider_id)
@@ -93,6 +109,7 @@ def set_ai_key(provider_id: str, config: AIKeyConfig):
 
 @key_router.delete("/{provider_id}")
 def delete_ai_key(provider_id: str):
+    _guard_managed_ai()
     from vendoo_studio.services.keychain import delete_ai_key as remove_key
 
     _spec(provider_id)
@@ -102,6 +119,7 @@ def delete_ai_key(provider_id: str):
 
 @key_router.post("/{provider_id}/test")
 async def test_ai_key(provider_id: str):
+    _guard_managed_ai()
     # Reading the key opens a database session on the web; keep it off the event loop.
     provider = await run_in_threadpool(_instance, provider_id)
     try:
@@ -113,6 +131,7 @@ async def test_ai_key(provider_id: str):
 
 @key_router.get("/{provider_id}/models")
 async def ai_key_models(provider_id: str):
+    _guard_managed_ai()
     from vendoo_studio.services.user_settings import get_key_provider_reasoning
 
     spec = _spec(provider_id)
@@ -163,6 +182,7 @@ async def ai_key_models(provider_id: str):
 
 @key_router.put("/{provider_id}/models")
 def set_ai_key_models(provider_id: str, config: AIKeyModelsConfig):
+    _guard_managed_ai()
     from vendoo_studio.services.user_settings import (
         clear_key_provider_reasoning,
         resolved_key_provider_models,

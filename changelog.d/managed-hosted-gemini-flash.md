@@ -1,0 +1,1 @@
+- Hosted web and iOS accounts can now use a platform-managed OpenRouter Gemini Flash model (`ANTEROOM_MANAGED_OPENROUTER_KEY`, defaulting to `google/gemini-3.8-flash`) automatically, hiding provider setup and model pickers on hosted while keeping local desktop provider sign-ins unchanged.

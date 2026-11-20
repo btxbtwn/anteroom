@@ -2,8 +2,49 @@
 from __future__ import annotations
 
 import inspect
+import os
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal, overload
+
+DEFAULT_MANAGED_MODEL = 'google/gemini-3.8-flash'
+_MANAGED_REASONING_EFFORTS = frozenset({'minimal', 'low', 'medium', 'high', 'xhigh', 'max'})
+
+
+def managed_openrouter_key() -> str:
+    """Platform OpenRouter key for hosted accounts; empty when seller-supplied providers are used."""
+    return os.environ.get('ANTEROOM_MANAGED_OPENROUTER_KEY', '').strip()
+
+
+def managed_model() -> str:
+    """Pinned OpenRouter model slug for photos, listings, assistant and sold comps."""
+    return os.environ.get('ANTEROOM_MANAGED_MODEL', '').strip() or DEFAULT_MANAGED_MODEL
+
+
+def managed_reasoning() -> str | None:
+    """Optional OpenRouter reasoning effort for the managed listing model."""
+    value = os.environ.get('ANTEROOM_MANAGED_REASONING', '').strip().lower()
+    return value if value in _MANAGED_REASONING_EFFORTS else None
+
+
+def managed_ai_enabled() -> bool:
+    """Whether hosted accounts automatically use Anteroom's managed Gemini Flash model."""
+    if managed_openrouter_key():
+        return True
+    from vendoo_studio import sandbox
+    return sandbox.enabled() and os.environ.get('ANTEROOM_MANAGED_AI', '').strip().lower() in {'1', 'true', 'yes'}
+
+
+def managed_provider() -> HostedProvider | None:
+    key = managed_openrouter_key()
+    if not key:
+        return None
+    from vendoo_studio.providers.chat_completions import OpenRouterProvider
+    from vendoo_studio.services.ai_key_catalog import KEY_PROVIDERS
+
+    model = managed_model()
+    return HostedProvider(
+        OpenRouterProvider(KEY_PROVIDERS['openrouter'], key, model, model, managed_reasoning()),
+    )
 
 
 class ProviderUnavailable(RuntimeError):
@@ -56,6 +97,8 @@ class HostedProvider:
 
 
 def provider_for(choice):
+    if managed_ai_enabled():
+        return managed_provider()
     from vendoo_studio.services.ai_key_catalog import KEY_PROVIDERS
     from vendoo_studio.services.keychain import get_ai_key, get_api_key
     from vendoo_studio.services.listing_provider import key_provider_instance

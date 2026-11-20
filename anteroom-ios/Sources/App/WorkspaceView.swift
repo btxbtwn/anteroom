@@ -52,7 +52,11 @@ struct WorkspaceView: View {
             } label: { Label("Inventory", systemImage: "tag.fill") }
             if views.contains("assistant") {
                 Tab(value: WorkspaceTab.assistant) {
-                    BusinessAssistantView(api: api, attachmentsAvailable: features.contains("chat_attachments"))
+                    BusinessAssistantView(
+                        api: api,
+                        attachmentsAvailable: features.contains("chat_attachments"),
+                        managedAI: features.contains("managed_ai")
+                    )
                 } label: { Label("Assistant", systemImage: "bubble.left.and.text.bubble.right.fill") }
             }
             if views.contains("marketplaces") {

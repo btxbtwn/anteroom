@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { ASSISTANT_MEMORY_KEY, AssistantRefused, type AssistantMessage, type AssistantThread } from "../api/assistant";
 import type { ChatAttachment, ChatAttachmentUpload } from "../api/types";
+import { useWorkspaceRuntime } from "../app/runtime";
 import { invalidateTopics } from "../cloud/liveUpdates";
 import { addToast } from "../ui/toast";
 import { useMobileLayout } from "../lib/useMobileLayout";
@@ -420,7 +421,8 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   const drawn = live ? liveParts(live, turns) : { question: false, answer: false };
   const visible = live && drawn.answer ? streamingDisplayText(live.parts.content) : "";
   const empty = !live && !turns.length && !messages.isLoading && !messages.isError;
-  const needsProvider = /sign in with chatgpt/i.test(error);
+  const { features } = useWorkspaceRuntime();
+  const needsProvider = !features.has("managed_ai") && /sign in with chatgpt/i.test(error);
   // An answer that failed, or that a restart cut off, left the last question unanswered.
   const unanswered = !live && !following && !messages.isFetching && turns[turns.length - 1]?.role === "user";
   const retry = () => {
