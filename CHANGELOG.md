@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1073 — 2026-11-20
+
+- Keep eBay and Etsy listing-mode checks off the request event loop so marketplace calls stay responsive.
+- Stop routine multi-machine routing, bot probes, and third-party supplier rate limits from flooding operator warning alerts.
+
 ## 0.1.1072 — 2026-11-20
 
 - Live updates between your devices now arrive by push instead of the database checking for changes twice a second, which frees database time for everything else.

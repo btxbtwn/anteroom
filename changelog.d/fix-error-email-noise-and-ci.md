@@ -1,2 +1,0 @@
-- Keep eBay and Etsy listing-mode checks off the request event loop so marketplace calls stay responsive.
-- Stop routine multi-machine routing, bot probes, and third-party supplier rate limits from flooding operator warning alerts.
