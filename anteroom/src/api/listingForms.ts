@@ -13,7 +13,7 @@ const STALE_FORM_GAP = /reload its fields/i;
 // identical for every seller and keyed by content hash. Keep them in memory
 // for the page's lifetime and in Cache Storage across reloads so iPad/phone
 // reloads don't re-download 1.5+ MB of static options.
-const CHOICE_LIST_CACHE = "anteroom-choice-lists-v1";
+const CHOICE_LIST_CACHE = "anteroom-choice-lists-v2";
 const CACHE_READ_TIMEOUT_MS = 500;
 const choiceLists = new Map<string, Promise<ChoiceList>>();
 const savedFormFingerprints = new WeakMap<object, string>();
@@ -31,6 +31,21 @@ async function openChoiceListCache(): Promise<Cache | null> {
   }
 }
 
+/** The server versions compact UTF-8 JSON with the first 16 SHA-256 hex digits.
+ * Serialization differences safely skip caching; they never assign another
+ * catalog's content to the requested version.
+ */
+async function matchesChoiceListVersion(data: ChoiceList, version: string): Promise<boolean> {
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(data)));
+    const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return hash.slice(0, 16) === version;
+  } catch {
+    // Crypto may be unavailable on an insecure origin; network reads still work.
+    return false;
+  }
+}
+
 async function readChoiceListFromDevice(name: string, version: string): Promise<ChoiceList | null> {
   if (typeof caches === "undefined") return null;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -40,7 +55,7 @@ async function readChoiceListFromDevice(name: string, version: string): Promise<
     const response = await cache.match(choiceListCacheKey(name, version));
     if (!response) return null;
     const data = (await response.json()) as ChoiceList;
-    return data && typeof data === "object" ? data : null;
+    return data && typeof data === "object" && await matchesChoiceListVersion(data, version) ? data : null;
   })();
   try {
     return await Promise.race([
@@ -56,6 +71,7 @@ async function readChoiceListFromDevice(name: string, version: string): Promise<
 }
 
 async function writeChoiceListToDevice(name: string, version: string, data: ChoiceList): Promise<void> {
+  if (!await matchesChoiceListVersion(data, version)) return;
   const cache = await openChoiceListCache();
   if (!cache) return;
   const targetKey = choiceListCacheKey(name, version);

@@ -31,6 +31,37 @@ function fakeCacheStorage() {
   };
 }
 
+it("does not persist a mismatched catalog during rollout or reuse it after rollback", async () => {
+  const { entries, cache, storage } = fakeCacheStorage();
+  vi.stubGlobal("caches", storage);
+  const client = createStudioQueryClient();
+  const original = { options: ["Nike"], option_values: {} };
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(original)));
+  const version = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, 16);
+  vi.spyOn(api.nativeMarketplaces, "form").mockResolvedValue({
+    marketplace: "mercari",
+    fields: [{ key: "brand", path: "brand", label: "Brand", value: "",
+      choice_list: { name: "mercari-brands", version } }],
+  } as never);
+  const list = vi.spyOn(api.catalog, "choiceList").mockResolvedValue({ options: ["Adidas"], option_values: {} });
+  try {
+    await prefetchListingForm(client, "rollout", "mercari", {}, "r1");
+    // Wait for any asynchronous persistence to finish.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(cache.put).not.toHaveBeenCalled();
+    expect(entries.size).toBe(0);
+    // Reject an incorrectly keyed entry on a subsequent load too.
+    entries.set(`/api/catalog/choice-lists/mercari-brands?v=${version}`, JSON.stringify({ options: ["Adidas"], option_values: {} }));
+    resetChoiceListCacheForTests();
+    client.clear();
+    list.mockResolvedValue(original);
+    await prefetchListingForm(client, "rollback", "mercari", {}, "r1");
+    expect(list).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(Array.from(entries.values())).toEqual([JSON.stringify(original)]));
+    expect(client.getQueryData(nativeFormOptions("rollback", "mercari", {}, "r1").queryKey)?.fields[0]?.options).toEqual(["Nike"]);
+  } finally { client.clear(); }
+});
+
 it("opens warmed forms synchronously and fetches again only when their structure changes", async () => {
   const client = createStudioQueryClient();
   const read = vi.spyOn(api.nativeMarketplaces, "form").mockResolvedValue({ marketplace: "mercari", fields: [] } as never);
@@ -75,14 +106,19 @@ it("persists versioned choice lists in Cache Storage across reloads and prunes o
   const { entries, storage } = fakeCacheStorage();
   vi.stubGlobal("caches", storage);
   const client = createStudioQueryClient();
-  let version = "v1";
+  const bodies = [{ options: ["Nike"], option_values: {} }, { options: ["Adidas"], option_values: {} }];
+  const versions = await Promise.all(bodies.map(async (body) => {
+    const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(body)));
+    return Array.from(new Uint8Array(hash), (byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, 16);
+  }));
+  let version = versions[0];
   vi.spyOn(api.nativeMarketplaces, "form").mockImplementation(async () => ({
     marketplace: "mercari",
     fields: [{ key: "mercari_specifics.brand", path: "mercari_specifics.brand", label: "Brand", value: "",
       choice_list: { name: "mercari-brands", version } }],
   }) as never);
   const list = vi.spyOn(api.catalog, "choiceList").mockImplementation(async (_name, v) => ({
-    options: [v === "v1" ? "Nike" : "Adidas"],
+    options: [v === versions[0] ? "Nike" : "Adidas"],
     option_values: {},
   }));
   try {
@@ -100,14 +136,14 @@ it("persists versioned choice lists in Cache Storage across reloads and prunes o
     expect(cached?.fields[0]?.options).toEqual(["Nike"]);
 
     // New choice-list version fetches once and evicts the superseded version.
-    version = "v2";
+    version = versions[1];
     resetChoiceListCacheForTests();
     client.clear();
     await prefetchListingForm(client, "three", "mercari", {}, "r1");
     expect(list).toHaveBeenCalledTimes(2);
     await vi.waitFor(() => {
       expect(entries.size).toBe(1);
-      expect(Array.from(entries.keys())[0]).toContain("v2");
+      expect(Array.from(entries.keys())[0]).toContain(versions[1]);
     });
   } finally { client.clear(); }
 });
