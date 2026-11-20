@@ -749,6 +749,31 @@ class AnalyticsInputsCacheTest(unittest.TestCase):
         self.db.rollback()
         self.assertIn(sale_id, [line.id for line in read_analytics_inputs(self.db).sales.get(self.sold.id, [])])
 
+    def test_a_sale_this_session_loaded_earlier_is_never_kept(self):
+        from vendoo_studio.models.marketplace_sale import MarketplaceSale
+        from vendoo_studio.services.inventory_analytics import read_analytics_inputs
+
+        if self.db.get_bind().dialect.name != "postgresql":
+            self.skipTest("Only the hosted Postgres database is read over the network")
+        self._add_sale()
+        read_analytics_inputs(self.db)  # Keeps the fixture's Vendoo sale on the ledger first.
+        self.db.commit()
+        held = self.db.query(MarketplaceSale).filter_by(order_id=self.order_id).one()
+        other = SessionLocal()
+        try:
+            other.query(MarketplaceSale).filter_by(id=held.id).one().quantity = 3
+            other.commit()
+        finally:
+            other.close()
+        # This session's copy still says 1; what it reads must not reach anyone else.
+        read_analytics_inputs(self.db)
+        fresh = SessionLocal()
+        try:
+            lines = read_analytics_inputs(fresh).sales[self.sold.id]
+        finally:
+            fresh.close()
+        self.assertEqual(next(line.quantity for line in lines if line.id == held.id), 3)
+
     def test_kept_sales_are_attached_to_no_session(self):
         from vendoo_studio.services.inventory_analytics import read_analytics_inputs
 

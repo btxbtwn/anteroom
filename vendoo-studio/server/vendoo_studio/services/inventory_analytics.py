@@ -241,8 +241,9 @@ def read_analytics_inputs(db, conversation_id: str | None = None) -> AnalyticsIn
     if version is None:
         return _read_analytics_inputs(db, conversation_id)
     shared, version = version
-    if not shared:
-        # This session wrote rows it has not committed: what it reads now may roll back.
+    if not shared or _holds_loaded_inputs(db):
+        # This session wrote rows it has not committed, which may roll back, or
+        # holds sales or boxes loaded earlier, which its read returns unrefreshed.
         return _read_analytics_inputs(db, None)
     key = getattr(db, "user_id", None)
     with _inputs_lock:
@@ -290,6 +291,14 @@ def _inputs_version(db) -> tuple[bool, tuple] | None:
     )
     row = db.execute(text(f"SELECT pg_current_xact_id_if_assigned() IS NULL, {parts}")).one()
     return bool(row[0]), tuple(row[1:])
+
+
+def _holds_loaded_inputs(db) -> bool:
+    """Whether the read would return entities this session loaded before, with their old values."""
+    from vendoo_studio.models.marketplace_sale import MarketplaceSale
+    from vendoo_studio.models.sourcing import SourceBox
+
+    return any(isinstance(row, (MarketplaceSale, SourceBox)) for row in db.identity_map.values())
 
 
 def _unbound(row):
