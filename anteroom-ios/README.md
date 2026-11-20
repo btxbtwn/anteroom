@@ -27,8 +27,9 @@ uses the hosted workspace's wording. General fields follow the canonical
 `skills/list-this/references/listing-editor-fields.json` order and labels.
 Photos, labels and private notes remain available alongside them.
 
-This is the first visual alignment pass, not desktop feature parity. The
-hosted API still does not expose generation or the full marketplace workflow.
+For remaining gaps between the iPhone/iPad app and the web workspace (such as
+provider setup in the web app and chat attachments), see
+[`docs/iphone-parity.md`](../docs/iphone-parity.md).
 
 ## iPhone navigation
 
@@ -141,10 +142,11 @@ preview General details and restore the full server snapshot with the current
 revision ID as a conflict guard. Unsaved edits must be saved first. Restore
 creates a new revision; it does not restore photos/private notes or publish.
 
-Swift stream framing tests run in the iOS build workflow. Device verification
-must cover a configured account generating from photos, assistant edits, an
-interrupted connection followed by Reconnect, Stop, and refresh of the saved
-listing without submitting duplicate work. No test or app flow publishes.
+Swift stream framing tests run in `./tools/test-models.sh` (invoked by Xcode
+Cloud's `ci_post_clone.sh` hook and `./tools/verify-release.sh`). Device
+verification must cover a configured account generating from photos, assistant
+edits, an interrupted connection followed by Reconnect, Stop, and refresh of the
+saved listing without submitting duplicate work. No test or app flow publishes.
 
 ## Local sandbox and UI tests
 
@@ -248,10 +250,11 @@ save contract; the visible seller labels use desktop's `vendooLabels` notes key.
 Package dimensions display saved seller values; shared preference defaults and
 recent-label suggestions remain part of the settings port.
 
-The iOS workflow runs executable seller-note preservation tests and the hosted
-sandbox UI test that saves seller inputs, switches garments, relaunches the app
-and checks the saved values. Screenshots are exported from XCTest results into
-the `iphone-sandbox-results` workflow artifact, on success as well as failure.
+`./tools/test-models.sh` (run by Xcode Cloud's `ci_post_clone.sh` hook and
+`./tools/verify-release.sh`) runs executable seller-note preservation tests.
+`./test-sandbox.sh` runs the local hosted sandbox UI test that saves seller
+inputs, switches garments, relaunches the app and checks the saved values,
+recording screenshots in the resulting `.xcresult` bundle.
 
 ## Shared appearance
 
@@ -270,8 +273,8 @@ local settings file. Mac-local settings remain separate until account migration.
 It is foreground refresh, not instant cross-device Realtime synchronization.
 
 The contract test checks response decoding and theme-only update payloads.
-The hosted simulator test selects Light, Dark and System, relaunches for each,
-and records screenshots in the `iphone-sandbox-results` artifact.
+The local hosted simulator test (`./test-sandbox.sh`) selects Light, Dark and
+System, relaunches for each, and records screenshots in its `.xcresult` bundle.
 
 ## Sign-in that ends
 

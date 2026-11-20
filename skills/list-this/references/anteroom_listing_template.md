@@ -8,11 +8,11 @@ Purpose: produce copy/insert-ready field values for eBay + Etsy + Poshmark + Mer
 * Output ONLY the fields in the exact order shown. Do not add extra commentary.  
 * One field per line in the format: Field: Value  
 * Never combine multiple fields into one line.  
-* If unknown or not visible, leave blank after the colon unless `SKILL.md` explicitly requires an estimate (including eBay jacket/coat Outer Shell Material).
+* If unknown or not visible, leave blank after the colon unless `SKILL.md` explicitly requires an estimate (such as packaged shipping weight or Etsy `when_made`).
 * Do not use an em dash in any title or description (use a standard hyphen if needed).  
 * Do not add a period after the last tag in any tag list.  
 * Pricing MUST follow the canonical formula in `skills/list-this/SKILL.md`: sold-comp median × 1.35, whole dollars only. Auto-accept = listing price minus $2. Minimum offer = listing price minus $4.
-* Physical-item descriptions MUST use the Size / Condition / Measurements formula in `SKILL.md`. Do not invent material, garment care, production date, original retail, or vintage status. Follow `SKILL.md`'s eBay jacket/coat Outer Shell Material exception and document any shell estimate as uncertain.
+* Physical-item descriptions MUST use the DESCRIPTION Formula in `SKILL.md` (vibe sentence, optional Flaws block, Measurements). Do not invent material, garment care, production date, original retail, or vintage status. Follow `SKILL.md`'s eBay jacket/coat Outer Shell Material rule (leave unsupported required shell material as a blocker) and keep all uncertainties out of the buyer-facing description (mention open questions only in the reply to the seller).
 
 # **INPUTS**
 
@@ -108,7 +108,7 @@ Etsy-Safe Title (Etsy only – no brand) (140 chars)
 
 *line break*
 
-Universal Description (paste-ready, include line breaks, under 150 characters) 
+Universal Description (paste-ready, include line breaks, max 1,000 characters) 
 
 {Trendy vibe/decade/style keywords} {item} with {key style/feature} in {color/pattern}, {fit/silhouette}.​
 
@@ -167,7 +167,7 @@ Depop: No title field → use Universal Description only
   "cost": 5.00,
   "quantity": 1,
   "brand": "Fruit of the Loom",
-  "condition": "Good",
+  "condition": "Pre-Owned - Good",
   "primaryColor": "White",
   "secondaryColor": "Red",
   "department": "Men",
@@ -180,8 +180,8 @@ Depop: No title field → use Universal Description only
   "weight_oz": 8,
   "package_dimensions_in": "13x10x3",
   "category_path": "Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts > T-Shirts",
-  "zipCode": "70125",
-  
+  "zipCode": "10001",
+
   "ebay_specifics": {
     "type": "T-Shirt",
     "department": "Men",
@@ -197,8 +197,6 @@ Depop: No title field → use Universal Description only
     "pattern": "Solid",
     "theme": "Racing, Cars, 2010s, Drag Racing",
     "features": "Double-Sided Graphic",
-    "strapType": "N/A",
-    "character": "N/A",
     "characterFamily": "NHRA",
     "occasion": "Casual",
     "season": "Summer",
@@ -215,7 +213,7 @@ Depop: No title field → use Universal Description only
     "accents": "Logo",
     "style": "Graphic Tee"
   },
-  
+
   "etsy_specifics": {
     "who_made": "Another company or person",
     "what_is": "A finished product",
@@ -232,13 +230,14 @@ Depop: No title field → use Universal Description only
       "fabricPattern": "Solid"
     }
   },
-  
+
   "poshmark_specifics": {
     "originalPrice": 0,
-    "smartPricing": false,
-    "smartPricingMin": "",
-    "costPrice": 5.00,
-    "otherInfo": ""
+    "smartSell": {
+      "enabled": false,
+      "minimumPrice": null
+    },
+    "sellerNotes": ""
   },
 
   "mercari_specifics": {
@@ -252,7 +251,7 @@ Depop: No title field → use Universal Description only
     "material": "Cotton",
     "occasion": ["Casual", "Sportswear", "Vacation"],
     "condition": "Used - Fair",
-    "location": "New Orleans, LA",
+    "location": "New York, NY",
     "shippingMethod": "Depop USPS",
     "parcelSize": "Small"
   }
@@ -265,7 +264,7 @@ Depop: No title field → use Universal Description only
 - `title` (required): Listing title, max 80 chars
 - `description` (required): Multi-line description with line breaks
 - `price` (required): Listing price
-- `cost`: Cost of goods
+- `cost`: Cost of goods (also sent to Poshmark as Cost Price)
 - `quantity`: Available quantity (default: 1)
 - `brand`: Brand name
 - `condition`: General condition values only. See `references/anteroom-dropdown-options.md` — each marketplace uses a different condition vocabulary.
@@ -291,7 +290,7 @@ Depop: No title field → use Universal Description only
   - Fuchsia, Magenta, Hot Pink → **Pink**
   - For multicolor items: primaryColor = most prominent basic color; secondaryColor = second visible basic color. Do **not** use Multicolor/Multi as primary when cross-listing — Etsy and Poshmark have no Multicolor option and leave primary blank. Prefer Multicolor only on eBay when a second concrete color is also set for fallback markets.
 - `sizeType`: Regular, Petite, Tall, Plus, Maternity
-- `size`: Size value (S, M, L, XL, numeric)
+- `size`: Size value (S, M, L, XL, numeric; waist alone for men's bottoms)
 - `size_us`: US size for consistency
 - `tags`: Array of keywords. When Etsy is selected, each tag may only use letters, numbers, spaces, hyphens, and apostrophes (max 20 chars, max 13 tags). No `#`, `/`, `&`, or other special characters.
 - `labels`: Array of the seller's labels
@@ -299,11 +298,11 @@ Depop: No title field → use Universal Description only
 - `package_dimensions_in`: Format "LxWxH". Use a reasonable poly-mailer / packaging estimate for the item unless the seller provided dimensions.
 - `category_path`: Full category path
 - `category_path` must end at a selectable general category leaf. Use `Clothing, Shoes & Accessories > Women > Women's Clothing > Tops` for women's shirts and T-shirts; `Shirts & Blouses` is not a valid general category segment. For men's T-shirts, use `Clothing, Shoes & Accessories > Men > Men's Clothing > Shirts > T-Shirts`.
-- `zipCode`: Ship from ZIP code
+- `zipCode`: Ship-from ZIP code (use the seller's saved ZIP from Settings, or leave blank if unknown)
 
 **eBay Specifics:**
-All eBay Item Specifics fields. Use Appendix values.
-- Jackets/coats must include `category_specifics["Outer Shell Material"]` (or the discovered schema key), following the required best-guess and uncertainty rules in `SKILL.md`.
+All eBay Item Specifics fields. Use Appendix values. Omit fields that do not apply — never write `"N/A"` or `"Does Not Apply"`.
+- Jackets/coats must include `category_specifics["Outer Shell Material"]` (or the discovered schema key) when evidence establishes the shell, following the Outer Shell Material and evidence rules in `SKILL.md` (leave unsupported required shell material as a blocker; never add shell uncertainty to the buyer-facing description).
 
 **Etsy Specifics:**
 - `who_made`, `what_is`, `when_made` (required for Etsy). `when_made` must be an exact Etsy dropdown year range from `anteroom-dropdown-options.json`, such as `2010 - 2019 (Recently)`, not `2010s`, `2010-2019`, or Made To Order. Non-vintage items use `2020 - 2026 (Recently)`, `2010 - 2019 (Recently)`, or `2007 - 2009 (Recently)`.
@@ -315,12 +314,15 @@ All eBay Item Specifics fields. Use Appendix values.
 - `category_specifics`: T-shirt optional fields after Show Optional Fields. Use live Etsy dropdown values from `anteroom-dropdown-options.json` (`clothingStyle`, `sleeveLength`, `neckline`, `closure`, `graphic`, `fabricPattern`). Fill every applicable row. Leave out `graphic` / `collarStyle` / `occasion` / `holiday` / `sustainability` only when they literally do not apply. Never write Does Not Apply.
 
 **Poshmark Specifics:**
-- `originalPrice`: always 0
-- `smartPricing`: Enable smart pricing (true/false)
+- `originalPrice`: always `0`
+- `smartSell`: `{ "enabled": boolean, "minimumPrice": number | null }` (Smart Sell auto-offers; when `enabled` is `true`, `minimumPrice` is required in whole dollars and follows the PRICING Formula minimum)
+- `sellerNotes`: private seller notes mapped to Poshmark's "Other Info" field (max 500 chars)
+- `poshmarkSku`: optional Poshmark-specific Listing SKU override (otherwise top-level `sku` is used; max 50 chars)
+- Cost Price is read from top-level `cost` (do not set `poshmark_specifics.costPrice`)
 - Shipping discount and return policy are account-level Poshmark settings — leave them out
 
 **Mercari Specifics:**
-- Leave Smart Pricing off. Do not set `smartPricing` or a floor price — the form then requires a floor and blocks the draft.
+- Leave Smart Pricing off (`smartPricing.enabled: false`, or omit `smartPricing`) and do not set a floor price unless requested — enabling Smart Pricing requires a floor price (`smartPricing.minimumPrice`) and blocks the draft when blank.
 
 **Depop Specifics:**
 - `source`: Preloved, Vintage, Deadstock, etc.
@@ -397,12 +399,11 @@ Use these lists only to select valid dropdown values. Outputs should still be th
 * Size Grouping (1): Maternity; Petite; Plus Size; Tall  
 * Type (up to 2): Blazer, Bomber, Cape, Duster, Lightweight, Poncho, Puffer, Shacket, Varsity, Windbreaker  
 * Material (up to 4): Cotton; Polyester; Spandex; Silk; Wool; Leather; Denim; Nylon; Rayon; Linen; Acrylic; Velvet; Corduroy; Fleece; Satin  
-* Type (up to 2): Blazer, Bomber, Cape, Duster, Lightweight, Poncho, Puffer, Shacket, Varsity, Windbreaker  
 * Occasion (exactly 3): Casual; Party; Festival; Gifting; Going out; Outdoors; Relaxation; School; Ski; Special Occasion; Summer; Vacation; Winter; Workout; Beach; Date night; Work  
 * Qty: 1  
 * Category: exact  
 * Brand: from list or “Other”  
-* Location: New Orleans, LA  
+* Location: `<seller city, state>` (e.g., `New York, NY`)  
 * Shipping: Depop USPS  
 * Depop parcel sizes (use these exact dropdown values; weight notes are not part of the value)  
 * Extra extra small — Under 4oz  
