@@ -1,0 +1,1 @@
+- Keep Sales, Analytics, the calendar and boxes from downloading your whole shop again on every refresh when nothing changed, which cuts the hosted database traffic.

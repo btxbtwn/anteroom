@@ -11,9 +11,14 @@ from __future__ import annotations
 
 import math
 import statistics
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
+
+from sqlalchemy import inspect as sa_inspect, text
+
 from vendoo_studio.database import json_value
 
 if TYPE_CHECKING:
@@ -220,10 +225,72 @@ def load_rows(db, conversation_id: str | None = None) -> list[AnalyticsItem]:
 
 
 def read_analytics_inputs(db, conversation_id: str | None = None) -> AnalyticsInputs:
-    """Materialize the inputs so read-only callers can close before calculations."""
+    """Materialize the inputs so read-only callers can close before calculations.
+
+    On Postgres the whole-shop read is kept per seller and read again only when
+    one of its rows changed (``_inputs_version``). Sales, Analytics, the calendar,
+    boxes and the assistant all read it, several of them on a timer, and each
+    full read sends every item's notes and every sale over the network.
+    The returned inputs are shared between callers: read them, never change them.
+    """
     from vendoo_studio.services.vendoo_sales_archive import ensure_archived
 
     ensure_archived(db)
+    version = _inputs_version(db) if conversation_id is None else None
+    if version is None:
+        return _read_analytics_inputs(db, conversation_id)
+    key = getattr(db, "user_id", None)
+    with _inputs_lock:
+        kept = _inputs_cache.get(key)
+        if kept is not None and kept[0] == version:
+            _inputs_cache.move_to_end(key)
+            return kept[1]
+    inputs = _read_analytics_inputs(db, None)
+    # Kept sales outlive this session: keep copies no session holds or expires.
+    inputs = replace(inputs, sales={conv_id: [_unbound(line) for line in lines] for conv_id, lines in inputs.sales.items()})
+    with _inputs_lock:
+        _inputs_cache[key] = (version, inputs)
+        _inputs_cache.move_to_end(key)
+        while len(_inputs_cache) > _INPUTS_CACHE_SIZE:
+            _inputs_cache.popitem(last=False)
+    return inputs
+
+
+# Every table _read_analytics_inputs reads. test_inventory_analytics pins this
+# list to the statements it runs, so a new read cannot go stale unnoticed.
+ANALYTICS_INPUT_TABLES = (
+    "conversations", "listings", "listing_revisions", "marketplace_listings", "marketplace_sales", "source_boxes",
+)
+_INPUTS_CACHE_SIZE = 16
+_inputs_cache: OrderedDict[str | None, tuple[tuple, AnalyticsInputs]] = OrderedDict()
+_inputs_lock = threading.Lock()
+
+
+def _inputs_version(db) -> tuple | None:
+    """One short row that changes whenever an input row is added, changed or removed (Postgres only).
+
+    Each write gives its row the writing transaction's id (``xmin``), newer than
+    every id already there, so while the row count stays the same the sum of the
+    ids only grows. Row security limits both to the seller's own rows.
+    """
+    if db.get_bind().dialect.name != "postgresql":
+        return None
+    if db.autoflush:
+        db.flush()  # The ORM reads below would flush pending changes; count them here too.
+    parts = ", ".join(
+        f"(SELECT count(*) || ':' || coalesce(sum(xmin::text::bigint), 0) FROM {table})"
+        for table in ANALYTICS_INPUT_TABLES
+    )
+    return tuple(db.execute(text(f"SELECT {parts}")).one())
+
+
+def _unbound(row):
+    """A copy of ``row`` with its column values, attached to no session."""
+    mapper = sa_inspect(row).mapper
+    return mapper.class_(**{attr.key: getattr(row, attr.key) for attr in mapper.column_attrs})
+
+
+def _read_analytics_inputs(db, conversation_id: str | None) -> AnalyticsInputs:
     from vendoo_studio.models.conversation import Conversation
     from vendoo_studio.models.listing import Listing, ListingRevision
     from vendoo_studio.models.sourcing import SourceBox

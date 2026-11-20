@@ -650,3 +650,97 @@ class InventoryCountsItemsTest(unittest.TestCase):
             (1, 1, 1, 1, 1),
         )
 
+
+
+class AnalyticsInputsCacheTest(unittest.TestCase):
+    """The whole-shop read is kept on Postgres until one of its rows changes."""
+
+    setUp = LoadAnalyticsTest.setUp
+    tearDown = LoadAnalyticsTest.tearDown
+
+    def _add_sale(self):
+        from vendoo_studio.models.marketplace_sale import MarketplaceSale
+
+        # Tests share this worker's database: each sale has its own order.
+        self.order_id = f"cache-{self.sold.id}"
+        self.db.add(MarketplaceSale(marketplace="depop", order_id=self.order_id, line_id="l1", listing_id="shop-tee",
+                                    conversation_id=self.sold.id, quantity=1, order_status="paid"))
+        self.db.commit()
+
+    def _tables_read(self, read):
+        import re
+
+        statements = self._statements(read)
+        # Common table expressions are named in the statement; they are not tables.
+        named = {name for statement in statements
+                 for name in re.findall(r'(\w+)\s*(?:\([^)]*\))?\s+AS\s*\(', statement, re.IGNORECASE)}
+        return {name for statement in statements
+                for name in re.findall(r'\b(?:FROM|JOIN)\s+"?(\w+)', statement, re.IGNORECASE)} - named
+
+    def _statements(self, read):
+        from sqlalchemy import event
+
+        statements = []
+
+        def record(_conn, _cursor, statement, *_args):
+            statements.append(statement)
+
+        engine = self.db.get_bind()
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            read()
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+        return statements
+
+    def test_the_version_covers_every_table_the_read_uses(self):
+        from vendoo_studio.services import inventory_analytics
+
+        self._add_sale()
+        tables = self._tables_read(lambda: inventory_analytics._read_analytics_inputs(self.db, None))
+        self.assertIn("marketplace_sales", tables)
+        self.assertLessEqual(tables, set(inventory_analytics.ANALYTICS_INPUT_TABLES))
+
+    def test_an_unchanged_shop_is_not_read_again_and_any_change_is(self):
+        from vendoo_studio.services import inventory_analytics
+        from vendoo_studio.services.inventory_analytics import read_analytics_inputs
+
+        if self.db.get_bind().dialect.name != "postgresql":
+            self.skipTest("Only the hosted Postgres database is read over the network")
+        self._add_sale()
+        first = read_analytics_inputs(self.db)
+        again = self._statements(lambda: read_analytics_inputs(self.db))
+        self.assertFalse([statement for statement in again if "notes" in statement or "marketplace_sales.id" in statement])
+        self.assertIs(read_analytics_inputs(self.db), first)
+
+        # A changed note, a new sale and a removed sale each read the shop again.
+        notes = json.loads(self.sold.notes)
+        notes["vendooLabels"] = "Shelf 2"
+        self.sold.notes = json.dumps(notes)
+        self.db.commit()
+        changed = read_analytics_inputs(self.db)
+        self.assertIsNot(changed, first)
+        rows = {row.conversation_id: row for row in inventory_analytics.rows_from_inputs(changed)}
+        self.assertEqual(rows[self.sold.id].labels, ("Shelf 2",))
+
+        from vendoo_studio.models.marketplace_sale import MarketplaceSale
+
+        sale = self.db.query(MarketplaceSale).filter_by(order_id=self.order_id).one()
+        self.db.delete(sale)
+        self.db.commit()
+        removed = read_analytics_inputs(self.db)
+        self.assertIsNot(removed, changed)
+        self.assertNotIn(sale.id, [line.id for line in removed.sales.get(self.sold.id, [])])
+
+    def test_kept_sales_are_attached_to_no_session(self):
+        from vendoo_studio.services.inventory_analytics import read_analytics_inputs
+
+        if self.db.get_bind().dialect.name != "postgresql":
+            self.skipTest("Only the hosted Postgres database is read over the network")
+        self._add_sale()
+        lines = read_analytics_inputs(self.db).sales[self.sold.id]
+        self.assertTrue(lines)
+        self.assertFalse(any(line in self.db for line in lines))
+        self.db.close()
+        self.assertEqual(lines[0].order_id, self.order_id)
+        self.assertTrue(isinstance(lines[0].is_order_backed, bool))
