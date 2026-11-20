@@ -205,6 +205,15 @@ export interface PublishedVersions {
   error: string | null;
 }
 
+export type DescriptionFormulaBlock = {
+  id: string;
+  label: string;
+  detail: string;
+  snippet: string;
+  default: boolean;
+  enabled: boolean;
+};
+
 export type VersionPlan = {
   tag: string;
   version: string | null;
@@ -1217,14 +1226,20 @@ export const api = {
         description: string;
         default_title: string;
         default_description: string;
+        empty_description?: string;
+        custom_description?: boolean;
+        blocks?: DescriptionFormulaBlock[];
       }>("/settings/formulas"),
-    setFormulas: (body: { title?: string | null; description?: string | null }) =>
+    setFormulas: (body: { title?: string | null; description?: string | null; blocks?: string[] | null }) =>
       request<{
         ok: boolean;
         title: string;
         description: string;
         default_title: string;
         default_description: string;
+        empty_description?: string;
+        custom_description?: boolean;
+        blocks?: DescriptionFormulaBlock[];
       }>("/settings/formulas", { method: "PUT", body: JSON.stringify(body) }),
     agent: () => request<AgentConnectionStatus>("/settings/agent"),
     testAgent: () => request<AgentConnectionTest>("/settings/agent/test", { method: "POST" }),

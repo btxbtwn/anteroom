@@ -597,6 +597,14 @@ def ensure_physical_description(listing: dict) -> bool:
     desc = str(listing.get("description") or "").strip()
     if not desc or _description_follows_formula(desc):
         return False
+    from vendoo_studio.services.skill_formulas import (
+        DEFAULT_DESCRIPTION_FORMULA,
+        description_formula_markers,
+    )
+    from vendoo_studio.services.user_settings import get_listing_formulas
+
+    if "measurements:" not in description_formula_markers():
+        return False
 
     meas = "See photos"
     meas_match = re.search(r"(?is)measurements?:\s*(.+?)(?:\n\n|\n[A-Z]|$)", desc)
@@ -611,7 +619,12 @@ def ensure_physical_description(listing: dict) -> bool:
             meas = "; ".join(re.sub(r"\s+", " ", bit).strip() for bit in bits)
 
     # Prefer appending the missing Measurements block so existing vibe prose stays intact.
-    if "\n" in desc and len(desc) >= 40 and "measurements:" not in desc.lower():
+    # A seller-chosen formula is never rebuilt into the old three blocks.
+    custom = get_listing_formulas().get("description", "")
+    seller_chose = bool(custom.strip()) and custom.strip() != DEFAULT_DESCRIPTION_FORMULA.strip()
+    if seller_chose or ("\n" in desc and len(desc) >= 40 and "measurements:" not in desc.lower()):
+        if "measurements:" in desc.lower():
+            return False
         listing["description"] = f"{desc.rstrip()}\n\nMeasurements: {meas}"
         return True
 
@@ -1330,7 +1343,7 @@ def apply_seller_description_facts(listing: dict, seller: dict) -> bool:
         set_description_block,
         without_see_photos,
     )
-    from vendoo_studio.services.skill_formulas import description_lists_flaws
+    from vendoo_studio.services.skill_formulas import description_has_section, description_lists_flaws
 
     if not isinstance(listing, dict):
         return False
@@ -1340,12 +1353,16 @@ def apply_seller_description_facts(listing: dict, seller: dict) -> bool:
     # A model that names the seller's flaws and adds ones it saw keeps its block.
     seller_flaws = "; ".join(flaw_items(flaws))
     described = _comparable(description_block(updated, "flaws?"))
-    if seller_flaws and _comparable(seller_flaws) not in described:
+    if seller_flaws and description_has_section("Flaws") and _comparable(seller_flaws) not in described:
         block = render_flaws_block(flaws, as_list=description_lists_flaws())
         if block:
             updated = set_description_block(updated, "flaws?", block, before="measurements?")
     measurements = _description_measurements(seller)
-    if measurements and description_block(updated, "measurements?") != measurements.rstrip("."):
+    if (
+        measurements
+        and description_has_section("Measurements")
+        and description_block(updated, "measurements?") != measurements.rstrip(".")
+    ):
         updated = set_description_block(updated, "measurements?", f"Measurements: {measurements}")
     if updated == desc:
         return False

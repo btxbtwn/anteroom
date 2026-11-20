@@ -137,7 +137,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     title: "Title and description formulas",
     section: "listings",
     targetId: "listing-formulas",
-    searchTerms: ["formula", "title", "description", "template", "flaws", "measurements"],
+    searchTerms: ["formula", "title", "description", "template", "flaws", "measurements", "vibe", "material", "fit", "trend"],
   },
   {
     id: "setup-guide",
