@@ -134,7 +134,11 @@ def remove_thread(thread_id: str, db: Session = Depends(get_db)):
         try:
             delete_attachments(images)
         except Exception:
-            log.warning("Post-commit attachment cleanup failed for deleted assistant thread %s", thread_id)
+            log.warning(
+                "Post-commit attachment cleanup failed for deleted assistant thread %s",
+                thread_id,
+                exc_info=True,
+            )
     return {"ok": True}
 
 
@@ -530,7 +534,10 @@ def _queue_question(db: Session, request: Request, question: str, body: Assistan
             try:
                 delete_attachments(attachments)
             except Exception:
-                log.warning("Failed to clean up uploaded attachments after assistant enqueue failure")
+                log.warning(
+                    "Failed to clean up uploaded attachments after assistant enqueue failure",
+                    exc_info=True,
+                )
         if isinstance(exc, IntegrityError):
             raise HTTPException(409, "The assistant is still answering your last question.") from None
         raise

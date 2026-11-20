@@ -5,7 +5,7 @@ or started, and no request accepts an owner, file path or operational identity.
 """
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -367,7 +367,7 @@ class UiInput(BaseModel):
     settled_shelf_expanded: bool | None = None
     stale_listing_days: int | None = Field(None, ge=15, le=120)
     recent_vendoo_labels: list[str] | None = Field(None, max_length=12)
-    remember_labels: str | list[str] | None = Field(None, max_length=200)
+    remember_labels: Annotated[str, Field(max_length=2000)] | Annotated[list[str], Field(max_length=200)] | None = None
     restore_labels: list[str] | None = Field(None, max_length=500)
     forget_label: str | None = Field(None, max_length=200)
     model_favorites: list[dict] | None = Field(None, max_length=500)

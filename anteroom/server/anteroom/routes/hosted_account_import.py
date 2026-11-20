@@ -67,8 +67,10 @@ def pending_photos(db=Depends(get_import_db)):
 
 @router.post('/photos/{photo_id}/{field}')
 async def photo(photo_id: str, field: str, request: Request):
-    # Guard memory with UploadSlots and stream-cap raw bytes before decoding.
-    async with hold_upload_slot(request):
+    # Guard memory globally (allowing parallel same-seller photo migration up to
+    # UploadSlots capacity) and release before Storage HTTP I/O so slow Storage
+    # calls never stall or 429 concurrent account-move uploads.
+    async with hold_upload_slot(request, per_seller=False):
         data = await read_bounded_body(
             request,
             hosted_photos.MAX_BYTES,
@@ -82,9 +84,9 @@ async def photo(photo_id: str, field: str, request: Request):
             return {'copied': False}
         image, width, height = await asyncio.to_thread(hosted_photos.normalize, bytes(data))
         del data
-        token = request.headers['authorization'].partition(' ')[2]
-        key = hosted_photos.new_key(request.state.seller.user_id, draft_id)
-        await asyncio.to_thread(hosted_photos.storage_call, 'POST', key, token, image)
+    token = request.headers['authorization'].partition(' ')[2]
+    key = hosted_photos.new_key(request.state.seller.user_id, draft_id)
+    await asyncio.to_thread(hosted_photos.storage_call, 'POST', key, token, image)
     try:
         saved = await in_seller_session(request, _save_photo, photo_id, field, key, image, width, height)
     except BaseException:

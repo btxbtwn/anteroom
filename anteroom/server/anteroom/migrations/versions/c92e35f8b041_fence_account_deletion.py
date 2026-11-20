@@ -23,7 +23,7 @@ def upgrade() -> None:
             ELSE
                 owner_id := NEW.user_id::text;
             END IF;
-            PERFORM pg_advisory_xact_lock(hashtextextended('anteroom-account-delete:' || owner_id, 0));
+            PERFORM pg_advisory_xact_lock_shared(hashtextextended('anteroom-account-delete:' || owner_id, 0));
             IF EXISTS (SELECT 1 FROM anteroom_private.account_cleanup WHERE user_id::text = owner_id) THEN
                 RAISE EXCEPTION 'Account deletion is pending' USING ERRCODE = '55000';
             END IF;

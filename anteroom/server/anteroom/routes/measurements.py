@@ -18,7 +18,7 @@ from anteroom.repositories.queries import ConversationRepo
 from anteroom.routes.api_contract import SIZE_TAG_READ_ERRORS, SizeTagReadResult
 from anteroom.services import hosted_photos, measure_read, size_tag_read
 from anteroom.services.hosted_database import SellerDatabaseSession, in_seller_session
-from anteroom.services.hosted_limits import bounded_route_class, stream_upload_to_path
+from anteroom.services.hosted_limits import bounded_route_class, release_upload_slot, stream_upload_to_path
 from anteroom.services.listing_provider import get_photo_provider
 from anteroom.services.photo_store import photo_store
 
@@ -119,6 +119,8 @@ async def read_measurements(request: Request, files: list[UploadFile] = File(...
     provider = _provider(garment)
     with tempfile.TemporaryDirectory(prefix="measure-upload-") as workdir:
         paths = await _write_uploads(files, workdir)
+        # Drop the upload slot once disk streaming finishes so slow vision LLM calls never hold it.
+        await release_upload_slot(request)
         return await _read(provider, paths, garment)
 
 
@@ -129,6 +131,7 @@ async def read_size_tags(request: Request, files: list[UploadFile] = File(...)):
     provider = _photo_provider("size tags")
     with tempfile.TemporaryDirectory(prefix="size-tag-upload-") as workdir:
         paths = await _write_uploads(files, workdir)
+        await release_upload_slot(request)
         return await _explained(size_tag_read.read_size_tag(provider, paths), "size", provider)
 
 

@@ -131,11 +131,92 @@ def test_measurements_hold_upload_slot_rejects_concurrent_seller_upload(monkeypa
         request = Request({"type": "http", "method": "POST", "path": "/api/size-tags/read",
                            "headers": [(b"content-type", b"multipart/form-data; boundary=x")],
                            "app": app, "query_string": b""}, receive)
-        with use(ctx):
+        with use(ctx):  # type: ignore[arg-type]
             async with slots.hold("seller-1"):
                 with pytest.raises(HTTPException) as exc_info:
                     await route.get_route_handler()(request)
                 assert exc_info.value.status_code == 429
+
+    asyncio.run(exercise())
+
+
+def test_measurements_releases_upload_slot_before_llm(monkeypatch):
+    app = FastAPI()
+    app.include_router(measurements.hosted_router)
+    slots = UploadSlots(total=1, wait=0.05)
+    app.state.upload_slots = slots
+
+    fake_provider = SimpleNamespace(vision_chat=lambda *_args, **_kwargs: "{}")
+    monkeypatch.setattr(measurements, "get_photo_provider", lambda: fake_provider)
+
+    llm_started = asyncio.Event()
+    release_llm = asyncio.Event()
+
+    async def slow_read_size_tag(_provider, _paths):
+        llm_started.set()
+        await release_llm.wait()
+        return {"photos_read": 1, "status": "accepted", "size": "M", "sizes": ["M"]}
+
+    monkeypatch.setattr("anteroom.services.size_tag_read.read_size_tag", slow_read_size_tag)
+
+    async def exercise():
+        ctx = SimpleNamespace(seller_id="seller-llm")
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            with use(ctx):  # type: ignore[arg-type]
+                first = asyncio.create_task(
+                    client.post(
+                        "/api/size-tags/read",
+                        files={"files": ("a.jpg", b"abc", "image/jpeg")},
+                    )
+                )
+                await asyncio.wait_for(llm_started.wait(), timeout=2.0)
+                # Upload slot must already be released while vision LLM inference runs.
+                async with slots.hold("seller-llm"):
+                    pass
+                release_llm.set()
+                resp = await first
+                assert resp.status_code == 200
+
+    asyncio.run(exercise())
+
+
+def test_assistant_messages_releases_upload_slot_before_sse_streaming(monkeypatch):
+    from fastapi.responses import StreamingResponse
+
+    app = FastAPI()
+    app.include_router(assistant_route.router)
+    slots = UploadSlots(total=1, wait=0.05)
+    app.state.upload_slots = slots
+
+    slot_free_during_stream = False
+
+    def fake_queue_question(_db, _request, _question, _body):
+        async def sse():
+            nonlocal slot_free_during_stream
+            async with slots.hold("seller-sse"):
+                slot_free_during_stream = True
+            yield "data: hello\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(sse(), media_type="text/event-stream")
+
+    async def fake_in_worker(fn, *args):
+        return fn(MagicMock(), *args)
+
+    monkeypatch.setattr(assistant_route, "_queued", lambda: True)
+    monkeypatch.setattr(assistant_route, "in_worker_session", fake_in_worker)
+    monkeypatch.setattr(assistant_route, "_queue_question", fake_queue_question)
+
+    async def exercise():
+        ctx = SimpleNamespace(seller_id="seller-sse")
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            with use(ctx):  # type: ignore[arg-type]
+                resp = await client.post("/api/assistant/messages", json={"text": "hello"})
+                assert resp.status_code == 200
+                assert "data: hello" in resp.text
+                assert slot_free_during_stream is True
 
     asyncio.run(exercise())
 
@@ -314,6 +395,70 @@ def test_hosted_account_import_body_caps_and_upload_slots(monkeypatch):
     assert client.post("/api/account-import/photos/p1/stored", content=b"x" * 256).status_code == 413
 
 
+def test_hosted_account_import_allows_four_concurrent_same_seller_photo_uploads(monkeypatch):
+    import threading
+
+    app = FastAPI()
+    # Even with total=1, releasing the upload slot BEFORE slow storage_call allows
+    # all 4 concurrent same-seller account_move photo uploads to overlap in Storage I/O
+    # without 429 or same-seller serialization.
+    app.state.upload_slots = UploadSlots(total=1, wait=1.0)
+
+    @app.middleware("http")
+    async def attach_seller(request: Request, call_next):
+        request.state.seller = SimpleNamespace(user_id="seller-migrate")
+        return await call_next(request)
+
+    app.include_router(hosted_account_import.router)
+
+    async def fake_in_seller_session(_request, fn, *args):
+        if fn is account_import.photo_to_import:
+            return f"draft-{args[0]}"
+        return True
+
+    barrier = threading.Barrier(4, timeout=5.0)
+    in_flight = 0
+    max_in_flight = 0
+    lock = threading.Lock()
+
+    def slow_storage_call(method, _key, _token, _image=None):
+        nonlocal in_flight, max_in_flight
+        assert method == "POST"
+        with lock:
+            in_flight += 1
+            max_in_flight = max(max_in_flight, in_flight)
+        try:
+            # All 4 same-seller uploads MUST reach storage_call concurrently.
+            barrier.wait()
+        finally:
+            with lock:
+                in_flight -= 1
+
+    monkeypatch.setattr(hosted_account_import, "in_seller_session", fake_in_seller_session)
+    monkeypatch.setattr(hosted_photos, "normalize", lambda raw: (raw, 100, 100))
+    monkeypatch.setattr(hosted_photos, "new_key", lambda user_id, draft_id: f"{user_id}/{draft_id}.jpg")
+    monkeypatch.setattr(hosted_photos, "storage_call", slow_storage_call)
+
+    async def exercise():
+        ctx = SimpleNamespace(seller_id="seller-migrate")
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            with use(ctx):  # type: ignore[arg-type]
+                responses = await asyncio.gather(*[
+                    client.post(
+                        f"/api/account-import/photos/p{i}/stored",
+                        content=b"fake-jpg",
+                        headers={"Authorization": "Bearer test-jwt"},
+                    )
+                    for i in range(4)
+                ])
+                assert [r.status_code for r in responses] == [200, 200, 200, 200]
+                assert all(r.json() == {"copied": True} for r in responses)
+                assert max_in_flight == 4
+
+    asyncio.run(exercise())
+
+
 def test_relay_inference_and_workspace_body_caps(monkeypatch):
     app = FastAPI()
     app.include_router(hosted_browser_relay.router)
@@ -343,6 +488,16 @@ def test_relay_inference_and_workspace_body_caps(monkeypatch):
         hosted_workspace.UiInput(restore_labels=["lbl"] * 501)
     with pytest.raises(ValidationError):
         hosted_workspace.UiInput(model_favorites=[{"id": str(i)} for i in range(501)])
+
+    # remember_labels accepts comma-separated strings up to 2000 chars and lists up to 200 items.
+    csv_500 = ",".join(f"label{i:03d}" for i in range(55))
+    assert len(csv_500) > 200
+    assert hosted_workspace.UiInput(remember_labels=csv_500).remember_labels == csv_500
+    assert len(hosted_workspace.UiInput(remember_labels=["lbl"] * 200).remember_labels or []) == 200
+    with pytest.raises(ValidationError):
+        hosted_workspace.UiInput(remember_labels="x" * 2001)
+    with pytest.raises(ValidationError):
+        hosted_workspace.UiInput(remember_labels=["lbl"] * 201)
 
 
 # ---------------------------------------------------------------------------
@@ -431,6 +586,10 @@ def test_redaction_masks_postgres_dsns_and_sensitive_headers():
         assert leaked not in masked_headers
     assert "Authorization: Bearer …(masked)" in masked_headers
     assert redaction.redact(masked_headers) == masked_headers
+
+    # Multi-line empty header must never swallow the next line's header or quoted token.
+    assert "Host: example.com" in redaction.redact("Authorization:\nHost: example.com")
+    assert '"next-line-value"' in redaction.redact('Authorization:\n"next-line-value"')
 
     dict_repr = "{'Authorization': 'Basic dXNlcjpwYXNz', 'Cookie': 'a=1; b=2', 'x-api-key': 'secret-key-99', 'Host': 'api.example'}"
     masked_dict = redaction.redact(dict_repr)

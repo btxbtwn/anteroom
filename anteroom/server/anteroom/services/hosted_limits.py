@@ -33,7 +33,7 @@ STREAM_CHUNK_BYTES = 64 * 1024
 
 
 class UploadSlots:
-    """At most one message upload per seller, and ``total`` across sellers."""
+    """At most one upload per seller (unless ``per_seller=False``), and ``total`` across sellers."""
 
     def __init__(self, total: int = UPLOAD_SLOTS, wait: float = UPLOAD_WAIT_SECONDS):
         self._total = asyncio.Semaphore(total)
@@ -42,7 +42,20 @@ class UploadSlots:
         self._sellers: dict[str, list] = {}
 
     @asynccontextmanager
-    async def hold(self, seller: str):
+    async def hold(self, seller: str, *, per_seller: bool = True):
+        if not per_seller:
+            try:
+                async with asyncio.timeout(self._wait):
+                    await self._total.acquire()
+            except TimeoutError:
+                raise HTTPException(
+                    503, 'Image uploads are busy right now. Try again in a moment.',
+                    headers={'Retry-After': '5'}) from None
+            try:
+                yield
+            finally:
+                self._total.release()
+            return
         entry = self._sellers.setdefault(seller, [asyncio.Lock(), 0])
         entry[1] += 1
         try:
@@ -74,7 +87,7 @@ class UploadSlots:
 
 
 @asynccontextmanager
-async def hold_upload_slot(request: Request | None):
+async def hold_upload_slot(request: Request | None, *, per_seller: bool = True):
     """Acquire the hosted app's UploadSlots for the current seller when configured."""
     if request is None:
         yield
@@ -88,8 +101,22 @@ async def hold_upload_slot(request: Request | None):
     if context is None:
         yield
         return
-    async with slots.hold(context.seller_id):
+    async with slots.hold(context.seller_id, per_seller=per_seller):
         yield
+
+
+async def release_upload_slot(request: Request | None) -> None:
+    """Release an upload slot acquired pre-parser by ``bounded_route_class`` early.
+
+    Used by endpoints that run slow downstream inference after finishing upload I/O,
+    so the seller's upload slot is not held while waiting on an LLM response.
+    """
+    if request is None:
+        return
+    releaser = getattr(request.state, '_release_upload_slot', None)
+    if releaser is not None:
+        request.state._release_upload_slot = None
+        await releaser()
 
 
 def _check_content_length(request: Request, max_bytes: int, too_large_detail: str) -> None:
@@ -184,6 +211,10 @@ def bounded_route_class(
 
     Preserves FastAPI's declared requestBody schema and handler signatures while
     rejecting oversized requests with 413 before buffering them into memory.
+    When ``use_upload_slots=True``, acquires the upload slot before multipart/body
+    parsing, enforces ``BODY_RECEIVE_SECONDS`` while receiving the body, and
+    exposes ``release_upload_slot(request)`` so handlers can drop the slot before
+    slow downstream LLM calls.
     """
 
     class _BoundedRoute(APIRoute):
@@ -213,13 +244,30 @@ def bounded_route_class(
                         received += len(message.get('body', b''))
                         if received > limit:
                             raise HTTPException(413, too_large_detail)
+                    elif message.get('type') == 'http.disconnect':
+                        body_complete = True
                     return message
 
                 request._receive = limited_receive
                 if use_upload_slots and request.method in {'POST', 'PUT', 'PATCH'}:
-                    async with hold_upload_slot(request):
-                        receive_deadline = asyncio.get_running_loop().time() + BODY_RECEIVE_SECONDS
+                    slot_cm = hold_upload_slot(request)
+                    await slot_cm.__aenter__()
+                    slot_held = True
+
+                    async def _release_slot() -> None:
+                        nonlocal slot_held
+                        if slot_held:
+                            slot_held = False
+                            await slot_cm.__aexit__(None, None, None)
+
+                    request.state._release_upload_slot = _release_slot
+                    receive_deadline = asyncio.get_running_loop().time() + BODY_RECEIVE_SECONDS
+                    try:
                         return await original_handler(request)
+                    finally:
+                        if slot_held:
+                            slot_held = False
+                            await slot_cm.__aexit__(None, None, None)
                 return await original_handler(request)
 
             return bounded_handler

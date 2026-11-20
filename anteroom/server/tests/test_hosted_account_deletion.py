@@ -389,3 +389,18 @@ def test_storage_trigger_serializes_with_deletion(migration_engine):  # noqa: F8
     with engine.begin() as db:
         with pytest.raises(DBAPIError, match='Account deletion is pending'):
             db.execute(text("INSERT INTO storage.objects VALUES ('anteroom-photos', :key)"), {'key': key + '-late'})
+
+
+def test_concurrent_seller_writes_do_not_serialize_under_deletion_fence(cloud):  # noqa: F811
+    from anteroom.services.hosted_database import SellerDatabaseSession
+    _client, engine = cloud
+    with SellerDatabaseSession(user_id=ALICE, bind=engine) as tx1:
+        tx1.add(Conversation(title='First concurrent write'))
+        tx1.flush()
+        with SellerDatabaseSession(user_id=ALICE, bind=engine) as tx2:
+            tx2.execute(text("SET LOCAL lock_timeout = '2s'"))
+            tx2.add(Conversation(title='Second concurrent write'))
+            tx2.commit()
+        tx1.commit()
+    assert owned_rows(engine, ALICE)['conversations'] == 2
+
