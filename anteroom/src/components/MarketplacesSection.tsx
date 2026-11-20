@@ -335,9 +335,9 @@ export function MarketplacesLayout({
   const nativeKey = ["native-marketplaces", convId];
   const liveKey = ["marketplace-listings", convId];
   // List runs in the background: poll while any marketplace action is running.
-  const native = useQuery({ queryKey: nativeKey, queryFn: () => api.nativeMarketplaces.status(convId),
+  const native = useQuery({ queryKey: nativeKey, queryFn: ({ signal }) => api.nativeMarketplaces.status(convId, { signal }),
     refetchInterval: (query) => Object.values(query.state.data ?? {}).some((draft) => isRunning(draft)) ? pollMs(1500) : false });
-  const live = useQuery({ queryKey: liveKey, queryFn: () => api.marketplaceListings.get(convId) });
+  const live = useQuery({ queryKey: liveKey, queryFn: ({ signal }) => api.marketplaceListings.get(convId, { signal }) });
   // A save can fix the fields a failed List asked for, which clears that error on the server.
   const seenRevision = useRef({ convId, revisionId });
   useEffect(() => {

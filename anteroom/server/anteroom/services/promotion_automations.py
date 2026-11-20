@@ -25,7 +25,7 @@ from typing import cast
 from sqlalchemy import CursorResult, func, or_, update
 from sqlalchemy.orm import Session
 
-from anteroom.database import SessionLocal
+from anteroom.database import SessionLocal, in_worker_session
 from anteroom.models.conversation import Conversation, new_id
 from anteroom.models.listing_promotion import (
     ListingPromotion,
@@ -384,14 +384,21 @@ def _skip_note(reasons: Counter) -> str:
     return "; ".join(f"{text[:120]} ({count})" for text, count in reasons.most_common(3))
 
 
-async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.sleep,
-                    like_events: dict[str, datetime] | None = None) -> PromotionRun | None:
-    """One round: share the next listings, or offer on listings with new likers. Stops at the first limit."""
-    now = _now()
+def _begin_round(
+    db: Session,
+    automation_id: str,
+    now: datetime,
+    expected_next_run_at: datetime | None,
+    like_events: dict[str, datetime] | None,
+) -> tuple[dict, str] | None:
+    row = db.get(PromotionAutomation, automation_id)
+    if row is None:
+        return None
     if like_events is None:
+        target_next_run = expected_next_run_at if expected_next_run_at is not None else row.next_run_at
         # Claim the due round: when two Machines read the same due rule, one runs it.
         claimed = db.execute(update(PromotionAutomation).execution_options(synchronize_session=False).where(
-            PromotionAutomation.id == row.id, PromotionAutomation.next_run_at == row.next_run_at,
+            PromotionAutomation.id == row.id, PromotionAutomation.next_run_at == target_next_run,
         ).values(next_run_at=next_share_slot(row, now) if row.action == "share" else now + OFFER_INTERVAL))
         if cast(CursorResult, claimed).rowcount != 1:
             db.rollback()
@@ -401,42 +408,164 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
     db.add(run)
     row.last_run_at = now
     db.commit()
+    rule = {
+        "id": row.id,
+        "marketplace": row.marketplace,
+        "action": row.action,
+        "speed": row.speed,
+        "daily_cap": row.daily_cap,
+        "min_days_listed": row.min_days_listed,
+        "min_likes": row.min_likes,
+        "shipping_label": row.shipping_label,
+        "discount_percent": row.discount_percent,
+    }
+    return rule, run.id
+
+
+def _prepare_round(
+    db: Session,
+    automation_id: str,
+    now: datetime,
+    like_events: dict[str, datetime] | None,
+) -> tuple[list[tuple[str, str, str]], int | None, set[str], dict[str, datetime]]:
+    row = db.get(PromotionAutomation, automation_id)
+    if row is None:
+        return [], None, set(), {}
+    covered = _covered(db, row)
+    targets = [
+        (conv.id, getattr(conv, "title", "") or "", listing_id)
+        for conv, listing_id, listed_at in _order(db, row, covered)
+        if (like_events is None or listing_id in like_events)
+        if not row.min_days_listed or (listed_at and (now - listed_at).days >= row.min_days_listed)
+    ]
+    remaining = (row.daily_cap or 0) - _shares_today(db, row.marketplace, now) if row.action == "share" else None
+    # Like-feed rounds read their listings; the regular scan skips those still waiting for a like.
+    waiting = _waiting_for_likes(db, row, now) if like_events is None else set()
+    held = _held_after_refusal(db, row, now, {target[1] for target in covered})
+    return targets, remaining, waiting, held
+
+
+def _check_enabled(db: Session, automation_id: str) -> bool:
+    row = db.get(PromotionAutomation, automation_id)
+    return bool(row and row.enabled)
+
+
+def _check_offer_target(
+    db: Session,
+    automation_id: str,
+    marketplace: str,
+    listing_id: str,
+    new_like_at: datetime | None,
+) -> tuple[bool, str | None]:
+    row = db.get(PromotionAutomation, automation_id)
+    if not row or not row.enabled:
+        return False, None
+    return True, promotions.blocking(db, marketplace, listing_id, "offer", new_like_at=new_like_at)
+
+
+def _record_review_failure(
+    db: Session,
+    send: ListingPromotion,
+    automation_id: str,
+    pause_reason: str | None,
+) -> str | None:
+    # The draft may have been deleted while Chrome was reading.
+    # Keep the listing identity, without a dangling draft reference.
+    if send.conversation_id and db.get(Conversation, send.conversation_id) is None:
+        send.conversation_id = None
+    db.add(send)
+    db.commit()
+    if pause_reason is not None:
+        row = db.get(PromotionAutomation, automation_id)
+        if row is not None:
+            return _pause(db, row, pause_reason)
+    return None
+
+
+def _save_preview_send(db: Session, send: ListingPromotion) -> str:
+    db.add(send)
+    db.commit()
+    return send.id
+
+
+def _mark_send_skipped(db: Session, send_id: str, exc: PromotionError) -> str:
+    send = db.get(ListingPromotion, send_id)
+    if send is None:
+        return scrub(str(exc)) or "The marketplace did not answer."
+    send.state, send.note = "skipped", str(exc)[:300]
+    db.commit()
+    return _skip_reason(exc, send)
+
+
+def _pause_by_id(db: Session, automation_id: str, reason: str) -> str:
+    row = db.get(PromotionAutomation, automation_id)
+    if row is None:
+        return f"Paused: {reason}"[:300]
+    return _pause(db, row, reason)
+
+
+def _finish_round(
+    db: Session,
+    run_id: str,
+    counts: Counter,
+    stop_note: str | None,
+    reasons: Counter,
+) -> PromotionRun | None:
+    run = db.get(PromotionRun, run_id)
+    if run is None:
+        return None
+    run.sent, run.skipped, run.failed = counts["sent"], counts["skipped"], counts["failed"]
+    run.finished_at = _now()
+    run.note = " ".join(part for part in (stop_note, f"Skipped: {_skip_note(reasons)}." if reasons else None) if part)[:500] or None
+    db.commit()
+    db.refresh(run)
+    db.expunge(run)
+    return run
+
+
+async def run_round(automation_id: str, *, expected_next_run_at: datetime | None = None,
+                    sleep=asyncio.sleep, like_events: dict[str, datetime] | None = None) -> PromotionRun | None:
+    """One round: share the next listings, or offer on listings with new likers. Stops at the first limit."""
+    now = _now()
+    started = await in_worker_session(_begin_round, automation_id, now, expected_next_run_at, like_events)
+    if started is None:
+        return None
+    rule, run_id = started
+    marketplace, action = rule["marketplace"], rule["action"]
     reasons: Counter = Counter()
-    counts = Counter()
+    counts: Counter = Counter()
     stop_note = None
     try:
         promotions.require_chrome()
-        covered = _covered(db, row)
-        targets = [target for target in _order(db, row, covered)
-                   if (like_events is None or target[1] in like_events)
-                   if not row.min_days_listed or (target[2] and (now - target[2]).days >= row.min_days_listed)]
-        remaining = (row.daily_cap or 0) - _shares_today(db, row.marketplace, now) if row.action == "share" else None
-        # Like-feed rounds read their listings; the regular scan skips those still waiting for a like.
-        waiting = _waiting_for_likes(db, row, now) if like_events is None else set()
-        held = _held_after_refusal(db, row, now, {target[1] for target in covered})
+        targets, remaining, waiting, held = await in_worker_session(_prepare_round, automation_id, now, like_events)
         reads = 0
         batch = new_id()
-        for conv, listing_id, _listed_at in targets:
+        for conv_id, conv_title, listing_id in targets:
             new_like_at = like_events.get(listing_id) if like_events is not None else None
-            db.refresh(row)
-            if not row.enabled:
-                stop_note = "Turned off during the round."
-                break
-            if remaining is not None and remaining <= 0:
-                stop_note = f"Reached the daily cap of {row.daily_cap:,} shares."
-                break
-            if row.action == "offer":
+            if action == "offer":
                 if listing_id in waiting:
+                    if not await in_worker_session(_check_enabled, automation_id):
+                        stop_note = "Turned off during the round."
+                        break
                     counts["skipped"] += 1
                     reasons[WAITING_FOR_LIKES] += 1
                     continue
                 # As in the feed filter, keep millisecond ties eligible until a later check.
                 if listing_id in held and (new_like_at is None or new_like_at < held[listing_id].replace(
                         microsecond=held[listing_id].microsecond // 1000 * 1000)):
+                    if not await in_worker_session(_check_enabled, automation_id):
+                        stop_note = "Turned off during the round."
+                        break
                     counts["skipped"] += 1
                     reasons[HELD_AFTER_REFUSAL] += 1
                     continue
-                if blocked := promotions.blocking(db, row.marketplace, listing_id, "offer", new_like_at=new_like_at):
+                enabled, blocked = await in_worker_session(
+                    _check_offer_target, automation_id, marketplace, listing_id, new_like_at,
+                )
+                if not enabled:
+                    stop_note = "Turned off during the round."
+                    break
+                if blocked:
                     counts["skipped"] += 1
                     reason = blocked if blocked == promotions.MERCARI_COOLDOWN_NOTE else "offered in the last 24 hours or unconfirmed"
                     reasons[reason] += 1
@@ -445,65 +574,66 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                     stop_note = f"Checked {OFFER_READS} listings; the rest are checked next time."
                     break
                 if reads:
-                    db.commit()  # Hold no connection through the pause between reads.
                     await sleep(READ_GAP_S)
                 reads += 1
-            send = promotions.new_row(conv, row.marketplace, row.action, batch, row.discount_percent, row.id)
+            else:
+                if not await in_worker_session(_check_enabled, automation_id):
+                    stop_note = "Turned off during the round."
+                    break
+                if remaining is not None and remaining <= 0:
+                    stop_note = f"Reached the daily cap of {rule['daily_cap']:,} shares."
+                    break
+            send = ListingPromotion(
+                batch_id=batch, conversation_id=conv_id, marketplace=marketplace, action=action,
+                listing_id="", title=conv_title, discount_percent=rule["discount_percent"],
+                automation_id=automation_id, state="preview", expires_at=_now() + promotions.PREVIEW_TTL,
+            )
             # Feed events arriving during the read must remain newer than this check.
             send.created_at = _now()
             try:
-                await promotions.review(db, send, conv, new_like_at=new_like_at)
+                await promotions.review(send, conv_id, new_like_at=new_like_at)
                 shipping = None
-                if row.action == "offer":
-                    if cast(int, send.like_count) < (row.min_likes or 1):
+                if action == "offer":
+                    if cast(int, send.like_count) < (rule["min_likes"] or 1):
                         raise PromotionError(409, "fewer likes than the rule needs")
-                    last = promotions.likes_at_last_offer(db, row.marketplace, listing_id)
+                    last = await in_worker_session(promotions.likes_at_last_offer, marketplace, listing_id)
                     if new_like_at is None and last is not None and cast(int, send.like_count) <= last:
                         raise PromotionError(409, "no new likers since the last offer")
-                    shipping = _shipping_choice(row, send)
+                    shipping = _shipping_choice_for(marketplace, rule["shipping_label"], send)
             except PromotionError as exc:
-                db.rollback()
                 # Review only reads, but its refusal still belongs in the
                 # per-listing activity journal. No send timestamp; a recognized
                 # Mercari eligibility refusal gates previews only.
                 send.listing_id = send.listing_id or listing_id
-                send.state, send.note = ("failed" if exc.code in ("chrome", "network") else "skipped"), _skip_reason(exc, send)
+                skip_reason = _skip_reason(exc, send)
+                send.state, send.note = ("failed" if exc.code in ("chrome", "network") else "skipped"), skip_reason
                 counts[send.state] += 1
                 send.marketplace_message = scrub(send.marketplace_message)
                 send.finished_at = _now()
-                # The draft may have been deleted while Chrome was reading.
-                # Keep the listing identity, without a dangling draft reference.
-                if send.conversation_id and db.get(Conversation, send.conversation_id) is None:
-                    send.conversation_id = None
-                db.add(send)
-                db.commit()
+                paused = await in_worker_session(
+                    _record_review_failure, send, automation_id, str(exc) if exc.code in STOP_CODES else None,
+                )
                 if exc.code in STOP_CODES:
-                    stop_note = _pause(db, row, str(exc))
+                    stop_note = paused
                     break
                 if exc.code in ("chrome", "network"):
                     stop_note = str(exc)
                     break
-                reasons[_skip_reason(exc, send)] += 1
+                reasons[skip_reason] += 1
                 continue
-            db.add(send)
-            db.flush()
-            send_id = send.id
-            # Committed, and nothing reloaded: perform holds no connection while Chrome sends, and neither does this.
-            db.commit()
+            send_id = await in_worker_session(_save_preview_send, send)
             try:
                 result = await promotions.perform(send_id, shipping,
                                                   new_like_at=new_like_at,
-                                                  gap_ms=SHARE_SPEEDS.get(row.speed or "") if row.action == "share" else None)
+                                                  gap_ms=SHARE_SPEEDS.get(rule["speed"] or "") if action == "share" else None)
             except PromotionError as exc:
-                db.rollback()
-                send.state, send.note = "skipped", str(exc)[:300]
-                db.commit()
+                reason = await in_worker_session(_mark_send_skipped, send_id, exc)
                 if exc.code in ("busy", "paused", "chrome"):
                     stop_note = "Stopped: another job needed Chrome." if exc.code == "busy" else str(exc)
                     counts["skipped"] += 1
                     break
                 counts["skipped"] += 1
-                reasons[_skip_reason(exc, send)] += 1
+                reasons[reason] += 1
                 continue
             if result["state"] == "done":
                 counts["sent"] += 1
@@ -512,29 +642,22 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                 continue
             counts["failed"] += 1
             if result["state"] == "unknown":
-                stop_note = _pause(db, row, "A send was not confirmed. Check it in the activity log, then turn this back on.")
+                stop_note = await in_worker_session(
+                    _pause_by_id, automation_id, "A send was not confirmed. Check it in the activity log, then turn this back on.",
+                )
                 break
             if result.get("stop"):
-                stop_note = _pause(db, row, result.get("note") or "The marketplace asked Anteroom to stop.")
+                stop_note = await in_worker_session(
+                    _pause_by_id, automation_id, result.get("note") or "The marketplace asked Anteroom to stop.",
+                )
                 break
             reasons[str(result.get("note") or "refused")[:120]] += 1
     except PromotionError as exc:
-        db.rollback()
         stop_note = str(exc)
-        log.warning("%s automation %s could not finish its round: %s", row.marketplace, row.id, scrub(str(exc)))
-    except Exception:
-        # A failed commit (a pool timeout during flush) leaves the session
-        # unusable until rolled back. Roll back so the round is still closed
-        # below and the original error, not PendingRollbackError, is reported.
-        # Sends already handed to Chrome were journaled in their own sessions.
-        db.rollback()
-        raise
+        log.warning("%s automation %s could not finish its round: %s", marketplace, automation_id, scrub(str(exc)))
     finally:
-        run.sent, run.skipped, run.failed = counts["sent"], counts["skipped"], counts["failed"]
-        run.finished_at = _now()
-        run.note = " ".join(part for part in (stop_note, f"Skipped: {_skip_note(reasons)}." if reasons else None) if part)[:500] or None
-        db.commit()
-    return run
+        finished = await in_worker_session(_finish_round, run_id, counts, stop_note, reasons)
+    return finished
 
 
 def report_overdue(db: Session) -> None:
@@ -547,14 +670,14 @@ def report_overdue(db: Session) -> None:
                   row.marketplace, row.action, row.id, row.user_id, row.next_run_at, row.last_run_at)
 
 
-def _shipping_choice(row: PromotionAutomation, send: ListingPromotion) -> str | None:
-    if row.marketplace not in promotions.SHIPPING_DISCOUNTS:
+def _shipping_choice_for(marketplace: str, shipping_label: str | None, send: ListingPromotion) -> str | None:
+    if marketplace not in promotions.SHIPPING_DISCOUNTS:
         return None
-    if not row.shipping_label:
+    if not shipping_label:
         return "none"
-    match = next((option for option in send.shipping_options or [] if option["label"] == row.shipping_label), None)
+    match = next((option for option in send.shipping_options or [] if option["label"] == shipping_label), None)
     if not match:
-        raise PromotionError(409, f"{NAMES[row.marketplace]} did not offer the shipping discount “{row.shipping_label}”")
+        raise PromotionError(409, f"{NAMES[marketplace]} did not offer the shipping discount “{shipping_label}”")
     return match["id"]
 
 
@@ -566,78 +689,136 @@ def _pause(db: Session, row: PromotionAutomation, reason: str) -> str:
     return note
 
 
-async def tick(db: Session, *, now: datetime | None = None, sleep=asyncio.sleep) -> int:
-    """Run every due automation, one at a time. A busy slot waits for the next tick."""
+def _due_automations(db: Session, moment: datetime) -> list[tuple[str, datetime | None]]:
     from anteroom.services.listing_mode import read
     if read(db) == "vendoo":
-        return 0
+        return []
+    rows = db.query(PromotionAutomation).filter(
+        PromotionAutomation.enabled.is_(True), PromotionAutomation.next_run_at <= moment,
+    ).order_by(PromotionAutomation.next_run_at).all()
+    return [(row.id, row.next_run_at) for row in rows]
+
+
+def _has_active_job(db: Session) -> bool:
+    return bool(JobRepo(db).get_active())
+
+
+async def tick(*, now: datetime | None = None, sleep=asyncio.sleep) -> int:
+    """Run every due automation, one at a time. A busy slot waits for the next tick."""
     moment = now or _now()
+    due = await in_worker_session(_due_automations, moment)
     ran = 0
-    due = db.query(PromotionAutomation).filter(PromotionAutomation.enabled.is_(True), PromotionAutomation.next_run_at <= moment).order_by(
-        PromotionAutomation.next_run_at).all()
-    for row in due:
-        if JobRepo(db).get_active():
+    for automation_id, next_run_at in due:
+        if await in_worker_session(_has_active_job):
             break
-        if _awaiting_chrome(row, moment):
+        if _awaiting_chrome_at(next_run_at, moment):
             continue
-        if await run_round(db, row, sleep=sleep) is not None:
+        if await run_round(automation_id, expected_next_run_at=next_run_at, sleep=sleep) is not None:
             ran += 1
     return ran
 
 
-def _awaiting_chrome(row: PromotionAutomation, moment: datetime) -> bool:
+def _awaiting_chrome_at(next_run_at: datetime | None, moment: datetime) -> bool:
     """Whether a due round should wait for Chrome to reconnect rather than record a round that cannot run."""
     try:
         promotions.require_chrome()
     except PromotionError as exc:
-        return exc.code == "chrome" and row.next_run_at is not None and moment - row.next_run_at < CHROME_GRACE
+        return exc.code == "chrome" and next_run_at is not None and moment - next_run_at < CHROME_GRACE
     return False
 
 
-async def check_new_likes(db: Session, *, sleep=asyncio.sleep) -> int:
+def _offer_automations(db: Session) -> list[tuple[str, str]]:
+    from anteroom.services.listing_mode import read
+    if read(db) == "vendoo":
+        return []
+    rows = db.query(PromotionAutomation).filter(
+        PromotionAutomation.enabled.is_(True), PromotionAutomation.action == "offer",
+        PromotionAutomation.marketplace.in_(("poshmark", "depop")),
+    ).all()
+    return [(row.id, row.marketplace) for row in rows]
+
+
+def _check_like_rule_state(db: Session, automation_id: str) -> tuple[str, datetime | None]:
+    if JobRepo(db).get_active():
+        return "busy", None
+    row = db.get(PromotionAutomation, automation_id)
+    if row is None or not row.enabled:
+        return "skip", None
+    if row.like_events_since is None:
+        # No historical feed replay when adopting the feature.
+        row.like_events_since = _now()
+        db.commit()
+        return "initialized", None
+    return "ready", row.like_events_since
+
+
+def _filter_like_events(
+    db: Session,
+    automation_id: str,
+    marketplace: str,
+    events: dict[str, datetime],
+) -> dict[str, datetime]:
+    row = db.get(PromotionAutomation, automation_id)
+    if row is None or not row.enabled:
+        return {}
+    covered = {target[1] for target in _covered(db, row)}
+    # The feed is re-read from the same start every minute, so a like this
+    # rule has already checked the listing for would otherwise read it again
+    # on every tick. Failed reads must retry. The Bridge truncates events to
+    # milliseconds: keep ties eligible until a check in a later millisecond.
+    # A count-only skip cannot assess individual likers: a replacement liker
+    # may leave the count unchanged. Its journal reason distinguishes it
+    # from completed eligibility checks, including existing persisted rows.
+    checked = dict(db.query(ListingPromotion.listing_id, func.max(ListingPromotion.created_at)).filter(
+        ListingPromotion.automation_id == row.id, ListingPromotion.action == "offer",
+        ListingPromotion.listing_id.in_(list(events)),
+        or_(ListingPromotion.state != "failed", ListingPromotion.sent_at.is_not(None)),
+        or_(ListingPromotion.state != "skipped", ListingPromotion.sent_at.is_not(None),
+            ListingPromotion.note.is_(None),
+            ~ListingPromotion.note.startswith("no new likers since the last offer")),
+    ).group_by(ListingPromotion.listing_id).all()) if events else {}
+    return {
+        key: at for key, at in events.items()
+        if key in covered
+        and not (key in checked and at < checked[key].replace(microsecond=checked[key].microsecond // 1000 * 1000))
+        and not promotions.blocking(db, marketplace, key, "offer", new_like_at=at)
+    }
+
+
+async def check_new_likes(*, sleep=asyncio.sleep) -> int:
     """Check bounded recent-like feeds once per minute, only for approved rules.
 
     The regular scan still catches older likes that fell out of these feeds.
     Only events after approval qualify. Re-reading the recent feed also catches
     late notifications; the send journal prevents replaying confirmed offers.
     """
-    from anteroom.services.listing_mode import read
-    if read(db) == "vendoo":
-        return 0
-    rows = db.query(PromotionAutomation).filter(
-        PromotionAutomation.enabled.is_(True), PromotionAutomation.action == "offer",
-        PromotionAutomation.marketplace.in_(("poshmark", "depop")),
-    ).all()
+    rules = await in_worker_session(_offer_automations)
     feeds: dict[str, tuple[datetime, dict]] = {}
     ran = 0
-    for row in rows:
-        if JobRepo(db).get_active():
+    for automation_id, marketplace in rules:
+        state, since = await in_worker_session(_check_like_rule_state, automation_id)
+        if state == "busy":
             break
-        db.refresh(row)
-        if not row.enabled:
+        if state != "ready" or since is None:
             continue
-        if row.like_events_since is None:
-            # No historical feed replay when adopting the feature.
-            row.like_events_since = _now()
-            db.commit()
-            continue
-        if row.marketplace not in feeds:
-            db.commit()  # Hold no connection while Chrome reads the feed.
+        if marketplace not in feeds:
             try:
                 promotions.require_chrome()
                 started = _now()
-                answer = await promotions.browser_bridge.request(SimpleNamespace(id=f"likes-{row.id}"),
-                    "marketplace.like_events", {"marketplace": row.marketplace}, timeout=45)
+                answer = await promotions.browser_bridge.request(SimpleNamespace(id=f"likes-{automation_id}"),
+                    "marketplace.like_events", {"marketplace": marketplace}, timeout=45)
             except (promotions.browser_bridge.BrowserBridgeError, PromotionError) as exc:
-                log.warning("%s automation %s could not read recent likes: %s", row.marketplace, row.id, scrub(str(exc)))
+                log.warning("%s automation %s could not read recent likes: %s", marketplace, automation_id, scrub(str(exc)))
                 continue
-            feeds[row.marketplace] = started, answer
-        started, answer = feeds[row.marketplace]
+            feeds[marketplace] = started, answer
+        started, answer = feeds[marketplace]
         if answer.get("ok") is not True:
-            log.error("%s automation %s recent-like feed failed: %s", row.marketplace, row.id,
+            log.error("%s automation %s recent-like feed failed: %s", marketplace, automation_id,
                       scrub(answer.get("error") or "The marketplace did not answer."))
             if answer.get("error_code") in STOP_CODES | {"schema_drift"}:
-                _pause(db, row, str(answer.get("error") or "The marketplace asked Anteroom to stop."))
+                await in_worker_session(
+                    _pause_by_id, automation_id, str(answer.get("error") or "The marketplace asked Anteroom to stop."),
+                )
             continue
         events: dict[str, datetime] = {}
         try:
@@ -648,33 +829,15 @@ async def check_new_likes(db: Session, *, sleep=asyncio.sleep) -> int:
                 if at.tzinfo is None or not isinstance(event["listing_id"], str):
                     raise ValueError("Invalid event")
                 at = at.astimezone(UTC).replace(tzinfo=None)
-                if row.like_events_since < at <= started:
+                if since < at <= started:
                     listing_id = event["listing_id"]
                     events[listing_id] = max(events.get(listing_id, at), at)
         except (ValueError, KeyError, TypeError, AttributeError):
-            _pause(db, row, "The recent-like feed changed. Anteroom needs an update.")
+            await in_worker_session(_pause_by_id, automation_id, "The recent-like feed changed. Anteroom needs an update.")
             continue
-        covered = {target[1] for target in _covered(db, row)}
-        # The feed is re-read from the same start every minute, so a like this
-        # rule has already checked the listing for would otherwise read it again
-        # on every tick. Failed reads must retry. The Bridge truncates events to
-        # milliseconds: keep ties eligible until a check in a later millisecond.
-        # A count-only skip cannot assess individual likers: a replacement liker
-        # may leave the count unchanged. Its journal reason distinguishes it
-        # from completed eligibility checks, including existing persisted rows.
-        checked = dict(db.query(ListingPromotion.listing_id, func.max(ListingPromotion.created_at)).filter(
-            ListingPromotion.automation_id == row.id, ListingPromotion.action == "offer",
-            ListingPromotion.listing_id.in_(list(events)),
-            or_(ListingPromotion.state != "failed", ListingPromotion.sent_at.is_not(None)),
-            or_(ListingPromotion.state != "skipped", ListingPromotion.sent_at.is_not(None),
-                ListingPromotion.note.is_(None),
-                ~ListingPromotion.note.startswith("no new likers since the last offer")),
-        ).group_by(ListingPromotion.listing_id).all()) if events else {}
-        events = {key: at for key, at in events.items() if key in covered
-                  and not (key in checked and at < checked[key].replace(microsecond=checked[key].microsecond // 1000 * 1000))
-                  and not promotions.blocking(db, row.marketplace, key, "offer", new_like_at=at)}
-        if events:
-            await run_round(db, row, sleep=sleep, like_events=events)
+        filtered = await in_worker_session(_filter_like_events, automation_id, marketplace, events)
+        if filtered:
+            await run_round(automation_id, sleep=sleep, like_events=filtered)
             ran += 1
     return ran
 
@@ -702,9 +865,8 @@ async def _timer() -> None:
         if account_shown():
             continue
         try:
-            with SessionLocal() as db:
-                await check_new_likes(db)
-                await tick(db)
+            await check_new_likes()
+            await tick()
         except Exception:  # noqa: BLE001 - one bad round must not stop the clock
             log.exception("promotion automation tick failed; unconfirmed sends are never retried")
 

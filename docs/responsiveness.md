@@ -11,6 +11,46 @@ and accounts must overlap; long work must leave navigation, input and unrelated
 drafts usable. This is a product requirement, not a promise of infinite hardware
 capacity or zero model/network latency.
 
+## Pool resilience, `/screen` collapse, and frontend request scheduling, 2026-11-20
+
+Summary of changes on branch `t3/app-responsiveness-db-timeouts` (on top of `6dcc4bc1`, 0.1.1068):
+
+- **Backend resilience & pool efficiency:**
+  - Global `SQLAlchemyError` handler in `anteroom/server/anteroom/hosted.py` logs via `note_cause()` and returns a retryable `503` (`Retry-After: 5`, `Cache-Control: no-store`) instead of an unhandled `500`.
+  - Hosted SSE stream polling (`anteroom/server/anteroom/routes/hosted_tasks.py:task_stream`) tolerates up to 3 consecutive transient `SQLAlchemyError` polls before emitting a clean SSE `error` + `[DONE]`.
+  - Lazy settings loading (`HostedSettingsStore.read()`) reuses the caller's open seller session with `no_autoflush` (eliminating nested pool checkouts and skipping `user_preferences` reads on routes that do not read settings), while separating generator-yielded FastAPI dependencies (scoped per request context) from direct `with`-block sessions (scoped per owner thread) so sessions are never shared across concurrent requests or worker threads.
+  - Function-scoped DB dependencies (`scope="function"`) across hosted routes (except the two streaming CSV exports in `sales_ledger.py`) so pooled connections return as soon as handlers finish.
+  - Short-lived TTL cache (`STALE_SECONDS[device] / 3`: 10 s Chrome, 15 s Mac) for confirmed owned device routes in `device_routes.py`, invalidated on drain/reset/release.
+- **Fewer round trips per open & save:**
+  - `GET /api/conversations/{identity}/screen` (`hosted_workspace.py:listing_screen`) now includes `marketplace_listings`, `native_marketplaces`, and `marketplace_sales` in one seller transaction, collapsing 9 opening browser reads into 1 request.
+  - `PUT /api/conversations/{identity}/listing` (`hosted_workspace.py:save_listing`) commits in a single transaction without a post-commit reload.
+- **Event loop hygiene:**
+  - `listing_promotions.py`, `promotion_automations.py`, and `hosted_promotion_scheduler.py` now run DB work through short-lived `in_worker_session(...)` calls, clearing all remaining entries from `STILL_ON_THE_LOOP` in `test_async_service_sessions.py`.
+- **Frontend request scheduling & cancellation:**
+  - Two-lane priority request scheduler (`anteroom/src/api/requestScheduler.ts`) starts interactive clicks, navigations, and writes immediately while pausing background prefetches and private thumbnail warm-ups until interactive traffic clears, capping background concurrency at `MAX_BACKGROUND_CONCURRENT = 2`, promoting queued background signals when a real screen mounts, and excluding long-lived SSE/relay streams.
+  - Background route prefetches serialize and cancel on navigation or hover leave (`navigationQueries.ts`, `useNavigationIntent.ts`), and opening a draft reads its marketplaces and sales directly from `/screen`.
+
+### Hosted load test, 2026-11-20 (5 sellers, 24 ms DB RTT)
+
+Same `anteroom/scripts/hosted-load-test.py` shape as the 2026-11-12 5-seller run (`ANTEROOM_HOSTED=1`, `ANTEROOM_SANDBOX_WORKER_PROCESS=1`, `ANTEROOM_SANDBOX_DB_RTT_MS=24`, 5 sellers, 40 extra inventory items each, 2 browsing tabs + 3 generating drafts + 1 follower stream per generation, 5 s fake model, 150 s idle + 150 s load) on the same shared 6-vCPU / 11 GB Linux VM (one-minute host load average during the run: mean/max `2.79/3.69` idle, `7.72/11.70` load; web CPU mean/max `0.31/0.56` idle, `0.34/0.60` load; worker CPU `0.14/1.03` load):
+
+| Request | 5 sellers, idle p50/p95 (max) ms | 5 sellers, 15 drafts generating p50/p95 (max) ms | Errors |
+| --- | --- | --- | --- |
+| Status | 155 / 198 (400) | 164 / 307 (414) | 0 |
+| Open a draft (`/screen`, now includes marketplaces + sales) | 474 / 608 (1,337) | 523 / 716 (920) | 0 |
+| Open a generating draft (`/screen`) | 473 / 590 (962) | 542 / 751 (1,168) | 0 |
+| Save notes | 401 / 514 (718) | 445 / 639 (888) | 0 |
+| Save a listing field | 470 / 608 (1,149) | 526 / 732 (907) | 0 |
+| Inventory | 788 / 1,636 (3,216) | 873 / 3,018 (4,379) | 0 |
+| Suggestions | 704 / 943 (1,208) | 814 / 1,406 (2,219) | 0 |
+| Analytics | 560 / 857 (1,528) | 674 / 1,000 (1,589) | 0 |
+| Sales | 203 / 355 (531) | 272 / 678 (1,179) | 0 |
+| Samples / errors | 1,566 / 0 | 1,440 / 0 | 0 |
+
+- **Zero timeouts or 5xx errors:** 0 HTTP errors across 3,006 browsing requests, 0 refused/failed generations across 19 started (4 finished in p50/p95 `79.4/79.6 s`, 15 still running at cutoff and cleanly cancelled, 0 error events), and 0 `TimeoutError`, `PoolTimeout`, `QueryCanceled`, `IdleInTransactionSessionTimeout`, `deadlock`, `503`, or `500` entries in the sandbox log (compared with 24 pool timeouts, 9 generate `500`s, 5 error events, and 2 inventory `503`s in the 2026-11-12 5-seller 24 ms RTT run).
+- **Connections & latency shifts:** Peak DB connections dropped from 26 to 22 (`19.58` mean in load); submit ack p50/p95/max was `1,267/2,435/2,531 ms` (down from p95 `4,379 ms`); `save_field` dropped from `658/1,110 ms` to `526/732 ms` in load; `inventory` load p95 dropped from `4,884 ms` to `3,018 ms`; `sales` dropped from `548/884 ms` to `272/678 ms`. `/screen` itself rose ~90–100 ms (`387/433 → 474/608 ms` idle, `425/672 → 523/716 ms` load) because it now returns `marketplace_listings`, `native_marketplaces`, and `marketplace_sales` in the same transaction instead of 3 separate browser HTTP requests.
+- **Caveats (unchanged from 2026-11-12):** Local Postgres without Supabase PgBouncer/TLS overhead, uncapped process CPU on a shared host (note: an earlier run on this host during a transient host-wide load spike of `52.45` experienced an ~83 s VM freeze that triggered 4 retryable `503`s and 0 `500`s/pool timeouts), 40 extra drafts per seller rather than 1,300, and fake 5 s model calls. Cross-region Fly (`sjc`) ↔ Supabase (Oregon) 24 ms DB RTT remains the latency floor for server-confirmed writes and cold reads until compute and database are co-located in the same region.
+
 ## Assistant answer stage timing, 2026-11-18
 
 A hosted answer reported as "Worked for 1m 21s" (question to saved answer

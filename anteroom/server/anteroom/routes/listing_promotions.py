@@ -46,19 +46,19 @@ def _error(exc: PromotionError) -> HTTPException:
 
 
 @router.get("")
-def history(db: Session = Depends(get_db)):
+def history(db: Session = Depends(get_db, scope="function")):
     return {"supported": {name: sorted(actions) for name, actions in listing_promotions.SUPPORTED.items()},
             "awaiting_capture": {name: sorted(actions) for name, actions in listing_promotions.AWAITING_CAPTURE.items()},
             "history": listing_promotions.history(db)}
 
 
 @router.post("/floors")
-def floors(body: FloorsRequest, db: Session = Depends(get_db)):
+def floors(body: FloorsRequest, db: Session = Depends(get_db, scope="function")):
     return listing_promotions.floors(db, body.conversation_ids, body.marketplace)
 
 
 @router.put("/floors")
-def save_floors(body: SaveFloorsRequest, db: Session = Depends(get_db)):
+def save_floors(body: SaveFloorsRequest, db: Session = Depends(get_db, scope="function")):
     try:
         return listing_promotions.save_floors(db, body.marketplace, body.floors)
     except PromotionError as exc:
@@ -91,7 +91,7 @@ async def check(promotion_id: str):
 
 
 @router.post("/{promotion_id}/checked")
-def mark_checked(promotion_id: str, body: Confirm, db: Session = Depends(get_db)):
+def mark_checked(promotion_id: str, body: Confirm, db: Session = Depends(get_db, scope="function")):
     try:
         return listing_promotions.mark_checked(db, promotion_id)
     except PromotionError as exc:

@@ -522,16 +522,56 @@ def test_screen_matches_core_reads_and_refuses_other_sellers(cloud, signing_keys
         response = client.get(path + '/screen', headers=alice)
     finally:
         event.remove(_engine, 'before_cursor_execute', record)
-    # One ownership read; activity reuses the messages already loaded for chat.
+    # One ownership read, one photos read, one marketplace_listings read; activity reuses messages.
     assert sum('FROM conversations' in sql for sql in statements) == 1
     assert sum('FROM messages' in sql for sql in statements) == 1
+    assert sum('FROM photos' in sql for sql in statements) == 1
+    assert sum('FROM marketplace_listings' in sql for sql in statements) == 1
     assert response.status_code == 200, response.text
     for key, suffix in [('conversation', ''), ('listing', '/listing'), ('photos', '/photos'),
-                        ('messages', '/messages'), ('activity', '/activity')]:
-        assert response.json()[key] == client.get(path + suffix, headers=alice).json()
+                        ('messages', '/messages'), ('activity', '/activity'),
+                        ('marketplace_listings', '/marketplace-listings'),
+                        ('native_marketplaces', '/native-marketplaces')]:
+        assert response.json()[key] == client.get(path + suffix, headers=alice).json(), key
     assert response.json()['jobs'] == client.get('/api/jobs', params={'conversation_id': identity}, headers=alice).json()
+    assert response.json()['marketplace_sales'] == client.get(
+        '/api/marketplace-sales', params={'state': 'new', 'conversation_id': identity}, headers=alice,
+    ).json()
     assert client.get(path + '/screen', headers=headers(signing_keys, BOB)).status_code == 404
     assert client.get(path + '/screen').status_code == 401
+
+
+def test_save_listing_commits_in_a_single_transaction(cloud, signing_keys):  # noqa: F811
+    from sqlalchemy import event
+
+    client, engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'Coat'}).json()['id']
+    path = f'/api/conversations/{identity}/listing'
+    first = client.put(path, headers=alice, json={'expected_revision_id': '', 'listing': {'title': 'Coat', 'price': 25}})
+    assert first.status_code == 200, first.text
+
+    statements: list[str] = []
+
+    def record(_conn, _cursor, statement, *_args):
+        statements.append(statement)
+
+    event.listen(engine, 'before_cursor_execute', record)
+    try:
+        second = client.put(
+            path,
+            headers=alice,
+            json={'expected_revision_id': first.json()['revision_id'], 'listing': {'title': 'Wool coat', 'price': 35}},
+        )
+    finally:
+        event.remove(engine, 'before_cursor_execute', record)
+    assert second.status_code == 200, second.text
+    assert second.json()['listing']['title'] == 'Wool coat'
+    assert second.json()['listing']['price'] == 35
+    # Only one transaction (one set_config for RLS) and no post-commit reload of listing_revisions.
+    assert sum('set_config' in sql for sql in statements) == 1, statements
+    assert sum('FROM listing_revisions' in sql for sql in statements) <= 1, statements
+
 
 
 def test_thumbnails_are_kept_by_the_browser_and_read_one_row(cloud, signing_keys, monkeypatch):  # noqa: F811

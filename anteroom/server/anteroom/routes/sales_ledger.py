@@ -20,7 +20,7 @@ def _run(operation):
 
 @router.get("")
 def records(response: Response, start: date, end: date, marketplace: str | None = None, conversation_id: str | None = None,
-            page: int = Query(1, ge=1), q: str = "", attention: str = "all", sort: str = "newest", db: Session = Depends(get_db)):
+            page: int = Query(1, ge=1), q: str = "", attention: str = "all", sort: str = "newest", db: Session = Depends(get_db, scope="function")):
     response.headers["Cache-Control"] = "no-store"
     return _run(lambda: sales_ledger.list_sales(db, start, end, marketplace, conversation_id, page, q, attention, sort))
 
@@ -46,18 +46,18 @@ def _download(chunks, kind):
 
 
 @router.get("/{sale_id}")
-def record(sale_id: str, response: Response, db: Session = Depends(get_db)):
+def record(sale_id: str, response: Response, db: Session = Depends(get_db, scope="function")):
     response.headers["Cache-Control"] = "no-store"
     return _run(lambda: sales_ledger.get_sale(db, sale_id))
 
 
 @router.put("/{sale_id}/financials")
-def save_financials(sale_id: str, body: sales_ledger.FinancialSave, response: Response, db: Session = Depends(get_db)):
+def save_financials(sale_id: str, body: sales_ledger.FinancialSave, response: Response, db: Session = Depends(get_db, scope="function")):
     response.headers["Cache-Control"] = "no-store"
     return _run(lambda: sales_ledger.save_financials(db, sale_id, body))
 
 
 @router.delete("/{sale_id}")
-def delete_sale(sale_id: str, expected_revision: int = Query(ge=0), db: Session = Depends(get_db)):
+def delete_sale(sale_id: str, expected_revision: int = Query(ge=0), db: Session = Depends(get_db, scope="function")):
     """Delete a sale the seller recorded by mistake. Marketplace-reported sales are refused."""
     return _run(lambda: sales_ledger.delete_seller_sale(db, sale_id, expected_revision))

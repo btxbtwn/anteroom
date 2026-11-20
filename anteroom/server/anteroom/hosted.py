@@ -415,11 +415,23 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.add_middleware(AccessLogMiddleware)
 
     from fastapi.exceptions import RequestValidationError
+    from sqlalchemy.exc import SQLAlchemyError
     from anteroom.services.hosted_context import CredentialStorageUnavailable
 
     @app.exception_handler(CredentialStorageUnavailable)
     async def unavailable_credentials(_request, _error):
         return JSONResponse({'detail': 'Secure credential storage is temporarily unavailable'}, status_code=503)
+
+    @app.exception_handler(SQLAlchemyError)
+    async def unavailable_database(_request, error):
+        from anteroom.services.error_alerts import note_cause
+
+        note_cause(error)
+        return JSONResponse(
+            {'detail': 'Cloud data is temporarily unavailable'},
+            status_code=503,
+            headers={'Retry-After': '5', 'Cache-Control': 'no-store'},
+        )
 
     @app.exception_handler(RequestValidationError)
     async def invalid_input(_request, _error):

@@ -100,7 +100,7 @@ def preview_copy(conv_id: str, response: Response, db: Session = Depends(get_db,
 
 
 @router.post("/{conv_id}/copy", response_model=Conversation)
-def copy_conversation(conv_id: str, body: CopyRequest, db: Session = Depends(get_db)):
+def copy_conversation(conv_id: str, body: CopyRequest, db: Session = Depends(get_db, scope="function")):
     from anteroom.services import listing_copy
 
     try:

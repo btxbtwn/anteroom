@@ -41,12 +41,12 @@ def _error(exc: PromotionError) -> HTTPException:
 
 
 @router.get("")
-def listing(db: Session = Depends(get_db)):
+def listing(db: Session = Depends(get_db, scope="function")):
     return promotion_automations.listing(db)
 
 
 @router.post("")
-def create(body: AutomationBody, db: Session = Depends(get_db)):
+def create(body: AutomationBody, db: Session = Depends(get_db, scope="function")):
     try:
         return promotion_automations.save(db, body.model_dump())
     except PromotionError as exc:
@@ -54,7 +54,7 @@ def create(body: AutomationBody, db: Session = Depends(get_db)):
 
 
 @router.put("/{automation_id}")
-def update(automation_id: str, body: AutomationBody, db: Session = Depends(get_db)):
+def update(automation_id: str, body: AutomationBody, db: Session = Depends(get_db, scope="function")):
     try:
         return promotion_automations.save(db, body.model_dump(), automation_id)
     except PromotionError as exc:
@@ -62,7 +62,7 @@ def update(automation_id: str, body: AutomationBody, db: Session = Depends(get_d
 
 
 @router.delete("/{automation_id}")
-def delete(automation_id: str, db: Session = Depends(get_db)):
+def delete(automation_id: str, db: Session = Depends(get_db, scope="function")):
     try:
         promotion_automations.delete(db, automation_id)
     except PromotionError as exc:
@@ -71,7 +71,7 @@ def delete(automation_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{automation_id}/enable")
-def enable(automation_id: str, body: Confirm, db: Session = Depends(get_db)):
+def enable(automation_id: str, body: Confirm, db: Session = Depends(get_db, scope="function")):
     try:
         return promotion_automations.enable(db, automation_id)
     except PromotionError as exc:
@@ -79,18 +79,18 @@ def enable(automation_id: str, body: Confirm, db: Session = Depends(get_db)):
 
 
 @router.post("/{automation_id}/pause")
-def pause(automation_id: str, db: Session = Depends(get_db)):
+def pause(automation_id: str, db: Session = Depends(get_db, scope="function")):
     promotion_automations.pause(db, automation_id)
     return {"ok": True}
 
 
 @router.post("/pause")
-def pause_all(db: Session = Depends(get_db)):
+def pause_all(db: Session = Depends(get_db, scope="function")):
     return {"paused": promotion_automations.pause(db)}
 
 
 @router.get("/{automation_id}/coverage")
-def coverage(automation_id: str, db: Session = Depends(get_db)):
+def coverage(automation_id: str, db: Session = Depends(get_db, scope="function")):
     try:
         return promotion_automations.coverage(db, automation_id)
     except PromotionError as exc:
@@ -98,7 +98,7 @@ def coverage(automation_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/{automation_id}/activity")
-def activity(automation_id: str, db: Session = Depends(get_db)):
+def activity(automation_id: str, db: Session = Depends(get_db, scope="function")):
     try:
         return promotion_automations.activity(db, automation_id)
     except PromotionError as exc:

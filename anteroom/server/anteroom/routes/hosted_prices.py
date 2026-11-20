@@ -35,13 +35,13 @@ def require_owned(db, identities):
 
 
 @router.post('/preview')
-def preview(body: PreviewInput, db=Depends(get_seller_db)):
+def preview(body: PreviewInput, db=Depends(get_seller_db, scope="function")):
     require_owned(db, body.conversation_ids)
     return {'rows': price_markdown.batch_preview(body.conversation_ids, db)}
 
 
 @router.post('')
-def apply(body: ApplyInput, db=Depends(get_seller_db)):
+def apply(body: ApplyInput, db=Depends(get_seller_db, scope="function")):
     # Check every owner before any item can be changed.
     require_owned(db, [drop.conversation_id for drop in body.drops])
     return price_markdown.batch_apply([drop.model_dump() for drop in body.drops], db)

@@ -18,13 +18,13 @@ def review(db, identity):
 
 
 @router.post('/preview')
-def preview(body: bulk_delete.PreviewRequest, db=Depends(get_seller_db)):
+def preview(body: bulk_delete.PreviewRequest, db=Depends(get_seller_db, scope="function")):
     """Review only. Another seller's item reads as missing."""
     return {'rows': [review(db, identity) for identity in dict.fromkeys(body.conversation_ids)]}
 
 
 @router.post('/delete')
-def delete(body: bulk_delete.DeleteRequest, request: Request, db=Depends(get_seller_db)):
+def delete(body: bulk_delete.DeleteRequest, request: Request, db=Depends(get_seller_db, scope="function")):
     if body.confirm is not True:
         raise HTTPException(400, 'Review and confirm the items to delete first.')
     token = request.headers['authorization'].partition(' ')[2]

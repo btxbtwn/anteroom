@@ -170,10 +170,12 @@ def running_marketplace(db: Session, conv_id: str) -> str | None:
     return None
 
 
-def status(conv_id: str, db: Session) -> dict:
+def status(conv_id: str, db: Session, *, conv=None, records: dict | None = None) -> dict:
     """Each marketplace's record, with what a running action is doing now."""
-    _conversation(db, conv_id)
-    records = MarketplaceListingRepo(db).for_conversation(conv_id)
+    if conv is None:
+        _conversation(db, conv_id)
+    if records is None:
+        records = MarketplaceListingRepo(db).for_conversation(conv_id)
     repo = JobRepo(db)
     for record in records.values():
         record["running"] = _running(db, record)

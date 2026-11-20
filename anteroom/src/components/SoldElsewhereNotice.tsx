@@ -73,7 +73,7 @@ export function SoldElsewhereNotice({ convId }: { convId: string }) {
   const sessionActive = useListingSessionActive();
   const { data } = useQuery({
     queryKey: ["marketplace-sales", convId],
-    queryFn: () => api.marketplaceSales.list({ conversationId: convId }),
+    queryFn: ({ signal }) => api.marketplaceSales.list({ conversationId: convId }, { signal }),
     refetchInterval: sessionActive ? () => pollMs(SALES_POLL_MS) : false,
   });
   const sales = data?.sales ?? [];

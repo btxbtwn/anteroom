@@ -46,7 +46,7 @@ def get_photo(db, draft_id, photo_id):
 
 
 @router.get('', response_model=list[PhotoResponse])
-def list_photos(draft_id: str, db=Depends(get_seller_db)):
+def list_photos(draft_id: str, db=Depends(get_seller_db, scope="function")):
     require_draft(db, draft_id)
     return db.scalars(select(Photo).where(Photo.conversation_id == draft_id)
                       .order_by(Photo.display_order, Photo.id)).all()
@@ -100,7 +100,7 @@ async def upload_photo(draft_id: str, request: Request, marketplace: Literal['po
 
 
 @router.get('/{photo_id}')
-def read_photo(draft_id: str, photo_id: str, request: Request, db=Depends(get_seller_db)):
+def read_photo(draft_id: str, photo_id: str, request: Request, db=Depends(get_seller_db, scope="function")):
     photo = get_photo(db, draft_id, photo_id)
     key = photo.stored_filename
     db.rollback()
@@ -109,7 +109,7 @@ def read_photo(draft_id: str, photo_id: str, request: Request, db=Depends(get_se
 
 
 @router.delete('/{photo_id}', status_code=204)
-def delete_photo(draft_id: str, photo_id: str, request: Request, db=Depends(get_seller_db)):
+def delete_photo(draft_id: str, photo_id: str, request: Request, db=Depends(get_seller_db, scope="function")):
     require_draft(db, draft_id, lock=True)
     photo = get_photo(db, draft_id, photo_id)
     key = photo.stored_filename

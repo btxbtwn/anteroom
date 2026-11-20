@@ -69,7 +69,7 @@ _config_router = APIRouter(
 )
 
 
-def get_import_db(db=Depends(get_seller_db)):
+def get_import_db(db=Depends(get_seller_db, scope="function")):
     return _quiet(db)
 
 
@@ -89,19 +89,19 @@ class Rows(BaseModel):
 
 
 @router.get('')
-def summary(db=Depends(get_seller_db)):
+def summary(db=Depends(get_seller_db, scope="function")):
     from anteroom.models.conversation import Conversation
     return {'tables': [table.name for table in account_import.imported_tables()],
             'listings': db.scalar(select(func.count()).select_from(Conversation))}
 
 
 @_rows_router.post('/rows')
-def rows(body: Rows, db=Depends(get_import_db)):
+def rows(body: Rows, db=Depends(get_import_db, scope="function")):
     return account_import.import_rows(db, body.table, body.rows)
 
 
 @router.get('/photos')
-def pending_photos(db=Depends(get_import_db)):
+def pending_photos(db=Depends(get_import_db, scope="function")):
     return account_import.pending_photos(db)
 
 
@@ -147,7 +147,7 @@ async def _forget(key, token):
 
 
 @router.post('/finish')
-def finish(db=Depends(get_seller_db)):
+def finish(db=Depends(get_seller_db, scope="function")):
     """Tell the seller's other devices, once, that everything may have changed."""
     account_import.announce_all(db)
     return {'ok': True}

@@ -1,3 +1,4 @@
+import { isBackgroundSignal, promoteBackgroundSignal, registerBackgroundSignal } from "./requestScheduler";
 import { currentHostedSession, studioFetch } from "./transport";
 
 /**
@@ -58,15 +59,19 @@ export async function loadPrivateImage(src: string, signal?: AbortSignal): Promi
   if (kept !== undefined) return kept;
   signal?.throwIfAborted();
   forCurrentSession();
+  const callerIsBackground = isBackgroundSignal(signal);
   let download = pending.get(src);
   // A new viewport can request the same cover before an aborted warm-up's
   // promise has settled. Start a fresh download rather than sharing that abort.
   if (download?.controller.signal.aborted) download = undefined;
   if (!download) {
     const controller = new AbortController();
+    if (callerIsBackground) registerBackgroundSignal(controller.signal);
     const started: Download = { promise: fetchPrivateImage(src, controller.signal), controller, viewers: 0, kept: false };
     pending.set(src, download = started);
     void started.promise.catch(() => {}).finally(() => { if (pending.get(src) === started) pending.delete(src); });
+  } else if (!callerIsBackground && isBackgroundSignal(download.controller.signal)) {
+    promoteBackgroundSignal(download.controller.signal);
   }
   if (!signal) {
     download.kept = true;

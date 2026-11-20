@@ -9,5 +9,5 @@ router = APIRouter(prefix="/api/listings/copies", tags=["listings"])
 
 
 @router.post("/preview")
-def preview(body: listing_copy.BatchPreviewRequest, db: Session = Depends(get_db)):
+def preview(body: listing_copy.BatchPreviewRequest, db: Session = Depends(get_db, scope="function")):
     return listing_copy.batch_preview(db, body)

@@ -146,6 +146,38 @@ def _sale_out(sale: MarketplaceSale, conv: Conversation | None, listings: dict, 
     }
 
 
+def conversation_new_sales(db: Session, conv: Conversation, listings: dict) -> dict:
+    """New marketplace sales for one already-loaded conversation, matching GET /api/marketplace-sales."""
+    sales = (
+        db.query(MarketplaceSale)
+        .filter(MarketplaceSale.state == "new", MarketplaceSale.conversation_id == conv.id)
+        .order_by(MarketplaceSale.received_at.desc())
+        .limit(200)
+        .all()
+    )
+    if not sales:
+        return {"sales": []}
+    from anteroom.services.sale_inventory import stock_after_sale
+
+    stocks = {}
+    for sale in sales:
+        key = (sale.conversation_id, sale.marketplace, sale.listing_id)
+        if key not in stocks:
+            stocks[key] = stock_after_sale(db, conv.id, sale.marketplace, sale.listing_id)
+    return {
+        "sales": [
+            _sale_out(
+                sale,
+                conv,
+                listings,
+                stocks.get((sale.conversation_id, sale.marketplace, sale.listing_id),
+                           {"status": "unknown", "remaining": None}),
+            )
+            for sale in sales
+        ]
+    }
+
+
 @router.get("/api/marketplace-sales")
 def list_sales(background_tasks: BackgroundTasks, state: str | None = "new", conversation_id: str | None = None, db: Session = Depends(get_db, scope="function")):
     from anteroom.services import recent_orders
@@ -209,7 +241,7 @@ class ReconcileResponse(BaseModel):
 @router.post("/api/marketplace-sales/reconcile", response_model=ReconcileResponse)
 def reconcile_sales(
     marketplace: Literal["ebay", "etsy", "poshmark", "mercari", "depop"] | None = None,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     """Match new sale alerts against saved listing links. No marketplace calls."""
     from anteroom.services.relay_sales import reconcile_unmatched
@@ -229,7 +261,7 @@ def _get_sale(db: Session, sale_id: str) -> MarketplaceSale:
 
 
 @router.post("/api/marketplace-sales/{sale_id}/dismiss")
-def dismiss_sale(sale_id: str, db: Session = Depends(get_db)):
+def dismiss_sale(sale_id: str, db: Session = Depends(get_db, scope="function")):
     sale = _get_sale(db, sale_id)
     sale.state = "dismissed"
     sale.resolved_at = datetime.now(UTC).replace(tzinfo=None)

@@ -23,12 +23,12 @@ def require_supported(db, edits):
 
 
 @router.post('/preview')
-def preview(body: bulk_edit.PreviewRequest, db=Depends(get_seller_db)):
+def preview(body: bulk_edit.PreviewRequest, db=Depends(get_seller_db, scope="function")):
     require_supported(db, body.edits)
     return bulk_edit.preview(db, body)
 
 
 @router.post('/apply')
-def apply(body: bulk_edit.ApplyRequest, db=Depends(get_seller_db)):
+def apply(body: bulk_edit.ApplyRequest, db=Depends(get_seller_db, scope="function")):
     require_supported(db, body.edits)
     return bulk_edit.apply(db, body)

@@ -1,3 +1,5 @@
+import { scheduleRequest } from "./requestScheduler";
+
 /** The existing API client uses this for desktop HTTP and authenticated cloud HTTP. */
 export interface HostedApiSession {
   origin: string;
@@ -18,7 +20,7 @@ export function hasHostedApiSession() { return hostedSession !== null; }
 /** The signed-in session, so per-account caches can tell when it changes. */
 export function currentHostedSession(): HostedApiSession | null { return hostedSession; }
 
-export async function studioFetch(input: string, options: RequestInit = {}): Promise<Response> {
+async function executeStudioFetch(input: string, options: RequestInit): Promise<Response> {
   const session = hostedSession;
   if (!session) return fetch(input, options);
   const url = new URL(input, session.origin);
@@ -33,6 +35,10 @@ export async function studioFetch(input: string, options: RequestInit = {}): Pro
   if (hostedSession !== session) throw new Error("Your account changed. Open the request again.");
   if (response.status === 401 && hostedSession === session) session.unauthorized();
   return response;
+}
+
+export function studioFetch(input: string, options: RequestInit = {}): Promise<Response> {
+  return scheduleRequest(input, options, () => executeStudioFetch(input, options));
 }
 
 /** Read an authenticated export without putting a session in its URL. */

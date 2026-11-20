@@ -158,13 +158,15 @@ def removed_marketplaces(notes: dict, anteroom_urls: dict[str, str]) -> list[str
     return removed
 
 
-def listings(db: Session, conv_id: str) -> dict:
+def listings(db: Session, conv_id: str, *, conv: Conversation | None = None, native: dict | None = None) -> dict:
     """Each marketplace listing Anteroom knows for this item, and what Delist would do."""
-    conv = ConversationRepo(db).get(conv_id)
+    if conv is None:
+        conv = ConversationRepo(db).get(conv_id)
     if not conv:
         raise DelistError(404, "Conversation not found")
     notes = parse_notes(conv.notes)
-    native = MarketplaceListingRepo(db).for_conversation(conv_id)
+    if native is None:
+        native = MarketplaceListingRepo(db).for_conversation(conv_id)
     return known_listings(notes, native, _sold_on(db, conv_id, notes, native))
 
 

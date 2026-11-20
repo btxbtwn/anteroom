@@ -91,13 +91,14 @@ def conversation_response(row, listing=None, direct=None, *, notes=None, include
     return result
 
 
-def listing_response(db, identity):
+def listing_response(db, identity, *, conv=None, photo_count=None):
     revision = hosted_drafts.current_fields_revision(db, identity)
     raw = revision.listing_json if revision and isinstance(revision.listing_json, dict) else {}
     payload = stored_listing_fields(raw)
     if 'title' not in payload:
-        payload['title'] = conversation(db, identity).title or ''
-    count = db.scalar(select(func.count()).select_from(Photo).where(Photo.conversation_id == identity))
+        payload['title'] = (conv.title if conv is not None else conversation(db, identity).title) or ''
+    count = (photo_count if photo_count is not None
+             else db.scalar(select(func.count()).select_from(Photo).where(Photo.conversation_id == identity)))
     import copy
     validation = validate_listing(copy.deepcopy(payload), count, require_photos=True)
     return {'conversation_id': identity, 'current_revision_id': revision.id if revision else None,
@@ -258,19 +259,38 @@ def edit_conversation(identity: str, body: contract.ConversationInput, db=Depend
 
 @router.get('/conversations/{identity}/screen')
 def listing_screen(identity: str, db=Depends(get_seller_db, scope="function")):
-    """Core editor reads share one seller transaction; marketplace lookups stay separate."""
+    """Editor and marketplace panel reads share one seller transaction."""
+    import copy
+    from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
+    from anteroom.routes.marketplace_accounts import conversation_new_sales
+    from anteroom.services import marketplace_delist, native_marketplaces
+
     # Keep the owned row alive in the identity map for the constituent reads.
     row = conversation(db, identity)
+    all_photos = db.scalars(
+        select(Photo).where(Photo.conversation_id == identity).order_by(Photo.display_order, Photo.id)
+    ).all()
+    general_photos = [photo_response(photo) for photo in all_photos if photo.marketplace is None]
     loaded_messages = messages(identity, db)
+    listing_doc = listing_response(db, identity, conv=row, photo_count=len(all_photos))
+    native_records = MarketplaceListingRepo(db).for_conversation(identity)
+    mp_listings = marketplace_delist.listings(db, identity, conv=row, native=native_records)
+    native_status = native_marketplaces.status(identity, db, conv=row, records=copy.deepcopy(native_records))
+    mp_sales = conversation_new_sales(db, row, mp_listings)
     # The contract parts read exactly as their own routes answer them, so a
     # client can seed those reads from this one.
-    payload = {'conversation': contract.Conversation.model_validate(conversation_response(row)).model_dump(mode='json'),
-            'listing': contract.ListingDocument.model_validate(get_listing(identity, db)).model_dump(mode='json'),
-            'photos': [contract.ListingPhoto.model_validate(photo).model_dump(mode='json') for photo in photos(identity, db=db)],
-            'messages': loaded_messages,
-            'jobs': jobs(identity, db),
-            'activity': activity_response(db, identity, len(loaded_messages),
-                loaded_messages[-1]['id'] if loaded_messages else None)}
+    payload = {
+        'conversation': contract.Conversation.model_validate(conversation_response(row)).model_dump(mode='json'),
+        'listing': contract.ListingDocument.model_validate(listing_doc).model_dump(mode='json'),
+        'photos': [contract.ListingPhoto.model_validate(photo).model_dump(mode='json') for photo in general_photos],
+        'messages': loaded_messages,
+        'jobs': jobs(identity, db),
+        'activity': activity_response(db, identity, len(loaded_messages),
+                                      loaded_messages[-1]['id'] if loaded_messages else None),
+        'marketplace_listings': mp_listings,
+        'native_marketplaces': native_status,
+        'marketplace_sales': mp_sales,
+    }
     # The DTO is fully materialized. Encoding and sending it need no transaction.
     db.close()
     return payload
@@ -278,15 +298,15 @@ def listing_screen(identity: str, db=Depends(get_seller_db, scope="function")):
 
 @router.get('/conversations/{identity}/listing', response_model=contract.ListingDocument, responses=NOT_FOUND)
 def get_listing(identity: str, db=Depends(get_seller_db, scope="function")):
-    conversation(db, identity)
-    return listing_response(db, identity)
+    row = conversation(db, identity)
+    return listing_response(db, identity, conv=row)
 
 
 @router.put('/conversations/{identity}/listing', response_model=contract.ListingSaveResult, responses={**NOT_FOUND, **CONFLICT})
 def save_listing(identity: str, body: contract.ListingSave, db=Depends(get_seller_db, scope="function")):
     import copy
     payload = copy.deepcopy(editable_listing(body.listing))
-    conversation(db, identity, lock=True)
+    conv = conversation(db, identity, lock=True)
     assert_idle(db, identity)
     from anteroom.services.hosted_listing_contract import validate_media
     validate_media(db, identity, payload)
@@ -315,15 +335,23 @@ def save_listing(identity: str, body: contract.ListingSave, db=Depends(get_selle
     current.current_revision_id = revision.id
     current.validation_status = None
     current.validation_errors = None
+    title = payload.get('title') or conv.title
     db.execute(update(Conversation).where(Conversation.id == identity).values(
-        title=payload.get('title') or conversation(db, identity).title,
+        title=title,
         updated_at=datetime.now(UTC).replace(tzinfo=None)))
+    # Compute validation inside this transaction so saving never opens a second
+    # transaction (BEGIN + set_config + revision reload + counts) after commit.
+    photo_count = db.scalar(select(func.count()).select_from(Photo).where(Photo.conversation_id == identity))
+    stored = stored_listing_fields(payload)
+    if 'title' not in stored:
+        stored['title'] = title or ''
+    validation = validate_listing(copy.deepcopy(stored), photo_count, require_photos=True)
+    revision_id = revision.id
     db.commit()
-    result = listing_response(db, identity)
-    return {'ok': True, 'revision_id': result['current_revision_id'], 'listing': result['listing'],
-            'validation': {'valid': not result['errors'], 'can_send': result['can_send'],
-                           'errors': result['errors'], 'warnings': result['warnings'], 'info': []},
-            'etsy_eligible': result['etsy_eligible']}
+    return {'ok': True, 'revision_id': revision_id, 'listing': stored,
+            'validation': {'valid': not validation.errors, 'can_send': validation.can_send,
+                           'errors': validation.errors, 'warnings': validation.warnings, 'info': []},
+            'etsy_eligible': etsy_eligible(stored)}
 
 
 @router.get('/conversations/{identity}/messages')

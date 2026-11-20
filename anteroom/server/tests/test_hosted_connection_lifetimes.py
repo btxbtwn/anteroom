@@ -210,7 +210,8 @@ def test_category_model_does_not_hold_the_catalog_connection(single_connection, 
 
 def test_live_category_lookup_does_not_hold_the_tree_connection(single_connection, monkeypatch):
     from anteroom.models.catalog import CategoryTree
-    from anteroom.services import direct_categories, native_category_match
+    from anteroom.services import agent_categories, direct_categories, native_category_match
+    assert agent_categories.native_rows is native_category_match.native_rows
 
     completed = []
 
@@ -385,7 +386,7 @@ def test_a_seller_request_reads_its_settings_through_its_own_connection(cloud, s
     event.listen(engine, 'checkout', checkout)
     event.listen(engine, 'before_cursor_execute', record)
     try:
-        assert client.get(f'/api/drafts/{draft}/photos', headers=alice).status_code == 200
+        assert client.get(f'/api/conversations/{draft}/listing', headers=alice).status_code == 200
     finally:
         event.remove(engine, 'checkout', checkout)
         event.remove(engine, 'before_cursor_execute', record)
@@ -702,3 +703,140 @@ def test_generated_listing_repair_releases_the_connection_before_model_waits(sin
         expected_revision_id='', expected_photo_fingerprint=fingerprint))
     assert waits == ['repair', 'fill']
     assert listing['price'] == 25
+
+
+def test_hosted_db_dependencies_release_before_response_streaming():
+    """Every hosted DB dependency must use scope='function' except explicit streaming exports."""
+    from anteroom.database import get_db
+    from anteroom.hosted import create_app
+    from anteroom.routes.hosted_account_import import get_import_db
+    from anteroom.services.hosted_database import get_seller_db
+
+    db_deps = {get_db, get_seller_db, get_import_db}
+    streaming_allowlist = {
+        ('anteroom.routes.sales_ledger', 'export_sales'),
+        ('anteroom.routes.sales_ledger', 'export_inventory'),
+    }
+
+    def iter_routes(routes):
+        for route in routes:
+            yield route
+            inner = getattr(route, 'original_router', None)
+            if inner is not None:
+                yield from iter_routes(getattr(inner, 'routes', []))
+            elif hasattr(route, 'routes'):
+                yield from iter_routes(route.routes)
+
+    def walk_dependant(dependant):
+        yield dependant
+        for child in getattr(dependant, 'dependencies', ()):
+            yield from walk_dependant(child)
+
+    request_scoped: set[tuple[str, str]] = set()
+    function_scoped_count = 0
+    for route in iter_routes(create_app().routes):
+        dependant = getattr(route, 'dependant', None)
+        endpoint = getattr(route, 'endpoint', None)
+        if dependant is None or endpoint is None:
+            continue
+        for dep in walk_dependant(dependant):
+            if dep.call in db_deps:
+                if dep.scope == 'function':
+                    function_scoped_count += 1
+                else:
+                    request_scoped.add((endpoint.__module__, endpoint.__name__))
+
+    assert function_scoped_count >= 150
+    assert request_scoped == streaming_allowlist
+
+
+def test_sqlalchemy_error_on_shared_route_returns_private_503(cloud, signing_keys, monkeypatch):  # noqa: F811
+    from sqlalchemy.exc import TimeoutError as PoolTimeout
+
+    from anteroom.services import boxes
+
+    client, _engine = cloud
+    alice = headers(signing_keys)
+
+    def fail_pool(*_args, **_kwargs):
+        raise PoolTimeout('QueuePool secret-connection-string')
+
+    monkeypatch.setattr(boxes, 'results', fail_pool)
+    response = client.get('/api/boxes', headers=alice)
+    assert response.status_code == 503
+    assert response.headers['retry-after'] == '5'
+    assert response.headers['cache-control'] == 'no-store'
+    assert response.json() == {'detail': 'Cloud data is temporarily unavailable'}
+    assert 'secret-connection-string' not in response.text
+
+
+def test_lazy_settings_skips_user_preferences_when_route_never_reads_settings(cloud, signing_keys):  # noqa: F811
+    client, engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/drafts', headers=alice, json={'title': 'Tee'}).json()['id']
+
+    statements: list[str] = []
+
+    def record(_conn, _cursor, statement, *_args):
+        statements.append(statement)
+
+    event.listen(engine, 'before_cursor_execute', record)
+    try:
+        response = client.get(f'/api/conversations/{identity}/messages', headers=alice)
+    finally:
+        event.remove(engine, 'before_cursor_execute', record)
+    assert response.status_code == 200
+    assert not any('user_preferences' in sql for sql in statements), statements
+
+    # A route that does read settings reuses the active seller session (peak == 1).
+    checked_out = 0
+    peak = 0
+
+    def on_checkout(*_args):
+        nonlocal checked_out, peak
+        checked_out += 1
+        peak = max(peak, checked_out)
+
+    def on_checkin(*_args):
+        nonlocal checked_out
+        checked_out -= 1
+
+    event.listen(engine, 'checkout', on_checkout)
+    event.listen(engine, 'checkin', on_checkin)
+    try:
+        listing = client.get(f'/api/conversations/{identity}/listing', headers=alice)
+    finally:
+        event.remove(engine, 'checkout', on_checkout)
+        event.remove(engine, 'checkin', on_checkin)
+    assert listing.status_code == 200
+    assert peak == 1
+
+
+def test_request_dependency_session_is_not_shared_across_requests_on_same_thread(cloud):  # noqa: F811
+    from anteroom.services.hosted_context import for_seller
+    from anteroom.services.hosted_database import active_seller_session, get_seller_db
+    from anteroom.services.seller_sessions import SellerIdentity
+    from anteroom.services.service_context import use
+
+    _client, _engine = cloud
+    request = SimpleNamespace(state=SimpleNamespace(seller=SellerIdentity(user_id=USER_ID)))
+    ctx_a = for_seller(USER_ID)
+    ctx_b = for_seller(USER_ID)
+
+    with use(ctx_a):
+        gen = get_seller_db(request)
+        db_a = next(gen)
+        try:
+            assert active_seller_session(USER_ID) is db_a
+            # Another request landing on the same AnyIO worker thread has a
+            # distinct ServiceContext and must never steal db_a.
+            with use(ctx_b):
+                assert active_seller_session(USER_ID) is None
+        finally:
+            try:
+                next(gen)
+            except StopIteration:
+                pass
+        assert active_seller_session(USER_ID) is None
+
+

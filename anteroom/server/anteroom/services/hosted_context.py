@@ -16,8 +16,8 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DBAPIError, IntegrityError, OperationalError, SQLAlchemyError, TimeoutError as PoolTimeout
 
 from anteroom.models.user_preference import UserPreference
-from anteroom.services.hosted_database import SellerDatabaseSession, note_changes
-from anteroom.services.service_context import ServiceContext
+from anteroom.services.hosted_database import SellerDatabaseSession, active_seller_session, note_changes
+from anteroom.services.service_context import ServiceContext, current
 
 
 _log = logging.getLogger(__name__)
@@ -52,15 +52,36 @@ class CredentialStorageUnavailable(RuntimeError):
 
 class HostedSettingsStore:
     """One execution's settings snapshot; updates serialize against current data."""
-    def __init__(self, sessions):
+    def __init__(self, sessions, owner: str | None = None):
         self.sessions = sessions
+        self._owner = owner
         self._snapshot = None
+
+    def _reusable_session(self) -> SellerDatabaseSession | None:
+        owner = self._owner
+        if owner is None:
+            try:
+                context = current()
+            except RuntimeError:
+                context = None
+            if context is None or context.settings is not self:
+                return None
+            owner = context.seller_id
+        return active_seller_session(owner)
 
     def read(self) -> dict:
         snapshot = self._snapshot
         if snapshot is None:
-            with self.sessions() as db:
-                snapshot = self.load(db)
+            # Reuse the caller's open seller session when one is active: avoids
+            # both an eager settings query on routes that never read settings
+            # and a nested pooled-connection checkout that deadlocks under load.
+            active = self._reusable_session()
+            if active is not None:
+                with active.no_autoflush:
+                    snapshot = self.load(active)
+            else:
+                with self.sessions() as db:
+                    snapshot = self.load(db)
         return copy.deepcopy(snapshot)
 
     def load(self, db) -> dict:
@@ -288,6 +309,6 @@ def for_seller(user_id, token=None, *, task_lease=None):
             session.info['background_lease'] = task_lease
         return session
     from anteroom.services.hosted_provider import provider_for
-    return ServiceContext(owner, sessions, HostedSettingsStore(sessions),
+    return ServiceContext(owner, sessions, HostedSettingsStore(sessions, owner),
                           VaultSecretStore(sessions, owner), HostedPhotoStore(owner, token),
                           catalog=catalog_state(owner), provider_factory=provider_for)

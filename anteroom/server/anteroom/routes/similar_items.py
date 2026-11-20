@@ -54,12 +54,12 @@ class MergeResult(BaseModel):
 
 
 @router.get("", response_model=SimilarItems)
-def list_similar_items(db: Session = Depends(get_db)):
+def list_similar_items(db: Session = Depends(get_db, scope="function")):
     return similar_items.find_similar(db)
 
 
 @router.post("/dismiss")
-def dismiss_pair(body: PairRequest, db: Session = Depends(get_db)):
+def dismiss_pair(body: PairRequest, db: Session = Depends(get_db, scope="function")):
     try:
         similar_items.dismiss(db, body.first_id, body.second_id)
     except similar_items.MergeError as exc:
@@ -68,7 +68,7 @@ def dismiss_pair(body: PairRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/merge", response_model=MergeResult)
-def merge_pair(body: MergeRequest, db: Session = Depends(get_db)):
+def merge_pair(body: MergeRequest, db: Session = Depends(get_db, scope="function")):
     try:
         return similar_items.merge(db, body.keep_id, body.merge_id)
     except similar_items.MergeError as exc:

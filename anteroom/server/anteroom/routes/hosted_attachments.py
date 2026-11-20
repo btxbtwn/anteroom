@@ -12,7 +12,7 @@ router = APIRouter()
 
 
 @router.get('/api/chat-attachments/{attachment_id:path}')
-def attachment(attachment_id: str, size: int | None = None, db=Depends(get_seller_db)):
+def attachment(attachment_id: str, size: int | None = None, db=Depends(get_seller_db, scope="function")):
     from anteroom.models.assistant import AssistantThread
 
     checked_photo_key(attachment_id, db.user_id)
