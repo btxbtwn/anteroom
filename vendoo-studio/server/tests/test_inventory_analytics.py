@@ -732,6 +732,23 @@ class AnalyticsInputsCacheTest(unittest.TestCase):
         self.assertIsNot(removed, changed)
         self.assertNotIn(sale.id, [line.id for line in removed.sales.get(self.sold.id, [])])
 
+    def test_a_sessions_uncommitted_writes_are_never_kept(self):
+        from vendoo_studio.models.marketplace_sale import MarketplaceSale
+        from vendoo_studio.services.inventory_analytics import read_analytics_inputs
+
+        if self.db.get_bind().dialect.name != "postgresql":
+            self.skipTest("Only the hosted Postgres database is read over the network")
+        self._add_sale()
+        read_analytics_inputs(self.db)  # Keeps the fixture's Vendoo sale on the ledger first.
+        self.db.commit()
+        sale = self.db.query(MarketplaceSale).filter_by(conversation_id=self.sold.id).first()
+        sale_id = sale.id
+        self.db.delete(sale)
+        self.db.flush()
+        self.assertNotIn(sale_id, [line.id for line in read_analytics_inputs(self.db).sales.get(self.sold.id, [])])
+        self.db.rollback()
+        self.assertIn(sale_id, [line.id for line in read_analytics_inputs(self.db).sales.get(self.sold.id, [])])
+
     def test_kept_sales_are_attached_to_no_session(self):
         from vendoo_studio.services.inventory_analytics import read_analytics_inputs
 

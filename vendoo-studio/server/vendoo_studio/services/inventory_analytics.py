@@ -9,6 +9,7 @@ them. It calls no marketplace and not Vendoo.
 
 from __future__ import annotations
 
+import copy
 import math
 import statistics
 import threading
@@ -239,6 +240,10 @@ def read_analytics_inputs(db, conversation_id: str | None = None) -> AnalyticsIn
     version = _inputs_version(db) if conversation_id is None else None
     if version is None:
         return _read_analytics_inputs(db, conversation_id)
+    shared, version = version
+    if not shared:
+        # This session wrote rows it has not committed: what it reads now may roll back.
+        return _read_analytics_inputs(db, None)
     key = getattr(db, "user_id", None)
     with _inputs_lock:
         kept = _inputs_cache.get(key)
@@ -266,28 +271,31 @@ _inputs_cache: OrderedDict[str | None, tuple[tuple, AnalyticsInputs]] = OrderedD
 _inputs_lock = threading.Lock()
 
 
-def _inputs_version(db) -> tuple | None:
+def _inputs_version(db) -> tuple[bool, tuple] | None:
     """One short row that changes whenever an input row is added, changed or removed (Postgres only).
 
-    Each write gives its row the writing transaction's id (``xmin``), newer than
-    every id already there, so while the row count stays the same the sum of the
-    ids only grows. Row security limits both to the seller's own rows.
+    Every write stores a new row version with its transaction's id (``xmin``) at
+    a location (``ctid``) no live row holds. Hashing each live row's pair and
+    summing the hashes changes when any row comes or goes, whatever order the
+    writing transactions commit in. Row security limits it to the seller's rows.
+    Also says whether this session has written anything it has not committed.
     """
     if db.get_bind().dialect.name != "postgresql":
         return None
     if db.autoflush:
         db.flush()  # The ORM reads below would flush pending changes; count them here too.
     parts = ", ".join(
-        f"(SELECT count(*) || ':' || coalesce(sum(xmin::text::bigint), 0) FROM {table})"
+        f"(SELECT count(*) || ':' || coalesce(sum(hashtext(ctid::text || ':' || xmin::text)::bigint), 0) FROM {table})"
         for table in ANALYTICS_INPUT_TABLES
     )
-    return tuple(db.execute(text(f"SELECT {parts}")).one())
+    row = db.execute(text(f"SELECT pg_current_xact_id_if_assigned() IS NULL, {parts}")).one()
+    return bool(row[0]), tuple(row[1:])
 
 
 def _unbound(row):
-    """A copy of ``row`` with its column values, attached to no session."""
+    """A copy of ``row`` with its column values, attached to no session and sharing no JSON."""
     mapper = sa_inspect(row).mapper
-    return mapper.class_(**{attr.key: getattr(row, attr.key) for attr in mapper.column_attrs})
+    return mapper.class_(**{attr.key: copy.deepcopy(getattr(row, attr.key)) for attr in mapper.column_attrs})
 
 
 def _read_analytics_inputs(db, conversation_id: str | None) -> AnalyticsInputs:
