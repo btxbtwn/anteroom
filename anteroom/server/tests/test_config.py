@@ -192,9 +192,33 @@ class ConfigPathTest(unittest.TestCase):
             marker.write_text(config.LEGACY_DATABASE_ADOPTION_MARKER_BODY, encoding="utf-8")
             os.environ.pop("ANTEROOM_DATABASE_URL", None)
             config.adopt_legacy_database(data)
-            self.assertTrue(marker.exists())
+            self.assertFalse(marker.exists())
             self.assertEqual(_read_sqlite_names(data / "anteroom.db"), ["new"])
             self.assertEqual(_read_sqlite_names(data / "vendoo_studio.db"), ["old"])
+
+    def test_competing_wals_abandon_marker_so_later_start_cannot_attach(self):
+        """After a WAL conflict, dropping the new WAL must not adopt the legacy one."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            _write_sqlite_with_committed_row(data / "anteroom.db", "new-primary")
+            # Force both sidecar names present (SQLite may have checkpointed its own WAL away).
+            new_wal = data / "anteroom.db-wal"
+            new_wal.write_bytes(b"new-wal")
+            orphan = data / "vendoo_studio.db-wal"
+            orphan.write_bytes(b"competing-legacy-wal")
+            marker = data / config.LEGACY_DATABASE_ADOPTION_MARKER
+            marker.write_text(config.LEGACY_DATABASE_ADOPTION_MARKER_BODY, encoding="utf-8")
+            os.environ.pop("ANTEROOM_DATABASE_URL", None)
+            config.adopt_legacy_database(data)
+            self.assertFalse(marker.exists())
+            self.assertEqual(orphan.read_bytes(), b"competing-legacy-wal")
+            self.assertEqual(new_wal.read_bytes(), b"new-wal")
+            # Simulate SQLite checkpointing away the new WAL, then another startup.
+            new_wal.unlink()
+            config.adopt_legacy_database(data)
+            self.assertEqual(orphan.read_bytes(), b"competing-legacy-wal")
+            self.assertFalse((data / "anteroom.db-wal").exists())
+            self.assertEqual(_read_sqlite_names(data / "anteroom.db"), ["new-primary"])
 
     def test_log_path_lives_under_user_data(self):
         with tempfile.TemporaryDirectory() as tmp:

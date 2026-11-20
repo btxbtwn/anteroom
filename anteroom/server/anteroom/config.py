@@ -133,27 +133,36 @@ def _legacy_database_names_present(root: Path) -> bool:
     return any((root / f"{LEGACY_DATABASE_NAME}{suffix}").exists() for suffix in _LEGACY_DATABASE_SIDECARS)
 
 
+def _abandon_legacy_database_adoption(marker: Path) -> None:
+    """Stop claiming an in-progress transfer. Database files are left untouched."""
+    marker.unlink(missing_ok=True)
+
+
 def _finish_legacy_database_adoption(root: Path, target: Path, legacy: Path, marker: Path) -> None:
-    """Continue a marker-proven transfer. Never deletes; stops on ambiguity."""
+    """Continue a marker-proven transfer. Never deletes DB files; stops on ambiguity."""
     if legacy.is_file() and target.exists():
-        # Both primaries present: do not choose. Leave every file and the marker.
+        # Both primaries present: do not choose. Leave every DB file; drop the marker
+        # so a later start cannot resume into sidecar renames.
+        _abandon_legacy_database_adoption(marker)
         return
     if legacy.is_file() and not target.exists():
         legacy.rename(target)
     if not target.exists():
         if not _legacy_database_names_present(root):
-            marker.unlink(missing_ok=True)
+            _abandon_legacy_database_adoption(marker)
         return
     for suffix in _LEGACY_DATABASE_SIDECARS:
         sidecar = root / f"{LEGACY_DATABASE_NAME}{suffix}"
         target_sidecar = root / f"{DATABASE_NAME}{suffix}"
         if sidecar.exists() and target_sidecar.exists():
-            # Same sidecar under both names: leave both; keep the marker.
+            # Competing sidecars: leave both. Drop the marker so a later start cannot
+            # attach the legacy WAL after SQLite checkpoints away the new one.
+            _abandon_legacy_database_adoption(marker)
             return
         if sidecar.exists() and not target_sidecar.exists():
             sidecar.rename(target_sidecar)
     if not _legacy_database_names_present(root):
-        marker.unlink(missing_ok=True)
+        _abandon_legacy_database_adoption(marker)
 
 
 def adopt_legacy_database(data_dir: Path | None = None) -> None:
@@ -163,9 +172,12 @@ def adopt_legacy_database(data_dir: Path | None = None) -> None:
     marker file is written; only that marker proves an in-progress adoption, so a
     later start can finish sidecars after a crash. ``anteroom.db`` existing is not
     provenance: if both primaries exist, or a preexisting new primary sits beside
-    old-name sidecars without a valid marker, every file is left alone. Historical
-    interruptions from builds that never wrote the marker cannot be identified
-    safely and are not guessed. Never opens the database; it only renames files.
+    old-name sidecars without a valid marker, every file is left alone. A marked
+    transfer that hits competing primaries or sidecars abandons the marker and
+    leaves both file sets so a later start cannot attach an unresolved legacy WAL
+    after SQLite removes the new one. Historical interruptions from builds that
+    never wrote the marker cannot be identified safely and are not guessed. Never
+    opens the database; it only renames files.
     """
     if os.environ.get("ANTEROOM_DATABASE_URL"):
         return
