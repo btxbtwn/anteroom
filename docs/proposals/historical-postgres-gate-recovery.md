@@ -208,3 +208,170 @@ run, establish native validation or authorize production. See docs/ci.md for
 execution restrictions and artifact interpretation. Original observations above
 remain scoped to the recorded ffe66259 snapshot; later merges, especially new
 migrations, require a fresh backlog assessment.
+
+
+## Consumer precursor review — 2026-11-20 (not implemented)
+
+This section records the current implementation boundary. It creates no
+executable recovery path, authorization record, deployment request or settings
+change. Ordinary push-CI selection, all-merges-since-live checks, release
+serialization and historical failed results remain unchanged. Opening a
+review PR does not authorize merging it or activating this proposal.
+
+### Refreshed evidence
+
+- Candidate main is `b28ba4b361071373731b93bc49c12b4bf78326e9` (0.1.1046),
+  tree `07ff8975695a4182c00c2605b5679d56e493c67b`.
+  [Exact push CI 44660122274](https://github.com/btxbtwn/anteroom/actions/runs/44660122274)
+  succeeded. This is a snapshot, not authority to select a newer target.
+- Recorded production base is
+  `b73c534707b9ef9bd70e4dc589b9c4b10863a852` (0.1.1011).
+  [Successful deploy 44257516865](https://github.com/btxbtwn/anteroom/actions/runs/44257516865)
+  binds that full commit to image digest
+  `sha256:9a4b1bccee97d53d903e23d5ec0a8cbf6bb71b043cbb35a1ed88c165947c60ac`.
+  Independent authorized read-only metadata at 02:31 UTC confirmed both web
+  and worker healthy on that digest, release 320. Production Alembic
+  `d0e4f3a92b68` was independently reported and matches the base's sole repo
+  head. This observation must be refreshed inside any eventual deployment
+  attempt; an old report is not runtime reconciliation.
+- The current source span includes migration `a70c21f496e8` after
+  `d0e4f3a92b68`, adding nullable `marketplace_listings.price_recorded_at`.
+  The older no-migration observation above applies only to its dated span.
+  Previous-release fixture upgrades on disposable SQLite and Postgres,
+  existing-row preservation, migration locking, old/new application behavior
+  and backup/restore readiness require pinned evidence before recovery.
+- [Descendant verification 44662061597](https://github.com/btxbtwn/anteroom/actions/runs/44662061597),
+  attempt 1, was dispatched once with the exact candidate and base above.
+  It is evidence-only and was still running when this section was prepared.
+  No successful final receipt is asserted here. Native validation remains
+  separate, including the merged #1631 and other accumulated native changes.
+
+### Blocking enforcement gaps
+
+Read-only GitHub metadata shows that the existing `production` environment
+has a branch-policy rule, no required-reviewer rule, and permits administrator
+bypass. Repository workflow-token permissions default to read. The hosted
+workflow also explicitly requests only read permissions. These observations
+are not requests to change protection or permissions.
+
+Neither a main-only environment, an Actions actor name, dispatch access nor a
+JSON `approved: true` field authenticates Cristian's approval of an exact
+recovery attempt. A checked-in record must have an independently verifiable
+operator authorization source bound to its immutable bytes; that verifier
+and trusted operator identity policy do not currently exist. No caller-supplied
+`authenticated` boolean is acceptable.
+
+The proposed Deployments API ledger also has no established atomic claim
+contract here. Serial concurrency alone does not prove safe behavior after a
+lost create response, crash or later rerun. Its API creates deployment events
+that external integrations can consume; creating a ledger entry must not be
+assumed to have no external side effects. No ledger entry was created to test
+this. See [GitHub's Deployments API documentation](https://docs.github.com/en/rest/deployments/deployments).
+
+**Stop production-capable implementation until operator authentication and
+one-use enforcement have a reviewed, testable contract.** A source-only
+validator that accepts unverified dictionaries would conceal these gaps,
+so none is introduced by this precursor.
+
+### Candidate one-attempt design to review
+
+A potentially smaller alternative to a new mutable approval ledger is authority
+bound to one GitHub workflow run identity. GitHub documents that a workflow's
+run number is unique and remains unchanged on rerun, while the attempt number
+increments. See [the Actions variables reference](https://docs.github.com/en/actions/reference/workflows-and-actions/variables).
+This is a candidate design, not an implemented or independently validated
+single-use guarantee:
+
+1. Before a future dispatch, an authenticated operator authorizes an immutable
+   record binding repository ID, recovery workflow ID/path and reviewed
+   workflow revision, one specific future run number, attempt 1, exact target
+   and tree, live base and expected base schema/image, diagnosed failed run/job,
+   correcting merge, expiry, and a unique verification receipt identity.
+   The receipt binding includes run ID/attempt, artifact IDs and digests, source
+   and CI blobs, inventories and independently confirmed final workflow success.
+2. The consumer verifies the record's immutable commit/blob and independently
+   authenticated operator identity. Record membership on main alone is
+   insufficient. Do not invent an operator allowlist or silently add reviewers.
+   Choosing this authentication mechanism needs explicit review/authorization.
+3. Obtain execution identity from GitHub's authoritative run/attempt records
+   and trusted workflow context, not dispatch inputs. Require the exact
+   repository/workflow identity and authorized run number, attempt 1, a single
+   designated side-effect job, manual event, and unchanged trusted implementation.
+   Resolve its unique run ID and bind the audit result to it. Reject every
+   rerun, duplicate dispatch, changed workflow, replacement repository or reused
+   record for a different run. An intervening run consumes the nominated
+   number and causes a stop, not selection of the next available number.
+4. Prove the complete side-effect job executes at most once for that identity,
+   including partial-job reruns and cancellation/restart. Do not rely on an
+   upstream validation job's cached success: all checks must execute in the
+   side-effect job. No automatic resume or retry is permitted after failure.
+   The unique run is consumed even if it fails before migration. This proof
+   and the authenticated record adapter are prerequisites, not TODOs to ship
+   behind a permissive flag.
+5. Reconcile all live Machine images, expected base revision, authoritative
+   schema and incomplete deployment attempts inside the same non-cancelling
+   `deploy-hosted` concurrency before any image push, migration or rollout.
+   Any drift, missing observation, failed API call or ambiguous previous effect
+   stops execution. Validate native, migration, hosted-image and operational
+   evidence separately; the Linux receipt cannot attest to these.
+6. Reuse the existing deployment stages and their ordering for only the exact
+   authorized target. Keep implementation validation tied to its reviewed
+   revision when checking out the application target. Record success only after
+   web readiness/version and every Machine image check pass. Preserve an
+   immutable audit result; that result is evidence, never ongoing permission.
+
+No new workflow, run-number reservation, operator record, API permission or
+production hook is installed here. Binding an authorization to a future run
+number can fail safely under races, but it does not reserve that number or
+solve operator authentication. Integration must demonstrate these properties
+before this alternative can replace the proposed durable claim ledger.
+
+### Required negative tests before an executable consumer PR
+
+Use stdlib mocks/fixtures first, with no network, application, database or
+production command execution. Every rejection must occur before the fake
+production-effect recorder receives any call. Include one fully bound positive
+fixture, then mutate each binding independently.
+
+| Boundary | Required fail-closed cases |
+| --- | --- |
+| Operator | Missing proof, default approval, forged actor, untrusted operator, mismatched record bytes, expired or revoked authorization |
+| One attempt | Wrong workflow/repository/run number, duplicate dispatch, attempt 2, partial-job rerun reusing validation outputs, crash/restart, replay after failure |
+| Immutable evidence | Wrong target/tree/base/CI blob/workflow blob, mismatched receipt/artifact IDs/digests, edited archive contents, expired/missing/duplicate artifacts |
+| GitHub records | Wrong repository/event/path/attempt, unfinished or failed final run, truncated/repeated API pages, ambiguous attempt lookup, unavailable API |
+| Test completeness | Missing, skipped, cancelled or failed required jobs; missing/overlapping shards; disagreement with full collection; skipped historical Postgres regression |
+| Live reconciliation | Changed/unknown base, mismatched worker/web images, schema drift, partial prior migration/rollout, old observation substituted for an in-attempt probe |
+| Release behavior | New main cannot change target; ordinary triggers cannot consume recovery authority; no record leaves ordinary gate decisions byte-for-byte unchanged |
+| Completion | Build failure prevents migration; readiness/worker failure prevents success marker; interrupted attempt cannot auto-resume; failed historical CI is never edited |
+
+A mock suite establishes rejection logic, not platform enforcement. Before
+activation, separately validate authenticated operator proof, GitHub run/attempt
+semantics and the whole side-effect job's retry behavior in a nonproduction
+harness. If the proof fails, stop and review a durable atomic claim mechanism;
+do not substitute a mutable pointer or a blanket SHA exception.
+
+### Implementation and activation sequence
+
+1. Review this boundary and choose the authenticated operator proof and either
+   demonstrated run-bound authority or a demonstrated durable atomic claim.
+   Any permissions or protection changes need separate explicit authorization.
+2. Only then prepare disconnected source validators and negative fixtures in
+   an unmerged PR. Reserve any expensive local validation with the coordinator;
+   do not duplicate the running evidence workflow. Require independent review
+   of authentication, replay resistance and the consumer/target trust boundary.
+3. Complete the current evidence attempt and archive immutable artifacts plus
+   final job results. Pin native, migration and operational validation separately.
+   A later application target needs refreshed span review and exact verification.
+4. Review the executable integration separately. Merging is a release, so
+   merging even a dormant precursor requires its own authorization. Do not
+   merge or dispatch merely to obtain evidence or an approval identity.
+5. Before activation, Cristian must choose continued ordinary automatic
+   deployment after recovery or a separately approved hold covering both
+   entrypoints. Once recovery records a new live base, later ordinary deploys
+   no longer traverse the old failure and queued runs may ship newer code.
+   No persistent historical exception is needed or allowed.
+
+This precursor has been checked against current repository workflows, the
+read-only protection metadata and the linked GitHub documentation. It is not
+an independent security approval; the contract and platform enforcement still
+need independent review. No production action is authorized by this text.
