@@ -16,10 +16,26 @@ const POSHMARK_SHARE_GAP_MS = 4000;
 const POSHMARK_SHARE_GAP_MAX_MS = 30000;
 const POSHMARK_SHARE_JITTER_MS = 3000;
 const POSHMARK_LAST_SHARE_KEY = 'poshmark_last_share_at';
+const PROMOTION_JOURNAL_PREFIX = 'promotion_';
+const PROMOTION_JOURNAL_LIMIT = 500;
+const PROMOTION_JOURNAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const promotionSettlements = new Map();
 
 function promotionKey(actionId) {
-  return `promotion_${actionId}`;
+  return `${PROMOTION_JOURNAL_PREFIX}${actionId}`;
+}
+
+function promotionEntrySettled(entry) {
+  return Boolean(entry?.finished && (entry.result?.ok === true || entry.result?.safe_to_retry === true));
+}
+
+async function prunePromotionJournal(keepKey) {
+  await pruneStorageJournal(PROMOTION_JOURNAL_PREFIX, {
+    maxSettled: PROMOTION_JOURNAL_LIMIT,
+    ttlMs: PROMOTION_JOURNAL_TTL_MS,
+    keepKey,
+    isSettled: promotionEntrySettled,
+  });
 }
 
 // Result checks and the original polling call can finish concurrently. Keep a
@@ -31,6 +47,7 @@ async function settlePromotionJournal(key, result) {
     if (stored?.finished && stored.result?.ok === true && stored.result.state === 'done') return stored;
     const settled = { ...stored, finished: true, at: Date.now(), result };
     await chrome.storage.local.set({ [key]: settled });
+    await prunePromotionJournal(key);
     return settled;
   });
   promotionSettlements.set(key, pending);
@@ -515,6 +532,7 @@ async function handleMarketplacePromotion(msg, respond = result => sendBrowserRe
       return;
     }
     await chrome.storage.local.set({ [key]: { finished: false, at: Date.now(), marketplace: payload.marketplace, action: payload.action } });
+    await prunePromotionJournal(key);
     const result = await runMarketplacePromotion(payload);
     const settled = await settlePromotionJournal(key, result);
     respond(settled.result);

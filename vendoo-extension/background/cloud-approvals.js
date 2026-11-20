@@ -16,6 +16,8 @@
   const LEEWAY_S = 60;
   // The longest life an approval may claim; the server issues five minutes.
   const MAX_LIFE_S = 600;
+  // Cap stored nonces alongside the 660 s TTL so a burst cannot fill chrome.storage.local.
+  const MAX_USED_APPROVALS = 2000;
   // The claims carry an id and SHA-256 for each of up to 30 photos.
   const TOKEN = /^[A-Za-z0-9_-]{10,200}\.[A-Za-z0-9_-]{10,10000}\.[A-Za-z0-9_-]{80,90}$/;
   const REFUSALS = {
@@ -51,7 +53,7 @@
     return JSON.stringify(value);
   }
 
-  function createApprovalVerifier(api, { publicKey = BRIDGE_APPROVAL_PUBLIC_KEY, now = Date.now, subtle = crypto.subtle } = {}) {
+  function createApprovalVerifier(api, { publicKey = BRIDGE_APPROVAL_PUBLIC_KEY, now = Date.now, subtle = crypto.subtle, maxUsed = MAX_USED_APPROVALS } = {}) {
     let key = null;
     let tail = Promise.resolve();
     async function commandHash(command) {
@@ -80,9 +82,19 @@
       const result = tail.then(async () => {
         const used = (await api.storage.local.get(USED_KEY))[USED_KEY] || {};
         const seconds = now() / 1000;
-        for (const [nonce, until] of Object.entries(used)) if (until + LEEWAY_S < seconds) delete used[nonce];
+        for (const [nonce, until] of Object.entries(used)) {
+          if (!Number.isFinite(until) || until + LEEWAY_S < seconds) delete used[nonce];
+        }
         if (Object.hasOwn(used, id)) return false;
         used[id] = expires;
+        const keys = Object.keys(used);
+        const cap = Number.isInteger(maxUsed) && maxUsed > 0 ? maxUsed : MAX_USED_APPROVALS;
+        if (keys.length > cap) {
+          const excess = keys.filter(nonce => nonce !== id)
+            .sort((a, b) => used[a] - used[b])
+            .slice(0, keys.length - cap);
+          for (const nonce of excess) delete used[nonce];
+        }
         await api.storage.local.set({ [USED_KEY]: used });
         return true;
       });

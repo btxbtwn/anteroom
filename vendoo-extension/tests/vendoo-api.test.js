@@ -85,3 +85,52 @@ test('the cloud Vendoo draft capability cannot relay publishing, arbitrary photo
   const worker = loadWorker();
   assert.equal(vm.runInContext('typeof handleVendooApiMessage', worker), 'function');
 });
+
+test('Vendoo photo upload PUT validates allowlisted HTTPS storage hosts and omits cookies', async () => {
+  const session = {uid: 'seller', access_token: 'private-token'};
+  const bytes = new Blob([new Uint8Array([1, 2, 3])], {type: 'image/jpeg'});
+  for (const allowedUrl of [
+    'https://storage.googleapis.com/vendoo-prod-7948f.appspot.com/users/seller/photo.jpg?X-Goog-Signature=abc',
+    'https://firebasestorage.googleapis.com/v0/b/vendoo-prod-7948f.appspot.com/o/photo.jpg?token=abc',
+    'https://vendoo-uploads.s3.amazonaws.com/users/seller/photo.jpg?X-Amz-Signature=abc',
+    'https://vendoo-uploads.s3-accelerate.amazonaws.com/users/seller/photo.jpg?X-Amz-Signature=abc',
+  ]) {
+    const worker = loadWorker();
+    const calls = [];
+    worker.fetch = async (url, init) => {
+      calls.push({url: String(url), init});
+      if (calls.length === 1) return reply(200, {url: allowedUrl, imagePath: 'users/seller/photo.jpg'});
+      return reply(200, null);
+    };
+    const result = await worker.uploadVendooPhotoBytes(session, {mime_type: 'image/jpeg', max_dimension: 1200}, bytes, 'jpg');
+    assert.equal(result.id, 'users/seller/photo.jpg');
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].url, allowedUrl);
+    assert.equal(calls[1].init.method, 'PUT');
+    assert.equal(calls[1].init.credentials, 'omit');
+    assert.equal(calls[1].init.headers.Authorization, undefined);
+  }
+
+  for (const rejectedUrl of [
+    'http://storage.googleapis.com/vendoo-prod-7948f.appspot.com/photo.jpg',
+    'https://evil.example/upload',
+    'https://storage.googleapis.com.evil.example/photo.jpg',
+    'https://127.0.0.1:4318/api/settings',
+    'https://poshmark.com/vm-rest/posts',
+    'https://storage.googleapis.com:8443/photo.jpg',
+    'https://user:pass@storage.googleapis.com/photo.jpg',
+    'https://s3.amazonaws.com/bucket/photo.jpg',
+  ]) {
+    const worker = loadWorker();
+    const calls = [];
+    worker.fetch = async (url, init) => {
+      calls.push({url: String(url), init});
+      return reply(200, {url: rejectedUrl, imagePath: 'users/seller/photo.jpg'});
+    };
+    await assert.rejects(
+      worker.uploadVendooPhotoBytes(session, {mime_type: 'image/jpeg'}, bytes, 'jpg'),
+      /recognised photo upload address/,
+    );
+    assert.equal(calls.length, 1, `must not PUT to rejected URL ${rejectedUrl}`);
+  }
+});

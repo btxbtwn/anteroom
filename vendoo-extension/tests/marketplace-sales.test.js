@@ -111,3 +111,39 @@ test('a sale check waits while another marketplace action is running', async () 
   assert.deepEqual(await read(c, 'poshmark', ['aaaaaaaaaaaaaaaaaaaaaaaa']), { ok: true, sales: [], skipped: true });
   vm.runInContext('nativeOperations.clear()', c);
 });
+
+test('Poshmark sales classifies HTTP and network failures and prepares request context', async () => {
+  const post = 'aaaaaaaaaaaaaaaaaaaaaaaa';
+  const seller = 'cccccccccccccccccccccccc';
+  let rulesUpdated = 0;
+  const ctx = worker({
+    [`/vm-rest/posts/${post}`]: [200, { data: { id: post, creator_id: seller, inventory: { status: 'available' } } }],
+    '/posts/filtered': [200, { data: [{ id: post }], more: { next_max_id: null } }],
+  });
+  ctx.c.chrome.declarativeNetRequest.updateSessionRules = async () => { rulesUpdated += 1; };
+  assert.deepEqual(await read(ctx.c, 'poshmark', [post]), { ok: true, sales: [] });
+  assert.equal(rulesUpdated, 1);
+
+  for (const [status, code] of [[401, 'signed_out'], [403, 'signed_out'], [429, 'rate_limited'], [503, 'network']]) {
+    const { c } = worker({ [`/vm-rest/posts/${post}`]: [status, {}] });
+    const result = await read(c, 'poshmark', [post]);
+    assert.equal(result.ok, false);
+    assert.equal(result.error_code, code, `post HTTP ${status}`);
+  }
+
+  for (const [status, code] of [[401, 'signed_out'], [429, 'rate_limited'], [502, 'network']]) {
+    const { c } = worker({
+      [`/vm-rest/posts/${post}`]: [200, { data: { id: post, creator_id: seller, inventory: { status: 'available' } } }],
+      '/posts/filtered': [status, {}],
+    });
+    const result = await read(c, 'poshmark', [post]);
+    assert.equal(result.ok, false);
+    assert.equal(result.error_code, code, `closet HTTP ${status}`);
+  }
+
+  const offline = worker({});
+  offline.c.fetch = async () => { throw new TypeError('network down'); };
+  const netResult = await read(offline.c, 'poshmark', [post]);
+  assert.equal(netResult.ok, false);
+  assert.equal(netResult.error_code, 'network');
+});

@@ -737,3 +737,38 @@ test('Depop preview 404 diagnostics distinguish account, product and offer-previ
     assert.ok(run.requests.every(r => r.key.startsWith('GET')));
   }
 });
+
+test('promotion journal prunes expired and excess settled entries while preserving active and unsettled ones', async () => {
+  const { c, store, results } = worker({ [`PUT ${share}`]: [200, { data: {} }] });
+  c.chrome.storage.local.get = async key => (key == null
+    ? structuredClone(store)
+    : (key in store ? { [key]: structuredClone(store[key]) } : {}));
+  c.chrome.storage.local.remove = async keys => {
+    for (const key of (Array.isArray(keys) ? keys : [keys])) delete store[key];
+  };
+  const now = Date.now();
+  const eightDaysAgo = now - 8 * 24 * 60 * 60 * 1000;
+  store.poshmark_last_share_at = 1;
+  store['promotion_active-1'] = { finished: false, at: eightDaysAgo, marketplace: 'poshmark', action: 'share' };
+  store['promotion_unsettled-1'] = { finished: true, at: eightDaysAgo, marketplace: 'depop', action: 'offer',
+    result: { ok: false, safe_to_retry: false, error_code: 'uncertain' }, depop_job: { id: 'job-1', product_id: '999', account_id: '55' } };
+  store['promotion_expired-1'] = { finished: true, at: eightDaysAgo, marketplace: 'poshmark', action: 'share', result: { ok: true, state: 'done' } };
+  for (let i = 0; i < 505; i += 1) {
+    store[`promotion_settled-${String(i).padStart(4, '0')}`] = {
+      finished: true, at: now - (505 - i) * 1000, marketplace: 'poshmark', action: 'share', result: { ok: true, state: 'done' },
+    };
+  }
+  await promote(c, { action: 'share', action_id: 'action-fresh' });
+  assert.deepEqual(results[0], { ok: true, state: 'done' });
+  assert.ok(store.poshmark_last_share_at >= now);
+  assert.ok(store['promotion_active-1'], 'in-flight promotion must never be pruned');
+  assert.ok(store['promotion_unsettled-1'], 'unsettled promotion must never be pruned');
+  assert.equal(store['promotion_expired-1'], undefined, 'expired settled promotion must be pruned');
+  assert.equal(store['promotion_settled-0000'], undefined, 'oldest excess settled promotion must be pruned');
+  assert.ok(store['promotion_settled-0504'], 'recent settled promotions must be retained');
+  assert.equal(store['promotion_action-fresh']?.finished, true);
+  const settledCount = Object.entries(store)
+    .filter(([key, value]) => key.startsWith('promotion_') && value?.finished && (value.result?.ok || value.result?.safe_to_retry))
+    .length;
+  assert.equal(settledCount, 500);
+});

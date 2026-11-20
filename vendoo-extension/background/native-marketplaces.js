@@ -137,13 +137,73 @@ async function runNativeMarketplace(msg) {
   return await runMercariNative(msg);
 }
 
+const NATIVE_OPERATION_JOURNAL_PREFIX = 'native_operation_';
+const NATIVE_OPERATION_JOURNAL_LIMIT = 200;
+const NATIVE_OPERATION_JOURNAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function nativeOperationSettled(entry) {
+  return Boolean(entry?.finished && (entry.result?.ok === true || entry.result?.safe_to_retry === true));
+}
+
+// Bound persisted journal entries by TTL and count so chrome.storage.local never
+// fills its 10 MB quota. Unsettled / in-flight entries are never pruned.
+async function pruneStorageJournal(prefix, { maxSettled, ttlMs, keepKey, isSettled }) {
+  if (typeof chrome.storage?.local?.get !== 'function' || typeof chrome.storage?.local?.remove !== 'function') return;
+  let all;
+  try {
+    all = await chrome.storage.local.get(null);
+  } catch {
+    return;
+  }
+  if (!all || typeof all !== 'object') return;
+  const now = Date.now();
+  const expired = [];
+  const retained = [];
+  for (const [key, entry] of Object.entries(all)) {
+    if (!key.startsWith(prefix) || key === keepKey) continue;
+    if (!isSettled(entry)) continue;
+    const at = Number(entry?.at);
+    if (Number.isFinite(at) && at > 0 && now - at > ttlMs) {
+      expired.push(key);
+    } else {
+      retained.push([key, Number.isFinite(at) ? at : 0]);
+    }
+  }
+  retained.sort((a, b) => b[1] - a[1]);
+  const limit = keepKey && isSettled(all[keepKey]) ? Math.max(0, maxSettled - 1) : maxSettled;
+  const excess = retained.slice(limit).map(([key]) => key);
+  const toRemove = [...expired, ...excess];
+  if (toRemove.length) {
+    try {
+      await chrome.storage.local.remove(toRemove);
+    } catch { /* Best-effort cleanup; the next write retries. */ }
+  }
+}
+
+async function saveNativeOperationJournal(key, entry) {
+  const settled = nativeOperationSettled(entry);
+  let next = { ...entry, at: Date.now() };
+  if (settled && Object.hasOwn(next, 'shop_before')) {
+    const { shop_before: _dropped, ...compact } = next;
+    next = compact;
+  }
+  await chrome.storage.local.set({ [key]: next });
+  await pruneStorageJournal(NATIVE_OPERATION_JOURNAL_PREFIX, {
+    maxSettled: NATIVE_OPERATION_JOURNAL_LIMIT,
+    ttlMs: NATIVE_OPERATION_JOURNAL_TTL_MS,
+    keepKey: key,
+    isSettled: nativeOperationSettled,
+  });
+  return next;
+}
+
 async function handleNativeMarketplaceMessage(msg, reply = result => sendBrowserResult(msg, result)) {
   const operationId = String(msg.payload?.operation_id || '');
   if (!/^[a-f0-9-]+$/i.test(operationId)) {
     reply(nativeRefusal('Invalid operation ID.'));
     return;
   }
-  const key = `native_operation_${operationId}`;
+  const key = `${NATIVE_OPERATION_JOURNAL_PREFIX}${operationId}`;
   let stored = (await chrome.storage.local.get(key))[key];
   if (msg.type === 'marketplace.result') {
     if (!stored && msg.payload.context?.draft_url) stored = { finished: false, context: msg.payload.context };
@@ -157,7 +217,8 @@ async function handleNativeMarketplaceMessage(msg, reply = result => sendBrowser
           expected_photo_count: stored.expected_photo_count ?? msg.payload.context?.expected_photo_count,
           publish_job_id: stored.publish_job_id, shop_before: stored.shop_before });
         if (recovered) {
-          await chrome.storage.local.set({ [key]: { ...stored, finished: true, result: recovered } });
+          const latest = (await chrome.storage.local.get(key))[key];
+          await saveNativeOperationJournal(key, { ...stored, ...latest, finished: true, result: recovered });
           reply({ finished: true, result: recovered });
           return;
         }
@@ -173,8 +234,7 @@ async function handleNativeMarketplaceMessage(msg, reply = result => sendBrowser
           action: 'publish', deadline: Date.now() + 50000,
         });
         if (status?.listing_url) {
-          stored = { ...stored, result: { ...stored.result, listing_url: status.listing_url } };
-          await chrome.storage.local.set({ [key]: stored });
+          stored = await saveNativeOperationJournal(key, { ...stored, result: { ...stored.result, listing_url: status.listing_url } });
         }
       } catch { /* The listing is already live. A missing link stays missing. */ }
       finally { releaseNativeOperation(reading); }
@@ -198,10 +258,10 @@ async function handleNativeMarketplaceMessage(msg, reply = result => sendBrowser
     const context = { marketplace: msg.payload.marketplace, action: msg.payload.action, draft_url: msg.payload.draft_url,
       listing_id: msg.payload.listing_id, local_draft_id: msg.payload.local_draft_id, revision_id: msg.payload.revision_id,
       operation_id: operationId };
-    await chrome.storage.local.set({ [key]: { finished: false, context } });
+    await saveNativeOperationJournal(key, { finished: false, context });
     const result = await runNativeMarketplace(msg);
     const journal = (await chrome.storage.local.get(key))[key];
-    await chrome.storage.local.set({ [key]: { ...journal, finished: true, result } });
+    await saveNativeOperationJournal(key, { ...journal, finished: true, result });
     reply(result);
   } finally { releaseNativeOperation(operation); }
 }

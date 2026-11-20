@@ -648,3 +648,22 @@ test('a saved shipping-label default follows its carrier across package weights'
     form: { mercari_shipping_label: { id: '2508', label: 'UPS Ground' } } }, classes);
   assert.equal(explicit.form.specifics.shipping.carrierId, 2551);
 });
+
+test('mercariPhotoBlob closes ImageBitmap even when canvas drawing throws', async () => {
+  const c = loadWorker();
+  let closed = false;
+  c.createImageBitmap = async () => ({ width: 800, height: 600, close() { closed = true; } });
+  c.OffscreenCanvas = function OffscreenCanvas() {
+    this.width = 800;
+    this.height = 600;
+    this.getContext = () => ({
+      fillRect() {},
+      drawImage() { throw new Error('canvas draw failed'); },
+    });
+  };
+  await assert.rejects(
+    c.mercariPhotoBlob({ base64: Buffer.from('jpg').toString('base64'), mime_type: 'image/jpeg' }),
+    /canvas draw failed/,
+  );
+  assert.equal(closed, true);
+});

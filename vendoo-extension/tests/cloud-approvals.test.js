@@ -150,3 +150,34 @@ test('the canonical form matches the server for the values a command carries', (
   assert.equal(canonical({ b: [1, 2.5, null, true], a: 'é"\n', c: { z: 0.1, y: 1e21, x: 1e-7, w: -0 } }),
     '{"a":"é\\"\\n","b":[1,2.5,null,true],"c":{"w":0,"x":1e-7,"y":1e+21,"z":0.1}}');
 });
+
+test('used approvals cap entry count alongside TTL without breaking active replay protection', async () => {
+  const s = await setup();
+  const store = storage();
+  const verifier = createApprovalVerifier({ storage: store }, { publicKey: s.signer.publicKey, now: () => NOW * 1000, maxUsed: 3 });
+  const first = await s.signer.sign(update(), ALICE, { seconds: NOW, changes: { exp: NOW + 100 } });
+  const second = await s.signer.sign(update(), ALICE, { seconds: NOW, changes: { exp: NOW + 200 } });
+  const third = await s.signer.sign(update(), ALICE, { seconds: NOW, changes: { exp: NOW + 300 } });
+  const fourth = await s.signer.sign(update(), ALICE, { seconds: NOW, changes: { exp: NOW + 400 } });
+  assert.equal(await verifier.verify(first, ALICE), null);
+  assert.equal(await verifier.verify(second, ALICE), null);
+  assert.equal(await verifier.verify(third, ALICE), null);
+  assert.equal(await verifier.verify(fourth, ALICE), null);
+  const used = (await store.local.get('anteroom_used_approvals')).anteroom_used_approvals;
+  assert.equal(Object.keys(used).length, 3);
+  // Active entries within the cap remain protected against replay.
+  assert.equal((await verifier.verify(second, ALICE)).approval, 'replayed');
+  assert.equal((await verifier.verify(fourth, ALICE)).approval, 'replayed');
+
+  // Default cap (2000) trims oversized pre-existing storage cleanly on the next approval.
+  const bulk = storage();
+  const oversized = {};
+  for (let i = 0; i < 2050; i += 1) oversized[i.toString(16).padStart(32, '0')] = NOW + 100 + i;
+  await bulk.local.set({ anteroom_used_approvals: oversized });
+  const defaultVerifier = createApprovalVerifier({ storage: bulk }, { publicKey: s.signer.publicKey, now: () => NOW * 1000 });
+  const fresh = await s.signer.sign(update(), ALICE, { seconds: NOW });
+  assert.equal(await defaultVerifier.verify(fresh, ALICE), null);
+  const trimmed = (await bulk.local.get('anteroom_used_approvals')).anteroom_used_approvals;
+  assert.equal(Object.keys(trimmed).length, 2000);
+  assert.equal((await defaultVerifier.verify(fresh, ALICE)).approval, 'replayed');
+});
