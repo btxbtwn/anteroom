@@ -142,11 +142,18 @@ preview General details and restore the full server snapshot with the current
 revision ID as a conflict guard. Unsaved edits must be saved first. Restore
 creates a new revision; it does not restore photos/private notes or publish.
 
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:3b092c6e68fca70873ce5acbed2ad71b46dc1474e718d70f896799bcd27c2321 -->
+
 Swift stream framing tests run in `./tools/test-models.sh` (invoked by Xcode
 Cloud's `ci_post_clone.sh` hook and `./tools/verify-release.sh`). Device
 verification must cover a configured account generating from photos, assistant
 edits, an interrupted connection followed by Reconnect, Stop, and refresh of the
-saved listing without submitting duplicate work. No test or app flow publishes.
+saved listing without submitting duplicate work. The generation and verification
+flows described here do not publish.
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 ## Local sandbox and UI tests
 
