@@ -319,6 +319,33 @@ final class AnteroomAPITests: XCTestCase {
         XCTAssertEqual(StubProtocol.requests.count, 1)
     }
 
+    func testSignOutDuringTokenAcquisitionCancelsWrite() async throws {
+        let pause = ExportRetryPause()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubProtocol.self]
+        let authorization = APIAuthorization(
+            accessToken: {
+                await pause.sleep()
+                return "retired-token"
+            },
+            refreshedToken: { "unexpected-refresh" },
+            signedOut: {})
+        let client = AnteroomAPI(baseURL: URL(string: "https://anteroom.test")!,
+                                 auth: authorization, configuration: configuration)
+        StubProtocol.answer(.init(status: 200, body: "{}"))
+        let write = Task { try await client.deleteAccount() }
+        await pause.waitUntilSleeping()
+        await client.forgetSeller()
+        await pause.resume()
+        do {
+            try await write.value
+            XCTFail("A write authorized under a retired session must be cancelled")
+        } catch is CancellationError {
+            // The token arrived after sign-out retired its transport session.
+        }
+        XCTAssertTrue(StubProtocol.requests.isEmpty, "The retired token must never reach the network")
+    }
+
     func testSignOutStopsSleepingExportAndAllowsNextSellerExport() async throws {
         let pause = ExportRetryPause()
         var retry = TestClock().retry

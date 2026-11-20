@@ -110,10 +110,10 @@ final class AnteroomAPI: Sendable {
         }
         body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"garment\"\r\n\r\n\(garment.rawValue)\r\n--\(boundary)--\r\n".utf8))
         var upload = try await request("POST", "api/measurements/read")
-        upload.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        upload.httpBody = body
+        upload.request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        upload.request.httpBody = body
         // Each reading is several photo-model calls.
-        upload.timeoutInterval = 180
+        upload.request.timeoutInterval = 180
         return try await decode(upload)
     }
 
@@ -128,9 +128,9 @@ final class AnteroomAPI: Sendable {
         }
         body.append(Data("--\(boundary)--\r\n".utf8))
         var upload = try await request("POST", "api/size-tags/read")
-        upload.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        upload.httpBody = body
-        upload.timeoutInterval = 180
+        upload.request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        upload.request.httpBody = body
+        upload.request.timeoutInterval = 180
         do { return try await decode(upload) }
         catch let error as APIError where error.status == 404 {
             throw APIError(status: 404, message: "Update Anteroom on the server to read size tags.")
@@ -736,9 +736,9 @@ final class AnteroomAPI: Sendable {
     /// A CSV export as a file to share. Delete it when the share sheet closes;
     /// sign-out empties the folder too.
     func exportCSV(_ path: String, query: [URLQueryItem] = [], filename: String) async throws -> URL {
-        let session = sessions.current
-        let data = try await send(request("GET", path, query: query), session: session)
-        return try sessions.withCurrent(session) {
+        let prepared = try await request("GET", path, query: query)
+        let data = try await send(prepared)
+        return try sessions.withCurrent(prepared.session) {
             try Task.checkCancellation()
             try FileManager.default.createDirectory(at: Self.exportsDirectory, withIntermediateDirectories: true)
             let url = Self.exportsDirectory.appending(path: filename)
@@ -821,8 +821,8 @@ final class AnteroomAPI: Sendable {
     func uploadPhoto(listingID: String, jpeg: Data, marketplace: String? = nil) async throws -> ListingPhoto {
         var upload = try await request("POST", "api/drafts/\(listingID)/photos",
                                        query: marketplace.map { [URLQueryItem(name: "marketplace", value: $0)] } ?? [])
-        upload.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
-        upload.httpBody = jpeg
+        upload.request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        upload.request.httpBody = jpeg
         return try await decode(upload)
     }
 
@@ -885,7 +885,7 @@ final class AnteroomAPI: Sendable {
     func previewPhotoEdits(listingID: String, photoID: String, edits: PhotoEdits, crop: Bool = true) async throws -> Data {
         var preview = try await request("POST", "api/conversations/\(listingID)/photos/\(photoID)/edits/preview",
                                         json: edits)
-        if !crop, let url = preview.url { preview.url = url.appending(queryItems: [URLQueryItem(name: "crop", value: "false")]) }
+        if !crop, let url = preview.request.url { preview.request.url = url.appending(queryItems: [URLQueryItem(name: "crop", value: "false")]) }
         return try await send(preview)
     }
 
@@ -916,7 +916,7 @@ final class AnteroomAPI: Sendable {
     /// reconnect uses resume=true; it can observe work but cannot enqueue it.
     func runAssistant(_ id: String, action: AssistantAction,
                       receive: @MainActor @Sendable (StreamFrame) -> Void) async throws {
-        var upload: URLRequest
+        var upload: PreparedRequest
         switch action {
         case .generate, .regenerate:
             upload = try await request("POST", "api/conversations/\(id)/generate")
@@ -927,9 +927,10 @@ final class AnteroomAPI: Sendable {
             upload = try await request("POST", "api/conversations/\(id)/generate",
                                        query: [URLQueryItem(name: "resume", value: "true")])
         }
-        upload.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        upload.timeoutInterval = 300
-        let (bytes, response) = try await urlSession.bytes(for: upload)
+        upload.request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        upload.request.timeoutInterval = 300
+        try sessions.withCurrent(upload.session) {}
+        let (bytes, response) = try await upload.session.bytes(for: upload.request)
         guard let http = response as? HTTPURLResponse else {
             throw APIError(status: 0, message: "Anteroom didn't answer. Reconnect to check your draft.")
         }
@@ -1019,11 +1020,12 @@ final class AnteroomAPI: Sendable {
         try await decode(request("POST", "api/assistant/messages/\(messageID)/automation/dismiss"))
     }
 
-    private func followAssistant(_ request: URLRequest, receive: @MainActor @Sendable (StreamFrame) -> Void) async throws -> String? {
+    private func followAssistant(_ request: PreparedRequest, receive: @MainActor @Sendable (StreamFrame) -> Void) async throws -> String? {
         var upload = request
-        upload.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        upload.timeoutInterval = 300
-        let (bytes, response) = try await urlSession.bytes(for: upload)
+        upload.request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        upload.request.timeoutInterval = 300
+        try sessions.withCurrent(upload.session) {}
+        let (bytes, response) = try await upload.session.bytes(for: upload.request)
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         guard (200..<300).contains(http.statusCode) else {
             var data = Data()
@@ -1139,7 +1141,13 @@ final class AnteroomAPI: Sendable {
 
     // MARK: Transport
 
-    private func request(_ method: String, _ path: String, query: [URLQueryItem] = []) async throws -> URLRequest {
+    private struct PreparedRequest {
+        var request: URLRequest
+        let session: URLSession
+    }
+
+    private func request(_ method: String, _ path: String, query: [URLQueryItem] = []) async throws -> PreparedRequest {
+        let session = sessions.current
         var url = baseURL.appending(path: path)
         if !query.isEmpty { url.append(queryItems: query) }
         let token: String
@@ -1158,13 +1166,13 @@ final class AnteroomAPI: Sendable {
         urlRequest.httpMethod = method
         urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
-        return urlRequest
+        return PreparedRequest(request: urlRequest, session: session)
     }
 
-    private func request(_ method: String, _ path: String, json body: some Encodable) async throws -> URLRequest {
+    private func request(_ method: String, _ path: String, json body: some Encodable) async throws -> PreparedRequest {
         var withBody = try await request(method, path)
-        withBody.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        withBody.httpBody = try JSONEncoder().encode(body)
+        withBody.request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        withBody.request.httpBody = try JSONEncoder().encode(body)
         return withBody
     }
 
@@ -1177,12 +1185,13 @@ final class AnteroomAPI: Sendable {
         return data
     }
 
-    private func decode<T: Decodable>(_ request: URLRequest) async throws -> T {
+    private func decode<T: Decodable>(_ request: PreparedRequest) async throws -> T {
         try JSONDecoder().decode(T.self, from: try await send(request))
     }
 
-    private func send(_ request: URLRequest, session: URLSession? = nil) async throws -> Data {
-        let session = session ?? sessions.current
+    private func send(_ prepared: PreparedRequest) async throws -> Data {
+        let request = prepared.request
+        let session = prepared.session
         let (data, status) = try await perform(request, session: session)
         if status == 401 {
             let refusal = try await renewAfterRefusal(data)
