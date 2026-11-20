@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InventoryImport } from "./InventoryImport";
+import { clearImportAll, importAllRun, startImportAll, type Importer } from "../importAll";
 
 const { useQuery, useMutation } = vi.hoisted(() => ({ useQuery: vi.fn(), useMutation: vi.fn() }));
 vi.mock("@tanstack/react-query", () => ({ useQuery, useMutation, useQueryClient: () => ({ invalidateQueries: vi.fn() }) }));
@@ -135,5 +136,52 @@ describe("linking matches to existing items", () => {
     await useMutation.mock.calls[useMutation.mock.calls.length - 1][0].mutationFn([{ id: "100000001", link: "a" }]);
     expect(submit).toHaveBeenCalledWith("100000001", "a");
     submit.mockRestore();
+  });
+});
+
+describe("import all active listings", () => {
+  afterEach(() => clearImportAll());
+  const never: Importer = { candidates: () => new Promise(() => {}), importListing: () => new Promise(() => {}), importNew: () => new Promise(() => {}) };
+
+  it("offers to import everything without publishing anything", () => {
+    const html = renderToStaticMarkup(<InventoryImport marketplace="poshmark" accountKey="me" onOpenListing={vi.fn()} />);
+    expect(html).toContain("Import all active listings");
+    expect(html).toContain("does not change or publish listings");
+  });
+
+  it("shows a running import with a stop, and pauses the page-by-page actions", () => {
+    startImportAll("poshmark:me", "poshmark", never, vi.fn());
+    const html = renderToStaticMarkup(<InventoryImport marketplace="poshmark" accountKey="me" onOpenListing={vi.fn()} />);
+    expect(html).toContain("Importing page 1… 0 imported · 0 already in Anteroom");
+    expect(html).toContain("Stop after this listing");
+    expect(html).not.toContain("Import all active listings");
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Import selected/);
+  });
+
+  it("lists suggested matches for the seller to link, import as new, or compare", async () => {
+    const match = { conversation_id: "local-coat", title: "Wool coat", score: 0.9, price: 40, price_differs: true };
+    startImportAll("mercari:me", "mercari", {
+      candidates: async () => ({ total: 1, has_more: false, rows: [{ id: "m1", title: "Grey wool coat", price: "45.00", quantity: 1,
+        reason: null, conversation_id: null, match }] }),
+      importListing: vi.fn(), importNew: vi.fn(),
+    }, vi.fn());
+    await vi.waitFor(() => expect(importAllRun("mercari:me")?.status).toBe("done"));
+    const html = renderToStaticMarkup(<InventoryImport marketplace="mercari" accountKey="me" onOpenListing={vi.fn()} />);
+    expect(html).toContain("Finished 1 page. 0 imported · 0 already in Anteroom · 1 to review");
+    expect(html).toContain("1 listing looks like an item already in Anteroom");
+    expect(html).toContain("Looks like “Wool coat” (priced $40 in Anteroom) · $45.00 on Mercari");
+    for (const label of ["Compare", "Import as new", "Link to this item", "Import all again"]) expect(html).toContain(label);
+  });
+
+  it("shows one error per message instead of one per listing", async () => {
+    const rows = ["a", "b", "c"].map((id) => ({ id, title: `Item ${id}`, price: "10.00", quantity: 1, reason: null, conversation_id: null, match: null }));
+    const importNew = vi.fn().mockRejectedValueOnce(new Error("Photo download failed.")).mockRejectedValueOnce(new Error("Photo download failed."))
+      .mockRejectedValueOnce(new Error("Not your listing."));
+    startImportAll("ebay:me", "ebay", { candidates: async () => ({ total: 3, has_more: false, rows }), importListing: vi.fn(), importNew }, vi.fn());
+    await vi.waitFor(() => expect(importAllRun("ebay:me")?.status).toBe("done"));
+    const html = renderToStaticMarkup(<InventoryImport marketplace="ebay" accountKey="me" onOpenListing={vi.fn()} />);
+    expect(html).toContain("2 listings: Photo download failed.");
+    expect(html).toContain("Item c: Not your listing.");
+    expect(html).toContain("3 failed");
   });
 });

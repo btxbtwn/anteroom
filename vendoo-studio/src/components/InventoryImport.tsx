@@ -1,31 +1,12 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api } from "../api/client";
-import type { ImportMarketplace, MarketplaceImportPage, MarketplaceImportResult } from "../api/inventoryImport";
+import type { ImportMarketplace, MarketplaceImportResult } from "../api/inventoryImport";
+import { clearImportAll, importerFor, resolveImportAllReview, startImportAll, stopImportAll, useImportAll, type ImportAllRun } from "../importAll";
 import { marketplaceName } from "./marketplaceNames";
 import { PageError, PageNote, PageSection } from "./WorkspacePage";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
 import { Input } from "./ui/input";
-
-interface Importer {
-  candidates: (page: number, cursor: string | null) => Promise<MarketplaceImportPage>;
-  importListing: (listing: string, linkConversationId?: string) => Promise<MarketplaceImportResult>;
-}
-
-function importerFor(marketplace: ImportMarketplace): Importer {
-  if (marketplace === "ebay" || marketplace === "etsy") {
-    const direct = api[marketplace];
-    return {
-      candidates: (page) => direct.importCandidates(page),
-      importListing: (listing, linkConversationId) => linkConversationId ? direct.importListing(listing, linkConversationId) : direct.importListing(listing),
-    };
-  }
-  return {
-    candidates: (_page, cursor) => api.chromeImport.importCandidates(marketplace, cursor),
-    importListing: (listing, linkConversationId) => api.chromeImport.importListing(marketplace, listing, linkConversationId),
-  };
-}
 
 const SUPPORT: Record<ImportMarketplace, string> = {
   ebay: "Supports active US fixed-price listings in USD without variations.",
@@ -42,6 +23,11 @@ export function InventoryImport({ marketplace, accountKey, onOpenListing }: { ma
   const name = marketplaceName(marketplace);
   const direct = marketplace === "ebay" || marketplace === "etsy";
   const importer = importerFor(marketplace);
+  const allKey = `${marketplace}:${accountKey}`;
+  const all = useImportAll(allKey);
+  const allBusy = all?.status === "running" || all?.status === "stopping";
+  // A run for an account that is no longer the connected one stops here.
+  useEffect(() => clearImportAll(marketplace, allKey), [marketplace, allKey]);
   const idPattern = marketplace === "ebay" ? "[0-9]{9,15}" : marketplace === "etsy" ? "[1-9][0-9]{0,19}" : undefined;
   const [page, setPage] = useState(1);
   // Chrome marketplaces page with their own cursor; cursors[n] opens page n + 1.
@@ -58,6 +44,11 @@ export function InventoryImport({ marketplace, accountKey, onOpenListing }: { ma
     queryKey: direct ? ["inventory-import", marketplace, accountKey, page] : ["inventory-import", marketplace, accountKey, page, cursor],
     queryFn: () => importer.candidates(page, cursor), retry: false,
   });
+  const refreshInventory = () => {
+    void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    void queryClient.invalidateQueries({ queryKey: ["inventory-import", marketplace] });
+    void queryClient.invalidateQueries({ queryKey: ["marketplace-sales"] });
+  };
   const run = useMutation({
     mutationFn: async (requests: ImportRequest[]) => {
       stop.current = false;
@@ -68,6 +59,7 @@ export function InventoryImport({ marketplace, accountKey, onOpenListing }: { ma
         try {
           const result = link ? await importer.importListing(id, link) : await importer.importListing(id);
           setResults((previous) => ({ ...previous, [id]: result }));
+          resolveImportAllReview(allKey, id);
           setSelected((previous) => previous.filter((value) => value !== id));
         } catch (error) {
           setErrors((previous) => ({ ...previous, [id]: error instanceof Error ? error.message : "This listing could not be imported." }));
@@ -77,9 +69,7 @@ export function InventoryImport({ marketplace, accountKey, onOpenListing }: { ma
     retry: false,
     onSettled: () => {
       setStopping(false);
-      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
-      void queryClient.invalidateQueries({ queryKey: ["inventory-import", marketplace] });
-      void queryClient.invalidateQueries({ queryKey: ["marketplace-sales"] });
+      refreshInventory();
     },
   });
   const goTo = (next: number) => {
@@ -103,6 +93,10 @@ export function InventoryImport({ marketplace, accountKey, onOpenListing }: { ma
 
   return <PageSection title={`Import from ${name}`} description={`Bring your active ${name} listings and photos into Anteroom. This reads ${name} and saves local inventory; it does not change or publish listings.`}>
     <PageNote>{SUPPORT[marketplace]} Existing Anteroom items are opened again without replacing their edits or photos. Linking a match only records that the item is live on {name}; check the suggested matches before linking them.</PageNote>
+    <ImportAll name={name} run={all} busy={allBusy} disabled={run.isPending}
+      onStart={() => startImportAll(allKey, marketplace, importer, refreshInventory)} onStop={() => stopImportAll(allKey)}
+      reviewing={run.isPending} results={results} onOpenListing={onOpenListing}
+      onImport={(id, link) => run.mutate([link ? { id, link } : { id }])} />
     <form className="ebay-search-form" onSubmit={(event) => { event.preventDefault(); if (!run.isPending) run.mutate([{ id: itemId.trim() }]); }}>
       <label className="min-w-48 flex-1 space-y-1 text-xs">{direct ? `${name} listing ID` : `${name} listing link or ID`}
         {direct ? <Input required inputMode="numeric" pattern={idPattern} maxLength={marketplace === "ebay" ? 15 : 20} value={itemId} disabled={run.isPending}
@@ -110,15 +104,15 @@ export function InventoryImport({ marketplace, accountKey, onOpenListing }: { ma
           : <Input required maxLength={2048} value={itemId} disabled={run.isPending}
             onChange={(event) => setItemId(event.target.value)} placeholder={`Paste the ${name} listing link`} />}
       </label>
-      <Button type="submit" size="sm" variant="outline" disabled={run.isPending || !validId}>Import listing</Button>
+      <Button type="submit" size="sm" variant="outline" disabled={run.isPending || allBusy || !validId}>Import listing</Button>
     </form>
     {candidates.error ? <PageError message={candidates.error.message} /> : null}
     <div className="flex flex-wrap items-center gap-2 text-xs">
       <span>{candidates.isPending ? "Loading active listings…" : candidates.data?.total != null ? `${candidates.data.total} active listings` : `${rows.length} listings shown`}</span>
       <Button size="xs" variant="ghost" disabled={run.isPending || candidates.isFetching} onClick={() => void candidates.refetch()}>Refresh listings</Button>
-      <Button size="xs" variant="ghost" disabled={run.isPending || !available.length} onClick={() => setSelected(available)}>Select this page</Button>
-      <Button size="xs" variant="outline" disabled={run.isPending || !selected.length} onClick={() => run.mutate(selected.map((id) => ({ id })))}>Import selected ({selected.length})</Button>
-      <Button size="xs" variant="outline" disabled={run.isPending || !linkable.length} onClick={() => run.mutate(linkable)}>Link matches on this page ({linkable.length})</Button>
+      <Button size="xs" variant="ghost" disabled={run.isPending || allBusy || !available.length} onClick={() => setSelected(available)}>Select this page</Button>
+      <Button size="xs" variant="outline" disabled={run.isPending || allBusy || !selected.length} onClick={() => run.mutate(selected.map((id) => ({ id })))}>Import selected ({selected.length})</Button>
+      <Button size="xs" variant="outline" disabled={run.isPending || allBusy || !linkable.length} onClick={() => run.mutate(linkable)}>Link matches on this page ({linkable.length})</Button>
       {run.isPending ? <Button size="xs" variant="ghost" disabled={stopping} onClick={() => { stop.current = true; setStopping(true); }}>
         {stopping ? "Stopping after this listing…" : "Stop after this listing"}</Button> : null}
     </div>
@@ -155,4 +149,59 @@ export function InventoryImport({ marketplace, accountKey, onOpenListing }: { ma
     </div> : null}
     {Object.entries(errors).map(([id, message]) => <PageError key={id} message={`${id}: ${message}`} />)}
   </PageSection>;
+}
+
+const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
+
+function summary(run: ImportAllRun) {
+  return [`${run.imported} imported`, `${run.alreadyIn} already in Anteroom`,
+    run.review.length ? `${run.review.length} to review` : "", run.skipped ? `${run.skipped} not supported` : "",
+    run.failures.length ? `${run.failures.length} failed` : ""].filter(Boolean).join(" · ");
+}
+
+/** One error per distinct message, so a dropped connection does not repeat for every listing. */
+function failureGroups(run: ImportAllRun | undefined) {
+  const groups = new Map<string, string[]>();
+  for (const failure of run?.failures ?? []) groups.set(failure.message, [...(groups.get(failure.message) ?? []), failure.title]);
+  // The run's own error already says why it stopped.
+  return [...groups].filter(([message]) => message !== run?.error).map(([message, titles]) => ({ message, titles }));
+}
+
+/** Import every active listing at once; listings that look like existing items wait for the seller. */
+function ImportAll({ name, run, busy, disabled, reviewing, results, onStart, onStop, onImport, onOpenListing }: {
+  name: string; run: ImportAllRun | undefined; busy: boolean; disabled: boolean; reviewing: boolean;
+  results: Record<string, MarketplaceImportResult>; onStart: () => void; onStop: () => void;
+  onImport: (id: string, link?: string) => void; onOpenListing: (id: string) => void;
+}) {
+  const status = !run ? null
+    : run.status === "running" ? `Importing page ${run.page}… ${summary(run)}`
+    : run.status === "stopping" ? `Stopping after this listing… ${summary(run)}`
+    : run.status === "stopped" ? `Stopped. ${summary(run)}`
+    : run.status === "failed" ? `Stopped on page ${run.page}. ${summary(run)}`
+    : `Finished ${plural(run.page, "page")}. ${summary(run)}`;
+  const review = run?.review.filter((row) => !results[row.id]) ?? [];
+  return <div className="space-y-2">
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      {busy ? <Button size="xs" variant="outline" disabled={run?.status === "stopping"} onClick={onStop}>Stop after this listing</Button>
+        : <Button size="sm" disabled={disabled} onClick={onStart}>{run ? "Import all again" : "Import all active listings"}</Button>}
+      <p role="status" className="tabular-nums text-muted-foreground">{status}</p>
+    </div>
+    {run?.error ? <PageError message={`${run.error} Listings already imported were kept; run it again to continue.`} /> : null}
+    {failureGroups(run).map(({ message, titles }) => <PageError key={message}
+      message={titles.length === 1 ? `${titles[0]}: ${message}` : `${titles.length} listings: ${message}`} />)}
+    {review.length ? <div className="space-y-1">
+      <p className="text-sm font-medium">{review.length === 1 ? "1 listing looks like an item" : `${review.length} listings look like items`} already in Anteroom</p>
+      <ul className="divide-y divide-border rounded-lg border border-border px-3">
+        {review.map((row) => <li key={row.id} className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3 text-sm">
+          {/* On a phone the actions wrap below the listing instead of squeezing it. */}
+          <div className="min-w-0 basis-full break-words sm:basis-0 sm:flex-1"><p className="font-medium">{row.title}</p>
+            <p className="text-xs text-muted-foreground">Looks like “{row.match.title}”{row.match.price_differs && row.match.price != null ? ` (priced $${row.match.price} in Anteroom)` : ""}{row.price != null ? ` · $${row.price} on ${name}` : ""}</p>
+          </div>
+          <Button size="xs" variant="ghost" onClick={() => onOpenListing(row.match.conversation_id)}>Compare</Button>
+          <Button size="xs" variant="ghost" disabled={reviewing || busy} onClick={() => onImport(row.id)}>Import as new</Button>
+          <Button size="xs" variant="outline" disabled={reviewing || busy} onClick={() => onImport(row.id, row.match.conversation_id)}>Link to this item</Button>
+        </li>)}
+      </ul>
+    </div> : null}
+  </div>;
 }

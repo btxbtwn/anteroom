@@ -74,6 +74,8 @@ class ImportRequest(BaseModel):
     listing_id: str = Field(pattern=r"^[1-9][0-9]{0,19}$")
     # Link the listing to this existing item instead of creating a new one.
     link_conversation_id: str | None = Field(None, min_length=1, max_length=64)
+    # Import all: leave a listing that looks like an existing item for the seller to review.
+    unless_matched: bool = False
 
 
 @router.get("/import/active")
@@ -87,7 +89,7 @@ async def import_item(body: ImportRequest, response: Response):
     if body.link_conversation_id:
         conversation_id = body.link_conversation_id
         return await _read_workspace(lambda client: etsy_import.link_listing(client, body.listing_id, conversation_id), response)
-    return await _read_workspace(lambda client: etsy_import.import_listing(client, body.listing_id), response)
+    return await _read_workspace(lambda client: etsy_import.import_listing(client, body.listing_id, unless_matched=body.unless_matched), response)
 
 
 class EtsyListingDefaults(BaseModel):

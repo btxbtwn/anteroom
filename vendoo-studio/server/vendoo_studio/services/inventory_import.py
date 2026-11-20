@@ -5,6 +5,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from vendoo_studio.config import MAX_PHOTO_COUNT
@@ -58,16 +59,45 @@ def _result(db: Session, conv_id: str, listing_id: str, *, reused: bool, warning
 _REUSED = "Already in Anteroom. Existing edits and photos were kept."
 
 
+def _match(db: Session, marketplace: str, snapshot: dict, compared: set[str] | None = None) -> tuple[dict | None, set[str]]:
+    """An item that looks like this listing, which import all leaves for the seller instead of duplicating it.
+
+    Also returns the items it compared. Given ``compared``, only items added since are scored: the full
+    comparison runs before the import gate, and only this short one inside it.
+    """
+    from vendoo_studio.models.conversation import Conversation
+    from vendoo_studio.services.chrome_import import match_candidates, suggested_match, title_tokens
+
+    ids = set(db.scalars(select(Conversation.id)))
+    if compared is None:
+        items = match_candidates(db)
+    else:
+        fresh = ids - compared
+        rows = db.query(Conversation.id, Conversation.title).filter(Conversation.id.in_(fresh)).all() if fresh else []
+        items = [(conv_id, title, title_tokens(title)) for conv_id, title in rows if title and title.strip()]
+    value = snapshot.get("price")
+    price = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    match = suggested_match(db, marketplace, str(snapshot.get("title") or ""), price, items) if items else None
+    return match, ids
+
+
+def _held(listing_id: str, match: dict) -> dict:
+    return {"conversation_id": None, "listing_id": listing_id, "reused": False, "photo_count": 0, "warnings": [], "match": match}
+
+
 def _reused(db: Session, marketplace: str, listing_id: str) -> dict | None:
     existing = owner(db, marketplace, listing_id)
     return _result(db, existing.id, listing_id, reused=True, warnings=[_REUSED]) if existing else None
 
 
 def _create(db: Session, marketplace: str, listing_id: str, snapshot: dict, urls: list[str], downloaded: list[dict],
-            binding: dict | None, target_id: str, kept: dict) -> dict:
+            binding: dict | None, target_id: str, kept: dict, compared: set[str] | None) -> dict:
     with start_gate():
         if reused := _reused(db, marketplace, listing_id):
             return reused
+        # Checked again under the gate against items saved since: another import may have brought one in.
+        if compared is not None and (match := _match(db, marketplace, snapshot, compared)[0]):
+            return _held(listing_id, match)
         conv = inventory_imports.create_import(db, marketplace, snapshot, listing_id, downloaded, binding, identity=target_id)
         kept["photos"] = True
     warnings = []
@@ -80,14 +110,22 @@ def _create(db: Session, marketplace: str, listing_id: str, snapshot: dict, urls
 
 
 async def save_owned_listing(marketplace: str, listing_id: str, snapshot: dict, urls: list[str],
-                             verify_connection: Callable[[], None], *, binding: dict | None = None) -> dict:
+                             verify_connection: Callable[[], None], *, binding: dict | None = None,
+                             unless_matched: bool = False) -> dict:
     """Save an already verified listing; reuse an existing local identity without overwriting it.
 
+    With ``unless_matched`` (import all), a listing that looks like an existing
+    item is not saved: the result names the match for the seller to review.
     Database steps run on worker threads with their own sessions, none open while photos download.
     """
     verify_connection()
     if reused := await in_worker_session(_reused, marketplace, listing_id):
         return reused
+    compared = None
+    if unless_matched:
+        match, compared = await in_worker_session(_match, marketplace, snapshot)
+        if match:
+            return _held(listing_id, match)
     urls = list(dict.fromkeys(url for url in urls if isinstance(url, str) and url))
     from vendoo_studio.models.conversation import new_id
     target_id = new_id()
@@ -97,7 +135,7 @@ async def save_owned_listing(marketplace: str, listing_id: str, snapshot: dict, 
         verify_connection()
         # Finish the save even if the request goes away, so its photos are either kept or deleted.
         return await asyncio.shield(in_worker_session(
-            _create, marketplace, listing_id, snapshot, urls, downloaded, binding, target_id, kept))
+            _create, marketplace, listing_id, snapshot, urls, downloaded, binding, target_id, kept, compared))
     finally:
         if not kept["photos"]:
             for meta in downloaded:

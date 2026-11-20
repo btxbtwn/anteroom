@@ -1,4 +1,5 @@
 """Import from Poshmark, Mercari, and Depop through a fake Chrome bridge."""
+import asyncio
 import copy
 from io import BytesIO
 from types import SimpleNamespace
@@ -202,3 +203,39 @@ def test_linking_a_reviewed_match_keeps_the_item_and_records_the_listing(chrome)
     chrome.remote.reply = {"ok": False, "error": "This Mercari listing is not on sale.", "error_code": "rejected"}
     assert post(chrome, "mercari", "m12345678901", link_conversation_id=other.id).status_code == 409
     assert "mercari" not in listings(chrome.db, other.id)
+
+
+def test_import_all_leaves_a_listing_that_now_matches_an_item_for_review(chrome):
+    """Import all checks for a match again as it saves, so two marketplaces importing at once never duplicate an item."""
+    # Another marketplace's import brought this item in after the page was read.
+    similar = ConversationRepo(chrome.db).create(title="Levi's Denim Jacket")
+    listing_persistence.save_revision(chrome.db, similar.id, {"title": "Levi's Denim Jacket", "price": 45}, "user")
+    chrome.db.commit()
+    response = post(chrome, "poshmark", POST, unless_matched=True)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["conversation_id"] is None and body["match"]["conversation_id"] == similar.id
+    assert chrome.db.query(Conversation).count() == 1 and chrome.db.query(Photo).count() == 0
+    assert "poshmark" not in listings(chrome.db, similar.id)
+    # Importing it as new on purpose still works.
+    assert post(chrome, "poshmark", POST).json()["conversation_id"] not in (None, similar.id)
+
+
+def test_import_all_drops_photos_when_a_match_appears_while_they_download(chrome, monkeypatch):
+    real = inventory_import.download_photos
+
+    async def download_then_match(urls, collection_id):
+        downloaded = await real(urls, collection_id)
+
+        def add():
+            conv = ConversationRepo(chrome.db).create(title="Levi's denim jacket")
+            listing_persistence.save_revision(chrome.db, conv.id, {"title": "Levi's denim jacket", "price": 45}, "user")
+            chrome.db.commit()
+
+        await asyncio.to_thread(add)
+        return downloaded
+
+    monkeypatch.setattr(inventory_import, "download_photos", download_then_match)
+    body = post(chrome, "poshmark", POST, unless_matched=True).json()
+    assert body["conversation_id"] is None and body["match"]
+    assert chrome.db.query(Conversation).count() == 1 and chrome.db.query(Photo).count() == 0

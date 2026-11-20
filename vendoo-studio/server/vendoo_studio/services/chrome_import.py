@@ -260,14 +260,15 @@ def _already_imported(db: Session, marketplace: str, listing_id: str) -> dict | 
             "warnings": ["Already in Anteroom. Existing edits and photos were kept."]}
 
 
-async def import_listing(marketplace: str, listing: str) -> dict:
+async def import_listing(marketplace: str, listing: str, *, unless_matched: bool = False) -> dict:
     """Create a local item for one listing, or reopen the item that already has it."""
     listing_id = listing_id_from(marketplace, listing)
     if existing := await in_worker_session(_already_imported, marketplace, listing_id):
         return existing
     data, photos = snapshot(marketplace, await _read(marketplace, listing_id))
     try:
-        result = await inventory_import.save_owned_listing(marketplace, listing_id, data, photos, lambda: None)
+        result = await inventory_import.save_owned_listing(marketplace, listing_id, data, photos, lambda: None,
+                                                           unless_matched=unless_matched)
     except inventory_import.ImportConflict as exc:
         raise ChromeImportError(409, str(exc)) from exc
     return {**result, "linked": False}

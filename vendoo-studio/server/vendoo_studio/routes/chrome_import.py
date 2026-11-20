@@ -12,6 +12,8 @@ class ImportRequest(BaseModel):
     listing: str = Field(min_length=1, max_length=2048)
     # Link the listing to this existing item instead of creating a new one.
     link_conversation_id: str | None = Field(None, min_length=1, max_length=64)
+    # Import all: leave a listing that looks like an existing item for the seller to review.
+    unless_matched: bool = False
 
 
 @router.get("/{marketplace}/active")
@@ -28,6 +30,6 @@ async def import_item(marketplace: str, body: ImportRequest):
     try:
         if body.link_conversation_id:
             return await chrome_import.link_listing(marketplace, body.listing, body.link_conversation_id)
-        return await chrome_import.import_listing(marketplace, body.listing)
+        return await chrome_import.import_listing(marketplace, body.listing, unless_matched=body.unless_matched)
     except ChromeImportError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc

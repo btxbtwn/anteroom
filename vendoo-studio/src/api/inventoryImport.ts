@@ -37,3 +37,10 @@ export interface MarketplaceImportResult {
   photo_count: number;
   warnings: string[];
 }
+
+/** Import all left this listing for the seller: it looks like an item already in Anteroom. */
+export interface MarketplaceImportHeld {
+  conversation_id: null;
+  listing_id: string;
+  match: MarketplaceImportMatch;
+}

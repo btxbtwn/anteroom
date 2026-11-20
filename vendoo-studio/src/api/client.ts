@@ -88,7 +88,7 @@ import type { ListingReadiness, NativeDraft, NativeDrafts, NativeMarketplace, Na
 import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
 import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
-import type { ChromeImportMarketplace, MarketplaceImportPage, MarketplaceImportResult } from "./inventoryImport";
+import type { ChromeImportMarketplace, MarketplaceImportHeld, MarketplaceImportPage, MarketplaceImportResult } from "./inventoryImport";
 import type { EtsyListing, EtsyListingState, EtsyOrders, EtsyOrderStatus, EtsyPage, EtsyShop } from "./etsy";
 
 const BASE = "/api";
@@ -328,11 +328,20 @@ export const api = {
       request<MarketplaceImportResult>(`/chrome-import/${marketplace}`, {
         method: "POST", body: JSON.stringify({ listing, ...(linkConversationId ? { link_conversation_id: linkConversationId } : {}) }),
       }),
+    /** Import all: a listing that looks like an existing item is left for the seller, not imported. */
+    importNew: (marketplace: ChromeImportMarketplace, listing: string) =>
+      request<MarketplaceImportResult | MarketplaceImportHeld>(`/chrome-import/${marketplace}`, {
+        method: "POST", body: JSON.stringify({ listing, unless_matched: true }),
+      }),
   },
   etsy: {
     importCandidates: (page: number) => request<MarketplaceImportPage>(`/etsy/import/active?page=${page}`),
     importListing: (listingId: string, linkConversationId?: string) => request<MarketplaceImportResult>("/etsy/import", {
       method: "POST", body: JSON.stringify({ listing_id: listingId, ...(linkConversationId ? { link_conversation_id: linkConversationId } : {}) }),
+    }),
+    /** Import all: a listing that looks like an existing item is left for the seller, not imported. */
+    importNew: (listingId: string) => request<MarketplaceImportResult | MarketplaceImportHeld>("/etsy/import", {
+      method: "POST", body: JSON.stringify({ listing_id: listingId, unless_matched: true }),
     }),
     notAllowed: () => request<EtsyNotAllowedResponse>("/etsy/not-allowed"),
     shop: () => request<EtsyShop>("/etsy/shop"),
@@ -525,6 +534,10 @@ export const api = {
     importCandidates: (page: number) => request<MarketplaceImportPage>(`/ebay/import/active?page=${page}`),
     importListing: (listingId: string, linkConversationId?: string) => request<MarketplaceImportResult>("/ebay/import", {
       method: "POST", body: JSON.stringify({ listing_id: listingId, ...(linkConversationId ? { link_conversation_id: linkConversationId } : {}) }),
+    }),
+    /** Import all: a listing that looks like an existing item is left for the seller, not imported. */
+    importNew: (listingId: string) => request<MarketplaceImportResult | MarketplaceImportHeld>("/ebay/import", {
+      method: "POST", body: JSON.stringify({ listing_id: listingId, unless_matched: true }),
     }),
     read: (section: string, params: Record<string, string | number> = {}) =>
       request<EbayPageData>(`/ebay/read/${section}?${new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]))}`),

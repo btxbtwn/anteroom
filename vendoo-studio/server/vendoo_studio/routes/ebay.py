@@ -62,6 +62,8 @@ class ImportRequest(BaseModel):
     listing_id: str = Field(pattern=r"^[0-9]{9,15}$")
     # Link the listing to this existing item instead of creating a new one.
     link_conversation_id: str | None = Field(None, min_length=1, max_length=64)
+    # Import all: leave a listing that looks like an existing item for the seller to review.
+    unless_matched: bool = False
 
 
 @router.get("/import/active")
@@ -79,7 +81,7 @@ async def import_item(body: ImportRequest):
         client = await EbayClient.connect()
         if body.link_conversation_id:
             return await ebay_import.link_listing(client, body.listing_id, body.link_conversation_id)
-        return await ebay_import.import_listing(client, body.listing_id)
+        return await ebay_import.import_listing(client, body.listing_id, unless_matched=body.unless_matched)
     except (EbayFailure, SignInRequired, httpx.HTTPError, ValueError) as exc:
         raise failure(exc) from exc
 
