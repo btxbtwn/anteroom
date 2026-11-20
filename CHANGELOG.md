@@ -6,6 +6,16 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1041 — 2026-11-20
+
+- Inventory now has three tabs, Active, Sold and Draft, and opens on Active. The Open and Failed tabs are gone.
+- Anything that isn't live or sold appears under Draft: new drafts, listings still sending to a marketplace, failed sends (still labelled Failed on the row) and delisted items. Every item sits under exactly one tab, on the web and on iPhone.
+- Starting a new listing switches to Draft so it shows up right away, and a listing you have open keeps its row if it sells or goes live while you're editing.
+
+## 0.1.1040 — 2026-11-20
+
+- Slow suggestion and Chrome-reply reports now show which read or wait took time without recording private details.
+
 ## 0.1.1039 — 2026-11-20
 
 - When you add several folders at once and one of them can't be uploaded (for example, it has more than 20 photos), the other folders are still added and generated, and the message names the folder that failed.

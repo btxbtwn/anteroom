@@ -1,1 +1,0 @@
-- Slow suggestion and Chrome-reply reports now show which read or wait took time without recording private details.
