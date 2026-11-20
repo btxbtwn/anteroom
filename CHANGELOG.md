@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1064 — 2026-11-20
+
+- Keep concurrent listing generations from timing out while saving marketplace fields by reusing fresh saved forms instead of reloading unchanged marketplaces, avoiding deep copies of saved forms during validation rechecks, and retrying brief database hiccups on background task heartbeats.
+
 ## 0.1.1063 — 2026-11-20
 
 - Speed up marketplace form loading by running eBay schema reads in parallel, releasing database connections before marketplace waits, and caching public Mercari shipping quotes and marketplace choice lists across reloads.
