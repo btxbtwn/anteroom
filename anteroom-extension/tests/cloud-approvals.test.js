@@ -175,7 +175,7 @@ test('used approvals cap entry count per account and keep unrelated accounts and
   assert.equal(await verifier.verify(bobCmd, BOB), null);
   assert.equal((await verifier.verify(bobCmd, BOB)).approval, 'replayed');
   const cancelCmd = await s.signer.sign({
-    type: 'cancel',
+    type: 'job.cancel',
     message_id: 'msg-cancel',
     job_id: 'job-1',
     payload: {},
@@ -199,4 +199,40 @@ test('used approvals cap entry count per account and keep unrelated accounts and
   assert.equal((await defaultVerifier.verify(seeded, ALICE)).approval, 'replayed');
   const retained = (await bulk.local.get('anteroom_used_approvals')).anteroom_used_approvals;
   assert.deepEqual(retained, oversized);
+});
+
+
+test('consumed approvals survive the previous numeric replay reader and a verifier restart', async () => {
+  const s = await setup();
+  const store = storage();
+  const options = { publicKey: s.signer.publicKey, now: () => NOW * 1000, maxUsed: 1 };
+  const command = await s.signer.sign(update(), ALICE, { seconds: NOW });
+  assert.equal(await createApprovalVerifier({ storage: store }, options).verify(command, ALICE), null);
+  const used = (await store.local.get('anteroom_used_approvals')).anteroom_used_approvals;
+  // The pre-bucket verifier prunes using precisely this predicate.
+  for (const [nonce, until] of Object.entries(used)) {
+    if (!Number.isFinite(until) || until + 60 < NOW) delete used[nonce];
+  }
+  assert.equal(Object.keys(used).length, 1);
+  await store.local.set({ anteroom_used_approvals: used });
+  const restarted = createApprovalVerifier({ storage: store }, options);
+  assert.equal((await restarted.verify(command, ALICE)).approval, 'replayed');
+  const next = await s.signer.sign(update(), ALICE, { seconds: NOW });
+  assert.equal((await restarted.verify(next, ALICE)).approval, 'capacity');
+});
+
+
+test('object replay records migrate before a replay refusal and preserve bucket capacity', async () => {
+  const s = await setup();
+  const store = storage();
+  const command = await s.signer.sign(update(), ALICE, { seconds: NOW });
+  const claims = JSON.parse(Buffer.from(command.payload.approval.split('.')[1], 'base64url'));
+  await store.local.set({ anteroom_used_approvals: { [claims.jti]: { exp: claims.exp, b: `acct:${ALICE}` } } });
+  const verifier = createApprovalVerifier({ storage: store }, {
+    publicKey: s.signer.publicKey, now: () => NOW * 1000, maxUsed: 1,
+  });
+  assert.equal((await verifier.verify(command, ALICE)).approval, 'replayed');
+  const used = (await store.local.get('anteroom_used_approvals')).anteroom_used_approvals;
+  assert.deepEqual(used, { [claims.jti]: claims.exp });
+  assert.equal((await verifier.verify(await s.signer.sign(update(), ALICE, { seconds: NOW }), ALICE)).approval, 'capacity');
 });

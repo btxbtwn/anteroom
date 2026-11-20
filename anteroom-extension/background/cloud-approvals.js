@@ -12,6 +12,7 @@
   // While it is empty, the Bridge refuses every command the web relays.
   const BRIDGE_APPROVAL_PUBLIC_KEY = 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAETSODemzvbkZtbvrN9kXt4ERklx7tQbbrqLkgX6QwByD/MFVX1TWzNeYgtsP5Gx0G4eLKXbCrCT1emOHbRIYq+A==';
   const USED_KEY = 'anteroom_used_approvals';
+  const BUCKETS_KEY = 'anteroom_approval_buckets';
   // Allowed clock difference between this computer and the server.
   const LEEWAY_S = 60;
   // The longest life an approval may claim; the server issues five minutes.
@@ -84,22 +85,36 @@
     function use(id, expires, bucket) {
       const result = tail.then(async () => {
         const used = (await api.storage.local.get(USED_KEY))[USED_KEY] || {};
+        const buckets = (await api.storage.local.get(BUCKETS_KEY))[BUCKETS_KEY] || {};
         const seconds = now() / 1000;
+        let migrated = false;
         let bucketCount = 0;
         for (const [nonce, raw] of Object.entries(used)) {
           const until = typeof raw === 'number' ? raw : raw?.exp;
-          const entryBucket = typeof raw === 'number' ? '' : (raw?.b || '');
+          const entryBucket = typeof raw === 'number' ? (buckets[nonce] || '') : (raw?.b || '');
           if (!Number.isFinite(until) || until + LEEWAY_S < seconds) {
             delete used[nonce];
-          } else if (entryBucket === bucket) {
-            bucketCount += 1;
+          } else {
+            if (typeof raw !== 'number') {
+              used[nonce] = until;
+              buckets[nonce] = entryBucket;
+              migrated = true;
+            }
+            if (entryBucket === bucket) bucketCount += 1;
           }
         }
+        for (const nonce of Object.keys(buckets)) {
+          if (!Object.hasOwn(used, nonce)) delete buckets[nonce];
+        }
+        // Keep the original numeric map readable by installed older versions.
+        // Normalize records from the object format before any early refusal too.
+        if (migrated) await api.storage.local.set({ [USED_KEY]: used, [BUCKETS_KEY]: buckets });
         if (Object.hasOwn(used, id)) return 'replayed';
         const cap = Number.isInteger(maxUsed) && maxUsed > 0 ? maxUsed : MAX_USED_APPROVALS;
         if (bucketCount >= cap) return 'capacity';
-        used[id] = { exp: expires, b: bucket };
-        await api.storage.local.set({ [USED_KEY]: used });
+        used[id] = expires;
+        buckets[id] = bucket;
+        await api.storage.local.set({ [USED_KEY]: used, [BUCKETS_KEY]: buckets });
         return null;
       });
       tail = result.catch(() => {});
@@ -136,7 +151,7 @@
       // Checked before the approval is used, so the page can still send the approved bytes.
       if (!await photosMatch(claims, photos)) return 'photos';
       const acct = String(accountId || '').toLowerCase();
-      const bucket = command.type === 'cancel' ? 'cancel' : acct ? `acct:${acct}` : '';
+      const bucket = command.type === 'job.cancel' ? 'cancel' : acct ? `acct:${acct}` : '';
       return await use(claims.jti, claims.exp, bucket);
     }
     return {
