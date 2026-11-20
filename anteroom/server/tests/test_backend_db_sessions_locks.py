@@ -772,3 +772,69 @@ def test_photo_edit_commit_cleanup_and_response_snapshot(tmp_path, monkeypatch, 
             assert response.edits == photo_edits.PhotoEdits(exposure=.5)
             assert saved.stored_filename == uploaded[0]
             assert not db.in_transaction()
+
+
+def test_photo_edit_releases_preexisting_read_transaction_before_waiting_on_lock(tmp_path, monkeypatch):
+    sessions = _make_sqlite_sessions(tmp_path)
+    monkeypatch.setattr("anteroom.services.photo_store._store", LocalPhotoStore(str(tmp_path)))
+    with sessions() as seed:
+        conv = ConversationRepo(seed).create(title="Boots")
+        data = _sample_jpeg()
+        (tmp_path / "original.jpg").write_bytes(data)
+        photo = listing_persistence.add_photo(
+            seed, conv.id, "original.jpg", "original.jpg", "image/jpeg", len(data),
+            checksum="f" * 64, width=240, height=160,
+        )
+        conv_id, photo_id = conv.id, photo.id
+
+    in_tx_at_lock_acquire = []
+    real_lock = photo_edits._photo_lock
+
+    with sessions() as db:
+        # Simulate hosted get_seller_db having already run a read query before yielding db.
+        assert db.get(Photo, photo_id) is not None
+        assert db.in_transaction()
+
+        def observed_lock(cid: str, pid: str):
+            in_tx_at_lock_acquire.append(db.in_transaction())
+            return real_lock(cid, pid)
+
+        monkeypatch.setattr(photo_edits, "_photo_lock", observed_lock)
+        saved = photo_edits.apply_photo_edit(
+            ConversationRepo(db), conv_id, photo_id, lambda _: photo_edits.PhotoEdits(exposure=0.25),
+        )
+        assert in_tx_at_lock_acquire == [False]
+        assert not db.in_transaction()
+        assert saved.stored_filename != "original.jpg"
+
+
+def test_photo_edit_noop_reset_returns_detached_snapshot_after_concurrent_delete(tmp_path, monkeypatch):
+    sessions = _make_sqlite_sessions(tmp_path)
+    monkeypatch.setattr("anteroom.services.photo_store._store", LocalPhotoStore(str(tmp_path)))
+    with sessions() as db:
+        conv = ConversationRepo(db).create(title="Scarf")
+        data = _sample_jpeg()
+        (tmp_path / "original.jpg").write_bytes(data)
+        photo = listing_persistence.add_photo(
+            db, conv.id, "original.jpg", "original.jpg", "image/jpeg", len(data),
+            checksum="1" * 64, width=240, height=160,
+        )
+        conv_id, photo_id = conv.id, photo.id
+
+        # No-op reset on an already-original photo takes the Phase 1 early return.
+        saved = photo_edits.apply_photo_edit(ConversationRepo(db), conv_id, photo_id, lambda _: None)
+        assert not db.in_transaction()
+
+        # Delete the row from another session; building the response must still succeed without querying.
+        with sessions() as other:
+            row = other.get(Photo, photo_id)
+            assert row is not None
+            other.delete(row)
+            other.commit()
+
+        from anteroom.routes.conversations import _photo_response
+        response = _photo_response(saved)
+        assert response.id == photo_id
+        assert response.original_filename == "original.jpg"
+        assert not db.in_transaction()
+

@@ -371,6 +371,11 @@ def read_preview_source(db, conv_id: str, photo_id: str) -> str:
         db.rollback()
 
 
+def _snapshot_photo(photo: Photo) -> Photo:
+    """Return a detached Photo copy with loaded column values so post-rollback reads never query."""
+    return Photo(**{attr.key: getattr(photo, attr.key) for attr in inspect(Photo).column_attrs})
+
+
 def apply_photo_edit(
     repo,
     conv_id: str,
@@ -382,6 +387,9 @@ def apply_photo_edit(
     from anteroom.services.service_context import current
 
     db = repo.db
+    # Hosted routes may enter with an open read transaction (e.g. get_seller_db settings load);
+    # release it before waiting on the per-photo lock so contention never holds a pooled connection.
+    end_read(db)
     with _photo_lock(conv_id, photo_id):
         # Phase 1: short unlocked read of current metadata, then release the DB transaction.
         try:
@@ -394,11 +402,12 @@ def apply_photo_edit(
             current_stored = photo.stored_filename
             current_source = photo.source_filename
             mime_type = photo.mime_type
+            noop_snapshot = _snapshot_photo(photo) if target is None and not current_source else None
         finally:
-            db.rollback()
+            end_read(db)
 
-        if target is None and not current_source:
-            return photo
+        if noop_snapshot is not None:
+            return noop_snapshot
 
         # Phase 2: Storage download + Pillow render + Storage upload outside any DB transaction.
         if target is None:
@@ -436,13 +445,12 @@ def apply_photo_edit(
             committed = True
             db.refresh(photo)
             # Keep the saved response snapshot while releasing the refresh transaction.
-            photo = Photo(**{attr.key: getattr(photo, attr.key) for attr in inspect(Photo).column_attrs})
+            photo = _snapshot_photo(photo)
             end_read(db)
         except BaseException:
-            if not committed:
-                db.rollback()
-                if uploaded_key:
-                    _cleanup_uploaded(uploaded_key)
+            db.rollback()
+            if not committed and uploaded_key:
+                _cleanup_uploaded(uploaded_key)
             raise
 
         # Phase 4: best-effort post-commit cleanup outside any DB transaction.
