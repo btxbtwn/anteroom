@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1054 — 2026-11-20
+
+- Rename remaining internal Vendoo Studio and Vendoo extension identifiers, files, and local storage paths to Anteroom while preserving existing local databases, Keychain secrets, browser settings, and Chrome extension installs.
+
 ## 0.1.1053 — 2026-11-20
 
 - Show the item's title instead of "Untitled item" in the Marketplace activity tray on hosted accounts.

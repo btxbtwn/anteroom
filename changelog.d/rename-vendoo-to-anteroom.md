@@ -1,1 +1,0 @@
-- Rename remaining internal Vendoo Studio and Vendoo extension identifiers, files, and local storage paths to Anteroom while preserving existing local databases, Keychain secrets, browser settings, and Chrome extension installs.
