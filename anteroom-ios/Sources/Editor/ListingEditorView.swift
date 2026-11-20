@@ -13,6 +13,7 @@ struct ListingEditorView: View {
     @State private var assistantPrompt: String?
     @State private var showingHistory = false
     @State private var showingTemplates = false
+    @State private var showingDraftRecovery = false
     @State private var showingListEverywhere = false
     @State private var showingMarketplaces = false
     @State private var tab = "general"
@@ -38,7 +39,12 @@ struct ListingEditorView: View {
     var body: some View {
         editor
             .alert("Unsaved changes", isPresented: draftNoticeShown) {
-                Button("OK", role: .cancel) {}
+                if model.recoveryDraft != nil {
+                    Button("Review kept edits") { showingDraftRecovery = true }
+                    Button("Later", role: .cancel) {}
+                } else {
+                    Button("OK", role: .cancel) {}
+                }
             } message: {
                 Text(model.draftNotice ?? "")
             }
@@ -55,9 +61,18 @@ struct ListingEditorView: View {
                 model.stashEdits()
                 onLeave(model.hasChanges)
             }
-            // Back on screen with the edits still in memory (from a tab switch or
-            // a pushed picker): the copy on disk is no longer needed.
-            .onAppear { if model.hasLoaded { model.forgetStash() } }
+            .sheet(isPresented: $showingDraftRecovery) {
+                if let draft = model.recoveryDraft {
+                    DraftRecoveryView(current: model.form, draft: draft, useKeptCopy: {
+                        model.recoverKeptDraft()
+                        showingDraftRecovery = false
+                    }, discardKeptCopy: {
+                        model.discardKeptDraft()
+                        showingDraftRecovery = false
+                    }, nextKeptCopy: model.recoveryDrafts.count > 1 ? { model.nextKeptDraft() } : nil,
+                                      canUseKeptCopy: model.canRecoverKeptDraft)
+                }
+            }
     }
 
     private var editor: some View {
@@ -65,6 +80,14 @@ struct ListingEditorView: View {
         return ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
+                if model.recoveryDraft != nil {
+                    WorkspaceSection("Kept unsaved edits") {
+                        Text(model.recoveryDrafts.count == 1
+                             ? "An earlier copy of your edits is still on this phone."
+                             : "\(model.recoveryDrafts.count) earlier copies of your edits are still on this phone.")
+                        Button("Review kept edits") { showingDraftRecovery = true }
+                    }
+                }
                 if let loadError = model.loadError {
                     WorkspaceSection("Couldn't load listing") {
                         Text("Your saved details weren't changed. Try again in a moment.")

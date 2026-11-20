@@ -2,6 +2,93 @@ import XCTest
 @testable import Anteroom
 
 final class EditorDraftTests: XCTestCase {
+    func testLegacyUnversionedCopyRemainsRecoverableWithoutAutomaticRestoration() throws {
+        var kept = ListingEditorModel.Form()
+        kept.fields.title = "Unsaved title"
+        kept.price = "19"
+        kept.sellerInputs.sku = "Unsaved SKU"
+        let draft = EditorDraft(listingID: "recovery", revisionID: nil, baselineInputs: SellerInputs(),
+                                form: kept, pending: ["ebay.title": .string("Kept eBay title")], savedAt: .now)
+        let decoded = try JSONDecoder().decode(EditorDraft.self, from: JSONEncoder().encode(draft))
+        var current = ListingEditorModel.Form()
+        current.fields.title = "Newer server title"
+        current.sellerInputs = SellerInputs(notes: #"{"future":true}"#)
+        XCTAssertFalse(decoded.restores(revisionID: nil, inputs: current.sellerInputs, currentForm: current))
+        let recovered = decoded.recoveredForm(onto: current)
+        XCTAssertEqual(recovered.fields.title, "Unsaved title")
+        XCTAssertEqual(recovered.price, "19")
+        XCTAssertEqual(recovered.sellerInputs.sku, "Unsaved SKU")
+        XCTAssertTrue(try recovered.sellerInputs.encodedNotes().contains("future"))
+        XCTAssertEqual(decoded.pending["ebay.title"], .string("Kept eBay title"))
+        XCTAssertEqual(current.fields.title, "Newer server title")
+    }
+
+    func testUnversionedDraftRejectsChangedListingButAllowsOpaqueMetadata() {
+        var baseline = ListingEditorModel.Form()
+        baseline.fields.title = "Shirt"
+        var edited = baseline
+        edited.price = "20"
+        let draft = EditorDraft(listingID: "unversioned", revisionID: nil, baselineInputs: baseline.sellerInputs,
+                                form: edited, pending: [:], savedAt: .now, baselineForm: baseline)
+        var fresh = baseline
+        fresh.sellerInputs = SellerInputs(notes: #"{"future":true}"#)
+        XCTAssertTrue(draft.restores(revisionID: nil, inputs: fresh.sellerInputs, currentForm: fresh))
+        fresh.fields.title = "Linen Shirt"
+        XCTAssertFalse(draft.restores(revisionID: nil, inputs: fresh.sellerInputs, currentForm: fresh))
+        let legacy = EditorDraft(listingID: "legacy", revisionID: nil, baselineInputs: baseline.sellerInputs,
+                                 form: edited, pending: [:], savedAt: .now)
+        XCTAssertFalse(legacy.restores(revisionID: nil, inputs: baseline.sellerInputs, currentForm: baseline))
+    }
+
+    func testLegacyDraftRestoresUnsavedEditsWithoutSizeProperties() throws {
+        let baseline = SellerInputs(notes: #"{"size":"0","future":true}"#)
+        // Frozen synthetic payload from the pre-size draft schema; do not regenerate with today's encoder.
+        let raw = #"""
+        {
+          "listingID":"legacy","revisionID":"r1","pending":{},"savedAt":800000000,
+          "baselineInputs":{
+            "originalNotes":"{\"size\":\"0\",\"future\":true}","sku":"","sellerNotes":"",
+            "knownFlaws":"","descriptionMeasurements":"","cog":"","packageDimensions":"",
+            "vendooLabels":"","garment":"top","measurements":{}
+          },
+          "form":{
+            "sellerInputs":{
+              "originalNotes":"{\"size\":\"0\",\"future\":true}","sku":"Unsaved SKU","sellerNotes":"",
+              "knownFlaws":"","descriptionMeasurements":"","cog":"","packageDimensions":"",
+              "vendooLabels":"","garment":"top","measurements":{}
+            },
+            "fields":{
+              "title":"Unsaved title","description":"","brand":"","condition":"","primaryColor":"",
+              "secondaryColor":"","size":"","sku":"","labels":[],"zipCode":"","categoryPath":"",
+              "department":"","packageDimensionsIn":""
+            },
+            "price":"","cost":"","quantity":"","weightOz":"","labels":""
+          }
+        }
+        """#
+        let restored = try JSONDecoder().decode(EditorDraft.self, from: Data(raw.utf8))
+        XCTAssertTrue(restored.restores(revisionID: "r1", inputs: baseline))
+        XCTAssertEqual(restored.form.fields.title, "Unsaved title")
+        XCTAssertEqual(restored.form.sellerInputs.sku, "Unsaved SKU")
+        XCTAssertEqual(restored.form.sellerInputs.size, "0")
+    }
+
+    func testNotesSaveBaselineRestoresLaterUnsavedListingEdits() {
+        var savedInputs = SellerInputs()
+        savedInputs.sku = "A"
+        var form = ListingEditorModel.Form()
+        form.fields.title = "Later unsaved title"
+        form.sellerInputs = savedInputs
+        let draft = EditorDraft(listingID: "saved-notes", revisionID: "r1", baselineInputs: savedInputs,
+                                form: form, pending: [:], savedAt: .now)
+        let freshInputs = SellerInputs(notes: #"{"sku":"A"}"#)
+        XCTAssertTrue(draft.restores(revisionID: "r1", inputs: freshInputs))
+        XCTAssertEqual(draft.form.sellerInputs.restoringNotesBaseline(from: freshInputs), freshInputs,
+                       "Listing-only edits keep the current notes baseline, avoiding phantom changes and empty PATCHes")
+        XCTAssertFalse(draft.restores(revisionID: "r2", inputs: freshInputs))
+        XCTAssertFalse(draft.restores(revisionID: "r1", inputs: SellerInputs(notes: #"{"sku":"B"}"#)))
+    }
+
     func testDraftRoundTripsAndRestoresOnlyOnTheSameVersion() throws {
         var form = ListingEditorModel.Form()
         form.fields.title = "Blue linen shirt"

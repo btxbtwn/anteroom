@@ -179,7 +179,9 @@ final class InventoryModel {
     /// adding a photo, a note, a detail or a message. Anything unclear keeps it,
     /// and so do photos still uploading.
     func discardIfUntouched(_ id: String) async {
-        guard EditorDraftStore.load(id) == nil, !PhotoUploadTracker.shared.isUploading(id) else { return }
+        guard EditorDraftStore.load(id) == nil,
+              EditorDraftStore.recoveryCopies(id)?.isEmpty == true,
+              !PhotoUploadTracker.shared.isUploading(id) else { return }
         do {
             guard try await api.discardBlankListing(id) else { return }
             changeListings { rows in rows.removeAll { $0.id == id } }

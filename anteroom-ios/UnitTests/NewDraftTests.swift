@@ -5,6 +5,21 @@ import XCTest
 /// a draft with anything in it is never deleted.
 @MainActor
 final class NewDraftTests: XCTestCase {
+    func testKeptRecoveryCopyPreventsBlankListingCleanup() async {
+        let id = "kept-recovery-\(UUID().uuidString)"
+        var form = ListingEditorModel.Form()
+        form.fields.title = "Unsaved seller title"
+        let draft = EditorDraft(listingID: id, revisionID: nil, baselineInputs: SellerInputs(),
+                                form: form, pending: [:], savedAt: .now)
+        EditorDraftStore.keepForRecovery(draft)
+        defer { EditorDraftStore.removeRecovery(draft) }
+        StubProtocol.answer(.init(status: 200, body: #"{"discarded":true}"#))
+        let model = InventoryModel(api: StubSignIn().api())
+        await model.discardIfUntouched(id)
+        XCTAssertTrue(StubProtocol.requests.isEmpty)
+        XCTAssertEqual(EditorDraftStore.recoveryCopies(id), [draft])
+    }
+
     func testUnsavedLocalEditsSendNoDiscardRequest() async throws {
         let id = "unsaved-\(UUID().uuidString)"
         var form = ListingEditorModel.Form()
