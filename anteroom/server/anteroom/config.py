@@ -335,11 +335,10 @@ def _execute_legacy_database_move_plan(
         if size != step.size or mtime_ns != step.mtime_ns:
             _refuse_ambiguous_legacy_database_adoption()
         source.rename(destination)
-    # Renames must be durable before the marker can go; keep it if sync fails.
-    try:
-        _fsync_directory(root)
-    except OSError:
-        return
+    # Renames must be durable before the marker can go. Propagate sync failure so
+    # startup does not open the database over an unsynced rename set; the marker
+    # stays for a later retry.
+    _fsync_directory(root)
     if not _legacy_database_names_present(root):
         _abandon_legacy_database_adoption(marker)
 

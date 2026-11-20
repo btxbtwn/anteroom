@@ -180,6 +180,31 @@ class ConfigPathTest(unittest.TestCase):
             self.assertFalse((data / config.LEGACY_DATABASE_ADOPTION_MARKER).exists())
             self.assertEqual(_read_sqlite_names(target), ["row-one"])
 
+    def test_post_rename_dir_sync_failure_keeps_marker_for_retry(self):
+        """If directory sync fails after renames, keep the marker and block open; retry works."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            legacy = data / "vendoo_studio.db"
+            _write_sqlite_with_committed_row(legacy, "row-one")
+            real_fsync = config._fsync_directory
+
+            def fsync_fail_after_rename(directory: Path) -> None:
+                if (data / "anteroom.db").exists() and not legacy.exists():
+                    raise OSError("injected directory sync failure")
+                real_fsync(directory)
+
+            os.environ.pop("ANTEROOM_DATABASE_URL", None)
+            with patch.object(config, "_fsync_directory", side_effect=fsync_fail_after_rename):
+                with self.assertRaises(OSError):
+                    config.adopt_legacy_database(data)
+            marker = data / config.LEGACY_DATABASE_ADOPTION_MARKER
+            self.assertTrue(marker.is_file())
+            self.assertTrue((data / "anteroom.db").is_file())
+            self.assertFalse(legacy.exists())
+            config.adopt_legacy_database(data)
+            self.assertFalse(marker.exists())
+            self.assertEqual(_read_sqlite_names(data / "anteroom.db"), ["row-one"])
+
     def test_leftover_tmp_marker_does_not_block_fresh_adoption_with_wal(self):
         """A partial .tmp marker with no published marker must not stop full adoption."""
         with tempfile.TemporaryDirectory() as tmp:
