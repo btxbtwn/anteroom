@@ -78,6 +78,38 @@ def test_only_the_trusted_login_lists_sellers_whose_sourcing_refresh_is_due(clou
         db.execute(text("SELECT * FROM anteroom_private.due_sourcing_owners(5, ARRAY['zip'], '', '')")).all()
 
 
+def test_the_due_check_reads_a_large_sourcing_state_once(cloud):  # noqa: F811
+    """A seller's sourcing state holds megabytes of resale data. The timer's check
+    runs every 15 minutes on the shared database: it must parse that state once,
+    not once per field it compares (which took 11-35 s of database CPU in production)."""
+    import time
+
+    _client, engine = cloud
+    owner = str(uuid.uuid4())
+    save_sourcing(owner, age=timedelta(hours=1))
+    with use(for_seller(owner)):
+        state = box_scout.read_state()
+        state['resale'] = {f'item {n}': {'prices': list(range(40)), 'title': 'x' * 60} for n in range(4_000)}
+        box_scout._write_state(state)
+
+    def timed(statement, **params):
+        with engine.begin() as connection:
+            start = time.perf_counter()
+            connection.execute(text(statement), params).all()
+            return time.perf_counter() - start
+
+    parse = min(timed("SELECT value::jsonb FROM user_preferences WHERE key = 'sourcing' AND user_id = :owner",
+                      owner=owner) for _ in range(3))
+    def due_check():
+        start = time.perf_counter()
+        hosted_sourcing_scheduler.due_owners(engine)
+        return time.perf_counter() - start
+
+    check = min(due_check() for _ in range(3))
+    assert hosted_sourcing_scheduler.due_owners(engine) == []
+    assert check < parse * 6, f'due check {check:.3f}s, one parse {parse:.3f}s'
+
+
 def test_web_timer_refreshes_each_due_seller_in_their_own_context(cloud, monkeypatch):  # noqa: F811
     _client, engine = cloud
     broken, carol = str(uuid.uuid4()), str(uuid.uuid4())
