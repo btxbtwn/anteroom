@@ -14,8 +14,10 @@ permissions:
   actions: read
 
 jobs:
-  submit:
-    name: Package and submit
+  # Check whether the Bridge changed before joining the submission concurrency
+  # group so server-only runs cannot cancel a pending extension release.
+  check:
+    name: Check Bridge changes
     if: >-
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'workflow_run' &&
@@ -23,14 +25,10 @@ jobs:
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.head_repository.full_name == github.repository)
-    # One submission at a time, never cancelled midway.
-    concurrency:
-      group: chrome-web-store
-      cancel-in-progress: false
     runs-on: ubuntu-latest
-    # Secrets live in this environment, which only main may use.
-    environment: production
-    timeout-minutes: 15
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.changed.outputs.run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -50,22 +48,38 @@ jobs:
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
 
+  submit:
+    name: Package and submit
+    needs: check
+    if: needs.check.outputs.run == 'true'
+    # One submission at a time, never cancelled midway.
+    concurrency:
+      group: chrome-web-store
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    # Secrets live in this environment, which only main may use.
+    environment: production
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
       - name: Require successful CI for the exact main commit
-        if: steps.changed.outputs.run == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: python3 .github/scripts/chrome-web-store.py verify-ci --repo "$GITHUB_REPOSITORY" --sha "$TARGET_SHA"
 
       - name: Package the Bridge
-        if: steps.changed.outputs.run == 'true'
         id: package
         run: |
           version=$(python3 .github/scripts/chrome-web-store.py package --out "$RUNNER_TEMP/anteroom-bridge.zip")
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Keep the package
-        if: steps.changed.outputs.run == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: anteroom-bridge-${{ steps.package.outputs.version }}
@@ -73,7 +87,6 @@ jobs:
           retention-days: 30
 
       - name: Submit to the Chrome Web Store
-        if: steps.changed.outputs.run == 'true'
         env:
           CHROME_WEB_STORE_SERVICE_ACCOUNT: ${{ secrets.CHROME_WEB_STORE_SERVICE_ACCOUNT }}
           CHROME_WEB_STORE_PUBLISHER_ID: ${{ secrets.CHROME_WEB_STORE_PUBLISHER_ID }}

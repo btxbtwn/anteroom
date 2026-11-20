@@ -261,7 +261,9 @@ def test_workflow_checks_out_and_gates_the_same_commit_before_credentials():
     assert "TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}" in workflow
     assert workflow.index("verify-ci --repo") < workflow.index("CHROME_WEB_STORE_SERVICE_ACCOUNT:")
     assert "chrome-web-store.py changed --sha" in workflow
-    assert "steps.changed.outputs.run == 'true'" in workflow
+    assert "needs.check.outputs.run == 'true'" in workflow
+    # Server-only runs must filter out before joining the submit concurrency group.
+    assert workflow.index("chrome-web-store.py changed --sha") < workflow.index("group: chrome-web-store")
 
 
 def test_extension_changed_detects_only_packaged_extension_edits(tmp_path):
@@ -269,6 +271,7 @@ def test_extension_changed_detects_only_packaged_extension_edits(tmp_path):
     (repo / "anteroom-extension" / "tests").mkdir(parents=True)
     (repo / "anteroom").mkdir()
     (repo / "anteroom-extension" / "manifest.json").write_text(json.dumps({"version": "1.0.0"}))
+    (repo / "anteroom-extension" / "legacy.js").write_text("console.log('legacy');\n")
     (repo / "anteroom-extension" / "README.md").write_text("docs\n")
     (repo / "anteroom" / "app.py").write_text("x = 1\n")
 
@@ -278,6 +281,7 @@ def test_extension_changed_detects_only_packaged_extension_edits(tmp_path):
     git("init", "-q")
     git("config", "user.email", "t@example.com")
     git("config", "user.name", "t")
+    git("config", "commit.gpgsign", "false")
     git("add", ".")
     git("commit", "-q", "-m", "initial")
     root_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
@@ -292,6 +296,12 @@ def test_extension_changed_detects_only_packaged_extension_edits(tmp_path):
     git("commit", "-qam", "extension readme only")
     docs_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
     assert store.extension_changed(docs_sha, repo) is False
+
+    # Moving a packaged file into an excluded folder removes it from the ZIP and must trigger a submit.
+    git("mv", "anteroom-extension/legacy.js", "anteroom-extension/tests/legacy.js")
+    git("commit", "-qm", "move packaged file into tests")
+    move_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+    assert store.extension_changed(move_sha, repo) is True
 
     (repo / "anteroom-extension" / "manifest.json").write_text(json.dumps({"version": "1.0.1"}))
     git("commit", "-qam", "bump extension")

@@ -74,7 +74,7 @@ def extension_changed(sha: str, root: Path = ROOT) -> bool:
                             capture_output=True, text=True)
     if parent.returncode != 0:
         return True
-    diff = subprocess.run(["git", "diff", "--name-only", "-z", f"{sha}^1", sha, "--", EXTENSION],
+    diff = subprocess.run(["git", "diff", "--name-only", "--no-renames", "-z", f"{sha}^1", sha, "--", EXTENSION],
                           cwd=root, check=True, capture_output=True).stdout.decode().split("\0")
     return any(_is_packaged(path.removeprefix(EXTENSION + "/")) for path in filter(None, diff))
 
