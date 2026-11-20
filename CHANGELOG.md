@@ -6,6 +6,23 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1046 — 2026-11-20
+
+- Bulk upload in the Mac app and on the web can read each item's size from the size tag in its photos with **Read size tags**. It fills only blank sizes, keeps a size you typed, and asks you to check a tag that is missing, unreadable or shows two sizes.
+- The size you enter in bulk upload in the Mac app and on the web is now the listing's Size, not a line in its notes.
+- Notes for measurements and sizes read from photos no longer name the AI provider or model.
+- Keep the confirmed tag size consistent with marketplace size choices and the listing title.
+- Keep a saved Mercari size when regenerating from a different tag size.
+- Read clothing size tags from photos when making bulk listings on iPhone, with editable sizes and checks for unclear tags.
+- See and edit a saved tag size in the iPhone listing editor before generating a draft.
+- Keep saved iPhone draft edits when updating, save cleared size and item details, and leave unchanged tag sizes alone.
+- Check a photo-read size again after removing a photo, and keep measurement reading notes accurate when values are already filled.
+- Keep size-tag reading results when reordering photos or choosing a different cover.
+- Restore later unsaved edits after saving notes, and preserve unresolved size warnings when a reread is interrupted.
+- Keep size-tag photo selection stable when regrouping photos, and avoid restoring older listing details over changes saved elsewhere.
+- Keep size mismatch warnings when rereading finds no tag or fails; a new reading or a manual size edit can resolve them.
+- Keep older unsaved iPhone edits available for review when they cannot be restored safely, with a choice to use or discard the kept copy.
+
 ## 0.1.1045 — 2026-11-20
 
 - Keep your saved Depop package size when preparing a listing, even when its saved weight suggests a different package.
