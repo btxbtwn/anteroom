@@ -161,6 +161,26 @@ class ConfigPathTest(unittest.TestCase):
             self.assertFalse((data / config.LEGACY_DATABASE_ADOPTION_MARKER).exists())
             self.assertEqual(_read_sqlite_names(legacy), ["legacy-row"])
 
+    def test_fresh_adoption_rejects_when_both_basename_wals_exist(self):
+        """Legacy primary + both WALs, no target primary: do not rename anything."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            legacy = data / "vendoo_studio.db"
+            _write_sqlite_with_committed_row(legacy, "legacy-row")
+            legacy_wal = data / "vendoo_studio.db-wal"
+            if not legacy_wal.is_file():
+                legacy_wal.write_bytes(b"legacy-wal")
+            target_wal = data / "anteroom.db-wal"
+            target_wal.write_bytes(b"foreign-wal")
+            os.environ.pop("ANTEROOM_DATABASE_URL", None)
+            config.adopt_legacy_database(data)
+            self.assertTrue(legacy.is_file())
+            self.assertFalse((data / "anteroom.db").exists())
+            self.assertTrue(legacy_wal.is_file())
+            self.assertEqual(target_wal.read_bytes(), b"foreign-wal")
+            self.assertFalse((data / config.LEGACY_DATABASE_ADOPTION_MARKER).exists())
+            self.assertEqual(_read_sqlite_names(legacy), ["legacy-row"])
+
     def test_marker_proven_interruption_finishes_sidecars_and_keeps_rows(self):
         """Crash after marker + main rename: finish sidecars; committed rows survive."""
         with tempfile.TemporaryDirectory() as tmp:
