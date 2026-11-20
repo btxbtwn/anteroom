@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1039 — 2026-11-20
+
+- When you add several folders at once and one of them can't be uploaded (for example, it has more than 20 photos), the other folders are still added and generated, and the message names the folder that failed.
+
 ## 0.1.1038 — 2026-11-20
 
 - Offer automations wait a day before checking a listing again when Depop can't find it at its saved link or Mercari won't allow an offer to likers on it, instead of retrying it every 15 minutes. A newer like, or a new price on the Mercari listing, checks it again right away, and refusals across most of a rule's listings keep being checked.
