@@ -691,12 +691,37 @@ def _validate_compare_diff(
                 raise ValueError("GitHub compare file entry has an invalid previous_filename.")
             compare_files.add(previous)
     local_file_set = set(local_files)
-    if len(local_file_set) <= 300:
+    if len(files) < 300 or compare_files == local_file_set:
         if len(files) > 300 or compare_files != local_file_set:
             raise ValueError("GitHub compare changed file set does not match local base..tip diff.")
     else:
         if len(files) != 300 or not compare_files <= local_file_set:
             raise ValueError("GitHub compare truncated file set is inconsistent with local base..tip diff.")
+
+
+class EvidenceReadError(RuntimeError):
+    """A bounded API command could not supply evidence; retry on the next poll."""
+
+
+def _compare_pages(fetch, before: str, tip: str, commit_count: int) -> dict:
+    """Read ordered commit pages; GitHub supplies file evidence only on page 1."""
+    combined = None
+    commits = []
+    for page in range(1, (commit_count + 99) // 100 + 1):
+        data = fetch(f"compare/{before}...{tip}?per_page=100&page={page}")
+        if not isinstance(data, dict) or not isinstance(data.get("commits"), list):
+            raise ValueError("Invalid GitHub compare page.")
+        if combined is None:
+            combined = dict(data)
+        elif any(data.get(key) != combined.get(key) for key in (
+            "status", "behind_by", "ahead_by", "total_commits", "base_commit", "merge_base_commit"
+        )):
+            raise ValueError("GitHub compare metadata changed between pages.")
+        if len(data["commits"]) != min(100, commit_count - len(commits)):
+            raise ValueError("GitHub compare commit page is truncated or excessive.")
+        commits.extend(data["commits"])
+    combined["commits"] = commits
+    return combined
 
 
 def _validate_push_jobs(
@@ -776,7 +801,7 @@ def _evaluate_tip_push(
             raise ValueError(f"Push span {before[:8]}..{tip[:8]} is not contiguous on main first-parent history.")
         local_raw = run_git("diff", "--no-renames", "--name-only", "-z", before, tip)
         local_files = sorted({path for path in local_raw.split("\0") if path})
-        compare = fetch(f"compare/{before}...{tip}")
+        compare = _compare_pages(fetch, before, tip, len(push_span))
         _validate_compare_diff(
             compare,
             before=before,
@@ -808,19 +833,30 @@ def _evaluate_tip_push(
         _validate_push_jobs(jobs, run_id=run_id, attempt=attempt, tip=tip, required_jobs=required_jobs)
         # Re-read the run after reading attempt jobs to reject TOCTOU re-runs.
         latest_run = fetch(f"actions/runs/{run_id}")
-        _, _, _, latest_status, latest_conclusion = _validate_push_run(
+        _, latest_attempt, _, latest_status, latest_conclusion = _validate_push_run(
             latest_run,
             repo=repo,
             tip=tip,
             expected_tree=tip_tree,
             expected_run_id=run_id,
-            expected_attempt=attempt,
             expected_check_suite_id=check_suite_id,
         )
+        if latest_attempt > attempt:
+            # Never reuse old jobs for a replacement attempt, even if it completed.
+            # The next bounded poll reads and verifies that attempt's own inventory.
+            return {
+                "status": "waiting",
+                "covered": covered_intermediates,
+                "detail": f"push CI run {run_id} changed to attempt {latest_attempt}; awaiting fresh evidence",
+            }
+        if latest_attempt != attempt:
+            raise ValueError("CI run attempt moved backwards during verification.")
         if latest_status != "completed" or latest_conclusion != "success":
             raise ValueError(
                 f"Covering push run {run_id} changed state to status={latest_status!r}, conclusion={latest_conclusion!r}."
             )
+    except EvidenceReadError as error:
+        return {"status": "waiting", "covered": covered_intermediates, "detail": str(error)}
     except (KeyError, ValueError, TypeError, RuntimeError, OSError, subprocess.SubprocessError, json.JSONDecodeError) as error:
         return {
             "status": "failed",
@@ -883,9 +919,13 @@ def verify_push_coverage(
 
     def default_fetch(path: str):
         limit = MAX_COMPARE_BYTES if path.startswith("compare/") else recovery_evidence.MAX_ARCHIVE
-        return _parse_strict_json(
-            recovery_evidence.read_command(["gh", "api", "--method", "GET", f"repos/{repo}/{path}"], limit=limit)
-        )
+        try:
+            raw = recovery_evidence.read_command(
+                ["gh", "api", "--method", "GET", f"repos/{repo}/{path}"], limit=limit
+            )
+        except (ValueError, OSError, subprocess.SubprocessError) as error:
+            raise EvidenceReadError("Could not read push CI evidence; awaiting next poll.") from error
+        return _parse_strict_json(raw)
 
     api_fetch = fetch or default_fetch
     tip_cache = {} if cache is None else cache
@@ -950,6 +990,7 @@ def main() -> int:
     deadline = time.monotonic() + args.timeout
     missing_since: dict[str, float] = {}
     superseded_historical: str | None = None
+    covered_commits: set[str] = set()
     while True:
         waiting = []
         coverage_cache: dict[str, dict] = {}
@@ -993,6 +1034,7 @@ def main() -> int:
                     cache=coverage_cache,
                 )
                 if cov_state == "covered":
+                    covered_commits.add(sha)
                     missing_since.pop(sha, None)
                     print(f"CI on {sha[:8]} is covered by {cov_detail}.")
                     continue
@@ -1017,6 +1059,21 @@ def main() -> int:
             else:
                 missing_since.pop(sha, None)
             waiting.append((sha, status))
+        if not waiting and covered_commits:
+            # Discard all earlier evidence before authorizing success. This also
+            # catches reruns started while later direct checks were being read.
+            final_cache: dict[str, dict] = {}
+            for covered_sha in all_checked:
+                if covered_sha not in covered_commits:
+                    continue
+                state, detail = verify_push_coverage(
+                    args.repo, covered_sha, all_checked, production, head_sha, cache=final_cache
+                )
+                if state == "failed":
+                    print(f"::error::Final push coverage verification failed: {detail}")
+                    return 1
+                if state != "covered":
+                    waiting.append((covered_sha, f"awaiting fresh coverage ({detail})"))
         if not waiting:
             if superseded_historical is None:
                 _write_github_output("recovery_checkpoint", "false")
@@ -1046,7 +1103,9 @@ def main() -> int:
                 f"confirmed at {report['live_base_version']}). Every other commit through {head_sha[:8]} passed push CI."
             )
             return 0
-        pending = [sha for sha, _ in waiting]
+        # Recheck accepted coverage on every poll, including the final poll.
+        # Each fresh evaluation verifies the current covering run and attempt.
+        pending = [sha for sha in all_checked if sha in covered_commits or any(sha == item[0] for item in waiting)]
         if time.monotonic() > deadline:
             print(f"::error::CI on {', '.join(s[:8] for s in pending)} did not finish within {args.timeout // 60} minutes.")
             return 1

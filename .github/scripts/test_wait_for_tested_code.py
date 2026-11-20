@@ -927,7 +927,7 @@ class WaitForTestedCodePushCoverageTests(unittest.TestCase):
             return copy.deepcopy(self.run if self.latest_run is None else self.latest_run)
         if path == f"check-suites/{self.check_suite_id}":
             return copy.deepcopy(self.suite)
-        if path == f"compare/{self.prod}...{self.tip}":
+        if path in (f"compare/{self.prod}...{self.tip}", f"compare/{self.prod}...{self.tip}?per_page=100&page=1"):
             return copy.deepcopy(self.compare)
         if path.startswith(f"actions/runs/{self.run_id}/attempts/{self.attempt}/jobs?"):
             return {"total_count": len(self.jobs), "jobs": copy.deepcopy(self.jobs)}
@@ -991,7 +991,7 @@ class WaitForTestedCodePushCoverageTests(unittest.TestCase):
             self.repo, self.c1, self.all_checked, self.prod, self.release,
             fetch=self.fake_fetch, git_fn=self.fake_git,
         )
-        self.assertEqual(state, "failed")
+        self.assertEqual(state, "waiting")
         self.assertIn("attempt", detail)
 
     def test_untrusted_push_provenance_fails_closed(self):
@@ -1243,6 +1243,7 @@ class WaitForTestedCodePushCoverageTests(unittest.TestCase):
             return ("waiting", "push CI in_progress") if polls["n"] == 0 else ("covered", "verified push CI")
 
         with (
+            patch.object(self.gate, "_write_github_output") as write_output,
             patch.object(self.gate, "git", side_effect=self.fake_git),
             patch.object(self.gate, "production_commit", return_value=self.prod),
             patch.object(self.gate, "commits_to_check", return_value=(self.all_checked, "span")),
@@ -1252,6 +1253,8 @@ class WaitForTestedCodePushCoverageTests(unittest.TestCase):
             patch.object(sys, "argv", ["gate", "--repo", self.repo, "--head", self.release, "--timeout", "60", "--interval", "0"]),
         ):
             self.assertEqual(self.gate.main(), 0)
+
+            write_output.assert_called_once_with("recovery_checkpoint", "false")
 
         # 3. Failed coverage evidence exits 1 immediately.
         with (
@@ -1266,6 +1269,153 @@ class WaitForTestedCodePushCoverageTests(unittest.TestCase):
             patch.object(sys, "argv", ["gate", "--repo", self.repo, "--head", self.release, "--timeout", "60"]),
         ):
             self.assertEqual(self.gate.main(), 1)
+
+    def test_compare_rename_entry_limit_and_truncated_subset(self):
+        paths = [f"docs/{i}.md" for i in range(602)]
+        self.compare["files"] = [
+            {"filename": paths[i], "previous_filename": paths[i + 1]}
+            for i in range(0, 302, 2)
+        ]
+        def validate(local):
+            self.gate._validate_compare_diff(
+                self.compare, before=self.prod, tip=self.tip,
+                before_tree=self.prod_tree, tip_tree=self.tip_tree,
+                push_span=self.push_span, local_files=local,
+            )
+        validate(paths[:302])  # 151 API entries represent 302 local paths.
+        with self.assertRaises(ValueError):
+            validate(paths[:303])  # Below cap, partial evidence is invalid.
+        self.compare["files"] = [{"filename": path} for path in paths[:300]]
+        validate(paths)  # At the cap, local Git supplies the complete selector input.
+        self.compare["files"][0]["filename"] = "unexpected.md"
+        with self.assertRaises(ValueError):
+            validate(paths)
+
+    def test_compare_paginates_251_commits_and_preserves_first_page_files(self):
+        span = [f"{i:040x}" for i in range(10, 260)] + [self.tip]
+        commits = [{"sha": sha, "commit": {"tree": {"sha": self.tip_tree}}} for sha in span]
+        self.compare.update(ahead_by=251, total_commits=251)
+        calls = []
+        def fetch(path):
+            calls.append(path)
+            page = int(path.rsplit("=", 1)[1])
+            result = {**self.compare, "commits": commits[(page - 1) * 100:page * 100]}
+            if page > 1:
+                result.pop("files")
+            return result
+        combined = self.gate._compare_pages(fetch, self.prod, self.tip, len(span))
+        self.assertEqual(len(calls), 3)
+        self.gate._validate_compare_diff(
+            combined, before=self.prod, tip=self.tip,
+            before_tree=self.prod_tree, tip_tree=self.tip_tree,
+            push_span=span, local_files=self.changed_files,
+        )
+        combined["commits"][100] = combined["commits"][99]
+        with self.assertRaises(ValueError):
+            self.gate._validate_compare_diff(
+                combined, before=self.prod, tip=self.tip,
+                before_tree=self.prod_tree, tip_tree=self.tip_tree,
+                push_span=span, local_files=self.changed_files,
+            )
+        with self.assertRaises(ValueError):
+            self.gate._compare_pages(lambda _: self.compare, self.prod, self.tip, 251)
+
+    def test_new_completed_attempt_requires_its_own_jobs(self):
+        self.latest_run = {**self.run, "run_attempt": 2}
+        state, _ = self.gate.verify_push_coverage(
+            self.repo, self.c1, self.all_checked, self.prod, self.release,
+            fetch=self.fake_fetch, git_fn=self.fake_git,
+        )
+        self.assertEqual(state, "waiting")
+        self.run = self.latest_run
+        self.attempt = 2
+        for job in self.jobs:
+            job["run_attempt"] = 2
+        state, _ = self.gate.verify_push_coverage(
+            self.repo, self.c1, self.all_checked, self.prod, self.release,
+            fetch=self.fake_fetch, git_fn=self.fake_git,
+        )
+        self.assertEqual(state, "covered")
+        self.jobs[0]["conclusion"] = "failure"
+        state, _ = self.gate.verify_push_coverage(
+            self.repo, self.c1, self.all_checked, self.prod, self.release,
+            fetch=self.fake_fetch, git_fn=self.fake_git,
+        )
+        self.assertEqual(state, "failed")
+
+    def test_reread_rejects_changed_run_or_suite(self):
+        for field, value in (("id", self.run_id + 1), ("check_suite_id", self.check_suite_id + 1)):
+            with self.subTest(field=field):
+                self.latest_run = {**self.run, field: value, "run_attempt": 2}
+                state, _ = self.gate.verify_push_coverage(
+                    self.repo, self.c1, self.all_checked, self.prod, self.release,
+                    fetch=self.fake_fetch, git_fn=self.fake_git,
+                )
+                self.assertEqual(state, "failed")
+
+    def test_api_command_timeout_waits_but_invalid_inventory_fails(self):
+        def read_command(command, **kwargs):
+            if "/jobs?" in command[-1]:
+                raise ValueError("Read-only command timed out.")
+            return json.dumps(self.fake_fetch(command[-1].split(f"repos/{self.repo}/", 1)[1])).encode()
+        with (
+            patch.object(self.gate.recovery_evidence, "read_command", side_effect=read_command),
+            patch.object(self.gate, "_read_git", side_effect=self.fake_git),
+        ):
+            state, _ = self.gate.verify_push_coverage(
+                self.repo, self.c1, self.all_checked, self.prod, self.release,
+            )
+        self.assertEqual(state, "waiting")
+        self.jobs[0]["conclusion"] = "skipped"
+        state, _ = self.gate.verify_push_coverage(
+            self.repo, self.c1, self.all_checked, self.prod, self.release,
+            fetch=self.fake_fetch, git_fn=self.fake_git,
+        )
+        self.assertEqual(state, "failed")
+
+    def test_main_revalidates_accepted_coverage_while_later_commit_waits(self):
+        poll = {"n": 0}
+        def ci(repo, sha):
+            if sha == self.release:
+                poll["n"] += 1
+                return ("in_progress", "") if poll["n"] == 1 else ("completed", "success")
+            return ("completed", "success") if sha == self.tip else ("missing", "")
+        def coverage(*args, **kwargs):
+            return ("covered", "attempt 1") if poll["n"] == 0 else ("failed", "attempt 2 failed")
+        with (
+            patch.object(self.gate, "_write_github_output") as output,
+            patch.object(self.gate, "git", side_effect=self.fake_git),
+            patch.object(self.gate, "production_commit", return_value=self.prod),
+            patch.object(self.gate, "commits_to_check", return_value=(self.full_span, "span")),
+            patch.object(self.gate, "ci_state", side_effect=ci),
+            patch.object(self.gate, "verify_push_coverage", side_effect=coverage),
+            patch.object(self.gate.time, "sleep", return_value=None),
+            patch.object(sys, "argv", ["gate", "--repo", self.repo, "--head", self.release, "--timeout", "60"]),
+        ):
+            self.assertEqual(self.gate.main(), 1)
+            output.assert_not_called()
+
+    def test_main_revalidates_before_success_after_direct_checks(self):
+        poll = {"n": 0}
+        def ci(repo, sha):
+            if sha == self.release:
+                poll["n"] += 1
+                return ("completed", "success")
+            return ("completed", "success") if sha == self.tip else ("missing", "")
+        def coverage(*args, **kwargs):
+            return ("covered", "attempt 1") if poll["n"] == 0 else ("failed", "attempt 2 failed")
+        with (
+            patch.object(self.gate, "_write_github_output") as output,
+            patch.object(self.gate, "git", side_effect=self.fake_git),
+            patch.object(self.gate, "production_commit", return_value=self.prod),
+            patch.object(self.gate, "commits_to_check", return_value=(self.full_span, "span")),
+            patch.object(self.gate, "ci_state", side_effect=ci),
+            patch.object(self.gate, "verify_push_coverage", side_effect=coverage),
+            patch.object(self.gate.time, "sleep", return_value=None),
+            patch.object(sys, "argv", ["gate", "--repo", self.repo, "--head", self.release, "--timeout", "60"]),
+        ):
+            self.assertEqual(self.gate.main(), 1)
+            output.assert_not_called()
 
     def test_ci_job_contract_matches_workflows_and_changed_components(self):
         changed_mod = self.gate._load_changed_components()
