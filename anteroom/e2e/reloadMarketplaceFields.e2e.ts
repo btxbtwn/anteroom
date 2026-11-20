@@ -62,3 +62,39 @@ test("reload marketplace fields preserves answers and refreshes validation", asy
     await request.delete(`/api/conversations/${id}`);
   }
 });
+
+test("stale marketplace fields reload automatically without clicking Reload fields", async ({ page, request, phone }, info) => {
+  test.setTimeout(90_000);
+  const title = `Auto reload fields ${info.project.name} ${Date.now()}`;
+  const id = await createListing(request, title);
+  try {
+    const saved = await request.put(`/api/conversations/${id}/listing`, { data: { expected_revision_id: "", listing: {
+      title, description: "Seller's description", price: 25,
+      direct_category_ids: { mercari: "2008" },
+      mercari_specifics: { title: "Seller's Mercari title", shippingMethod: "SOYO" },
+      _native_forms: { mercari: { category_id: "old", page_labels: true,
+        inputs: { "direct_category_ids.mercari": "old" },
+        fields: [{ path: "direct_category_ids.mercari", label: "Category" }] } },
+    } } });
+    expect(saved.ok(), await saved.text()).toBe(true);
+    const before = await (await request.get(`/api/conversations/${id}/native-marketplaces/preflight`)).json();
+    expect(before.marketplaces.mercari.gaps.some((gap: { message: string }) => gap.message.includes("Reload its fields"))).toBe(true);
+
+    await openListing(page, phone, title);
+    await expect(await titleBox(page, phone)).toBeVisible();
+    await openForm(page, phone, "Mercari");
+    const form = page.getByRole("group", { name: "Mercari listing fields" });
+
+    // Without clicking Reload fields, the stale Mercari contract refreshes automatically.
+    await expect.poll(async () => {
+      const body = await (await request.get(`/api/conversations/${id}/listing`)).json();
+      return body.listing._native_forms?.mercari?.inputs?.["direct_category_ids.mercari"];
+    }).toBe("2008");
+    const after = await (await request.get(`/api/conversations/${id}/native-marketplaces/preflight`)).json();
+    expect(after.marketplaces.mercari.gaps.some((gap: { message: string }) => gap.message.includes("Reload its fields"))).toBe(false);
+    await expect(form.getByText("The form's category or dependent choices changed.", { exact: false })).toHaveCount(0);
+    await expect(form.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("Seller's Mercari title");
+  } finally {
+    await request.delete(`/api/conversations/${id}`);
+  }
+});

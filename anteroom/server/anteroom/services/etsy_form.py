@@ -38,11 +38,18 @@ def category_choices() -> dict:
     return {"options": [row["path"] for row in rows], "option_values": {row["path"]: row["id"] for row in rows}}
 
 
-def _row(captured: dict, value) -> dict:
+@lru_cache(maxsize=1)
+def _category_ids() -> frozenset[str]:
+    return frozenset(category_choices()["option_values"].values())
+
+
+def _row(captured: dict, value, *, shared: dict | None = None) -> dict:
     from anteroom.services.native_editor import field
 
     extra = {key: copy.deepcopy(item) for key, item in captured.items()
              if key not in {"path", "label", "value", "settings_choice"}}
+    if shared:
+        extra.update(shared)
     if extra.get("options"):
         extra.setdefault("options_source", "marketplace")
     return field(captured["path"], captured.get("label", ""), value, **extra)
@@ -145,17 +152,18 @@ async def editor_form(snapshot: dict) -> dict:
     from anteroom.services.etsy_listings import etsy_quantity, list_fields
 
     category = direct_category_id(snapshot, "etsy")
-    known = category in category_choices()["option_values"].values()
-    (properties, property_note), (defaults, names) = await asyncio.gather(_properties(category), _settings_choices())
+    known = category in _category_ids()
+    from anteroom.services.user_settings import get_listing_field_defaults
+
+    (properties, property_note), (defaults, names), saved = await asyncio.gather(
+        _properties(category), _settings_choices(), asyncio.to_thread(get_listing_field_defaults),
+    )
     details = snapshot.get("etsy_specifics")
     if not isinstance(details, dict):
         details = {}
     lists = list_fields(snapshot)
     weight, size = _package(snapshot)
     when = etsy_when_raw(details, snapshot)
-    from anteroom.services.user_settings import get_listing_field_defaults
-
-    saved = await asyncio.to_thread(get_listing_field_defaults)
     who = etsy_who_raw(details) or (saved.get("etsy_specifics.whoMade") or {}).get("label", "")
     what = etsy_what_raw(details) or (saved.get("etsy_specifics.whatIsIt") or {}).get("label", "")
     renewal = (etsy_renewal_raw(details)
@@ -183,7 +191,7 @@ async def editor_form(snapshot: dict) -> dict:
             rows.extend(property_rows(snapshot, properties, captured))
             continue
         if path == CATEGORY_PATH:
-            rows.append(_row({**captured, **category_choices()}, values[path]))
+            rows.append(_row(captured, values[path], shared=category_choices()))
             continue
         kind = captured.get("settings_choice")
         if kind:

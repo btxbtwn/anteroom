@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import asyncio
-import copy
+import inspect
 import logging
 import re
+from collections.abc import Awaitable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, field as dc_field
 
 import httpx
 from sqlalchemy.orm import Session
@@ -15,6 +18,67 @@ from anteroom.services.native_marketplaces import NativeMarketplaceError
 
 
 _log = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class FormSnapshot:
+    """Plain data read in one short DB session before awaiting external marketplaces."""
+
+    snapshot: dict
+    listing_json: dict
+    schemas: dict[tuple[str, str], list[dict] | None] = dc_field(default_factory=dict)
+    choices: dict[str, dict | None] = dc_field(default_factory=dict)
+
+    @contextmanager
+    def cached_context(self) -> Iterator[None]:
+        """Expose preloaded DB caches and one shared lazy eBay client for this form build."""
+        from anteroom.services import marketplace_schemas, saved_choices
+
+        with marketplace_schemas.schema_session(self.schemas), saved_choices.preload_entries(self.choices):
+            yield
+
+
+def _preload_form_caches(
+    db: Session,
+    snapshot: dict,
+    marketplace: str,
+) -> tuple[dict[tuple[str, str], list[dict] | None], dict[str, dict | None]]:
+    from anteroom.services import category_fields, marketplace_schemas, saved_choices
+
+    if marketplace == "ebay":
+        from anteroom.services.ebay_listings import ebay_category_id
+        from anteroom.services.listing_result import ListingProblem
+
+        try:
+            category = ebay_category_id(snapshot)
+        except ListingProblem:
+            category = ""
+        schemas: dict[tuple[str, str], list[dict] | None] = {}
+        if re.fullmatch(r"[1-9]\d{0,14}", category):
+            schemas = category_fields.load_rows_many(
+                (
+                    (marketplace_schemas.EBAY_ASPECTS, category),
+                    (marketplace_schemas.EBAY_CONDITIONS, category),
+                    (marketplace_schemas.EBAY_LISTING_TYPES, category),
+                    (marketplace_schemas.EBAY_LISTING_STRUCTURE, category),
+                ),
+                db=db,
+            )
+        return schemas, {"ebay-policies": saved_choices.read_entry("ebay-policies", db=db)}
+
+    if marketplace == "etsy":
+        from anteroom.services.direct_categories import direct_category_id
+
+        category = direct_category_id(snapshot, "etsy")
+        schemas = {}
+        if re.fullmatch(r"[1-9]\d{0,14}", category):
+            schemas = category_fields.load_rows_many(
+                ((marketplace_schemas.ETSY_PROPERTIES, category),),
+                db=db,
+            )
+        return schemas, {"etsy-profiles": saved_choices.read_entry("etsy-profiles", db=db)}
+
+    return {}, {}
 
 
 def _category_failure_types(exc: BaseException) -> str:
@@ -41,8 +105,8 @@ def _category_failure_types(exc: BaseException) -> str:
     return " > ".join(labels)
 
 
-def form_snapshot(db: Session, conv_id: str, marketplace: str, revision_id: str | None) -> tuple[dict, dict]:
-    """The plain data a form is built from: the marketplace snapshot and the saved listing.
+def form_snapshot(db: Session, conv_id: str, marketplace: str, revision_id: str | None) -> FormSnapshot:
+    """The plain data a form is built from: the marketplace snapshot, saved listing, and cached schemas.
 
     Rolls back before returning, so no connection is held while eBay, Chrome
     or Mercari answer.
@@ -57,8 +121,9 @@ def form_snapshot(db: Session, conv_id: str, marketplace: str, revision_id: str 
     # A draft nobody has generated yet still opens every form, empty, for the seller to fill in.
     listing_json = revision.listing_json if revision else {}
     snapshot = direct_preflight.prepare(db, conv, listing_json, marketplace)
+    schemas, choices = _preload_form_caches(db, snapshot, marketplace)
     db.rollback()
-    return snapshot, listing_json
+    return FormSnapshot(snapshot=snapshot, listing_json=listing_json, schemas=schemas, choices=choices)
 
 
 async def build_form(snapshot: dict, listing_json: dict, marketplace: str, *, refresh: bool = False) -> dict:
@@ -66,15 +131,15 @@ async def build_form(snapshot: dict, listing_json: dict, marketplace: str, *, re
     if marketplace == "poshmark":
         from anteroom.services.poshmark_form import form
 
-        return form(snapshot)
+        return await asyncio.to_thread(form, snapshot)
     if marketplace == "depop":
         from anteroom.services.depop_form import form
 
-        return form(snapshot)
+        return await asyncio.to_thread(form, snapshot)
     if marketplace == "mercari":
         from anteroom.services.mercari_form import editor_form as mercari_form
 
-        return await mercari_form(snapshot)
+        return await mercari_form(snapshot, refresh=refresh)
     if marketplace == "etsy":
         from anteroom.services.etsy_form import editor_form as etsy_form
 
@@ -82,7 +147,7 @@ async def build_form(snapshot: dict, listing_json: dict, marketplace: str, *, re
     if not refresh:
         from anteroom.services import native_contract
 
-        saved_form = native_contract.editor_form(listing_json, marketplace, values=snapshot)
+        saved_form = await asyncio.to_thread(native_contract.editor_form, listing_json, marketplace, values=snapshot)
         if saved_form is not None:
             return saved_form
         # Stale saved choices must be rebuilt from the current catalog below.
@@ -96,20 +161,28 @@ async def editor_form(conv_id: str, marketplace: str, revision_id: str | None, *
     """One marketplace's form, read in a short session of its own on a worker thread."""
     from anteroom.database import in_worker_session
 
-    snapshot, listing_json = await in_worker_session(form_snapshot, conv_id, marketplace, revision_id)
-    return await build_form(snapshot, listing_json, marketplace, refresh=refresh)
+    inputs = await in_worker_session(form_snapshot, conv_id, marketplace, revision_id)
+    with inputs.cached_context():
+        return await build_form(inputs.snapshot, inputs.listing_json, marketplace, refresh=refresh)
+
+
+async def refresh_editor_form(conv_id: str, marketplace: str, revision_id: str) -> dict:
+    """Rebuild one form off the DB session and fence its saved definition against concurrent edits."""
+    from anteroom.database import in_worker_session
+
+    form = await editor_form(conv_id, marketplace, revision_id, refresh=True)
+    return await in_worker_session(save_refreshed_form, conv_id, marketplace, revision_id, form)
 
 
 def read_form(db: Session, conv_id: str, marketplace: str, revision_id: str | None, *, refresh: bool = False) -> dict:
-    """``editor_form`` for a plain route, in its worker thread, with the request's session."""
-    snapshot, listing_json = form_snapshot(db, conv_id, marketplace, revision_id)
-    return asyncio.run(build_form(snapshot, listing_json, marketplace, refresh=refresh))
+    """``editor_form`` for a plain caller with an existing session."""
+    inputs = form_snapshot(db, conv_id, marketplace, revision_id)
 
+    async def run() -> dict:
+        with inputs.cached_context():
+            return await build_form(inputs.snapshot, inputs.listing_json, marketplace, refresh=refresh)
 
-def refresh_form(db: Session, conv_id: str, marketplace: str, revision_id: str) -> dict:
-    """Rebuild one form and fence its saved definition against concurrent edits. For a plain route."""
-    form = read_form(db, conv_id, marketplace, revision_id, refresh=True)
-    return save_refreshed_form(db, conv_id, marketplace, revision_id, form)
+    return asyncio.run(run())
 
 
 def save_refreshed_form(db: Session, conv_id: str, marketplace: str, revision_id: str, form: dict) -> dict:
@@ -126,12 +199,11 @@ def save_refreshed_form(db: Session, conv_id: str, marketplace: str, revision_id
     revision = repo.get_revision(revision_id)
     if revision is None:
         raise NativeMarketplaceError(404, "Listing revision not found")
-    listing = copy.deepcopy(revision.listing_json)
-    listing[native_contract.KEY] = {
-        **(listing.get(native_contract.KEY) or {}),
-        **native_contract.capture(listing, {marketplace: form}, [marketplace]),
-    }
-    if listing != revision.listing_json:
+    listing = native_contract.copy_listing(revision.listing_json)
+    existing_contracts = listing.get(native_contract.KEY) or {}
+    captured = native_contract.capture(listing, {marketplace: form}, [marketplace])
+    if captured.get(marketplace) != existing_contracts.get(marketplace):
+        listing[native_contract.KEY] = {**existing_contracts, **captured}
         try:
             revision = listing_persistence.save_revision(
                 db, conv_id, listing, "native_schema", parent_revision_id=revision_id, expected_revision_id=revision_id)
@@ -216,7 +288,7 @@ async def _ebay_choices(snapshot: dict) -> list[dict]:
         profiles = {"fulfillment": [], "payment": [], "return": [], "locations": []}
         note = str(exc) if "access" in str(exc) else "eBay's policies could not be loaded. Reopen the listing to try again."
     own = own_listing_choices(snapshot)
-    defaults = get_ebay_listing_defaults()
+    defaults = await asyncio.to_thread(get_ebay_listing_defaults)
 
     def row(key: str, kind: str, label: str, section: str) -> dict:
         options = profiles[kind]
@@ -249,9 +321,9 @@ async def ebay_form(snapshot: dict) -> dict:
     except ListingProblem:
         category = ""
 
-    async def category_rows() -> tuple[list[dict], list[dict]]:
+    async def load_schema() -> list[dict]:
         try:
-            schema = await marketplace_schemas.fields("ebay", category) if category else []
+            return await marketplace_schemas.fields("ebay", category) if category else []
         except Exception as exc:  # noqa: BLE001 - never substitute a different form
             # Record before routes replace the cause with a safe HTTP response.
             # Never attach exc_info: even nested exception messages/URLs may carry credentials.
@@ -260,12 +332,30 @@ async def ebay_form(snapshot: dict) -> dict:
             _log.error("eBay category schema load failed (category_id=%s; exception_types=%s)",
                        safe_category, _category_failure_types(exc))
             raise NativeMarketplaceError(502, "eBay’s category fields could not be loaded. Check its connection and refresh choices.") from None
-        return schema, await _ebay_variations_field(snapshot, category, schema)
 
     details = snapshot.get("ebay_specifics") or {}
-    # Independent eBay reads: the page waits for the slowest, not their sum.
-    (schema, variations), selling, (payment, shipping_policy, location, returns) = await asyncio.gather(
-        category_rows(), _ebay_format_fields(snapshot, category, details), _ebay_choices(snapshot))
+    # All five independent eBay reads run concurrently and share one lazy client on cache misses.
+    with marketplace_schemas.schema_session():
+        schema_task = asyncio.create_task(load_schema())
+        raw_schema, raw_variations, raw_selling, raw_choices = await asyncio.gather(
+            schema_task,
+            _ebay_variations_field(snapshot, category, schema_task),
+            _ebay_format_fields(snapshot, category, details),
+            _ebay_choices(snapshot),
+            return_exceptions=True,
+        )
+    if isinstance(raw_schema, BaseException):
+        raise raw_schema
+    if isinstance(raw_variations, BaseException):
+        raise raw_variations
+    if isinstance(raw_selling, BaseException):
+        raise raw_selling
+    if isinstance(raw_choices, BaseException):
+        raise raw_choices
+    schema = raw_schema
+    variations = raw_variations
+    selling = raw_selling
+    payment, shipping_policy, location, returns = raw_choices
     aspects = ebay_aspects(snapshot, snapshot.get("form") or {})
 
     def aspect_field(row: dict, section: str) -> dict:
@@ -396,14 +486,17 @@ async def ebay_form(snapshot: dict) -> dict:
     return {"marketplace": "ebay", "native": True, "known": True, "category_id": category, "fields": fields}
 
 
-async def _ebay_variations_field(snapshot: dict, category: str, schema: list[dict]) -> list[dict]:
+async def _ebay_variations_field(
+    snapshot: dict,
+    category: str,
+    schema: list[dict] | Awaitable[list[dict]],
+) -> list[dict]:
     """Variations: what they differ by (aspects eBay enables for variations in this leaf) and one row each.
 
     Included whenever this category allows them. The editor hides the row during
     an auction that has no variation rows yet.
     """
     from anteroom.services import ebay_variations, marketplace_schemas
-    from anteroom.services.ebay_client import EbayClient
 
     varied = ebay_variations.has_variations(snapshot)
     value = ebay_variations.raw(snapshot) if varied else {"aspects": [], "rows": [], "photos": {}}
@@ -411,12 +504,13 @@ async def _ebay_variations_field(snapshot: dict, category: str, schema: list[dic
         return []
     supported: bool | None = None
     try:
-        supported = await marketplace_schemas.ebay_variations_supported(await EbayClient.connect(), category)
+        supported = await marketplace_schemas.ebay_variations_supported(None, category)
     except Exception:  # noqa: BLE001 - List checks it again before anything is written
         supported = None
+    resolved_schema = await schema if inspect.isawaitable(schema) else schema
     aspects = [{"name": row["name"], "selection_only": row["mode"] == "selection",
                 "options": list(dict.fromkeys(entry["label"] for entry in row.get("values") or []))}
-               for row in schema if row.get("variations") and row.get("id") != "condition"]
+               for row in resolved_schema if row.get("variations") and row.get("id") != "condition"]
     if supported is False and not varied:
         return []
     help_text = ("Each variation has its own quantity, SKU and price. eBay lists them as one fixed-price listing "
@@ -441,7 +535,6 @@ async def _ebay_format_fields(snapshot: dict, category: str, details: dict) -> l
     prices while the listing is fixed price.
     """
     from anteroom.services import marketplace_schemas
-    from anteroom.services.ebay_client import EbayClient
     from anteroom.services.ebay_listings import (AUCTION, DEFAULT_AUCTION_DURATION, FIXED_PRICE, FORMAT_LABELS,
                                                       duration_label)
 
@@ -450,7 +543,7 @@ async def _ebay_format_fields(snapshot: dict, category: str, details: dict) -> l
     note = ""
     if category:
         try:
-            allowed = await marketplace_schemas.ebay_listing_types(await EbayClient.connect(), category)
+            allowed = await marketplace_schemas.ebay_listing_types(None, category)
         except Exception:  # noqa: BLE001 - fixed price needs no lookup; List checks auctions again
             note = "eBay's auction rules for this category could not be loaded. Reopen the listing to try again."
     auction_lengths = allowed.get(AUCTION) or []

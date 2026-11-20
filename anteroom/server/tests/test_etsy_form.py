@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from worker_sessions import worker_sessions
 
 from anteroom.config import skills_dir
 from anteroom.database import Base, get_db, load_models
@@ -45,7 +46,8 @@ def studio():
                                   "whenMade": "2020 - 2026 (Recently)", "category_specifics": {"sleeveLength": "Short sleeve"}}}
     revision = listing_persistence.save_revision(db, conv.id, listing, "test")
     app.dependency_overrides[get_db] = lambda: db
-    with patch("anteroom.services.browser_bridge.request", new_callable=AsyncMock) as bridge, \
+    with worker_sessions(engine), \
+            patch("anteroom.services.browser_bridge.request", new_callable=AsyncMock) as bridge, \
             patch.object(marketplace_schemas, "etsy_properties", AsyncMock(return_value=PROPERTIES)) as properties:
         yield SimpleNamespace(db=db, conv=conv, listing=listing, revision=revision, client=TestClient(app),
                               url=f"/api/conversations/{conv.id}/native-marketplaces/etsy/form", bridge=bridge,

@@ -6,11 +6,12 @@ import editorFields from "../../../skills/list-this/references/listing-editor-fi
 import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { ApiRequestError } from "../api/transport";
 import type { EbayVariationAspect, EbayVariations, ListingData, ListingDocument, MarketplaceForm, NativeInventoryGroup, NativeInventoryRow } from "../api/types";
 import { cloneListing, editorValuePresent, expandJoinedChoices, formFieldText, formFieldValues, getListingEditorValue, marketplaceDisplayValue, setListingEditorValue, squashFieldKey } from "../listingPaths";
 import { listingEdits } from "../api/listingEdits";
 import { registerUnsavedWork } from "../lib/unsavedWork";
-import { DIRECT_FORM_MARKETS, nativeFormOptions, prefetchListingForm } from "../api/listingForms";
+import { autoRefreshStaleForms, DIRECT_FORM_MARKETS, nativeFormOptions, prefetchListingForm, staleFormMarketplaces } from "../api/listingForms";
 import { PhotoTray } from "./PhotoTray";
 import { useListingSessionActive } from "./listingSession";
 import { NativeInventoryEditor } from "./NativeInventoryEditor";
@@ -305,6 +306,7 @@ export function ListingEditor({
             listing={listing}
             revisionId={data?.current_revision_id}
             tab={reviewTab === "forms" && editTab !== "general" ? editTab : "general"}
+            generating={generating}
             target={fieldTarget}
             onAskChat={askChat}
             disabled={runtime.hosted && reviewTab === "forms" && editTab !== "general" && !runtime.marketplaceForms.has(editTab)}
@@ -438,6 +440,7 @@ export function StructuredEditor({
   listing,
   revisionId,
   tab,
+  generating = false,
   onChange,
   target,
   disabled,
@@ -450,6 +453,7 @@ export function StructuredEditor({
   listing: ListingData;
   revisionId?: string | null;
   tab: string;
+  generating?: boolean;
   onChange: (v: ListingData) => void;
   target: { field: string; sequence: number } | null;
   disabled?: boolean;
@@ -468,6 +472,8 @@ export function StructuredEditor({
   };
   const vendoo = useListingMode().data?.listing_mode === "vendoo";
   const nativeTab = !vendoo && DIRECT_FORM_MARKETS.has(tab);
+  const [autoReloadingMarket, setAutoReloadingMarket] = React.useState<string | null>(null);
+  const [autoReloadError, setAutoReloadError] = React.useState<{ market: string; revisionId: string; message: string } | null>(null);
   // The form's rows come from the category. A price, brand, format, or shipping
   // edit must not start a new read: that used to drop every row until the form
   // answered, leaving only the marketplace price on screen. A new category,
@@ -476,7 +482,7 @@ export function StructuredEditor({
   // include it so its refreshed dependent choices reach the editor too.
   const nativeQuery = useQuery({
     ...nativeFormOptions(convId, tab, listing, revisionId),
-    enabled: nativeTab && !saving,
+    enabled: nativeTab && !saving && autoReloadingMarket === null,
     placeholderData: (previous, previousQuery) => {
       const key = previousQuery?.queryKey;
       if (!previous || previous.marketplace !== tab || key?.[1] !== convId || key?.[2] !== tab) return undefined;
@@ -745,10 +751,15 @@ export function StructuredEditor({
   };
   const commitDraftsRef = React.useRef(commitDrafts);
   const hasDrafts = Object.keys(drafts).length > 0;
+  const autoReloadAttemptedRef = React.useRef<{ convId: string; keys: Set<string> }>({ convId: "", keys: new Set() });
   const reloadFields = useMutation({
     mutationFn: ({ market, revision }: { market: string; revision: string }) =>
       api.nativeMarketplaces.refreshForm(convId, market, revision),
+    onMutate: ({ market }) => {
+      setAutoReloadError((current) => (current?.market === market ? null : current));
+    },
     onSuccess: async (result, { market }) => {
+      setAutoReloadError((current) => (current?.market === market ? null : current));
       await queryClient.invalidateQueries({ queryKey: ["listing", convId] });
       // Use the returned revision even before React renders it. This also
       // refreshes notes when rebuilding did not change the saved definition.
@@ -768,6 +779,65 @@ export function StructuredEditor({
   React.useLayoutEffect(() => {
     commitDraftsRef.current = commitDrafts;
   });
+  // Automatically reload stale or unavailable fields on the open marketplace
+  // tab so the seller never has to click "Reload fields" after edits or failed
+  // fills. Scoped to the active tab so unused or disconnected marketplaces are
+  // never refreshed in the background.
+  React.useEffect(() => {
+    if (autoReloadAttemptedRef.current.convId !== convId) {
+      autoReloadAttemptedRef.current = { convId, keys: new Set() };
+      setAutoReloadError(null);
+    }
+    if (
+      !nativeTab || disabled || saving || hasDrafts || generating || reloadFields.isPending
+      || !revisionId || preflight.isPlaceholderData || preflight.isError
+      || preflight.data?.revision_id !== revisionId
+    ) {
+      return;
+    }
+    const staleMarkets = staleFormMarketplaces(preflight.data, [tab], tab)
+      .filter((market) => !autoReloadAttemptedRef.current.keys.has(`${revisionId}:${market}`));
+    if (!staleMarkets.length) return;
+    const controller = new AbortController();
+    void autoRefreshStaleForms(
+      queryClient,
+      convId,
+      staleMarkets,
+      revisionId,
+      autoReloadAttemptedRef.current.keys,
+      {
+        signal: controller.signal,
+        activeMarket: tab,
+        onMarketStart: (market) => {
+          if (!controller.signal.aborted) {
+            setAutoReloadingMarket(market);
+            if (market) {
+              setAutoReloadError((current) => (current?.market === market ? null : current));
+            }
+          }
+        },
+        onMarketError: (market, error) => {
+          if (controller.signal.aborted) return;
+          const detail = error instanceof Error && error.message.trim() ? error.message.trim() : "";
+          const name = marketplaceName(market);
+          const message = detail
+            ? `${name} fields could not be reloaded: ${detail} Press Reload fields to try again.`
+            : `${name} fields could not be reloaded. Press Reload fields to try again.`;
+          setAutoReloadError({ market, revisionId, message });
+        },
+      },
+    ).finally(() => {
+      if (!controller.signal.aborted) {
+        setAutoReloadingMarket(null);
+      }
+    });
+    return () => {
+      controller.abort();
+      setAutoReloadingMarket(null);
+    };
+  }, [convId, disabled, generating, hasDrafts, nativeTab, preflight.data, preflight.isError,
+    preflight.isPlaceholderData, queryClient, reloadFields.isPending, revisionId, saving, tab]);
+
   React.useEffect(() => {
     const pending = { current: hasDrafts };
     const unregister = registerUnsavedWork({
@@ -832,21 +902,34 @@ export function StructuredEditor({
   const sections = React.useMemo(() => pageLayout ? nativeFormSections(renderedFields)
     : tab === "general" ? generalFormSections(renderedFields) : groupFieldsIntoSections(renderedFields), [pageLayout, tab, renderedFields]);
   // Only loading, errors and gaps get a line; a form that loaded fine needs none.
-  const formStatus = nativeTab && !nativeQuery.data && nativeQuery.isFetching
-    ? "Loading the marketplace’s category fields and choices…"
-    : nativeTab && nativeQuery.isError && !nativeQuery.data
-      ? (nativeQuery.error instanceof Error ? nativeQuery.error.message : "The marketplace form could not be loaded. Reopen the listing to try again.")
-      : categoryStale
-        ? "Updating this category’s fields…"
-        : nativeTab && nativeQuery.isFetching
-          ? "Refreshing choices…"
-          : !nativeTab && formsQuery.isFetching
-            ? "Refreshing category fields and choices…"
-            : !nativeTab && (formsQuery.isError || dropdownQuery.isError)
-              ? "Some choices could not be refreshed. Check each field's choices before listing."
-              : categoryForm?.known === false
-                ? "The full category form is unavailable. Reference choices are shown where available."
-                : null;
+  const reloadingThisTab = nativeTab && (reloadFields.isPending || autoReloadingMarket === tab);
+  const formLoadError = nativeQuery.error instanceof ApiRequestError && nativeQuery.error.status === 0
+    ? "Could not reach the server to load this form. Check your connection and try again."
+    : nativeQuery.error instanceof Error
+      ? nativeQuery.error.message
+      : "The marketplace form could not be loaded. Reopen the listing to try again.";
+  const activeAutoReloadError = nativeTab && autoReloadError && autoReloadError.market === tab && autoReloadError.revisionId === revisionId
+    ? autoReloadError.message
+    : null;
+  const formStatus = reloadingThisTab
+    ? "Reloading fields…"
+    : nativeTab && !nativeQuery.data && (nativeQuery.isFetching || autoReloadingMarket !== null)
+      ? "Loading the marketplace’s category fields and choices…"
+      : nativeTab && nativeQuery.isError && !nativeQuery.data
+        ? formLoadError
+        : activeAutoReloadError
+          ? activeAutoReloadError
+          : categoryStale
+            ? "Updating this category’s fields…"
+            : nativeTab && nativeQuery.isFetching
+              ? "Refreshing choices…"
+              : !nativeTab && formsQuery.isFetching
+                ? "Refreshing category fields and choices…"
+                : !nativeTab && (formsQuery.isError || dropdownQuery.isError)
+                  ? "Some choices could not be refreshed. Check each field's choices before listing."
+                  : categoryForm?.known === false
+                    ? "The full category form is unavailable. Reference choices are shown where available."
+                    : null;
   // Renders its own hint beside the selected count.
   const multiSelectControl = (f: EditorField) => Boolean(f.multi)
     && !["inventory", "variations", "boolean", "textarea"].includes(String(f.type))
@@ -1036,9 +1119,9 @@ export function StructuredEditor({
     <fieldset ref={formRef} key={tab} disabled={disabled} aria-busy={disabled || undefined}
       aria-label={`${marketplaceName(tab)} listing fields`} className="@container flex min-w-0 flex-col border-0 p-0">
       {nativeTab && <div className="flex justify-end py-2">
-        <Button size="xs" variant="ghost" disabled={disabled || saving || hasDrafts || !revisionId || reloadFields.isPending}
+        <Button size="xs" variant="ghost" disabled={disabled || saving || hasDrafts || !revisionId || reloadFields.isPending || autoReloadingMarket !== null}
           onClick={() => { if (revisionId) reloadFields.mutate({ market: tab, revision: revisionId }); }}>
-          {reloadFields.isPending ? "Reloading fields…" : "Reload fields"}
+          {reloadingThisTab ? "Reloading fields…" : "Reload fields"}
         </Button>
       </div>}
       {tab !== "general" && formStatus && <p role="status" className="border-b py-3 text-xs text-muted-foreground">{formStatus}</p>}

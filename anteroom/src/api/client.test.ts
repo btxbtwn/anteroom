@@ -204,6 +204,12 @@ describe("Requests while the server restarts", () => {
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "Not found" }), { status: 404 })));
     expect(await failure(() => api.suggestions.list())).toMatchObject({ status: 404, retryable: false, message: "Not found" });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<html>Bad Gateway</html>", { status: 502 })));
+    expect(await failure(() => api.suggestions.list())).toMatchObject({ status: 502, retryable: true });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "eBay is not connected." }), { status: 502 })));
+    expect(await failure(() => api.suggestions.list())).toMatchObject({ status: 502, retryable: false, message: "eBay is not connected." });
   });
 
   it("never marks a write as safe to repeat", async () => {
@@ -219,5 +225,64 @@ describe("Requests while the server restarts", () => {
     expect(retryAfterMs(new Date(60_000).toUTCString(), 40_000)).toBe(20_000);
     expect(retryAfterMs("soon")).toBeNull();
     expect(retryAfterMs(null)).toBeNull();
+  });
+});
+
+describe("Reloading marketplace fields", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("retries once when Safari drops the connection with TypeError: Load failed", async () => {
+    const fetch = vi.fn()
+      .mockRejectedValueOnce(new TypeError("Load failed"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: "r2" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(api.nativeMarketplaces.refreshForm("item", "mercari", "r1")).resolves.toEqual({ revision_id: "r2" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries once on an unexplained proxy 503 and fails fast on explained 409 or 502", async () => {
+    const proxyFetch = vi.fn()
+      .mockResolvedValueOnce(new Response("<html>503</html>", { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: "r2" }), { status: 200 }));
+    vi.stubGlobal("fetch", proxyFetch);
+    await expect(api.nativeMarketplaces.refreshForm("item", "ebay", "r1")).resolves.toEqual({ revision_id: "r2" });
+    expect(proxyFetch).toHaveBeenCalledTimes(2);
+
+    const conflictFetch = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ detail: "The listing changed while fields loaded. Reload its fields again." }),
+      { status: 409 },
+    ));
+    vi.stubGlobal("fetch", conflictFetch);
+    await expect(api.nativeMarketplaces.refreshForm("item", "ebay", "r1")).rejects.toMatchObject({ status: 409 });
+    expect(conflictFetch).toHaveBeenCalledTimes(1);
+
+    const explained502 = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ detail: "eBay's category fields could not be loaded." }),
+      { status: 502 },
+    ));
+    vi.stubGlobal("fetch", explained502);
+    await expect(api.nativeMarketplaces.refreshForm("item", "ebay", "r1")).rejects.toMatchObject({ status: 502 });
+    expect(explained502).toHaveBeenCalledTimes(1);
+  });
+
+  it("replaces Safari's Load failed with a clear connection message if the retry also drops", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Load failed")));
+    await expect(api.nativeMarketplaces.refreshForm("item", "mercari", "r1")).rejects.toThrow(
+      "Could not reach the server to reload fields. Check your connection and try again.",
+    );
+  });
+
+  it("retries once when the connection drops while reading a 200 response body", async () => {
+    const brokenBody = {
+      ok: true,
+      status: 200,
+      json: vi.fn().mockRejectedValue(new TypeError("Load failed")),
+    } as unknown as Response;
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(brokenBody)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: "r2" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(api.nativeMarketplaces.refreshForm("item", "mercari", "r1")).resolves.toEqual({ revision_id: "r2" });
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 });
