@@ -25,6 +25,8 @@ def sandbox_env(directory: str, base: dict[str, str] | None = None) -> dict[str,
     """
     paths = {'DATA_DIR': directory, 'PORT': PORT}
     env = dict(os.environ if base is None else base, ANTEROOM_SANDBOX='1')
+    # Both builds open this database instead of the throwaway folder's SQLite file.
+    env.pop('ANTEROOM_DATABASE_URL', None)
     for prefix in ('ANTEROOM', 'VENDOO_STUDIO'):
         env.update({f'{prefix}_{name}': value for name, value in paths.items()})
     return env

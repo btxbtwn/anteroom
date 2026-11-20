@@ -30,10 +30,19 @@ def test_sandbox_env_points_old_and_new_builds_at_the_throwaway_folder(tmp_path)
 
 
 def test_sandbox_env_overrides_inherited_values(tmp_path):
-    inherited = {"VENDOO_STUDIO_DATA_DIR": "/real/data", "ANTEROOM_PORT": "4318", "PATH": "/usr/bin"}
+    inherited = {
+        "VENDOO_STUDIO_DATA_DIR": "/real/data",
+        "ANTEROOM_PORT": "4318",
+        "ANTEROOM_SANDBOX": "0",
+        # Old and new builds both open this instead of the throwaway SQLite file.
+        "ANTEROOM_DATABASE_URL": "postgresql://real/db",
+        "PATH": "/usr/bin",
+    }
 
     env = _script().sandbox_env(str(tmp_path), base=inherited)
 
     assert env["VENDOO_STUDIO_DATA_DIR"] == str(tmp_path)
     assert env["ANTEROOM_PORT"] == "4321"
+    assert env["ANTEROOM_SANDBOX"] == "1"
+    assert "ANTEROOM_DATABASE_URL" not in env
     assert env["PATH"] == "/usr/bin"
