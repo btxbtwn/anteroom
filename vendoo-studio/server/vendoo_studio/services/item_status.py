@@ -194,12 +194,16 @@ def repeated_lines(lines: list[MarketplaceSale]) -> set[str]:
     return repeated
 
 
-def paid_lines(db: Session, conv_ids: set[str] | None = None) -> dict[str, list[MarketplaceSale]]:
+def paid_lines(db: Session, conv_ids: set[str] | None = None, *, refresh: bool = False) -> dict[str, list[MarketplaceSale]]:
     """Each item's paid sales, every sale once (see ``repeated_lines``)."""
     query = db.query(MarketplaceSale).filter(MarketplaceSale.conversation_id.isnot(None),
                                              MarketplaceSale.order_status.in_(PAID_STATUSES))
     if conv_ids is not None:
         query = query.filter(MarketplaceSale.conversation_id.in_(conv_ids))
+    if refresh:
+        # Do not overwrite pending edits when autoflush is disabled.
+        db.flush()
+        query = query.populate_existing()
     grouped: dict[str, list[MarketplaceSale]] = {}
     for line in query.all():
         if line.conversation_id is not None:

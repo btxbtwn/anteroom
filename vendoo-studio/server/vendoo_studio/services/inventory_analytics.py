@@ -231,7 +231,7 @@ def read_analytics_inputs(db, conversation_id: str | None = None) -> AnalyticsIn
     one of its rows changed (``_inputs_version``). Sales, Analytics, the calendar,
     boxes and the assistant all read it, several of them on a timer, and each
     full read sends every item's notes and every sale over the network.
-    The returned inputs are shared between callers: read them, never change them.
+    The wrapper is request-local; its nested values are shared and read-only.
     """
     from vendoo_studio.services.vendoo_sales_archive import ensure_archived
 
@@ -244,16 +244,20 @@ def read_analytics_inputs(db, conversation_id: str | None = None) -> AnalyticsIn
         kept = _inputs_cache.get(key)
         if kept is not None and kept[0] == version:
             _inputs_cache.move_to_end(key)
-            return kept[1]
+            return replace(kept[1])
     inputs = _read_analytics_inputs(db, None)
     # Kept sales outlive this session: keep copies no session holds or expires.
     inputs = replace(inputs, sales={conv_id: [_unbound(line) for line in lines] for conv_id, lines in inputs.sales.items()})
+    # xmin stays the same across repeated writes within one transaction.
+    # Its snapshot must not be published before another write with that version.
+    if db.execute(text("SELECT pg_current_xact_id_if_assigned()")).scalar() is not None:
+        return inputs
     with _inputs_lock:
         _inputs_cache[key] = (version, inputs)
         _inputs_cache.move_to_end(key)
         while len(_inputs_cache) > _INPUTS_CACHE_SIZE:
             _inputs_cache.popitem(last=False)
-    return inputs
+    return replace(inputs)
 
 
 # Every table _read_analytics_inputs reads. test_inventory_analytics pins this
@@ -275,8 +279,8 @@ def _inputs_version(db) -> tuple | None:
     """
     if db.get_bind().dialect.name != "postgresql":
         return None
-    if db.autoflush:
-        db.flush()  # The ORM reads below would flush pending changes; count them here too.
+    # Protect pending edits before refreshing sales, even with autoflush disabled.
+    db.flush()
     parts = ", ".join(
         f"(SELECT count(*) || ':' || coalesce(sum(xmin::text::bigint), 0) FROM {table})"
         for table in ANALYTICS_INPUT_TABLES
@@ -325,8 +329,9 @@ def _read_analytics_inputs(db, conversation_id: str | None) -> AnalyticsInputs:
             Conversation.box_id,
         ).filter(Conversation.id == conversation_id if conversation_id else True).all()
     ]
+    lines = paid_lines(db, {conversation_id} if conversation_id else None,
+                       refresh=db.get_bind().dialect.name == "postgresql")
     own = statuses(db, [(conv_id, notes) for conv_id, _title, _status, notes, _box in conversations])
-    lines = paid_lines(db, {conversation_id} if conversation_id else None)
     return AnalyticsInputs(facets, box_share, conversations, own, lines)
 
 

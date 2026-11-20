@@ -655,7 +655,15 @@ class InventoryCountsItemsTest(unittest.TestCase):
 class AnalyticsInputsCacheTest(unittest.TestCase):
     """The whole-shop read is kept on Postgres until one of its rows changes."""
 
-    setUp = LoadAnalyticsTest.setUp
+    def setUp(self):
+        from vendoo_studio.services.vendoo_sales_archive import ensure_archived
+
+        LoadAnalyticsTest.setUp(self)
+        # Cache fixtures use explicit ledger sales, not the importer's sale.
+        self.sold.notes = "{}"
+        self.db.commit()
+        ensure_archived(self.db)
+
     tearDown = LoadAnalyticsTest.tearDown
 
     def _add_sale(self):
@@ -711,7 +719,7 @@ class AnalyticsInputsCacheTest(unittest.TestCase):
         first = read_analytics_inputs(self.db)
         again = self._statements(lambda: read_analytics_inputs(self.db))
         self.assertFalse([statement for statement in again if "notes" in statement or "marketplace_sales.id" in statement])
-        self.assertIs(read_analytics_inputs(self.db), first)
+        self.assertIs(read_analytics_inputs(self.db).facets, first.facets)
 
         # A changed note, a new sale and a removed sale each read the shop again.
         notes = json.loads(self.sold.notes)
@@ -744,3 +752,51 @@ class AnalyticsInputsCacheTest(unittest.TestCase):
         self.db.close()
         self.assertEqual(lines[0].order_id, self.order_id)
         self.assertTrue(isinstance(lines[0].is_order_backed, bool))
+
+    def test_request_reassignment_does_not_change_cached_conversations(self):
+        from vendoo_studio.services.inventory_analytics import read_analytics_inputs
+
+        if self.db.get_bind().dialect.name != "postgresql":
+            self.skipTest("Postgres cache")
+        first = read_analytics_inputs(self.db)
+        original = first.conversations
+        first.conversations = []
+        again = read_analytics_inputs(self.db)
+        self.assertEqual(again.conversations, original)
+        again.conversations = []
+        self.assertEqual(read_analytics_inputs(self.db).conversations, original)
+
+    def test_loaded_sale_is_refreshed_and_pending_edits_are_preserved(self):
+        from vendoo_studio.models.marketplace_sale import MarketplaceSale
+        from vendoo_studio.services import inventory_analytics
+
+        if self.db.get_bind().dialect.name != "postgresql":
+            self.skipTest("Postgres cache")
+        self._add_sale()
+        sale = self.db.query(MarketplaceSale).filter_by(order_id=self.order_id).one()
+        with SessionLocal() as other:
+            other.query(MarketplaceSale).filter_by(id=sale.id).update({"quantity": 2})
+            other.commit()
+        fresh = inventory_analytics.read_analytics_inputs(self.db)
+        self.assertEqual(fresh.sales[self.sold.id][0].quantity, 2)
+        self.assertEqual(fresh.statuses[self.sold.id].units_sold, 2)
+        self.db.autoflush = False
+        sale.quantity = 3
+        edited = inventory_analytics.read_analytics_inputs(self.db)
+        self.assertEqual(edited.sales[self.sold.id][0].quantity, 3)
+        self.assertEqual(sale.quantity, 3)
+
+    def test_repeated_writes_in_one_transaction_are_not_published(self):
+        from vendoo_studio.services.inventory_analytics import read_analytics_inputs
+
+        if self.db.get_bind().dialect.name != "postgresql":
+            self.skipTest("Postgres cache")
+        self.sold.notes = json.dumps({"vendooLabels": "First"})
+        self.db.flush()
+        first = read_analytics_inputs(self.db)
+        self.assertEqual(next(row[3] for row in first.conversations if row[0] == self.sold.id)["vendooLabels"], "First")
+        self.sold.notes = json.dumps({"vendooLabels": "Second"})
+        self.db.commit()
+        with SessionLocal() as fresh:
+            inputs = read_analytics_inputs(fresh)
+            self.assertEqual(next(row[3] for row in inputs.conversations if row[0] == self.sold.id)["vendooLabels"], "Second")
