@@ -497,6 +497,7 @@ def test_job_list_skips_the_listing_snapshot(cloud, signing_keys):  # noqa: F811
         event.remove(Engine, 'before_cursor_execute', record)
     assert listed.status_code == 200, listed.text
     assert [row['id'] for row in listed.json()] == ['job-1']
+    assert listed.json()[0]['listing_title'] == 'Coat'
     assert scoped.json() == listed.json()
     assert 'listing_snapshot' not in listed.json()[0]
     job_reads = [statement for statement in statements if 'FROM jobs' in statement]
@@ -673,6 +674,7 @@ def test_active_job_polls_skip_the_listing_snapshot(cloud, signing_keys):  # noq
         event.remove(Engine, 'before_cursor_execute', record)
     assert queue.status_code == 200, queue.text
     assert [row['id'] for row in queue.json()['jobs']] == ['job-1']
+    assert queue.json()['jobs'][0]['listing_title'] == 'Coat'
     assert activity.status_code == 200, activity.text
     assert activity.json()['busy'] is True
     job_reads = [statement for statement in statements if 'FROM jobs' in statement]
