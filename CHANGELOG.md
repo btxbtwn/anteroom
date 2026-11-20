@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1066 — 2026-11-20
+
+- Bulk upload keeps going when one folder's draft can't be started: the drafts already made still generate, the folders after it are still added, and the message names the folder to add again.
+
 ## 0.1.1065 — 2026-11-20
 
 - Keep marketplace form schemas out of the listing database payload and prevent database pool timeouts during category lookups and listing publishes.
