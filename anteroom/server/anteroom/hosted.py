@@ -56,6 +56,19 @@ http_log = logging.getLogger("anteroom.http")
 AUTH_THREADS = 4
 
 
+def _skip_client_warning(scope, route, status: int, *, fly_replay: bool) -> bool:
+    """Client/routing 4xx responses that are routine and should not alert the operator."""
+    if fly_replay and status == 409:
+        return True
+    if route is None and status in {401, 404, 405}:
+        return True
+    if scope["method"] == "HEAD" and status == 405:
+        return True
+    if getattr(route, "path", None) == "/api/marketplaces/sessions" and status == 409:
+        return True
+    return False
+
+
 class AccessLogMiddleware:
     """One line per request: method, route template, status and duration.
 
@@ -81,12 +94,13 @@ class AccessLogMiddleware:
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
-        started, status, failed = time.perf_counter(), 0, False
+        started, status, failed, fly_replay = time.perf_counter(), 0, False, False
 
         async def record(message):
-            nonlocal status
+            nonlocal status, fly_replay
             if message["type"] == "http.response.start":
                 status = message["status"]
+                fly_replay = any(name.lower() == b"fly-replay" for name, _ in message.get("headers") or ())
             await send(message)
 
         from anteroom.services.error_alerts import request_context
@@ -108,7 +122,7 @@ class AccessLogMiddleware:
             if status >= 500:
                 http_log.error("%s %s answered %s", scope["method"], template, status,
                                exc_info=details.get("cause"))
-            elif status >= 400:
+            elif status >= 400 and not _skip_client_warning(scope, route, status, fly_replay=fly_replay):
                 http_log.warning("%s %s answered %s", scope["method"], template, status)
             request_context.reset(context)
             # 499: the client closed the connection before any response started.

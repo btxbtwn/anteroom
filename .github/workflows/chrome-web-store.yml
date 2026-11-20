@@ -38,19 +38,34 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Check whether the Bridge changed
+        id: changed
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || python3 .github/scripts/chrome-web-store.py changed --sha "$TARGET_SHA"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Require successful CI for the exact main commit
+        if: steps.changed.outputs.run == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: python3 .github/scripts/chrome-web-store.py verify-ci --repo "$GITHUB_REPOSITORY" --sha "$TARGET_SHA"
 
       - name: Package the Bridge
+        if: steps.changed.outputs.run == 'true'
         id: package
         run: |
           version=$(python3 .github/scripts/chrome-web-store.py package --out "$RUNNER_TEMP/anteroom-bridge.zip")
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Keep the package
+        if: steps.changed.outputs.run == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: anteroom-bridge-${{ steps.package.outputs.version }}
@@ -58,6 +73,7 @@ jobs:
           retention-days: 30
 
       - name: Submit to the Chrome Web Store
+        if: steps.changed.outputs.run == 'true'
         env:
           CHROME_WEB_STORE_SERVICE_ACCOUNT: ${{ secrets.CHROME_WEB_STORE_SERVICE_ACCOUNT }}
           CHROME_WEB_STORE_PUBLISHER_ID: ${{ secrets.CHROME_WEB_STORE_PUBLISHER_ID }}

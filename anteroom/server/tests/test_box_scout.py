@@ -851,6 +851,27 @@ class RefreshTest(unittest.TestCase):
         self.assertEqual({lot["store"] for lot in snapshot["lots"]}, {"tvf", "papercrane"})
         self.assertEqual((snapshot["stores"]["papercrane"]["zone"], snapshot["stores"]["papercrane"]["origins"]), (None, 2))
 
+    def test_catalog_block_or_rate_limit_logs_info_while_other_errors_warn(self):
+        def fetch(store):
+            if store == "raghouse":
+                raise urllib.error.HTTPError("u", 403, "Forbidden", {}, None)
+            if store == "tvf":
+                raise urllib.error.HTTPError("u", 429, "Too Many Requests", {}, None)
+            raise urllib.error.HTTPError("u", 503, "Service Unavailable", {}, None)
+
+        self.fetch.side_effect = fetch
+        errors: dict[str, str] = {}
+        with self.assertLogs(box_scout.log, level="INFO") as captured:
+            box_scout._crawl(errors, recrawl=True)
+        self.assertEqual(set(errors), {"raghouse", "tvf", "papercrane"})
+        by_level = [(record.levelname, record.getMessage()) for record in captured.records]
+        self.assertTrue(any(lvl == "INFO" and "Raghouse" in msg for lvl, msg in by_level), by_level)
+        self.assertTrue(any(lvl == "INFO" and "Thrift Vintage Fashion" in msg for lvl, msg in by_level), by_level)
+        self.assertFalse(any(lvl == "WARNING" and ("Raghouse" in msg or "Thrift Vintage Fashion" in msg)
+                             for lvl, msg in by_level), by_level)
+        self.assertTrue(any(lvl == "WARNING" and "PaperCrane" in msg for lvl, msg in by_level), by_level)
+
+
 
     def test_preferences_saved_during_research_survive_and_request_a_rebuild(self):
         def research(themes, own, now):

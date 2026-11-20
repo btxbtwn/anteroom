@@ -402,7 +402,7 @@ async def etsy_api(method: str, path: str, **kwargs: Any):
     """
     if method.upper() not in {"GET", "HEAD"}:
         from anteroom.services.listing_mode import require
-        require("direct")
+        await asyncio.to_thread(require, "direct")
     async def send(token: str):
         for upload in (kwargs.get("files") or {}).values():
             handle = upload[1] if isinstance(upload, tuple) else None

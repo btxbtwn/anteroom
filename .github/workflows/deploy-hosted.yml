@@ -188,7 +188,14 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           IMAGE: ${{ steps.image.outputs.ref }}
         run: |
-          flyctl deploy . --config deploy/fly/fly.toml --ha=false --image "$IMAGE"
+          # The Fly Machines API occasionally drops an HTTP/2 stream mid-rollout;
+          # retrying the same pushed image finishes the deploy cleanly.
+          for attempt in 1 2 3; do
+            flyctl deploy . --config deploy/fly/fly.toml --ha=false --image "$IMAGE" && exit 0
+            [ "$attempt" = 3 ] && exit 1
+            echo "Fly.io deploy failed (attempt $attempt); retrying in 20s."
+            sleep 20
+          done
 
       - name: Confirm the live version
         if: steps.gate.outputs.skip != 'true'

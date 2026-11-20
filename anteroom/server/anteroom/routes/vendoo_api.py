@@ -123,7 +123,7 @@ async def _with_live_schema(listing: dict, marketplace: str, fields: list[dict])
     """eBay and Etsy editor rows gain the live schema. Other marketplaces are unchanged."""
     from anteroom.services.listing_mode import read
 
-    if read() == "vendoo" or marketplace not in ("ebay", "etsy"):
+    if await asyncio.to_thread(read) == "vendoo" or marketplace not in ("ebay", "etsy"):
         return fields
     from anteroom.services.direct_categories import overlay_live_fields
 

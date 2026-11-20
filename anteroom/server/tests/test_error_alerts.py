@@ -585,3 +585,55 @@ def test_pool_timeouts_through_a_session_keep_one_group_whatever_the_call_site()
     assert not any(app_module_path(line.split('"')[1]) for line in kept[-8:]), 'the stack must be deep enough to matter'
     expected = hashlib.sha256(repr(('sqlalchemy.exc.TimeoutError', named[-8:])).encode()).hexdigest()[:12]
     assert catalog['fingerprint'] == expected
+
+
+def test_expected_client_4xx_and_fly_replay_do_not_warn():
+    from fastapi import FastAPI, Response
+    from fastapi.responses import JSONResponse
+    from fastapi.testclient import TestClient
+    from anteroom.hosted import AccessLogMiddleware
+
+    app = FastAPI()
+
+    @app.get("/")
+    def home():
+        return {"ok": True}
+
+    @app.post("/api/browser-relay/replies")
+    def replay():
+        return Response(status_code=409, headers={"fly-replay": "instance=machine-2"})
+
+    @app.get("/api/marketplaces/sessions")
+    def sessions():
+        return JSONResponse({"detail": "Connect Chrome, then check marketplace sign-in."}, status_code=409)
+
+    @app.get("/api/items/{item_id}")
+    def refused(item_id: str):
+        return JSONResponse({"detail": "conflict"}, status_code=409)
+
+    class RejectUnauth:
+        def __init__(self, inner):
+            self.inner = inner
+
+        async def __call__(self, scope, receive, send):
+            if scope["type"] == "http" and scope["path"] == "/wp-login.php":
+                await JSONResponse({"detail": "A valid seller session is required"}, status_code=401)(scope, receive, send)
+                return
+            await self.inner(scope, receive, send)
+
+    app.add_middleware(RejectUnauth)
+    app.add_middleware(AccessLogMiddleware)
+
+    client = TestClient(app)
+    with patch.object(logging.getLogger("anteroom.http"), "warning") as warning:
+        assert client.post("/api/browser-relay/replies").status_code == 409
+        assert client.get("/wp-login.php").status_code == 401
+        assert client.get("/unknown-scanner-path").status_code == 404
+        assert client.head("/").status_code == 405
+        assert client.get("/api/marketplaces/sessions").status_code == 409
+        warning.assert_not_called()
+
+        # Matched-route refusals still log a warning.
+        assert client.get("/api/items/123").status_code == 409
+        warning.assert_called_once()
+

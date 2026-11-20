@@ -260,3 +260,41 @@ def test_workflow_checks_out_and_gates_the_same_commit_before_credentials():
     assert "ref: ${{ github.event.workflow_run.head_sha || github.sha }}" in workflow
     assert "TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}" in workflow
     assert workflow.index("verify-ci --repo") < workflow.index("CHROME_WEB_STORE_SERVICE_ACCOUNT:")
+    assert "chrome-web-store.py changed --sha" in workflow
+    assert "steps.changed.outputs.run == 'true'" in workflow
+
+
+def test_extension_changed_detects_only_packaged_extension_edits(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / "anteroom-extension" / "tests").mkdir(parents=True)
+    (repo / "anteroom").mkdir()
+    (repo / "anteroom-extension" / "manifest.json").write_text(json.dumps({"version": "1.0.0"}))
+    (repo / "anteroom-extension" / "README.md").write_text("docs\n")
+    (repo / "anteroom" / "app.py").write_text("x = 1\n")
+
+    def git(*args):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+
+    git("init", "-q")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "t")
+    git("add", ".")
+    git("commit", "-q", "-m", "initial")
+    root_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+    assert store.extension_changed(root_sha, repo) is True
+
+    (repo / "anteroom" / "app.py").write_text("x = 2\n")
+    git("commit", "-qam", "server only")
+    server_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+    assert store.extension_changed(server_sha, repo) is False
+
+    (repo / "anteroom-extension" / "README.md").write_text("docs updated\n")
+    git("commit", "-qam", "extension readme only")
+    docs_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+    assert store.extension_changed(docs_sha, repo) is False
+
+    (repo / "anteroom-extension" / "manifest.json").write_text(json.dumps({"version": "1.0.1"}))
+    git("commit", "-qam", "bump extension")
+    ext_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()
+    assert store.extension_changed(ext_sha, repo) is True
+

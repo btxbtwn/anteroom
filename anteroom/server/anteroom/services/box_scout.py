@@ -458,7 +458,10 @@ def _crawl(errors: dict[str, str], *, recrawl: bool) -> dict[str, list[dict]]:
         except FETCH_ERRORS as exc:
             name = scout().STORES[store]["name"]
             errors[store] = f"{name} did not return its catalog. Try again later with Update now."
-            log.warning("%s did not return its catalog: %s", name, exc)
+            if isinstance(exc, urllib.error.HTTPError) and exc.code in {403, 429}:
+                log.info("%s did not return its catalog: %s", name, exc)
+            else:
+                log.warning("%s did not return its catalog: %s", name, exc)
     return catalogs
 
 
