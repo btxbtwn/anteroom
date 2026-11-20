@@ -46,15 +46,14 @@ def _recheck_error_flag(db: Session, conv_id: str) -> None:
     touching the flag, and photos change its photo rule, so a listing fixed any
     other way would otherwise stay flagged forever.
     """
-    import copy
-
+    from anteroom.services import native_contract
     from anteroom.services.validation import validate_listing
 
     listing = db.query(Listing).filter(Listing.conversation_id == conv_id).first()
     if not listing or listing.validation_status != "error":
         return
     revision = db.get(ListingRevision, listing.current_revision_id) if listing.current_revision_id else None
-    data = copy.deepcopy(revision.listing_json) if revision and isinstance(revision.listing_json, dict) else {}
+    data = native_contract.copy_listing(revision.listing_json) if revision and isinstance(revision.listing_json, dict) else {}
     photo_count = db.query(Photo).filter(Photo.conversation_id == conv_id, Photo.marketplace.is_(None)).count()
     validation = validate_listing(data, photo_count, require_photos=True)
     listing.validation_status = "valid" if validation.valid else "error"

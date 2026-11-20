@@ -116,16 +116,52 @@ async def _execute(task_id, token):
     return False
 
 
+HEARTBEAT_INTERVAL_S = 20.0
+HEARTBEAT_RETRY_S = 5.0
+LEASE_DURATION_S = 120.0
+
+
 async def run_claimed(task_id, owner, token, *, heartbeat_loop: BackgroundLoop):
     with use(for_seller(owner, task_lease=(task_id, token))) as context:
         work = asyncio.create_task(_execute(task_id, token))
         completed = threading.Event()
 
         async def heartbeat():
+            last_renewed = time.monotonic()
+            delay = HEARTBEAT_INTERVAL_S
+            last_error: SQLAlchemyError | None = None
             while not completed.is_set():
-                await asyncio.sleep(20)
-                if not completed.is_set():
-                    await asyncio.to_thread(queue.renew, task_id, token)
+                await asyncio.sleep(delay)
+                if completed.is_set():
+                    break
+                attempt_started = time.monotonic()
+                remaining = LEASE_DURATION_S - (attempt_started - last_renewed)
+                if remaining <= 0:
+                    raise last_error or queue.TaskLeaseExpired()
+                try:
+                    await asyncio.wait_for(asyncio.to_thread(queue.renew, task_id, token), timeout=remaining)
+                except TimeoutError:
+                    if last_error is not None:
+                        raise last_error from None
+                    raise queue.TaskLeaseExpired() from None
+                except SQLAlchemyError as exc:
+                    last_error = exc
+                    elapsed = time.monotonic() - last_renewed
+                    if elapsed >= LEASE_DURATION_S:
+                        raise
+                    # Transient DB contention (statement/pool timeout) should not abort
+                    # an in-flight draft while its 2-minute lease is still valid.
+                    logging.getLogger(__name__).warning(
+                        'Draft task lease renewal failed temporarily (%s); retrying',
+                        type(exc).__name__,
+                    )
+                    delay = min(HEARTBEAT_RETRY_S, max(0.0, LEASE_DURATION_S - elapsed))
+                else:
+                    # PostgreSQL now() reflects transaction start, so anchor the
+                    # next retry budget conservatively before queue.renew began.
+                    last_renewed = attempt_started
+                    last_error = None
+                    delay = HEARTBEAT_INTERVAL_S
 
         # Canonical generation still makes synchronous database calls. Its
         # event loop may block, but lease renewal must keep running for every
@@ -158,6 +194,7 @@ async def run_claimed(task_id, owner, token, *, heartbeat_loop: BackgroundLoop):
             locations = ' > '.join(f'{frame.filename.rsplit("/", 1)[-1]}:{frame.lineno}:{frame.name}'
                                    for frame in traceback.extract_tb(exc.__traceback__))
             logging.getLogger(__name__).error('Draft task failed (%s at %s)', type(exc).__name__, locations)
+            work.cancel()
             try:
                 await asyncio.to_thread(queue.finish, task_id, token,
                                         error='The draft task stopped. Review the saved draft and try again.')
