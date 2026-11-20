@@ -29,7 +29,15 @@ export const test = base.extend<{ phone: boolean; createConversation: (data: { t
   // Any uncaught error in the page fails the test, so a broken screen cannot pass quietly.
   page: async ({ page }, use) => {
     const errors: string[] = [];
-    page.on("pageerror", (error) => errors.push(error.message));
+    page.on("pageerror", (error) => {
+      // WebKit reports same-origin polls cancelled by a reload or navigation as
+      // access-control failures. Extension status is polled from Settings and
+      // Connect Chrome; routing the URL alone does not stop the pageerror.
+      if (/\/api\/extension\/status due to access control checks\.?$/i.test(error.message)) {
+        return;
+      }
+      errors.push(error.message);
+    });
     await use(page);
     expect(errors, "uncaught errors in the page").toEqual([]);
   },
