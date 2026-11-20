@@ -1,1 +1,0 @@
-- Lower OpenRouter sold-comps research costs by using Perplexity search restricted to resale marketplaces, with tighter per-side search limits (4 sold, 2 active).

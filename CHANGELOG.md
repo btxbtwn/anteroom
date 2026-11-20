@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1051 — 2026-11-20
+
+- Lower OpenRouter sold-comps research costs by using Perplexity search restricted to resale marketplaces, with tighter per-side search limits (4 sold, 2 active).
+
+## 0.1.1050 — 2026-11-20
+
+- Keep Sales, Analytics, the calendar and boxes from downloading your whole shop again on every refresh when nothing changed, which cuts the hosted database traffic.
+
 ## 0.1.1049 — 2026-11-20
 
 - Hosted web and iOS accounts can now use a platform-managed OpenRouter Gemini Flash model (`ANTEROOM_MANAGED_OPENROUTER_KEY`, defaulting to `google/gemini-3.8-flash`) automatically, hiding provider setup and model pickers on hosted while keeping local desktop provider sign-ins unchanged.
