@@ -151,7 +151,9 @@
       // Checked before the approval is used, so the page can still send the approved bytes.
       if (!await photosMatch(claims, photos)) return 'photos';
       const acct = String(accountId || '').toLowerCase();
-      const bucket = command.type === 'job.cancel' ? 'cancel' : acct ? `acct:${acct}` : '';
+      const bucket = command.type === 'job.cancel'
+        ? (acct ? `cancel:${acct}` : 'cancel')
+        : acct ? `acct:${acct}` : '';
       return await use(claims.jti, claims.exp, bucket);
     }
     return {

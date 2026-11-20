@@ -236,3 +236,37 @@ test('object replay records migrate before a replay refusal and preserve bucket 
   assert.deepEqual(used, { [claims.jti]: claims.exp });
   assert.equal((await verifier.verify(await s.signer.sign(update(), ALICE, { seconds: NOW }), ALICE)).approval, 'capacity');
 });
+
+test('cancel buckets are isolated per account and expired legacy numeric entries are pruned', async () => {
+  const s = await setup();
+  const store = storage();
+  await store.local.set({ anteroom_used_approvals: { expired0000000000000000000000001: NOW - 120 } });
+  const verifier = createApprovalVerifier({ storage: store }, {
+    publicKey: s.signer.publicKey, now: () => NOW * 1000, maxUsed: 1,
+  });
+  const aliceCancel = await s.signer.sign({
+    type: 'job.cancel',
+    message_id: 'msg-cancel-alice-1',
+    job_id: 'job-alice-1',
+    payload: { job_id: 'job-alice-1' },
+  }, ALICE, { seconds: NOW });
+  assert.equal(await verifier.verify(aliceCancel, ALICE), null);
+  const used = (await store.local.get('anteroom_used_approvals')).anteroom_used_approvals;
+  assert.equal(Object.hasOwn(used, 'expired0000000000000000000000001'), false);
+
+  const aliceCancelSecond = await s.signer.sign({
+    type: 'job.cancel',
+    message_id: 'msg-cancel-alice-2',
+    job_id: 'job-alice-2',
+    payload: { job_id: 'job-alice-2' },
+  }, ALICE, { seconds: NOW });
+  assert.equal((await verifier.verify(aliceCancelSecond, ALICE)).approval, 'capacity');
+
+  const bobCancel = await s.signer.sign({
+    type: 'job.cancel',
+    message_id: 'msg-cancel-bob-1',
+    job_id: 'job-bob-1',
+    payload: { job_id: 'job-bob-1' },
+  }, BOB, { seconds: NOW });
+  assert.equal(await verifier.verify(bobCancel, BOB), null);
+});

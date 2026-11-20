@@ -324,3 +324,22 @@ for (const failure of ['quota', 'persistent quota', 'unrelated']) {
     assert.equal(call(s.context, 'nativeOperationsRunning'), false);
   });
 }
+
+test('final journal save failure still delivers marketplace reply and releases lock', async () => {
+  const s = setup('poshmark');
+  s.msg.payload.draft_url = null;
+  fullStorage(s.context);
+  const save = s.context.chrome.storage.local.set;
+  let writes = 0;
+  s.context.chrome.storage.local.set = async values => {
+    writes += 1;
+    if (writes > 1) throw new Error('Storage write failed after execution');
+    await save(values);
+  };
+  s.context.runPoshmarkApi = async () => ({ ok: true, state: 'draft', draft_url: 'https://poshmark.com/create-listing' });
+  await s.context.handleNativeMarketplaceMessage(s.msg);
+  assert.equal(s.replies.length, 1);
+  assert.equal(s.replies[0].ok, true);
+  assert.equal(s.replies[0].state, 'draft');
+  assert.equal(call(s.context, 'nativeOperationsRunning'), false);
+});
