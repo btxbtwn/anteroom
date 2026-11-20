@@ -80,6 +80,10 @@ describe("marketplaces section", () => {
     const loaded = render({}, {}, { selected: "ebay" });
     expect(enabledButton(loaded, "List…")).toBe(true);
     expect(enabledButton(loaded, "Save draft")).toBe(true);
+    // List everywhere stays in place, disabled, rather than disappearing while the listing loads.
+    const listEverywhere = /<button[^>]*title="List on [^"]*"[^>]*>/;
+    expect(loading.match(listEverywhere)?.[0]).toContain('disabled=""');
+    expect(loaded.match(listEverywhere)?.[0]).not.toContain('disabled=""');
   });
 
   it("keeps List available when local field checks are incomplete or unavailable", () => {

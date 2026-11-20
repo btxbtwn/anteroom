@@ -776,7 +776,8 @@ export function MarketplacesLayout({
   // List everywhere covers the marketplaces on the rail that are ready now; the rest wait for the seller.
   const unlisted = ORDER.filter((marketplace) => ids.includes(marketplace) && !running(marketplace) && !startingOn(marketplace)
     && listable(marketplace, statusById.get(marketplace)!));
-  const readyToList = unlisted.filter((marketplace) => !listBlocked(marketplace)) as NativeMarketplace[];
+  // A listing still loading keeps List everywhere in place, disabled, so the rail does not shift.
+  const readyToList = unlisted.filter((marketplace) => retryIn(marketplace) === 0) as NativeMarketplace[];
   const choices = ORDER.filter((marketplace) => ids.includes(marketplace)).map((marketplace) => listChoice(marketplace, {
     status: statusById.get(marketplace)!, canAct: canAct(marketplace), retryIn: retryIn(marketplace), soldSomewhere,
     listable: listable(marketplace, statusById.get(marketplace)!) && !running(marketplace) && !startingOn(marketplace),
