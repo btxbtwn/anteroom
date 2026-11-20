@@ -24,7 +24,7 @@ beforeEach(() => {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init = {}) => {
     const request = new Request(input, init);
     const body = ["GET", "HEAD"].includes(request.method) ? "" : await request.clone().text();
-    calls.push({ method: request.method, url: request.url, headers: request.headers, body, signal: init.signal });
+    calls.push({ method: request.method, url: request.url, headers: request.headers, body, signal: init.signal, redirect: init.redirect });
     const match = routes.findLast((r) => r.method === request.method && r.pattern.test(request.url));
     if (!match) return new Response(`unmocked ${request.method} ${request.url}`, { status: 599 });
     const out = await match.respond({ request, body, url: new URL(request.url) });
@@ -397,6 +397,71 @@ describe("Etsy", () => {
     expect(swapped.status).toBe(401);
     expect(await swapped.text()).not.toContain("2.new");
   });
+
+  it("revokes refresh and API proxy access when the Etsy shop is unlinked", async () => {
+    const a = await register();
+    await connectEtsy(a.token, { userId: "785", shopId: "55" });
+    route("GET", /api\.etsy\.com\/v3\/application\/shops\/55\/receipts/, () => ({ count: 0, results: [] }));
+    route("POST", /api\.etsy\.com\/v3\/public\/oauth\/token/, () => ({
+      access_token: "785.new",
+      refresh_token: "785.newer",
+      expires_in: 3600,
+    }));
+
+    const proxy = () =>
+      relay("/studio/etsy/v3/application/shops/55/receipts", authed(a.token, { headers: { "x-etsy-authorization": "Bearer 785.access" } }));
+    const refresh = () =>
+      relay("/studio/oauth/etsy/refresh", authed(a.token, { method: "POST", body: JSON.stringify({ refreshToken: "785.refresh" }) }));
+
+    expect((await proxy()).status).toBe(200);
+    expect((await refresh()).status).toBe(200);
+
+    expect((await relay("/studio/accounts/etsy/55", authed(a.token, { method: "DELETE" }))).status).toBe(200);
+    expect((await (await relay("/studio/accounts", authed(a.token))).json()).accounts).toEqual([]);
+
+    const callsBefore = calls.length;
+    expect((await refresh()).status).toBe(401);
+    expect((await proxy()).status).toBe(403);
+    expect(calls.length).toBe(callsBefore);
+  });
+
+  it("refuses upstream redirects from Etsy API with 502 and uses redirect: manual", async () => {
+    const a = await register();
+    await connectEtsy(a.token, { userId: "786", shopId: "56" });
+    route("GET", /api\.etsy\.com\/v3\/application\/shops\/56\/receipts/, () =>
+      new Response("redirecting", { status: 302, headers: { location: "https://evil.example/steal" } }),
+    );
+    const response = await relay(
+      "/studio/etsy/v3/application/shops/56/receipts",
+      authed(a.token, { headers: { "x-etsy-authorization": "Bearer 786.access" } }),
+    );
+    expect(response.status).toBe(502);
+    expect(response.headers.get("location")).toBe(null);
+    const upstream = calls.find((c) => c.url.includes("/shops/56/receipts"));
+    expect(upstream.redirect).toBe("manual");
+  });
+
+  it("passes through 304 Not Modified with ETag on conditional Etsy API requests", async () => {
+    const a = await register();
+    await connectEtsy(a.token, { userId: "787", shopId: "57" });
+    route("GET", /api\.etsy\.com\/v3\/application\/shops\/57\/receipts/, () =>
+      new Response(null, { status: 304, headers: { etag: '"v1-etag"' } }),
+    );
+    const response = await relay(
+      "/studio/etsy/v3/application/shops/57/receipts",
+      authed(a.token, {
+        headers: {
+          "x-etsy-authorization": "Bearer 787.access",
+          "if-none-match": '"v1-etag"',
+        },
+      }),
+    );
+    expect(response.status).toBe(304);
+    expect(response.headers.get("etag")).toBe('"v1-etag"');
+    expect(await response.text()).toBe("");
+    const upstream = calls.find((c) => c.url.includes("/shops/57/receipts"));
+    expect(upstream.redirect).toBe("manual");
+  });
 });
 
 describe("eBay", () => {
@@ -499,31 +564,53 @@ describe("eBay", () => {
     expect(accounts.accounts).toEqual([]);
   });
 
-  it("rejects notifications that fail the signature check", async () => {
+  it("rejects notifications that fail the signature check, including malformed base64", async () => {
     await mockEbayBasics();
-    const response = await relay("/ebay", { method: "POST", body: "{}", headers: { "x-ebay-signature": ebayHeader(EBAY_KID, btoa("junk")) } });
-    expect(response.status).toBe(412);
+    const junk = await relay("/ebay", { method: "POST", body: "{}", headers: { "x-ebay-signature": ebayHeader(EBAY_KID, btoa("junk")) } });
+    expect(junk.status).toBe(412);
+    const badBase64 = await relay("/ebay", {
+      method: "POST",
+      body: "{}",
+      headers: { "x-ebay-signature": ebayHeader(EBAY_KID, "not valid base64!!!") },
+    });
+    expect(badBase64.status).toBe(412);
   });
 
-  it("refreshes tokens only for the device's own eBay account", async () => {
+  it("refreshes tokens only for the device's own eBay account and blocks unlinked devices before calling eBay", async () => {
     const a = await register();
     const b = await register();
+    const c = await register();
     await connectEbay(a.token, "seller-r");
+    await connectEbay(c.token, "seller-c");
+    // Ensure subsequent user lookup returns seller-r (the token owner).
+    route("GET", /apiz\.ebay\.com\/commerce\/identity\/v1\/user/, () => ({ userId: "seller-r", username: "name-seller-r" }));
     const refresh = (token) =>
       relay("/studio/oauth/ebay/refresh", authed(token, { method: "POST", body: JSON.stringify({ refreshToken: "ebay-refresh" }) }));
     const ok = await refresh(a.token);
     expect(ok.status).toBe(200);
     expect((await ok.json()).tokens.accessToken).toBe("ebay-user-token-2");
-    const stranger = await refresh(b.token);
-    expect(stranger.status).toBe(401);
-    expect(await stranger.text()).not.toContain("ebay-user-token-2");
+
+    // Unlinked device b must be rejected without calling eBay's token endpoint.
+    const tokenCalls = () => calls.filter((call) => call.url.includes("/identity/v1/oauth2/token")).length;
+    const before = tokenCalls();
+    const unlinked = await refresh(b.token);
+    expect(unlinked.status).toBe(401);
+    expect(await unlinked.text()).not.toContain("ebay-user-token-2");
+    expect(tokenCalls()).toBe(before);
+
+    // Linked device c cannot refresh seller-r's token either.
+    const other = await refresh(c.token);
+    expect(other.status).toBe(401);
+    expect(await other.text()).not.toContain("ebay-user-token-2");
   });
 
   it("asks the seller to sign in again when a refresh token is dead", async () => {
     const a = await register();
-    await mockEbayBasics();
+    await connectEbay(a.token, "seller-dead");
+    const before = calls.filter((call) => call.url.includes("/identity/v1/oauth2/token")).length;
     const response = await relay("/studio/oauth/ebay/refresh", authed(a.token, { method: "POST", body: JSON.stringify({ refreshToken: "dead" }) }));
     expect(response.status).toBe(401);
+    expect(calls.filter((call) => call.url.includes("/identity/v1/oauth2/token")).length).toBe(before + 1);
   });
 });
 
@@ -562,7 +649,7 @@ describe("eBay public keys", () => {
 });
 
 describe("replays", () => {
-  it("refuses eBay notifications published more than a day ago", async () => {
+  it("refuses eBay notifications published more than a day ago or far in the future", async () => {
     const a = await register();
     await connectEbay(a.token, "seller-old");
     const stale = {
@@ -570,10 +657,28 @@ describe("replays", () => {
       notification: { notificationId: "n-old", eventDate: now(-25 * 3600e3), publishDate: now(-25 * 3600e3), data: { userId: "seller-old" } },
     };
     expect((await postEbayNotification(stale)).status).toBe(412);
+    const future = {
+      metadata: { topic: "MARKETPLACE_ACCOUNT_DELETION" },
+      notification: { notificationId: "n-future", eventDate: now(10 * 60e3), publishDate: now(10 * 60e3), data: { userId: "seller-old" } },
+    };
+    expect((await postEbayNotification(future)).status).toBe(412);
     const undated = { ...stale, notification: { notificationId: "n-undated", data: { userId: "seller-old" } } };
     expect((await postEbayNotification(undated)).status).toBe(400);
     expect((await (await relay("/studio/accounts", authed(a.token))).json()).accounts).toHaveLength(1);
     expect(await events(a.token)).toEqual([]);
+
+    // Small clock skew within 5 minutes is tolerated.
+    const slightSkew = {
+      metadata: { topic: "ORDER_CONFIRMATION" },
+      notification: {
+        notificationId: "n-skew",
+        eventDate: now(2 * 60e3),
+        publishDate: now(2 * 60e3),
+        data: { user: { userId: "seller-old" }, order: { orderId: "12-999" } },
+      },
+    };
+    expect((await postEbayNotification(slightSkew)).status).toBe(204);
+    expect(await events(a.token)).toHaveLength(1);
   });
 
   it("does not accept an acknowledged eBay notification again", async () => {
@@ -634,6 +739,17 @@ describe("request bodies", () => {
     expect(response.status).toBe(413);
     expect(stats.read).toBeLessThan(12 * 1024 * 1024);
   });
+
+  it.each(["/studio/ack", "/studio/oauth/ebay/refresh", "/studio/oauth/etsy/refresh"])(
+    "stops reading %s body once it passes the limit",
+    async (path) => {
+      const device = await register();
+      const { body, stats } = endless();
+      const response = await relay(path, authed(device.token, { method: "POST", body, duplex: "half" }));
+      expect(response.status).toBe(413);
+      expect(stats.read).toBeLessThan(1024 * 1024);
+    },
+  );
 });
 
 describe("deadlines", () => {
