@@ -158,6 +158,40 @@ class CategoryTreeSeedTest(unittest.TestCase):
         finally:
             engine.dispose()
 
+    def test_seed_restore_cannot_reuse_a_body_cached_under_another_snapshot(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session
+
+        from anteroom.routes import catalog
+
+        export_seed(self.source, self.seed)
+        import_seed(self.target, self.seed)
+        other = self.root / "other.json"
+        payload = json.loads(gzip.decompress(self.seed.read_bytes()))
+        for node in payload["category_tree_nodes"]:
+            if node["marketplace"] == "ebay":
+                node["label"] = "Seed B"
+        other.write_text(json.dumps(payload))
+        engine = create_engine(f"sqlite:///{self.target}")
+        serialize = catalog._serialize_tree_nodes
+
+        def interleaved(db, marketplace, **kwargs):
+            import_seed(self.target, other)
+            result = serialize(db, marketplace, **kwargs)
+            import_seed(self.target, self.seed)
+            return result
+
+        try:
+            with patch.object(catalog, "_serialize_tree_nodes", side_effect=interleaved):
+                with Session(engine) as db:
+                    first = catalog.categories("ebay", None, db)
+            self.assertEqual(json.loads(first.body)["nodes"][0]["label"], "Seed B")
+            with Session(engine) as db:
+                restored = catalog.categories("ebay", None, db)
+            self.assertEqual(json.loads(restored.body)["nodes"][0]["label"], "Ebay")
+        finally:
+            engine.dispose()
+
     def test_ensure_imports_when_incomplete_and_skips_when_complete(self):
         export_seed(self.source, self.seed)
         self.assertIsNone(ensure_seeded_category_trees(self.source, self.seed))

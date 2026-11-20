@@ -168,3 +168,36 @@ def test_complete_category_trees_are_cached_per_version_and_invalidated_on_reimp
         assert len(node_queries) == 2
     finally:
         event.remove(engine, 'before_cursor_execute', count_node_queries)
+
+
+def test_seed_restore_cannot_reuse_mismatched_cached_nodes(cloud, signing_keys, tmp_path, monkeypatch):  # noqa: F811
+    from anteroom.routes import catalog
+    from anteroom.services.category_tree_seed import import_seed
+
+    client, engine = cloud
+    alice = headers(signing_keys)
+    original = seed(tmp_path)
+    import_seed(engine, original)
+    payload = json.loads(original.read_text())
+    for node in payload['category_tree_nodes']:
+        if node['marketplace'] == 'ebay':
+            node['label'] = 'Seed B'
+    other = tmp_path / 'other.json'
+    other.write_text(json.dumps(payload))
+    serialize = catalog._serialize_tree_nodes
+
+    def interleaved(db, marketplace, **kwargs):
+        import_seed(engine, other)
+        result = serialize(db, marketplace, **kwargs)
+        import_seed(engine, original)
+        return result
+
+    with monkeypatch.context() as patch:
+        patch.setattr(catalog, '_serialize_tree_nodes', interleaved)
+        first = client.get('/api/catalog/categories?marketplace=ebay', headers=alice)
+    assert first.status_code == 200
+    assert {node['label'] for node in first.json()['nodes']} == {'Seed B'}
+    restored = client.get('/api/catalog/categories?marketplace=ebay', headers=alice)
+    assert restored.status_code == 200
+    assert restored.headers['etag'] != first.headers['etag']
+    assert 'Seed B' not in {node['label'] for node in restored.json()['nodes']}

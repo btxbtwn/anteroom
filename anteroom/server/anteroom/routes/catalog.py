@@ -23,7 +23,8 @@ router = APIRouter(prefix="/api/catalog", tags=["catalog"])
 # encoded JSON per engine and marketplace so repeated picker loads do not scan
 # and serialize 20k ORM rows on every request.
 _TREE_CACHE_LOCK = threading.Lock()
-_TREE_CACHE: WeakKeyDictionary[Any, dict[str, tuple[tuple[datetime, str | None, str | None], bytes, str]]] = WeakKeyDictionary()
+_TreeVersion = tuple[datetime, str | None, str | None]
+_TREE_CACHE: WeakKeyDictionary[Any, dict[str, tuple[_TreeVersion, bytes, str]]] = WeakKeyDictionary()
 
 
 def _etag_matches(header: str | None, etag: str) -> bool:
@@ -37,7 +38,7 @@ def _etag_matches(header: str | None, etag: str) -> bool:
     return False
 
 
-def _serialize_tree_nodes(db: Session, marketplace: str, *, complete: bool) -> tuple[bytes, str]:
+def _serialize_tree_nodes(db: Session, marketplace: str) -> tuple[bytes, str, _TreeVersion | None]:
     rows = (
         db.query(
             CategoryTreeNode.category_id,
@@ -46,15 +47,25 @@ def _serialize_tree_nodes(db: Session, marketplace: str, *, complete: bool) -> t
             CategoryTreeNode.label,
             CategoryTreeNode.is_leaf,
             CategoryTreeNode.has_children,
+            CategoryTree.status,
+            CategoryTree.updated_at,
+            CategoryTree.source,
+            CategoryTree.content_hash,
         )
-        .filter(CategoryTreeNode.marketplace == marketplace)
+        .select_from(CategoryTree)
+        .outerjoin(CategoryTreeNode, CategoryTreeNode.marketplace == CategoryTree.marketplace)
+        .filter(CategoryTree.marketplace == marketplace)
         .order_by(CategoryTreeNode.path)
         .all()
     )
+    # A single statement binds the cache version to the nodes' snapshot, even
+    # under READ COMMITTED and when a seed is imported and then restored.
+    status, updated_at, source, content_hash = rows[0][6:] if rows else (None, None, None, None)
+    version = (updated_at, source, content_hash) if status == "complete" and updated_at is not None else None
     body = json.dumps(
         {
             "coverage": "tree",
-            "complete": complete,
+            "complete": status == "complete",
             "nodes": [
                 {
                     "id": category_id,
@@ -64,14 +75,15 @@ def _serialize_tree_nodes(db: Session, marketplace: str, *, complete: bool) -> t
                     "is_leaf": is_leaf,
                     "has_children": has_children,
                 }
-                for category_id, parent_id, path, label, is_leaf, has_children in rows
+                for category_id, parent_id, path, label, is_leaf, has_children, *_version in rows
+                if category_id is not None
             ],
         },
         separators=(",", ":"),
         ensure_ascii=False,
     ).encode("utf-8")
     etag = f'"{hashlib.sha256(body).hexdigest()[:16]}"'
-    return body, etag
+    return body, etag, version
 
 
 @router.get("/categories")
@@ -94,7 +106,7 @@ def categories(
                 if _etag_matches(if_none_match, etag):
                     return Response(status_code=304, headers=headers)
                 return Response(body, media_type="application/json", headers=headers)
-        body, etag = _serialize_tree_nodes(db, marketplace, complete=tree.status == "complete")
+        body, etag, version = _serialize_tree_nodes(db, marketplace)
         if version is not None:
             with _TREE_CACHE_LOCK:
                 by_marketplace = _TREE_CACHE.get(engine)
