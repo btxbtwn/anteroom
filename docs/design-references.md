@@ -11,7 +11,7 @@ there is no required number of sources or prescribed tour through the list.
   [sources](../DESIGN.md#sources) hold the design-system and accessibility
   references; they are not duplicated here.
 - [AGENTS.md](../AGENTS.md) owns engineering and product invariants;
-  [the product specification](../VENDOO_STUDIO_SPEC.md) describes the product
+  [the product specification](../ANTEROOM_SPEC.md) describes the product
   and architecture. For current web styling, follow `DESIGN.md`, not older
   visual descriptions in the specification or audit snapshots.
 - [Performance goals](performance.md) applies McMaster-Carr/NextMaster's speed

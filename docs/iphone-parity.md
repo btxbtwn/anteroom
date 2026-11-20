@@ -6,8 +6,8 @@ the shared hosted backend; Python, Keychain, the desktop filesystem and Chrome
 automation do not move into the iOS process.
 
 Sources: `src/components/workspaceCrumbs.ts`, `src/app/runtime.tsx`,
-`src/components/settingsNav.ts`, `server/vendoo_studio/hosted.py` and the
-routers it mounts (paths are relative to `vendoo-studio/`). The native source
+`src/components/settingsNav.ts`, `server/anteroom/hosted.py` and the
+routers it mounts (paths are relative to `anteroom/`). The native source
 is `anteroom-ios/Sources/`. Backend availability below describes code, not a
 verified production deployment. Recheck `/api/runtime` on the deployed server.
 

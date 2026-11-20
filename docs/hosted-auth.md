@@ -1,9 +1,9 @@
 # Hosted seller sessions (cloud step 1b)
 
 The first accounts increment is a separate hosted API entry point,
-`vendoo_studio.hosted:app`. It verifies seller identity without importing the
+`anteroom.hosted:app`. It verifies seller identity without importing the
 desktop API, opening its database, or starting its Chrome and automation services.
-The desktop app continues to use `vendoo_studio.main:app` on loopback.
+The desktop app continues to use `anteroom.main:app` on loopback.
 
 ## What works
 
@@ -40,11 +40,11 @@ requirements are defined.
 
 ## Run locally
 
-From `vendoo-studio/`, after installing the backend dependencies:
+From `anteroom/`, after installing the backend dependencies:
 
 ```sh
 SUPABASE_URL=https://YOUR_PROJECT.supabase.co \
-  python -m uvicorn vendoo_studio.hosted:app --host 127.0.0.1 --port 4319
+  python -m uvicorn anteroom.hosted:app --host 127.0.0.1 --port 4319
 ```
 
 `SUPABASE_URL` is the public project origin, with no path, query or credentials.

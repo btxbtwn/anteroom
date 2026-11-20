@@ -1,6 +1,6 @@
 # Anteroom for iPhone
 
-A native SwiftUI app on the hosted Anteroom API (`vendoo_studio.hosted:app`)
+A native SwiftUI app on the hosted Anteroom API (`anteroom.hosted:app`)
 and Supabase, step 5 of [`docs/cloud-architecture.md`](../docs/cloud-architecture.md).
 
 What works now: email-and-password accounts (sign in, create account, and
@@ -84,7 +84,7 @@ does two things:
   versions of its dependencies. To update a package, change `project.yml`,
   resolve in Xcode, and commit the new `Package.resolved` back to `Config/`.
 - writes `Config/Version.xcconfig` (not tracked) with the app version from
-  `vendoo-studio/VERSION`, the version the whole product ships as. The build
+  `anteroom/VERSION`, the version the whole product ships as. The build
   number comes from the CI run.
 
 ## Sign-in
@@ -178,8 +178,8 @@ The inventory row, listing, photo, save, runtime and error models in
 `Sources/API/Generated/APIContract.swift` are generated from the backend's
 shared contract (see [`contracts/README.md`](../contracts/README.md)); the
 web app's TypeScript types come from the same source. Never edit that file:
-change `vendoo-studio/server/vendoo_studio/routes/api_contract.py` and run
-`python vendoo-studio/scripts/api-contract.py`. Behavior the phone adds to
+change `anteroom/server/anteroom/routes/api_contract.py` and run
+`python anteroom/scripts/api-contract.py`. Behavior the phone adds to
 those models (display titles, cover photo ids, photo edit checks) lives in
 extensions in `Sources/API/Models.swift`. A field with a default decodes to
 that default when a response leaves it out, and a literal (a runtime feature,

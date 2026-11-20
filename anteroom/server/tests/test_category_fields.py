@@ -1,0 +1,441 @@
+from __future__ import annotations
+
+import unittest
+from unittest import mock
+
+from fastapi.testclient import TestClient
+
+from anteroom.main import app
+from anteroom.services import category_fields
+from anteroom.services.category_tree import product_type_slugs
+from anteroom.services.vendoo_specifics import normalize_specifics
+
+RAW = {
+    "Season": {
+        "id": "Season", "display": "Season",
+        "rules": {"fieldOptions": {"minValues": 0, "maxValues": 100, "selectionMode": "SelectionOnly"}},
+        "options": {"0": {"id": "Spring", "display": "Spring"}, "1": {"id": "Fall", "display": "Fall"}},
+    },
+    "condition": {
+        "id": "condition", "display": "Condition",
+        "rules": {"fieldOptions": {"minValues": 1, "maxValues": 1, "selectionMode": "SelectionOnly"}},
+        "options": {"0": {"id": "3000", "display": "Pre-owned - Good"}},
+    },
+    "Size": {
+        "id": "Size", "display": "Size",
+        "rules": {"fieldOptions": {"minValues": 1, "maxValues": 1, "selectionMode": "FreeText"}},
+        "options": {},
+    },
+}
+
+
+class CategoryFieldsCacheTest(unittest.TestCase):
+    marketplace = "ebay"
+    category_id = "test-53159"
+
+    def tearDown(self):
+        from anteroom.database import SessionLocal
+        from anteroom.models.catalog import CategoryFieldSchema
+
+        with SessionLocal() as db:
+            db.query(CategoryFieldSchema).filter_by(
+                marketplace=self.marketplace, category_id=self.category_id
+            ).delete()
+            db.commit()
+
+    def test_round_trips_through_the_cache(self):
+        self.assertIsNone(category_fields.load_fields(self.marketplace, self.category_id))
+        specs = normalize_specifics(RAW)
+        category_fields.save_fields(self.marketplace, self.category_id, specs)
+
+        loaded = category_fields.load_fields(self.marketplace, self.category_id)
+        self.assertEqual(sorted(loaded), ["Season", "Size", "condition"])
+        self.assertTrue(loaded["Season"].multi)
+        self.assertTrue(loaded["condition"].required)
+        self.assertFalse(loaded["Size"].selection_only)
+        self.assertEqual(loaded["condition"].options, {"3000": "Pre-owned - Good"})
+
+    def test_saving_again_replaces_the_row(self):
+        category_fields.save_fields(self.marketplace, self.category_id, normalize_specifics(RAW))
+        category_fields.save_fields(
+            self.marketplace, self.category_id,
+            normalize_specifics({"Size": RAW["Size"]}),
+        )
+        loaded = category_fields.load_fields(self.marketplace, self.category_id)
+        self.assertEqual(sorted(loaded), ["Size"])
+
+    def test_stale_and_empty_schemas_refresh_without_repeated_empty_fetches(self):
+        from datetime import UTC, datetime, timedelta
+        from anteroom.database import SessionLocal
+        from anteroom.models.catalog import CategoryFieldSchema
+
+        category_fields.save_fields(self.marketplace, self.category_id, normalize_specifics(RAW))
+        with SessionLocal() as db:
+            row = db.query(CategoryFieldSchema).filter_by(marketplace=self.marketplace, category_id=self.category_id).one()
+            row.fetched_at = datetime.now(UTC) - timedelta(days=8)
+            db.commit()
+        self.assertIsNone(category_fields.load_fields(self.marketplace, self.category_id))
+        category_fields.save_fields(self.marketplace, self.category_id, normalize_specifics(RAW))
+        self.assertIn("Season", category_fields.load_fields(self.marketplace, self.category_id))
+        category_fields.save_fields(self.marketplace, self.category_id, {})
+        self.assertEqual(category_fields.load_fields(self.marketplace, self.category_id), {})
+
+    def test_fields_route_serves_the_cache(self):
+        category_fields.save_fields(self.marketplace, self.category_id, normalize_specifics(RAW))
+        client = TestClient(app)
+        res = client.get("/api/catalog/fields", params={
+            "marketplace": self.marketplace, "category_id": self.category_id,
+        })
+        self.assertEqual(res.status_code, 200)
+        body = res.json()
+        self.assertEqual(sorted(body["required"]), ["Size", "condition"])
+        season = next(row for row in body["fields"] if row["key"] == "Season")
+        self.assertTrue(season["multi"])
+        self.assertEqual(season["options"], {"Spring": "Spring", "Fall": "Fall"})
+
+    def test_uncached_category_is_a_404(self):
+        client = TestClient(app)
+        res = client.get("/api/catalog/fields", params={
+            "marketplace": "ebay", "category_id": "never-fetched",
+        })
+        self.assertEqual(res.status_code, 404)
+
+
+class DepopProductTypeTest(unittest.TestCase):
+    def test_leaf_ids_become_unique_sorted_product_types(self):
+        self.assertEqual(
+            product_type_slugs(["kidswear_jackets", "menswear_jackets", "womenswear_crop-top", " ", "books"]),
+            ["books", "crop-top", "jackets"],
+        )
+
+
+class DropdownOptionsRouteTest(unittest.TestCase):
+    def test_serves_skill_scrape_with_mercari_shipping(self):
+        client = TestClient(app)
+        res = client.get("/api/catalog/dropdown-options")
+        self.assertEqual(res.status_code, 200)
+        forms = res.json()["forms"]
+        self.assertIn("Streetwear", forms["depop"]["style"])
+        self.assertIn("Another company or person", forms["etsy"]["whoMade"])
+        self.assertTrue(
+            any("Ground Advantage" in label for label in forms["mercari"]["shippingLabel"])
+        )
+        self.assertIn("FixedPriceItem", forms["ebay"]["pricingFormat"])
+
+
+class MercariSpecificsTest(unittest.TestCase):
+    """Mercari's schema comes from a static file, keyed flat as {cat}_Size."""
+
+    MASTER = {
+        "version": "v1.15",
+        "categorySizeGroup": {"12": 1, "99": 7},
+        "itemSizes": [
+            {"id": 4, "name": "M (8-10)", "itemSizeGroupId": 1, "itemSizeSubGroupId": 11, "displayOrder": 50},
+            {"id": 293, "name": "M (8-10)", "itemSizeGroupId": 1, "itemSizeSubGroupId": 12, "displayOrder": 50},
+            {"id": 353, "name": "M (7-9)", "itemSizeGroupId": 1, "itemSizeSubGroupId": 15, "displayOrder": 50},
+            {"id": 2, "name": "XS (0-2)", "itemSizeGroupId": 1, "itemSizeSubGroupId": 11, "displayOrder": 10},
+            {"id": 900, "name": "Other group", "itemSizeGroupId": 2, "itemSizeSubGroupId": 11},
+        ],
+    }
+
+    def test_collapses_duplicate_labels_to_the_primary_sub_group(self):
+        from anteroom.services.vendoo_specifics import mercari_specifics
+
+        specs = mercari_specifics(self.MASTER, "12")
+        self.assertEqual(list(specs), ["Size"])
+        # 293 duplicates 4's label exactly, so only the lower sub-group's id
+        # survives; the juniors label is a different choice and stays.
+        self.assertEqual(specs["Size"].options, {
+            "2": "XS (0-2)", "4": "M (8-10)", "353": "M (7-9)",
+        })
+
+    def test_resolves_a_qualified_size_and_reports_a_bare_one(self):
+        from anteroom.services.vendoo_specifics import encode_specific, mercari_specifics
+
+        size = mercari_specifics(self.MASTER, "12")["Size"]
+        self.assertEqual(encode_specific(size, "M (8-10)"), ("4", True))
+        self.assertEqual(encode_specific(size, "M (7-9)"), ("353", True))
+        # "M" fits both standard and juniors, so it is reported, not guessed.
+        self.assertEqual(encode_specific(size, "M"), ("", False))
+
+    def test_a_category_without_a_size_group_has_no_size(self):
+        from anteroom.services.vendoo_specifics import mercari_specifics
+
+        self.assertEqual(mercari_specifics(self.MASTER, "404"), {})
+        # a group with no rows is empty too, not a stub field
+        self.assertEqual(mercari_specifics(self.MASTER, "99"), {})
+
+
+
+class NumberedSizeCodesTest(unittest.TestCase):
+    """Depop numbers its sizes, so a code can spell another size's label."""
+
+    def test_a_size_is_read_as_its_label_before_a_code(self):
+        from anteroom.services.vendoo_specifics import FieldSpec, encode_specific
+
+        size = FieldSpec("size", display="Size", selection_only=True, options={
+            "12": "10", "14": "12", "17": "M", "22": "14",
+        })
+        self.assertEqual(encode_specific(size, "14"), ("22", True))
+        self.assertEqual(encode_specific(size, "12"), ("14", True))
+        self.assertEqual(encode_specific(size, "M"), ("17", True))
+        # No size is shown as "17". It is a size Depop does not offer, never
+        # Vendoo's id 17 — that would list the item as an M.
+        self.assertEqual(encode_specific(size, "17"), ("", False))
+
+    def test_a_waist_size_matches_its_label_in_inches(self):
+        from anteroom.services.vendoo_specifics import FieldSpec, encode_specific
+
+        # Mercari's jeans: id 26 is the 36 in. waist, and a 26 is id 17.
+        size = FieldSpec("Size", display="Size", selection_only=True, options={
+            "17": "26 in.", "26": "36 in.", "329": "58+ in.", "396": "M",
+        })
+        self.assertEqual(encode_specific(size, "26"), ("17", True))
+        self.assertEqual(encode_specific(size, "26 in."), ("17", True))
+        self.assertEqual(encode_specific(size, "36"), ("26", True))
+        self.assertEqual(encode_specific(size, "17"), ("", False))
+
+    def test_a_plain_size_is_not_the_same_size_in_inches(self):
+        from anteroom.services.vendoo_specifics import FieldSpec, encode_specific
+
+        # Depop's jeans: 28" is a waist, 28 a size of its own.
+        size = FieldSpec("size", display="Size", selection_only=True, options={
+            "18": '27"', "19": '28"', "44": "28",
+        })
+        self.assertEqual(encode_specific(size, "28"), ("44", True))
+        self.assertEqual(encode_specific(size, '28"'), ("19", True))
+        self.assertEqual(encode_specific(size, "28 in."), ("19", True))
+        self.assertEqual(encode_specific(size, "28 inches"), ("19", True))
+        # No plain 27 is offered, so the waist is the only 27 there is.
+        self.assertEqual(encode_specific(size, "27"), ("18", True))
+
+    def test_a_named_code_is_still_read_as_a_code(self):
+        from anteroom.services.vendoo_specifics import FieldSpec, encode_specific
+
+        grouping = FieldSpec("attribute_body-fit", display="Size grouping", selection_only=True, options={
+            "plus-size": "Plus", "tall": "Tall",
+        })
+        self.assertEqual(encode_specific(grouping, "plus-size"), ("plus-size", True))
+
+    def test_a_scaled_size_is_read_as_its_label_before_a_code(self):
+        from anteroom.services.vendoo_specifics import FieldSpec, encode_scaled
+
+        size = FieldSpec("size", display="Size", scales={
+            "numbered": {"display": "Numbered", "options": {"14": "12", "22": "14"}},
+            "plus": {"display": "Plus", "options": {"32Plus": "32", "32": "32"}},
+        })
+        self.assertEqual(encode_scaled(size, "14"), ("numbered", "22", True))
+        self.assertEqual(encode_scaled(size, "32"), ("plus", "32", True))
+        self.assertEqual(encode_scaled(size, "32Plus"), ("plus", "32Plus", True))
+        self.assertEqual(encode_scaled(size, "22"), ("", "", False))
+
+    def test_a_kids_size_lands_on_the_departments_scale(self):
+        # Poshmark tells boys from girls only by the size scale.
+        from anteroom.services.vendoo_specifics import FieldSpec, encode_scaled
+
+        size = FieldSpec("size", display="Size", scales={
+            "girls": {"display": "US Girls", "options": {"XLG": "XL", "16G": "16"}},
+            "boys": {"display": "US Boys", "options": {"XLB": "XL", "18B": "18"}},
+        })
+        self.assertEqual(encode_scaled(size, "XL (18/20)", "Boys"), ("boys", "XLB", True))
+        self.assertEqual(encode_scaled(size, "XL", "Girls"), ("girls", "XLG", True))
+        self.assertEqual(encode_scaled(size, "XL", "Unisex"), ("girls", "XLG", True))
+
+
+class SchemaFeedsTheGapFillerTest(unittest.TestCase):
+    """The cached schema is what the gap filler asks the model to fill."""
+
+    def test_offers_every_empty_schema_field_with_its_options(self):
+        from anteroom.services import listing_field_gaps
+        from anteroom.services.vendoo_specifics import normalize_specifics
+
+        specs = normalize_specifics({
+            "Season": {"id": "Season", "display": "Season", "options": {
+                "0": {"id": "Spring", "display": "Spring"},
+                "1": {"id": "Winter", "display": "Winter"},
+            }, "rules": {"fieldOptions": {"minValues": 0, "maxValues": 2,
+                                          "selectionMode": "SelectionOnly"}}},
+            "Department": {"id": "Department", "display": "Department", "options": {
+                "0": {"id": "Women", "display": "Women"},
+            }, "rules": {"fieldOptions": {"minValues": 1, "maxValues": 1,
+                                          "selectionMode": "SelectionOnly"}}},
+        })
+        listing = {
+            "category_path": "Clothing > Tops",
+            "marketplace_category_ids": {"ebay": "53159"},
+            "ebay_specifics": {"department": "Women"},
+        }
+
+        class NoRows:
+            def query(self, *_a, **_k): return self
+            def filter_by(self, *_a, **_k): return self
+            def all(self): return []
+
+        with mock.patch.object(listing_field_gaps, "load_fields", return_value=specs), \
+                mock.patch.object(listing_field_gaps, "RegistryService") as registry:
+            registry.return_value._repo.list_fields.return_value = []
+            gaps = listing_field_gaps.collect_empty_discovered_fields(NoRows(), listing)
+
+        by_field = {row["field"]: row for row in gaps if row["marketplace"] == "ebay"}
+        # Department is already answered in the listing, so it is not a gap.
+        self.assertNotIn("Department", by_field)
+        # Season is empty, and the model is handed the exact values it may use.
+        self.assertIn("Season", by_field)
+        self.assertEqual(by_field["Season"]["options"], ["Spring", "Winter"])
+
+
+class DeclineAndFallbackTest(unittest.TestCase):
+    """What the model says when a list has no answer for the item."""
+
+    def spec(self, key, options, required=False, display=None):
+        return normalize_specifics({key: {
+            "id": key, "display": display or key,
+            "options": {str(i): {"id": v, "display": v} for i, v in enumerate(options)},
+            "rules": {"fieldOptions": {"minValues": 1 if required else 0, "maxValues": 1,
+                                       "selectionMode": "SelectionOnly"}},
+        }})[key]
+
+    def test_does_not_apply_is_a_decline_not_a_rejection(self):
+        from anteroom.services.vendoo_specifics import encode_specific
+
+        occasion = self.spec("Occasion", ["Birthday", "Wedding"])
+        # Nothing to store, and nothing worth reporting either.
+        self.assertEqual(encode_specific(occasion, "Does Not Apply"), ("", True))
+        self.assertEqual(encode_specific(occasion, "N/A"), ("", True))
+
+    def test_a_list_that_offers_it_still_blanks_it(self):
+        from anteroom.services.vendoo_specifics import encode_specific
+
+        # eBay renders the phrase verbatim on the form, so even the lists that
+        # offer it get the blank. Studio keeps the answer on the listing.
+        handmade = self.spec("Handmade", ["Yes", "No", "Does Not Apply"])
+        self.assertEqual(encode_specific(handmade, "Does Not Apply"), ("", True))
+        self.assertEqual(encode_specific(handmade, "No"), ("No", True))
+
+    def test_free_text_fields_take_the_blank_too(self):
+        from anteroom.services.vendoo_specifics import FieldSpec, encode_specific
+
+        upc = FieldSpec("upc", display="UPC")
+        self.assertEqual(encode_specific(upc, "Does Not Apply"), ("", True))
+        self.assertEqual(encode_specific(upc, "N/A"), ("", True))
+        self.assertEqual(encode_specific(upc, "012345678905"), ("012345678905", True))
+
+    def test_a_not_applicable_answer_is_recognised_whole(self):
+        from anteroom.services.vendoo_specifics import is_not_applicable
+
+        self.assertTrue(is_not_applicable("Does Not Apply"))
+        self.assertTrue(is_not_applicable(["N/A", "does not apply"]))
+        self.assertFalse(is_not_applicable(""))
+        self.assertFalse(is_not_applicable("No"))
+        self.assertFalse(is_not_applicable(["Cotton", "N/A"]))
+
+    def test_a_real_value_the_list_lacks_is_still_reported(self):
+        from anteroom.services.vendoo_specifics import encode_specific
+
+        sleeve = self.spec("Sleeve length", ["Long Sleeve", "Sleeveless"])
+        self.assertEqual(encode_specific(sleeve, "Short sleeve"), ("", False))
+
+    def test_an_unlisted_brand_falls_back_to_other(self):
+        from anteroom.services.vendoo_specifics import encode_specific
+
+        brand = self.spec("brand", ["Nike", "Adidas", "Other"], display="Brand")
+        self.assertEqual(encode_specific(brand, "GB Girls"), ("Other", True))
+
+    def test_no_other_option_means_it_is_reported(self):
+        from anteroom.services.vendoo_specifics import encode_specific
+
+        brand = self.spec("brand", ["Nike", "Adidas"], display="Brand")
+        self.assertEqual(encode_specific(brand, "GB Girls"), ("", False))
+
+
+class ListingFieldsRouteTest(unittest.TestCase):
+    """The app needs a form per marketplace, not one flat list of fields."""
+
+    def test_groups_by_marketplace_with_values_and_options(self):
+        from anteroom.services import category_fields as cf
+        from anteroom.services.vendoo_specifics import normalize_specifics
+
+        specs = normalize_specifics({
+            "Season": {"id": "Season", "display": "Season", "options": {
+                "0": {"id": "Spring", "display": "Spring"}},
+                "rules": {"fieldOptions": {"minValues": 0, "maxValues": 2, "selectionMode": "SelectionOnly"}}},
+            "Department": {"id": "Department", "display": "Department", "options": {
+                "0": {"id": "Girls", "display": "Girls"}},
+                "rules": {"fieldOptions": {"minValues": 1, "maxValues": 1, "selectionMode": "SelectionOnly"}}},
+        })
+        listing = {"ebay_specifics": {"department": "Girls"}}
+
+        with mock.patch.object(cf, "listing_category_ids", return_value={"ebay": "53159"}), \
+                mock.patch.object(cf, "load_fields", return_value=specs), \
+                mock.patch("anteroom.repositories.queries.ConversationRepo.get", return_value=object()), \
+                mock.patch("anteroom.repositories.queries.ListingRepo.latest_revision",
+                           return_value=type("R", (), {"listing_json": listing})()):
+            client = TestClient(app)
+            body = client.get("/api/conversations/c1/vendoo-api/fields").json()
+
+        form = body["forms"][0]
+        self.assertEqual(form["marketplace"], "ebay")
+        self.assertTrue(form["known"])
+        labels = [f["label"] for f in form["fields"]]
+        # Required first, so what blocks a listing reads at the top.
+        self.assertEqual(labels[0], "Department")
+        self.assertEqual(form["fields"][0]["value"], "Girls")
+        season = next(f for f in form["fields"] if f["label"] == "Season")
+        self.assertEqual(season["options"], ["Spring"])
+        self.assertTrue(season["multi"])
+        # Controls the category schema omits still show, from the form scrape.
+        material = next(f for f in form["fields"] if f["label"] == "Material")
+        self.assertFalse(material["required"])
+        self.assertIn("Acrylic", material["options"])
+        self.assertEqual(labels, sorted(set(labels), key=labels.index))
+
+
+
+    def test_a_value_no_form_names_still_gets_a_row(self):
+        """Otherwise a rejected leftover key is invisible and cannot be cleared."""
+        from anteroom.services import category_fields as cf
+
+        specs = normalize_specifics({"Season": {"id": "Season", "display": "Season", "options": {
+            "0": {"id": "Spring", "display": "Spring"}},
+            "rules": {"fieldOptions": {"minValues": 0, "maxValues": 1, "selectionMode": "SelectionOnly"}}}})
+        listing = {"ebay_specifics": {"Fabric Weight": "Lightweight", "categoryPath": "a/b"}}
+
+        with mock.patch.object(cf, "listing_category_ids", return_value={"ebay": "53159"}), \
+                mock.patch.object(cf, "load_fields", return_value=specs), \
+                mock.patch("anteroom.repositories.queries.ConversationRepo.get", return_value=object()), \
+                mock.patch("anteroom.repositories.queries.ListingRepo.latest_revision",
+                           return_value=type("R", (), {"listing_json": listing})()):
+            body = TestClient(app).get("/api/conversations/c1/vendoo-api/fields").json()
+
+        labels = {f["label"]: f for f in body["forms"][0]["fields"]}
+        self.assertEqual(labels["Fabric Weight"]["value"], "Lightweight")
+        # Studio's own bookkeeping keys are not form fields.
+        self.assertNotIn("Category Path", labels)
+
+    def test_a_category_with_no_cached_schema_is_marked_unknown(self):
+        from anteroom.services import category_fields as cf
+
+        with mock.patch.object(cf, "listing_category_ids", return_value={"depop": "menswear_tshirts"}), \
+                mock.patch.object(cf, "load_fields", return_value=None), \
+                mock.patch("anteroom.repositories.queries.ConversationRepo.get", return_value=object()), \
+                mock.patch("anteroom.repositories.queries.ListingRepo.latest_revision", return_value=None):
+            body = TestClient(app).get("/api/conversations/c1/vendoo-api/fields").json()
+        self.assertEqual(body["forms"][0]["known"], False)
+        self.assertEqual(body["forms"][0]["marketplace"], "depop")
+
+    def test_vendoo_fields_do_not_inject_a_direct_mercari_size_catalog(self):
+        from anteroom.services import category_fields as cf
+
+        listing = {"size": "XL (18/20)", "direct_category_ids": {"mercari": "1931"}}
+        with mock.patch.object(cf, "listing_category_ids", return_value={"mercari": "1881"}), \
+                mock.patch.object(cf, "load_fields", return_value=None), \
+                mock.patch("anteroom.repositories.queries.ConversationRepo.get", return_value=object()), \
+                mock.patch("anteroom.repositories.queries.ListingRepo.latest_revision",
+                           return_value=type("R", (), {"listing_json": listing})()):
+            body = TestClient(app).get("/api/conversations/c1/vendoo-api/fields").json()
+        self.assertEqual(body["forms"][0]["category_id"], "1881")
+        self.assertFalse(any(f["key"] == "size" and f["options_source"] == "marketplace" for f in body["forms"][0]["fields"]))
+
+
+if __name__ == "__main__":
+    unittest.main()

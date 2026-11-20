@@ -21,7 +21,7 @@ These are private web interfaces and may change without a versioned public
 contract. Authentication stays in Chrome. Read back draft/live status before
 deciding whether a failed request can be repeated.
 
-Implementation: [native requests](../../vendoo-extension/background/poshmark-native.js),
-[imports](../../vendoo-extension/background/marketplace-import.js),
-[native form](../../vendoo-studio/server/vendoo_studio/services/poshmark_form.py).
-Coverage: [native tests](../../vendoo-extension/tests/poshmark-native.test.js).
+Implementation: [native requests](../../anteroom-extension/background/poshmark-native.js),
+[imports](../../anteroom-extension/background/marketplace-import.js),
+[native form](../../anteroom/server/anteroom/services/poshmark_form.py).
+Coverage: [native tests](../../anteroom-extension/tests/poshmark-native.test.js).

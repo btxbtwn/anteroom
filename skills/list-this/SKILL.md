@@ -48,7 +48,7 @@ Returns one of the following:
 ### Sample Output Structure
 
 **For the COMPLETE JSON template with all 100+ fields, see:**
-`references/vendoo_listing_template.md` → Section "2. Listing JSON Structure"
+`references/anteroom_listing_template.md` → Section "2. Listing JSON Structure"
 
 **Etsy digital download output:**
 ```markdown
@@ -68,7 +68,7 @@ What is it: {what_is}
 When made: {when_made}
 ```
 
-**Note:** The listing JSON carries 100+ fields across all marketplaces. Always reference the complete template in `references/vendoo_listing_template.md` for the full field list and allowed values.
+**Note:** The listing JSON carries 100+ fields across all marketplaces. Always reference the complete template in `references/anteroom_listing_template.md` for the full field list and allowed values.
 
 **Etsy digital download exception:** Do not return JSON for Etsy digital products. Return a copy-pasteable text block using the Etsy Digital Download Output Format.
 
@@ -241,7 +241,7 @@ Every eBay listing MUST populate these fields. Leaving them blank causes downgra
 
 **Pitfall: eBay Season has no "All Seasons" option.** Choose exactly one of Spring, Summer, Fall, or Winter from the garment (fabric, sleeve, type, title cues). For year-round items, put `"All Seasons"` under **Features** and still set Season to the primary wear season.
 
-**Pitfall: JSON key names must exactly match the listing contract's keys** (e.g., `unitQuantity` not `unit_quantity` or `qty`). See the JSON Field Reference in `references/vendoo_listing_template.md`.
+**Pitfall: JSON key names must exactly match the listing contract's keys** (e.g., `unitQuantity` not `unit_quantity` or `qty`). See the JSON Field Reference in `references/anteroom_listing_template.md`.
 
 ## Formula Reference (NON-NEGOTIABLE)
 
@@ -347,7 +347,7 @@ Anteroom fills Auto-accept and Minimum into eBay's Best Offer (auto-accept / dec
 6. **📌 DESCRIPTION MUST MATCH THE APPLICABLE FORMULA EXACTLY** — use the physical-item template by default, or the Etsy Digital Download Description Formula for Etsy digital products
 7. **Pricing MUST follow formula** (comp × 1.35, whole dollars only)
 8. **NEVER put uncertainties in the description** — the description is buyer-facing. No hedges about what you couldn't verify or read, no "approximate", "estimated", "photo estimates", "uncertain" or "unclear" notes, no missing-tag or color doubts. Leave unsupported fields empty and mention open questions only in your reply to the seller
-9. **Reference vendoo_listing_template.md BEFORE generating** — structure/order priority
+9. **Reference anteroom_listing_template.md BEFORE generating** — structure/order priority
 10. **For Etsy digital downloads, use the Etsy Digital Download Description Formula** — do not use the physical-item description template
 11. **For Etsy digital downloads, return the Etsy Digital Download Output Format** — do not output JSON
 12. **Infer packaged shipping weight on every listing; do not ask the seller for it** — always populate both `weight_lb` and `weight_oz` with a reasonable packaged-shipping estimate supported by the item type, size, material, photos, seller notes, and research evidence (include typical packaging). Pounds may be `0`, but the combined weight must be greater than zero. Examples: light tee/tank ~6–10 oz; heavy graphic tee ~10–14 oz; hoodie/sweatshirt ~1 lb 0–8 oz; jeans/pants ~1–1.5 lb; light jacket ~1–2 lb. Prefer seller-provided scale weight when given. Anteroom supplies `package_dimensions_in` from the seller's saved package-dimensions default (initially `13x10x3`); do not ask the seller to confirm routine apparel shipping weight or package size. Infer unread tag size/material, department, when-made era, and other product facts from photos and initial seller notes when supportable; leave unsupported facts empty — never ask.
@@ -357,14 +357,14 @@ Anteroom fills Auto-accept and Minimum into eBay's Best Offer (auto-accept / dec
 
 Before outputting ANY listing, verify:
 
-- [ ] **Reference:** `references/vendoo_listing_template.md` consulted
+- [ ] **Reference:** `references/anteroom_listing_template.md` consulted
 - [ ] **Brand confirmed:** From visible tag/label
 - [ ] **Size confirmed:** From visible tag/label or defensibly derived from measurements when no readable size tag exists
 - [ ] **Cross-check passed:** Extractor and verifier agree, or measurement fallback applied and documented
 - [ ] **Comps checked:** web_search used or baseline estimated
 - [ ] **Title formula:** `{BRAND} {SIZE} {VIBE} {ITEM} {COLOR} {FIT}` followed EXACTLY
 - [ ] **Title size matches the size field:** the same value, character for character (men's bottoms: `34`, not `34x34`)
-- [ ] **Condition is a general value and is not blank** (`Pre-Owned - Good`, `New With Tags/Box`, and the other values in `references/vendoo-dropdown-options.md`)
+- [ ] **Condition is a general value and is not blank** (`Pre-Owned - Good`, `New With Tags/Box`, and the other values in `references/anteroom-dropdown-options.md`)
 - [ ] **Title length:** 80 characters or less
 - [ ] **Physical-item description lines:** if the item is physical, use the standard description formula and preserve its required line structure
 - [ ] **Etsy digital description override:** if the item is a digital Etsy product, use the Etsy Digital Download Description Formula instead of the physical-item template
@@ -388,7 +388,7 @@ Before outputting ANY listing, verify:
 - [ ] **Etsy specifics populated:** who_made, what_is, when_made, materials, tags
 - [ ] **Poshmark fields:** originalPrice is 0, and primaryColor/secondaryColor are colors on Poshmark's list (up to two)
 - [ ] **Depop specifics populated:** source, age, style (3 items)
-- [ ] **All marketplace fields:** Reference `vendoo_listing_template.md` for complete field list
+- [ ] **All marketplace fields:** Reference `anteroom_listing_template.md` for complete field list
 
 **⚠️ IF ANY BOX IS NOT CHECKED, DO NOT OUTPUT THE LISTING. FIX IT FIRST.**
 
@@ -401,7 +401,7 @@ Before outputting ANY listing, verify:
 
 **Etsy (Required for listing):**
 - who_made, what_is, when_made are MANDATORY
-- `when_made` must be an exact current Etsy dropdown value from `vendoo-dropdown-options.json` (for example `2010 - 2019 (Recently)`), not `2010s` or `2010-2019`
+- `when_made` must be an exact current Etsy dropdown value from `anteroom-dropdown-options.json` (for example `2010 - 2019 (Recently)`), not `2010s` or `2010-2019`
 - primaryColor must be present; secondaryColor when a second color is visible
 - sku only when the seller gives one; never make one up
 - Up to 13 tags, up to 10 materials
@@ -428,7 +428,7 @@ Before outputting ANY listing, verify:
 - Parcel size must match the packaged weight you estimated: under 4oz Extra extra small, under 8oz Extra small, under 12oz Small, under 1lb Medium, under 2lb Large, otherwise Extra large
 
 **Mercari:**
-- Condition is required and uses Mercari labels (see `vendoo-dropdown-options.md`)
+- Condition is required and uses Mercari labels (see `anteroom-dropdown-options.md`)
 - shippingLabel must be `USPS Ground Advantage`
 
 
@@ -468,8 +468,8 @@ Before outputting ANY listing, verify:
 
 ## Resources
 
-- **Mandatory reference:** `references/vendoo_listing_template.md`
-- **Marketplace dropdowns (live scrape):** `references/vendoo-dropdown-options.md` — use exact condition/color/source strings per marketplace
+- **Mandatory reference:** `references/anteroom_listing_template.md`
+- **Marketplace dropdowns (live scrape):** `references/anteroom-dropdown-options.md` — use exact condition/color/source strings per marketplace
 - **Script:** `scripts/` (if any helper scripts exist)
 
 ## Notes

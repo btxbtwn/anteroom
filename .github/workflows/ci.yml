@@ -77,9 +77,9 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
             # checkout tests a merge; its first parent is the actual base.
             # The event's base SHA can predate a release already in that merge.
-            python vendoo-studio/scripts/check-changelog.py --base "$(git rev-parse HEAD^1)"
+            python anteroom/scripts/check-changelog.py --base "$(git rev-parse HEAD^1)"
           else
-            python vendoo-studio/scripts/check-changelog.py
+            python anteroom/scripts/check-changelog.py
           fi
 
   repo-checks:
@@ -99,7 +99,7 @@ jobs:
       - name: Test the required-check contract
         run: python3 .github/scripts/test-required-checks.py
       - name: Version sync
-        run: python vendoo-studio/scripts/check-version-sync.py
+        run: python anteroom/scripts/check-version-sync.py
       - name: Reject case-insensitive path and module collisions
         run: |
           python - <<'PY'
@@ -181,7 +181,7 @@ jobs:
       - name: Validate skill sources
         run: |
           test -f skills/list-this/SKILL.md
-          python -m json.tool skills/list-this/references/vendoo-dropdown-options.json >/dev/null
+          python -m json.tool skills/list-this/references/anteroom-dropdown-options.json >/dev/null
 
   studio-frontend:
     name: Studio frontend
@@ -190,7 +190,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: vendoo-studio
+        working-directory: anteroom
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -199,7 +199,7 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: vendoo-studio/package-lock.json
+          cache-dependency-path: anteroom/package-lock.json
       - run: npm ci
       - run: npm run lint
       - name: Unused files, exports and dependencies (knip.json lists the ones that predate the check)
@@ -228,7 +228,7 @@ jobs:
             script: e2e:hosted
     defaults:
       run:
-        working-directory: vendoo-studio
+        working-directory: anteroom
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -237,12 +237,12 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: vendoo-studio/uv.lock
+          cache-dependency-path: anteroom/uv.lock
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: vendoo-studio/package-lock.json
+          cache-dependency-path: anteroom/package-lock.json
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.12.13"
@@ -265,7 +265,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: hosted-marketplace-sessions-screenshots
-          path: vendoo-studio/e2e/results/hosted/session-*.png
+          path: anteroom/e2e/results/hosted/session-*.png
           if-no-files-found: ignore
           retention-days: 7
       - name: Keep the report, screenshots and traces
@@ -274,8 +274,8 @@ jobs:
         with:
           name: studio-browser-report-${{ matrix.suite.name }}
           path: |
-            vendoo-studio/e2e/report
-            vendoo-studio/e2e/results
+            anteroom/e2e/report
+            anteroom/e2e/results
           retention-days: 7
 
   studio-code-health:
@@ -285,7 +285,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: vendoo-studio
+        working-directory: anteroom
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -294,7 +294,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: vendoo-studio/uv.lock
+          cache-dependency-path: anteroom/uv.lock
       # basedpyright reads packages from .venv (pyproject.toml), as on a laptop.
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
@@ -336,7 +336,7 @@ jobs:
         group: [1, 2]
     defaults:
       run:
-        working-directory: vendoo-studio
+        working-directory: anteroom
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -345,7 +345,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: vendoo-studio/uv.lock
+          cache-dependency-path: anteroom/uv.lock
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.12.13"
@@ -362,7 +362,7 @@ jobs:
       - run: python -m pytest -q -n auto --splits 2 --group ${{ matrix.group }}
         env:
           VERIFICATION_INVENTORY_PATH: ${{ runner.temp }}/inventory-sqlite-${{ matrix.group }}.json
-          VENDOO_STUDIO_DATA_DIR: ${{ runner.temp }}/vendoo-studio-data
+          ANTEROOM_DATA_DIR: ${{ runner.temp }}/anteroom-data
 
       - name: Retain complete backend collection evidence
         if: success() && inputs.full_verification
@@ -403,7 +403,7 @@ jobs:
           --health-retries 10
     defaults:
       run:
-        working-directory: vendoo-studio
+        working-directory: anteroom
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -412,7 +412,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: vendoo-studio/uv.lock
+          cache-dependency-path: anteroom/uv.lock
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.12.13"
@@ -440,7 +440,7 @@ jobs:
           --durations-path "${{ runner.temp }}/pg-durations-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}.json"
         env:
           VERIFICATION_INVENTORY_PATH: ${{ runner.temp }}/inventory-postgres-${{ matrix.group }}.json
-          VENDOO_STUDIO_DATA_DIR: ${{ runner.temp }}/vendoo-studio-data
+          ANTEROOM_DATA_DIR: ${{ runner.temp }}/anteroom-data
           ANTEROOM_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
           PYTHONPATH: ${{ github.workspace }}/.github/scripts
           PG_INVENTORY_PATH: ${{ runner.temp }}/pg-observations-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}/inventory.json
@@ -491,31 +491,31 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: vendoo-studio/package-lock.json
+          cache-dependency-path: anteroom/package-lock.json
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.12"
-      - name: Install the linter (vendoo-studio's locked oxlint)
+      - name: Install the linter (anteroom's locked oxlint)
         run: npm ci --ignore-scripts --no-audit --no-fund
-        working-directory: vendoo-studio
+        working-directory: anteroom
       - name: Lint
-        run: vendoo-studio/node_modules/.bin/oxlint -c vendoo-extension/.oxlintrc.json --deny-warnings vendoo-extension
+        run: anteroom/node_modules/.bin/oxlint -c anteroom-extension/.oxlintrc.json --deny-warnings anteroom-extension
       - name: Validate manifest and sample listing
         run: |
-          python -m json.tool vendoo-extension/manifest.json >/dev/null
-          python -m json.tool vendoo-extension/sample-listing.json >/dev/null
+          python -m json.tool anteroom-extension/manifest.json >/dev/null
+          python -m json.tool anteroom-extension/sample-listing.json >/dev/null
       - name: Syntax-check JavaScript
         run: |
-          git ls-files 'vendoo-extension/*.js' 'vendoo-extension/background/*.js' 'vendoo-extension/content-scripts/*.js' \
+          git ls-files 'anteroom-extension/*.js' 'anteroom-extension/background/*.js' 'anteroom-extension/content-scripts/*.js' \
             | while IFS= read -r file; do
                 node --check "$file"
               done
       - name: Unit tests
-        run: node --test 'vendoo-extension/tests/*.test.js'
+        run: node --test 'anteroom-extension/tests/*.test.js'
       - name: Require a version bump for changed Bridge code
         if: github.event_name == 'pull_request'
         # checkout tests a merge; its first parent is the actual base.
-        run: node vendoo-extension/tools/version-bump/check.js "$(git rev-parse HEAD^1)"
+        run: node anteroom-extension/tools/version-bump/check.js "$(git rev-parse HEAD^1)"
 
   webhook-relay:
     name: Webhook relay
@@ -578,6 +578,6 @@ jobs:
         run: >-
           python3 .github/scripts/verify-pg-inventories.py
           --directory "${{ runner.temp }}/pg-inventories"
-          --commit "$(git rev-parse HEAD)" --lock vendoo-studio/uv.lock
+          --commit "$(git rev-parse HEAD)" --lock anteroom/uv.lock
           --run-id "${{ github.run_id }}" --attempt "${{ github.run_attempt }}"
           --dependency-result "${{ needs.studio-backend-postgres.result }}"

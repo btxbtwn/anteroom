@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// The web app's palette (vendoo-studio/src/styles/t3-theme.css, the hosted
+/// The web app's palette (anteroom/src/styles/t3-theme.css, the hosted
 /// workspace at myanteroom.com), so the iPhone app looks like the same product.
 /// Each value names the web token it copies; respect system appearance.
 enum WorkspaceStyle {

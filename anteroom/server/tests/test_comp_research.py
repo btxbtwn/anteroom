@@ -1,0 +1,408 @@
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import unittest
+from unittest.mock import AsyncMock, patch
+
+from anteroom.services.comp_research import (
+    COMPS_FAILED_NOTE,
+    COMPS_SETUP_NOTE,
+    COMPS_TIMEOUT_NOTE,
+    ACTIVE,
+    SOLD,
+    ModelSearch,
+    comps_search_available,
+    comps_search_messages,
+    comps_setup_note,
+    model_report,
+    model_search,
+    research_sold_comps,
+    stream_sold_comps,
+)
+from anteroom.services.sold_comps import (
+    SoldComp,
+    SoldCompsReport,
+    comps_confident,
+    comps_usable,
+    format_sold_comps,
+    parse_sold_comps,
+)
+
+
+ANALYSIS = "Photo analysis:\n- brand: Levi's\n- style: Slim shorts"
+CHATGPT_COMPS = (
+    "Sold comps:\n"
+    "Query: Levi's Slim shorts sold comps\n"
+    "Source: ChatGPT web search\n"
+    "Market: $18–$25\n"
+    "\n"
+    "- $22 · eBay · Good · Levi's 511 Slim Shorts\n"
+    "  https://www.ebay.com/itm/1\n"
+    "- $19 · Poshmark · Good · Levi's Slim Shorts\n"
+    "  https://poshmark.com/listing/2\n"
+    "- $25 · Mercari · Levi's 511 Shorts\n"
+    "  https://www.mercari.com/item/3\n"
+    "\n"
+    "Use these live results to set market price, then listing price = market × 1.35 (whole dollars)."
+)
+BRAVE_COMPS = (
+    "Sold comps:\n"
+    "Query: Levi's Slim shorts sold (site:ebay.com OR site:poshmark.com OR site:mercari.com OR site:depop.com OR site:etsy.com)\n"
+    "Source: Brave Search\n"
+    "Market: $22\n"
+    "\n"
+    "- $22 · eBay · Levi's 511 Slim Shorts - Sold\n"
+    "  https://www.ebay.com/itm/123\n"
+    "- $21 · Poshmark · Levi's Slim Shorts - Sold\n"
+    "  https://poshmark.com/listing/124\n"
+    "- $24 · Depop · Levi's 511 Shorts\n"
+    "  https://www.depop.com/products/125\n"
+    "\n"
+    "Use these live results to set market price, then listing price = market × 1.35 (whole dollars)."
+)
+THIN_BRAVE_COMPS = (
+    "Sold comps:\n"
+    "Query: Levi's Slim shorts sold\n"
+    "Source: Brave Search\n"
+    "Market: $22\n"
+    "\n"
+    "- $22 · eBay · Levi's 511 Slim Shorts - Sold\n"
+    "  https://www.ebay.com/itm/123\n"
+    "\n"
+    "Only 1 sold listing found — too thin to price from. Treat it as a weak signal "
+    "and lean on an estimated baseline."
+)
+EMPTY_COMPS = format_sold_comps(
+    SoldCompsReport(query="Levi's Slim shorts sold comps", source="ChatGPT web search")
+)
+
+
+class CompUsableTest(unittest.TestCase):
+    def test_requires_structured_sold_items(self):
+        self.assertFalse(comps_usable(""))
+        self.assertFalse(comps_usable(EMPTY_COMPS))
+        self.assertFalse(comps_usable("Sold comps:\nSearch failed (timeout)."))
+        self.assertFalse(comps_usable("Typical sold price $20"))
+        self.assertTrue(comps_usable(CHATGPT_COMPS))
+
+    def test_confident_needs_three_sold_listings(self):
+        self.assertTrue(comps_usable(THIN_BRAVE_COMPS))
+        self.assertFalse(comps_confident(THIN_BRAVE_COMPS))
+        self.assertFalse(comps_confident(EMPTY_COMPS))
+        self.assertTrue(comps_confident(CHATGPT_COMPS))
+
+
+def listing_json(*comps: tuple[int, str, str], live: tuple[tuple[int, str, str], ...] = ()) -> str:
+    def entries(items):
+        return ",".join(
+            f'{{"title":"Levi\'s {title}","price":{price},"url":"{url}"}}' for price, title, url in items
+        )
+
+    return f'{{"market":"","comps":[{entries(comps)}],"live":[{entries(live)}]}}'
+
+
+THREE_SOLD = listing_json(
+    (22, "511 Slim Shorts", "https://www.ebay.com/itm/1"),
+    (19, "Slim Shorts", "https://poshmark.com/listing/2"),
+    (25, "511 Shorts", "https://www.mercari.com/us/item/m3"),
+)
+
+
+def searcher(answer: str = "", *, error: Exception | None = None, delay: float = 0.0, calls: list | None = None):
+    async def search(messages: list[dict]) -> dict:
+        if calls is not None:
+            calls.append(messages)
+        if delay:
+            await asyncio.sleep(delay)
+        if error:
+            raise error
+        return {"answer": answer, "sources": []}
+
+    return search
+
+
+def brave_report(*comps: tuple[int, str, str]) -> SoldCompsReport:
+    return SoldCompsReport(
+        query="q",
+        source="Brave",
+        comps=[SoldComp(price=price, marketplace="eBay", title=f"Levi's {title}", url=url) for price, title, url in comps],
+    )
+
+
+def patched(model: ModelSearch | None, *, brave=None, brave_key: str | None = "BSA-test"):
+    return (
+        patch("anteroom.services.comp_research.model_search", return_value=model),
+        patch("anteroom.services.comp_research.get_brave_api_key", return_value=brave_key),
+        patch(
+            "anteroom.services.comp_research.research_brave_report",
+            new=brave or AsyncMock(return_value=brave_report()),
+        ),
+    )
+
+
+class CompAvailabilityTest(unittest.TestCase):
+    def test_available_with_a_listing_model_or_brave(self):
+        with (
+            patch("anteroom.services.comp_research.model_search", return_value=None),
+            patch("anteroom.services.comp_research.get_brave_api_key", return_value=None),
+        ):
+            self.assertFalse(comps_search_available())
+        with (
+            patch("anteroom.services.comp_research.model_search", return_value=ModelSearch("Cursor", searcher())),
+            patch("anteroom.services.comp_research.get_brave_api_key", return_value=None),
+        ):
+            self.assertTrue(comps_search_available())
+        with (
+            patch("anteroom.services.comp_research.model_search", return_value=None),
+            patch("anteroom.services.comp_research.get_brave_api_key", return_value="BSA-test"),
+        ):
+            self.assertTrue(comps_search_available())
+
+    def test_searches_with_the_listing_model_only(self):
+        from anteroom.providers.cursor_agent import CursorProvider
+
+        provider = CursorProvider(api_key="cur-key")
+        with patch("anteroom.services.comp_research.get_listing_provider", return_value=provider):
+            search = model_search()
+        self.assertEqual(search.label, "Cursor")
+        self.assertEqual(search.search, provider.web_search)
+        with patch("anteroom.services.comp_research.get_listing_provider", return_value=None):
+            self.assertIsNone(model_search())
+
+
+class SearchPromptTest(unittest.TestCase):
+    """Each paid search reads only the rules for its own side."""
+
+    def test_sold_search_is_not_told_to_hunt_active_listings(self):
+        system, user = comps_search_messages("Levi's 501 sold comps", SOLD)
+        rules = system["content"]
+        self.assertIn("Require explicit evidence that the item sold", rules)
+        self.assertIn("roughly eight searches", rules)
+        self.assertNotIn("still for sale, aiming", rules)
+        self.assertNotIn("roughly four searches", rules)
+        self.assertTrue(user["content"].startswith("Find recently sold comps for: Levi's 501"))
+
+    def test_active_search_is_not_told_to_hunt_sold_comps(self):
+        system, user = comps_search_messages("Levi's 501", ACTIVE)
+        rules = system["content"]
+        self.assertIn("still for sale, aiming for at least three", rules)
+        self.assertIn("roughly four searches", rules)
+        self.assertIn("An asking price is not a sold price", rules)
+        self.assertNotIn("aim for at least six", rules)
+        self.assertNotIn("Require explicit evidence that the item sold", rules)
+        self.assertTrue(user["content"].startswith("Find active marketplace listings"))
+
+    def test_both_sides_keep_the_shared_rules_and_answer_shape(self):
+        for side in (SOLD, ACTIVE):
+            rules = comps_search_messages("Levi's 501", side)[0]["content"]
+            self.assertIn("excluding shipping and fees", rules)
+            self.assertIn("Exclude lots, bundles", rules)
+            self.assertIn("exact listing URL you observed", rules)
+            self.assertIn("Do not invent prices or URLs", rules)
+            self.assertNotIn("## ", rules)
+
+
+class ModelReportTest(unittest.TestCase):
+    def test_reads_sold_and_live_listings(self):
+        report = model_report(
+            "Cursor",
+            "Levi's shorts sold comps",
+            listing_json(
+                (22, "511 Shorts", "https://www.ebay.com/itm/1"),
+                live=((30, "Slim Shorts", "https://poshmark.com/listing/9"),),
+            ),
+            [],
+        )
+        self.assertEqual(report.source, "Cursor")
+        self.assertEqual([comp.price for comp in report.comps], [22])
+        self.assertEqual([comp.price for comp in report.live], [30])
+
+    def test_keeps_markdown_research_when_no_listings(self):
+        text = format_sold_comps(model_report(
+            "ChatGPT",
+            "Sauza tee sold comps",
+            "## Research note — Sauza Tequila T-shirt\n"
+            "**Typical sold-price range:** **$10–$25 USD** for a standard tee.",
+            [],
+        ))
+        self.assertIn("Market: $10–$25", text)
+        self.assertIn("Typical sold-price range", text)
+        self.assertFalse(comps_usable(text))
+
+    def test_empty_json_does_not_become_the_note(self):
+        text = format_sold_comps(model_report("MiMo", "Nike tee sold comps", '{"market":"","comps":[]}', []))
+        self.assertIn("No sold listings found", text)
+        self.assertNotIn('"comps":[]', text)
+
+
+class ResearchTest(unittest.IsolatedAsyncioTestCase):
+    async def test_sold_and_active_search_side_by_side_with_brave(self):
+        # Each search waits until all three have started, so they finish only
+        # if they run at once. Run one after another, the first would wait out
+        # the fallback and the overlap check below fails instead of hanging.
+        started = 0
+        all_started = asyncio.Event()
+
+        def overlapping(search):
+            async def run(*args, **kwargs):
+                nonlocal started
+                started += 1
+                if started == 3:
+                    all_started.set()
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(all_started.wait(), 5)
+                return await search(*args, **kwargs)
+            return run
+
+        brave = AsyncMock(side_effect=overlapping(AsyncMock(return_value=brave_report())))
+        calls: list = []
+        model = ModelSearch("ChatGPT", overlapping(searcher(listing_json(
+            (22, "511 Slim Shorts", "https://www.ebay.com/itm/1"),
+            (19, "Slim Shorts", "https://poshmark.com/listing/2"),
+            (25, "511 Shorts", "https://www.mercari.com/us/item/m3"),
+            live=((28, "Shorts", "https://www.ebay.com/itm/4"),),
+        ), calls=calls)))
+        first, second, third = patched(model, brave=brave)
+        began = asyncio.get_running_loop().time()
+        with first, second, third:
+            text = await research_sold_comps(ANALYSIS)
+        # Both model searches and Brave ran at once, not one after another.
+        self.assertTrue(all_started.is_set())
+        self.assertLess(asyncio.get_running_loop().time() - began, 5)
+        self.assertEqual(len(calls), 2)
+        asks = sorted(call[1]["content"] for call in calls)
+        self.assertTrue(asks[0].startswith("Find active marketplace listings"))
+        self.assertTrue(asks[1].startswith("Find recently sold comps for: Levi's"))
+        rules = {call[1]["content"].split(" ", 2)[1]: call[0]["content"] for call in calls}
+        self.assertIn("Require explicit evidence that the item sold", rules["recently"])
+        self.assertNotIn("Require explicit evidence that the item sold", rules["active"])
+        brave.assert_awaited_once()
+        # A small fixed budget: the top sold queries plus one active query.
+        from anteroom.services.brave_search import brave_active_queries, brave_sold_queries, item_fields
+
+        fields = item_fields(ANALYSIS)
+        self.assertEqual(
+            brave.await_args.args[0],
+            [*brave_sold_queries(fields)[:3], *brave_active_queries(fields)[:1]],
+        )
+        self.assertIn(" sold ", brave.await_args.args[0][0])
+        self.assertNotIn("sold", brave.await_args.args[0][-1])
+        report = parse_sold_comps(text)
+        self.assertEqual(report.source, "ChatGPT + Brave")
+        # Only the sold search vouches for sales; the active one's comps are dropped.
+        self.assertEqual(sorted(comp.price for comp in report.comps), [19, 22, 25])
+
+    async def test_thin_model_results_are_supplemented(self):
+        brave = AsyncMock(return_value=brave_report(
+            (21, "Shorts", "https://www.ebay.com/itm/5"),
+            (23, "Shorts", "https://www.ebay.com/itm/6"),
+        ))
+        model = ModelSearch("ChatGPT", searcher(listing_json(
+            (22, "Shorts", "https://www.ebay.com/itm/1"),
+        )))
+        first, second, third = patched(model, brave=brave)
+        with first, second, third:
+            text = await research_sold_comps(ANALYSIS)
+        brave.assert_awaited_once()
+        self.assertTrue(comps_confident(text))
+        self.assertEqual(parse_sold_comps(text).source, "ChatGPT + Brave")
+
+    async def test_spent_brave_quota_is_not_asked_again_this_month(self):
+        from anteroom.services.brave_search import _note_quota_exhausted, reset_quota_backoff
+
+        _note_quota_exhausted("Brave HTTP 402: USAGE_LIMIT_EXCEEDED")
+        self.addCleanup(reset_quota_backoff)
+        brave = AsyncMock(return_value=brave_report())
+        first, second, third = patched(ModelSearch("ChatGPT", searcher(THREE_SOLD)), brave=brave)
+        with first, second, third:
+            text = await research_sold_comps(ANALYSIS)
+        brave.assert_not_awaited()
+        self.assertEqual(parse_sold_comps(text).source, "ChatGPT")
+
+
+    async def test_supplement_failure_preserves_model_results(self):
+        brave = AsyncMock(side_effect=RuntimeError("unavailable"))
+        model = ModelSearch("ChatGPT", searcher(listing_json(
+            (22, "Shorts", "https://www.ebay.com/itm/1"),
+        )))
+        first, second, third = patched(model, brave=brave)
+        with first, second, third:
+            text = await research_sold_comps(ANALYSIS)
+        self.assertEqual([comp.price for comp in parse_sold_comps(text).comps], [22])
+
+    async def test_no_sold_comps_falls_back_to_brave_and_keeps_live(self):
+        brave = AsyncMock(return_value=brave_report((21, "Slim Shorts", "https://www.ebay.com/itm/5")))
+        model = ModelSearch("Cursor", searcher(listing_json(live=((30, "Slim Shorts", "https://poshmark.com/listing/9"),))))
+        first, second, third = patched(model, brave=brave)
+        with first, second, third:
+            text = await research_sold_comps(ANALYSIS)
+        brave.assert_awaited_once()
+        self.assertIn("site:ebay.com", brave.await_args.args[0][0])
+        self.assertEqual(brave.await_args.kwargs["expected_names"], ("Levi's",))
+        report = parse_sold_comps(text)
+        self.assertEqual(report.source, "Cursor + Brave")
+        self.assertEqual([comp.price for comp in report.comps], [21])
+        self.assertEqual([comp.price for comp in report.live], [30])
+
+    async def test_failed_model_falls_back_to_brave(self):
+        brave = AsyncMock(return_value=brave_report((21, "Slim Shorts", "https://www.ebay.com/itm/5")))
+        first, second, third = patched(ModelSearch("MiMo", searcher(error=RuntimeError("MiMo HTTP 401"))), brave=brave)
+        with first, second, third:
+            events = [event async for event in stream_sold_comps(ANALYSIS)]
+        states = {(event.source, event.state) for event in events if event.kind == "source"}
+        self.assertEqual(states, {
+            ("MiMo (sold)", "searching"), ("MiMo (active)", "searching"), ("Brave", "searching"),
+            ("MiMo (sold)", "failed"), ("MiMo (active)", "failed"), ("Brave", "done"),
+        })
+        self.assertEqual(parse_sold_comps(events[-1].text).source, "Brave")
+
+    async def test_slow_model_times_out_while_brave_answers(self):
+        brave = AsyncMock(return_value=brave_report((21, "Slim Shorts", "https://www.ebay.com/itm/5")))
+        first, second, third = patched(ModelSearch("Cursor", searcher(THREE_SOLD, delay=60)), brave=brave)
+        with first, second, third, patch("anteroom.services.comp_research.MODEL_SEARCH_TIMEOUT_SEC", 0.05):
+            events = [event async for event in stream_sold_comps(ANALYSIS)]
+        states = [(event.source, event.state) for event in events]
+        self.assertIn(("Cursor (sold)", "timeout"), states)
+        self.assertIn(("Cursor (active)", "timeout"), states)
+        brave.assert_awaited_once()
+        self.assertEqual(parse_sold_comps(events[-1].text).source, "Brave")
+
+    async def test_brave_alone_when_no_model_is_connected(self):
+        brave = AsyncMock(return_value=brave_report((21, "Slim Shorts", "https://www.ebay.com/itm/5")))
+        first, second, third = patched(None, brave=brave)
+        with first, second, third:
+            text = await research_sold_comps(ANALYSIS)
+        brave.assert_awaited_once()
+        self.assertEqual(parse_sold_comps(text).source, "Brave")
+
+    async def test_skips_when_nothing_can_search(self):
+        first, second, third = patched(None, brave_key=None)
+        with first, second, third:
+            text = await research_sold_comps(ANALYSIS)
+        self.assertIn(COMPS_SETUP_NOTE, text)
+
+    async def test_overall_timeout_returns_a_note(self):
+        first, second, third = patched(ModelSearch("ChatGPT", searcher(THREE_SOLD, delay=60)), brave_key=None)
+        with first, second, third, patch("anteroom.services.comp_research.SOLD_COMPS_TIMEOUT_SEC", 0.05):
+            text = await research_sold_comps(ANALYSIS)
+        self.assertIn(COMPS_TIMEOUT_NOTE, text)
+
+    async def test_every_source_failing_returns_the_failure_note(self):
+        first, second, third = patched(
+            ModelSearch("ChatGPT", searcher(error=RuntimeError("ChatGPT HTTP 401"))), brave_key=None,
+        )
+        with first, second, third:
+            text = await research_sold_comps(ANALYSIS)
+        self.assertIn(COMPS_FAILED_NOTE, text)
+        self.assertIn("ChatGPT HTTP 401", text)
+
+    def test_setup_note_is_parseable_sold_comps_card(self):
+        text = comps_setup_note()
+        self.assertTrue(text.startswith("Sold comps:"))
+        self.assertIn(COMPS_SETUP_NOTE, text)
+        self.assertFalse(comps_usable(text))
+
+
+if __name__ == "__main__":
+    unittest.main()

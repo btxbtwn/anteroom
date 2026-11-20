@@ -1,0 +1,114 @@
+from __future__ import annotations
+
+import tempfile
+import json
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from anteroom.services import listing_persistence
+from anteroom.services.photo_store import LocalPhotoStore
+from anteroom.database import Base, get_db
+from anteroom.main import app
+from anteroom.models.conversation import Conversation
+from anteroom.models.job import Job
+from anteroom.models.listing import Listing, ListingRevision  # noqa: F401
+from anteroom.models.registry import FieldRegistry  # noqa: F401
+
+JPEG_BYTES = bytes([
+    0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
+    0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xD9,
+])
+
+
+class JobPhotoRouteTest(unittest.TestCase):
+    def setUp(self):
+        self.decoded_json = []
+        def decode_json(value):
+            self.decoded_json.append(value)
+            return json.loads(value)
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+            json_deserializer=decode_json,
+        )
+        Base.metadata.create_all(engine)
+        Session = sessionmaker(bind=engine)
+        self.db = Session()
+        self.conv = Conversation(title="Bamboo jeans")
+        self.db.add(self.conv)
+        self.db.commit()
+        self.job = Job(
+            conversation_id=self.conv.id,
+            approved_revision_id="rev1",
+            listing_snapshot={"title": "Bamboo jeans"},
+            status="dispatched",
+        )
+        self.db.add(self.job)
+        self.db.commit()
+        self.tmp = tempfile.TemporaryDirectory()
+        stored = "front.jpg"
+        (Path(self.tmp.name) / stored).write_bytes(JPEG_BYTES)
+        self.photo = listing_persistence.add_photo(self.db,
+            self.conv.id,
+            "front.jpg",
+            stored,
+            "image/jpeg",
+            len(JPEG_BYTES),
+        )
+
+        def override_get_db():
+            try:
+                yield self.db
+            finally:
+                pass
+
+        app.dependency_overrides[get_db] = override_get_db
+        self.client = TestClient(app)
+
+    def tearDown(self):
+        app.dependency_overrides.clear()
+        self.db.close()
+        self.tmp.cleanup()
+
+    def test_job_photo_is_served_for_matching_conversation(self):
+        with patch("anteroom.services.photo_store._store", LocalPhotoStore(self.tmp.name)):
+            response = self.client.get(f"/api/jobs/{self.job.id}/photos/{self.photo.id}")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.content, JPEG_BYTES)
+        self.assertIn("image/jpeg", response.headers.get("content-type", ""))
+
+    def test_job_photo_rejects_unknown_photo(self):
+        with patch("anteroom.services.photo_store._store", LocalPhotoStore(self.tmp.name)):
+            response = self.client.get(f"/api/jobs/{self.job.id}/photos/does-not-exist")
+        self.assertEqual(response.status_code, 404)
+
+    def test_job_photo_reads_only_approved_photo_metadata(self):
+        self.job.listing_snapshot = {
+            "_native_forms": {"large_catalog": ["unused option"] * 10000},
+            "_approved_photos": [{"id": self.photo.id, "stored_filename": "front.jpg", "mime_type": "image/jpeg"}],
+        }
+        self.db.commit()
+        url = f"/api/jobs/{self.job.id}/photos/{self.photo.id}"
+        self.decoded_json.clear()
+        with patch("anteroom.services.photo_store._store", LocalPhotoStore(self.tmp.name)):
+            response = self.client.get(url)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.content, JPEG_BYTES)
+        self.assertTrue(self.decoded_json)
+        self.assertFalse(any("unused option" in value for value in self.decoded_json),
+                         "Serving a photo must not decode the job's marketplace catalogs")
+
+    def test_explicit_empty_approved_photos_does_not_serve_current_photos(self):
+        for manifest in ([], None):
+            with self.subTest(manifest=manifest):
+                self.job.listing_snapshot = {"_approved_photos": manifest}
+                self.db.commit()
+                response = self.client.get(f"/api/jobs/{self.job.id}/photos/{self.photo.id}")
+                self.assertEqual(response.status_code, 404)

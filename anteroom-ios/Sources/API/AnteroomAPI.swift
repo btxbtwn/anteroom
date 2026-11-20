@@ -24,7 +24,7 @@ struct APIAuthorization: Sendable {
     var signedOut: @Sendable () async -> Void
 }
 
-/// Client for the hosted Anteroom API (`vendoo_studio.hosted:app`). Every
+/// Client for the hosted Anteroom API (`anteroom.hosted:app`). Every
 /// request carries the seller's current Supabase access token.
 ///
 /// When the server refuses the token (401) the client renews the sign-in once.
