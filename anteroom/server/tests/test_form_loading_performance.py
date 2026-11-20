@@ -535,3 +535,25 @@ def test_mercari_shipping_quote_stale_ordinary_request_does_not_overwrite_refres
 
     asyncio.run(run())
 
+
+def test_sync_builders_run_in_worker_with_context():
+    """Synchronous Poshmark and Depop form builders run off the event loop with contextvars intact."""
+    from anteroom.services import marketplace_schemas, native_editor
+
+    async def run():
+        for market in ("poshmark", "depop"):
+            with marketplace_schemas.schema_session():
+                holder = marketplace_schemas._ebay_client_holder.get()
+                main_thread = threading.get_ident()
+
+                def build(snapshot, main_thread=main_thread, holder=holder):
+                    assert threading.get_ident() != main_thread
+                    assert marketplace_schemas._ebay_client_holder.get() is holder
+                    return snapshot
+
+                with patch(f"anteroom.services.{market}_form.form", side_effect=build):
+                    assert await native_editor.build_form({"title": "test"}, {}, market) == {"title": "test"}
+
+    asyncio.run(run())
+
+

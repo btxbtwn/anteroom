@@ -153,7 +153,7 @@ async function rawRequest<T>(path: string, options?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     const parsed = await res.json().catch(() => null);
-    const explained = typeof parsed?.detail === "string" && parsed.detail.trim().length > 0;
+    const explained = errorMessage(parsed, "").trim().length > 0;
     const body = parsed ?? { detail: res.statusText };
     const retryable = isRead && UNAVAILABLE_STATUSES.has(res.status) && !(res.status === 502 && explained);
     throw new ApiRequestError(
