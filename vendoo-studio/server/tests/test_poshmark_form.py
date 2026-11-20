@@ -3,7 +3,8 @@ from __future__ import annotations
 import copy
 import unittest
 
-from vendoo_studio.services import native_contract, poshmark_form
+from vendoo_studio.models.schema import VALID_CONDITIONS
+from vendoo_studio.services import direct_preflight, native_contract, poshmark_form
 
 
 class PoshmarkFormTest(unittest.TestCase):
@@ -15,6 +16,35 @@ class PoshmarkFormTest(unittest.TestCase):
             "smartSell": {"enabled": True}, "availability": "coming_soon"}})["fields"]}
         self.assertTrue(rows["poshmark_specifics.smartSell.minimumPrice"]["required"])
         self.assertTrue(rows["poshmark_specifics.makeAvailableAt"]["required"])
+
+    def test_condition_follows_general_until_the_seller_picks_one(self):
+        # AM TEES XL (draft 0b945d2660ec): General "Pre-Owned - Good", no Poshmark condition of its own.
+        listing = {"condition": "Pre-Owned - Good", "price": 20}
+        before = copy.deepcopy(listing)
+        row = next(row for row in poshmark_form.form(listing)["fields"] if row["path"] == "poshmark_specifics.condition")
+        self.assertEqual(row["value"], "ug")
+        self.assertIsNone(native_contract.value_error(row, row["value"]))
+        self.assertEqual(listing, before)
+        self.assertFalse(any(gap["field"] == "poshmark_specifics.condition"
+                             for gap in direct_preflight._empty_form_rows(listing, "poshmark")))
+        for own in ("uln", ""):
+            listing = {"condition": "New With Tags/Box", "poshmark_specifics": {"condition": own}}
+            row = next(row for row in poshmark_form.form(listing)["fields"] if row["path"] == "poshmark_specifics.condition")
+            self.assertEqual(row["value"], own)
+
+    def test_every_general_condition_is_one_of_poshmarks_and_none_is_invented(self):
+        expected = {"New With Tags/Box": "nwt", "New Without Tags/Box": "uln", "New With Imperfections": "ug",
+                    "Pre-Owned - Excellent": "uln", "Pre-Owned - Good": "ug", "Pre-Owned - Fair": "uf",
+                    "Poor (Major flaws)": "uf"}
+        self.assertEqual(set(expected), set(VALID_CONDITIONS))
+        for general, code in expected.items():
+            row = next(row for row in poshmark_form.form({"condition": general})["fields"]
+                       if row["path"] == "poshmark_specifics.condition")
+            self.assertEqual(row["value"], code, general)
+        for missing in ({}, {"condition": ""}, {"condition": "something unreadable"}):
+            row = next(row for row in poshmark_form.form(missing)["fields"]
+                       if row["path"] == "poshmark_specifics.condition")
+            self.assertEqual(row["value"], "", missing)
 
     def test_general_size_is_matched_only_to_a_verified_size_in_the_selected_group(self):
         catalog = poshmark_form.catalog()

@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
-import { createListing, expect, test } from "./fixtures";
+import { createListing, expect, showStatusTab, test } from "./fixtures";
 
 /** Layout checks from the UI audit: text never runs under controls or gets cut short with room to spare. */
 
@@ -26,6 +26,7 @@ test.describe("layout", () => {
   test("a hovered sidebar row ends its title before the row's actions", async ({ page, request }) => {
     await createListing(request, LONG_TITLE);
     await page.goto("/");
+    await showStatusTab(page, "Draft");
     const link = page.getByRole("list", { name: "Listings" }).getByRole("link", { name: LONG_TITLE, exact: true });
     await link.hover();
     const rename = page.getByRole("button", { name: `Rename ${LONG_TITLE}` });
@@ -43,6 +44,8 @@ test.describe("layout", () => {
     await createListing(request, titleText);
     await page.goto("/");
     await page.getByRole("button", { name: "Inventory table" }).click();
+    // The table opens on Active; a new listing is a draft.
+    await page.getByRole("group", { name: "Listing status" }).getByRole("button", { name: /^Draft\b/ }).click();
     const table = page.getByRole("table", { name: "Inventory" });
     const title = table.getByRole("rowheader").filter({ hasText: titleText }).getByText(titleText, { exact: true });
     await expect(title).toBeVisible();

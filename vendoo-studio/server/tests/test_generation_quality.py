@@ -51,6 +51,37 @@ def repair(monkeypatch, listing, operations):
     return result, call
 
 
+def test_repair_leaves_size_rows_alone_under_a_locked_general_size(monkeypatch):
+    """A native size row emptied because it doesn't offer the seller's size stays a gap for the seller."""
+    listing = {**copy.deepcopy(BASE), "price": -1, "size": "XL", "seller_fields": ["size"],
+               "ebay_specifics": {"Size": ""}, "mercari_specifics": {"nativeSizeId": ""}}
+
+    def blockers(snapshot):
+        price = [] if (snapshot.get("price") or 0) > 0 else [{"field": "price", "message": "Price must be above 0."}]
+        return price + [{"field": path, "message": "Choose a size."}
+                        for path in ("ebay_specifics.Size", "mercari_specifics.nativeSizeId", "depop_specifics.size")]
+    monkeypatch.setattr(listing_generate, "_validation_blockers", blockers)
+    call = AsyncMock(return_value=json.dumps([{"op": "replace", "path": "/price", "value": 29}]))
+    monkeypatch.setattr(listing_generate, "collect_provider_text", call)
+    result = asyncio.run(listing_generate.fill_validation_gaps(object(), listing))
+    assert json.loads(call.await_args.args[1][-1]["content"])["allowed_paths"] == ["/price"]
+    assert result["ebay_specifics"]["Size"] == "" and result["price"] == 29
+
+
+def test_repair_can_fill_marketplace_size_ids_when_the_seller_cleared_general_size(monkeypatch):
+    """A cleared General Size is locked but sets no size; marketplace size rows stay repairable."""
+    listing = {**copy.deepcopy(BASE), "price": -1, "size": "", "seller_fields": ["size"], "mercari_specifics": {"nativeSizeId": ""}}
+    monkeypatch.setattr(listing_generate, "_validation_blockers", lambda snapshot: [
+        {"field": "price", "message": "Price must be above 0."}, {"field": "size", "message": "Choose a size."},
+        {"field": "mercari_specifics.nativeSizeId", "message": "Choose a size."}])
+    call = AsyncMock(return_value=json.dumps([{"op": "replace", "path": "/price", "value": 29}]))
+    monkeypatch.setattr(listing_generate, "collect_provider_text", call)
+    asyncio.run(listing_generate.fill_validation_gaps(object(), listing))
+    allowed = json.loads(call.await_args.args[1][-1]["content"])["allowed_paths"]
+    # General Size itself stays the seller's; the Mercari size ID is still repairable.
+    assert allowed == ["/price", "/mercari_specifics/nativeSizeId"]
+
+
 def test_repair_changes_only_failed_fields_and_keeps_valid_json_payload(monkeypatch):
     original = {**copy.deepcopy(BASE), "price": -1, "sku": "seller-sku", "seller_fields": ["sku"]}
     result, call = repair(monkeypatch, original, [{"op": "replace", "path": "/price", "value": 29}])

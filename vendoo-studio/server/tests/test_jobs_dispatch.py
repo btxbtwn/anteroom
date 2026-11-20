@@ -232,6 +232,26 @@ class PrepareListingSnapshotRetryTest(unittest.TestCase):
         self.assertEqual(snapshot["cost"], 9)
         self.assertEqual(snapshot["internal_notes"], "Bin 2")
 
+    def test_depop_snapshot_keeps_the_saved_package_instead_of_reinferring_from_weight(self):
+        import copy
+
+        from vendoo_studio.services.job_snapshot import prepare_listing_snapshot
+
+        for field, value, expected in (("parcelSize", "Large", "Large"), ("parcel_size", "Large", "Large"),
+                                       ("parcelSize", "", ""),
+                                       ("parcelSize", "Small (S): Under 12 oz — $6.49", "Small")):
+            with self.subTest(field=field, value=value):
+                listing = {"title": "Jeans", "size": "0", "department": "Women", "weight_oz": 2,
+                           "direct_category_ids": {"depop": "womenswear_jeans"},
+                           "depop_specifics": {field: value, "size": "", "nativeSizeId": ""},
+                           "seller_fields": ["depop_specifics.size", "depop_specifics.nativeSizeId"]}
+                original = copy.deepcopy(listing)
+                snapshot = prepare_listing_snapshot(self.db, self.conv, listing)
+                self.assertEqual(snapshot["depop_specifics"]["parcelSize"], expected)
+                self.assertEqual(snapshot["depop_specifics"]["size"], "")
+                self.assertEqual(snapshot["depop_specifics"]["nativeSizeId"], "")
+                self.assertEqual(listing, original)
+
 
 if __name__ == "__main__":
     unittest.main()

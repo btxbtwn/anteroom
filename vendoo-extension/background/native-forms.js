@@ -273,7 +273,7 @@ function depopEditorForm(listing, attributes, parcels = [], shipFrom = '') {
     { ...nativeEditorBase(listing, { marketplace: 'depop', title: false, maxDescription: DEPOP_MAX_DESCRIPTION })[0],
       placeholder: 'eg. small grey Nike t-shirt, only worn a few times', counter: true, hashtag_max: DEPOP_MAX_HASHTAGS },
     nativeEditorChoice('direct_category_ids.depop', 'Category', depopDirectId(category), choices,
-      { required: true, clears: ['depop_specifics.nativeSizeId', 'depop_specifics.type', 'depop_specifics.attributes'] }),
+      { required: true, clears: ['depop_specifics.size', 'depop_specifics.nativeSizeId', 'depop_specifics.type', 'depop_specifics.attributes'] }),
   ];
   for (const id of category?.attributeIds || []) {
     const attr = (attributes.generic_attributes || []).find(row => row.id === id);
@@ -293,9 +293,13 @@ function depopEditorForm(listing, attributes, parcels = [], shipFrom = '') {
     nativeEditorChoice('depop_specifics.colour', 'Color', posted.colour || [],
       pageChoices(attributes.colour, DEPOP_COLOURS), { multi: true, max_values: 2 }),
   );
-  if (set) fields.push(nativeEditorChoice('depop_specifics.nativeSizeId', 'Size',
-    resolvedSize?.id ?? specifics.nativeSizeId ?? specifics.size ?? '',
-    (set.sizes || []).map(row => ({ label: depopName(row), value: row.id })), { required: true, category_specific: true }));
+  // Both the local form and posting read the label first. Editing an older ID
+  // beside a cleared label otherwise leaves Size empty in the submitted draft.
+  const sizeLabel = (set?.sizes || []).find(row => String(row.id) === String(resolvedSize?.id));
+  if (set) fields.push(nativeEditorChoice('depop_specifics.size', 'Size',
+    sizeLabel ? depopName(sizeLabel) : specifics.size ?? '',
+    (set.sizes || []).map(row => depopName(row)),
+    { required: true, category_specific: true, clears: ['depop_specifics.nativeSizeId'] }));
   fields.push(
     nativeEditorField('quantity', 'Quantity', listing.quantity ?? 1, { input_type: 'number', min_value: 1, step: 1 }),
     nativeEditorField('depop.note.sku', 'Learn more about SKUs', '', { input_type: 'note' }),
@@ -359,7 +363,7 @@ function depopPageLayout(fields) {
   return fields.map(field => {
     const hint = field.path.startsWith('depop_specifics.attributes.') ? `Select up to ${field.max_values}` : hints[field.path];
     return { ...field, section: section(field.path),
-      ...(['depop_specifics.nativeSizeId', 'quantity'].includes(field.path) ? { width: 'quarter' }
+      ...(['depop_specifics.size', 'quantity'].includes(field.path) ? { width: 'quarter' }
         : field.path === 'depop_specifics.sku' ? { width: 'half' } : {}),
       ...(hint ? { help: [typeof hint === 'function' ? hint(field.max_values) : hint, field.help].filter(Boolean).join(' ') } : {}) };
   });
@@ -383,7 +387,8 @@ function mercariPackageRows(listing) {
     nativeEditorField('mercari_specifics.package.ounces', 'oz', pick('ounces', listing.weight_oz), { ...weight, max_value: 15.99 }),
     nativeEditorChoice('mercari_specifics.package.fitsShoebox', 'Will your item fit in a shoebox?', mercariShoeboxAnswer(listing),
       [{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }],
-      { required: true, presentation: 'radio', help: 'A standard shoebox measures 14\u201d x 10\u201d x 5\u201d.' }),
+      { required: true, presentation: 'radio', save_as_default: true,
+        help: 'A standard shoebox measures 14\u201d x 10\u201d x 5\u201d.' }),
     nativeEditorField('mercari_specifics.package.length', 'Length', pick('length', details[0]), side),
     nativeEditorField('mercari_specifics.package.width', 'Width', pick('width', details[1]), side),
     nativeEditorField('mercari_specifics.package.height', 'Height', pick('height', details[2]), side),

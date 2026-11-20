@@ -717,6 +717,8 @@ test('preview diagnostics identify each refused Mercari read without sending a p
       assert.equal(run.results[0].preview_step, step);
       assert.equal(run.results[0].safe_to_retry, true);
       assert.equal(run.results[0].marketplace_message, message);
+      // The price the item read returned, so a refusal can be compared with later prices; none before that read.
+      assert.equal(run.results[0].price_cents, step === 'mercari-item' ? undefined : 5000);
       assert.ok(!run.requests.some(r => r.key === OFFER_SEND));
       for (const request of run.requests.filter(r => r.body)) assert.deepEqual(request.body.variables, { itemId: ITEM });
     }

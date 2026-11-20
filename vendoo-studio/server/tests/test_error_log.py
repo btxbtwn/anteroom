@@ -87,3 +87,58 @@ class ErrorLogTest(unittest.TestCase):
             error_log.install()
             logger.warning("api_key=%s", "failed_write_secret_123")
         self.assertNotIn("failed_write_secret_123", fallback.getvalue())
+
+
+def test_hosted_assistant_timings_keep_individual_samples(tmp_path, monkeypatch):
+    from vendoo_studio.services import error_alerts
+
+    path = tmp_path / 'timings.jsonl'
+    monkeypatch.setattr(error_log, '_disk_path', lambda: path)
+    # Force the existing ring's compaction path without generating thousands of logs.
+    monkeypatch.setattr(error_log, '_DISK_MAX', 2)
+    path.write_text('{"message":"old"}\n' * 40000)
+    logger = logging.getLogger('vendoo_studio.assistant.timing')
+    reports = []
+
+    class Alerts(logging.Handler):
+        def emit(self, record):
+            reports.append(error_alerts.build_report(record))
+
+    alert = Alerts(level=logging.WARNING)
+    parent = logging.getLogger('vendoo_studio.assistant')
+    with patch.object(parent, 'handlers', [alert]), patch.object(parent, 'propagate', False), patch.object(
+        logger, 'handlers', []
+    ), patch.object(logger, 'propagate', True), patch.object(logger, 'level', logging.WARNING):
+        error_log.install_assistant_timings()
+        error_log.install_assistant_timings()
+        assert len(logger.handlers) == 1
+        assert parent.handlers == [alert]
+        for total in (80000, 40000):
+            logger.warning('assistant answer timing: outcome=answered total_ms=%s', total)
+    entries = error_log.query_entries(grep='assistant answer timing')
+    assert [entry['message'].split('total_ms=')[1] for entry in entries] == ['40000', '80000']
+    assert path.stat().st_size < 512_000
+    assert len(path.read_text().splitlines()) <= 3
+    # Both samples still reach alert handling, even though its grouping merges them.
+    assert len(reports) == 2
+    assert reports[0]['fingerprint'] == reports[1]['fingerprint']
+    assert reports[0]['message'] != reports[1]['message']
+
+
+def test_timing_handler_preserves_assistant_stderr_fallback(monkeypatch):
+    assistant_logger = logging.getLogger('vendoo_studio.assistant')
+    timing_logger = logging.getLogger('vendoo_studio.assistant.timing')
+    captured = []
+
+    class Fallback(logging.Handler):
+        def emit(self, record):
+            captured.append(record.getMessage())
+
+    with patch.object(assistant_logger, 'handlers', []), patch.object(
+        assistant_logger, 'propagate', False
+    ), patch.object(assistant_logger, 'level', logging.ERROR), patch.object(
+        timing_logger, 'handlers', []
+    ), patch.object(logging, 'lastResort', Fallback()):
+        error_log.install_assistant_timings()
+        assistant_logger.error('controlled preparation failure')
+    assert captured == ['controlled preparation failure']

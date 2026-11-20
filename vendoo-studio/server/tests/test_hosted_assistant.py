@@ -168,7 +168,7 @@ def test_failed_answers_keep_a_safe_reason_on_resume_and_retry_without_duplicate
         'prepare': 'Anteroom could not read your shop for this answer. Try again.',
     }[failure]
 
-    async def answer(_provider, _messages, _shop):
+    async def answer(_provider, _messages, _shop, timing=None):
         if partial:
             yield 'text', partial
         if failure == 'provider':
@@ -215,7 +215,7 @@ def test_failed_answers_keep_a_safe_reason_on_resume_and_retry_without_duplicate
             assert client.post('/api/assistant/messages/retry?thread_id=' + thread, headers=alice).status_code == 409
         else:
             monkeypatch.setattr(assistant_route, '_prepare', prepare)
-            async def recovered(_provider, _messages, _shop):
+            async def recovered(_provider, _messages, _shop, timing=None):
                 yield 'text', 'Buy coats.'
             monkeypatch.setattr(business_assistant, 'answer', recovered)
             assert 'Buy coats.' in client.post('/api/assistant/messages/retry?thread_id=' + thread, headers=alice).text
@@ -254,6 +254,63 @@ def test_shop_snapshot_survives_calculation_longer_than_the_idle_transaction_dea
             assert audited == ['Coat M']
             assert 'Coat M' in business_assistant.run_lookup(shop.lookups, 'SELECT title FROM listings')
             shop.lookups.close()
+
+
+def test_shop_snapshot_waits_for_the_sales_archive_lock_outside_a_transaction(
+    migration_engine, jwks, monkeypatch,  # noqa: F811
+):
+    """Another thread holding the imported-sales archive lock must not cost the snapshot its connection.
+
+    ``ensure_archived`` takes one process-wide lock before every sales read.
+    While another seller's first archive holds it, the snapshot waits; Postgres
+    ends a transaction left idle that long. Each wait here is a real one: a
+    second thread takes the lock and keeps it for 300 ms, twice the deadline.
+    """
+    import threading
+    import time
+    from test_business_assistant import NOW, add_listing
+    from vendoo_studio.database import SessionLocal
+    from vendoo_studio.services import business_assistant, hosted_database, vendoo_sales_archive
+    from vendoo_studio.services.hosted_context import for_seller
+    from vendoo_studio.services.service_context import use
+
+    lock = threading.Lock()
+    waits = []
+
+    class HeldByAnotherThread:
+        def __enter__(self):
+            taken, timed, done = threading.Event(), threading.Event(), threading.Event()
+
+            def hold():
+                with lock:
+                    taken.set()
+                    timed.wait()
+                    time.sleep(.3)
+                done.set()
+
+            threading.Thread(target=hold, daemon=True).start()
+            assert taken.wait(5)
+            started = time.monotonic()
+            timed.set()
+            lock.acquire()
+            waits.append(time.monotonic() - started)
+            done.wait(5)
+            return self
+
+        def __exit__(self, *_exc):
+            lock.release()
+
+    with _worker_client(migration_engine, monkeypatch):
+        with use(for_seller(USER_ID)), SessionLocal() as db:
+            add_listing(db, 'Coat M', {'title': 'Coat M', 'size': 'M', 'price': 40})
+            db.commit()
+            monkeypatch.setattr(hosted_database, 'IDLE_IN_TRANSACTION_TIMEOUT', '150ms')
+            monkeypatch.setattr(vendoo_sales_archive, '_archive_lock', HeldByAnotherThread())
+            shop = business_assistant.read_shop(db, now=NOW)
+            assert 'Coat M' in business_assistant.run_lookup(shop.lookups, 'SELECT title FROM listings')
+            shop.lookups.close()
+    # The listings read and the sales read each waited behind the other thread.
+    assert len(waits) >= 2 and min(waits) >= .2
 
 
 def test_four_snapshots_for_two_sellers_release_connections_during_other_reads_and_writes(

@@ -1,7 +1,9 @@
 """Record slow response starts without logging private URLs or stream lifetimes."""
 import logging
 import time
+from contextlib import contextmanager
 from contextvars import ContextVar
+from time import perf_counter
 
 from vendoo_studio.services.hosted_browser_relay import WAIT_S
 
@@ -18,6 +20,24 @@ def note(**fields: int | str) -> None:
     details = _details.get()
     if details is not None:
         details.update(fields)
+
+
+@contextmanager
+def reply_step(name: str):
+    """Time one allowlisted await, including scheduling/network work, not SQL.
+
+    Cancellation and exceptions propagate unchanged. Only fixed numeric fields
+    join the existing slow-response line; no new I/O or per-request log.
+    """
+    if name not in ('lookup', 'persist'):
+        yield
+        return
+    started = perf_counter()
+    note(**{f'relay_{name}_calls': 1})
+    try:
+        yield
+    finally:
+        note(**{f'relay_{name}_ms': min(round(max(0.0, perf_counter() - started) * 1000), 600000)})
 
 
 class RequestTimingMiddleware:

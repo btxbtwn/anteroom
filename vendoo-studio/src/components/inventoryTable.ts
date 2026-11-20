@@ -29,6 +29,8 @@ export type TableListing = {
   vendoo_sold_dates?: Record<string, string>;
   direct_records?: Record<string, DirectRecord>;
   removed_marketplaces?: string[];
+  /** Where Anteroom recorded the sale: the record there can still read live. */
+  sold_marketplaces?: string[];
 };
 
 const LIVE = new Set(["published", "pending_review"]);
@@ -45,7 +47,8 @@ export function marketplaceCell(listing: TableListing, marketplace: string, miss
   const imported = (listing.vendoo_marketplaces || []).some((id) => (ALIASES[id] || id) === marketplace);
   const removed = (listing.removed_marketplaces || []).some((id) => (ALIASES[id] || id) === marketplace);
   const url = record?.listing_url || listing.vendoo_listing_urls?.[marketplace] || null;
-  if (listing.vendoo_sold_dates?.[marketplace]) return { kind: "sold", label: "Sold", url };
+  if (listing.vendoo_sold_dates?.[marketplace]
+    || (listing.sold_marketplaces || []).some((id) => (ALIASES[id] || id) === marketplace)) return { kind: "sold", label: "Sold", url };
   if (record && LIVE.has(record.state)) {
     return { kind: "listed", label: record.state === "pending_review" ? "In review" : "Listed", url };
   }

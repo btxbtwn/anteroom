@@ -32,7 +32,7 @@ from vendoo_studio.models.conversation import Conversation, new_id
 from vendoo_studio.models.listing_promotion import ListingPromotion, MarketplaceOfferFloor
 from vendoo_studio.models.promotion_automation import PromotionAutomation
 from vendoo_studio.repositories.queries import JobRepo, ListingRepo
-from vendoo_studio.services import browser_bridge, listing_mode, mercari_offer_cooldown
+from vendoo_studio.services import browser_bridge, listing_mode, mercari_offer_cooldown, offer_preview_refusals
 from vendoo_studio.services.depop_offer_eligibility import expected_multisize
 from vendoo_studio.services.api_job_lock import claim_api_job, release_api_job
 from vendoo_studio.services.ebay_api import dollars, money_cents
@@ -299,6 +299,11 @@ async def _review_remote(row: ListingPromotion, listing_id: str) -> None:
         if cooldown:
             row.finished_at = _now()
             raise PromotionError(409, MERCARI_COOLDOWN_NOTE, "eligibility_cooldown")
+        if held := offer_preview_refusals.recognized(row.marketplace, "marketplace.promotion_check", row.action, facts):
+            # The price the marketplace's item read returned before refusing, when the Bridge gives it.
+            if isinstance(price := facts.get("price_cents"), int) and not isinstance(price, bool) and price > 0:
+                row.price_cents = price
+            raise PromotionError(409, held, facts.get("error_code"))
         raise PromotionError(409, str(facts.get("error") or "The marketplace did not answer."), facts.get("error_code"))
     row.price_cents = int(facts["price_cents"])
     row.like_count = int(facts.get("like_count") or 0)

@@ -42,6 +42,9 @@ class ItemStatus:
     # True when Anteroom's own sales, listings, marks or delists decided it,
     # rather than Vendoo's label alone.
     own: bool = False
+    # Marketplaces a sold item sold on (its sale lines and Mark as sold), so the
+    # list does not call those listings live. Empty while units are left.
+    sold_on: tuple[str, ...] = ()
 
     @property
     def partially_sold(self) -> bool:
@@ -170,10 +173,15 @@ def repeated_lines(lines: list[MarketplaceSale]) -> set[str]:
 
     repeated: set[str] = set()
     orders = [line for line in lines if line.source == "marketplace" and line.is_order_backed]
+    # Index every hyphen-delimited suffix to preserve both bare transaction
+    # IDs and IDs containing hyphens, without scanning orders for each line.
+    ebay_suffixes = {
+        (line.order_id, line.line_id[offset + 1:])
+        for line in orders if line.marketplace == "ebay"
+        for offset, char in enumerate(line.line_id) if char == "-"
+    }
     for line in orders:
-        if line.marketplace == "ebay" and any(
-                other is not line and other.marketplace == "ebay" and other.order_id == line.order_id
-                and other.line_id.endswith(f"-{line.line_id}") for other in orders):
+        if line.marketplace == "ebay" and (line.order_id, line.line_id) in ebay_suffixes:
             repeated.add(line.id)
     copies = [line for line in lines if line.source == "vendoo"]
     for order in sorted((line for line in orders if line.id not in repeated),
@@ -266,9 +274,14 @@ def statuses(db: Session, conversations: list[tuple[str, dict]]) -> dict[str, It
         sold_out = units > 0 and quantity > 1 and _read_sold_out(observations.get(conv_id, {}), own)
         if vendoo == "sold" or units >= quantity or sold_out:
             # The latest sale Analytics counts, so the Sold tab orders sales as Analytics lists them.
-            moments = [sale_moment(line) for line in counted_sales(own, quantity)] if own else mark_moments
+            counted = counted_sales(own, quantity)
+            moments = [sale_moment(line) for line in counted] if own else mark_moments
+            # Only the sales Analytics counts: a cleanup report from clearing
+            # another listing after the sale did not sell the item there.
+            sold_on = {line.marketplace for line in counted} | {
+                name for name, mark in marks.items() if isinstance(mark, dict) and mark.get("state") == "sold"}
             result[conv_id] = ItemStatus("sold", units, quantity, max(filter(None, moments), default=None),
-                                         own=vendoo != "sold")
+                                         own=vendoo != "sold", sold_on=tuple(sorted(name for name in sold_on if name in MARKETPLACES)))
             continue
         sold_at = max(filter(None, [*(sale_moment(line) for line in own), *mark_moments]), default=None)
         live_direct = direct.get(conv_id, {})

@@ -100,6 +100,12 @@ def _request() -> dict[str, Any] | None:
     }
 
 
+def _app_module(frame: traceback.FrameSummary) -> str | None:
+    """The frame's module path inside Anteroom's package, or None for library code."""
+    path = frame.filename.replace("\\", "/")
+    return path.rsplit("/vendoo_studio/", 1)[1] if "/vendoo_studio/" in path else None
+
+
 def build_report(record: logging.LogRecord) -> dict[str, Any]:
     exc_type = exc_message = stack = None
     database_pool = None
@@ -127,6 +133,16 @@ def build_report(record: logging.LogRecord) -> dict[str, Any]:
         # Diagnostic plumbing must not split existing pool-error groups.
         identity_frames = [f for f in frames if not f.filename.replace("\\", "/").endswith("/vendoo_studio/database_pool.py")]
         identity = (exc_type, tuple((Path(f.filename).name, f.name) for f in identity_frames[-8:]))
+        # A driver error raised deep inside SQLAlchemy keeps only library
+        # frames, so every operation that hit it shared one group. Name the
+        # innermost Anteroom frame then (module path and function, no line or
+        # values). Groups that already keep an Anteroom frame are unchanged.
+        # Pool timeouts stay one group per incident: whichever function was
+        # waiting for a connection is not a different failure.
+        if not isinstance(value, PoolTimeout) and not any(_app_module(f) for f in identity_frames[-8:]):
+            site = next(((module, f.name) for f in reversed(identity_frames) if (module := _app_module(f))), None)
+            if site is not None:
+                identity += (site,)
     browser = getattr(record, "browser", None)
     if browser:
         # Browser stacks are minified and per-release; group by kind and message shape.

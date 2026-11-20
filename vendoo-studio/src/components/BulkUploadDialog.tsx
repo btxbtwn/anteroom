@@ -142,7 +142,8 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
           };
         }));
       } catch (error) {
-        setRow(index, { readNote: error instanceof Error ? error.message : "Reading failed." });
+        const message = error instanceof Error ? error.message : "Reading failed.";
+        setRow(index, { readNote: `${message} Your entered details are kept. You can enter measurements manually or try reading again.` });
       }
       setReading((current) => current && { ...current, done: current.done + 1 });
     });

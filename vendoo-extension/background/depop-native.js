@@ -306,6 +306,8 @@ const DEPOP_MAX_DESCRIPTION = 1000;
 const DEPOP_MAX_HASHTAGS = 5;
 const DEPOP_PHOTO_HOSTS = ['.s3.amazonaws.com', '.s3-accelerate.amazonaws.com'];
 const DEPOP_WEBAPI = 'https://webapi.depop.com';
+// Reads of a draft Depop is still posting when its publish status read is unavailable.
+const DEPOP_UNAVAILABLE_STATUS_POLLS = 8;
 
 function depopBaseDescription(listing) {
   return String(marketplaceCopy(listing, 'depop', 'description') || '').trim();
@@ -1085,6 +1087,8 @@ async function depopLiveFields(request, payload, product) {
 // safe_to_retry means this step wrote nothing.
 async function depopApiAction(action, payload) {
   let wrote = false;
+  // Narrowed to the publish-evidence budget once Depop's status read answers 404.
+  let readDeadline = payload.deadline;
   try {
     const request = async (method, path, body, extraHeaders) => {
       const allowedRead = method === 'GET' && (/^\/presentation\/api\/v1\/drafts\/[A-Za-z0-9_-]{1,80}\/$/.test(path)
@@ -1125,7 +1129,7 @@ async function depopApiAction(action, payload) {
       const retry = method === 'GET' || action === 'photo' || path === DEPOP_PICTURE_CHECK;
       try {
         const { data } = await marketplaceFetch(`https://webapi.depop.com${path}`, { marketplace: 'depop', step: action, method, headers,
-          credentials: 'omit', deadline: payload.deadline, retry, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+          credentials: 'omit', deadline: readDeadline, retry, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
         if (method !== 'GET' && !retry) wrote = true;
         return data;
       } catch (error) {
@@ -1137,7 +1141,9 @@ async function depopApiAction(action, payload) {
           ? `sent: ${Object.keys(body).sort().join(', ')}` : '';
         const extra = [detail && !String(error.marketplace_message || '').includes(detail) ? detail : '', sent].filter(Boolean);
         if (extra.length) error.marketplace_message = [error.marketplace_message, ...extra].filter(Boolean).join(' | ');
-        if (detail || sent) marketplaceLog('depop', action, { method, status: error.status || null, error_code: error.code || null, body: detail, sent });
+        // Logged even without a body: a bodiless 404 must still name the request that answered it.
+        marketplaceLog('depop', action, { method, status: error.status || null, error_code: error.code || null,
+          path: depopPathTemplate(path), body: detail, sent });
         throw error;
       }
     };
@@ -1211,6 +1217,7 @@ async function depopApiAction(action, payload) {
       if (!/^[A-Za-z0-9_-]{1,80}$/.test(String(draft.id))) throw marketplaceError('Depop did not confirm its new draft ID. Check drafts before trying again.', { code: 'schema_drift', rejected: false });
       return { draft_url: `https://www.depop.com/sellinghub/drafts/edit/${draft.id}/` };
     }
+    if (action === 'shop_matches') return { matches: await depopShopMatches(request, payload) };
     if (!id && action !== 'publish_status' && action !== 'update') throw marketplaceError('A saved Depop draft link is required.');
     if (action === 'read') {
       const draft = await readDraft();
@@ -1390,7 +1397,17 @@ async function depopApiAction(action, payload) {
     }
     if (action === 'publish_status') {
       if (!/^[A-Za-z0-9_-]+$/.test(String(payload.publish_job_id))) throw marketplaceError('A Depop publish receipt is required.');
-      const status = await request('GET', `/api/v3/drafts/products/${payload.publish_job_id}/status/`);
+      let status;
+      try {
+        status = await request('GET', `/api/v3/drafts/products/${payload.publish_job_id}/status/`);
+      } catch (error) {
+        // Since 2026-11-17 Depop answers this read with a bodiless 404 on every
+        // poll, after it has posted the item. A 404 on a read is not a refusal of
+        // the publish, which Depop already accepted. Read what the publish leaves.
+        if (error?.status !== 404) throw error;
+        if (Number.isFinite(payload.evidence_until)) readDeadline = Math.min(payload.deadline, payload.evidence_until);
+        return await depopPublishEvidence(request, payload, id ? path : '', () => Date.now() >= readDeadline);
+      }
       // Only a count names an answer. A job Depop has accepted but not started yet
       // reports no counts at all, which is waiting, not a refusal.
       const counts = status?.count_by_status && typeof status.count_by_status === 'object' ? status.count_by_status : {};
@@ -1423,6 +1440,44 @@ async function depopApiAction(action, payload) {
   } catch (error) {
     return marketplaceFailure(error, !wrote);
   }
+}
+
+// Depop's own path words, with every id, slug and query left out of logs.
+const DEPOP_PATH_WORDS = new Set(['presentation', 'api', 'v1', 'v2', 'v3', 'drafts', 'products', 'status', 'by-slug',
+  'edit-listing', 'shops', 'shop', 'by-status', 'selling', 'users', 'me', 'pictures', 'attributes', 'addresses',
+  'settings', 'shipping', 'providers', 'depop', 'validate']);
+function depopPathTemplate(path) {
+  return String(path || '').split('?')[0].split('/')
+    .map(part => (!part || DEPOP_PATH_WORDS.has(part) ? part : '{id}')).join('/');
+}
+
+// The publish status read is unavailable. Posting consumes the draft, so a draft
+// that still reads is still queued (or was never posted), and a draft that is
+// gone is posted only when its one matching product is in the seller's shop.
+// Nothing here is a refusal: the publish was accepted, so the answer is either
+// the listing or unconfirmed.
+async function depopPublishEvidence(request, payload, draftPath, spent = () => false) {
+  const unavailable = { complete: false, failed: false, counts: {}, status_unavailable: true };
+  if (!draftPath) return unavailable;
+  try {
+    await request('GET', draftPath);
+    return unavailable;
+  } catch (error) {
+    // Out of time for evidence: still unconfirmed, never a refusal.
+    if (spent()) return unavailable;
+    if (error?.status !== 404) throw error;
+  }
+  // Only a product that was not in the shop before this publish can be the one it made:
+  // the seller may already have an identical listing live. Without that earlier
+  // reading, nothing in the shop is evidence.
+  const before = Array.isArray(payload.shop_before?.seen) && payload.shop_before.seller_id ? payload.shop_before : null;
+  const after = before ? await depopShopMatches(request, payload) : null;
+  // Only the account that published: Chrome may be signed in to another Depop shop by now.
+  // New means absent from the whole shop before posting, not only from its matches: a
+  // listing repriced or reworded since then is not this publish's product.
+  const existed = new Set(before?.seen);
+  const made = after && after.seller_id === before.seller_id ? after.urls.filter(url => !existed.has(url)) : [];
+  return made.length === 1 ? { ...unavailable, complete: true, listing_url: made[0] } : { ...unavailable, draft_posted: true };
 }
 
 // Read only error containers: draft descriptions, addresses and other seller
@@ -1566,6 +1621,50 @@ async function depopShopUrl(request, payload) {
   return '';
 }
 
+// Every product link in the signed-in seller's shop that this listing's text and price
+// match, across every page read, with every link seen and that seller's id. Null when
+// the shop could not be read in full.
+async function depopShopMatches(request, payload) {
+  // The price the publish sent: a locked Depop price, else General's.
+  const listing = { ...payload.listing, price: depopPrice(payload.listing || {}) };
+  if (!depopBaseDescription(listing) || !Number.isFinite(Number(listing.price))) return null;
+  let me;
+  try { me = await request('GET', '/presentation/api/v1/users/me/'); } catch { return null; }
+  const userId = String(me?.id ?? '');
+  if (!/^\d{1,15}$/.test(userId)) return null;
+  const scoped = { ...listing, seller_id: userId };
+  const matches = new Set();
+  const seen = new Set();
+  const inventory = `/api/v1/shop/${userId}/products/?limit=200`;
+  let offset = '';
+  let previousId;
+  for (let pageNumber = 0; pageNumber < 8; pageNumber += 1) {
+    const path = offset ? `${inventory}&offset_id=${offset}` : inventory;
+    if (!depopShopRead(path)) return null;
+    let page;
+    try { page = await request('GET', path); } catch { return null; }
+    // A page without a product list Anteroom knows is not an empty shop.
+    if (!['objects', 'products', 'data'].some(key => Array.isArray(page?.[key]))) return null;
+    for (const product of depopProductRows(page)) {
+      const url = depopListingUrl(product?.slug || product?.url);
+      if (url) seen.add(url);
+      if (depopShopProduct(product, scoped)) matches.add(url);
+    }
+    if (page?.meta?.end === true) return { seller_id: userId, urls: [...matches], seen: [...seen] };
+    // A page or cursor that repeats means the scan stopped advancing: not read in full.
+    const firstId = depopProductRows(page)[0]?.id;
+    if (pageNumber && firstId != null && firstId === previousId) return null;
+    previousId = firstId;
+    const next = depopCursorToken(page?.meta?.last_offset_id);
+    // More pages, but no cursor that reaches them: not read in full.
+    if (!next) return page?.meta?.end === false ? null : { seller_id: userId, urls: [...matches], seen: [...seen] };
+    if (next === offset) return null;
+    offset = next;
+  }
+  // More pages than were read: a match could be on one not read.
+  return null;
+}
+
 async function depopAction(action, payload) {
   if (nativeOperationFor('depop')?.cancelled) throw marketplaceError('Marketplace action cancelled.', { code: 'network' });
   const result = await depopApiAction(action, payload);
@@ -1683,6 +1782,10 @@ async function runDepopNative(msg, recovery = false) {
       // whose category, size or attributes are no longer the ones sent.
       payload.depop_fields = await depopResolvedFields(payload);
       await depopAction('prepare_publish', payload);
+      // The shop's matching products before posting, so a publish whose status read is
+      // unavailable can tell its new product from an identical one already live. Read only.
+      payload.shop_before = (await depopAction('shop_matches', payload).catch(() => null))?.matches ?? null;
+      await storeReceipt({ shop_before: payload.shop_before });
       try {
         const receipt = await depopAction('publish', payload);
         committed = true;
@@ -1695,9 +1798,16 @@ async function runDepopNative(msg, recovery = false) {
     }
     if (!payload.publish_job_id) throw new Error('No confirmed Depop publish receipt is available. Review the native account.');
     let status = {};
+    // Without Depop's status read, each poll reads the draft, and the whole shop once the
+    // draft is gone. Bound them so a Check answers inside Anteroom's 65 s wait for Chrome.
+    const evidenceUntil = Date.now() + 40000;
+    let queuedPolls = 0;
+    let postedPolls = 0;
     while (Date.now() < payload.deadline) {
-      status = await depopAction('publish_status', payload);
+      status = await depopAction('publish_status', { ...payload, evidence_until: evidenceUntil });
       if (status.complete) return { ok: true, state: 'published', draft_url: payload.draft_url, ...(status.listing_url ? { listing_url: status.listing_url } : {}) };
+      if (status.status_unavailable && (Date.now() >= evidenceUntil
+        || (status.draft_posted ? (postedPolls += 1) >= 2 : (queuedPolls += 1) >= DEPOP_UNAVAILABLE_STATUS_POLLS))) break;
       if (status.failed) {
         // Depop's job ended without posting this draft. The draft is untouched, so List can run again.
         return marketplaceFailure(marketplaceError(`Depop could not publish this listing.${status.reason ? ` ${status.reason}` : ''}`,
@@ -1708,16 +1818,26 @@ async function runDepopNative(msg, recovery = false) {
       // whether the item is live is unknown, so keep asking rather than guess.
       await marketplaceSleep(2000);
     }
-    throw marketplaceError('Depop has not confirmed publishing yet. Check its result later.',
-      { code: 'uncertain', rejected: false, marketplace_message: `counts: ${JSON.stringify(status.counts || {})}` });
+    if (status.draft_posted) {
+      // The draft left Depop's drafts, but no one new product in the shop is this listing.
+      throw Object.assign(marketplaceError('Depop took this draft for publishing, but Anteroom could not find the new listing. '
+        + 'Check your Depop shop, then add the listing link here.',
+      { code: 'uncertain', rejected: false, marketplace_message: 'publish status: HTTP 404; draft: no longer in drafts; shop: no single new matching listing' }),
+      { publish_read: true });
+    }
+    throw Object.assign(marketplaceError('Depop has not confirmed publishing yet. Check its result later.',
+      { code: 'uncertain', rejected: false, marketplace_message: status.status_unavailable
+        ? 'publish status: HTTP 404; draft: still in drafts' : `counts: ${JSON.stringify(status.counts || {})}` }),
+    { publish_read: true });
   } catch (error) {
     if (depopDraftGone(error) && !replacedDraft) payload.draft_url = '';
     // A write may have landed and the reply was lost. Read Depop before answering
     // so a finished action is a draft, a listing, or a refusal — never a guess.
-    if (committed && payload.draft_url) {
+    // A publish result already read to its end is not read again.
+    if (committed && payload.draft_url && error.publish_read !== true) {
       try {
         if (payload.publish_job_id) {
-          const status = await depopAction('publish_status', payload);
+          const status = await depopAction('publish_status', { ...payload, evidence_until: Date.now() + 10000 });
           if (status.complete) return { ok: true, state: 'published', draft_url: payload.draft_url, ...(status.listing_url ? { listing_url: status.listing_url } : {}) };
         } else if (payload.action === 'save_draft') {
           return await verify();

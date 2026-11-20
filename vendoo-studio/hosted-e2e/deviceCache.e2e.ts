@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { showStatusTab } from "../e2e/fixtures";
 
 /**
  * A reload opens on the workspace kept in this browser, before the server
@@ -44,6 +45,7 @@ test("a reload opens on the kept workspace, and signing out erases it", async ({
 
   await signIn(page, "alice@sandbox.test");
   await openInventory(page, isMobile);
+  await showStatusTab(page, "Draft");
   const row = page.getByRole("list", { name: "Listings" }).getByRole("link", { name: title, exact: true });
   await expect(row).toBeVisible();
   await expect.poll(() => keptKeys(page)).toEqual(expect.arrayContaining(["owner", "queries", "runtime"]));
@@ -53,6 +55,7 @@ test("a reload opens on the kept workspace, and signing out erases it", async ({
   await page.route((url) => url.pathname.startsWith("/api/"), () => { held += 1; });
   await page.reload({ waitUntil: "commit" });
   await openInventory(page, isMobile);
+  await showStatusTab(page, "Draft");
   await expect(row).toBeVisible();
   expect(held, "the reload asked the server and is still waiting").toBeGreaterThan(0);
   await page.screenshot({ path: `e2e/results/hosted/kept-workspace-${info.project.name}.png` });
@@ -66,6 +69,7 @@ test("a reload opens on the kept workspace, and signing out erases it", async ({
 
   await signIn(page, "bob@sandbox.test");
   await openInventory(page, isMobile);
+  await showStatusTab(page, "Draft");
   await expect(page.getByRole("tablist", { name: "Listing status" })).toBeVisible();
   await expect(page.getByText(title)).toHaveCount(0);
 });

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { test, expect } from "@playwright/test";
+import { showStatusTab } from "../e2e/fixtures";
 
 const api = `http://127.0.0.1:${process.env.VENDOO_STUDIO_PORT || "4341"}`;
 const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2L8AAAAASUVORK5CYII=", "base64");
@@ -32,6 +33,7 @@ test("a signed-in seller opens a hosted draft and other sellers cannot see its p
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
   }
+  await showStatusTab(page, "Draft");
   await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: title, exact: true }).click();
   await page.getByRole("button", { name: "Account", exact: true }).click();
   await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
@@ -90,6 +92,7 @@ test("generation waits for all four photos and saves the listing from the editor
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await showStatusTab(page, "Draft");
   await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: title, exact: true }).click();
 
   let release!: () => void;
@@ -237,6 +240,7 @@ test("typing before the initial details arrive preserves the pending edit and un
     expect(saved.sku).toBe("KEEP-123");
     expect(saved.knownFlaws).toBe("Keep this mark");
     await notes.fill("Saved after moving to another draft");
+    await showStatusTab(page, "Draft");
     await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: otherTitle, exact: true }).click();
     await expect.poll(async () => {
       const response = await request.get(`${api}/api/conversations/${draft.id}`, { headers });
@@ -303,6 +307,7 @@ test("a listing the server briefly cannot answer keeps loading and fills in its 
   if (info.project.name === "phone") {
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
+    await showStatusTab(page, "Draft");
     await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: draft.title, exact: true }).click();
     await page.getByRole("tab", { name: "Listing", exact: true }).click();
   } else {

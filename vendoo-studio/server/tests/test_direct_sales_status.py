@@ -678,6 +678,10 @@ def test_postgres_sale_undo_waits_for_explicit_finish_ownership(undo_env, monkey
 
 RACE_DELETE = {"listing_id": "123456789012", "url": EBAY_URL, "at": "2026-11-17T06:00:00+00:00"}
 # Delist notes writes: the delete record as a delete starts, and a failure record.
+# A notes write waiting on the item's row lock (marketplace_delist._locked_conversation).
+LOCKED_NOTES_WRITE = text("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
+                          "AND wait_event_type = 'Lock' AND query LIKE 'UPDATE conversations %'")
+
 DELIST_WRITES = {
     "record_delete": lambda db: marketplace_delist._record_delete(db, "race", "ebay", {**RACE_DELETE, "state": "deleting"}),
     "store": lambda db: marketplace_delist._record(db, "race", "ebay", {**RACE_DELETE, "state": "failed", "error": "Not deleted."}),
@@ -770,16 +774,18 @@ def test_postgres_delist_notes_write_waits_for_a_sale_undo_and_keeps_it(undo_env
         with monkeypatch.context() as held_transaction:
             held_transaction.setattr(undo, "commit", undo.flush)
             delete_seller_sale(undo, sale["id"], sale["financial_revision"])
-        writer_thread = threading.Thread(target=write)
-        writer_thread.start()
-        deadline = time.monotonic() + 10
-        waiting = 0
-        with bind.connect() as watch:
+        # Postgres keeps one pg_stat_activity snapshot per transaction, so the
+        # watch autocommits: each poll then sees the writer as it is now.
+        with bind.connect().execution_options(isolation_level="AUTOCOMMIT") as watch:
+            writer_thread = threading.Thread(target=write)
+            writer_thread.start()
+            deadline = time.monotonic() + 10
+            waiting = 0
             while not waiting and time.monotonic() < deadline:
-                waiting = watch.scalar(text("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() "
-                                            "AND wait_event_type = 'Lock'"))
+                waiting = watch.scalar(LOCKED_NOTES_WRITE)
                 time.sleep(0.05)
-        assert waiting and writer_thread.is_alive(), "the delist write must wait on the undo's row lock"
+        assert writer_thread.is_alive(), failures
+        assert waiting, "the delist write must wait on the undo's row lock"
         undo.commit()
     writer_thread.join(10)
     assert not writer_thread.is_alive() and not failures, failures
@@ -1126,3 +1132,27 @@ def test_a_sale_of_the_newer_listing_counts_despite_the_superseded_seller_link(e
     line(env.db, "coat", marketplace, order="new-sale", listing_id=marketplace_delist.listing_id(marketplace, new))
     entry = marketplace_delist.listings(env.db, "coat")[marketplace]
     assert entry["sold_here"] is True and entry["listing_id"] == marketplace_delist.listing_id(marketplace, new)
+
+
+def test_the_mac_list_names_the_marketplace_a_sold_item_sold_on(env):
+    item(env.db, "top", notes={"vendooStatus": "active"})
+    item(env.db, "tees", quantity=2, notes={"vendooStatus": "active"})
+    for conv_id in ("top", "tees"):
+        MarketplaceListingRepo(env.db).save(conv_id, "poshmark", {"state": "published", "listing_url": POSH_URL})
+        line(env.db, conv_id, "poshmark", order=f"o-{conv_id}", listing_id="65a1b2c3d4e5f6a7b8c9d0e1")
+    rows = {row["id"]: row for row in env.client.get("/api/conversations").json()}
+    assert rows["top"]["status"] == "sold"
+    assert rows["top"]["sold_marketplaces"] == ["poshmark"]
+    assert rows["tees"]["sold_marketplaces"] == []
+
+
+def test_a_cleanup_report_after_the_sale_is_not_named_as_where_it_sold(env):
+    # The coat sold on eBay; clearing its Mercari listing later read as "sold" there.
+    item(env.db, "coat", notes={"vendooStatus": "active"})
+    line(env.db, "coat", "ebay", order="o1", order_line="l1", when=datetime(2026, 11, 1))
+    env.db.add(MarketplaceSale(marketplace="mercari", order_id="m123", line_id="m123", listing_id="m123",
+                               conversation_id="coat", sold_at=datetime(2026, 11, 2)))
+    env.db.commit()
+    rows = {row["id"]: row for row in env.client.get("/api/conversations").json()}
+    assert rows["coat"]["status"] == "sold"
+    assert rows["coat"]["sold_marketplaces"] == ["ebay"]

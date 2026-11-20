@@ -27,6 +27,8 @@ export interface Conversation {
   direct_marketplaces?: string[];
   /** Every direct listing record by marketplace, for the inventory table. */
   direct_records?: Record<string, DirectRecord>;
+  /** Marketplaces a sold item sold on, from Anteroom's sales and Mark as sold. Their listing records may still read live. */
+  sold_marketplaces?: string[];
   /** Marketplaces Anteroom delisted directly, though imported history says listed. */
   removed_marketplaces?: string[];
   /** Units sold on Anteroom's sales ledger. An Active row with some sold reads "1 of 3 sold". */
@@ -105,6 +107,8 @@ export interface ConversationSummary {
   direct_marketplaces?: string[];
   /** Every direct listing record by marketplace, for the inventory table. */
   direct_records?: Record<string, DirectRecord>;
+  /** Marketplaces a sold item sold on, from Anteroom's sales and Mark as sold. Their listing records may still read live. */
+  sold_marketplaces?: string[];
   /** Marketplaces Anteroom delisted directly, though imported history says listed. */
   removed_marketplaces?: string[];
   /** Units sold on Anteroom's sales ledger. An Active row with some sold reads "1 of 3 sold". */

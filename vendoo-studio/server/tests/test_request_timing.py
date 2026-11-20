@@ -160,3 +160,26 @@ def test_route_timing_fields_join_only_their_own_slow_line(caplog):
     assert second == "Slow response: GET /api/status 200 6000ms"
     # Outside a request there is nowhere to attach fields, and nothing fails.
     request_timing.note(builds=1)
+
+
+
+def test_reply_step_elapsed_bounds_and_invalid_names(monkeypatch):
+    import pytest
+    from vendoo_studio.services import request_timing
+
+    details = {}
+    token = request_timing._details.set(details)
+    clock = iter((1.0, 1.125, 2.0, 10000.0))
+    monkeypatch.setattr(request_timing, 'perf_counter', lambda: next(clock))
+    try:
+        with request_timing.reply_step('lookup'):
+            pass
+        with pytest.raises(RuntimeError):
+            with request_timing.reply_step('persist'):
+                raise RuntimeError('private error')
+        with request_timing.reply_step('private dynamic label'):
+            pass
+        assert details == {'relay_lookup_calls': 1, 'relay_lookup_ms': 125,
+                           'relay_persist_calls': 1, 'relay_persist_ms': 600000}
+    finally:
+        request_timing._details.reset(token)

@@ -22,7 +22,7 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import cast
 
-from sqlalchemy import CursorResult, func, update
+from sqlalchemy import CursorResult, func, or_, update
 from sqlalchemy.orm import Session
 
 from vendoo_studio.database import SessionLocal
@@ -35,6 +35,7 @@ from vendoo_studio.models.marketplace_listing import MarketplaceListing
 from vendoo_studio.models.promotion_automation import PromotionAutomation, PromotionRun
 from vendoo_studio.repositories.queries import JobRepo
 from vendoo_studio.services import listing_promotions as promotions
+from vendoo_studio.services import offer_preview_refusals
 from vendoo_studio.services.automation_age import load_listed_index, resolve_listed_at
 from vendoo_studio.services.automation_schedule import (
     ScheduleError,
@@ -68,6 +69,9 @@ READ_GAP_S = 2.0
 # has no such feed, so its daily re-check is how its new likes are found.
 LIKE_RECHECK = {"poshmark": timedelta(days=7), "depop": timedelta(days=7), "mercari": timedelta(days=1)}
 WAITING_FOR_LIKES = "no new likes since the last check"
+HELD_AFTER_REFUSAL = "refused at the last check; checked again a day later"
+# More held listings than this, and over half of a rule's listings, are not held.
+BROAD_REFUSALS = 3
 TICK_S = 60.0
 # How long a due round waits for Chrome to reconnect, e.g. after a restart,
 # before it is recorded as unable to run.
@@ -334,6 +338,39 @@ def _waiting_for_likes(db: Session, row: PromotionAutomation, now: datetime) -> 
             and (likes < minimum or (offered.get(listing_id) is not None and likes <= cast(int, offered[listing_id])))}
 
 
+def _held_after_refusal(db: Session, row: PromotionAutomation, now: datetime, covered: set[str]) -> dict[str, datetime]:
+    """Listings whose latest check by this rule, within a day, got a refusal that repeats until the listing changes.
+
+    Maps each to when it was refused: a like newer than that still reads it. A
+    price Anteroom recorded for the listing after the refusal, different from
+    the one the marketplace read then, releases it. So many held listings at
+    once looks like a change at the marketplace, so none is held then.
+    """
+    if row.action != "offer":
+        return {}
+    latest: dict[str, ListingPromotion] = {}
+    for promotion in db.query(ListingPromotion).filter(
+        ListingPromotion.automation_id == row.id, ListingPromotion.marketplace == row.marketplace,
+        ListingPromotion.action == "offer", ListingPromotion.created_at > now - offer_preview_refusals.HOLD,
+    ).order_by(ListingPromotion.created_at.desc()):
+        latest.setdefault(promotion.listing_id, promotion)
+    refused = {listing_id: promotion for listing_id, promotion in latest.items()
+               if listing_id in covered and promotion.state == "skipped" and offer_preview_refusals.held_note(promotion.note, promotion.marketplace_message)}
+    priced = {promotion.conversation_id: promotion for promotion in refused.values()
+              if promotion.price_cents is not None and promotion.conversation_id}
+    if priced:
+        for conversation_id, listed_price, price_recorded_at in db.query(
+            MarketplaceListing.conversation_id, MarketplaceListing.listed_price, MarketplaceListing.price_recorded_at,
+        ).filter(MarketplaceListing.conversation_id.in_(list(priced)), MarketplaceListing.marketplace == row.marketplace):
+            promotion = priced[conversation_id]
+            if (listed_price is not None and price_recorded_at is not None and price_recorded_at > (promotion.finished_at or promotion.created_at)
+                    and round(listed_price * 100) != promotion.price_cents):
+                refused.pop(promotion.listing_id, None)
+    if len(refused) > BROAD_REFUSALS and len(refused) * 2 > len(covered):
+        return {}
+    return {listing_id: promotion.created_at for listing_id, promotion in refused.items()}
+
+
 def _skip_reason(exc: PromotionError, send: ListingPromotion) -> str:
     """The skip text, with the marketplace's own words when it gave them."""
     text = scrub(str(exc)) or "The marketplace did not answer."
@@ -369,12 +406,14 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
     stop_note = None
     try:
         promotions.require_chrome()
-        targets = [target for target in _order(db, row, _covered(db, row))
+        covered = _covered(db, row)
+        targets = [target for target in _order(db, row, covered)
                    if (like_events is None or target[1] in like_events)
                    if not row.min_days_listed or (target[2] and (now - target[2]).days >= row.min_days_listed)]
         remaining = (row.daily_cap or 0) - _shares_today(db, row.marketplace, now) if row.action == "share" else None
         # Like-feed rounds read their listings; the regular scan skips those still waiting for a like.
         waiting = _waiting_for_likes(db, row, now) if like_events is None else set()
+        held = _held_after_refusal(db, row, now, {target[1] for target in covered})
         reads = 0
         batch = new_id()
         for conv, listing_id, _listed_at in targets:
@@ -391,6 +430,12 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                     counts["skipped"] += 1
                     reasons[WAITING_FOR_LIKES] += 1
                     continue
+                # As in the feed filter, keep millisecond ties eligible until a later check.
+                if listing_id in held and (new_like_at is None or new_like_at < held[listing_id].replace(
+                        microsecond=held[listing_id].microsecond // 1000 * 1000)):
+                    counts["skipped"] += 1
+                    reasons[HELD_AFTER_REFUSAL] += 1
+                    continue
                 if blocked := promotions.blocking(db, row.marketplace, listing_id, "offer", new_like_at=new_like_at):
                     counts["skipped"] += 1
                     reason = blocked if blocked == promotions.MERCARI_COOLDOWN_NOTE else "offered in the last 24 hours or unconfirmed"
@@ -404,6 +449,8 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                     await sleep(READ_GAP_S)
                 reads += 1
             send = promotions.new_row(conv, row.marketplace, row.action, batch, row.discount_percent, row.id)
+            # Feed events arriving during the read must remain newer than this check.
+            send.created_at = _now()
             try:
                 await promotions.review(db, send, conv, new_like_at=new_like_at)
                 shipping = None
@@ -416,12 +463,12 @@ async def run_round(db: Session, row: PromotionAutomation, *, sleep=asyncio.slee
                     shipping = _shipping_choice(row, send)
             except PromotionError as exc:
                 db.rollback()
-                counts["skipped"] += 1
                 # Review only reads, but its refusal still belongs in the
                 # per-listing activity journal. No send timestamp; a recognized
                 # Mercari eligibility refusal gates previews only.
                 send.listing_id = send.listing_id or listing_id
-                send.state, send.note = "skipped", _skip_reason(exc, send)
+                send.state, send.note = ("failed" if exc.code in ("chrome", "network") else "skipped"), _skip_reason(exc, send)
+                counts[send.state] += 1
                 send.marketplace_message = scrub(send.marketplace_message)
                 send.finished_at = _now()
                 # The draft may have been deleted while Chrome was reading.
@@ -608,7 +655,23 @@ async def check_new_likes(db: Session, *, sleep=asyncio.sleep) -> int:
             _pause(db, row, "The recent-like feed changed. Anteroom needs an update.")
             continue
         covered = {target[1] for target in _covered(db, row)}
+        # The feed is re-read from the same start every minute, so a like this
+        # rule has already checked the listing for would otherwise read it again
+        # on every tick. Failed reads must retry. The Bridge truncates events to
+        # milliseconds: keep ties eligible until a check in a later millisecond.
+        # A count-only skip cannot assess individual likers: a replacement liker
+        # may leave the count unchanged. Its journal reason distinguishes it
+        # from completed eligibility checks, including existing persisted rows.
+        checked = dict(db.query(ListingPromotion.listing_id, func.max(ListingPromotion.created_at)).filter(
+            ListingPromotion.automation_id == row.id, ListingPromotion.action == "offer",
+            ListingPromotion.listing_id.in_(list(events)),
+            or_(ListingPromotion.state != "failed", ListingPromotion.sent_at.is_not(None)),
+            or_(ListingPromotion.state != "skipped", ListingPromotion.sent_at.is_not(None),
+                ListingPromotion.note.is_(None),
+                ~ListingPromotion.note.startswith("no new likers since the last offer")),
+        ).group_by(ListingPromotion.listing_id).all()) if events else {}
         events = {key: at for key, at in events.items() if key in covered
+                  and not (key in checked and at < checked[key].replace(microsecond=checked[key].microsecond // 1000 * 1000))
                   and not promotions.blocking(db, row.marketplace, key, "offer", new_like_at=at)}
         if events:
             await run_round(db, row, sleep=sleep, like_events=events)

@@ -451,6 +451,195 @@ test('two Depop inventory rows for one listing do not pick a link', async () => 
   assert.equal(status.listing_url, undefined);
 });
 
+// Production, 2026-11-17 and 2026-11-18: Depop posted the item, then its publish
+// status read answered a bodiless HTTP 404 on every read, and Anteroom reported
+// "Depop refused the request (HTTP 404)" with the listing live.
+function publishWithStatus404(c, payload, { draftAfterPost, shopRows }) {
+  c.chrome.storage.local.get = async () => ({});
+  c.marketplaceSleep = async () => {};
+  const sent = { ...FULL, tags: [] };
+  const draft = {};
+  const requests = [];
+  let posted = false;
+  c.fetch = async (url, options = {}) => {
+    const { pathname } = new URL(url);
+    requests.push({ method: options.method || 'GET', pathname });
+    if (pathname.endsWith('/status/')) return reply(404, '');
+    if (options.method === 'POST' && pathname === '/presentation/api/v1/drafts/products/') { posted = true; return reply(200, { id: 'job-1' }); }
+    if (pathname === '/presentation/api/v1/drafts/123456/' && posted) return draftAfterPost();
+    if (pathname === '/presentation/api/v1/users/me/') return reply(200, { id: 42 });
+    if (pathname.includes('/by-status/selling/')) return reply(200, { objects: [] });
+    if (pathname === '/api/v1/shop/42/products/') return reply(200, { meta: { end: true }, products: shopRows(sent, posted) });
+    return reply(200, draft);
+  };
+  withCatalog(c);
+  return { sent, draft, requests, run: async () => {
+    const fields = await c.depopResolvedFields({ listing: sent, deadline: Date.now() + 30000 });
+    Object.assign(draft, call(c, 'depopDraftWriteBody', sent, fields, [789]), { pictures: [{ id: 789 }], missing_fields: [] });
+    return c.runDepopNative({ payload: { ...payload, listing: sent, action: 'publish', confirm: true, operation_id: 'abc123' } });
+  } };
+}
+
+const publishPosts = requests => requests.filter(request => request.method === 'POST'
+  && request.pathname === '/presentation/api/v1/drafts/products/').length;
+
+test('a Depop publish whose status read answers 404 is confirmed by the posted product, not called a refusal', async () => {
+  const { c, payload } = page();
+  const { requests, run } = publishWithStatus404(c, payload, {
+    draftAfterPost: () => reply(404, { detail: 'Not found' }),
+    shopRows: (sent, posted) => posted
+      ? [{ slug: 'seller-corona-tee-5618', description: c.depopDescription(sent), price_amount: String(sent.price), user_id: 42 }] : [],
+  });
+  const result = await run();
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.state, 'published');
+  assert.equal(result.listing_url, 'https://www.depop.com/products/seller-corona-tee-5618/');
+  assert.equal(result.draft_url, DRAFT);
+  assert.equal(publishPosts(requests), 1);
+});
+
+test('a Depop publish whose status read answers 404 stays unconfirmed while its draft is still there', async () => {
+  const { c, payload } = page();
+  let draftReads = 0;
+  const { draft, requests, run } = publishWithStatus404(c, payload, {
+    draftAfterPost: () => { draftReads += 1; return reply(200, draft); },
+    shopRows: () => [],
+  });
+  const result = await run();
+  assert.equal(result.ok, false);
+  assert.equal(result.safe_to_retry, false);
+  assert.equal(result.error_code, 'uncertain');
+  assert.equal(result.draft_url, DRAFT);
+  assert.doesNotMatch(result.error, /refused/);
+  assert.ok(draftReads > 1, 'the draft is re-read while Depop works through its queue');
+  assert.equal(publishPosts(requests), 1);
+});
+
+test('a Depop publish whose status read answers 404 and whose product cannot be found asks for the link, never a retry', async () => {
+  const { c, payload } = page();
+  const { requests, run } = publishWithStatus404(c, payload, {
+    draftAfterPost: () => reply(404, { detail: 'Could not find draft with id: 123456' }),
+    // Another product of the seller's, not this listing.
+    shopRows: () => [{ slug: 'other-item', description: 'Something else', price_amount: '9', user_id: 42 }],
+  });
+  const result = await run();
+  assert.equal(result.ok, false);
+  assert.equal(result.safe_to_retry, false);
+  assert.equal(result.error_code, 'uncertain');
+  assert.equal(result.listing_url, undefined);
+  // Keeps the draft link and never says the draft was deleted: Anteroom would save and publish a second copy.
+  assert.equal(result.draft_url, DRAFT);
+  assert.doesNotMatch(`${result.error} ${result.marketplace_message || ''}`, /could not find draft/i);
+  assert.match(result.error, /link/);
+  assert.equal(publishPosts(requests), 1);
+});
+
+test('a Depop publish whose status read answers 404 is not confirmed by an identical listing already live', async () => {
+  const { c, payload } = page();
+  const older = sent => ({ slug: 'seller-corona-tee-older-1111', description: c.depopDescription(sent), price_amount: String(sent.price), user_id: 42 });
+  const { requests, run } = publishWithStatus404(c, payload, {
+    draftAfterPost: () => reply(404, { detail: 'Not found' }),
+    // The same item listed earlier; Depop has not shown the new product yet.
+    shopRows: sent => [older(sent)],
+  });
+  const result = await run();
+  assert.equal(result.ok, false);
+  assert.equal(result.safe_to_retry, false);
+  assert.equal(result.error_code, 'uncertain');
+  assert.equal(result.listing_url, undefined);
+  assert.equal(publishPosts(requests), 1);
+});
+
+test('a Depop status read that answers 404 confirms nothing from the shop without a reading taken before posting', async () => {
+  const { c, payload } = page();
+  c.fetch = async (url) => {
+    const { pathname } = new URL(url);
+    if (pathname.endsWith('/status/')) return reply(404, '');
+    if (pathname === '/presentation/api/v1/drafts/123456/') return reply(404, { detail: 'Not found' });
+    if (pathname === '/presentation/api/v1/users/me/') return reply(200, { id: 42 });
+    if (pathname === '/api/v1/shop/42/products/') return reply(200, { meta: { end: true },
+      products: [{ slug: 'seller-columbia-xl', description: 'Private draft', price_amount: '12', user_id: 42 }] });
+    throw new Error(pathname);
+  };
+  // A Check of a publish journalled before this change has no earlier shop reading.
+  const status = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1' });
+  assert.equal(status.complete, false);
+  assert.equal(status.draft_posted, true);
+  assert.equal(status.listing_url, undefined);
+  const known = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1', shop_before: { seller_id: '42', urls: [], seen: [] } });
+  assert.equal(known.listing_url, 'https://www.depop.com/products/seller-columbia-xl/');
+  // Published from another Depop account than the one Chrome is signed in to now.
+  const switched = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1', shop_before: { seller_id: '7', urls: [], seen: [] } });
+  assert.equal(switched.listing_url, undefined);
+  assert.equal(switched.draft_posted, true);
+  // In the shop before posting, at another price: repriced since, it is still not this publish's product.
+  const repriced = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1',
+    shop_before: { seller_id: '42', urls: [], seen: ['https://www.depop.com/products/seller-columbia-xl/'] } });
+  assert.equal(repriced.listing_url, undefined);
+  assert.equal(repriced.draft_posted, true);
+});
+
+test('the Depop shop reading matches the locked Depop price the publish sent, and a repeating page is not a full reading', async () => {
+  const { c, payload } = page();
+  const locked = { ...payload.listing, seller_fields: ['depop_specifics.price'], depop_specifics: { price: 20 } };
+  const row = { slug: 'seller-locked-price', description: 'Private draft', price_amount: '20.00', user_id: 42 };
+  let pages = 0;
+  let cursor = 'next';
+  c.fetch = async (url) => {
+    const { pathname } = new URL(url);
+    if (pathname === '/presentation/api/v1/users/me/') return reply(200, { id: 42 });
+    if (pathname === '/api/v1/shop/42/products/') {
+      pages += 1;
+      return reply(200, { meta: { end: cursor === '', last_offset_id: cursor }, products: [{ ...row, id: pages }] });
+    }
+    throw new Error(pathname);
+  };
+  cursor = '';
+  const read = await c.depopApiAction('shop_matches', { ...payload, listing: locked });
+  assert.deepEqual({ ...read.matches, urls: [...read.matches.urls] }, { seller_id: '42', urls: ['https://www.depop.com/products/seller-locked-price/'], seen: read.matches.seen });
+  // The same cursor twice: the scan stopped advancing, so it is not a full reading.
+  cursor = 'stuck';
+  const stuck = await c.depopApiAction('shop_matches', { ...payload, listing: locked });
+  assert.equal(stuck.matches, null);
+  // More pages, but a cursor Anteroom cannot use: not read in full either.
+  cursor = 'x'.repeat(221);
+  const unusable = await c.depopApiAction('shop_matches', { ...payload, listing: locked });
+  assert.equal(unusable.matches, null);
+  // A page in a shape Anteroom does not know is not an empty shop.
+  c.fetch = async (url) => (new URL(url).pathname === '/presentation/api/v1/users/me/'
+    ? reply(200, { id: 42 }) : reply(200, { meta: { end: true } }));
+  const unknown = await c.depopApiAction('shop_matches', { ...payload, listing: locked });
+  assert.equal(unknown.matches, null);
+});
+
+test('Depop publish evidence reads stop at their time budget and stay unconfirmed', async () => {
+  const { c, payload } = page();
+  const seen = [];
+  c.fetch = async (url) => {
+    const { pathname } = new URL(url);
+    seen.push(pathname);
+    if (pathname.endsWith('/status/')) return reply(404, '');
+    throw new Error(`no read after the budget: ${pathname}`);
+  };
+  const status = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1', evidence_until: Date.now() - 1 });
+  assert.equal(status.complete, false);
+  assert.equal(status.status_unavailable, true);
+  assert.equal(status.listing_url, undefined);
+  assert.deepEqual(seen, ['/api/v3/drafts/products/job-1/status/']);
+});
+
+test('a bodiless Depop refusal still names its step, method, path and status in the log, without ids', async () => {
+  const { c, payload } = page();
+  const logs = [];
+  c.console.log = (...args) => logs.push(args.join(' '));
+  c.fetch = async () => reply(404, '');
+  await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-777', listing: {} });
+  const line = logs.find(text => text.includes('path='));
+  assert.ok(line, logs.join('\n'));
+  assert.match(line, /step=publish_status method=GET status=404 .*path=\/api\/v3\/drafts\/products\/\{id\}\/status\//);
+  assert.doesNotMatch(logs.join('\n'), /job-777|123456/);
+});
+
 test('an uncertain Depop mutation is never retried', async () => {
   const { c, requests, payload } = page();
   c.fetch = async (_url, options) => { requests.push(options); throw new Error('Disconnected'); };
@@ -948,6 +1137,41 @@ test('a men\'s waist keeps the tag size when Depop spells it with inches', () =>
   assert.deepEqual([both.set, both.id], [41, 80]);
   // A size this list does not carry still needs the seller.
   assert.ok(c.depopSize({ ...listing, size: 'fits small', depop_specifics: {} }, category, attributes).problem);
+});
+
+test('Depop clothing Size edits replace a cleared label and serialize the selected category size', async () => {
+  const c = loadWorker();
+  const attributes = { ...ATTRIBUTES,
+    category_size_mapping: [{ department: 'womenswear', product_type: 'jeans', size_set_by_region: { US: 41 } }],
+    size_sets: [{ id: 41, sizes: [{ id: 80, name_i18n: { 'en-US': '0' } },
+      { id: 81, name_i18n: { 'en-US': '00' } }] }] };
+  const listing = { ...FULL, size: '0', direct_category_ids: { depop: 'womenswear_jeans' },
+    depop_specifics: { size: '', nativeSizeId: '', parcelSize: 'Medium' },
+    seller_fields: ['depop_specifics.size', 'depop_specifics.nativeSizeId'] };
+  const category = c.depopCategory(listing, attributes);
+  assert.ok(c.depopSize(listing, category, attributes).problem);
+  const form = c.depopEditorForm(listing, attributes);
+  const row = form.fields.find(field => field.label === 'Size');
+  assert.equal(row.path, 'depop_specifics.size');
+  assert.equal(row.value, '');
+  assert.ok(row.options.includes('0'));
+  assert.ok(form.fields.find(field => field.label === 'Category').clears.includes('depop_specifics.size'));
+  const oldIdForm = c.depopEditorForm({ ...listing, depop_specifics: { nativeSizeId: 81 } }, attributes);
+  assert.equal(oldIdForm.fields.find(field => field.label === 'Size').value, '00');
+  // Apply the same label/option-value write as the editor, without changing General.
+  listing.depop_specifics.size = row.option_values['0'];
+  c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  withCatalog(c, { attributes: [200, attributes] });
+  const fields = await c.depopResolvedFields({ listing, deadline: Date.now() + 30000 });
+  const body = c.depopDraftWriteBody(listing, fields, [], {});
+  assert.equal(body.variant_set, 41);
+  assert.deepEqual(JSON.parse(JSON.stringify(body.variants)), { 80: 1 });
+  assert.equal(listing.size, '0');
+  listing.depop_specifics.size = '';
+  assert.ok(c.depopSize(listing, category, attributes).problem);
+  listing.depop_specifics.size = row.option_values['0'];
+  const recovered = await c.depopResolvedFields({ listing, deadline: Date.now() + 30000 });
+  assert.deepEqual(JSON.parse(JSON.stringify(recovered.variants)), { 80: 1 });
 });
 
 test('Depop publish refuses a draft whose size or type is not the one sent', async () => {

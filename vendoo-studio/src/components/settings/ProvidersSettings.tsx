@@ -108,7 +108,7 @@ function TestResult({ result }: { result: string | null }) {
   );
 }
 
-function useConnectionTest(run: () => Promise<{ ok: boolean; error?: string | null }>) {
+function useConnectionTest(run: () => Promise<{ ok: boolean; error?: string | null }>, success = "Connection successful") {
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const test = async () => {
@@ -116,7 +116,7 @@ function useConnectionTest(run: () => Promise<{ ok: boolean; error?: string | nu
     setResult(null);
     try {
       const outcome = await run();
-      setResult(outcome.ok ? "Connection successful" : outcome.error || "Connection failed");
+      setResult(outcome.ok ? success : outcome.error || "Connection failed");
     } catch (err) {
       setResult(`Error: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -344,6 +344,7 @@ function summarizeProvider(
   id: ListingProviderId,
   provider: ProviderStatus | undefined,
   keyProvider: AIKeyProvider | undefined,
+  hosted: boolean,
 ): ProviderSummary {
   if (isKeyProviderId(id)) {
     if (!keyProvider) return { tone: "idle", headline: "Checking" };
@@ -354,14 +355,16 @@ function summarizeProvider(
   if (!provider) return { tone: "idle", headline: "Checking" };
   if (id === "chatgpt") {
     const chatgpt = provider.chatgpt;
-    if (chatgpt?.signed_in) return { tone: "ready", headline: "Signed in", detail: chatgpt.email ?? undefined };
+    if (chatgpt?.signed_in) return { tone: "ready", headline: hosted ? "Available via Mac" : "Signed in on this Mac", detail: chatgpt.email ?? undefined };
+    if (hosted) return { tone: "idle", headline: "Not ready via Mac" };
     if (chatgpt?.pending) return { tone: "warning", headline: "Waiting for sign-in" };
     if (chatgpt?.error) return { tone: "error", headline: "Sign-in failed", detail: chatgpt.error };
     return { tone: "idle", headline: "Not signed in" };
   }
   if (id === "claude") {
     const claude = provider.claude;
-    if (claude?.signed_in) return { tone: "ready", headline: "Signed in", detail: claude.email ?? undefined };
+    if (claude?.signed_in) return { tone: "ready", headline: hosted ? "Available via Mac" : "Signed in on this Mac", detail: claude.email ?? undefined };
+    if (hosted) return { tone: "idle", headline: "Not ready via Mac" };
     if (claude && !claude.installed) return { tone: "warning", headline: "Needs Claude Code" };
     return { tone: "idle", headline: "Not signed in" };
   }
@@ -624,7 +627,8 @@ export function ProvidersSettings() {
   const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<ListingProviderId | null>(null);
   const [claudeTerminalOpen, setClaudeTerminalOpen] = useState(false);
-  const activeTest = useConnectionTest(api.settings.testConnection);
+  const activeTest = useConnectionTest(api.settings.testConnection,
+    hosted ? "Connection successful through this account" : "Connection successful on this Mac");
   const mimoTest = useConnectionTest(api.settings.testMimo);
   const cursorTest = useConnectionTest(api.settings.testCursor);
 
@@ -1218,7 +1222,7 @@ export function ProvidersSettings() {
                   <ProviderListRow
                     key={id}
                     id={id}
-                    summary={summarizeProvider(id, provider, isKeyProviderId(id) ? keyEntries.get(id) : undefined)}
+                    summary={summarizeProvider(id, provider, isKeyProviderId(id) ? keyEntries.get(id) : undefined, hosted)}
                     selected={selected === id}
                     onSelect={() => setSelectedId(id)}
                     badges={<RoleBadges id={id} primary={primary} fallback={fallback} photoProvider={photoProvider} />}
@@ -1239,7 +1243,10 @@ export function ProvidersSettings() {
                     <RoleBadges id={selected} primary={primary} fallback={fallback} photoProvider={photoProvider} />
                   </span>
                 </div>
-                {hosted && selected === "chatgpt" && !chatgptSignedIn && macChatGPT ? <MacChatGPTSignIn bridge={macChatGPT} /> : hosted && (selected === "chatgpt" || selected === "claude") ? <SettingsNote>{(selected === "chatgpt" ? chatgptSignedIn : claudeSignedIn) ? `${providerLabel(selected)} on your computer is connected. Select it as your primary listing AI above. Models and reasoning are selected in the desktop app's settings. Keep the computer awake and Anteroom open while generating from the web or iPhone.` : `Open Anteroom on your computer, sign into your ${providerLabel(selected)} subscription under Account → This Mac’s Listings → Settings → Providers, then return to Account → My Account and sign into this Anteroom account. Keep the computer awake, online, and Anteroom open. Subscription credentials stay on your computer.`}</SettingsNote> : hosted && !providerIds.includes(selected) ? <SettingsNote>This sign-in requires the desktop app to be connected. Choose an API-key provider below and select it as your primary listing AI to run in the web app.</SettingsNote> : editors[selected]}
+                {!hosted && (selected === "chatgpt" || selected === "claude") && (
+                  <SettingsNote>Sign-in and Test here check the provider on this Mac. Web and iPhone requests also need this Mac connected to the same Anteroom account under Account → My Account. Opening your account does not require copying listings.</SettingsNote>
+                )}
+                {hosted && selected === "chatgpt" && !chatgptSignedIn && macChatGPT ? <MacChatGPTSignIn bridge={macChatGPT} /> : hosted && (selected === "chatgpt" || selected === "claude") ? <SettingsNote>{(selected === "chatgpt" ? chatgptSignedIn : claudeSignedIn) ? `At the last status check, ${providerLabel(selected)} was available through this account’s Mac connection. This is a readiness check, not a completed AI request. Photo reading may use a different provider selected above. Keep Anteroom open and the Mac awake and online.` : `This account does not currently see ${providerLabel(selected)} ready on its Mac connection. On the Mac, check the subscription in Settings → Providers, then open Account → My Account using the same Anteroom account. Keep the computer awake, online, and Anteroom open. No listing copy or import is needed to connect.`}</SettingsNote> : hosted && !providerIds.includes(selected) ? <SettingsNote>This sign-in requires the desktop app to be connected. Choose an API-key provider below and select it as your primary listing AI to run in the web app.</SettingsNote> : editors[selected]}
               </div>
             </ScrollArea>
           </div>

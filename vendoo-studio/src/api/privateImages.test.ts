@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { cachedPrivateImage, forgetDeviceImages, loadPrivateImage } from "./privateImages";
+import { PhotoLoadError, cachedPrivateImage, forgetDeviceImages, loadPrivateImage } from "./privateImages";
 import { installHostedApiSession } from "./transport";
 
 let uninstall: () => void = () => {};
@@ -159,4 +159,30 @@ it("does not retry a photo that is gone", async () => {
   fetchMock.mockResolvedValueOnce(new Response("", { status: 404 }));
   await expect(loadPrivateImage("/api/photos/gone/thumb?size=96&v=abc")).rejects.toThrow("Photo unavailable");
   expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+
+it.each([401, 403, 404])("reports a refused %i at once, keeping the status for diagnostics", async (status) => {
+  fetchMock.mockResolvedValueOnce(new Response("", { status }));
+  const failure = await loadPrivateImage(`/api/conversations/c/photos/p${status}/bytes?v=abc`).catch((error: unknown) => error);
+  expect(failure).toBeInstanceOf(PhotoLoadError);
+  expect((failure as PhotoLoadError).status).toBe(status);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it("reports a server failure only after trying again, with its status", async () => {
+  vi.useFakeTimers();
+  try {
+    fetchMock.mockResolvedValue(new Response("busy", { status: 503 }));
+    const failure = loadPrivateImage("/api/conversations/c/photos/busy/bytes?v=abc").catch((error: unknown) => error);
+    await vi.runAllTimersAsync();
+    const error = await failure;
+    expect(error).toBeInstanceOf(PhotoLoadError);
+    expect((error as PhotoLoadError).status).toBe(503);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  } finally {
+    vi.useRealTimers();
+    fetchMock.mockReset();
+    fetchMock.mockImplementation(async () => new Response(new Blob(["jpeg"]), { status: 200 }));
+  }
 });

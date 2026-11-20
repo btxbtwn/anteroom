@@ -998,6 +998,24 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         self.assertEqual(self.delist_new_poshmark().status_code, 200)
         self.assertEqual((seen["state"], seen["listing_id"], seen["url"]), ("deleting", "6adc371572e62463d992ffef", POSH_URL))
 
+    def test_deleting_a_seller_linked_listing_keeps_a_different_live_anteroom_listing(self):
+        # Anteroom's own Poshmark listing is live.
+        self.bridge.return_value = {"ok": True, "state": "published", "listing_url": POSH_URL}
+        self.assertEqual(self.list("poshmark")["state"], "published")
+        # The seller links a duplicate listing and delists it.
+        duplicate_id = "b" * 24
+        marked = self.client.post(f"/api/conversations/{self.conv.id}/marketplace-listings/poshmark/mark",
+                                  json={"state": "listed", "url": f"https://poshmark.com/listing/dup-{duplicate_id}"})
+        self.assertEqual(marked.status_code, 200, marked.text)
+        self.bridge.reset_mock(return_value=True)
+        self.bridge.side_effect = [{"ok": True, "state": "deleted"}]
+        response = self.delist_new_poshmark()
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.bridge.call_args.args[2]["listing_id"], duplicate_id)
+        # Only the duplicate was deleted: Anteroom's own listing is still live.
+        record = self.record("poshmark")
+        self.assertEqual((record.get("state"), record.get("listing_url")), ("published", POSH_URL))
+
     def test_a_confirmed_delist_leaves_the_record_ready_to_list_again(self):
         self.bridge.side_effect = [{"ok": True, "state": "draft", "draft_url": URLS["mercari"]}, self.published("mercari")]
         self.assertEqual(self.list("mercari")["state"], "published")
@@ -1035,7 +1053,7 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
     def test_poshmark_lists_in_one_step_and_updates_the_same_listing(self):
         self.bridge.return_value = {"ok": True, "state": "published", "listing_url": POSH_URL}
         record = self.list("poshmark")
-        self.assertEqual((record["state"], record["listing_url"]), ("published", POSH_URL))
+        self.assertEqual((record.get("state"), record.get("listing_url")), ("published", POSH_URL))
         self.assertEqual(self.actions(), ["list"])
         self.assertEqual(self.client.post(f"{self.base}/poshmark/list", json={"revision_id": self.rev.id, "confirm": True}).status_code, 409)
         revised = listing_persistence.save_revision(self.db, self.conv.id, {**LISTING, "title": "Updated tee"}, "user")
@@ -1332,6 +1350,101 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
 
 
 
+
+    def test_a_check_that_answers_after_the_seller_added_the_link_keeps_the_link(self):
+        # Production, 2026-11-18: Depop's publish was unconfirmed, a Check was asking
+        # Chrome, and the seller pasted the live link before Chrome answered.
+        from vendoo_studio.database import in_worker_session
+
+        # Read once: the test session's commits expire self.conv, and reading it again
+        # inside a Chrome stand-in would query on the event loop.
+        conv_id = self.conv.id
+        from vendoo_studio.services.marketplace_delist import mark
+
+        async def publish_lost(job, kind, payload, timeout=None):
+            if kind == "marketplace.execute" and payload["action"] == "save_draft":
+                return {"ok": True, "state": "draft", "draft_url": URLS["depop"]}
+            if kind == "marketplace.execute":
+                raise BrowserBridgeError("lost")
+            return {"finished": False}
+
+        self.bridge.side_effect = publish_lost
+        with patch.object(native, "SETTLE_DEADLINE_S", 0):
+            record = self.list("depop")
+        self.assertEqual((record["state"], record["action"]), ("unknown", "publish"))
+        seller_link = "https://www.depop.com/products/seller-added-link-e2f1/"
+        stale = {"ok": False, "safe_to_retry": False, "error": "Depop refused the request (HTTP 404).",
+                 "error_code": "uncertain", "marketplace_message": "HTTP 404"}
+
+        other = {"ok": True, "state": "published", "draft_url": record["draft_url"],
+                 "listing_url": "https://www.depop.com/products/some-other-listing-1234/"}
+        # DGK (c02f59cb2eb7): Mark as listed. Gear for Sports (b2d0b9f27f87): "I checked it
+        # myself" first, which rests the record as a draft, then Mark as listed.
+        for answer, reset_first in ((stale, False), (other, False), (stale, True)):
+            async def bridge(job, kind, payload, timeout=None, answer=answer, reset_first=reset_first):
+                if reset_first:
+                    rested = await in_worker_session(lambda db: native.reset(conv_id, "depop", db))
+                    self.assertEqual(rested["state"], "draft")
+                await in_worker_session(mark, conv_id, "depop", "listed", seller_link)
+                return {"finished": True, "result": answer}
+
+            MarketplaceListingRepo(self.db).save(self.conv.id, "depop", {"state": "unknown", "listing_url": None,
+                                                                         "listing_id": None})
+            self.bridge.side_effect = bridge
+            checked = self.client.post(f"{self.base}/depop/check")
+            self.assertEqual(checked.status_code, 200, checked.text)
+            kept = self.record("depop")
+            self.assertEqual((kept["state"], kept["listing_url"]), ("published", seller_link))
+            self.assertIsNone(kept.get("error"))
+            events = [event.event_type for event in JobRepo(self.db).get_events(record["job_id"])]
+            self.assertIn("native_check_superseded", events)
+
+        # "I checked it myself" alone, then Chrome confirms the listing: the confirmed
+        # answer wins, or the record would stay a draft and the next List would post a second copy.
+        async def confirmed_after_reset(job, kind, payload, timeout=None):
+            await in_worker_session(lambda db: native.reset(conv_id, "depop", db))
+            return {"finished": True, "result": {"ok": True, "state": "published", "draft_url": record["draft_url"],
+                                                 "listing_url": LIVE["depop"]}}
+
+        # A confirmation for some other draft is not one: the reset stays.
+        async def other_draft_after_reset(job, kind, payload, timeout=None):
+            await in_worker_session(lambda db: native.reset(conv_id, "depop", db))
+            return {"finished": True, "result": {"ok": True, "state": "published", "listing_url": LIVE["depop"],
+                                                 "draft_url": "https://www.depop.com/sellinghub/drafts/edit/otherdraft9/"}}
+
+        MarketplaceListingRepo(self.db).save(self.conv.id, "depop", {"state": "unknown", "listing_url": None,
+                                                                     "listing_id": None})
+        self.bridge.side_effect = other_draft_after_reset
+        checked = self.client.post(f"{self.base}/depop/check")
+        self.assertEqual(checked.status_code, 200, checked.text)
+        self.assertEqual(self.record("depop")["state"], "draft")
+
+        MarketplaceListingRepo(self.db).save(self.conv.id, "depop", {"state": "unknown", "listing_url": None,
+                                                                     "listing_id": None})
+        self.bridge.side_effect = confirmed_after_reset
+        checked = self.client.post(f"{self.base}/depop/check")
+        self.assertEqual(checked.status_code, 200, checked.text)
+        live = self.record("depop")
+        self.assertEqual((live["state"], live["listing_url"]), ("published", LIVE["depop"]))
+
+        # "I checked it myself" finished before the Check opened on the resting draft; the
+        # seller then marks it listed while Chrome answers. The mark is newer than either answer.
+        for answer in (None, other):
+            MarketplaceListingRepo(self.db).save(self.conv.id, "depop", {"state": "unknown", "listing_url": None,
+                                                                         "listing_id": None})
+            from vendoo_studio.services.marketplace_delist import _store as store_note
+            store_note(self.db, self.conv.id, "marketplaceMarks", "depop", None)
+            self.assertEqual(native.reset(self.conv.id, "depop", self.db)["state"], "draft")
+
+            async def mark_while_checking(job, kind, payload, timeout=None, answer=answer):
+                await in_worker_session(mark, conv_id, "depop", "listed", seller_link)
+                return {"finished": answer is not None, "result": answer}
+
+            self.bridge.side_effect = mark_while_checking
+            checked = self.client.post(f"{self.base}/depop/check")
+            self.assertEqual(checked.status_code, 200, checked.text)
+            kept = self.record("depop")
+            self.assertEqual((kept["state"], kept["listing_url"]), ("published", seller_link))
 
     def test_a_pasted_draft_link_is_checked_without_repeating_the_write(self):
         self.bridge.side_effect = BrowserBridgeError("lost")

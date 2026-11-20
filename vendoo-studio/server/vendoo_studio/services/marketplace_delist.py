@@ -38,9 +38,11 @@ BROWSER_MARKETPLACES = {"poshmark", "mercari", "depop"}
 
 
 class DelistError(RuntimeError):
-    def __init__(self, status_code: int, detail: str):
+    def __init__(self, status_code: int, detail: str, reason: str | None = None):
         super().__init__(detail)
         self.status_code = status_code
+        # Sent as X-Anteroom-Reason so the app can offer the right next step.
+        self.reason = reason
 
 
 def _now() -> str:
@@ -258,15 +260,20 @@ def _record(db: Session, conv_id: str, marketplace: str, value: dict) -> None:
     _store(db, conv_id, "marketplaceDelists", marketplace, value)
 
 
-def _forget_deleted_listing(db: Session, conv_id: str, marketplace: str) -> None:
-    """A confirmed delete leaves nothing live, so the listing record rests as Mark as not listed leaves it.
+def _forget_deleted_listing(db: Session, conv_id: str, marketplace: str, deleted_id: str | None) -> None:
+    """A confirmed delete of Anteroom's listing leaves nothing live, so its record rests as Mark as not listed leaves it.
 
     Without this the record still reads published and List refuses the item
     as already listed. The marketplace IDs stay, so a new List reuses them.
+    A delete of a different listing (a duplicate the seller linked) leaves
+    Anteroom's own listing live, so its record stays.
     """
     records = MarketplaceListingRepo(db)
     record = records.get(conv_id, marketplace)
     if record.get("state") not in {"published", "pending_review"}:
+        return
+    live_id = listing_id(marketplace, record.get("listing_url"))
+    if live_id and deleted_id and str(live_id) != str(deleted_id):
         return
     from vendoo_studio.services.native_marketplaces import _resting_state
 
@@ -279,14 +286,15 @@ def _forget_deleted_listing(db: Session, conv_id: str, marketplace: str) -> None
 MARKS = ("listed", "sold", "not_listed")
 
 
-def mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | None = None) -> dict:
+def mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | None = None,
+         relink_deleted: bool = False) -> dict:
     # Serialise duplicate validation and the local write with other seller
     # marks and direct action starts in this process.
     with start_gate():
-        return _mark(db, conv_id, marketplace, state, url)
+        return _mark(db, conv_id, marketplace, state, url, relink_deleted)
 
 
-def _mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | None) -> dict:
+def _mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | None, relink_deleted: bool = False) -> dict:
     """Record what the seller says about one marketplace. The marketplace itself is not touched.
 
     A mark also settles an unconfirmed direct listing: the seller has looked.
@@ -307,6 +315,17 @@ def _mark(db: Session, conv_id: str, marketplace: str, state: str, url: str | No
 
         if any(conv.id != conv_id for conv in matching_listings(db, marketplace, item_id)):
             raise DelistError(409, "This marketplace listing is already linked to another item. Resolve the duplicate before linking it here.")
+        conv = ConversationRepo(db).get(conv_id)
+        if conv is not None:
+            # A delist writes through its own sessions; read the record it left.
+            db.refresh(conv)
+        deleted = _notes_dict(parse_notes(conv.notes if conv else None), "marketplaceDelists").get(marketplace)
+        if not relink_deleted and isinstance(deleted, dict) and deleted.get("state") == "deleted" and deleted.get("listing_id") == item_id:
+            # An old link pasted back by mistake would make Update, offers and
+            # Delist act on a listing that is gone. Only the seller's look can say otherwise.
+            name = marketplace.title()
+            raise DelistError(409, f"Anteroom delisted this {name} listing. Paste the link to the listing that is live on {name} now, "
+                                   f"or confirm it is still there if you just checked.", reason="deleted_listing")
         value.update(url=clean, listing_id=item_id)
     else:
         value.update(url=known.get("url"), listing_id=known.get("listing_id"))
@@ -518,4 +537,4 @@ def _record_delete(db: Session, conv_id: str, name: str, value: dict) -> None:
 
 def _deleted(db: Session, conv_id: str, name: str, base: dict) -> None:
     _record_delete(db, conv_id, name, {**base, "state": "deleted", "error": None, "at": _now()})
-    _forget_deleted_listing(db, conv_id, name)
+    _forget_deleted_listing(db, conv_id, name, base.get("listing_id"))

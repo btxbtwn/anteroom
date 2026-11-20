@@ -132,7 +132,7 @@ struct InventoryView: View {
         let hints = Suggestion.hints(model.suggestions)
         let stale = model.staleListingIDs
         return VStack(spacing: 0) {
-            StatusTabs(tabs: model.tabs(counts: counts), counts: counts, selection: $model.filters.status)
+            StatusTabs(tabs: StatusTab.allCases, counts: counts, selection: $model.filters.status)
             List(selection: $selected) {
             // Suggestions show on each listing's own row; only the batch markdown needs a place of its own.
             if !selecting && !stale.isEmpty {
@@ -317,14 +317,16 @@ struct InventoryView: View {
                 }
             } else if !search.isEmpty {
                 ContentUnavailableView.search(text: search)
+            } else if model.filters.activeCount == 0 {
+                ContentUnavailableView("No \(model.filters.status.label.lowercased()) listings", systemImage: "tag")
             } else {
                 ContentUnavailableView {
                     Label("No matching listings", systemImage: "line.3.horizontal.decrease.circle")
                 } actions: {
-                    if model.filters.activeCount > 0 || model.filters.status != .open {
-                        Button("Show all listings") { model.filters = InventoryFilters(sort: model.filters.sort) }
-                            .frame(minHeight: 44)
+                    Button("Clear filters") {
+                        model.filters = InventoryFilters(status: model.filters.status, sort: model.filters.sort)
                     }
+                    .frame(minHeight: 44)
                 }
             }
         } else if !model.hasLoaded, model.error != nil, !model.isLoading {
@@ -452,7 +454,7 @@ private struct CheckedLabel: View {
     }
 }
 
-/// Open / Draft / Active / Sold (and Failed while anything failed), with counts.
+/// Draft / Active / Sold, with counts.
 private struct StatusTabs: View {
     let tabs: [StatusTab]
     let counts: [StatusTab: Int]

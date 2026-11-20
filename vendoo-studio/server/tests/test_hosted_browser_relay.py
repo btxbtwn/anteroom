@@ -34,7 +34,11 @@ def test_relay_is_per_seller_and_refuses_other_commands(direct_mode):
             assert relay is not extension_manager
             # No tab has asked yet: Chrome is not connected, and nothing is queued.
             assert not relay.connected and 'Open Anteroom in Chrome' in relay.refusal()
+            # A tab that declared nothing is not connected yet; one that
+            # declared some reads but not marketplace actions needs a newer Bridge.
             assert await relay.next_message(set(), 0.01) is None
+            assert 'Open Anteroom in Chrome' in relay.refusal()
+            assert await relay.next_message({hosted_browser_relay.SALES_HISTORY}, 0.01) is None
             assert relay.refusal().startswith('Update Anteroom Bridge')
             assert await relay.next_message({MARKETPLACE_ACTIONS}, 0.01) is None
             assert relay.connected and relay.refusal() is None
@@ -52,6 +56,37 @@ def test_relay_is_per_seller_and_refuses_other_commands(direct_mode):
 
     asyncio.run(scenario())
     direct_mode.assert_called_once_with('direct')
+
+
+@pytest.mark.parametrize('capability', sorted(hosted_browser_relay.NEEDS))
+def test_a_relay_no_tab_has_polled_asks_to_connect_even_on_a_freshly_booted_machine(monkeypatch, capability):
+    # Monotonic time starts near zero when a Machine boots. A relay nobody has
+    # polled must not count as seen during its first SEEN_FOR_S seconds, or a
+    # deploy tells the seller to update a Bridge that simply has not reconnected.
+    monkeypatch.setattr(hosted_browser_relay, 'time', SimpleNamespace(monotonic=lambda: 30.0))
+    relay = hosted_browser_relay.BrowserRelay()
+    assert not relay._can(capability)
+    assert relay._local_refusal(capability) == 'Open Anteroom in Chrome on your computer and connect Chrome first.'
+    # A polled tab that declared no capabilities is not connected yet either.
+    relay.note_seen(set())
+    assert relay._local_refusal(capability) == 'Open Anteroom in Chrome on your computer and connect Chrome first.'
+
+
+def test_relayed_reads_ask_to_connect_until_a_tab_declares_capabilities(monkeypatch):
+    monkeypatch.setattr(hosted_browser_relay, 'time', SimpleNamespace(monotonic=lambda: 30.0))
+    relay = hosted_browser_relay.BrowserRelay()
+
+    async def read():
+        with pytest.raises(hosted_browser_relay.ChromeReadError) as error:
+            await relay.read_local('marketplace.sessions', {}, 1)
+        return str(error.value)
+
+    assert asyncio.run(read()) == 'Open Anteroom in Chrome on your computer and connect Chrome first.'
+    # Declared, but without the read it needs: that Bridge is out of date.
+    relay.note_seen({MARKETPLACE_ACTIONS})
+    assert relay._local_refusal(hosted_browser_relay.MARKETPLACE_SESSIONS) == (
+        'Update Anteroom Bridge in Chrome to 0.2.44 or later to check marketplace sign-in from the web.')
+    assert asyncio.run(read()).startswith('Update Anteroom Bridge in Chrome to 0.2.44')
 
 
 def test_heartbeat_keeps_a_busy_reader_connected_and_expires_after_tab_loss(monkeypatch):
@@ -239,3 +274,118 @@ def test_sales_history_uses_only_the_connected_sellers_capable_bridge():
         assert await request == {'ok': True, 'orders': []}
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('outcome', ['ok', 'sql_failure', 'unexpected', 'cancelled', 'pinned', 'missing', 'no_timing'])
+def test_reply_diagnostics_preserve_await_order_errors_and_private_payloads(monkeypatch, outcome):
+    from unittest.mock import MagicMock
+    from sqlalchemy.exc import SQLAlchemyError
+    from fastapi import HTTPException, Response
+    from vendoo_studio.routes import hosted_browser_relay as route
+    from vendoo_studio.services import request_timing
+
+    details, events = {}, []
+    token = request_timing._details.set(details)
+    relay = MagicMock()
+    relay.is_waiting.return_value = outcome != 'missing'
+    relay.timing.return_value = None if outcome == 'no_timing' else {'job_id': 'private job', 'type': 'private operation'}
+    relay.resolve_wait.side_effect = lambda *_: events.append('resolved')
+    monkeypatch.setattr(route, '_relay', lambda: relay)
+
+    def pinned(**_kwargs):
+        events.append('lookup')
+        return Response(status_code=409) if outcome == 'pinned' else None
+
+    def persist(_timing):
+        events.append('persist')
+        if outcome == 'sql_failure':
+            raise SQLAlchemyError('private storage detail')
+        if outcome == 'unexpected':
+            raise RuntimeError('private unexpected failure')
+        if outcome == 'cancelled':
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr(route, '_pinned', pinned)
+    monkeypatch.setattr(route, '_record_timing', persist)
+    body = route.Reply(request_id='a' * 32, payload={'private': 'marketplace reply'})
+    try:
+        if outcome in ('unexpected', 'cancelled', 'missing'):
+            error = {'unexpected': RuntimeError, 'cancelled': asyncio.CancelledError, 'missing': HTTPException}[outcome]
+            with pytest.raises(error):
+                asyncio.run(route.post_reply(body))
+        else:
+            result = asyncio.run(route.post_reply(body))
+            assert (result.status_code if outcome == 'pinned' else result) == (409 if outcome == 'pinned' else {'ok': True})
+        persisted = outcome not in ('pinned', 'missing', 'no_timing')
+        assert details['relay_lookup_calls'] == 1
+        assert details['relay_persist_calls'] == int(persisted)
+        assert all(type(value) is int and value >= 0 for value in details.values())
+        assert 'private' not in repr(details) and 'a' * 32 not in repr(details)
+        expected = ['lookup'] + (['persist'] if persisted else [])
+        if outcome in ('ok', 'sql_failure', 'no_timing'):
+            expected += ['resolved']
+        assert events == expected
+    finally:
+        request_timing._details.reset(token)
+
+
+@pytest.mark.parametrize('blocked_step', ['lookup', 'persist'])
+def test_reply_request_cancellation_does_not_resolve_while_its_worker_finishes(monkeypatch, blocked_step):
+    from unittest.mock import MagicMock
+    from vendoo_studio.routes import hosted_browser_relay as route
+    from vendoo_studio.services import request_timing
+
+    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+    worker_released = []
+    clock = [10.0]
+    monkeypatch.setattr(request_timing, 'perf_counter', lambda: clock[0])
+    details = {}
+    token = request_timing._details.set(details)
+    relay = MagicMock()
+    relay.is_waiting.return_value = True
+    relay.timing.return_value = {'job_id': 'private job', 'type': 'private operation'}
+    monkeypatch.setattr(route, '_relay', lambda: relay)
+
+    def block(step):
+        if blocked_step == step:
+            entered.set()
+            try:
+                worker_released.append(release.wait(3))
+            finally:
+                finished.set()
+
+    def lookup(**_kwargs):
+        block('lookup')
+        return None
+
+    def persist(_timing):
+        block('persist')
+
+    monkeypatch.setattr(route, '_pinned', lookup)
+    monkeypatch.setattr(route, '_record_timing', persist)
+
+    async def run():
+        task = asyncio.create_task(route.post_reply(route.Reply(request_id='b' * 32, payload={'private': 'reply'})))
+        try:
+            assert await asyncio.to_thread(entered.wait, 2)
+            clock[0] = 10.125
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert details[f'relay_{blocked_step}_calls'] == 1
+            assert not finished.is_set()
+            assert details[f'relay_{blocked_step}_ms'] == 125
+            relay.resolve_wait.assert_not_called()
+        finally:
+            release.set()
+            assert await asyncio.to_thread(finished.wait, 2)
+            assert worker_released == [True]
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    try:
+        asyncio.run(run())
+        relay.resolve_wait.assert_not_called()
+    finally:
+        request_timing._details.reset(token)

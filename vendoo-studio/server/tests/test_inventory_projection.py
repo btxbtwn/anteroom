@@ -42,7 +42,20 @@ def test_inventory_reads_do_not_extract_large_marketplace_forms(migration_engine
         try:
             suggestion = _listing_rows(db)[0]
             analytics = load_rows(db)[0]
-            summary = inventory_response(db)[0]
+            from vendoo_studio.services import hosted_read_snapshots as snapshots
+
+            phases = {}
+            token = snapshots._build_phases.set(phases)
+            try:
+                summary = inventory_response(db)[0]
+            finally:
+                snapshots._build_phases.reset(token)
+            assert set(phases) == {f'step_{step}_{metric}' for step in snapshots.INVENTORY_STEPS
+                                   for metric in ('ms', 'orm_calls')}
+            assert phases['step_conversations_orm_calls'] == 1
+            assert phases['step_covers_orm_calls'] == 1
+            assert phases['step_assemble_orm_calls'] == 0
+            assert all(isinstance(value, int) and value >= 0 for value in phases.values())
         finally:
             event.remove(engine, "before_cursor_execute", capture)
         assert suggestion[3:] == ("Example", ["Men", "Coats"], ["Winter"], "Wool coat", "Coat", ["Wool"])
@@ -144,3 +157,36 @@ def test_hosted_inventory_carries_the_sale_date_the_sold_tab_sorts_by(migration_
     assert rows["coat"]["units_sold"] == 1
     assert rows["tee"]["sold_at"] is None
     assert rows["tee"]["units_sold"] == 0
+
+
+def test_hosted_inventory_names_the_marketplace_a_sold_item_sold_on(migration_engine):  # noqa: F811
+    """The sidebar must not say Listed on a marketplace the item sold on (detail says Sold here)."""
+    from datetime import datetime
+
+    from vendoo_studio.models.marketplace_sale import MarketplaceSale
+    from vendoo_studio.services import listing_persistence
+
+    engine = migration_engine
+    schema_migrations.ensure_schema(engine)
+    with Session(engine) as db:
+        db.add_all([Conversation(id="top", title="Crop top"), Conversation(id="tees", title="Two tees")])
+        db.commit()
+        listing_persistence.save_revision(db, "tees", {"title": "Two tees", "quantity": 2}, "user")
+        for conv_id in ("top", "tees"):
+            # The listing record stays published after a sale: a sale never changes it.
+            db.add(MarketplaceListing(conversation_id=conv_id, marketplace="poshmark", state="published",
+                                      listing_url=f"https://poshmark.com/listing/{conv_id}"))
+            db.add(MarketplaceListing(conversation_id=conv_id, marketplace="mercari", state="published",
+                                      listing_url=f"https://www.mercari.com/us/item/m{len(conv_id)}2345678/"))
+            db.add(MarketplaceSale(marketplace="poshmark", order_id=f"o-{conv_id}", line_id=f"l-{conv_id}", listing_id=conv_id,
+                                   conversation_id=conv_id, order_status="paid", quantity=1,
+                                   sold_at=datetime(2026, 11, 17, 14, 32), received_at=datetime(2026, 11, 17, 14, 33)))
+        db.commit()
+        rows = {row["id"]: row for row in inventory_response(db)}
+    assert rows["top"]["status"] == "sold"
+    assert rows["top"]["sold_marketplaces"] == ["poshmark"]
+    # The other live listing still reads listed: it may need delisting.
+    assert sorted(rows["top"]["direct_marketplaces"]) == ["mercari", "poshmark"]
+    # One of two units sold: the Poshmark listing still has stock, so nothing is named sold.
+    assert rows["tees"]["status"] == "active"
+    assert rows["tees"]["sold_marketplaces"] == []

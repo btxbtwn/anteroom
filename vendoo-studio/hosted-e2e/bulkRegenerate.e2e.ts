@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { showStatusTab } from "../e2e/fixtures";
 
 const api = `http://127.0.0.1:${process.env.VENDOO_STUDIO_PORT || "4341"}`;
 const pixel = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2L8AAAAASUVORK5CYII=", "base64");
@@ -26,6 +27,7 @@ test("all five rewrites start before slow editor reads finish", async ({ page, r
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
   }
+  await showStatusTab(page, "Draft");
   await page.getByRole("button", { name: "Select listings", exact: true }).click();
   for (const draft of drafts) {
     await page.getByRole("checkbox", { name: `Select ${draft.title}`, exact: true }).click();

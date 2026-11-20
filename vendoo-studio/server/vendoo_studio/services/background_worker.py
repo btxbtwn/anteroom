@@ -124,14 +124,17 @@ async def run_claimed(task_id, owner, token, *, heartbeat_loop: BackgroundLoop):
             # draft complete or silently replay it after a process restart.
             raise
         except queue.TaskStopped:
+            context.task_outcome['stop'] = 'cancelled'
             # Stop already settled the task and freed the draft; just end the work.
             logging.getLogger(__name__).info('Draft task stopped by the seller')
         except queue.TaskLeaseExpired:
+            context.task_outcome['stop'] = 'lease_lost'
             # Terminal saves revoke the lease too. This worker no longer owns
             # the row and must not try to mark it failed. Actual expiry is
             # settled by the queue's claim sweep, without replaying work.
             logging.getLogger(__name__).warning('Draft task lease lost; stopping worker')
         except Exception as exc:
+            context.task_outcome['stop'] = 'error'
             # Exception messages and formatted tracebacks can include private
             # SQL parameters. Record only the type and source locations.
             locations = ' > '.join(f'{frame.filename.rsplit("/", 1)[-1]}:{frame.lineno}:{frame.name}'

@@ -329,6 +329,13 @@ def test_inventory_slow_line_reports_a_real_seller_build(cloud, signing_keys, mo
     assert int(corrected['build_commits']) >= 1
     assert (rebuilt['builds'], rebuilt['uncached'], rebuilt['build_commits']) == ('1', '0', '0')
     assert (hit['builds'], hit['waits'], hit['build_total_ms']) == ('0', '0', '0')
+    for step in snapshots.INVENTORY_STEPS:
+        assert int(rebuilt[f'inv_{step}_ms']) >= 0
+        assert int(rebuilt[f'inv_{step}_orm_calls']) >= 0
+        assert hit[f'inv_{step}_ms'] == hit[f'inv_{step}_orm_calls'] == '0'
+    assert int(rebuilt['inv_conversations_orm_calls']) == 1
+    assert int(rebuilt['inv_covers_orm_calls']) == 1
+    assert rebuilt['inv_assemble_orm_calls'] == '0'
     for line in (corrected, rebuilt):
         phases = [int(line[f'build_{phase}_ms']) for phase in ('connect', 'db', 'assemble', 'recheck')]
         assert all(value >= 0 for value in phases)
@@ -349,3 +356,97 @@ def test_pool_use_reads_the_hosted_queue_pool_without_a_query(monkeypatch):
     assert snapshots._pool_use() == '0/3'
     monkeypatch.setattr('vendoo_studio.database.engine', create_engine('sqlite://', poolclass=NullPool))
     assert snapshots._pool_use() == '0/0'
+
+
+def test_snapshot_step_counts_are_parameter_free_and_removed_after_failure(monkeypatch):
+    from sqlalchemy import create_engine, select, literal
+    from sqlalchemy.orm import Session
+
+    phases = {}
+    token = snapshots._build_phases.set(phases)
+    clock = iter((1.0, 1.25, 2.0, 2.5))
+    monkeypatch.setattr(snapshots, 'perf_counter', lambda: next(clock))
+    engine = create_engine('sqlite://')
+    try:
+        with Session(engine) as db:
+            with snapshots.snapshot_step(db, 'conversations'):
+                assert db.scalar(select(literal('private seller title'))) == 'private seller title'
+            with pytest.raises(RuntimeError, match='private failure'):
+                with snapshots.snapshot_step(db, 'covers'):
+                    db.scalar(select(literal('private photo id')))
+                    raise RuntimeError('private failure')
+            db.scalar(select(literal('later private value')))
+        assert phases == {'step_conversations_ms': 250, 'step_conversations_orm_calls': 1,
+                          'step_covers_ms': 500, 'step_covers_orm_calls': 1}
+        assert 'private' not in repr(phases)
+    finally:
+        snapshots._build_phases.reset(token)
+        engine.dispose()
+
+
+def test_snapshot_step_is_inert_outside_a_snapshot_build():
+    with snapshots.snapshot_step(None, 'analytics'):
+        pass
+    phases = {}
+    token = snapshots._build_phases.set(phases)
+    try:
+        with snapshots.snapshot_step(None, 'private dynamic name'):
+            pass
+        assert phases == {}
+    finally:
+        snapshots._build_phases.reset(token)
+
+
+@pytest.mark.parametrize('snapshot,step,prefix', [('inventory', 'listings', 'inv'), ('suggestions', 'listing_rows', 'sug')])
+def test_step_diagnostics_follow_shared_build_and_reset_on_cache_hit(monkeypatch, snapshot, step, prefix):
+    from dataclasses import replace
+    from sqlalchemy import create_engine, literal, select
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import NullPool
+
+    engine = create_engine('sqlite://', poolclass=NullPool)
+
+    owner = replace(context('private seller identity'), session_factory=sessionmaker(engine))
+    cache, reports = snapshots.SellerReadSnapshots(), []
+    monkeypatch.setattr(snapshots, '_version', lambda _: 1)
+    monkeypatch.setattr(snapshots, 'note', lambda **fields: reports.append(fields))
+
+    def read(db):
+        with snapshots.snapshot_step(db, step):
+            return db.scalar(select(literal('private listing contents')))
+
+    async def run():
+        with use(owner):
+            assert await cache.read(snapshot, read) == 'private listing contents'
+            assert await cache.read(snapshot, read) == 'private listing contents'
+
+    try:
+        asyncio.run(run())
+        built, hit = reports
+        assert built[f'{prefix}_{step}_orm_calls'] == 1
+        assert built[f'{prefix}_covers_orm_calls'] == 0
+        assert all(value == 0 for key, value in hit.items() if key.startswith(f'{prefix}_'))
+        assert 'private' not in repr(reports)
+    finally:
+        engine.dispose()
+
+
+def test_snapshot_step_parallel_sessions_do_not_mix_diagnostics():
+    from sqlalchemy import create_engine, literal, select
+    from sqlalchemy.orm import Session
+
+    def run(calls):
+        engine = create_engine('sqlite://')
+        phases = {}
+        token = snapshots._build_phases.set(phases)
+        try:
+            with Session(engine) as db, snapshots.snapshot_step(db, 'analytics'):
+                for _ in range(calls):
+                    db.scalar(select(literal('private parameter')))
+            return phases['step_analytics_orm_calls']
+        finally:
+            snapshots._build_phases.reset(token)
+            engine.dispose()
+
+    with ThreadPoolExecutor(max_workers=2) as workers:
+        assert list(workers.map(run, (1, 3))) == [1, 3]

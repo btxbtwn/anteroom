@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { bulkListingNotes, createBulkPhotoListings, rotationForTurns } from "./bulkPhotoUpload";
 
+const noPhotos = vi.fn().mockResolvedValue([]);
+
 function photo(name: string): File {
   return new File(["photo"], name, { type: "image/jpeg" });
 }
@@ -59,9 +61,64 @@ describe("createBulkPhotoListings", () => {
         { id: "saved-front", original_filename: `${prefix}front.jpg` },
       ], errors: ["lost.jpg: Invalid photo"] }),
       rotatePhoto,
+      photos: noPhotos,
     });
     expect(rotatePhoto).toHaveBeenCalledExactlyOnceWith("coat", "saved-tag", 90);
     expect(result[0]!.errors).toEqual(["lost.jpg: Invalid photo"]);
+  });
+
+  it("keeps going when one folder's upload is refused, and names that folder by its path", async () => {
+    const create = vi.fn()
+      .mockResolvedValueOnce({ id: "coat" })
+      .mockResolvedValueOnce({ id: "jeans" })
+      .mockResolvedValueOnce({ id: "boots" });
+    const uploadPhotos = vi.fn()
+      .mockResolvedValueOnce({ count: 1, photos: [] })
+      .mockRejectedValueOnce(new Error("Maximum 20 photos per listing"))
+      .mockResolvedValueOnce({ count: 2, photos: [] });
+
+    const result = await createBulkPhotoListings([
+      { folder: "batch/A/Coat", files: [photo("a.jpg")] },
+      { folder: "batch/B/Jeans", files: [photo("b.jpg")] },
+      { folder: "batch/C/Boots", files: [photo("c.jpg"), photo("d.jpg")] },
+    ], { cog: "", labels: "" }, { create, uploadPhotos, rotatePhoto: vi.fn(), photos: noPhotos });
+
+    expect(create).toHaveBeenNthCalledWith(2, { title: "Jeans" });
+    expect(result).toEqual([
+      { convId: "coat", folder: "batch/A/Coat", count: 1, errors: [] },
+      { convId: "jeans", folder: "batch/B/Jeans", count: 0, errors: ["batch/B/Jeans: Maximum 20 photos per listing"] },
+      { convId: "boots", folder: "batch/C/Boots", count: 2, errors: [] },
+    ]);
+  });
+
+  it("counts the photos a refused upload already saved, so the draft still generates", async () => {
+    const photos = vi.fn().mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
+    const result = await createBulkPhotoListings([
+      { folder: null, files: [photo("a.jpg"), photo("b.jpg"), photo("c.jpg")] },
+    ], { cog: "", labels: "" }, {
+      create: vi.fn().mockResolvedValue({ id: "coat" }),
+      uploadPhotos: vi.fn().mockRejectedValue(new Error("Failed to fetch")),
+      rotatePhoto: vi.fn(),
+      photos,
+    });
+
+    expect(photos).toHaveBeenCalledWith("coat");
+    expect(result).toEqual([{ convId: "coat", folder: null, count: 2, errors: ["New Listing: Failed to fetch"] }]);
+  });
+
+  it("says the saved photos are unknown when the refused draft's photos cannot be read either", async () => {
+    const result = await createBulkPhotoListings([
+      { folder: "batch/Coat", files: [photo("a.jpg")] },
+    ], { cog: "", labels: "" }, {
+      create: vi.fn().mockResolvedValue({ id: "coat" }),
+      uploadPhotos: vi.fn().mockRejectedValue(new Error("Failed to fetch")),
+      rotatePhoto: vi.fn(),
+      photos: vi.fn().mockRejectedValue(new Error("Failed to fetch")),
+    });
+
+    expect(result[0]).toMatchObject({ count: 0, errors: [
+      "batch/Coat: Failed to fetch Anteroom couldn't check which of its photos were saved; open the draft to check.",
+    ] });
   });
 
   it("keeps same-named photos in different item folders independent", async () => {
@@ -75,7 +132,7 @@ describe("createBulkPhotoListings", () => {
     await createBulkPhotoListings([
       { folder: "batch/coat", files: [first], rotations: new Map([[first, 90]]) },
       { folder: "batch/jeans", files: [second], rotations: new Map([[second, -90]]) },
-    ], { cog: "", labels: "" }, { create, uploadPhotos, rotatePhoto });
+    ], { cog: "", labels: "" }, { create, uploadPhotos, rotatePhoto, photos: noPhotos });
     expect(rotatePhoto.mock.calls).toEqual([["coat", "coat-front", 90], ["jeans", "jeans-front", -90]]);
   });
 
@@ -92,6 +149,7 @@ describe("createBulkPhotoListings", () => {
         { id: "plain", original_filename: "front.jpg" },
       ] }),
       rotatePhoto,
+      photos: noPhotos,
     });
     expect(rotatePhoto.mock.calls).toEqual([["coat", "named", 90], ["coat", "plain", -90]]);
   });
@@ -114,6 +172,7 @@ describe("createBulkPhotoListings", () => {
         { id: "turned", original_filename: directory ? "batch/coat/front.jpg" : "front.jpg" },
       ] }),
       rotatePhoto,
+      photos: noPhotos,
     });
     expect(rotatePhoto.mock.calls).toEqual([["coat", "turned", -90]]);
   });
@@ -130,7 +189,7 @@ describe("createBulkPhotoListings", () => {
         { folder: "upload/Item B", files: [photo("b.jpg")] },
       ],
       { cog: "8", labels: "To List, Shelf A" },
-      { create, uploadPhotos, rotatePhoto: vi.fn() },
+      { create, uploadPhotos, rotatePhoto: vi.fn(), photos: noPhotos },
     );
 
     const expectedNotes = JSON.stringify({ cog: "8", vendooLabels: "To List, Shelf A" });
@@ -153,7 +212,7 @@ describe("createBulkPhotoListings", () => {
         { folder: "upload/Item B", files: [photo("b.jpg")] },
       ],
       { cog: "", labels: "" },
-      { create, uploadPhotos, rotatePhoto: vi.fn() },
+      { create, uploadPhotos, rotatePhoto: vi.fn(), photos: noPhotos },
     );
 
     expect(create).toHaveBeenNthCalledWith(1, { title: "Item A", notes: JSON.stringify({ sku: "A1" }) });
@@ -167,7 +226,7 @@ describe("createBulkPhotoListings", () => {
     await createBulkPhotoListings(
       [{ folder: "upload/Item A", files: [photo("a.jpg")] }],
       { cog: "", labels: "", boxId: "box-1" },
-      { create, uploadPhotos, rotatePhoto: vi.fn() },
+      { create, uploadPhotos, rotatePhoto: vi.fn(), photos: noPhotos },
     );
 
     expect(create).toHaveBeenCalledWith({ title: "Item A", box_id: "box-1" });
@@ -197,7 +256,7 @@ describe("createBulkPhotoListings", () => {
         rotations: new Map([[sideways, -90], [lost, 180]]),
       }],
       { cog: "", labels: "" },
-      { create, uploadPhotos, rotatePhoto },
+      { create, uploadPhotos, rotatePhoto, photos: noPhotos },
     );
 
     expect(rotatePhoto).toHaveBeenCalledTimes(1);

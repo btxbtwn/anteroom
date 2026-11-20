@@ -435,7 +435,13 @@ class NativeContractTest(unittest.TestCase):
         self.assertTrue(contract.gaps(listing, "mercari")[0]["blocking"])
         listing["mercari_specifics"]["material"] = "cotton"
         contract.constrain_generated(listing, listing)
-        self.assertNotIn("material", listing["mercari_specifics"])
+        # A form that could not be loaded is unknown, not one without this
+        # field: an answer already saved is kept (b2d0b9f27f87 lost every
+        # Mercari answer this way), and the form is reported as needing a
+        # reload. A new, unchecked answer is dropped
+        # (test_unavailable_form_keeps_answers).
+        self.assertEqual(listing["mercari_specifics"]["material"], "cotton")
+        self.assertTrue(contract.gaps(listing, "mercari")[0]["blocking"])
 
     def test_category_changes_clear_carried_answers_and_block_stale_choices(self):
         previous = seed()

@@ -1002,6 +1002,14 @@ class PersistListingTest(unittest.TestCase):
         # A kids' age the seller chose on the Depop form stays.
         kids["depop_specifics"]["size"] = "14 years"
         self.assertFalse(propagate_general_size(kids))
+        # Depop's own spelling of the previous size followed it: XL (18/20) was 16 years, M is 10.
+        kids["depop_specifics"]["size"] = "16 years"
+        kids["size"] = "M"
+        self.assertTrue(propagate_general_size(kids, previous_size="XL (18/20)"))
+        self.assertEqual(kids["depop_specifics"]["size"], "10 years")
+        # A Depop size that wasn't following still stays.
+        kids["depop_specifics"]["size"] = "14 years"
+        self.assertFalse(propagate_general_size(kids, previous_size="XL (18/20)"))
         self.assertEqual(kids["depop_specifics"]["size"], "14 years")
         # Without a Depop size yet, the kids' age is still written.
         missing = {"size": "M", "marketplace_categories": {"depop": "Kids > Coats and jackets > Jackets"},

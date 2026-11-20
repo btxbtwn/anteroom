@@ -41,6 +41,7 @@ interface BulkUploadApi {
   create: (body: { title: string; notes?: string; box_id?: string }) => Promise<{ id: string }>;
   uploadPhotos: (convId: string, files: File[]) => Promise<PhotoUploadResult>;
   rotatePhoto: (convId: string, photoId: string, degrees: PhotoRotation) => Promise<ListingPhoto>;
+  photos: (convId: string) => Promise<ListingPhoto[]>;
 }
 
 export interface BulkListingUploadResult {
@@ -83,7 +84,21 @@ export async function createBulkPhotoListings(
       ...(notes ? { notes } : {}),
       ...(defaults.boxId ? { box_id: defaults.boxId } : {}),
     });
-    const result = await conversations.uploadPhotos(conv.id, item.files);
+    let result: PhotoUploadResult;
+    try {
+      result = await conversations.uploadPhotos(conv.id, item.files);
+    } catch (err) {
+      // One refused folder (over 20 photos, or every file unreadable) must not
+      // stop the folders after it or hide the drafts already started. Hosted
+      // uploads go one photo at a time, so a failure can follow saved photos:
+      // count what the draft holds so it still generates.
+      const message = err instanceof Error ? err.message : "Upload failed";
+      const saved = await conversations.photos(conv.id).then((photos) => photos.length, () => null);
+      // An unreadable draft may still hold photos: say so rather than call it empty.
+      const unknown = saved === null ? " Anteroom couldn't check which of its photos were saved; open the draft to check." : "";
+      listings.push({ convId: conv.id, folder: item.folder, count: saved ?? 0, errors: [`${item.folder || "New Listing"}: ${message}${unknown}`] });
+      continue;
+    }
     const errors = result.errors || [];
     // A file that failed to upload is missing from the result, so match by name.
     const sourceFiles = new Map(item.files.map(file => [file.name, file] as const));

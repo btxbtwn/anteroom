@@ -131,6 +131,45 @@ def test_snapshot_size_audits_release_the_database_before_calculating(workspace,
     shop.lookups.close()
 
 
+def test_the_snapshot_waits_and_calculates_outside_a_database_transaction(workspace, monkeypatch):
+    """No idle transaction while the snapshot waits for the sales archive lock or calculates.
+
+    Postgres ends a transaction left idle past its deadline; a large shop's
+    totals, or a wait behind another thread's archive, can outlast it.
+    """
+    from vendoo_studio.services import inventory_analytics, sales_records, vendoo_sales_archive
+    from vendoo_studio.services.inventory_analytics import ANALYTICS_RANGES
+
+    db, _client = workspace
+    seed(db)
+    checked: dict[str, int] = {}
+
+    def outside_a_transaction(name, real):
+        def check(*args, **kwargs):
+            assert not db.in_transaction(), f"{name} ran inside an open database transaction"
+            checked[name] = checked.get(name, 0) + 1
+            return real(*args, **kwargs)
+        return check
+
+    for module, name in ((inventory_analytics, "rows_from_inputs"), (inventory_analytics, "summarize"),
+                         (sales_records, "records_from_lines"), (boxes, "_box_row")):
+        monkeypatch.setattr(module, name, outside_a_transaction(name, getattr(module, name)))
+    real_lock = vendoo_sales_archive._archive_lock
+
+    class Watched:
+        def __enter__(self):
+            outside_a_transaction("the archive lock wait", lambda: None)()
+            return real_lock.__enter__()
+
+        def __exit__(self, *exc):
+            return real_lock.__exit__(*exc)
+
+    monkeypatch.setattr(vendoo_sales_archive, "_archive_lock", Watched())
+    business_assistant.read_shop(db, now=NOW).lookups.close()
+    assert checked == {"the archive lock wait": 2, "rows_from_inputs": 1, "summarize": len(ANALYTICS_RANGES),
+                       "records_from_lines": 1, "_box_row": 1}
+
+
 def test_price_history_releases_the_database_before_calculating(workspace, monkeypatch):
     from vendoo_studio.services import inventory_analytics
 
@@ -845,3 +884,507 @@ def test_the_brief_reads_the_same_through_the_day_so_a_prompt_cache_can_keep_it(
     assert morning.brief == later.brief
     for shop in (morning, later):
         shop.lookups.close()
+
+
+TIMING = re.compile(
+    r"^assistant answer timing: outcome=(\w+) queue_wait_ms=(-|\d+) prepare_ms=(\d+) rounds=(\d+) "
+    r"first_token_ms=([\d,-]*) round_ms=([\d,]*) lookups=(\d+) lookup_ms=(\d+) save_ms=(-|\d+) total_ms=(\d+)$")
+
+
+def timing_lines(caplog):
+    return [record.getMessage() for record in caplog.records if record.getMessage().startswith("assistant answer timing")]
+
+
+def test_each_answer_logs_where_its_time_went_and_nothing_the_seller_wrote(workspace, monkeypatch, caplog):
+    db, client = workspace
+    seed(db)
+    caplog.set_level("INFO", logger="vendoo_studio.assistant")
+    ask_through(client, monkeypatch, (f"{FENCE}sql\n-- sizes\nSELECT size FROM listings WHERE status = 'sold'\n{FENCE}",),
+                ("Size 34 sold.",))
+    [line] = timing_lines(caplog)
+    match = TIMING.match(line)
+    assert match, line
+    outcome, queued, _prepare, rounds, first, each, lookups, _lookup, saved, _total = match.groups()
+    assert (outcome, queued, rounds, lookups) == ("answered", "-", "2", "1")
+    assert len(first.split(",")) == 2 and len(each.split(",")) == 2 and saved != "-"
+    for private in ("Which sizes sell?", "Size 34", "SELECT", "sizes", "Levi"):
+        assert private not in line
+
+
+def test_a_failed_answer_still_logs_its_timing(workspace, monkeypatch, caplog):
+    _db, client = workspace
+    caplog.set_level("INFO", logger="vendoo_studio.assistant")
+    monkeypatch.setattr(assistant_route, "get_listing_provider", lambda: Provider(("Half an",), fail=True))
+    client.post("/api/assistant/messages", json={"text": "Anything stale?"})
+    [line] = timing_lines(caplog)
+    assert TIMING.match(line) and " outcome=error " in line and " rounds=1 " in line
+
+
+def test_queue_wait_is_measured_from_when_the_question_was_queued(workspace, monkeypatch, caplog):
+    from datetime import timedelta
+
+    db, _client = workspace
+    caplog.set_level("INFO", logger="vendoo_studio.assistant")
+    thread = business_assistant.resolve_thread(db, None)
+    business_assistant.add_message(db, "user", "What sold?", thread_id=thread.id)
+    journal = assistant_route._Journal()
+    queued_at = datetime.now(UTC) - timedelta(seconds=3)
+    error = asyncio.run(assistant_route._answer(journal, Provider(), "What sold?", None, thread.id, queued_at=queued_at))
+    assert error is None
+    [line] = timing_lines(caplog)
+    waited = int(TIMING.match(line).group(2))
+    assert 3_000 <= waited < 60_000
+    # A clock that runs ahead of the database's never reports a negative wait; values are capped.
+    assert assistant_route.elapsed_ms_since(datetime.now(UTC) + timedelta(seconds=5)) == 0
+    assert assistant_route.elapsed_ms_since(datetime.now(UTC) - timedelta(days=2)) == 600_000
+
+
+def test_only_a_slow_answer_logs_its_timing_as_a_warning(workspace, monkeypatch, caplog):
+    _db, client = workspace
+    caplog.set_level("INFO", logger="vendoo_studio.assistant")
+    ask_through(client, monkeypatch, ("Quick.",))
+    monkeypatch.setattr(business_assistant, "SLOW_ANSWER_MS", 0)
+    ask_through(client, monkeypatch, ("Slow.",))
+    levels = [record.levelname for record in caplog.records if record.getMessage().startswith("assistant answer timing")]
+    assert levels == ["INFO", "WARNING"]
+
+
+def test_one_question_reads_each_part_of_the_shop_once(workspace, monkeypatch):
+    """Eight sales ranges share one read of the listings, the sale ledger, sale events and ad spend."""
+    from vendoo_studio.services import ad_spend, inventory_analytics, sale_events, sales_records
+
+    db, _client = workspace
+    seed(db)
+    calls: dict[str, int] = {}
+    for module, name in ((inventory_analytics, "read_analytics_inputs"), (sales_records, "read_sale_lines"),
+                         (sale_events, "windows"), (ad_spend, "list_entries")):
+        real = getattr(module, name)
+
+        def counted(*args, _real=real, _name=name, **kwargs):
+            calls[_name] = calls.get(_name, 0) + 1
+            return _real(*args, **kwargs)
+
+        monkeypatch.setattr(module, name, counted)
+
+    shop = business_assistant.read_shop(db, now=NOW)
+    shop.lookups.close()
+    # Ad spend is read once for the eight ranges and once for the seller's own entries table.
+    assert calls == {"read_analytics_inputs": 1, "read_sale_lines": 1, "windows": 1, "list_entries": 2}
+
+
+def test_every_range_the_assistant_reads_matches_analytics(workspace):
+    """Sharing the reads changes no figure: each range equals Analytics' own answer for it."""
+    from vendoo_studio.services import ad_spend
+    from vendoo_studio.services.inventory_analytics import ANALYTICS_RANGES, analytics_ranges, inventory_analytics, load_rows
+
+    db, _client = workspace
+    _box, jeans, _coat = seed(db)
+    add_listing(db, "Undated sale", {"price": 30}, {"vendooStatus": "sold", "vendooSale": {"marketplace": "ebay"}})
+    db.add(AdSpend(marketplace="ebay", start_date=date(2026, 9, 20), end_date=date(2026, 9, 29), spend=12.5))
+    db.commit()
+    assert ad_spend.list_entries(db)
+    rows = load_rows(db)
+    shared = analytics_ranges(db, ANALYTICS_RANGES, now=NOW, rows=rows)
+    for range_id in ANALYTICS_RANGES:
+        assert shared[range_id] == inventory_analytics(db, range_id=range_id, now=NOW, rows=rows), range_id
+    assert shared["all"]["incomplete_sales"] and shared["30d"]["ads"]["spend"]
+    assert jeans.id in {row.conversation_id for row in rows}
+
+
+@pytest.mark.parametrize('pieces', [False, True])
+def test_failed_round_records_wait_until_failure(monkeypatch, pieces):
+    from types import SimpleNamespace
+
+    clock = [0.0]
+    monkeypatch.setattr(business_assistant, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+    failure = RuntimeError('provider failed')
+
+    class FailingProvider:
+        async def chat(self, *_args, **_kwargs):
+            if pieces:
+                clock[0] = 1.0
+                yield 'Hello.'
+            clock[0] = 80.0
+            raise failure
+
+    timing = business_assistant.AnswerTiming()
+
+    async def consume():
+        async for _ in business_assistant.answer(FailingProvider(), [], None, timing):
+            pass
+
+    with pytest.raises(RuntimeError) as caught:
+        asyncio.run(consume())
+    assert caught.value is failure
+    assert timing.round_ms == [80_000]
+    assert timing.first_token_ms == [1000 if pieces else None]
+
+
+def test_cancelled_lookup_records_attempt_and_wait(monkeypatch):
+    from types import SimpleNamespace
+
+    clock = [0.0]
+    monkeypatch.setattr(business_assistant, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
+
+    async def cancelled(*_args):
+        clock[0] = 8.0
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(business_assistant, 'run_any_lookup', cancelled)
+    timing = business_assistant.AnswerTiming()
+
+    async def consume():
+        async for _ in business_assistant.answer(Provider(('```view_box_media\nbox:1\n```',)), [], None, timing):
+            pass
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(consume())
+    assert timing.lookups == 1
+    assert timing.lookup_ms == 8000
+
+
+def test_cancelled_preparation_records_wait(monkeypatch, caplog):
+    caplog.set_level('INFO', logger='vendoo_studio.assistant')
+
+    async def cancelled(_run, work, *_args):
+        work.close()
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(assistant_route, 'await_with_pulses', cancelled)
+    monkeypatch.setattr(business_assistant, 'elapsed_ms', lambda _start: 7000)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(assistant_route._answer(assistant_route._Journal(), Provider(), 'Question'))
+    [line] = timing_lines(caplog)
+    assert 'outcome=cancelled ' in line and 'prepare_ms=7000 ' in line
+
+
+@pytest.mark.parametrize('failure_name, outcome', [
+    ('RuntimeError', 'error'), ('TaskLeaseExpired', 'lease_lost'),
+    ('TaskStopped', 'cancelled'), ('CancelledError', 'cancelled'),
+])
+def test_failed_save_records_outcome_and_duration(workspace, monkeypatch, caplog, failure_name, outcome):
+    from vendoo_studio.services import background_tasks
+
+    caplog.set_level('INFO', logger='vendoo_studio.assistant')
+    failure = (RuntimeError('save failed') if failure_name == 'RuntimeError' else
+               asyncio.CancelledError() if failure_name == 'CancelledError' else
+               getattr(background_tasks, failure_name)())
+
+    def fail_save(*_args, **_kwargs):
+        raise failure
+
+    monkeypatch.setattr(assistant_route, '_save_answer', fail_save)
+    monkeypatch.setattr(business_assistant, 'elapsed_ms', lambda _start: 9000)
+    with pytest.raises(type(failure)) as caught:
+        asyncio.run(assistant_route._answer(assistant_route._Journal(), Provider(), 'Question'))
+    assert caught.value is failure
+    [line] = timing_lines(caplog)
+    assert f'outcome={outcome} ' in line and 'save_ms=9000 ' in line
+
+
+@pytest.mark.parametrize('stopped', [False, True])
+def test_journal_stop_reason_survives_worker_cancellation(monkeypatch, caplog, stopped):
+    from types import SimpleNamespace
+    from vendoo_studio.services import background_tasks
+
+    caplog.set_level('INFO', logger='vendoo_studio.assistant')
+    failure = background_tasks.TaskStopped() if stopped else background_tasks.TaskLeaseExpired()
+
+    async def preparing(_run, work, *_args):
+        work.close()
+        await asyncio.Future()
+
+    def reject(*_args, **_kwargs):
+        raise failure
+
+    def unexpected(*_args, **_kwargs):
+        pytest.fail('Preparation was cancelled; no provider round or save may start')
+
+    monkeypatch.setattr(assistant_route, 'await_with_pulses', preparing)
+    monkeypatch.setattr(assistant_route, '_require_provider', Provider)
+    monkeypatch.setattr(assistant_route, '_save_answer', unexpected)
+    monkeypatch.setattr(business_assistant, 'answer', unexpected)
+    monkeypatch.setattr(background_tasks, 'EVENT_INTERVAL', 0.001)
+    monkeypatch.setattr(background_tasks, 'append_events', reject)
+    monkeypatch.setattr(background_tasks, 'finish', reject)
+    task = SimpleNamespace(payload={'question': 'Question'}, assistant_thread_id=None, created_at=datetime.now(UTC))
+    assert asyncio.run(assistant_route.answer_task('task', 'token', task)) is True
+    [line] = timing_lines(caplog)
+    outcome = 'cancelled' if stopped else 'lease_lost'
+    assert f'outcome={outcome} ' in line
+    assert 'rounds=0 ' in line and 'lookups=0 ' in line and 'save_ms=- ' in line
+
+
+@pytest.mark.parametrize('failure_name, expected', [
+    (None, 'error'), ('TaskStopped', 'cancelled'), ('TaskLeaseExpired', 'lease_lost'),
+])
+def test_empty_hosted_answer_logs_after_finish(monkeypatch, caplog, failure_name, expected):
+    from types import SimpleNamespace
+    from vendoo_studio.services import background_tasks
+
+    caplog.set_level('INFO', logger='vendoo_studio.assistant')
+    monkeypatch.setattr(assistant_route, '_require_provider', Provider)
+    monkeypatch.setattr(assistant_route, '_prepare', lambda *_: ([], SimpleNamespace(
+        lookups=SimpleNamespace(close=lambda: None))))
+    monkeypatch.setattr(background_tasks, 'append_events', lambda *_: None)
+
+    async def empty(*_):
+        if False:
+            yield
+
+    def finish(*_, **kwargs):
+        assert timing_lines(caplog) == []
+        if failure_name:
+            raise getattr(background_tasks, failure_name)()
+        assert kwargs['error']
+
+    monkeypatch.setattr(business_assistant, 'answer', empty)
+    monkeypatch.setattr(background_tasks, 'finish', finish)
+    task = SimpleNamespace(payload={}, assistant_thread_id=None, created_at=datetime.now(UTC))
+    asyncio.run(assistant_route.answer_task('task', 'token', task))
+    [line] = timing_lines(caplog)
+    assert f'outcome={expected} ' in line
+
+
+def test_journal_database_failure_logs_error(monkeypatch, caplog):
+    from types import SimpleNamespace
+    from vendoo_studio.services import background_tasks
+
+    caplog.set_level('INFO', logger='vendoo_studio.assistant')
+
+    async def preparing(_run, work, *_):
+        work.close()
+        await asyncio.Future()
+
+    def fail(*_):
+        raise RuntimeError('database unavailable')
+
+    monkeypatch.setattr(assistant_route, 'await_with_pulses', preparing)
+    monkeypatch.setattr(assistant_route, '_require_provider', Provider)
+    monkeypatch.setattr(background_tasks, 'EVENT_INTERVAL', .001)
+    monkeypatch.setattr(background_tasks, 'append_events', fail)
+    monkeypatch.setattr(background_tasks, 'finish', lambda *_, **kwargs: None)
+    task = SimpleNamespace(payload={}, assistant_thread_id=None, created_at=datetime.now(UTC))
+    asyncio.run(assistant_route.answer_task('task', 'token', task))
+    [line] = timing_lines(caplog)
+    assert 'outcome=error ' in line
+
+
+@pytest.mark.parametrize('saved', [False, True])
+def test_concurrent_lease_loss_waits_for_save_confirmation(monkeypatch, caplog, saved):
+    from types import SimpleNamespace
+    from vendoo_studio.services import background_tasks
+
+    caplog.set_level('INFO', logger='vendoo_studio.assistant')
+
+    async def exercise():
+        saving, release = asyncio.Event(), asyncio.Event()
+
+        async def answer(journal, *_, settle, **kwargs):
+            journal.publish('data: answer\n\n')
+            saving.set()
+            await release.wait()
+            # The append took frames before settle started.
+            settle(None, None)
+            await asyncio.sleep(0)
+            if saved:
+                journal.confirm_saved('answered')
+            journal.timing_sample = (business_assistant.AnswerTiming(),
+                                     'answered' if saved else 'lease_lost', 100)
+
+        def append(*_):
+            asyncio.run_coroutine_threadsafe(unblock(), loop).result()
+            raise background_tasks.TaskLeaseExpired()
+
+        async def unblock():
+            release.set()
+            await asyncio.sleep(0)
+
+        loop = asyncio.get_running_loop()
+        monkeypatch.setattr(assistant_route, '_answer', answer)
+        monkeypatch.setattr(background_tasks, 'append_events', append)
+        monkeypatch.setattr(background_tasks, 'complete_in', lambda *_, **kwargs: None)
+        monkeypatch.setattr(background_tasks, 'finish', lambda *_, **kwargs: None)
+        task = SimpleNamespace(payload={}, assistant_thread_id=None, created_at=datetime.now(UTC))
+        await assistant_route.answer_task('task', 'token', task)
+
+    monkeypatch.setattr(assistant_route, '_require_provider', Provider)
+    monkeypatch.setattr(background_tasks, 'EVENT_INTERVAL', .001)
+    asyncio.run(exercise())
+    [line] = timing_lines(caplog)
+    assert f"outcome={'answered' if saved else 'lease_lost'} " in line
+
+
+@pytest.mark.parametrize('commit_failed', [False, True])
+def test_precommit_settle_does_not_confirm_answer_save(workspace, monkeypatch, caplog, commit_failed):
+    caplog.set_level('INFO', logger='vendoo_studio.assistant')
+    journal = assistant_route._Journal()
+    settled = []
+    failure = RuntimeError('commit failed')
+
+    def save(_provider, _answer, _changes, _memory, _automation, _thread, settle, _error, *, on_committed):
+        settle(None, None)
+        assert journal.saved_outcome is None
+        if commit_failed:
+            raise failure
+        on_committed()
+
+    monkeypatch.setattr(assistant_route, '_save_answer', save)
+
+    async def exercise():
+        return await assistant_route._answer(
+            journal, Provider(), 'Question', settle=lambda *_: settled.append(True))
+
+    if commit_failed:
+        with pytest.raises(RuntimeError) as caught:
+            asyncio.run(exercise())
+        assert caught.value is failure
+    else:
+        assert asyncio.run(exercise()) is None
+    assert settled == [True]
+    assert journal.saved_outcome == (None if commit_failed else 'answered')
+    assert journal.timing_sample[1] == ('error' if commit_failed else 'answered')
+    assert timing_lines(caplog) == []  # Hosted emission belongs to answer_task.
+
+
+@pytest.mark.parametrize('stop', [None, 'cancelled', 'lease_lost'])
+def test_cleanup_cancels_unfinished_save_even_after_settle(monkeypatch, caplog, stop):
+    from types import SimpleNamespace
+    from vendoo_studio.services import background_tasks
+    from vendoo_studio.services.service_context import ServiceContext, use
+
+    caplog.set_level('INFO', logger='vendoo_studio.assistant')
+    context = ServiceContext('seller', lambda: None, None, None, None)
+    other_task = ServiceContext('seller', lambda: None, None, None, None)
+
+    async def exercise():
+        saving, cancelled = asyncio.Event(), asyncio.Event()
+
+        async def answer(journal, *_, settle, **kwargs):
+            settle(None, None)  # The callback ran, but the commit has not returned.
+            saving.set()
+            try:
+                await asyncio.Future()
+            finally:
+                cancelled.set()
+                journal.timing_sample = (business_assistant.AnswerTiming(), 'cancelled', 100)
+
+        monkeypatch.setattr(assistant_route, '_answer', answer)
+        task = SimpleNamespace(payload={}, assistant_thread_id=None, created_at=datetime.now(UTC))
+        with use(context):
+            worker = asyncio.create_task(assistant_route.answer_task('task', 'token', task))
+            await asyncio.wait_for(saving.wait(), 1)
+            if stop is not None:
+                context.task_outcome['stop'] = stop
+            worker.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(worker, 1)
+        assert cancelled.is_set()
+
+    monkeypatch.setattr(assistant_route, '_require_provider', Provider)
+    monkeypatch.setattr(background_tasks, 'complete_in', lambda *_, **kwargs: None)
+    asyncio.run(exercise())
+    [line] = timing_lines(caplog)
+    assert f'outcome={stop or "interrupted"} ' in line
+    assert other_task.task_outcome == {}  # Same seller, independent claimed-task state.
+
+
+@pytest.mark.parametrize('failure, expected', [
+    (None, 'answered'), ('commit', 'error'), ('fence', 'lease_lost'),
+])
+def test_answer_commit_is_confirmed_before_blocked_refresh(workspace, monkeypatch, caplog, failure, expected):
+    from threading import Event
+    from types import SimpleNamespace
+    from vendoo_studio.models.assistant import AssistantMessage
+    from vendoo_studio.services import background_tasks
+
+    caplog.set_level('INFO', logger='vendoo_studio.assistant')
+    append_started, save_terminal, release_refresh, save_closed = (Event() for _ in range(4))
+    factory = assistant_route.SessionLocal
+    journals = []
+    earlier_commits = []
+
+    class Journal(assistant_route._Journal):
+        def __init__(self):
+            super().__init__()
+            journals.append(self)
+
+    def sessions():
+        db = factory()
+        commit, refresh, close = db.commit, db.refresh, db.close
+
+        def commit_answer():
+            final = any(isinstance(row, AssistantMessage) for row in db.new)
+            assert journals[0].saved_outcome is None
+            if final and failure == 'commit':
+                save_terminal.set()
+                raise RuntimeError('final commit failed')
+            commit()  # Real SQLite commit, including any earlier thread creation.
+            if not final:
+                assert journals[0].saved_outcome is None
+                earlier_commits.append(True)
+
+        def refresh_answer(row, *args, **kwargs):
+            if isinstance(row, AssistantMessage):
+                # add_message has committed and confirmed, but has not returned.
+                assert journals[0].saved_outcome == 'answered'
+                save_terminal.set()
+                assert release_refresh.wait(5), 'test must release the save thread'
+            return refresh(row, *args, **kwargs)
+
+        def close_save():
+            try:
+                close()
+            finally:
+                save_closed.set()
+
+        monkeypatch.setattr(db, 'commit', commit_answer)
+        monkeypatch.setattr(db, 'refresh', refresh_answer)
+        monkeypatch.setattr(db, 'close', close_save)
+        return db
+
+    class WaitingProvider:
+        async def chat(self, *_args, **_kwargs):
+            yield 'Answer.'
+            assert await asyncio.to_thread(append_started.wait, 5)
+            yield '\n```memory\n[{"op":"add","text":"Prefers denim."}]\n```'
+
+    def append(*_args):
+        append_started.set()  # Takes pending frames while settled is still false.
+        assert save_terminal.wait(5), 'save must reach its terminal boundary'
+        if failure != 'commit':
+            raise background_tasks.TaskLeaseExpired()
+
+    def settle(*_args, **_kwargs):
+        if failure == 'fence':
+            save_terminal.set()
+            raise background_tasks.TaskLeaseExpired()
+
+    monkeypatch.setattr(assistant_route, '_Journal', Journal)
+    monkeypatch.setattr(assistant_route, 'SessionLocal', sessions)
+    monkeypatch.setattr(assistant_route, '_prepare', lambda *_: ([], SimpleNamespace(
+        lookups=SimpleNamespace(close=lambda: None))))
+    monkeypatch.setattr(assistant_route, '_require_provider', WaitingProvider)
+    monkeypatch.setattr(background_tasks, 'EVENT_INTERVAL', .001)
+    monkeypatch.setattr(background_tasks, 'append_events', append)
+    monkeypatch.setattr(background_tasks, 'complete_in', settle)
+    monkeypatch.setattr(background_tasks, 'finish', lambda *_, **kwargs: None)
+
+    async def exercise():
+        task = SimpleNamespace(payload={}, assistant_thread_id=None, created_at=datetime.now(UTC))
+        worker = asyncio.create_task(assistant_route.answer_task('task', 'token', task))
+        try:
+            await asyncio.wait_for(worker, 3)
+            [line] = timing_lines(caplog)
+            assert f'outcome={expected} ' in line
+            assert journals[0].saved_outcome == ('answered' if failure is None else None)
+            # Memory only flushes; thread creation commits after the fence accepts.
+            assert bool(earlier_commits) is (failure != 'fence')
+            if failure is None:
+                assert not save_closed.is_set(), 'cleanup must not wait for post-commit refresh'
+        finally:
+            release_refresh.set()
+            await asyncio.gather(worker, return_exceptions=True)
+            assert await asyncio.to_thread(save_closed.wait, 5)
+
+    asyncio.run(exercise())

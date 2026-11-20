@@ -41,22 +41,20 @@ export const STALE_DAY_OPTIONS = [30, 60, 90] as const;
 
 const DAY_MS = 86_400_000;
 
-/** The inventory's lifecycle tabs. */
-export const LISTING_STATUS_TABS = ["draft", "active", "sold", "failed"] as const;
-
-export type ListingStatusFilter = "all" | (typeof LISTING_STATUS_TABS)[number];
-
 /**
- * Tab names. "all" is the working list, drafts and active listings, so it reads
- * "Open": sold listings sit under their own tab, and "All 4" beside "Sold 12"
- * looked like a miscount.
+ * The inventory's tabs, one per lifecycle state. Every listing sits under
+ * exactly one of them: Active for what is live, Sold for what sold, and Draft
+ * for everything not listed (a new draft, a send in progress or one that
+ * failed, a delisted item, any status this build does not know).
  */
+export const LISTING_STATUS_TABS = ["draft", "active", "sold"] as const;
+
+export type ListingStatusFilter = (typeof LISTING_STATUS_TABS)[number];
+
 export const LISTING_STATUS_LABELS: Record<ListingStatusFilter, string> = {
-  all: "Open",
   draft: "Draft",
   active: "Active",
   sold: "Sold",
-  failed: "Failed",
 };
 
 export type FilterableListing = {
@@ -71,6 +69,7 @@ export type FilterableListing = {
   vendoo_labels?: string[];
   vendoo_marketplaces?: string[];
   direct_marketplaces?: string[];
+  sold_marketplaces?: string[];
   removed_marketplaces?: string[];
   sold_at?: string | null;
   /** When the longest-standing live listing went up. A relist starts its marketplace over. */
@@ -99,7 +98,7 @@ export interface ListingFilters {
 }
 
 export const DEFAULT_LISTING_FILTERS: ListingFilters = {
-  status: "all",
+  status: "active",
   marketplaces: [],
   labels: [],
   notListed: false,
@@ -109,19 +108,24 @@ export const DEFAULT_LISTING_FILTERS: ListingFilters = {
   sort: "recent",
 };
 
-/** The inventory tab a listing belongs to while preserving its detailed row status. */
-export function listingStatusTab(status?: string | null): string {
+/** What an empty tab says when nothing is searched or filtered: "No draft listings". */
+export function emptyTabLabel(tab: ListingStatusFilter): string {
+  return `No ${LISTING_STATUS_LABELS[tab].toLowerCase()} listings`;
+}
+
+/** The tab a listing belongs to. Anything not live or sold files under Draft. */
+export function listingStatusTab(status?: string | null): ListingStatusFilter {
   const value = String(status || "draft");
-  return value === "in_progress" || value === "inactive" ? "draft" : value;
+  return value === "active" || value === "sold" ? value : "draft";
 }
 
 /**
  * Whether a listing shows under a status tab. The tabs are lifecycle states and
  * nothing else: a live listing with unsent edits still belongs to Active, where
- * its unsent tag and the filter can explain it.
+ * its unsent tag and the filter can explain it. A failed send keeps its Failed
+ * label on its row under Draft.
  */
 export function inStatusTab(listing: FilterableListing, tab: ListingStatusFilter): boolean {
-  if (tab === "all") return true;
   return listingStatusTab(inventoryStatus(listing)) === tab;
 }
 
@@ -129,8 +133,13 @@ function lower(value: string | null | undefined): string {
   return String(value || "").toLowerCase();
 }
 
+/**
+ * The marketplaces an item is on for the filter: live there, or sold there.
+ * A sold listing is not live, but the Sold tab is still searched by where it
+ * sold, and a sold item has nothing left to list there.
+ */
 function listedOn(listing: FilterableListing): string[] {
-  return liveMarketplaces(listing);
+  return [...new Set([...liveMarketplaces(listing), ...(listing.sold_marketplaces || [])])];
 }
 
 /** Search covers title, SKU and the labels a listing wears. */
@@ -279,7 +288,10 @@ export function sortListings<T extends FilterableListing>(listings: T[], sort: L
   return compare ? [...listings].sort(compare) : listings;
 }
 
-/** Finished listings stay out of the working list, but remain findable in search and Sold. */
+/**
+ * Finished listings (sold ones, and duplicates merged into another item) stay
+ * out of the working list, but remain findable in search and Sold.
+ */
 export function visibleInInventory(
   listing: FilterableListing,
   tab: string,
@@ -293,12 +305,13 @@ export function statusCounts(
   listings: FilterableListing[],
   searching = false,
   selectedId: string | null = null,
+  retainedTab?: ListingStatusFilter,
 ): Record<string, number> {
-  const counts: Record<string, number> = { all: 0 };
+  const counts: Record<string, number> = {};
   for (const listing of listings) {
-    if (visibleInInventory(listing, "all", searching, selectedId)) counts.all += 1;
-    const status = listingStatusTab(inventoryStatus(listing));
-    if (visibleInInventory(listing, status, searching, selectedId)) counts[status] = (counts[status] || 0) + 1;
+    const status = retainedTab && listing.id === selectedId ? retainedTab : listingStatusTab(inventoryStatus(listing));
+    if (!visibleInInventory(listing, status, searching, selectedId)) continue;
+    counts[status] = (counts[status] || 0) + 1;
   }
   return counts;
 }
@@ -348,7 +361,7 @@ export function activeFilterCount(filters: ListingFilters): number {
 }
 
 /**
- * A count short enough to sit in a status tab. Four tabs and their counts share
+ * A count short enough to sit in a status tab. Three tabs and their counts share
  * a sidebar that narrows to 200px, where "1121" is what pushes the labels into
  * each other.
  */

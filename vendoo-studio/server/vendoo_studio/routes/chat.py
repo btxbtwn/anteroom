@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.database import in_worker_session
 from vendoo_studio.repositories.queries import ConversationRepo, ListingRepo
-from vendoo_studio.services import activity
+from vendoo_studio.services import activity, background_tasks
 from vendoo_studio.services.photo_store import photo_store
 from vendoo_studio.services.chat_citations import (
     citations_to_plain_text,
@@ -240,6 +240,8 @@ async def run_message(conv_id: str, body: ChatMessage, *, stored_attachments=Non
                 return
             try:
                 _operations, saved = persist_task.result()
+            except background_tasks.TaskLeaseExpired:
+                raise
             except Exception:
                 log.exception("failed to persist chat result for %s", conv_id)
                 await in_worker_session(_reset_status, conv_id, "chat persist error")
@@ -247,6 +249,11 @@ async def run_message(conv_id: str, body: ChatMessage, *, stored_attachments=Non
             if saved:
                 yield sse_event("listing_updated", "1")
             yield "data: [DONE]\n\n"
+        except background_tasks.TaskLeaseExpired:
+            # Stop or another terminal save revoked this worker's lease. The
+            # durable worker settles it; another status/prose write is fenced.
+            settled = True
+            raise
         except Exception as e:
             settled = True
             message = str(e).strip() or type(e).__name__

@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures";
+import { expect, showStatusTab, test } from "./fixtures";
 
 test("loads upcoming thumbnails before their inventory rows mount", async ({ page, phone }, info) => {
   const requested = new Set<number>();
@@ -17,6 +17,7 @@ test("loads upcoming thumbnails before their inventory rows mount", async ({ pag
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
   }
+  await showStatusTab(page, "Draft");
   const list = page.getByRole("list", { name: "Listings" });
   await expect(list).toBeVisible();
   // Index 50 is well beyond the mounted viewport and its five overscan rows.

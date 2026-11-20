@@ -178,6 +178,11 @@ enum AssistantFormat {
     }
 
     /// The home screen's greeting, by the seller's local time.
+    /// Why a chat wasn't deleted. While it is still answering (409) it says what to do, as the web does.
+    static func deleteFailure(_ message: String, status: Int?) -> String {
+        status == 409 ? "\(message) Stop answering or wait for the answer to finish, then try deleting again." : message
+    }
+
     static func greeting(at date: Date = .now, calendar: Calendar = .current) -> String {
         switch calendar.component(.hour, from: date) {
         case 5..<12: return "Good morning"

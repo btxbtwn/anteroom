@@ -23,24 +23,38 @@ struct InventoryTests {
         precondition(rows[0].coverPhotoVersion == "abc" && rows[1].coverPhotoVersion == nil)
         precondition(rows[3].displayTitle == "Untitled")
 
-        // Open holds what is not sold; settled listings appear in Sold and in search.
+        // Draft, Active and Sold hold every listing exactly once; the app opens on Active.
+        precondition(StatusTab.allCases == [.draft, .active, .sold])
         var filters = InventoryFilters()
-        precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["d", "a", "b", "e"])
+        precondition(filters.status == .active)
+        precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["b"])
         let counts = InventoryQuery.counts(rows, search: "")
-        precondition(counts[.open] == 4 && counts[.draft] == 2 && counts[.active] == 1 && counts[.sold] == 1 && counts[.failed] == 1)
-        // A sold item not yet settled is out of Open too, unless the seller searches.
+        precondition(counts == [.draft: 3, .active: 1, .sold: 1])
+        // Anything not live or sold is a draft: a failed send, a send in progress, a status this build does not know.
+        precondition(rows[3].statusTab == "draft")
         let soldNow = ConversationSummary(id: "s", title: "Sold tee", status: "sold", createdAt: "", updatedAt: "")
-        precondition(!InventoryQuery.inTab(soldNow, .open) && InventoryQuery.inTab(soldNow, .open, searching: true))
-        precondition(InventoryQuery.inTab(rows[0], .open) && InventoryQuery.inTab(rows[3], .open))
+        precondition(InventoryQuery.inTab(soldNow, .sold) && !InventoryQuery.inTab(soldNow, .active) && !InventoryQuery.inTab(soldNow, .draft))
+        let sending = ConversationSummary(id: "l", title: "Sending", status: "listing", createdAt: "", updatedAt: "")
+        let unknown = ConversationSummary(id: "u", title: "Unknown", status: "archived", createdAt: "", updatedAt: "")
+        precondition(sending.statusTab == "draft" && unknown.statusTab == "draft")
+        let everyTab = InventoryQuery.counts(rows + [sending, soldNow], search: "")
+        precondition(everyTab == [.draft: 4, .active: 1, .sold: 2])
+        precondition(everyTab.values.reduce(0, +) == rows.count + 2)
+        filters.status = .draft
+        precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["d", "a", "e"])
         filters.status = .sold
         precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["c"])
-        filters.status = .open
+        // Search runs within the tab.
         precondition(ids(InventoryQuery.rows(rows, search: "coat", filters: filters)) == ["c"])
+        filters.status = .draft
         precondition(ids(InventoryQuery.rows(rows, search: "b-1", filters: filters)) == ["d"])
+        precondition(ids(InventoryQuery.rows(rows, search: "coat", filters: filters)).isEmpty)
 
         // Marketplace filter, and Not listed with and without picks.
+        filters.status = .active
         filters.marketplaces = ["ebay"]
         precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["b"])
+        filters.status = .draft
         filters.notListed = true
         precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["d", "a", "e"])
         filters.marketplaces = []
@@ -50,16 +64,16 @@ struct InventoryTests {
         precondition(InventoryQuery.marketplaceCounts(rows, options: ["etsy"], notListed: true)["etsy"] == 5)
 
         // Sorts: empty values last both ways; SKU compares numerically and ignores case.
-        filters = InventoryFilters(sort: .priceAsc)
-        precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["d", "a", "b", "e"])
+        filters = InventoryFilters(status: .draft, sort: .priceAsc)
+        precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["d", "a", "e"])
         filters.sort = .priceDesc
-        precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["b", "a", "d", "e"])
+        precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["a", "d", "e"])
         filters.sort = .skuAsc
-        precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["a", "d", "b", "e"])
+        precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["a", "d", "e"])
         filters.sort = .titleAsc
-        precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["a", "e", "b", "d"])
+        precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["a", "e", "d"])
         filters.sort = .createdAsc
-        precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["a", "b", "d", "e"])
+        precondition(ids(InventoryQuery.rows(rows, search: "", filters: filters)) == ["a", "d", "e"])
 
         // The desktop's listing-date and sale-date sorts, by the server's oldest
         // live listing date; one never listed or never sold sorts last.
@@ -73,10 +87,10 @@ struct InventoryTests {
         ]
         """#.utf8))
         filters = InventoryFilters(sort: .stalest)
-        // Open leaves out the sold items s and t.
-        precondition(ids(InventoryQuery.rows(dated, search: "", filters: filters)) == ["q", "p", "r"])
+        // Active leaves out the draft r and the sold items s and t.
+        precondition(ids(InventoryQuery.rows(dated, search: "", filters: filters)) == ["q", "p"])
         filters.sort = .freshest
-        precondition(ids(InventoryQuery.rows(dated, search: "", filters: filters)) == ["p", "q", "r"])
+        precondition(ids(InventoryQuery.rows(dated, search: "", filters: filters)) == ["p", "q"])
         filters.choose(.soldDesc)
         precondition(filters.status == .sold, "sorting by sale date opens Sold")
         precondition(ids(InventoryQuery.rows(dated, search: "", filters: filters)) == ["t", "s"])
@@ -214,10 +228,10 @@ struct InventoryTests {
                 return ids(InventoryQuery.rows(rows, search: text, filters: InventoryFilters()))
             }
         }
-        precondition(searched("") == ["d", "a", "b", "e"] && computed == 1)
-        precondition(searched("") == ["d", "a", "b", "e"] && computed == 1, "same inputs: no recompute")
-        precondition(searched("coat") == ["c"] && computed == 2)
-        precondition(searched("") == ["d", "a", "b", "e"] && computed == 3)
+        precondition(searched("") == ["b"] && computed == 1)
+        precondition(searched("") == ["b"] && computed == 1, "same inputs: no recompute")
+        precondition(searched("coat").isEmpty && computed == 2)
+        precondition(searched("") == ["b"] && computed == 3)
         // Sort by, then Order: every sort sits under one field, and switching field keeps the direction.
         precondition(Set(ListingSort.Field.allCases.flatMap { $0.orders.map(\.sort) }) == Set(ListingSort.allCases))
         precondition(ListingSort.createdAsc.field == .created && ListingSort.stalest.field == .listed)

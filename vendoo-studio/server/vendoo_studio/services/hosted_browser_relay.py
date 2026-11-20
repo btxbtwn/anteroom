@@ -63,6 +63,9 @@ CONTRACT = ("type", "job_id", "message_id", "payload")
 # How long a tab stays connected after it last asked or beat. A background tab's
 # timers can run as rarely as once a minute in Chrome, so this outlasts that.
 SEEN_FOR_S = 90.0
+# A relay no tab has polled on this process. Monotonic time starts near zero
+# when a Machine boots, so 0.0 would read as seen for its first SEEN_FOR_S.
+NEVER_SEEN = float("-inf")
 # Empty /next requests deliberately wait this long for a command.
 WAIT_S = 20.0
 # Commands whose timing is kept until their reply; older ones are dropped.
@@ -75,7 +78,7 @@ class BrowserRelay(ReplyWaits):
         self.owner = owner
         self._outbox: deque[dict] = deque()
         self._ready = asyncio.Event()
-        self._seen_at = 0.0
+        self._seen_at = NEVER_SEEN
         self._capabilities: frozenset[str] = frozenset()
         self._loop: asyncio.AbstractEventLoop | None = None
         # When each job's command was queued and handed to the page, by message id.
@@ -109,7 +112,9 @@ class BrowserRelay(ReplyWaits):
         return self._local_refusal(capability)
 
     def _local_refusal(self, capability: str) -> str | None:
-        if time.monotonic() - self._seen_at >= SEEN_FOR_S:
+        # A tab that declared nothing has not connected a Bridge yet. Name a
+        # version only when a Bridge declared reads but not the one needed.
+        if time.monotonic() - self._seen_at >= SEEN_FOR_S or not self._capabilities:
             return "Open Anteroom in Chrome on your computer and connect Chrome first."
         if capability not in self._capabilities:
             version, purpose = NEEDS[capability]

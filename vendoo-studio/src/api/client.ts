@@ -594,9 +594,10 @@ export const api = {
       request<MarketplaceListings>(`/conversations/${convId}/marketplace-listings/delist`, {
         method: "POST", body: JSON.stringify({ marketplaces, confirm: true }),
       }),
-    mark: (convId: string, marketplace: DelistMarketplace, state: MarketplaceMark, url?: string) =>
+    /** `relinkDeleted`: the seller checked that the listing Anteroom deleted is still live. */
+    mark: (convId: string, marketplace: DelistMarketplace, state: MarketplaceMark, url?: string, relinkDeleted = false) =>
       request<MarketplaceListings>(`/conversations/${convId}/marketplace-listings/${marketplace}/mark`, {
-        method: "POST", body: JSON.stringify({ state, ...(url ? { url } : {}) }),
+        method: "POST", body: JSON.stringify({ state, ...(url ? { url } : {}), ...(relinkDeleted ? { relink_deleted: true } : {}) }),
       }),
     recordSale: (convId: string, sale: SellerSale) =>
       request<SellerSaleResult>(`/conversations/${convId}/marketplace-listings/sold`, {

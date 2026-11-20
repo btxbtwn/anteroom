@@ -212,9 +212,10 @@ test('Mercari ship on your own records seller-paid shipping, and the form keeps 
   assert.deepEqual(fields['mercari_specifics.shippingPayerId'].option_values, { 'Yes (Recommended)': '2', No: '1' });
   assert.equal(fields['mercari_specifics.shipsFrom'].value, '70125');
   assert.ok(fields['mercari_specifics.shippingClassId']);
-  // These two answers stay the same on every listing, so the field offers to remember them.
+  // These answers stay the same on most listings, so the field offers to remember them.
   assert.equal(fields['mercari_specifics.shipsFrom'].save_as_default, true);
   assert.equal(fields['mercari_specifics.shippingClassId'].save_as_default, true);
+  assert.equal(fields['mercari_specifics.package.fitsShoebox'].save_as_default, true);
   assert.ok(!fields['mercari_specifics.shippingMethod'].save_as_default);
   assert.ok(!fields.weight_oz && !fields.package_dimensions_in);
 });
@@ -242,8 +243,8 @@ test('Depop form reads native general attribute objects, maximums and category a
   assert.equal(fields['depop_specifics.source'].max_values, 2);
   assert.deepEqual(fields['depop_specifics.attributes.bottom-fit'].options, ['Straight']);
   assert.ok(fields['depop_specifics.attributes.bottom-fit'].required);
-  assert.equal(fields['depop_specifics.nativeSizeId'].value, 1);
-  assert.equal(fields['depop_specifics.nativeSizeId'].category_specific, true);
+  assert.equal(fields['depop_specifics.size'].value, '30');
+  assert.equal(fields['depop_specifics.size'].category_specific, true);
   assert.equal(fields['depop_specifics.attributes.bottom-fit'].category_specific, true);
   assert.ok(!fields['depop_specifics.age'].category_specific);
   assert.ok(!form.fields.some(row => row.path === 'title'));

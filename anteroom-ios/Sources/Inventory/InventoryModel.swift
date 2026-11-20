@@ -137,15 +137,10 @@ final class InventoryModel {
         }
     }
 
-    /// Tabs in desktop order; Failed only appears while something failed.
-    func tabs(counts: [StatusTab: Int]) -> [StatusTab] {
-        StatusTab.allCases.filter { $0 != .failed || (counts[.failed] ?? 0) > 0 || filters.status == .failed }
-    }
-
     /// Facet counts are taken over the tab in front of the seller.
     func facetSource(search: String) -> [ConversationSummary] {
         let needle = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return listings.filter { InventoryQuery.matchesSearch($0, needle) && InventoryQuery.inTab($0, filters.status, searching: !needle.isEmpty) }
+        return listings.filter { InventoryQuery.matchesSearch($0, needle) && InventoryQuery.inTab($0, filters.status) }
     }
 
     func marketplaceOptions() -> [String] {
@@ -168,6 +163,8 @@ final class InventoryModel {
                 rows.removeAll { $0.id == listing.id }
                 rows.insert(listing, at: 0)
             }
+            // A new listing is a draft; show it among them when the seller comes back.
+            filters.status = .draft
             return listing
         } catch {
             self.error = error.localizedDescription

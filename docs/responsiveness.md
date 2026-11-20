@@ -11,6 +11,99 @@ and accounts must overlap; long work must leave navigation, input and unrelated
 drafts usable. This is a product requirement, not a promise of infinite hardware
 capacity or zero model/network latency.
 
+## Assistant answer stage timing, 2026-11-18
+
+A hosted answer reported as "Worked for 1m 21s" (question to saved answer
+80.4 s, from persisted turn times) could not be attributed: Anteroom recorded no
+per-stage assistant timing. Each answer now logs one line, `assistant answer
+timing:`, with only fixed field names and whole milliseconds: `outcome`,
+`queue_wait_ms` (hosted task creation to the worker starting it, `-` on the
+Mac), `prepare_ms` (shop read and prompt), `rounds`, per-round
+`first_token_ms` (first piece including thinking, `-` when none arrived) and
+`round_ms`, `lookups`, `lookup_ms`, `save_ms` and `total_ms`. Values are capped
+at 600,000. The timing message contains only fixed labels and numeric timing
+values: no question, answer, SQL, provider text, URLs or tokens. This describes
+the message, not the full operator report: existing alert enrichment may attach
+seller identifiers and request/environment metadata. That policy is unchanged.
+
+`total_ms` starts when `_answer` starts and ends after its save/cleanup wait;
+queue wait is separate. First-token time is a point within its round, not an
+additional duration to sum. Round time includes local processing and streaming
+handoff while consuming the provider, so it is not pure provider/network time.
+Preparation and save measure their awaited intervals, including thread dispatch;
+on cancellation a thread may still finish after the await ends. Parsing,
+proposal processing and cleanup can leave time outside the named stages.
+
+Hosted timing is emitted once after journal settlement/cleanup so journal and
+heartbeat stop reasons can distinguish seller Stop (`cancelled`), lease loss
+(`lease_lost`) and ordinary shutdown (`interrupted`). The final message's commit
+confirms its answer outcome synchronously, before the post-commit row refresh;
+earlier memory/thread commits and the pre-commit settle callback do not confirm
+it. Unfinished work is still cancelled during cleanup, including after settle.
+A thread that commits only after the sample is emitted remains unconfirmed in
+that sample. A confirmed save retains its answer outcome
+despite a concurrent lease revocation. `total_ms` ends with the answer's cleanup
+wait, not the later journal settlement or log emission.
+
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:c16ae77c1fa266df95938d44689e61b2522ff68f559affd05d4c47994dd17247 -->
+
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:a7bf8ddaba1ad12e7f8db7edee06b4c705d6b50d207af17c02a51d566f3f7868 -->
+
+Answers under 30 s log at INFO, which hosted logging drops; slower ones log at
+WARNING and, when operator alerts are enabled, enter the hourly batched operator alert email (grouped by call site,
+as `Slow response` lines are). The digest retains only the latest sample in each
+group. Hosted workers also retain individual warnings in the existing local
+`logs/anteroom.jsonl` diagnostic sink under the configured data directory. Once
+the file exceeds 512,000 bytes and has more than 2,000 entries it is trimmed to
+its last 2,000 entries; this is a rolling entry limit, not a 512,000-byte hard cap. Messages
+are capped at 4,000 characters. Operators can read this worker-local file; it is
+not shared across Machines and can be lost with the filesystem. Disk logging is
+best effort and does not change alert delivery. No stderr handler is added.
+
+<!-- /coderabbit-ai-generated:v1 -->
+`queue_wait_ms` compares the worker clock with the database's `created_at`;
+skew is clamped at zero, not corrected. Time between `total_ms` and the
+follower seeing `[DONE]` (journal polling) is not included. This line measures;
+it changes no answer behavior and proves no cause by itself.
+
+<!-- /coderabbit-ai-generated:v1 -->
+
+
+## Assistant shop read: shared range inputs, 2026-11-18
+
+Seller report: a hosted assistant answer ("What is selling best the last two
+months?") showed "Worked for 1m 21s". Its persisted turns, read seller-scoped
+without replay, were saved 06:03:21.005Z and 06:04:41.426Z UTC: 80.4 s from
+question to saved answer. That span covers queue wait, the shop read, every
+model round and lookup, and the save. At the time, Anteroom recorded no per-stage assistant
+timing, and the task row and journal were not reachable, so how the 80.4 s
+divides between them is unknown. The worker Machine was shared-CPU, 1 vCPU.
+
+Profiling the shop read found range-independent work repeated per range. Each
+of the eight Analytics ranges re-read sale events, ad spend and the full sale
+ledger (with the imported-sales archive check) and rebuilt the incomplete-sales
+list; box results reloaded every listing a second time. These are now read once
+per question (`inventory_analytics.analytics_ranges`, `boxes.results(rows=)`).
+The brief and every lookup row are identical on the same data.
+
+Local synthetic benchmark (SQLite, one process, this VPS, uncached read, median
+of 5 after a warm-up; 50% sold listings):
+
+| Listings | Before | After | SQL statements before → after |
+|---|---|---|---|
+| 300 | 449 ms | 172 ms | 53 → 24 |
+| 1,500 | 2,066 ms | 881 ms | 69 → 32 |
+
+These are local CPU and statement counts, not production latency. Hosted
+statements each cost a Postgres round trip (about 24 ms measured 2026-11-11),
+and the shared-CPU worker may run slower than this machine. This does not
+establish what part of the reported 80.4 s the shop read took; model rounds,
+lookups and queue wait were unmeasured for that answer.
+
 ## eBay refused sign-in status, 2026-11-16
 
 An isolated saved-account fixture reproduces Settings reporting connected after
@@ -977,3 +1070,94 @@ change does not claim reduced marketplace calls or fix minimum-price/404
 refusals. There were no production/credential/marketplace reads or mutations.
 Browser/native p50/p95 and concurrent seller latency remain unmeasured; these
 bounded fixtures measure severity and unchanged request counts only.
+
+### Account and subscription readiness copy (2026-11-18)
+
+Provider authentication on the local Mac, its Anteroom account session, and
+account-scoped hosted relay readiness are separate states. The local account
+entry point now offers account navigation before any explicit listing-copy
+flow; opening the guidance reads only the configured destination URL. It does
+not read listing-copy status or start a session. Navigation occurs only after
+the seller chooses Open My Account. Status handlers and hosted provider metadata
+selection leave an absent relay absent; actual requested operations establish
+relay state as before. Existing ten-second hosted Settings polling is unchanged.
+The hosted ready note reports the last check, rather than promising the next
+request will succeed. Photo reading may use a different configured provider.
+
+Bulk measurement errors retain photos and typed details and offer manual entry.
+Forwarding errors name the connection that could not be reached without claiming
+an unknown sign-out, sleep or offline cause. No timeout, capacity, credential
+storage, login/handshake or marketplace-action behavior is changed.
+
+Design follows descriptive errors and preserving seller effort from WCAG
+[Error Identification](https://www.w3.org/WAI/WCAG22/Understanding/error-identification)
+and NN/g [Visibility of System Status](https://www.nngroup.com/articles/visibility-system-status/),
+using existing Anteroom dialogs, buttons, notes and theme tokens. No new visual
+system or automatic navigation is introduced. Local status/model requests and
+production testing are out of scope. Concurrent-load p50/p95, interaction latency,
+Mac native behavior and desktop/phone screenshots remain pending the coordinated
+VPS validation slot; this note makes no production-readiness claim.
+
+### Inventory read-step diagnostics — 2026-11-17
+
+The deployed 0.1.1009 samples supplied by the coordinator place most elapsed
+inventory build time in `build_db_ms`. This is the transaction-bearing phase,
+including network, fetching/ORM, Python and transaction teardown, not summed
+server SQL execution time. Zero queue/wait fields and endpoint pool snapshots
+do not establish the absence of transient waits or identify a database cause.
+
+The next diagnostic adds fixed `inv_<step>_ms` and
+`inv_<step>_orm_calls` fields to the existing slow inventory response line:
+analytics, reconcile, conversations, covers, listings, direct, sales, unsent and
+assemble. The observer is local to the build's session and each step; it reads
+no statement text, parameters, identifiers, row contents or exception text and
+issues no query. It counts ORM execution attempts, including failed attempts,
+not all driver round trips or autoflush SQL. Counts saturate at 10,000 and
+elapsed milliseconds at 600,000; a saturated value is a lower bound. Step wall
+time includes work inside that block, not just database execution. Work between
+blocks and connection close is outside these step totals. Existing coarse
+build fields are unchanged. Cache hits report zeros; peer requests can report
+the shared build's measurements. A build that raises before completion has no
+completed-build measurements. No extra per-query log or global engine listener
+is installed. No performance improvement, production root cause or p50/p95
+claim follows from these counters.
+
+Verification uses deterministic clocks, synthetic private-looking parameters,
+failure cleanup, independent threaded sessions, cache-hit reset and the real
+inventory-response projection test. Production replay, database queries,
+query optimization and load benchmarks are outside this diagnostic's scope.
+Full selected local validation and hosted/Postgres coverage remain required
+before release; focused SQLite coverage alone is insufficient.
+
+### Suggestions and Chrome reply diagnostics — 2026-11-17
+
+This follow-up to the inventory-step diagnostic adds fixed `sug_<step>_ms`
+and `sug_<step>_orm_calls` fields for preferences, covers, photo_counts,
+listing_rows, direct, conversations, busy and ranking. It reuses the same
+session-local observer (now named `snapshot_step`) and preserves queries,
+connection release before ranking, output and cache behavior. Preference
+settings use a separate hosted session: its elapsed work is measured, but its
+SQL is not counted by the observed suggestions session; zero ORM calls there
+must not be read as zero database work. Other limits of the inventory counters
+apply, including fixed labels, saturation and no server SQL attribution.
+
+For `/api/browser-relay/replies`, fixed `relay_lookup_ms/calls` and
+`relay_persist_ms/calls` fields time the existing worker awaits around route
+lookup and diagnostic persistence. Calls are zero or one; milliseconds saturate
+at 600,000. Elapsed time includes scheduling/network/driver/Python work and,
+when cancelled, ends when the await is cancelled, not when its existing worker
+later finishes. Replay, missing-reply, absent-timing and error paths retain
+their original behavior. Persistence still precedes reply resolution; its
+SQLAlchemy errors are still swallowed, other failures/cancellation propagate.
+No new timeout, retry, task, query, log line or external call is introduced.
+These are diagnostic observations, not a speed fix or a common-cause claim
+about the supplied suggestions/jobs/relay samples.
+
+The suggestions parity fixture requires a known validation card and compares
+results and query counts with observation active versus inactive in the current
+implementation; it does not compare against the previous implementation's query
+sequence. Other fixtures cover snapshot cache reset, reply branch ordering,
+error propagation and actual awaiting-task
+cancellation while its original worker finishes. Full selected local checks,
+Postgres/hosted/browser coverage and timing-overhead/load measurements remain
+unverified until separately coordinated; no production replay was used.

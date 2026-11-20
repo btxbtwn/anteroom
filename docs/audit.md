@@ -8,6 +8,12 @@ PRs for the bugs it finds. It never merges.
 This file holds **instructions only**. Results go in the daily GitHub issue.
 Change this file through a PR (see **Keeping this file current**).
 
+**Unresolved for Cristian:** the merge permission in **Fixing bugs** and the
+daily test/flake quota in **Each run** conflict with the scheduled audit brief,
+which forbids auto-merge and daily quotas. This PR leaves that policy decision
+open; follow the stricter brief until Cristian resolves it. These instructions
+do not grant new merge permissions or expand quotas.
+
 ## Safety rules
 
 These override everything below.
@@ -40,7 +46,15 @@ These override everything below.
   `./check.sh --fast` alongside `./check.sh --all` pushed the load past 19:
   Playwright's web server missed its 120 s start, every iPhone test timed
   out, and the backend run took two hours. Finish the smoke first, then
-  check fix branches one after another. Keep fix worktrees on a short path
+  check fix branches one after another.
+- A fix worktree can reuse the audit worktree's installs: symlink
+  `vendoo-studio/.venv` and `vendoo-studio/node_modules` to them, and add
+  both paths to `$(git rev-parse --git-common-dir)/info/exclude`, or
+  `check.sh` counts the untracked symlinks as changes. pytest still imports
+  the fix worktree's code, because `pyproject.toml` puts `server` first on
+  its path. A hosted test needs Postgres: run it with
+  `ANTEROOM_TEST_DATABASE_URL` from a private `pgserver` (see `check.sh`);
+  on SQLite it is skipped. Keep fix worktrees on a short path
   (`../anteroom-fix-<name>`), not the scratchpad: macOS caps Unix socket
   paths at 104 bytes.
 
@@ -76,6 +90,39 @@ passing when it did not run.
 
 Every run, in this order:
 
+0. **Check disk and swap first:** run `df -h /` and `sysctl vm.swapusage`.
+   macOS keeps its swap files in the same APFS container as the data volume,
+   so memory pressure from the suite spends free disk too. On 2026-11-18 the
+   Mac started with 2.6 GB free and 14 GB of swap already in use, and the
+   backend suite's first minute added a 1 GB swap file. The seller's own app
+   writes to that disk and needs room to snapshot before a migration (it once
+   refused to start: "5.7 GB free, 5.8 GB needed"). About 10 GB is a stop
+   floor, never clearance to start. Before any heavy work, budget fresh snapshot
+   allocation if needed, the native build/runtime floor, dependency installation
+   headroom and a reserve for further swap growth. Record the measured free
+   space, swap usage and each allocation; if they do not fit with that reserve,
+   <!-- coderabbit-ai-generated:v1 -->
+   <!-- coderabbit-ai-generated-section:v1:b04ba3d532f5e34d425ff1ae137e80de83c8a58d2f12f67794ea7fc24fcacff8 -->
+   record the affected suites, sandboxes and builds as **not run (disk)**.
+   Record the missing full iPhone run in the daily issue too, so the next
+   audit can identify the gap in its UI-test baseline.
+   <!-- /coderabbit-ai-generated:v1 -->
+   On 2026-11-18, 12 GiB free with 11 GiB swap was insufficient for a 5.8 GB
+   fresh snapshot plus a 5.25 GiB native build floor and swap reserve. The Mac
+   native hold at `495c9b61` remains until resources are cleared separately.
+   A native-only gate needs neither a migration nor an installed-app launch;
+   do not add those steps to clear it. Continue read-only review and report
+   the resource blocker under **Needs the seller**. Never delete files to make
+   room. Do not assume a fresh install is safe: inspect the actual uv cache,
+   filesystem, clone support and allocated space, and reserve install headroom.
+   APFS clones can reduce initial allocation, but `uv pip install` has no
+   general near-zero-disk guarantee; cache misses, copies and later writes
+   consume space.
+   Don't start `check.sh` with `&` inside a script: a background job in a
+   non-interactive shell ignores SIGINT, and
+   `test_check_postgres_cleanup.py::...[INT--2]` then fails with `0 == -2`
+   (2026-11-18). Use the tool's own background mode, or run it in the
+   foreground.
 1. `./check.sh --all` in the audit worktree after setup
    (`cd vendoo-studio && python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]" && npm ci && npx playwright install chromium webkit`).
    Phone browser tests run in WebKit. After a Playwright bump, a Mac without
@@ -104,12 +151,45 @@ Every run, in this order:
    CI never builds the hosted image, so a base-image bump can pass CI and
    fail every deploy (2026-11-16: Python 3.15 from Dependabot's #1547 broke
    deploys for five hours). Report a failed latest run with its log line.
+   The current deploy gate requires passing CI on every non-release
+   first-parent commit since the recorded production commit. A historical
+   failure can block later deploys even after a fix passes on newer code.
+   On 2026-11-18, `fa824f9a` failed
+   `test_shop_snapshot_survives_calculation_longer_than_the_idle_transaction_deadline`
+   with `IdleInTransactionSessionTimeout` in `read_sale_lines`. The read
+   transaction stayed open across the sales archive lock and CPU calculations.
+   #1653 (merged as `5cc7fea1`) fixed that defect and added deterministic lock
+   regression coverage; the original test, its 150 ms deadline and its sleep
+   were unchanged. Do not classify this failure as merely flaky or lengthen
+   the deadline/sleep as a fix.
+   Preserve the historical failure, its commit, run/attempt and logs in the
+   report. A historical CI rerun executes the old defective code; a passing
+   attempt can unlock all eligible backlog and automatic deployment. Do not
+   recommend or trigger a rerun as the default recovery. Recovery needs a
+   separate authorized proposal and approval, with its deployment consequences
+   stated explicitly. The gate-only owner (`e25e13c4`) is reviewing that proposal;
+   this documentation change implements no gate policy. At the 2026-11-18
+   handoff, main was `ffe66259` (0.1.1033), while live health was reported as
+   0.1.1011: merged is not deployed. Record fresh evidence during a future audit
+   rather than treating those versions as current indefinitely.
 2. `cd vendoo-studio && npm run e2e` (local web, desktop and phone sizes).
 3. `cd vendoo-studio && npm run e2e:hosted` (hosted web, two sellers).
 4. `./anteroom-ios/test-sandbox.sh` (iPhone XCUITests in the Simulator). Run
    it while nothing else heavy runs: under load its 5 to 30 second waits time
    out on different tests each run. Before reporting a failure, rerun it alone
-   and compare with the latest iPhone job on `main` (`gh run list --workflow ios.yml --branch main`).
+   <!-- coderabbit-ai-generated:v1 -->
+   <!-- coderabbit-ai-generated-section:v1:a5fa7de14472f6751a674b304a01d87bd69212105040e487029358b0be32c8a3 -->
+   and compare with the last full local run in the previous `audit` issue.
+   If that issue has no full run, look for the last full run in earlier
+   `audit` issues. If none exists, report the isolated rerun's observed result
+   in the daily issue with **baseline unavailable**; a failure is **failed**,
+   with regression status unknown. Do not claim a pass or a regression from
+   missing evidence. If disk space prevents the current run, report
+   **not run (disk)** instead.
+   <!-- /coderabbit-ai-generated:v1 -->
+   `ios.yml` was removed by #1488; Xcode Cloud's **iOS Verify** runs only the
+   Swift checks and unit tests, not these UI tests (`docs/xcode-cloud.md`), so
+   GitHub has no iPhone UI baseline.
    If several tests fail at their first step and the UI hierarchy shows the
    app still on the Assistant tab, the launch helper's tab tap was dropped
    (fixed by #1417); check that fix is on `main` before reporting them.
@@ -122,10 +202,15 @@ Every run, in this order:
    or updated (sandbox must keep logs under `VENDOO_STUDIO_DATA_DIR`). The
    seller's own app may be running and writing that log, so compare its size
    and time with `stat` and look for sandbox paths in any new lines. Also
-   read that log's `ERROR` lines since the last audit, read only: they show
+   read the `ERROR` lines since the last audit in that log and in
+   `logs/anteroom.jsonl` beside it (`"level": "error"`), read only. On
+   2026-11-19 the text log had been silent for a day while the app kept
+   writing the JSON log, so reading only `Anteroom.log` misses errors. They show
    live marketplace failures no sandbox can reproduce (on 2026-11-15 a
    Mercari HTTP 400 on every delist, #1539). Quote only the error, never
-   buyer or listing details. Unset
+   buyer or listing details. `ebay eligible_items failed: Reconnect eBay`
+   every 15 minutes means the seller's eBay sign-in expired: list it once
+   under **Needs the seller**, not as a finding (2026-11-17). Unset
    any leftover `VENDOO_STUDIO_PORT` / `ANTEROOM_SANDBOX` from that run before
    starting `./sandbox.sh --hosted` (hosted defaults to 4320; an inherited
    `4321` makes it fail to bind).
@@ -201,7 +286,7 @@ list remembers.
 | Day | Area | Where to look |
 |---|---|---|
 | Monday | Listing editor, every marketplace tab (the list is `FORM_ORDER` in `src/components/editorTabs.ts`), category selection, item details, variations. Neither sandbox can load eBay's category fields once a listing has a category (they come from eBay's API), so the eBay tab shows "could not be loaded" there; record eBay item specifics and variations as **not run** until the sandbox seeds them. Mercari's Shipping label shows "Choices unavailable" in both sandboxes: its choices come from Mercari's live shipping quote | `src/components/ListingEditor.tsx`, `NativeInventoryEditor.tsx`, `editorTabs.ts`, `anteroom-ios/Sources/Editor/` |
-| Tuesday | Bulk actions (edit, copy, delete, price drop, regenerate, upload), templates, inventory filters and search, import. Closing any bulk dialog, Cancel included, leaves selection mode, so select again before the next dialog. Hosted web has no bulk Marketplaces button | `src/components/Bulk*`, `ListingTemplatesDialog.tsx`, `anteroom-ios/Sources/Bulk/`, `Templates/`, `Inventory/` |
+| Tuesday | Bulk actions (edit, copy, delete, price drop, regenerate, upload), templates, inventory filters and search, import. Closing any bulk dialog, Cancel included, leaves selection mode, so select again before the next dialog. Hosted web has no bulk Marketplaces button. Use drafts with a price and photos (the journey's `Audit edit` drafts) as sources: on a blank draft Regenerate is disabled and Mark down has no price to drop. Carry each action through to its result (copy, then mark down, edit and delete the copies) on local and hosted, and confirm each through the API: only opening and cancelling the dialogs missed a hosted delete that failed on every edited draft (#1593, 2026-11-17). Import reads a live marketplace, so record it as **not run** | `src/components/Bulk*`, `ListingTemplatesDialog.tsx`, `anteroom-ios/Sources/Bulk/`, `Templates/`, `Inventory/` |
 | Wednesday | Photos: upload, drop, reorder, crop and edit, thumbnails, camera on iPhone, measurements from ruler photos | `src/components/Photo*`, `anteroom-ios/Sources/Photos/` |
 | Thursday | Assistant and listing chat, automations, suggestions, similar items, previous versions and history | `src/components/Assistant*`, `Automations*`, `ListingHistory.tsx`, `anteroom-ios/Sources/Assistant/`, `Automations/`, `History/` |
 | Friday | Settings, providers, labels, sign-in, sign-up, password reset, account menu, analytics, sales records, mark sold; Mac app first run, backups and restore, migration of a database from the previous release | `src/components/SettingsPage.tsx`, `src/components/settings/`, `src/cloud/`, `anteroom-ios/Sources/Settings/`, `Session/`, `Analytics/`, `services/backups.py` |
@@ -233,6 +318,18 @@ names the code that moved focus.
   Query a narrower element.
 - `PolishScreenshotTests.testPolishedScreensInLightAndDark`: the Inventory
   list didn't appear within 30 s after a theme change, on CI (2026-11-11).
+- `AssistantSandboxTests.testStarterQuestionIsAnsweredAndKept`: "The answer
+  streams into the conversation" failed at `SandboxTests.swift:343` on two
+  of three fix-branch `./check.sh --fast` runs that didn't touch the
+  Assistant, then passed alone (2026-11-17). Likely a fixed wait on the
+  streamed answer under load.
+- `AutomationOffersSandboxTests.testOfferOverviewAndEvidenceWithAccessibilityText`:
+  failed at `SandboxTests.swift:11` in `./check.sh --all` (2026-11-18). The
+  "Automations" button was not found right after tapping More, so
+  `openMorePage` waited for a "More" back button that wasn't there. It passed
+  alone. Likely cause: `openMorePage` checks `isHittable` before the More list
+  has rendered (slower at accessibility text sizes under load). Wait for the
+  list or the destination before choosing the back-button branch.
 - `e2e/photoReorder.e2e.ts` "photos on a marketplace form reorder by
   dragging" [desktop]: hit the 120 s test timeout before the order check,
   on two of four fix-branch `./check.sh` runs that did not touch photos;

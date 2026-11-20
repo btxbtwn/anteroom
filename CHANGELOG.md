@@ -6,6 +6,154 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1045 — 2026-11-20
+
+- Keep your saved Depop package size when preparing a listing, even when its saved weight suggests a different package.
+- Let choosing Depop's clothing Size replace an old blank size, and identify a cleared required clothing size before listing.
+
+## 0.1.1044 — 2026-11-20
+
+- Poshmark's Condition now shows the listing's condition instead of staying empty and counting as a missing field.
+- Mercari's Brand now explains when a brand isn't in Anteroom's copy of Mercari's brand list: listing checks Mercari's current list and uses No brand only if Mercari doesn't have it.
+
+## 0.1.1043 — 2026-11-20
+
+- A Depop listing that went live no longer shows "Depop refused the request (HTTP 404)". When Depop's publish status can't be read, Anteroom finds the new listing in your shop, or asks you to add its link.
+- A link you add with Mark as listed stays put, even if an earlier result check answers afterwards.
+
+## 0.1.1042 — 2026-11-20
+
+- When an assistant answer is slow, Anteroom now records how long each step took (waiting its turn, reading your shop, each model reply, each lookup and saving), so a slow answer can be traced to the step that held it up.
+
+## 0.1.1041 — 2026-11-20
+
+- Inventory now has three tabs, Active, Sold and Draft, and opens on Active. The Open and Failed tabs are gone.
+- Anything that isn't live or sold appears under Draft: new drafts, listings still sending to a marketplace, failed sends (still labelled Failed on the row) and delisted items. Every item sits under exactly one tab, on the web and on iPhone.
+- Starting a new listing switches to Draft so it shows up right away, and a listing you have open keeps its row if it sells or goes live while you're editing.
+
+## 0.1.1040 — 2026-11-20
+
+- Slow suggestion and Chrome-reply reports now show which read or wait took time without recording private details.
+
+## 0.1.1039 — 2026-11-20
+
+- When you add several folders at once and one of them can't be uploaded (for example, it has more than 20 photos), the other folders are still added and generated, and the message names the folder that failed.
+
+## 0.1.1038 — 2026-11-20
+
+- Offer automations wait a day before checking a listing again when Depop can't find it at its saved link or Mercari won't allow an offer to likers on it, instead of retrying it every 15 minutes. A newer like, or a new price on the Mercari listing, checks it again right away, and refusals across most of a rule's listings keep being checked.
+- A like that an offer automation has already checked no longer makes it check the same listing again every minute, for example a liked Poshmark listing that has just sold.
+
+## 0.1.1037 — 2026-11-20
+
+- The listings sidebar shows a marketplace an item sold on as sold, instead of still listed there.
+
+## 0.1.1036 — 2026-11-19
+
+- When you've set a listing's Size yourself, regenerating it keeps every marketplace's size and the title on your size, instead of leaving the AI's size there. Marketplace sizes you set yourself stay as they are, and a size a marketplace doesn't offer is left for you to choose.
+
+## 0.1.1035 — 2026-11-19
+
+- Your Mercari, Poshmark, Depop and eBay answers are no longer erased when a marketplace's fields can't be loaded during generation. That marketplace asks you to reload its fields before listing instead.
+
+## 0.1.1034 — 2026-11-18
+
+- Stopping a listing chat no longer reports its rejected save as a new chat error.
+
+## 0.1.1033 — 2026-11-18
+
+- The assistant handles waits for sales history and calculations for analytics and boxes without losing its connection to your shop data.
+
+## 0.1.1032 — 2026-11-18
+
+- When a full-size photo cannot load, the photo viewer now says so and offers Retry, instead of showing an empty picture with only its label.
+
+## 0.1.1031 — 2026-11-18
+
+- When Mercari doesn't offer your saved shipping label, the note on the Mercari tab now says List uses USPS Ground Advantage instead, and that Mercari refuses the listing if it offers neither.
+
+## 0.1.1030 — 2026-11-18
+
+- Mark as listed no longer suggests an old link Anteroom delisted, or any link while a marketplace action is unconfirmed, and pasting a link to a listing Anteroom delisted now asks you to confirm it is still live.
+
+## 0.1.1029 — 2026-11-18
+
+- Tell apart provider sign-in on your Mac and its connection to your Anteroom account, and keep opening your account separate from copying listings.
+- Keep bulk-upload details when measurement reading cannot reach your Mac, with clearer connection guidance.
+
+## 0.1.1028 — 2026-11-18
+
+- The assistant reads your shop faster before it answers: sales figures for every date range now share one read of your sales, sale events and ad spend.
+
+## 0.1.1027 — 2026-11-18
+
+- Error emails for database timeouts now name the part of Anteroom that hit them, so different problems no longer share one email group.
+
+## 0.1.1026 — 2026-11-18
+
+- Delist now has tests showing that a listing another app already removed reads Delisted while the sale and Sold status stay, and that a sign-in problem, timeout or unclear answer never counts as removed.
+
+## 0.1.1025 — 2026-11-18
+
+- After an Anteroom update, the web no longer tells you to update Anteroom Bridge before Chrome has reconnected. It asks you to connect Chrome instead.
+
+## 0.1.1024 — 2026-11-18
+
+- Steadier automated checks for reading sales in the background.
+
+## 0.1.1023 — 2026-11-18
+
+- Fix two checks that could fail at random when they test that a delist waits for a sale undo. No change to the app.
+
+## 0.1.1022 — 2026-11-18
+
+- A marketplace form no longer jumps while Anteroom re-checks its fields after a change, so tapping a photo right after reordering opens it.
+
+## 0.1.1021 — 2026-11-18
+
+- Show a clear background-removal error if the Mac cannot provide an image mask.
+
+## 0.1.1020 — 2026-11-18
+
+- Slow inventory reports now show which read step took time, helping diagnose delays without recording listing details.
+
+## 0.1.1019 — 2026-11-18
+
+- Keep required checks from passing when an affected test group did not run, and run every check group when a changed file's impact is unknown.
+
+## 0.1.1018 — 2026-11-18
+
+- Keep safe database failure details in error reports when saved account credentials cannot be read or updated, without exposing credentials.
+
+## 0.1.1017 — 2026-11-18
+
+- The sale calendar now says "1 item" and "1 sale event" instead of "1 items" and "1 sale events".
+
+## 0.1.1016 — 2026-11-18
+
+- Refuse to restore an empty file or another program's database over your Anteroom data.
+
+## 0.1.1015 — 2026-11-18
+
+- Deleting a draft you had edited no longer fails with "Cloud data is temporarily unavailable" in your online account, alone or in a bulk delete.
+
+## 0.1.1014 — 2026-11-18
+
+- Delisting a duplicate listing you linked no longer makes Anteroom forget its own listing that is still live on that marketplace.
+
+## 0.1.1013 — 2026-11-18
+
+- Save your answer to Mercari’s “Will your item fit in a shoebox?” as the default for new listings, with the same bookmark as Shipping label. A listing that already has its own Yes or No keeps it.
+
+## 0.1.1012 — 2026-11-18
+
+- Mercari no longer says the Shipping label is required and empty when your saved label is shown. It says List will use your saved label if Mercari offers it for the package, and asks you to choose one when Mercari doesn't offer it.
+
+## 0.1.1011 — 2026-11-18
+
+- Sold and active price research spends fewer paid web searches: each search only looks for its own kind of listing, and OpenRouter research stops after eight searches.
+- Generation records now count the web searches each research call ran, so search fees can be told apart from model costs.
+
 ## 0.1.1010 — 2026-11-18
 
 - Steadier automated checks for listing generation, so a test-only crash no longer blocks updates.

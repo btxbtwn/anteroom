@@ -11,7 +11,7 @@ import { confirmDialog } from "../../ui/confirmDialog";
 import { ListingStatusLabel, ListingTag, ListingThumb, SelectCheckbox } from "./ListingBits";
 import { displayCoverUrl } from "./coverSrc";
 import { statusIsListed } from "../fillLog/marketplaces";
-import { inventoryStatus, listedFromImport, listingRowPrice, partialSale, quantityLabel, statusHint, withDirectListings } from "./listingStatus";
+import { inventoryStatus, listedFromImport, listingRowPrice, marketplacesLabel, partialSale, quantityLabel, statusHint, withDirectListings } from "./listingStatus";
 import { compactRelativeTime, type Listing } from "./listingShelves";
 import { prefetchListingReads } from "../../api/navigationQueries";
 import { preloadListingCode } from "../../app/pageLoaders";
@@ -99,8 +99,9 @@ export const ListingRow = memo(function ListingRow({
       listing.direct_marketplaces,
       visibleMarketplaces,
       listing.removed_marketplaces,
+      listing.sold_marketplaces,
     ),
-    [importedRows, listing.direct_marketplaces, visibleMarketplaces, listing.removed_marketplaces],
+    [importedRows, listing.direct_marketplaces, visibleMarketplaces, listing.removed_marketplaces, listing.sold_marketplaces],
   );
   const listedMarketplaces = popupStatuses.filter((row) => row.id !== "general" && statusIsListed(row.status));
   const activate = () => {
@@ -241,7 +242,7 @@ export const ListingRow = memo(function ListingRow({
           {listedMarketplaces.length ? (
             <div
               className="mt-2 flex flex-wrap items-center gap-2.5"
-              aria-label={`Listed on ${listedMarketplaces.map((row) => row.label).join(", ")}`}
+              aria-label={marketplacesLabel(listedMarketplaces)}
             >
               {listedMarketplaces.map((row) => (
                 <span key={row.id} className={cn("inline-flex", row.status === "SOLD" && "opacity-55")}>

@@ -281,6 +281,9 @@ def prompt(contracts: dict) -> str:
     )
 
 
+NOT_AN_OPTION = "Choose a value from this marketplace's current options."
+
+
 def value_error(row: dict, value) -> str | None:
     """Validate a supplied value without truncating, guessing, or selecting a substitute."""
     if value is None or value == "" or value == [] or value == {}:
@@ -321,7 +324,7 @@ def value_error(row: dict, value) -> str | None:
         allowed = {str(item) for item in row.get("options") or []}
         allowed.update(str(item) for item in (row.get("option_values") or {}).values())
         if not allowed or any(str(item) not in allowed for item in values):
-            return "Choose a value from this marketplace's current options."
+            return NOT_AN_OPTION
     for item in values:
         if row.get("max_length") and len(str(item)) > int(row["max_length"]):
             return f"Use at most {row['max_length']} characters."
@@ -479,6 +482,17 @@ def constrain_generated(listing: dict, seed: dict, *, freeze_categories: bool = 
     for market, contract in contracts.items():
         prefix = f"{market}_specifics"
         block = listing.get(prefix)
+        if not isinstance(contract, dict) or contract.get("unavailable") or not contract.get("fields"):
+            # A form that could not be loaded is unknown, not one with no
+            # fields: nothing here can be checked. Keep the answers already
+            # saved (seed) and drop anything new, which no form has checked.
+            # The seed also holds the seller's locked answers.
+            saved = seed.get(prefix)
+            if isinstance(saved, dict):
+                listing[prefix] = copy.deepcopy(saved)
+            else:
+                listing.pop(prefix, None)
+            continue
         if not isinstance(block, dict):
             continue
         rows = {path_of(row): row for row in contract.get("fields") or []}
@@ -551,12 +565,26 @@ def gaps(listing: dict, market: str) -> list[dict]:
             value = shared_answer(listing, row, market, path)
         if value in (None, "", [], {}) and not is_locked(listing, path):
             value = settings_answer(listing, path)
+        if value in (None, "", [], {}) and not is_locked(listing, path) and market == "mercari":
+            note, blocking, value = _mercari_label(listing, row, path, value)
+            if note:
+                found.append(gap(path, note, blocking=blocking, label=row.get("label")))
+            if note and blocking:
+                continue
         if account_resolved(row) and value in (None, "", [], {}):
             # List picks this from the seller's account, so the row is not
             # empty in any way that stops the listing.
             found.append(gap(path, f"{row.get('label') or path}: Uses the account's own choice.", blocking=False))
             continue
         error = value_error(applicable_row(row, listing, fields), value)
+        if error == NOT_AN_OPTION and path == "mercari_specifics.brand":
+            # This catalog is a dated copy. List checks Mercari's current brand
+            # list and sends no brand only when Mercari has no match, so a name
+            # missing here is said, not refused.
+            found.append(gap(path, f"Brand: “{value}” isn't in Anteroom's copy of Mercari's brand list. When you "
+                                   "list, Anteroom checks Mercari's current list and uses No brand if Mercari "
+                                   "doesn't have it.", blocking=False, label=row.get("label")))
+            continue
         if error:
             # A policy or location with no stored answer is chosen from the
             # account at List. Missing one here does not stop the listing, so it
@@ -593,6 +621,34 @@ _SETTINGS_CHOICES = {"ebay_specifics.fulfillmentPolicyId": "fulfillment_policy_i
                      "ebay_specifics.paymentPolicyId": "payment_policy_id",
                      "ebay_specifics.returnPolicyId": "return_policy_id",
                      "ebay_specifics.merchantLocationKey": "merchant_location_key"}
+
+
+def _mercari_label(listing: dict, row: dict, path: str, value: Any) -> tuple[str | None, bool, Any]:
+    """Mercari's empty label row answered the way List answers it: ``(note, blocking, value)``.
+
+    A captured form holds the labels Mercari offered for this package, so a
+    saved carrier counts only when that form offers it, under its id for this
+    weight tier. When it does not, List sends USPS Ground Advantage if that is
+    offered, and the note says so; with neither, the seller has to choose. A
+    label the prepared form resolved is checked like any value.
+    """
+    from vendoo_studio.services import mercari_shipping_label as labels
+
+    # Ship on your own asks for no label, so it has nothing to answer here.
+    if path != labels.PATH or not row.get("required") or not labels.needs_label(listing):
+        return None, False, value
+    answer = labels.label_answer(listing)
+    if answer.source == "form":
+        return None, False, answer.value
+    if answer.source != "default":
+        return None, False, value
+    offered = labels.offered_id(row, answer.value)
+    if offered:
+        return None, False, offered
+    automatic = labels.offered_id(row, labels.AUTOMATIC)
+    if automatic:
+        return labels.automatic_instead_message(answer.value), False, automatic
+    return labels.unavailable_default_message(answer.value), True, value
 
 
 def settings_answer(listing: dict, path: str) -> str | None:

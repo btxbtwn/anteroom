@@ -54,7 +54,7 @@ import { Spinner } from "./ui/spinner";
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
-import { savedDefaultFor } from "./fieldDefaults";
+import { savedDefaultFor, shownSavedDefault } from "./fieldDefaults";
 import { agentFieldLocked } from "./agentFieldLocks";
 
 interface Props {
@@ -588,10 +588,9 @@ export function StructuredEditor({
         if (packageHint && field.key === "package_dimensions_in") {
           return { ...field, placeholder: packageHint };
         }
-        if (field.saveAsDefault && saved?.[field.key]
-          && !formFieldText(getListingEditorValue(listing, field.key))) {
-          return { ...field, defaultValue: saved[field.key].label };
-        }
+        const shownDefault = field.saveAsDefault && !formFieldText(getListingEditorValue(listing, field.key))
+          ? shownSavedDefault(field, saved?.[field.key]) : undefined;
+        if (shownDefault !== undefined) return { ...field, defaultValue: shownDefault };
         return field;
       });
     },
