@@ -232,7 +232,7 @@ def read_analytics_inputs(db, conversation_id: str | None = None) -> AnalyticsIn
     one of its rows changed (``_inputs_version``). Sales, Analytics, the calendar,
     boxes and the assistant all read it, several of them on a timer, and each
     full read sends every item's notes and every sale over the network.
-    The returned inputs are shared between callers: read them, never change them.
+    Each caller gets its own wrapper; the values inside are shared: never change them.
     """
     from vendoo_studio.services.vendoo_sales_archive import ensure_archived
 
@@ -250,7 +250,7 @@ def read_analytics_inputs(db, conversation_id: str | None = None) -> AnalyticsIn
         kept = _inputs_cache.get(key)
         if kept is not None and kept[0] == version:
             _inputs_cache.move_to_end(key)
-            return kept[1]
+            return replace(kept[1])
     inputs = _read_analytics_inputs(db, None)
     # Kept sales outlive this session: keep copies no session holds or expires.
     inputs = replace(inputs, sales={conv_id: [_unbound(line) for line in lines] for conv_id, lines in inputs.sales.items()})
@@ -259,7 +259,7 @@ def read_analytics_inputs(db, conversation_id: str | None = None) -> AnalyticsIn
         _inputs_cache.move_to_end(key)
         while len(_inputs_cache) > _INPUTS_CACHE_SIZE:
             _inputs_cache.popitem(last=False)
-    return inputs
+    return replace(inputs)
 
 
 # Every table _read_analytics_inputs reads. test_inventory_analytics pins this

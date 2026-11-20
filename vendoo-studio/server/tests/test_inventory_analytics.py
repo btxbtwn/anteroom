@@ -711,7 +711,7 @@ class AnalyticsInputsCacheTest(unittest.TestCase):
         first = read_analytics_inputs(self.db)
         again = self._statements(lambda: read_analytics_inputs(self.db))
         self.assertFalse([statement for statement in again if "notes" in statement or "marketplace_sales.id" in statement])
-        self.assertIs(read_analytics_inputs(self.db), first)
+        self.assertIs(read_analytics_inputs(self.db).conversations, first.conversations)
 
         # A changed note, a new sale and a removed sale each read the shop again.
         notes = json.loads(self.sold.notes)
@@ -786,3 +786,31 @@ class AnalyticsInputsCacheTest(unittest.TestCase):
         self.db.close()
         self.assertEqual(lines[0].order_id, self.order_id)
         self.assertTrue(isinstance(lines[0].is_order_backed, bool))
+
+    def test_reassigning_a_callers_inputs_leaves_the_kept_ones_alone(self):
+        from vendoo_studio.services.inventory_analytics import read_analytics_inputs
+
+        if self.db.get_bind().dialect.name != "postgresql":
+            self.skipTest("Only the hosted Postgres database is read over the network")
+        first = read_analytics_inputs(self.db)
+        original = first.conversations
+        first.conversations = []
+        self.assertEqual(read_analytics_inputs(self.db).conversations, original)
+
+    def test_a_row_written_twice_in_one_transaction_is_read_as_committed(self):
+        from vendoo_studio.services.inventory_analytics import read_analytics_inputs
+
+        if self.db.get_bind().dialect.name != "postgresql":
+            self.skipTest("Only the hosted Postgres database is read over the network")
+        self.db.autoflush = True
+        self.sold.notes = json.dumps({"vendooLabels": "First"})
+        self.db.flush()
+        read_analytics_inputs(self.db)
+        self.sold.notes = json.dumps({"vendooLabels": "Second"})
+        self.db.commit()
+        fresh = SessionLocal()
+        try:
+            notes = {row[0]: row[3] for row in read_analytics_inputs(fresh).conversations}
+        finally:
+            fresh.close()
+        self.assertEqual(notes[self.sold.id].get("vendooLabels"), "Second")
