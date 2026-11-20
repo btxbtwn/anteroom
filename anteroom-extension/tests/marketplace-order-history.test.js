@@ -298,3 +298,41 @@ test('between full walks, Poshmark and Mercari stop at the first page of settled
   // One page each for orders in progress and sold items.
   assert.equal(pages.length, 2);
 });
+
+test('Poshmark order history classifies HTTP auth, rate-limit, server, network and login-page errors accurately', async () => {
+  const seller = 'cccccccccccccccccccccccc';
+  const orderId = 'aaaaaaaaaaaaaaaaaaaaaaaa';
+  for (const [status, expected] of [[401, 'signed_out'], [403, 'signed_out'], [429, 'rate_limited'], [503, 'network']]) {
+    const { c } = worker({ [`/vm-rest/users/${seller}/orders/sales`]: [status, {}] }, { jwt: poshmarkJwt(seller) });
+    assert.deepEqual(await read(c, 'poshmark'), { ok: false, error: expected }, `list HTTP ${status}`);
+  }
+
+  // Transient 503 on Poshmark sales list retries and recovers.
+  let attempts = 0;
+  const recovered = worker({
+    [`/vm-rest/users/${seller}/orders/sales`]: () => (++attempts === 1
+      ? [503, {}]
+      : [200, { data: { sales_summary: [] }, meta: { next_max_id: '' } }]),
+  }, { jwt: poshmarkJwt(seller) });
+  assert.equal((await read(recovered.c, 'poshmark')).ok, true);
+  assert.equal(attempts, 2);
+
+  // Network error on Poshmark sales list classifies as network, not schema_drift.
+  const offline = worker({}, { jwt: poshmarkJwt(seller) });
+  offline.c.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  assert.deepEqual(await read(offline.c, 'poshmark'), { ok: false, error: 'network' });
+
+  // Order detail page 401 / 502 / 200-login-page classify accurately too.
+  for (const [detailReply, expected] of [
+    [[401, 'Unauthorized'], 'signed_out'],
+    [[502, 'Bad Gateway'], 'network'],
+    [[200, '<html><form action="/login"><input type="password"></form></html>'], 'signed_out'],
+  ]) {
+    const { c } = worker({
+      [`/vm-rest/users/${seller}/orders/sales`]: [200, { data: { sales_summary: [{ id: orderId, display_status: 'Order Complete' }] },
+        meta: { next_max_id: '' } }],
+      [`/order/sales/${orderId}`]: detailReply,
+    }, { jwt: poshmarkJwt(seller) });
+    assert.deepEqual(await read(c, 'poshmark'), { ok: false, error: expected }, `detail ${expected}`);
+  }
+});

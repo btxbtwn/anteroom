@@ -1236,13 +1236,17 @@ async function depopApiAction(action, payload) {
       }
       const bytes = Uint8Array.from(atob(payload.photo.base64), char => char.charCodeAt(0));
       const image = await createImageBitmap(new Blob([bytes], { type: payload.photo.mime_type }));
-      const canvas = new OffscreenCanvas(1280, 1280);
-      const context = canvas.getContext('2d');
-      context.fillStyle = '#ffffff';
-      context.fillRect(0, 0, 1280, 1280);
-      const scale = Math.min(1280 / image.width, 1280 / image.height);
-      context.drawImage(image, (1280 - image.width * scale) / 2, (1280 - image.height * scale) / 2, image.width * scale, image.height * scale);
-      image.close();
+      let canvas;
+      try {
+        canvas = new OffscreenCanvas(1280, 1280);
+        const context = canvas.getContext('2d');
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, 1280, 1280);
+        const scale = Math.min(1280 / image.width, 1280 / image.height);
+        context.drawImage(image, (1280 - image.width * scale) / 2, (1280 - image.height * scale) / 2, image.width * scale, image.height * scale);
+      } finally {
+        image.close();
+      }
       const file = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.95 });
       // A presigned PUT replaces the same object, so it is safe to repeat.
       await marketplaceFetch(destination.href, { marketplace: 'depop', step: 'photo-upload', method: 'PUT', credentials: 'omit',
@@ -1475,7 +1479,7 @@ async function depopPublishEvidence(request, payload, draftPath, spent = () => f
   // Only the account that published: Chrome may be signed in to another Depop shop by now.
   // New means absent from the whole shop before posting, not only from its matches: a
   // listing repriced or reworded since then is not this publish's product.
-  const existed = new Set(before?.seen);
+  const existed = new Set((before?.seen || []).map(entry => depopListingUrl(entry) || entry));
   const made = after && after.seller_id === before.seller_id ? after.urls.filter(url => !existed.has(url)) : [];
   return made.length === 1 ? { ...unavailable, complete: true, listing_url: made[0] } : { ...unavailable, draft_posted: true };
 }
@@ -1676,6 +1680,16 @@ async function depopAction(action, payload) {
   return result;
 }
 
+function compactDepopShopBefore(before) {
+  if (!before?.seller_id || !Array.isArray(before.seen)) return null;
+  const prefix = 'https://www.depop.com/products/';
+  return {
+    seller_id: before.seller_id,
+    seen: before.seen.map(entry => (typeof entry === 'string' && entry.startsWith(prefix) && entry.endsWith('/')
+      ? entry.slice(prefix.length, -1) : entry)),
+  };
+}
+
 async function runDepopNative(msg, recovery = false) {
   const payload = { ...msg.payload, deadline: Date.now() + 120000 };
   const key = `native_operation_${payload.operation_id}`;
@@ -1785,7 +1799,7 @@ async function runDepopNative(msg, recovery = false) {
       // The shop's matching products before posting, so a publish whose status read is
       // unavailable can tell its new product from an identical one already live. Read only.
       payload.shop_before = (await depopAction('shop_matches', payload).catch(() => null))?.matches ?? null;
-      await storeReceipt({ shop_before: payload.shop_before });
+      await storeReceipt({ shop_before: compactDepopShopBefore(payload.shop_before) });
       try {
         const receipt = await depopAction('publish', payload);
         committed = true;

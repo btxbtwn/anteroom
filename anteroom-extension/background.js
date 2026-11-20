@@ -324,7 +324,7 @@ async function handleStudioMessage(msg) {
       break;
 
     case 'job.vendoo_api':
-      handleVendooApiMessage(msg);
+      await handleVendooApiMessage(msg);
       break;
     case 'marketplace.execute':
     case 'marketplace.result': {

@@ -16,6 +16,8 @@
   const LEEWAY_S = 60;
   // The longest life an approval may claim; the server issues five minutes.
   const MAX_LIFE_S = 600;
+  // Cap stored nonces alongside the 660 s TTL so a burst cannot fill chrome.storage.local.
+  const MAX_USED_APPROVALS = 2000;
   // The claims carry an id and SHA-256 for each of up to 30 photos.
   const TOKEN = /^[A-Za-z0-9_-]{10,200}\.[A-Za-z0-9_-]{10,10000}\.[A-Za-z0-9_-]{80,90}$/;
   const REFUSALS = {
@@ -24,6 +26,7 @@
     expired: 'This action\'s approval expired before Chrome received it. Check this computer\'s clock, then try again.',
     invalid: 'Chrome did not run this action because its approval is not valid. Reload Anteroom and try again.',
     mismatch: 'Chrome did not run this action because it is not the one Anteroom approved. Reload Anteroom and try again.',
+    capacity: 'Chrome cannot accept more approvals yet. Wait a few minutes, then start the action again in Anteroom.',
     replayed: 'Chrome already ran this approval once. Start the action again in Anteroom.',
     photos: 'Chrome did not run this action because its photos are not the ones Anteroom approved. Reload Anteroom and try again.',
   };
@@ -51,7 +54,7 @@
     return JSON.stringify(value);
   }
 
-  function createApprovalVerifier(api, { publicKey = BRIDGE_APPROVAL_PUBLIC_KEY, now = Date.now, subtle = crypto.subtle } = {}) {
+  function createApprovalVerifier(api, { publicKey = BRIDGE_APPROVAL_PUBLIC_KEY, now = Date.now, subtle = crypto.subtle, maxUsed = MAX_USED_APPROVALS } = {}) {
     let key = null;
     let tail = Promise.resolve();
     async function commandHash(command) {
@@ -80,11 +83,15 @@
       const result = tail.then(async () => {
         const used = (await api.storage.local.get(USED_KEY))[USED_KEY] || {};
         const seconds = now() / 1000;
-        for (const [nonce, until] of Object.entries(used)) if (until + LEEWAY_S < seconds) delete used[nonce];
-        if (Object.hasOwn(used, id)) return false;
+        for (const [nonce, until] of Object.entries(used)) {
+          if (!Number.isFinite(until) || until + LEEWAY_S < seconds) delete used[nonce];
+        }
+        if (Object.hasOwn(used, id)) return 'replayed';
+        const cap = Number.isInteger(maxUsed) && maxUsed > 0 ? maxUsed : MAX_USED_APPROVALS;
+        if (Object.keys(used).length >= cap) return 'capacity';
         used[id] = expires;
         await api.storage.local.set({ [USED_KEY]: used });
-        return true;
+        return null;
       });
       tail = result.catch(() => {});
       return result;
@@ -119,7 +126,7 @@
           || claims.sha !== await commandHash(command)) return 'mismatch';
       // Checked before the approval is used, so the page can still send the approved bytes.
       if (!await photosMatch(claims, photos)) return 'photos';
-      return await use(claims.jti, claims.exp) ? null : 'replayed';
+      return await use(claims.jti, claims.exp);
     }
     return {
       // Null when the command may run with `photos`; otherwise the Bridge's refusal, which

@@ -124,6 +124,17 @@ class SmokeReadinessTests(unittest.TestCase):
         self.assertFalse(any(call[0] == 'run' and 'anteroom-image-smoke-app' in call for call in calls))
         self.assert_cleanup(root, calls)
 
+    def test_smoke_pins_postgres_digest_matching_ci(self):
+        import re
+
+        ci_text = (SCRIPT.parent / 'workflows' / 'ci.yml').read_text(encoding='utf-8')
+        smoke_text = SCRIPT.read_text(encoding='utf-8')
+        ci_match = re.search(r'postgres:16@sha256:[0-9a-f]{64}', ci_text)
+        smoke_match = re.search(r'postgres:16@sha256:[0-9a-f]{64}', smoke_text)
+        self.assertIsNotNone(ci_match)
+        self.assertIsNotNone(smoke_match)
+        self.assertEqual(smoke_match.group(0), ci_match.group(0))
+
 
 if __name__ == '__main__':
     unittest.main()

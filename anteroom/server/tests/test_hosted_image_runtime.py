@@ -30,12 +30,33 @@ def _ci_pythons() -> set[str]:
     return found
 
 
+def _image_nodes() -> set[str]:
+    dockerfile = (ROOT / 'deploy/fly/Dockerfile').read_text(encoding='utf-8')
+    return set(re.findall(r'^FROM node:(\d+)[-@:]', dockerfile, re.M))
+
+
+def _ci_nodes() -> set[str]:
+    workflow = yaml.safe_load((ROOT / '.github/workflows/ci.yml').read_text(encoding='utf-8'))
+    found = set()
+    for job in workflow['jobs'].values():
+        for step in job.get('steps', []):
+            if 'setup-node' in str(step.get('uses', '')):
+                found.add(str(step['with']['node-version']))
+    return found
+
+
 def test_hosted_image_runs_the_python_ci_tests():
     image = _image_pythons()
     assert len(image) == 1, f'every Python stage of the image uses one version: {image}'
     assert image == _ci_pythons(), f'image {image} must be the Python CI tests ({_ci_pythons()})'
     pyproject = tomllib.loads((ROOT / 'anteroom/pyproject.toml').read_text(encoding='utf-8'))
     assert {pyproject['tool']['basedpyright']['pythonVersion']} == image
+
+
+def test_hosted_image_builds_with_the_node_ci_tests():
+    image = _image_nodes()
+    assert len(image) == 1, f'every Node stage of the image uses one version: {image}'
+    assert image == _ci_nodes(), f'image {image} must be the Node CI tests ({_ci_nodes()})'
 
 
 def test_dependabot_keeps_the_image_python_and_moves_only_its_digest():
@@ -46,3 +67,5 @@ def test_dependabot_keeps_the_image_python_and_moves_only_its_digest():
     ignored = {rule['dependency-name']: set(rule.get('update-types', [])) for rule in docker[0].get('ignore', [])}
     # A new Python is a deliberate move of CI, the type checker and the image together.
     assert {'version-update:semver-major', 'version-update:semver-minor'} <= ignored.get('python', set())
+    # Keep Node on CI's LTS major; Dependabot still updates the digest.
+    assert 'version-update:semver-major' in ignored.get('node', set())

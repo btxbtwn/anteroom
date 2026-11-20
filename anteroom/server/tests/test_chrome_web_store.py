@@ -44,6 +44,29 @@ def test_package_holds_every_file_the_bridge_loads_and_no_developer_files(tmp_pa
     assert json.loads(zipfile.ZipFile(out).read("manifest.json"))["version"] == version
 
 
+def test_package_excludes_oxlintrc_and_dotfiles(tmp_path):
+    out = tmp_path / "bridge.zip"
+    store.package(out)
+    names = set(zipfile.ZipFile(out).namelist())
+    assert ".oxlintrc.json" not in names
+    assert not any(part.startswith(".") for name in names for part in name.split("/"))
+
+    repo = tmp_path / "repo"
+    source = repo / "anteroom-extension"
+    (source / ".hidden-dir").mkdir(parents=True)
+    (source / "background").mkdir(parents=True)
+    (source / "manifest.json").write_text(json.dumps({"version": "1.0.0", "background": {"service_worker": "background.js"}}))
+    (source / "background.js").write_text("console.log('ok');\n")
+    (source / ".oxlintrc.json").write_text("{}\n")
+    (source / ".hidden-dir" / "ignored.js").write_text("console.log('no');\n")
+    (source / "background" / ".dotfile.json").write_text("{}\n")
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    synthetic_out = tmp_path / "synthetic.zip"
+    store.package(synthetic_out, repo)
+    assert set(zipfile.ZipFile(synthetic_out).namelist()) == {"manifest.json", "background.js"}
+
+
 def test_package_carries_no_developer_page_inspection(tmp_path):
     # Page inspection read open marketplace tabs for protocol investigation, a
     # developer feature no seller can start. Chrome Web Store policy allows web

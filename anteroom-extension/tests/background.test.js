@@ -116,3 +116,24 @@ test('a refused duplicate copy stands down until the reconnect alarm', async () 
   assert.equal(vm.runInContext('duplicateBridge', worker), false);
   assert.ok(vm.runInContext('ws', worker));
 });
+
+test('handleStudioMessage awaits handleVendooApiMessage so rejections are caught by callers', async () => {
+  const w = loadWorker();
+  let settled = false;
+  let finish;
+  w.handleVendooApiMessage = () => new Promise((_resolve, reject) => {
+    finish = () => {
+      settled = true;
+      reject(new Error('vendoo handler boom'));
+    };
+  });
+  const pending = w.handleStudioMessage({ type: 'job.vendoo_api', payload: {} });
+  let resolvedEarly = false;
+  pending.then(() => { resolvedEarly = true; }, () => {});
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(settled, false);
+  assert.equal(resolvedEarly, false);
+  finish();
+  await assert.rejects(pending, /vendoo handler boom/);
+  assert.equal(settled, true);
+});
