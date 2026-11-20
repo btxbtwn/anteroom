@@ -1042,18 +1042,40 @@ def put_ui_prefs(config: UiPrefsConfig, db: Session = Depends(get_db)):
 class ListingFormulasConfig(BaseModel):
     title: str | None = None
     description: str | None = None
+    blocks: list[str] | None = None
 
 
 def _listing_formulas_payload() -> dict:
-    from vendoo_studio.services.skill_formulas import DEFAULT_DESCRIPTION_FORMULA, DEFAULT_TITLE_FORMULA
+    from vendoo_studio.services.skill_formulas import (
+        DEFAULT_DESCRIPTION_FORMULA,
+        DEFAULT_TITLE_FORMULA,
+        DESCRIPTION_BLOCKS,
+        NO_SECTION_DESCRIPTION,
+        description_block_selection,
+    )
     from vendoo_studio.services.user_settings import get_listing_formulas
 
     custom = get_listing_formulas()
+    enabled, custom_description = description_block_selection(custom.get("description", ""))
+    chosen = set(enabled)
     return {
         "title": custom.get("title", ""),
         "description": custom.get("description", ""),
         "default_title": DEFAULT_TITLE_FORMULA,
         "default_description": DEFAULT_DESCRIPTION_FORMULA,
+        "empty_description": NO_SECTION_DESCRIPTION,
+        "custom_description": custom_description,
+        "blocks": [
+            {
+                "id": block.id,
+                "label": block.label,
+                "detail": block.detail,
+                "snippet": block.snippet,
+                "default": block.default,
+                "enabled": block.id in chosen,
+            }
+            for block in DESCRIPTION_BLOCKS
+        ],
     }
 
 
@@ -1064,10 +1086,15 @@ def get_listing_formulas():
 
 @router.put("/formulas")
 def put_listing_formulas(config: ListingFormulasConfig):
+    from vendoo_studio.services.skill_formulas import DEFAULT_DESCRIPTION_FORMULA, compile_description_blocks
     from vendoo_studio.services.user_settings import set_listing_formulas
 
+    description = config.description
     try:
-        set_listing_formulas(title=config.title, description=config.description)
+        if config.blocks is not None:
+            compiled = compile_description_blocks(config.blocks)
+            description = "" if compiled == DEFAULT_DESCRIPTION_FORMULA else compiled
+        set_listing_formulas(title=config.title, description=description)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     return {"ok": True, **_listing_formulas_payload()}

@@ -1,0 +1,1 @@
+- Choose which sections a generated description includes. The current formula stays on, and you can add or remove sections such as fit, material, trend, and care.

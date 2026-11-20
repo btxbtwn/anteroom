@@ -131,10 +131,16 @@ def _title_follows_formula(title: str, brand: str, size: str) -> bool:
 
 
 def _description_follows_formula(description: str) -> bool:
-    from vendoo_studio.services.skill_formulas import description_formula_markers
+    from vendoo_studio.services.skill_formulas import (
+        active_description_template,
+        description_formula_markers,
+    )
 
     text = description.strip()
-    if len(text) < 40 or "\n" not in text:
+    if not text:
+        return False
+    # A one-line formula, such as no labeled sections, does not demand a line break.
+    if "\n" in active_description_template() and (len(text) < 40 or "\n" not in text):
         return False
     lower = text.lower()
     return all(marker in lower for marker in description_formula_markers())
@@ -588,11 +594,20 @@ def validate_listing(
         if title and brand and not _title_follows_formula(title, brand, size):
             add_issue(result, "title", "Title must follow Brand Size Vibe Item Color Fit")
         if description and not _description_follows_formula(description):
-            add_issue(
-                result,
-                "description",
-                "Description must use the physical-item formula, including Flaws and Measurements",
+            from vendoo_studio.services.skill_formulas import (
+                description_formula_markers,
+                description_lists_flaws,
             )
+
+            markers = description_formula_markers()
+            if markers == ("measurements:",) and description_lists_flaws():
+                message = "Description must use the physical-item formula, including Flaws and Measurements"
+            elif markers:
+                names = ", ".join(marker[:-1].title() for marker in markers)
+                message = f"Description must follow your description formula, including {names}"
+            else:
+                message = "Description must follow your description formula"
+            add_issue(result, "description", message)
     elif description and "instant download" not in description.lower() and "no physical item" not in description.lower():
         add_issue(
             result,

@@ -311,45 +311,84 @@ function HiddenFieldsSection() {
   );
 }
 
+type FormulaDraft = { title: string; description: string; blockIds: string[] | null };
+
+function descriptionPreview(
+  blocks: { id: string; snippet: string }[],
+  ids: string[],
+  empty: string,
+): string {
+  const chosen = new Set(ids);
+  const parts = blocks.filter((block) => chosen.has(block.id)).map((block) => block.snippet);
+  return parts.length ? parts.join("\n\n") : empty;
+}
+
+function sameIds(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index]);
+}
+
 function ListingFormulasSection() {
   const queryClient = useQueryClient();
   const { data, isPending, isError, error } = useQuery({
     queryKey: ["settings-formulas"],
     queryFn: () => api.settings.formulas(),
   });
-  const [draft, setDraft] = useState<{ title: string; description: string } | null>(null);
+  const [draft, setDraft] = useState<FormulaDraft | null>(null);
 
   const defaultTitle = data?.default_title || "";
   const defaultDescription = data?.default_description || "";
+  const blocks = data?.blocks;
   const serverTitle = data ? data.title || defaultTitle : "";
   const serverDescription = data ? data.description || defaultDescription : "";
+  const serverBlockIds = (blocks ?? []).filter((block) => block.enabled).map((block) => block.id);
+  const defaultBlockIds = (blocks ?? []).filter((block) => block.default).map((block) => block.id);
   const title = draft?.title ?? serverTitle;
   const description = draft?.description ?? serverDescription;
+  const blockIds = draft?.blockIds ?? (data?.custom_description ? null : blocks ? serverBlockIds : null);
+  const usingBlocks = Boolean(blocks) && blockIds !== null;
 
   const saveMutation = useMutation({
-    mutationFn: (body: { title: string; description: string }) => api.settings.setFormulas(body),
+    mutationFn: (body: { title: string; description?: string; blocks?: string[] }) => api.settings.setFormulas(body),
     onSuccess: (payload) => {
       queryClient.setQueryData(["settings-formulas"], payload);
       setDraft(null);
     },
   });
 
-  const dirty =
-    draft !== null &&
-    (draft.title.trim() !== serverTitle.trim() || draft.description.trim() !== serverDescription.trim());
-  const usingCustom = Boolean(data?.title || data?.description);
+  const titleDirty = draft !== null && draft.title.trim() !== serverTitle.trim();
+  const textDirty = draft !== null && draft.blockIds === null && draft.description.trim() !== serverDescription.trim();
+  const blocksDirty = draft?.blockIds != null && (
+    Boolean(data?.custom_description) || !sameIds(draft.blockIds, serverBlockIds)
+  );
+  const dirty = titleDirty || textDirty || blocksDirty;
+  const usingCustom = Boolean(data?.title || data?.description || (blockIds && !sameIds(blockIds, defaultBlockIds)));
 
-  const persist = (nextTitle: string, nextDescription: string) => {
+  const persist = (nextTitle: string, nextDescription: string, nextBlocks: string[] | null) => {
     const titleToSave = nextTitle.trim() === defaultTitle.trim() ? "" : nextTitle;
+    if (nextBlocks !== null) {
+      saveMutation.mutate({ title: titleToSave, blocks: nextBlocks });
+      return;
+    }
     const descriptionToSave = nextDescription.trim() === defaultDescription.trim() ? "" : nextDescription;
     saveMutation.mutate({ title: titleToSave, description: descriptionToSave });
+  };
+
+  const editTitle = (nextTitle: string) => setDraft({ title: nextTitle, description, blockIds });
+
+  const toggleBlock = (id: string, checked: boolean) => {
+    const current = blockIds ?? serverBlockIds;
+    const next = new Set(current);
+    if (checked) next.add(id);
+    else next.delete(id);
+    const ordered = (blocks ?? []).map((block) => block.id).filter((blockId) => next.has(blockId));
+    setDraft({ title, description, blockIds: ordered });
   };
 
   return (
     <SettingsSection id="listing-formulas" title="Listing formulas">
       <SettingsRow
         title="Title and description"
-        description="Every generated listing follows these; clear a field and save to restore the default."
+        description="New listings follow the title and the description sections you leave on. The current formula starts on."
       >
         {isPending ? (
           <LoadingNote>Loading formulas</LoadingNote>
@@ -363,25 +402,83 @@ function ListingFormulasSection() {
                 size="sm"
                 font="mono"
                 value={title}
-                onChange={(e) => setDraft({ title: e.target.value, description })}
+                onChange={(e) => editTitle(e.target.value)}
                 spellCheck={false}
                 aria-label="Title formula"
               />
             </Label>
-            <Label className="grid gap-1 text-xs font-normal text-muted-foreground">
-              Description
-              <Textarea
-                size="sm"
-                className="font-mono text-xs"
-                value={description}
-                onChange={(e) => setDraft({ title, description: e.target.value })}
-                spellCheck={false}
-                rows={6}
-                aria-label="Description formula"
-              />
-            </Label>
+            {blocks ? (
+              <div className="grid gap-2">
+                {!usingBlocks ? (
+                  <Label className="grid gap-1 text-xs font-normal text-muted-foreground">
+                    Description
+                    <Textarea
+                      size="sm"
+                      className="font-mono text-xs"
+                      value={description}
+                      onChange={(e) => setDraft({ title, description: e.target.value, blockIds: null })}
+                      spellCheck={false}
+                      rows={6}
+                      aria-label="Description formula"
+                    />
+                  </Label>
+                ) : (
+                  <>
+                    <span className="text-xs text-muted-foreground">Description</span>
+                    <p className="text-xs text-muted-foreground">
+                      Turn a section off to drop it, or on to add it. A section is left out of a listing when the item does not have that fact.
+                    </p>
+                  </>
+                )}
+                {data?.custom_description && draft?.blockIds == null ? (
+                  <SettingsNote>This description was typed in. Turn a section on or off to replace it with the list.</SettingsNote>
+                ) : null}
+                <div className="divide-y divide-border/50 overflow-hidden rounded-lg border border-border/60" role="group" aria-label="Description sections">
+                  {blocks.map((block) => (
+                    <Label
+                      key={block.id}
+                      className="flex min-h-11 cursor-pointer items-center gap-3 bg-background px-3 py-2 font-normal"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm text-foreground">{block.label}</span>
+                        <span className="block text-xs text-muted-foreground">{block.detail}</span>
+                      </span>
+                      <Switch
+                        size="sm"
+                        checked={(blockIds ?? serverBlockIds).includes(block.id)}
+                        disabled={saveMutation.isPending}
+                        aria-label={block.label}
+                        onCheckedChange={(checked) => toggleBlock(block.id, checked)}
+                      />
+                    </Label>
+                  ))}
+                </div>
+                {usingBlocks ? (
+                  <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-border/60 bg-muted/40 p-3 font-mono text-xs text-foreground">
+                    {descriptionPreview(blocks, blockIds ?? [], data?.empty_description || "")}
+                  </pre>
+                ) : null}
+              </div>
+            ) : (
+              <Label className="grid gap-1 text-xs font-normal text-muted-foreground">
+                Description
+                <Textarea
+                  size="sm"
+                  className="font-mono text-xs"
+                  value={description}
+                  onChange={(e) => setDraft({ title, description: e.target.value, blockIds: null })}
+                  spellCheck={false}
+                  rows={6}
+                  aria-label="Description formula"
+                />
+              </Label>
+            )}
             <div className="flex flex-wrap items-center gap-2">
-              <Button size="sm" disabled={saveMutation.isPending || !dirty} onClick={() => persist(title, description)}>
+              <Button
+                size="sm"
+                disabled={saveMutation.isPending || !dirty}
+                onClick={() => persist(title, description, blockIds)}
+              >
                 {saveMutation.isPending ? <Spinner /> : null}
                 {saveMutation.isPending ? "Saving" : "Save formulas"}
               </Button>
@@ -390,8 +487,13 @@ function ListingFormulasSection() {
                 variant="outline"
                 disabled={saveMutation.isPending || (!usingCustom && !dirty)}
                 onClick={() => {
-                  setDraft({ title: defaultTitle, description: defaultDescription });
-                  persist(defaultTitle, defaultDescription);
+                  if (blocks) {
+                    setDraft({ title: defaultTitle, description: defaultDescription, blockIds: defaultBlockIds });
+                    persist(defaultTitle, defaultDescription, defaultBlockIds);
+                    return;
+                  }
+                  setDraft({ title: defaultTitle, description: defaultDescription, blockIds: null });
+                  persist(defaultTitle, defaultDescription, null);
                 }}
               >
                 <RotateCcwIcon />
