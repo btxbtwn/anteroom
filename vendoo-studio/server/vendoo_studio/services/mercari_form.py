@@ -143,11 +143,20 @@ def form(listing: dict, shipping_classes: list[dict] | None = None, *, notes: li
     brand = marketplace_text(listing, "mercari", "brand")
     blank = re.sub(r"[^a-z0-9]+", " ", brand.casefold()).strip() in {
         "", "unbranded", "no brand", "not sure", "no brand not sure", "none", "n a", "na", "unknown"}
-    brand = NO_BRAND if blank or specifics.get("noBrand") is True else next(
-        (name for name in brands if name.casefold() == brand.casefold()), brand)
+    known = next((name for name in brands if name.casefold() == brand.casefold()), None)
+    unconfirmed = not blank and specifics.get("noBrand") is not True and known is None
+    brand = NO_BRAND if blank or specifics.get("noBrand") is True else known or brand
     picker = brand_choices()
     fields["mercari_specifics.brand"].update(value=brand, options=list(picker["options"]),
                                             option_values=dict(picker["option_values"]))
+    if unconfirmed:
+        # This catalog is a dated copy, so a missing name is not proof Mercari
+        # lacks the brand. List checks Mercari's current list and sends no brand
+        # only when Mercari has no match; a failed check stops List instead.
+        fields["mercari_specifics.brand"]["help"] = (
+            f"“{brand}” isn't in Anteroom's copy of Mercari's brand list. When you list, Anteroom checks "
+            "Mercari's current list: if Mercari has this brand it's used, otherwise the item is listed with "
+            "No brand. Choose a brand or No brand / Not sure to decide now.")
     fields["mercari_specifics.condition"]["value"] = _condition(specifics.get("condition") or listing.get("condition"))
     sizes = _sizes(category)
     if sizes:

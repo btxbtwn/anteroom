@@ -54,6 +54,49 @@ class MercariFormTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(fields['mercari_specifics.package.fitsShoebox']['required'])
         self.assertEqual(listing, before)
 
+    def test_a_brand_missing_from_the_catalog_copy_is_not_shown_as_no_brand(self):
+        # AM TEES XL (draft 0b945d2660ec): General brand "AM Tees", no Mercari brand of its own.
+        # The bundled catalog is a dated copy, so absence there is not a confirmed no-match.
+        listing = {'brand': 'AM Tees', 'condition': 'Pre-Owned - Good', 'price': 20}
+        before = copy.deepcopy(listing)
+        row = next(row for row in mercari_form.form(listing)['fields'] if row['path'] == 'mercari_specifics.brand')
+        self.assertEqual(row['value'], 'AM Tees')
+        self.assertIn("isn't in Anteroom's copy of Mercari's brand list", row['help'])
+        self.assertIn('otherwise the item is listed with No brand', row['help'])
+        self.assertEqual(listing, before)
+
+    def test_recognized_blank_and_seller_brands_are_kept(self):
+        row = next(row for row in mercari_form.form({'brand': 'nike'})['fields'] if row['path'] == 'mercari_specifics.brand')
+        self.assertEqual(row['value'], 'Nike')
+        self.assertNotIn('help', row)
+        for listing in ({'brand': ''}, {'brand': 'Unbranded'}, {'brand': 'AM Tees', 'mercari_specifics': {'noBrand': True}}):
+            row = next(row for row in mercari_form.form(listing)['fields'] if row['path'] == 'mercari_specifics.brand')
+            self.assertEqual(row['value'], mercari_form.NO_BRAND, listing)
+            self.assertNotIn('help', row)
+        locked = {'brand': 'Other', 'mercari_specifics': {'brand': 'AM Tees'},
+                  'seller_fields': ['mercari_specifics.brand']}
+        row = next(row for row in mercari_form.form(locked)['fields'] if row['path'] == 'mercari_specifics.brand')
+        self.assertEqual(row['value'], 'AM Tees')
+
+    def test_an_unconfirmed_brand_does_not_block_list_before_mercaris_live_check(self):
+        from vendoo_studio.services import native_contract
+
+        def brand_gaps(listing):
+            listing = {**listing, native_contract.KEY: native_contract.capture(
+                listing, {'mercari': mercari_form.form(listing)}, ['mercari'])}
+            return [gap for gap in native_contract.gaps(listing, 'mercari') if gap['field'] == 'mercari_specifics.brand']
+
+        found = brand_gaps({'brand': 'AM Tees', 'price': 20})
+        self.assertEqual(len(found), 1)
+        self.assertFalse(found[0]['blocking'])
+        self.assertIn("isn't in Anteroom's copy of Mercari's brand list", found[0]['message'])
+        self.assertEqual(brand_gaps({'brand': 'Nike', 'price': 20}), [])
+
+    def test_an_unreadable_brand_catalog_is_an_error_not_no_brand(self):
+        with patch.object(mercari_form, 'catalog', side_effect=OSError('catalog unreadable')):
+            with self.assertRaises(OSError):
+                mercari_form.form({'brand': 'AM Tees'})
+
     async def test_shipping_requires_the_sellers_shoebox_answer_and_uses_live_fees(self):
         listing = {'direct_category_ids': {'mercari': '275'}, 'weight_lb': 1, 'package_dimensions_in': '13x10x3'}
         quote = {'id': 2552, 'fee': 799, 'standardFee': 899, 'etaForSeller': '1 - 7 days',

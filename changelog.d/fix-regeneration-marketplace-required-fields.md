@@ -1,0 +1,2 @@
+- Poshmark's Condition now shows the listing's condition instead of staying empty and counting as a missing field.
+- Mercari's Brand now explains when a brand isn't in Anteroom's copy of Mercari's brand list: listing checks Mercari's current list and uses No brand only if Mercari doesn't have it.
