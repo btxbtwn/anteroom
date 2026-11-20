@@ -5,6 +5,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from multiprocessing import Process
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import patch
@@ -65,6 +66,25 @@ def _readable_sqlite_names(db_path: Path) -> list[str]:
         return _read_sqlite_names(db_path)
     except sqlite3.DatabaseError:
         return []
+
+
+def _crash_after_primary_rename(root: str) -> None:
+    """Leave a mid-adoption fixture: marker + renamed primary, WAL still under the legacy name.
+
+    Exits without closing the writer so SQLite does not checkpoint into the renamed
+    primary (which would change destination identity and hide WAL dependence).
+    """
+    data = Path(root)
+    legacy = data / "vendoo_studio.db"
+    target = data / "anteroom.db"
+    conn = _open_sqlite_with_uncheckpointed_wal(legacy, "from-wal")
+    plan = config._build_fresh_legacy_database_move_plan(data, legacy, target)
+    assert plan is not None
+    _write_adoption_plan_marker(data, plan)
+    legacy.rename(target)
+    assert (data / "vendoo_studio.db-wal").is_file()
+    del conn
+    os._exit(0)
 
 
 class ConfigPathTest(unittest.TestCase):
@@ -145,24 +165,12 @@ class ConfigPathTest(unittest.TestCase):
             self.assertFalse((data / config.LEGACY_DATABASE_ADOPTION_MARKER).exists())
             self.assertEqual(_read_sqlite_names(target), ["row-one"])
 
-    def test_fresh_adoption_rejects_preexisting_target_sidecar(self):
-        """Do not rename the legacy primary beside an existing anteroom.db-wal."""
-        with tempfile.TemporaryDirectory() as tmp:
-            data = Path(tmp)
-            legacy = data / "vendoo_studio.db"
-            _write_sqlite_with_committed_row(legacy, "legacy-row")
-            preexisting = data / "anteroom.db-wal"
-            preexisting.write_bytes(b"foreign-wal")
-            os.environ.pop("ANTEROOM_DATABASE_URL", None)
-            config.adopt_legacy_database(data)
-            self.assertTrue(legacy.is_file())
-            self.assertFalse((data / "anteroom.db").exists())
-            self.assertEqual(preexisting.read_bytes(), b"foreign-wal")
-            self.assertFalse((data / config.LEGACY_DATABASE_ADOPTION_MARKER).exists())
-            self.assertEqual(_read_sqlite_names(legacy), ["legacy-row"])
+    def test_fresh_refusal_with_target_sidecar_blocks_empty_default_db(self):
+        """Legacy primary + foreign target WAL, no target primary: raise before open.
 
-    def test_fresh_adoption_rejects_when_both_basename_wals_exist(self):
-        """Legacy primary + both WALs, no target primary: do not rename anything."""
+        ``database.py`` calls ``adopt_legacy_database`` before ``make_engine``; a
+        raised error is what stops an empty ``anteroom.db`` from replacing listings.
+        """
         with tempfile.TemporaryDirectory() as tmp:
             data = Path(tmp)
             legacy = data / "vendoo_studio.db"
@@ -173,7 +181,8 @@ class ConfigPathTest(unittest.TestCase):
             target_wal = data / "anteroom.db-wal"
             target_wal.write_bytes(b"foreign-wal")
             os.environ.pop("ANTEROOM_DATABASE_URL", None)
-            config.adopt_legacy_database(data)
+            with self.assertRaises(config.LegacyDatabaseAdoptionError):
+                config.adopt_legacy_database(data)
             self.assertTrue(legacy.is_file())
             self.assertFalse((data / "anteroom.db").exists())
             self.assertTrue(legacy_wal.is_file())
@@ -185,19 +194,13 @@ class ConfigPathTest(unittest.TestCase):
         """Crash after marker + main rename: finish sidecars; committed rows survive."""
         with tempfile.TemporaryDirectory() as tmp:
             data = Path(tmp)
-            legacy = data / "vendoo_studio.db"
             target = data / "anteroom.db"
-            # Keep the connection open so close does not checkpoint the WAL away before
-            # we rename only the main file (the interruption window).
-            conn = _open_sqlite_with_uncheckpointed_wal(legacy, "from-wal")
-            try:
-                plan = config._build_fresh_legacy_database_move_plan(data, legacy, target)
-                self.assertIsNotNone(plan)
-                _write_adoption_plan_marker(data, plan)
-                legacy.rename(target)
-                self.assertTrue((data / "vendoo_studio.db-wal").is_file())
-            finally:
-                conn.close()
+            child = Process(target=_crash_after_primary_rename, args=(tmp,))
+            child.start()
+            child.join(timeout=30)
+            self.assertEqual(child.exitcode, 0)
+            self.assertTrue(target.is_file())
+            self.assertTrue((data / "vendoo_studio.db-wal").is_file())
             # Immediately before resume: the committed row still depends on the WAL
             # (main alone, with the WAL under the old basename, must not show it).
             self.assertNotIn("from-wal", _readable_sqlite_names(target))
@@ -255,8 +258,9 @@ class ConfigPathTest(unittest.TestCase):
             _write_adoption_plan_marker(data, plan)
             marker = data / config.LEGACY_DATABASE_ADOPTION_MARKER
             os.environ.pop("ANTEROOM_DATABASE_URL", None)
-            config.adopt_legacy_database(data)
-            self.assertFalse(marker.exists())
+            with self.assertRaises(config.LegacyDatabaseAdoptionError):
+                config.adopt_legacy_database(data)
+            self.assertTrue(marker.is_file())
             self.assertEqual(_read_sqlite_names(data / "anteroom.db"), ["new"])
             self.assertEqual(_read_sqlite_names(legacy), ["old"])
 
@@ -289,8 +293,8 @@ class ConfigPathTest(unittest.TestCase):
             self.assertFalse(legacy.exists())
             self.assertEqual(_read_sqlite_names(data / "anteroom.db"), ["legacy-row"])
 
-    def test_competing_wals_abandon_marker_so_later_start_cannot_attach(self):
-        """After a WAL conflict, dropping the new WAL must not adopt the legacy one."""
+    def test_competing_wals_keep_marker_and_refuse_open(self):
+        """Competing WALs: keep the marker and raise so startup cannot attach either."""
         with tempfile.TemporaryDirectory() as tmp:
             data = Path(tmp)
             target = data / "anteroom.db"
@@ -299,8 +303,6 @@ class ConfigPathTest(unittest.TestCase):
             new_wal.write_bytes(b"new-wal")
             orphan = data / "vendoo_studio.db-wal"
             orphan.write_bytes(b"competing-legacy-wal")
-            # Primary already moved (source gone, dest present); wal step conflicts
-            # because both basename WALs exist — preflight must abandon without moving.
             plan = [
                 config._LegacyDbMove(
                     config.LEGACY_DATABASE_NAME,
@@ -316,15 +318,108 @@ class ConfigPathTest(unittest.TestCase):
             _write_adoption_plan_marker(data, plan)
             marker = data / config.LEGACY_DATABASE_ADOPTION_MARKER
             os.environ.pop("ANTEROOM_DATABASE_URL", None)
-            config.adopt_legacy_database(data)
-            self.assertFalse(marker.exists())
+            with self.assertRaises(config.LegacyDatabaseAdoptionError):
+                config.adopt_legacy_database(data)
+            self.assertTrue(marker.is_file())
             self.assertEqual(orphan.read_bytes(), b"competing-legacy-wal")
             self.assertEqual(new_wal.read_bytes(), b"new-wal")
+            # After the conflict clears without a marker, the orphan must stay detached.
+            marker.unlink()
             new_wal.unlink()
             config.adopt_legacy_database(data)
             self.assertEqual(orphan.read_bytes(), b"competing-legacy-wal")
             self.assertFalse((data / "anteroom.db-wal").exists())
             self.assertEqual(_read_sqlite_names(target), ["new-primary"])
+
+    def test_replaced_destination_identity_refuses_without_attaching_wal(self):
+        """Completed primary step whose destination no longer matches the plan."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            target = data / "anteroom.db"
+            _write_sqlite_with_committed_row(target, "replacement")
+            orphan = data / "vendoo_studio.db-wal"
+            orphan.write_bytes(b"legacy-wal-bytes")
+            plan = [
+                config._LegacyDbMove(
+                    config.LEGACY_DATABASE_NAME,
+                    config.DATABASE_NAME,
+                    size=1,
+                    mtime_ns=1,
+                ),
+                config._LegacyDbMove(
+                    f"{config.LEGACY_DATABASE_NAME}-wal",
+                    f"{config.DATABASE_NAME}-wal",
+                    *config._legacy_database_file_identity(orphan),
+                ),
+            ]
+            _write_adoption_plan_marker(data, plan)
+            marker = data / config.LEGACY_DATABASE_ADOPTION_MARKER
+            os.environ.pop("ANTEROOM_DATABASE_URL", None)
+            with self.assertRaises(config.LegacyDatabaseAdoptionError):
+                config.adopt_legacy_database(data)
+            self.assertTrue(marker.is_file())
+            self.assertFalse((data / "anteroom.db-wal").exists())
+            self.assertEqual(orphan.read_bytes(), b"legacy-wal-bytes")
+            self.assertEqual(_read_sqlite_names(target), ["replacement"])
+
+    def test_truncated_plan_missing_legacy_wal_refuses(self):
+        """A v2 marker that omits an existing legacy WAL must not move the primary."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            legacy = data / "vendoo_studio.db"
+            _write_sqlite_with_committed_row(legacy, "legacy-row")
+            wal = data / "vendoo_studio.db-wal"
+            if not wal.is_file():
+                wal.write_bytes(b"wal-bytes")
+            plan = [
+                config._LegacyDbMove(
+                    config.LEGACY_DATABASE_NAME,
+                    config.DATABASE_NAME,
+                    *config._legacy_database_file_identity(legacy),
+                )
+            ]
+            _write_adoption_plan_marker(data, plan)
+            marker = data / config.LEGACY_DATABASE_ADOPTION_MARKER
+            os.environ.pop("ANTEROOM_DATABASE_URL", None)
+            with self.assertRaises(config.LegacyDatabaseAdoptionError):
+                config.adopt_legacy_database(data)
+            self.assertTrue(marker.is_file())
+            self.assertTrue(legacy.is_file())
+            self.assertFalse((data / "anteroom.db").exists())
+            self.assertTrue(wal.is_file())
+
+    def test_unplanned_destination_sidecar_on_resume_refuses(self):
+        """Resume must not continue when a target sidecar exists outside the plan."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            target = data / "anteroom.db"
+            _write_sqlite_with_committed_row(target, "moved-primary")
+            foreign_shm = data / "anteroom.db-shm"
+            foreign_shm.write_bytes(b"foreign-shm")
+            orphan = data / "vendoo_studio.db-wal"
+            orphan.write_bytes(b"legacy-wal-bytes")
+            plan = [
+                config._LegacyDbMove(
+                    config.LEGACY_DATABASE_NAME,
+                    config.DATABASE_NAME,
+                    *config._legacy_database_file_identity(target),
+                ),
+                config._LegacyDbMove(
+                    f"{config.LEGACY_DATABASE_NAME}-wal",
+                    f"{config.DATABASE_NAME}-wal",
+                    *config._legacy_database_file_identity(orphan),
+                ),
+            ]
+            _write_adoption_plan_marker(data, plan)
+            marker = data / config.LEGACY_DATABASE_ADOPTION_MARKER
+            os.environ.pop("ANTEROOM_DATABASE_URL", None)
+            with self.assertRaises(config.LegacyDatabaseAdoptionError):
+                config.adopt_legacy_database(data)
+            self.assertTrue(marker.is_file())
+            self.assertFalse((data / "anteroom.db-wal").exists())
+            self.assertEqual(orphan.read_bytes(), b"legacy-wal-bytes")
+            self.assertEqual(foreign_shm.read_bytes(), b"foreign-shm")
+            self.assertEqual(_read_sqlite_names(target), ["moved-primary"])
 
     def test_log_path_lives_under_user_data(self):
         with tempfile.TemporaryDirectory() as tmp:
