@@ -6,7 +6,7 @@ import os
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal, overload
 
-DEFAULT_MANAGED_MODEL = 'google/gemini-3.8-flash'
+DEFAULT_MANAGED_MODEL = 'google/gemini-3.1-flash-lite'
 _MANAGED_REASONING_EFFORTS = frozenset({'minimal', 'low', 'medium', 'high', 'xhigh', 'max'})
 
 
