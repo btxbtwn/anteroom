@@ -3,9 +3,12 @@
 // Depop or Etsy) and press Enter. Read-only: it never saves, posts or changes the page.
 //
 // It prints and downloads <marketplace>-inspection.json: the page URL without its query,
-// title, visible field and button labels, listing links, and public script URLs. Form
-// values, inline state, cookies and headers are left out. To download one of the listed
-// public scripts instead, set SCRIPT_URL to it before running.
+// title, visible field and button labels, listing links, and public script URLs. Values
+// typed into the page's fields, inline state, cookies and headers are left out. On Etsy
+// it also reads the listing editor's data for a new, empty listing and includes its
+// default form values (empty_form_defaults) and core_details_data; on Depop and Etsy it
+// includes the key names of one draft. To download one of the listed public scripts
+// instead, set SCRIPT_URL to it before running.
 //
 // This runs only in your own DevTools. It is not part of Anteroom Bridge: the store
 // package and the Mac app's copy leave tools/ out.
