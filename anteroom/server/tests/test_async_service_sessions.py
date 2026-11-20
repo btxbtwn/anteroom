@@ -514,3 +514,67 @@ def test_cancelled_job_joins_next_step_before_finalizing(monkeypatch):
 
     asyncio.run(run())
     assert events == ["initialized", "finished", "released"]
+
+
+@pytest.mark.parametrize("phase", ["journal", "result", "finalizer"])
+@pytest.mark.parametrize("worker_fails", [False, True])
+def test_cancelled_job_joins_mutations_before_releasing(monkeypatch, phase, worker_fails):
+    import asyncio
+    import threading
+
+    from anteroom.services import approved_photos, etsy_listings
+    from anteroom.services import native_marketplaces as native
+
+    entered = threading.Event()
+    release = threading.Event()
+    events = []
+
+    def mutation(name, result=None):
+        def work(*_args):
+            if name == phase:
+                entered.set()
+                assert release.wait(5)
+            events.append(name)
+            if name == phase and worker_fails:
+                raise RuntimeError("worker failed")
+            return result
+        return work
+
+    async def worker(work, *args):
+        return await asyncio.to_thread(work, None, *args)
+
+    async def execute(_step, _snapshot, _photos, _binding, record, _active, **_kwargs):
+        await record({"listing_id": "listing"})
+        return {"state": "published"}
+
+    monkeypatch.setattr(native, "in_worker_session", worker)
+    monkeypatch.setattr(native, "_open_step", lambda *_: ({}, {}))
+    monkeypatch.setattr(native, "_store", mutation("journal"))
+    monkeypatch.setattr(native, "_apply_result", mutation("result", {"state": "published"}))
+    monkeypatch.setattr(native, "_finish_job", mutation("finalizer"))
+    monkeypatch.setattr(native, "release_api_job", lambda *_: events.append("released"))
+    monkeypatch.setattr(approved_photos, "load", lambda *_: [])
+    monkeypatch.setattr(etsy_listings, "execute", execute)
+
+    async def run():
+        task = asyncio.create_task(native.run_job("job", "conv", "etsy", ["publish"], {}))
+        try:
+            assert await asyncio.to_thread(entered.wait, 5)
+            for _ in range(2):
+                task.cancel()
+                for _ in range(20):
+                    await asyncio.sleep(0)
+            assert not task.done()
+            assert "released" not in events
+            if phase != "finalizer":
+                assert "finalizer" not in events
+        finally:
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+    asyncio.run(run())
+    assert events[-1] == "released"
+    assert events.index(phase) < events.index("released")
+    if phase != "finalizer":
+        assert events.index(phase) < events.index("finalizer")
