@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1068 — 2026-11-20
+
+- The Mac app's sandbox smoke check keeps an older installed Anteroom on throwaway data instead of the seller's own data folder.
+
 ## 0.1.1067 — 2026-11-20
 
 - Fill Depop condition and colors from the general listing details when not set on Depop, keep weight-based Depop package sizes during generation, and stop flagging inherited Depop, Mercari, and Poshmark fields as empty.

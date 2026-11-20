@@ -1,1 +1,0 @@
-- The Mac app's sandbox smoke check keeps an older installed Anteroom on throwaway data instead of the seller's own data folder.
