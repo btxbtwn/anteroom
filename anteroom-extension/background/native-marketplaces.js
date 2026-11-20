@@ -265,10 +265,21 @@ async function handleNativeMarketplaceMessage(msg, reply = result => sendBrowser
     const context = { marketplace: msg.payload.marketplace, action: msg.payload.action, draft_url: msg.payload.draft_url,
       listing_id: msg.payload.listing_id, local_draft_id: msg.payload.local_draft_id, revision_id: msg.payload.revision_id,
       operation_id: operationId };
-    await saveNativeOperationJournal(key, { finished: false, context });
+    try {
+      await saveNativeOperationJournal(key, { finished: false, context });
+    } catch (error) {
+      // Do not run the marketplace action if the initial journal entry could not be persisted;
+      // reply cleanly with safe_to_retry=true so the caller is never left waiting.
+      reply(marketplaceFailure(error, true));
+      return;
+    }
     const result = await runNativeMarketplace(msg);
-    const journal = (await chrome.storage.local.get(key))[key];
-    await saveNativeOperationJournal(key, { ...journal, finished: true, result });
+    try {
+      const journal = (await chrome.storage.local.get(key))[key];
+      await saveNativeOperationJournal(key, { ...journal, finished: true, result });
+    } catch (error) {
+      console.warn('[BRIDGE] Failed to save finished native operation journal:', error);
+    }
     reply(result);
   } finally { releaseNativeOperation(operation); }
 }

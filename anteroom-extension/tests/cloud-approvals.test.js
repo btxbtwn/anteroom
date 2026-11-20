@@ -151,7 +151,7 @@ test('the canonical form matches the server for the values a command carries', (
     '{"a":"é\\"\\n","b":[1,2.5,null,true],"c":{"w":0,"x":1e-7,"y":1e+21,"z":0.1}}');
 });
 
-test('used approvals cap entry count alongside TTL without breaking active replay protection', async () => {
+test('used approvals cap entry count per account and keep unrelated accounts and cancel working', async () => {
   const s = await setup();
   const store = storage();
   let seconds = NOW;
@@ -166,22 +166,37 @@ test('used approvals cap entry count alongside TTL without breaking active repla
   assert.equal((await verifier.verify(fourth, ALICE)).approval, 'capacity');
   const used = (await store.local.get('anteroom_used_approvals')).anteroom_used_approvals;
   assert.equal(Object.keys(used).length, 3);
-  // Every accepted approval remains protected when capacity is reached.
+  // Every accepted approval remains protected when Alice reaches capacity.
   assert.equal((await verifier.verify(first, ALICE)).approval, 'replayed');
   assert.equal((await verifier.verify(second, ALICE)).approval, 'replayed');
+
+  // Unrelated accounts and Cancel remain unblocked even while Alice's bucket is full.
+  const bobCmd = await s.signer.sign(update(), BOB, { seconds: NOW });
+  assert.equal(await verifier.verify(bobCmd, BOB), null);
+  assert.equal((await verifier.verify(bobCmd, BOB)).approval, 'replayed');
+  const cancelCmd = await s.signer.sign({
+    type: 'cancel',
+    message_id: 'msg-cancel',
+    job_id: 'job-1',
+    payload: {},
+  }, ALICE, { seconds: NOW });
+  assert.equal(await verifier.verify(cancelCmd, ALICE), null);
+  assert.equal((await verifier.verify(cancelCmd, ALICE)).approval, 'replayed');
+
   seconds = NOW + 161;
   assert.equal(await verifier.verify(fourth, ALICE), null);
   assert.equal((await verifier.verify(second, ALICE)).approval, 'replayed');
   assert.equal((await verifier.verify(fourth, ALICE)).approval, 'replayed');
 
-  // Oversized pre-existing live storage must also retain every nonce.
+  // Pre-existing live nonces in legacy anteroom_used_approvals remain protected from replay.
   const bulk = storage();
-  const oversized = {};
+  const seeded = await s.signer.sign(update(), ALICE, { seconds: NOW });
+  const seededClaims = JSON.parse(Buffer.from(seeded.payload.approval.split('.')[1], 'base64url').toString('utf8'));
+  const oversized = { [seededClaims.jti]: seededClaims.exp };
   for (let i = 0; i < 2050; i += 1) oversized[i.toString(16).padStart(32, '0')] = NOW + 100 + i;
   await bulk.local.set({ anteroom_used_approvals: oversized });
   const defaultVerifier = createApprovalVerifier({ storage: bulk }, { publicKey: s.signer.publicKey, now: () => NOW * 1000 });
-  const fresh = await s.signer.sign(update(), ALICE, { seconds: NOW });
-  assert.equal((await defaultVerifier.verify(fresh, ALICE)).approval, 'capacity');
+  assert.equal((await defaultVerifier.verify(seeded, ALICE)).approval, 'replayed');
   const retained = (await bulk.local.get('anteroom_used_approvals')).anteroom_used_approvals;
   assert.deepEqual(retained, oversized);
 });

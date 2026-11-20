@@ -309,10 +309,14 @@ for (const failure of ['quota', 'persistent quota', 'unrelated']) {
       assert.equal(writes, 3); // initial failure, retry, settlement
       assert.equal(store.native_operation_dead, undefined);
     } else {
-      await assert.rejects(s.context.handleNativeMarketplaceMessage(s.msg), /quota exceeded|Storage unavailable/);
+      await s.context.handleNativeMarketplaceMessage(s.msg);
       assert.equal(executions, 0);
       assert.equal(writes, failure === 'unrelated' ? 1 : 2);
       assert.equal(Boolean(store.native_operation_dead), failure === 'unrelated');
+      assert.equal(s.replies.length, 1);
+      assert.equal(s.replies[0].ok, false);
+      assert.equal(s.replies[0].safe_to_retry, true);
+      assert.match(s.replies[0].error, /quota exceeded|Storage unavailable/);
     }
     assert.ok(store.native_operation_active);
     assert.ok(store.native_operation_uncertain);

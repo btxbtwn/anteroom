@@ -79,17 +79,26 @@
       return true;
     }
     // Remember each approval until it expires, so a copy of it cannot run again.
-    function use(id, expires) {
+    // Partition capacity per account and reserve a separate bucket for Cancel so one
+    // high-volume account cannot block unrelated accounts or Cancel commands.
+    function use(id, expires, bucket) {
       const result = tail.then(async () => {
         const used = (await api.storage.local.get(USED_KEY))[USED_KEY] || {};
         const seconds = now() / 1000;
-        for (const [nonce, until] of Object.entries(used)) {
-          if (!Number.isFinite(until) || until + LEEWAY_S < seconds) delete used[nonce];
+        let bucketCount = 0;
+        for (const [nonce, raw] of Object.entries(used)) {
+          const until = typeof raw === 'number' ? raw : raw?.exp;
+          const entryBucket = typeof raw === 'number' ? '' : (raw?.b || '');
+          if (!Number.isFinite(until) || until + LEEWAY_S < seconds) {
+            delete used[nonce];
+          } else if (entryBucket === bucket) {
+            bucketCount += 1;
+          }
         }
         if (Object.hasOwn(used, id)) return 'replayed';
         const cap = Number.isInteger(maxUsed) && maxUsed > 0 ? maxUsed : MAX_USED_APPROVALS;
-        if (Object.keys(used).length >= cap) return 'capacity';
-        used[id] = expires;
+        if (bucketCount >= cap) return 'capacity';
+        used[id] = { exp: expires, b: bucket };
         await api.storage.local.set({ [USED_KEY]: used });
         return null;
       });
@@ -126,7 +135,9 @@
           || claims.sha !== await commandHash(command)) return 'mismatch';
       // Checked before the approval is used, so the page can still send the approved bytes.
       if (!await photosMatch(claims, photos)) return 'photos';
-      return await use(claims.jti, claims.exp);
+      const acct = String(accountId || '').toLowerCase();
+      const bucket = command.type === 'cancel' ? 'cancel' : acct ? `acct:${acct}` : '';
+      return await use(claims.jti, claims.exp, bucket);
     }
     return {
       // Null when the command may run with `photos`; otherwise the Bridge's refusal, which

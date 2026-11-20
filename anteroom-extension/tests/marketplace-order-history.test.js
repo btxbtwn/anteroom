@@ -336,3 +336,28 @@ test('Poshmark order history classifies HTTP auth, rate-limit, server, network a
     assert.deepEqual(await read(c, 'poshmark'), { ok: false, error: expected }, `detail ${expected}`);
   }
 });
+
+test('order history reads stay outside listing cancellation scope', async () => {
+  const seller = 'cccccccccccccccccccccccc';
+  const orderId = 'aaaaaaaaaaaaaaaaaaaaaaaa';
+  const { c } = worker({
+    [`/vm-rest/users/${seller}/orders/sales`]: () => {
+      // Simulate a Poshmark listing operation starting and being cancelled mid-pass.
+      c.nativeOperationFor = () => ({ id: 'other-listing', cancelled: true, controller: new AbortController() });
+      return [200, { data: { sales_summary: [{ id: orderId, display_status: 'Order Complete' }] },
+        meta: { next_max_id: '' } }];
+    },
+    [`/order/sales/${orderId}`]: [200, poshmarkPage({
+      id: orderId,
+      state: 'seller_confirm_initiated',
+      inventory_booked_at: '2026-10-12T10:00:00Z',
+      total_price_amount: { val: '20.00' },
+      pm_fee_amount: { val: '4.00' },
+      seller_shipping_discount_amount: null,
+      line_items: [{ id: 'li-1', product_id: 'bbbbbbbbbbbbbbbbbbbbbbbb', price_amount: { val: '20.00' } }],
+    })],
+  }, { jwt: poshmarkJwt(seller) });
+  const result = await read(c, 'poshmark');
+  assert.equal(result.ok, true);
+  assert.equal(result.orders.length, 1);
+});

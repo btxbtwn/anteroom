@@ -26,7 +26,7 @@ const MERCARI_ORDER_STATUS = '1e2de463bdf2fb33c7c328ad2659d4ef20ace0e4ff0c526b64
 
 async function historyJson(marketplace, url, options = {}) {
   try {
-    const { data } = await marketplaceFetch(url, { ...options, marketplace, step: 'sales_history',
+    const { data } = await marketplaceFetch(url, { ...options, marketplace, step: 'sales_history', guard: false,
       headers: { Accept: 'application/json', ...options.headers }, deadline: Date.now() + 60000 });
     return data;
   } catch (error) {
@@ -37,7 +37,7 @@ async function historyJson(marketplace, url, options = {}) {
 
 async function historyText(marketplace, url, options = {}) {
   try {
-    const { data } = await marketplaceFetch(url, { ...options, marketplace, step: 'sales_history',
+    const { data } = await marketplaceFetch(url, { ...options, marketplace, step: 'sales_history', guard: false,
       expect: 'text', deadline: Date.now() + 60000 });
     return typeof data === 'string' ? data : '';
   } catch (error) {

@@ -44,7 +44,14 @@ async function saleRead(url, options = {}) {
   if (response.status === 404) return null;
   if (!response.ok) {
     const status = response.status;
-    const code = (status === 401 || status === 403) ? 'signed_out'
+    let body = '';
+    if ([401, 403, 429, 503].includes(status) && typeof response.text === 'function') {
+      try { body = await response.text(); } catch { body = ''; }
+    }
+    const challenged = [401, 403, 429, 503].includes(status)
+      && typeof MARKETPLACE_CHALLENGE !== 'undefined' && MARKETPLACE_CHALLENGE.test(body);
+    const code = challenged ? 'challenge'
+      : (status === 401 || status === 403) ? 'signed_out'
       : status === 429 ? 'rate_limited'
       : (status >= 500 || status === 408) ? 'network'
       : 'rejected';
@@ -68,7 +75,7 @@ async function sellerFrom(ids, read) {
       const seller = await read(id);
       if (seller) return seller;
     } catch (error) {
-      if (error?.code === 'signed_out' || error?.code === 'rate_limited') throw error;
+      if (error?.code === 'signed_out' || error?.code === 'challenge' || error?.code === 'rate_limited') throw error;
       lastError = error;
     }
   }
