@@ -328,5 +328,64 @@ def test_cleanup_failure_keeps_targets_and_credentials_for_retry(cloud, signing_
     assert sorted(calls[-1]) == sorted(keys)
     with engine.connect() as db:
         assert ALICE not in set(map(str, db.scalars(text('SELECT id FROM auth.users'))))
-        assert db.scalar(text('SELECT count(*) FROM anteroom_private.account_cleanup')) == 0
+        assert db.scalar(text('SELECT object_keys FROM anteroom_private.account_cleanup WHERE user_id = :owner'),
+                         {'owner': ALICE}) == []
     assert owned_rows(engine, ALICE) == {}
+
+
+def test_pending_deletion_fences_late_import_and_preserves_other_seller(cloud):  # noqa: F811
+    from anteroom.services.hosted_database import SellerDatabaseSession
+    _client, engine = cloud
+    supabase_schemas(engine)
+    seed(engine, ALICE)
+    account_deletion._delete_records(ALICE)
+    for finalize in (False, True):
+        if finalize:
+            account_deletion._finish_deletion(ALICE)
+        with SellerDatabaseSession(user_id=ALICE, bind=engine) as db:
+            db.add(Conversation(title='late import'))
+            with pytest.raises(DBAPIError, match='Account deletion is pending'):
+                db.commit()
+        with SellerDatabaseSession(user_id=BOB, bind=engine) as db:
+            db.add(Conversation(title='Other seller'))
+            db.commit()
+    assert owned_rows(engine, ALICE) == {}
+
+
+def test_storage_trigger_serializes_with_deletion(migration_engine):  # noqa: F811
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from anteroom.services import schema_migrations
+    from anteroom.services.hosted_database import SellerDatabaseSession
+    engine = migration_engine
+    if engine.dialect.name != 'postgresql':
+        pytest.skip('Deletion fences require Postgres')
+    # Add the managed Storage stand-in after older Storage-policy migrations;
+    # the new fence migration must attach to an existing Storage table.
+    from alembic import command
+    command.upgrade(schema_migrations.alembic_config(engine.url.render_as_string(hide_password=False)), 'b81d24e7a930')
+    with engine.begin() as db:
+        db.execute(text('CREATE SCHEMA storage; CREATE TABLE storage.objects (bucket_id text, name text)'))
+    schema_migrations.ensure_schema(engine)
+    started = Event()
+    key = f'{ALICE}/item/{"a" * 32}.jpg'
+    with engine.connect() as writer, ThreadPoolExecutor() as workers:
+        writer.execute(text("INSERT INTO storage.objects VALUES ('anteroom-photos', :key)"), {'key': key})
+
+        def stage():
+            with SellerDatabaseSession(user_id=ALICE, bind=engine) as db:
+                started.set()
+                db.execute(text('SELECT pg_advisory_xact_lock(hashtextextended(:identity, 0))'),
+                           {'identity': f'anteroom-account-delete:{ALICE}'})
+                keys = list(db.scalars(text('SELECT * FROM anteroom_private.stage_account_deletion()')))
+                db.commit()
+                return keys
+
+        pending = workers.submit(stage)
+        assert started.wait(5)
+        assert not pending.done()
+        writer.commit()
+        assert pending.result(timeout=10) == [key]
+    with engine.begin() as db:
+        with pytest.raises(DBAPIError, match='Account deletion is pending'):
+            db.execute(text("INSERT INTO storage.objects VALUES ('anteroom-photos', :key)"), {'key': key + '-late'})

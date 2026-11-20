@@ -20,13 +20,12 @@ _SECRET_PAIR = re.compile(
 )
 _HEADER_KEYS = "authorization|set-cookie|cookie|x-api-key"
 _QUOTED_HEADER = re.compile(
-    rf"""(["']\b(?:{_HEADER_KEYS})\b["']\s*[:=]\s*["'])([^"'\r\n]+)(["'])""",
+    rf"""(["']?\b(?:{_HEADER_KEYS})\b["']?\s*[:=]\s*)(["'])((?:\\.|(?!\2)[^\\\r\n])*)\2""",
     re.IGNORECASE,
 )
-# Raw header lines end at a newline; punctuation (including &, comma and })
-# can be part of the credential. Quoted mapping values use their own boundaries.
+# Possessive whitespace prevents backing into a quoted value after its guard.
 _UNQUOTED_HEADER = re.compile(
-    rf"""(\b(?:{_HEADER_KEYS})\s*[:=]\s*)(?!["'])(?!Bearer\s+…\(masked\))([^\r\n]+)""",
+    rf"""(\b(?:{_HEADER_KEYS})\s*[:=][ \t]*+)(?!["'])([^\r\n]+)""",
     re.IGNORECASE,
 )
 _POSTGRES_DSN = re.compile(
@@ -45,8 +44,6 @@ def _mask(value: str) -> str:
 
 
 def _mask_full(value: str) -> str:
-    if value.endswith(_MASK):
-        return value
     return _MASK
 
 
@@ -54,6 +51,6 @@ def redact(text: str) -> str:
     text = _POSTGRES_DSN.sub(lambda m: f"{m.group(1)}{_mask_full(m.group(2))}{m.group(3)}", text)
     text = _BEARER.sub(lambda m: f"{m.group(1)}{_MASK}", text)
     text = _JWT.sub(lambda m: _mask(m.group(0)), text)
-    text = _QUOTED_HEADER.sub(lambda m: f"{m.group(1)}{_mask_full(m.group(2))}{m.group(3)}", text)
-    text = _UNQUOTED_HEADER.sub(lambda m: f"{m.group(1)}{_mask_full(m.group(2))}", text)
+    text = _QUOTED_HEADER.sub(lambda m: f"{m.group(1)}{m.group(2)}{_MASK}{m.group(2)}", text)
+    text = _UNQUOTED_HEADER.sub(lambda m: f"{m.group(1)}" + (f"Bearer {_MASK}" if re.fullmatch(r"Bearer\s+…\(masked\)", m.group(2), re.IGNORECASE) else _MASK), text)
     return _SECRET_PAIR.sub(lambda m: f"{m.group(1)}{_mask(m.group(2))}", text)

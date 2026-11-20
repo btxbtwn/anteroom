@@ -40,6 +40,14 @@ def test_admission_rejects_before_receiving_multipart(router, path):
 
 def test_receive_deadline_is_total_releases_slot_and_stops_after_body(monkeypatch):
     monkeypatch.setattr(hosted_limits, 'BODY_RECEIVE_SECONDS', 0.04)
+    deadlines = []
+    original_timeout_at = asyncio.timeout_at
+
+    def timeout_at(deadline):
+        deadlines.append(deadline)
+        return original_timeout_at(deadline)
+
+    monkeypatch.setattr(asyncio, 'timeout_at', timeout_at)
 
     async def run():
         app = FastAPI()
@@ -61,7 +69,9 @@ def test_receive_deadline_is_total_releases_slot_and_stops_after_body(monkeypatc
         async def slow_receive():
             nonlocal reads
             reads += 1
-            await asyncio.sleep(0.025)
+            if reads == 1:
+                return {'type': 'http.request', 'body': b'a', 'more_body': True}
+            await asyncio.Event().wait()
             return {'type': 'http.request', 'body': b'a', 'more_body': True}
 
         scope = {'type': 'http', 'method': 'POST', 'path': '/body', 'app': app,
@@ -74,6 +84,7 @@ def test_receive_deadline_is_total_releases_slot_and_stops_after_body(monkeypatc
                 await route.get_route_handler()(Request(scope, slow_receive))
             assert error.value.status_code == 408
             assert reads == 2
+            assert deadlines[-1] == deadlines[-2]
             assert slots._sellers == {}
             events = iter([{'type': 'http.request', 'body': b'ok', 'more_body': False},
                            {'type': 'http.disconnect'}])
@@ -88,6 +99,10 @@ def test_receive_deadline_is_total_releases_slot_and_stops_after_body(monkeypatc
 
 
 @pytest.mark.parametrize('raw,expected', [
+    ('{"Cookie": "sid=first\'second", "status": 500}', '{"Cookie": "…(masked)", "status": 500}'),
+    ("{'Cookie': 'sid=first\"second', 'status': 500}", "{'Cookie': '…(masked)', 'status': 500}"),
+    ('Cookie="sid=first"', 'Cookie="…(masked)"'),
+    ('Cookie: sid=first, Authorization: Bearer token123', 'Cookie: …(masked)'),
     ('Cookie: sid=first&second\nstatus=500', 'Cookie: …(masked)\nstatus=500'),
     ('{"Cookie": "sid=first&second", "status": 500}', '{"Cookie": "…(masked)", "status": 500}'),
     ('postgresql://alice:first@second@db.example/app', 'postgresql://alice:…(masked)@db.example/app'),
