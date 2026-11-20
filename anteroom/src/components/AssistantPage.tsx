@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState, type MouseEvent } from "react";
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
 import { ArrowUpRightIcon, CircleAlertIcon, HourglassIcon, PercentIcon, TagIcon, TrendingUpIcon, type LucideIcon } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
@@ -16,7 +16,7 @@ import { coalesceSseEvents, emptySseParts, type SseParts } from "./sseCoalesce";
 import { streamingDisplayText } from "./streamingText";
 import { settleAgents } from "./liveTrace";
 import { useComposerImages, type ComposerImage } from "./chat/ComposerAttachments";
-import { getComposerDraft, removeComposerDraftImages, restoreComposerDraftImages, setComposerDraftText, transferComposerDraftRemainder, useComposerDraftText } from "./chat/composerDrafts";
+import { getComposerDraft, hasComposerDraft, removeComposerDraftImages, restoreComposerDraftImages, setComposerDraftText, transferComposerDraftRemainder, useComposerDraftText } from "./chat/composerDrafts";
 import { ChatComposer } from "./chat/ChatComposer";
 import { chatTime } from "./chat/chatHistory";
 import { foldSseEvent } from "./chat/chatStream";
@@ -135,21 +135,34 @@ interface FailedSubmission {
   error: string;
 }
 
+const EMPTY_FAILED_SUBMISSIONS: readonly FailedSubmission[] = [];
 /** Finished turns of this session keep their "Worked for" rows while the app is open, per conversation. */
 const sessionFolds = new Map<string, FoldedTurn[]>();
 /** Background and per-thread send errors stay visible on their thread until cleared by a new ask or retry. */
 const sessionErrors = new Map<string, string>();
 /** Failed submissions that could not be placed back into an already-edited or navigated-away composer. */
 const sessionFailedSubmissions = new Map<string, FailedSubmission[]>();
+const failedSubmissionListeners = new Set<() => void>();
 let foldSeq = 0;
 let failedSeq = 0;
+
+function emitFailedSubmissions() {
+  for (const listener of failedSubmissionListeners) listener();
+}
+
+function subscribeFailedSubmissions(listener: () => void): () => void {
+  failedSubmissionListeners.add(listener);
+  return () => {
+    failedSubmissionListeners.delete(listener);
+  };
+}
 
 function foldsFor(threadId: string): FoldedTurn[] {
   return sessionFolds.get(threadId) ?? [];
 }
 
-function failedSubmissionsFor(bucketKey: string): FailedSubmission[] {
-  return sessionFailedSubmissions.get(bucketKey) ?? [];
+function failedSubmissionsFor(bucketKey: string): readonly FailedSubmission[] {
+  return sessionFailedSubmissions.get(bucketKey) ?? EMPTY_FAILED_SUBMISSIONS;
 }
 
 /**
@@ -174,7 +187,11 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   const [live, setLive] = useState<LiveTurn | null>(null);
   const [folds, setFolds] = useState<FoldedTurn[]>(() => (threadId ? foldsFor(threadId) : []));
   const [error, setError] = useState(() => (threadId ? (sessionErrors.get(threadId) ?? "") : ""));
-  const [failedSubmissions, setFailedSubmissions] = useState<FailedSubmission[]>(() => failedSubmissionsFor(bucketKey));
+  const failedSubmissions = useSyncExternalStore(
+    subscribeFailedSubmissions,
+    () => failedSubmissionsFor(bucketKey),
+    () => EMPTY_FAILED_SUBMISSIONS,
+  );
   const [stopping, setStopping] = useState(false);
   /** True while this page follows an answer, including a reattach that has not heard anything yet. */
   const [following, setFollowing] = useState(false);
@@ -190,6 +207,13 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   turnsRef.current = turns;
   const threadIdRef = useRef(threadId);
   threadIdRef.current = threadId;
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   /** The conversation the in-flight follow belongs to, so selecting a thread this page just created does not cancel the question. */
   const followThread = useRef<string | null>(null);
   /** Increments on thread transitions so a late createThread() only transfers drafts from its own new-chat session. */
@@ -204,14 +228,14 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   const keepFold = (id: string, fold: FoldedTurn) => {
     const next = [...foldsFor(id), fold];
     sessionFolds.set(id, next);
-    if (threadIdRef.current === id) setFolds(next);
+    if (mountedRef.current && threadIdRef.current === id) setFolds(next);
   };
 
   const keepFailedSubmission = (targetId: string | null, item: FailedSubmission) => {
     const key = targetId ?? "__new__";
     const next = [...failedSubmissionsFor(key), item];
     sessionFailedSubmissions.set(key, next);
-    if ((threadIdRef.current ?? "__new__") === key) setFailedSubmissions(next);
+    emitFailedSubmissions();
   };
 
   const dropFailedSubmission = (targetId: string | null, itemId: string) => {
@@ -219,14 +243,16 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     const next = failedSubmissionsFor(key).filter((item) => item.id !== itemId);
     if (next.length) sessionFailedSubmissions.set(key, next);
     else sessionFailedSubmissions.delete(key);
-    if ((threadIdRef.current ?? "__new__") === key) setFailedSubmissions(next);
+    emitFailedSubmissions();
   };
 
   const reportThreadError = (targetId: string | null, message: string, notifyIfInactive = false, originSession?: number) => {
     if (targetId) sessionErrors.set(targetId, message);
-    const isActive = targetId !== null
-      ? threadIdRef.current === targetId
-      : threadIdRef.current === null && (originSession === undefined || draftSessionRef.current === originSession);
+    const isActive = mountedRef.current && (
+      targetId !== null
+        ? threadIdRef.current === targetId
+        : threadIdRef.current === null && (originSession === undefined || draftSessionRef.current === originSession)
+    );
     if (isActive) {
       setError(message);
     } else if (notifyIfInactive) {
@@ -236,7 +262,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
 
   const clearThreadError = (targetId: string | null) => {
     if (targetId) sessionErrors.delete(targetId);
-    if (threadIdRef.current === targetId) setError("");
+    if (mountedRef.current && threadIdRef.current === targetId) setError("");
   };
 
   /**
@@ -267,8 +293,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     ) => {
       if (!text && !imagesToRestore.length) return;
       const targetKey = `assistant:${targetId ?? "__new__"}`;
-      const existingText = getComposerDraft(targetKey).text;
-      if (allowDraftRestore && (!text || !existingText)) {
+      if (allowDraftRestore && !hasComposerDraft(targetKey)) {
         if (text) setComposerDraftText(targetKey, text);
         if (imagesToRestore.length) restoreComposerDraftImages(targetKey, imagesToRestore);
         return;
@@ -336,7 +361,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
           id = await creating;
         } catch (failure) {
           const message = failure instanceof Error ? failure.message : "Could not start a conversation.";
-          const stillOnSameNewSession = threadIdRef.current === null && draftSessionRef.current === originSession;
+          const stillOnSameNewSession = mountedRef.current && threadIdRef.current === null && draftSessionRef.current === originSession;
           restoreSubmission(null, question, attachedImages, message, stillOnSameNewSession);
           reportThreadError(null, message, isCreator, originSession);
           return;
@@ -345,21 +370,37 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
             pendingCreateBySession.current.delete(originSession);
           }
         }
-        const stillOnOriginDraft = threadIdRef.current === null && draftSessionRef.current === originSession;
+        const preserveFreshNewDraft = !clearDraft && hasComposerDraft(originDraftKey);
+        if (preserveFreshNewDraft && createdThreadBySession.current.get(originSession) === id) {
+          createdThreadBySession.current.delete(originSession);
+        }
+        const stillOnOriginDraft = mountedRef.current
+          && threadIdRef.current === null
+          && draftSessionRef.current === originSession
+          && !preserveFreshNewDraft;
         if (isCreator && stillOnOriginDraft) {
           followThread.current = id;
-          // Move any remaining images or newer text off assistant:__new__ before switching threads.
-          transferComposerDraftRemainder(originDraftKey, `assistant:${id}`, clearDraft ? question : null);
-          transferred = true;
+          if (clearDraft) {
+            // Move any remaining images or newer text off assistant:__new__ before switching threads.
+            transferComposerDraftRemainder(originDraftKey, `assistant:${id}`, question);
+            transferred = true;
+          }
           onThreadReady?.(id);
         }
       }
     }
     if (!id) return;
-    const stillOnOriginDraft = inThread === null && threadIdRef.current === null && draftSessionRef.current === originSession;
-    const targetsActiveThread = stillOnOriginDraft || threadIdRef.current === id || followThread.current === id;
+    const preserveFreshNewDraft = inThread === null && !clearDraft && hasComposerDraft(originDraftKey);
+    const stillOnOriginDraft = mountedRef.current
+      && inThread === null
+      && threadIdRef.current === null
+      && draftSessionRef.current === originSession
+      && !preserveFreshNewDraft;
+    const targetsActiveThread = mountedRef.current && (
+      stillOnOriginDraft || threadIdRef.current === id || followThread.current === id
+    );
     if (question !== null && !targetsActiveThread) {
-      if (clearDraft && (inThread !== null || draftSessionRef.current === originSession)) {
+      if (clearDraft && (inThread !== null || (mountedRef.current && draftSessionRef.current === originSession))) {
         clearMatchingDraftText(originDraftKey, question);
       }
       sendInBackground(id, question);
@@ -499,7 +540,6 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
 
   // Pick an answer back up after opening a conversation, leaving the page, or locking the phone.
   useEffect(() => {
-    setFailedSubmissions(failedSubmissionsFor(threadId ?? "__new__"));
     if (!threadId) {
       setLive(null);
       setError("");
@@ -671,6 +711,8 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   const retryFailedSubmission = (item: FailedSubmission) => {
     dropFailedSubmission(threadIdRef.current, item.id);
     clearThreadError(threadIdRef.current);
+    const hasFreshNewDraft = threadIdRef.current === null && hasComposerDraft("assistant:__new__");
+    const retryOriginSession = hasFreshNewDraft ? -(++failedSeq) : draftSessionRef.current;
     void follow(
       item.text,
       item.uploads,
@@ -678,7 +720,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
       threadIdRef.current,
       false,
       false,
-      draftSessionRef.current,
+      retryOriginSession,
       item.attached,
     );
   };

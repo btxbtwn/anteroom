@@ -528,4 +528,233 @@ describe("AssistantPage concurrency and background failure recovery", () => {
       container.remove();
     }
   });
+
+  it("preserves a failed new-chat submission out-of-band when AssistantPage unmounts and remounts before createThread() rejects", async () => {
+    const createDeferred = deferred<{ id: string }>();
+    mocks.createThread.mockReturnValueOnce(createDeferred.promise);
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      setComposerDraftText("assistant:__new__", "Original unmounted question");
+
+      await act(async () => {
+        root.render(
+          <AssistantPage
+            threadId={null}
+            onOpenProviders={vi.fn()}
+            onOpenListing={vi.fn()}
+          />,
+        );
+      });
+
+      const sendButton = () => container.querySelector<HTMLButtonElement>('[data-testid="send-button"]')!;
+      await act(async () => {
+        sendButton().click();
+        await flushMicrotasks();
+      });
+
+      // Simulate leaving Assistant (App unmounts AssistantPage) while createThread() is still pending.
+      await act(async () => {
+        root.unmount();
+      });
+
+      // Return to Assistant as a fresh mount and start composing a brand-new draft before the earlier createThread() rejects.
+      const remountedRoot = createRoot(container);
+      try {
+        setComposerDraftText("assistant:__new__", "Brand new draft after returning");
+        await act(async () => {
+          remountedRoot.render(
+            <AssistantPage
+              threadId={null}
+              onOpenProviders={vi.fn()}
+              onOpenListing={vi.fn()}
+            />,
+          );
+        });
+
+        await act(async () => {
+          createDeferred.reject(new Error("Thread service unavailable"));
+          await flushMicrotasks();
+        });
+
+        // Toast fires for the unmounted failure, the fresh draft is untouched, and the remounted page immediately shows the preserved alert.
+        expect(mocks.addToast).toHaveBeenCalledWith({ type: "error", title: "Thread service unavailable" });
+        expect(getComposerDraft("assistant:__new__").text).toBe("Brand new draft after returning");
+        expect(container.textContent).toContain("Thread service unavailable");
+        expect(container.textContent).toContain("Original unmounted question");
+
+        const dismissButton = Array.from(container.querySelectorAll("button")).find((btn) => btn.textContent === "Dismiss");
+        expect(dismissButton).toBeTruthy();
+        await act(async () => {
+          dismissButton!.click();
+          await flushMicrotasks();
+        });
+        expect(container.textContent).not.toContain("Original unmounted question");
+      } finally {
+        await act(async () => {
+          remountedRoot.unmount();
+        });
+      }
+    } finally {
+      container.remove();
+    }
+  });
+
+  it("retries a preserved new-chat submission in the background without moving or hijacking a fresh new-chat draft", async () => {
+    const failedCreateDeferred = deferred<{ id: string }>();
+    const retryCreateDeferred = deferred<{ id: string }>();
+    const retryAskDeferred = deferred<{ error?: string }>();
+    const freshCreateDeferred = deferred<{ id: string }>();
+    const freshAskDeferred = deferred<{ error?: string }>();
+
+    mocks.prepareComposerImage
+      .mockResolvedValueOnce({
+        ok: true,
+        name: "failed-receipt.png",
+        dataUrl: "data:image/png;base64,DD==",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        name: "fresh-tag.png",
+        dataUrl: "data:image/png;base64,EE==",
+      });
+    mocks.createThread
+      .mockReturnValueOnce(failedCreateDeferred.promise)
+      .mockReturnValueOnce(retryCreateDeferred.promise)
+      .mockReturnValueOnce(freshCreateDeferred.promise);
+    mocks.ask
+      .mockReturnValueOnce(retryAskDeferred.promise)
+      .mockReturnValueOnce(freshAskDeferred.promise);
+
+    const failedAttachment = {
+      id: "img-retry-failed-1",
+      file: new File(["img-bytes"], "failed-receipt.png", { type: "image/png" }),
+    };
+    const freshAttachment = {
+      id: "img-fresh-draft-1",
+      file: new File(["img-bytes"], "fresh-tag.png", { type: "image/png" }),
+    };
+
+    const onThreadReady = vi.fn();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      setComposerDraftText("assistant:__new__", "Failed question to recover");
+      setComposerDraftImages("assistant:__new__", [failedAttachment]);
+
+      await act(async () => {
+        root.render(
+          <AssistantPage
+            threadId={null}
+            onThreadReady={onThreadReady}
+            onOpenProviders={vi.fn()}
+            onOpenListing={vi.fn()}
+          />,
+        );
+      });
+
+      const sendButton = () => container.querySelector<HTMLButtonElement>('[data-testid="send-button"]')!;
+      await act(async () => {
+        sendButton().click();
+        await flushMicrotasks();
+      });
+
+      // Navigate away, fail thread creation, then return to New chat.
+      await act(async () => {
+        root.render(
+          <AssistantPage
+            threadId="thread-other-before-retry"
+            onThreadReady={onThreadReady}
+            onOpenProviders={vi.fn()}
+            onOpenListing={vi.fn()}
+          />,
+        );
+        await flushMicrotasks();
+      });
+
+      await act(async () => {
+        failedCreateDeferred.reject(new Error("Temporary outage"));
+        await flushMicrotasks();
+      });
+
+      await act(async () => {
+        root.render(
+          <AssistantPage
+            threadId={null}
+            onThreadReady={onThreadReady}
+            onOpenProviders={vi.fn()}
+            onOpenListing={vi.fn()}
+          />,
+        );
+        await flushMicrotasks();
+      });
+
+      // Seller composes a fresh text + image draft in assistant:__new__ before clicking Retry.
+      await act(async () => {
+        setComposerDraftText("assistant:__new__", "Fresh draft in progress");
+        setComposerDraftImages("assistant:__new__", [freshAttachment]);
+      });
+
+      const retryButton = Array.from(container.querySelectorAll("button")).find((btn) => btn.textContent === "Retry");
+      expect(retryButton).toBeTruthy();
+
+      await act(async () => {
+        retryButton!.click();
+        retryCreateDeferred.resolve({ id: "thread-retried-bg" });
+        await flushMicrotasks();
+      });
+
+      // Retried submission runs in the background on its own thread; fresh draft and focus stay on New chat.
+      expect(onThreadReady).not.toHaveBeenCalled();
+      expect(getComposerDraft("assistant:__new__").text).toBe("Fresh draft in progress");
+      expect(getComposerDraft("assistant:__new__").images).toEqual([freshAttachment]);
+      expect(getComposerDraft("assistant:thread-retried-bg").text).toBe("");
+      expect(getComposerDraft("assistant:thread-retried-bg").images).toEqual([]);
+      expect(mocks.ask).toHaveBeenNthCalledWith(
+        1,
+        "Failed question to recover",
+        expect.anything(),
+        expect.anything(),
+        [{ name: "failed-receipt.png", data_url: "data:image/png;base64,DD==" }],
+        "thread-retried-bg",
+      );
+
+      // Submitting the fresh draft afterwards starts its own distinct thread.
+      await act(async () => {
+        sendButton().click();
+        await flushMicrotasks();
+      });
+      await act(async () => {
+        freshCreateDeferred.resolve({ id: "thread-fresh-own" });
+        await flushMicrotasks();
+      });
+
+      expect(onThreadReady).toHaveBeenCalledTimes(1);
+      expect(onThreadReady).toHaveBeenCalledWith("thread-fresh-own");
+      expect(mocks.ask).toHaveBeenNthCalledWith(
+        2,
+        "Fresh draft in progress",
+        expect.anything(),
+        expect.anything(),
+        [{ name: "fresh-tag.png", data_url: "data:image/png;base64,EE==" }],
+        "thread-fresh-own",
+      );
+
+      await act(async () => {
+        retryAskDeferred.resolve({});
+        freshAskDeferred.resolve({});
+        await flushMicrotasks();
+      });
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
 });
