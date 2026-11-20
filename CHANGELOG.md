@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1069 — 2026-11-20
+
+- List, Save draft and Update wait until the listing has loaded, instead of saying "Fill in the listing first." on a slow connection.
+- The business assistant answers on large shops while Anteroom is busy, instead of failing on a database timeout.
+
 ## 0.1.1068 — 2026-11-20
 
 - The Mac app's sandbox smoke check keeps an older installed Anteroom on throwaway data instead of the seller's own data folder.
