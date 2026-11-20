@@ -20,7 +20,7 @@ def _event(db, event_id: str):
 
 
 @router.get("")
-def get_calendar(timezone: str = Query("UTC", max_length=100), db: Session = Depends(get_db)):
+def get_calendar(timezone: str = Query("UTC", max_length=100), db: Session = Depends(get_db, scope="function")):
     try:
         return sale_calendar.calendar_data(db, timezone)
     except ValueError as exc:
@@ -28,7 +28,7 @@ def get_calendar(timezone: str = Query("UTC", max_length=100), db: Session = Dep
 
 
 @router.post("", status_code=201)
-def create_event(body: sale_calendar.SalePlan, db: Session = Depends(get_db)):
+def create_event(body: sale_calendar.SalePlan, db: Session = Depends(get_db, scope="function")):
     try:
         event = sale_calendar.save_plan(db, body)
     except ValueError as exc:
@@ -37,7 +37,7 @@ def create_event(body: sale_calendar.SalePlan, db: Session = Depends(get_db)):
 
 
 @router.put("/{event_id}")
-def edit_event(event_id: str, body: sale_calendar.SalePlan, db: Session = Depends(get_db)):
+def edit_event(event_id: str, body: sale_calendar.SalePlan, db: Session = Depends(get_db, scope="function")):
     try:
         event = sale_calendar.save_plan(db, body, _event(db, event_id))
     except ValueError as exc:
@@ -46,7 +46,7 @@ def edit_event(event_id: str, body: sale_calendar.SalePlan, db: Session = Depend
 
 
 @router.post("/records", status_code=201)
-def record_event(body: sale_calendar.SaleRecord, db: Session = Depends(get_db)):
+def record_event(body: sale_calendar.SaleRecord, db: Session = Depends(get_db, scope="function")):
     try:
         event = sale_calendar.save_record(db, body)
     except ValueError as exc:
@@ -55,7 +55,7 @@ def record_event(body: sale_calendar.SaleRecord, db: Session = Depends(get_db)):
 
 
 @router.put("/records/{event_id}")
-def edit_record(event_id: str, body: sale_calendar.SaleRecord, db: Session = Depends(get_db)):
+def edit_record(event_id: str, body: sale_calendar.SaleRecord, db: Session = Depends(get_db, scope="function")):
     try:
         event = sale_calendar.save_record(db, body, _event(db, event_id))
     except ValueError as exc:
@@ -69,7 +69,7 @@ class StatusUpdate(BaseModel):
 
 
 @router.patch("/{event_id}/status")
-def update_status(event_id: str, body: StatusUpdate, db: Session = Depends(get_db)):
+def update_status(event_id: str, body: StatusUpdate, db: Session = Depends(get_db, scope="function")):
     try:
         sale_calendar.change_status(db, _event(db, event_id), body.status)
     except ValueError as exc:
@@ -78,7 +78,7 @@ def update_status(event_id: str, body: StatusUpdate, db: Session = Depends(get_d
 
 
 @router.delete("/{event_id}")
-def delete_event(event_id: str, db: Session = Depends(get_db)):
+def delete_event(event_id: str, db: Session = Depends(get_db, scope="function")):
     db.delete(_event(db, event_id))
     db.commit()
     return {"ok": True}

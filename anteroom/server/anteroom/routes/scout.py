@@ -85,7 +85,7 @@ def _response(db: Session, check: ScoutCheck) -> ScoutCheckResponse:
 
 
 @_scout_router.get("", response_model=ScoutResponse)
-def list_checks(db: Session = Depends(get_db)):
+def list_checks(db: Session = Depends(get_db, scope="function")):
     sold = scout.outcomes(db)
     return ScoutResponse(
         checks=[ScoutCheckResponse.model_validate(scout.to_dict(c, sold.get(c.id))) for c in scout.recent(db)],
@@ -131,18 +131,18 @@ def _create(db: Session, photos: list[dict], asking_price: float | None) -> tupl
 
 
 @_scout_router.get("/{check_id}", response_model=ScoutCheckResponse)
-def get_check(check_id: str, db: Session = Depends(get_db)):
+def get_check(check_id: str, db: Session = Depends(get_db, scope="function")):
     return _response(db, _check(db, check_id))
 
 
 @_scout_router.patch("/{check_id}", response_model=ScoutCheckResponse)
-def update_check(check_id: str, body: AskingPriceUpdate, db: Session = Depends(get_db)):
+def update_check(check_id: str, body: AskingPriceUpdate, db: Session = Depends(get_db, scope="function")):
     check = scout.set_asking_price(db, _check(db, check_id), body.asking_price)
     return _response(db, check)
 
 
 @_scout_router.post("/{check_id}/decision", response_model=ScoutCheckResponse)
-def decide(check_id: str, body: DecisionRequest, db: Session = Depends(get_db)):
+def decide(check_id: str, body: DecisionRequest, db: Session = Depends(get_db, scope="function")):
     check = _check(db, check_id)
     if check.status != "done" and body.decision == "bought":
         raise HTTPException(409, "Wait for the check to finish")

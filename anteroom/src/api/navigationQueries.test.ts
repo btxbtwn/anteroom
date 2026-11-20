@@ -7,7 +7,7 @@ import { photoThumbUrl } from "../photoThumb";
 import type { ListingPhoto } from "./types";
 
 afterEach(() => vi.restoreAllMocks());
-beforeEach(() => vi.spyOn(api.listings, "get").mockResolvedValue({ listing: { title: "Saved listing" }, current_revision_id: "saved" } as never));
+beforeEach(() => { vi.spyOn(api.listings, "get").mockResolvedValue({ listing: { title: "Saved listing" }, current_revision_id: "saved" } as never); });
 
 it("warms bounded versioned thumbnails, deduplicates intent, and retries failed images", async () => {
   const images: { src: string; fetchPriority: string; onload: () => void; onerror: () => void }[] = [];
@@ -87,13 +87,44 @@ it("warms every read the listing screen makes on open", async () => {
     expect(jobs).toHaveBeenCalledExactlyOnceWith("item", { signal: expect.any(AbortSignal) });
     expect(activity).toHaveBeenCalledExactlyOnceWith("item", { signal: expect.any(AbortSignal) });
     expect(fields).toHaveBeenCalledExactlyOnceWith("item", { signal: expect.any(AbortSignal) });
-    expect(live).toHaveBeenCalledExactlyOnceWith("item");
-    expect(native).toHaveBeenCalledExactlyOnceWith("item");
-    expect(sales).toHaveBeenCalledExactlyOnceWith({ conversationId: "item" });
+    expect(live).toHaveBeenCalledExactlyOnceWith("item", { signal: expect.any(AbortSignal) });
+    expect(native).toHaveBeenCalledExactlyOnceWith("item", { signal: expect.any(AbortSignal) });
+    expect(sales).toHaveBeenCalledExactlyOnceWith({ conversationId: "item" }, { signal: expect.any(AbortSignal) });
     for (const key of [["jobs", "item"], ["activity", "item"], ["listing-fields", "item"], ["marketplace-listings", "item"],
       ["native-marketplaces", "item"], ["marketplace-sales", "item"]]) {
       expect(client.getQueryState(key)?.status).toBe("success");
     }
+  } finally { client.clear(); }
+});
+
+it("tags background hover prefetches and aborts them when the caller cancels", async () => {
+  const { isBackgroundSignal } = await import("./requestScheduler");
+  const client = createStudioQueryClient();
+  const seenSignals: AbortSignal[] = [];
+  const capture = () => (_arg: unknown, opts?: { signal?: AbortSignal }) => {
+    if (opts?.signal) seenSignals.push(opts.signal);
+    return new Promise((_resolve, reject) => {
+      opts?.signal?.addEventListener("abort", () => reject(opts.signal!.reason), { once: true });
+    });
+  };
+  vi.spyOn(api.conversations, "get").mockImplementation(capture() as never);
+  vi.spyOn(api.conversations, "photos").mockImplementation((_id, _mp, opts) => capture()(_id, opts) as never);
+  vi.spyOn(api.conversations, "messages").mockImplementation(capture() as never);
+  vi.spyOn(api.conversations, "activity").mockImplementation(capture() as never);
+  vi.spyOn(api.jobs, "list").mockImplementation(capture() as never);
+  vi.spyOn(api.listings, "get").mockImplementation(capture() as never);
+  vi.spyOn(api.listings, "fields").mockImplementation(capture() as never);
+  vi.spyOn(api.marketplaceListings, "get").mockImplementation(capture() as never);
+  vi.spyOn(api.nativeMarketplaces, "status").mockImplementation(capture() as never);
+  vi.spyOn(api.marketplaceSales, "list").mockImplementation((_f, opts) => capture()(_f, opts) as never);
+  const controller = new AbortController();
+  try {
+    const running = prefetchListingReads(client, "hover-item", { signal: controller.signal, background: true });
+    await vi.waitFor(() => expect(seenSignals.length).toBeGreaterThanOrEqual(9));
+    expect(seenSignals.every((signal) => isBackgroundSignal(signal))).toBe(true);
+    controller.abort(new DOMException("Left row", "AbortError"));
+    await running;
+    expect(seenSignals.every((signal) => signal.aborted)).toBe(true);
   } finally { client.clear(); }
 });
 

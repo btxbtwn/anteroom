@@ -174,7 +174,7 @@ def _preview_inputs(conv_id: str, db: Session) -> tuple[dict, list, str | None, 
 
 
 @router.post("/api/conversations/{conv_id}/price-drop/preview")
-def preview_price_drop(conv_id: str, db: Session = Depends(get_db)):
+def preview_price_drop(conv_id: str, db: Session = Depends(get_db, scope="function")):
     """History and sell-through suggestion. Does not change the listing.
 
     Sold comps are a web search that can take minutes; the dialog streams them
@@ -189,7 +189,7 @@ def preview_price_drop(conv_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/api/conversations/{conv_id}/price-drop/comps")
-def stream_price_drop_comps(conv_id: str, db: Session = Depends(get_db)):
+def stream_price_drop_comps(conv_id: str, db: Session = Depends(get_db, scope="function")):
     """Stream sold comps as each source answers, with the suggestion they imply.
 
     Events: ``step`` (a search the models ran), ``source`` (JSON: one source's
@@ -266,7 +266,7 @@ def stream_price_drop_comps(conv_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/api/conversations/{conv_id}/price-drop")
-def apply_price_drop(conv_id: str, body: PriceDropApply, db: Session = Depends(get_db)):
+def apply_price_drop(conv_id: str, body: PriceDropApply, db: Session = Depends(get_db, scope="function")):
     """Apply a confirmed whole-dollar price; records a ``price_drop`` revision."""
     try:
         result = price_markdown.apply_price_drop(

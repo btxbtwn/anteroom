@@ -66,7 +66,9 @@ export const ListingRow = memo(function ListingRow({
   const navigationIntent = useNavigationIntent(() => {
     if (selecting) return;
     preloadListingCode();
-    void prefetchListingReads(queryClient, listing.id);
+    const controller = new AbortController();
+    void prefetchListingReads(queryClient, listing.id, { signal: controller.signal, background: true });
+    return () => controller.abort();
   });
   const statusTitle = partial ? `Active · ${partial}`
     : status === "active" && String(listing.status || "draft") !== "active"

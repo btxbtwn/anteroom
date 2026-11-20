@@ -25,7 +25,7 @@ from collections.abc import Callable
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from anteroom.services.device_routes import machine_id, routing_enabled
+from anteroom.services.device_routes import clear_route_cache, machine_id, routing_enabled
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +40,7 @@ _draining = threading.Event()
 def begin_draining() -> None:
     """Called from the shutdown signal: hand work over before requests drain."""
     _draining.set()
+    clear_route_cache()
 
 
 def draining() -> bool:
@@ -48,6 +49,7 @@ def draining() -> bool:
 
 def reset() -> None:
     _draining.clear()
+    clear_route_cache()
 
 
 def hold(engine, name: str = LEASE) -> bool:
@@ -61,6 +63,7 @@ def hold(engine, name: str = LEASE) -> bool:
 
 
 def release(engine) -> None:
+    clear_route_cache()
     if not routing_enabled():
         return
     try:

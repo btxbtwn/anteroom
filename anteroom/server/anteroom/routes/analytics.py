@@ -165,7 +165,7 @@ def get_analytics(
     span: str = Query("12m", alias="range"),
     start: date | None = None,
     end: date | None = None,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     try:
         payload = inventory_analytics(db, range_id=span, start=start, end=end)
@@ -224,7 +224,7 @@ def get_overview(
     response: Response,
     start: date | None = None,
     marketplace: str | None = None,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     """Sales figures for whole UTC days from ``start`` (all time when absent) through ``end``."""
     from anteroom.services.inventory_analytics import load_rows
@@ -240,7 +240,7 @@ def get_overview(
 
 
 @router.get("/generation-timings")
-def get_generation_timings(limit: int = Query(50, ge=1, le=500), db: Session = Depends(get_db)):
+def get_generation_timings(limit: int = Query(50, ge=1, le=500), db: Session = Depends(get_db, scope="function")):
     """Recent listing generations: seconds per stage, and the median of each stage."""
     from anteroom.services.generation_timing import recent_summary
 
@@ -251,7 +251,7 @@ def get_generation_timings(limit: int = Query(50, ge=1, le=500), db: Session = D
 def get_offer_analytics(
     start: date, end: date, response: Response,
     timezone: str = Query("UTC", max_length=100),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     from zoneinfo import ZoneInfoNotFoundError
     from anteroom.services.offer_analytics import offer_analytics

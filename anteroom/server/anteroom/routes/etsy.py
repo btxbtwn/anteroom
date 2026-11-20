@@ -135,7 +135,7 @@ class EtsyNotAllowedResponse(BaseModel):
 
 
 @router.get("/not-allowed", response_model=EtsyNotAllowedResponse)
-def get_not_allowed(db: Session = Depends(get_db)):
+def get_not_allowed(db: Session = Depends(get_db, scope="function")):
     """Read-only: items live on Etsy that Etsy does not allow. Nothing here delists."""
     return EtsyNotAllowedResponse(items=[
         EtsyNotAllowedItem.model_validate(row) for row in etsy_not_allowed_live(db)

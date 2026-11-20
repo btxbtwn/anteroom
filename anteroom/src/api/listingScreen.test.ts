@@ -142,3 +142,67 @@ it("never aborts a shared read that a caller without a signal is waiting on", as
     expect(await prefetch).toEqual({});
   } finally { stop(); vi.unstubAllGlobals(); }
 });
+
+it("coalesces marketplace listings, native marketplaces, and conversation sales into the same /screen read", async () => {
+  const stop = installHostedApiSession({ seller: "seller", origin: "https://app.test", accessToken: async () => "token", unauthorized: () => {} });
+  const screen = {
+    conversation: { id: "coat" },
+    listing: { listing: { title: "Coat" } },
+    photos: [],
+    messages: [],
+    jobs: [],
+    activity: { busy: false },
+    marketplace_listings: { marketplaces: { ebay: { state: "published" } } },
+    native_marketplaces: { ebay: { state: "published" } },
+    marketplace_sales: { sales: [{ id: "sale-1" }] },
+  };
+  const fetch = vi.fn().mockImplementation(async () => new Response(JSON.stringify(screen)));
+  vi.stubGlobal("fetch", fetch);
+  try {
+    const results = await Promise.all([
+      api.conversations.get("coat"),
+      api.listings.get("coat"),
+      api.conversations.photos("coat"),
+      api.conversations.messages("coat"),
+      api.jobs.list("coat"),
+      api.conversations.activity("coat"),
+      api.marketplaceListings.get("coat"),
+      api.nativeMarketplaces.status("coat"),
+      api.marketplaceSales.list({ conversationId: "coat" }),
+    ]);
+    expect(results).toEqual([
+      screen.conversation,
+      screen.listing,
+      [],
+      [],
+      [],
+      screen.activity,
+      screen.marketplace_listings,
+      screen.native_marketplaces,
+      screen.marketplace_sales,
+    ]);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch.mock.calls[0][0]).toBe("https://app.test/api/conversations/coat/screen");
+  } finally { stop(); vi.unstubAllGlobals(); }
+});
+
+it("falls back to the direct endpoint if a /screen payload omits a newer key", async () => {
+  const stop = installHostedApiSession({ seller: "seller", origin: "https://app.test", accessToken: async () => "token", unauthorized: () => {} });
+  const fetch = vi.fn().mockImplementation(async (url: string) => {
+    if (url.endsWith("/screen")) return new Response(JSON.stringify({ conversation: { id: "coat" } }));
+    return new Response(JSON.stringify({ marketplaces: {} }));
+  });
+  vi.stubGlobal("fetch", fetch);
+  try {
+    const [conv, live] = await Promise.all([
+      api.conversations.get("coat"),
+      api.marketplaceListings.get("coat"),
+    ]);
+    expect(conv).toEqual({ id: "coat" });
+    expect(live).toEqual({ marketplaces: {} });
+    expect(fetch.mock.calls.map(call => call[0])).toEqual([
+      "https://app.test/api/conversations/coat/screen",
+      "https://app.test/api/conversations/coat/marketplace-listings",
+    ]);
+  } finally { stop(); vi.unstubAllGlobals(); }
+});

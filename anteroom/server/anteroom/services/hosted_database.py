@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
+import weakref
 from collections.abc import Iterator
 from contextlib import contextmanager
 from uuid import UUID
@@ -23,9 +25,44 @@ from anteroom.services.seller_sessions import SellerIdentity
 STATEMENT_TIMEOUT = "15s"
 IDLE_IN_TRANSACTION_TIMEOUT = "30s"
 
+_thread_sessions = threading.local()
+_context_sessions_lock = threading.RLock()
+_context_sessions: dict[int, list[weakref.ref[SellerDatabaseSession]]] = {}
+
+
+def _current_context():
+    from anteroom.services.service_context import current
+
+    try:
+        return current()
+    except RuntimeError:
+        return None
+
+
+def _drop_context_ref(context_id: int, ref: weakref.ref[SellerDatabaseSession]) -> None:
+    with _context_sessions_lock:
+        refs = _context_sessions.get(context_id)
+        if not refs:
+            return
+        remaining = [item for item in refs if item is not ref and item() is not None]
+        if remaining:
+            _context_sessions[context_id] = remaining
+        else:
+            _context_sessions.pop(context_id, None)
+
+
+def _register_context_session(context_id: int, session: SellerDatabaseSession) -> weakref.ref[SellerDatabaseSession]:
+    ref: weakref.ref[SellerDatabaseSession] = weakref.ref(
+        session,
+        lambda dead, cid=context_id: _drop_context_ref(cid, dead),
+    )
+    with _context_sessions_lock:
+        _context_sessions.setdefault(context_id, []).append(ref)
+    return ref
+
 
 class SellerDatabaseSession(Session):
-    def __init__(self, *, user_id: str, bind, **kwargs):
+    def __init__(self, *, user_id: str, bind, request_dependency: bool = False, **kwargs):
         self._seller_id = str(UUID(user_id))
         if self._seller_id == LOCAL_USER_ID:
             raise ValueError("Hosted sessions require an account owner")
@@ -36,15 +73,96 @@ class SellerDatabaseSession(Session):
         # generation that spans minutes of provider calls, and a handful of
         # them drain the small Supabase pool. Keep committed values loaded.
         kwargs.setdefault("expire_on_commit", False)
+        self._closed_session = False
+        self._request_dependency = request_dependency
+        self._owner_thread: int | None = None
+        self._registered_context_id: int | None = None
+        self._registered_ref: weakref.ref[SellerDatabaseSession] | None = None
         super().__init__(bind=bind, **kwargs)
+        if request_dependency:
+            self.enable_request_context_reuse()
+
+    def enable_request_context_reuse(self) -> None:
+        """Allow lazy same-request reads (e.g. settings) across FastAPI's generator/endpoint threads."""
+        self._request_dependency = True
+        if self._closed_session or self._registered_ref is not None:
+            return
+        context = _current_context()
+        if context is not None and context.seller_id == self._seller_id:
+            context_id = id(context)
+            self._registered_context_id = context_id
+            self._registered_ref = _register_context_session(context_id, self)
 
     @property
     def user_id(self) -> str:
         return self._seller_id
 
+    def __enter__(self):
+        # Generator-yielded FastAPI dependencies enter on one AnyIO worker
+        # thread and yield back to the pool; never put them on a thread-local
+        # stack where another request landing on that thread could reuse them.
+        if not self._request_dependency:
+            stack = getattr(_thread_sessions, "stack", None)
+            if stack is None:
+                stack = []
+                _thread_sessions.stack = stack
+            self._owner_thread = threading.get_ident()
+            stack.append(self)
+        return super().__enter__()
+
+    def __exit__(self, type_, value, traceback):
+        try:
+            return super().__exit__(type_, value, traceback)
+        finally:
+            if not self._request_dependency:
+                stack = getattr(_thread_sessions, "stack", None)
+                if stack and self in stack:
+                    stack.remove(self)
+                self._owner_thread = None
+
+    def close(self) -> None:
+        self._closed_session = True
+        context_id, ref = self._registered_context_id, self._registered_ref
+        self._registered_context_id = None
+        self._registered_ref = None
+        if context_id is not None and ref is not None:
+            _drop_context_ref(context_id, ref)
+        super().close()
+
+
+def active_seller_session(owner: str | None = None) -> SellerDatabaseSession | None:
+    """Return an active, open seller session for lazy same-transaction reads, if unambiguous."""
+    current_thread = threading.get_ident()
+    stack: list[SellerDatabaseSession] = getattr(_thread_sessions, "stack", None) or []
+    for session in reversed(stack):
+        if (
+            not session._closed_session
+            and session._owner_thread == current_thread
+            and session.is_active
+            and (owner is None or session.user_id == owner)
+        ):
+            return session
+    context = _current_context()
+    if context is None or (owner is not None and context.seller_id != owner):
+        return None
+    with _context_sessions_lock:
+        refs = list(_context_sessions.get(id(context), ()))
+    candidates = [
+        session
+        for ref in refs
+        if (session := ref()) is not None
+        and session._request_dependency
+        and not session._closed_session
+        and session.is_active
+        and (owner is None or session.user_id == owner)
+    ]
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
+
 
 @contextmanager
-def seller_session(request: Request) -> Iterator[SellerDatabaseSession]:
+def seller_session(request: Request, *, request_dependency: bool = False) -> Iterator[SellerDatabaseSession]:
     """A session for the request's verified seller; database failures answer 503."""
     identity = getattr(request.state, "seller", None)
     if not isinstance(identity, SellerIdentity):
@@ -53,17 +171,13 @@ def seller_session(request: Request) -> Iterator[SellerDatabaseSession]:
 
     if engine.dialect.name != "postgresql":
         raise HTTPException(status_code=503, detail="The cloud database is not configured")
-    from anteroom.services.service_context import current
 
     try:
-        with SellerDatabaseSession(user_id=identity.user_id, bind=engine) as db:
-            # Preferences are an execution snapshot. Load it as this session's
-            # first query: concurrent validators must not each hold one pooled
-            # connection while waiting for a second one to read settings, and
-            # a session of its own would cost four more round trips per request.
-            context = current()
-            if context is not None:
-                context.settings.load(db)
+        with SellerDatabaseSession(
+            user_id=identity.user_id,
+            bind=engine,
+            request_dependency=request_dependency,
+        ) as db:
             yield db
     except SQLAlchemyError as exc:
         note_cause(exc)
@@ -73,7 +187,7 @@ def seller_session(request: Request) -> Iterator[SellerDatabaseSession]:
 
 def get_seller_db(request: Request):
     """Hosted route dependency: trust only the middleware's verified identity."""
-    with seller_session(request) as db:
+    with seller_session(request, request_dependency=True) as db:
         yield db
 
 

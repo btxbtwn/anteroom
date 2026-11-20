@@ -92,7 +92,7 @@ def _payload(body: AutomationBody) -> dict:
 
 
 @router.get("")
-def list_automations(db: Session = Depends(get_db)):
+def list_automations(db: Session = Depends(get_db, scope="function")):
     """List scheduled automations, newest first."""
     return automations.list_automations(db)
 
@@ -104,7 +104,7 @@ def draft_automation(body: DraftBody):
 
 
 @router.post("/preview")
-def preview_automation(body: AutomationBody, db: Session = Depends(get_db)):
+def preview_automation(body: AutomationBody, db: Session = Depends(get_db, scope="function")):
     """Which items a task would touch, and the price each would become. Nothing is saved or sent."""
     try:
         return automations.preview(db, _payload(body))
@@ -113,7 +113,7 @@ def preview_automation(body: AutomationBody, db: Session = Depends(get_db)):
 
 
 @router.get("/approvals")
-def list_approvals(db: Session = Depends(get_db)):
+def list_approvals(db: Session = Depends(get_db, scope="function")):
     """Item-specific marketplace actions waiting for seller approval."""
     return automations.list_pending_approvals(db)
 
@@ -186,7 +186,7 @@ async def approve_listing(approval_id: str, body: ConfirmBody):
 
 
 @router.post("")
-def create_automation(body: AutomationBody, db: Session = Depends(get_db)):
+def create_automation(body: AutomationBody, db: Session = Depends(get_db, scope="function")):
     """Save an automation. It runs only when activate is set and the task names its actions and marketplaces."""
     try:
         return automations.create_automation(db, _payload(body))
@@ -195,7 +195,7 @@ def create_automation(body: AutomationBody, db: Session = Depends(get_db)):
 
 
 @router.patch("/{automation_id}")
-def update_automation(automation_id: str, body: AutomationBody, db: Session = Depends(get_db)):
+def update_automation(automation_id: str, body: AutomationBody, db: Session = Depends(get_db, scope="function")):
     """Change a saved automation. Pass activate to confirm an edited draft."""
     try:
         return automations.update_automation(db, automation_id, _payload(body))
@@ -204,7 +204,7 @@ def update_automation(automation_id: str, body: AutomationBody, db: Session = De
 
 
 @router.post("/{automation_id}/pause")
-def pause_automation(automation_id: str, db: Session = Depends(get_db)):
+def pause_automation(automation_id: str, db: Session = Depends(get_db, scope="function")):
     """Stop an automation from starting new runs. A run already going finishes."""
     try:
         return automations.pause_automation(db, automation_id)
@@ -213,7 +213,7 @@ def pause_automation(automation_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{automation_id}/resume")
-def resume_automation(automation_id: str, db: Session = Depends(get_db)):
+def resume_automation(automation_id: str, db: Session = Depends(get_db, scope="function")):
     """Let a paused automation run again at its next time. A missed time runs once."""
     try:
         return automations.resume_automation(db, automation_id)
@@ -222,7 +222,7 @@ def resume_automation(automation_id: str, db: Session = Depends(get_db)):
 
 
 @router.delete("/{automation_id}")
-def delete_automation(automation_id: str, db: Session = Depends(get_db)):
+def delete_automation(automation_id: str, db: Session = Depends(get_db, scope="function")):
     """Delete an automation and its run history. Listing jobs it already wrote stay in the job log."""
     try:
         return automations.delete_automation(db, automation_id)
@@ -268,7 +268,7 @@ async def _dry_executor(*_args, **_kwargs):
 
 
 @router.get("/{automation_id}/history")
-def automation_history(automation_id: str, db: Session = Depends(get_db)):
+def automation_history(automation_id: str, db: Session = Depends(get_db, scope="function")):
     """Past runs, with each item's result and any error."""
     try:
         return automations.history(db, automation_id)

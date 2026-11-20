@@ -103,17 +103,17 @@ class BusinessNote(BaseModel):
 
 
 @router.get("/threads")
-def get_threads(db: Session = Depends(get_db)):
+def get_threads(db: Session = Depends(get_db, scope="function")):
     return [business_assistant.thread_view(row) for row in business_assistant.list_threads(db)]
 
 
 @router.post("/threads")
-def create_thread(db: Session = Depends(get_db)):
+def create_thread(db: Session = Depends(get_db, scope="function")):
     return business_assistant.thread_view(business_assistant.create_thread(db))
 
 
 @router.delete("/threads/{thread_id}")
-def remove_thread(thread_id: str, db: Session = Depends(get_db)):
+def remove_thread(thread_id: str, db: Session = Depends(get_db, scope="function")):
     from anteroom.services.chat_attachments import delete_attachments
 
     if _queued():
@@ -148,7 +148,7 @@ def _require_thread(db: Session, thread_id: str | None) -> None:
 
 
 @router.get("/messages")
-def get_messages(thread_id: str | None = None, db: Session = Depends(get_db)):
+def get_messages(thread_id: str | None = None, db: Session = Depends(get_db, scope="function")):
     _require_thread(db, thread_id)
     return [business_assistant.message_view(row) for row in business_assistant.list_messages(db, thread_id)]
 
@@ -164,13 +164,13 @@ def save_note(body: BusinessNote):
 
 
 @router.get("/memory")
-def get_memory(db: Session = Depends(get_db)):
+def get_memory(db: Session = Depends(get_db, scope="function")):
     """Facts the assistant keeps across conversations."""
     return {"memories": assistant_memory.list_memories(db)}
 
 
 @router.delete("/memory/{memory_id}")
-def forget_memory(memory_id: str, db: Session = Depends(get_db)):
+def forget_memory(memory_id: str, db: Session = Depends(get_db, scope="function")):
     """Drop one fact the seller says is wrong."""
     if not assistant_memory.forget(db, memory_id):
         raise HTTPException(404, "That memory is no longer kept.")
@@ -802,7 +802,7 @@ def _apply_to_listing(item: dict, db: Session) -> str | None:
 
 
 @router.post("/messages/{message_id}/changes/apply")
-def apply_changes(message_id: str, db: Session = Depends(get_db)):
+def apply_changes(message_id: str, db: Session = Depends(get_db, scope="function")):
     """Write the changes an answer proposed, now that the seller has reviewed them.
 
     Each listing is saved as the listing editor saves it, as a new revision the
@@ -859,7 +859,7 @@ def _automation_message(message_id: str, db: Session) -> AssistantMessage:
 
 
 @router.post("/messages/{message_id}/automation/confirm")
-def confirm_automation_message(message_id: str, db: Session = Depends(get_db)):
+def confirm_automation_message(message_id: str, db: Session = Depends(get_db, scope="function")):
     """Save the automation an answer drafted, now that the seller has confirmed it."""
     from anteroom.services import automations
     from anteroom.services.automations import AutomationError
@@ -884,7 +884,7 @@ def confirm_automation_message(message_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/messages/{message_id}/automation/dismiss")
-def dismiss_automation_message(message_id: str, db: Session = Depends(get_db)):
+def dismiss_automation_message(message_id: str, db: Session = Depends(get_db, scope="function")):
     row = _automation_message(message_id, db)
     assert row.automation is not None
     row.automation = {**row.automation, "status": "dismissed"}
@@ -893,7 +893,7 @@ def dismiss_automation_message(message_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/messages/{message_id}/changes/dismiss")
-def dismiss_changes(message_id: str, db: Session = Depends(get_db)):
+def dismiss_changes(message_id: str, db: Session = Depends(get_db, scope="function")):
     with _change_request(message_id):
         row = _proposal(message_id, db)
         assert row.changes is not None

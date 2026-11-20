@@ -1,27 +1,55 @@
 import { useEffect, useRef } from "react";
 
-/** Warm a destination after a brief hover, or immediately on focus or touch. */
-export function useNavigationIntent(prepare: () => void) {
+/** Warm a destination after a brief hover, or immediately on focus or touch.
+ * If `prepare` returns a cleanup function, it runs when hover/focus ends before click. */
+export function useNavigationIntent(prepare: () => (() => void) | void) {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cancel = () => {
+  const stop = useRef<(() => void) | null>(null);
+  const pressed = useRef(false);
+
+  const clearTimer = () => {
     if (timer.current !== null) clearTimeout(timer.current);
     timer.current = null;
   };
-  const immediate = () => {
-    cancel();
-    prepare();
+
+  const abort = () => {
+    clearTimer();
+    const fn = stop.current;
+    stop.current = null;
+    fn?.();
   };
+
+  const run = () => {
+    clearTimer();
+    if (stop.current) return;
+    const cleanup = prepare();
+    if (typeof cleanup === "function") stop.current = cleanup;
+  };
+
   useEffect(() => () => {
-    if (timer.current !== null) clearTimeout(timer.current);
+    clearTimer();
+    stop.current?.();
+    stop.current = null;
   }, []);
+
   return {
     onPointerEnter: () => {
-      cancel();
-      timer.current = setTimeout(immediate, 80);
+      pressed.current = false;
+      clearTimer();
+      timer.current = setTimeout(run, 80);
     },
-    onPointerLeave: cancel,
-    onPointerDown: immediate,
-    onFocus: immediate,
-    onBlur: cancel,
+    onPointerLeave: () => {
+      clearTimer();
+      if (!pressed.current) abort();
+      pressed.current = false;
+    },
+    onPointerDown: () => {
+      pressed.current = true;
+      run();
+    },
+    onFocus: run,
+    onBlur: () => {
+      if (!pressed.current) abort();
+    },
   };
 }

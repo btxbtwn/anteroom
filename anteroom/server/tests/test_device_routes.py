@@ -236,3 +236,58 @@ def test_health_fails_when_the_draft_loop_has_stopped(monkeypatch):
     assert response.status_code == 503 and response.json()['status'] == 'worker_stopped'
     app.state.background_worker = Future()
     assert client.get('/api/health').status_code == 200
+
+
+def test_confirmed_device_route_is_cached_and_cleared_on_handoff_release(storage, monkeypatch):  # noqa: F811
+    from sqlalchemy import event
+
+    from anteroom.services import process_handoff
+
+    engine, _sessions = storage
+    owner = str(uuid.uuid4())
+    monkeypatch.setenv('FLY_MACHINE_ID', 'machinecachea')
+    monkeypatch.setenv('ANTEROOM_PROCESS_BASE_URL', 'http://127.0.0.1:8080')
+    device_routes.clear_route_cache()
+
+    queries: list[str] = []
+
+    def record(_conn, _cursor, statement, *_args):
+        queries.append(statement)
+
+    event.listen(engine, 'before_cursor_execute', record)
+    try:
+        first = claim(owner, 'chrome', engine)
+        assert first.owned and first.machine_id == 'machinecachea'
+        assert queries
+
+        queries.clear()
+        second = claim(owner, 'chrome', engine)
+        assert second == first
+        assert queries == [], 'Confirmed owned route within TTL should skip the DB'
+
+        found = device_routes.lookup(owner, 'chrome', engine)
+        assert found == first
+        assert queries == [], 'Lookup of confirmed owned route within TTL should skip the DB'
+
+        # Releasing the handoff clears the route cache so the next claim hits DB.
+        process_handoff.release(engine)
+        queries.clear()
+        refreshed = claim(owner, 'chrome', engine)
+        assert refreshed == first
+        assert queries, 'Handoff release must invalidate cached device routes'
+
+        # A non-owned route is never cached.
+        monkeypatch.setenv('FLY_MACHINE_ID', 'machinecacheb')
+        monkeypatch.setenv('ANTEROOM_PROCESS_BASE_URL', 'http://127.0.0.1:8081')
+        queries.clear()
+        foreign = claim(owner, 'chrome', engine)
+        assert not foreign.owned and foreign.machine_id == 'machinecachea'
+        assert queries
+        queries.clear()
+        foreign_again = claim(owner, 'chrome', engine)
+        assert not foreign_again.owned
+        assert queries, 'Non-owned device routes must never be cached'
+    finally:
+        event.remove(engine, 'before_cursor_execute', record)
+        device_routes.clear_route_cache()
+

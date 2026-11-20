@@ -1,3 +1,4 @@
+import { isBackgroundSignal, promoteBackgroundSignal, registerBackgroundSignal } from "./requestScheduler";
 import { currentHostedSession } from "./transport";
 
 // Coalesce core reads issued together. Share only requests currently running. React Query owns freshness and invalidation.
@@ -7,6 +8,37 @@ const pending = new Map<string, ReadBatch>();
 let owner = currentHostedSession();
 
 export type ScreenRead = <R>(path: string, signal?: AbortSignal) => Promise<R>;
+
+const CONVERSATION_PART_KEYS: Record<string, string> = {
+  listing: "listing",
+  photos: "photos",
+  messages: "messages",
+  activity: "activity",
+  "marketplace-listings": "marketplace_listings",
+  "native-marketplaces": "native_marketplaces",
+};
+
+function matchScreenTarget(path: string): { id: string; key: string } | null {
+  const conv = /^\/conversations\/([^/?]+)(?:\/(listing|photos|messages|activity|marketplace-listings|native-marketplaces))?$/.exec(path);
+  if (conv) {
+    return { id: conv[1], key: conv[2] ? CONVERSATION_PART_KEYS[conv[2]] : "conversation" };
+  }
+  const job = /^\/jobs\?conversation_id=([^&]+)$/.exec(path);
+  if (job) {
+    return { id: decodeURIComponent(job[1]), key: "jobs" };
+  }
+  if (path.startsWith("/marketplace-sales?")) {
+    const params = new URLSearchParams(path.slice("/marketplace-sales?".length));
+    const convId = params.get("conversation_id");
+    const state = params.get("state") ?? "new";
+    if (convId && state === "new") {
+      // Only coalesce when no extra unrecognized filter parameters are present.
+      const allowed = [...params.keys()].every((name) => name === "conversation_id" || name === "state");
+      if (allowed) return { id: convId, key: "marketplace_sales" };
+    }
+  }
+  return null;
+}
 
 /** Settles with `promise`, or rejects as soon as this caller's own signal aborts. */
 function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined, onAbort?: () => void): Promise<T> {
@@ -26,15 +58,15 @@ export async function listingScreenRead<T>(path: string, read: ScreenRead, signa
   const session = currentHostedSession();
   if (session !== owner) { pending.clear(); owner = session; }
   if (!session) return read<T>(path, signal);
-  const match = /^\/conversations\/([^/?]+)(?:\/(listing|photos|messages|activity))?$/.exec(path);
-  const job = /^\/jobs\?conversation_id=([^&]+)$/.exec(path);
-  if (!match && !job) return read<T>(path, signal);
-  const id = match ? match[1] : decodeURIComponent(job![1]);
-  const key = match ? match[2] || "conversation" : "jobs";
+  const target = matchScreenTarget(path);
+  if (!target) return read<T>(path, signal);
+  const { id, key } = target;
+  const callerIsBackground = isBackgroundSignal(signal);
   let batch = pending.get(id);
   if (!batch) {
     const keys = new Set<string>();
     const controller = new AbortController();
+    if (callerIsBackground) registerBackgroundSignal(controller.signal);
     const promise = Promise.resolve().then(async () => {
       if (currentHostedSession() !== session) throw new Error("Your account changed.");
       // A single polling read should not reload the whole screen.
@@ -47,6 +79,8 @@ export async function listingScreenRead<T>(path: string, read: ScreenRead, signa
     const started: ReadBatch = { keys, promise, controller, waiting: 0 };
     pending.set(id, batch = started);
     void promise.finally(() => { if (pending.get(id) === started) pending.delete(id); }).catch(() => {});
+  } else if (!callerIsBackground && isBackgroundSignal(batch.controller.signal)) {
+    promoteBackgroundSignal(batch.controller.signal);
   }
   const joined = batch;
   joined.keys.add(key);
@@ -59,5 +93,6 @@ export async function listingScreenRead<T>(path: string, read: ScreenRead, signa
     joined.controller.abort();
   });
   if (currentHostedSession() !== session) throw new Error("Your account changed.");
+  if (!(key in result)) return read<T>(path, signal);
   return result[key] as T;
 }

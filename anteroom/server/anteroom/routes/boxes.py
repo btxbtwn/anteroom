@@ -87,12 +87,12 @@ class BoxUpdate(BaseModel):
 
 
 @router.get("", response_model=BoxesResponse)
-def list_boxes(db: Session = Depends(get_db)):
+def list_boxes(db: Session = Depends(get_db, scope="function")):
     return BoxesResponse.model_validate(boxes.results(db))
 
 
 @router.post("", response_model=BoxesResponse)
-def create_box(body: BoxCreate, db: Session = Depends(get_db)):
+def create_box(body: BoxCreate, db: Session = Depends(get_db, scope="function")):
     try:
         boxes.create_box(db, **body.model_dump())
     except boxes.BoxCountError as error:
@@ -101,7 +101,7 @@ def create_box(body: BoxCreate, db: Session = Depends(get_db)):
 
 
 @router.patch("/{box_id}", response_model=BoxesResponse)
-def update_box(box_id: str, body: BoxUpdate, db: Session = Depends(get_db)):
+def update_box(box_id: str, body: BoxUpdate, db: Session = Depends(get_db, scope="function")):
     box = boxes.get_box(db, box_id)
     if box is None:
         raise HTTPException(404, "Box not found")
@@ -113,7 +113,7 @@ def update_box(box_id: str, body: BoxUpdate, db: Session = Depends(get_db)):
 
 
 @router.delete("/{box_id}", response_model=BoxesResponse)
-def delete_box(box_id: str, db: Session = Depends(get_db)):
+def delete_box(box_id: str, db: Session = Depends(get_db, scope="function")):
     box = boxes.get_box(db, box_id)
     if box is None:
         raise HTTPException(404, "Box not found")

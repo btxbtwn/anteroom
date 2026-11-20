@@ -284,7 +284,7 @@ def _job_response(job) -> JobResponse:
 
 
 @router.get("/{job_id}/photos/{photo_id}")
-def serve_job_photo(job_id: str, photo_id: str, db: Session = Depends(get_db)):
+def serve_job_photo(job_id: str, photo_id: str, db: Session = Depends(get_db, scope="function")):
     job_repo = JobRepo(db)
     job = job_repo.photo_source(job_id)
     if not job:

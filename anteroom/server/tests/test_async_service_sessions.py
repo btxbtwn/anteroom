@@ -12,13 +12,7 @@ STILL_ON_THE_LOOP = {
     "services/extension_connection.py:_reconnect_work_after_settle",
     "services/extension_connection.py:extension_websocket",
     "services/hosted_automation_scheduler.py:run_owner",
-    "services/hosted_promotion_scheduler.py:check_seller",
-    "services/listing_promotions.py:review",
     "services/marketplace_accounts.py:autodelist_for_sales",
-    "services/promotion_automations.py:_timer",
-    "services/promotion_automations.py:check_new_likes",
-    "services/promotion_automations.py:run_round",
-    "services/promotion_automations.py:tick",
     "services/vendoo_drafts.py:_ops",
     "services/vendoo_drafts.py:run",
 }

@@ -79,14 +79,30 @@ def task_stream(task_id):
             return rows, task.status, task.error
 
     async def stream():
+        from sqlalchemy.exc import SQLAlchemyError
+        from anteroom.services.error_alerts import note_cause
+
         sequence = 0
+        consecutive_db_errors = 0
         yield KEEPALIVE
         # Read only when Postgres announces new progress or a status change for
         # this task, or after task_signals' fallback; see services/task_signals.py.
         with task_signals.subscribe(task_id) as signal:
             while True:
                 signal.clear()
-                rows, status, error = await asyncio.to_thread(poll, sequence)
+                try:
+                    rows, status, error = await asyncio.to_thread(poll, sequence)
+                    consecutive_db_errors = 0
+                except SQLAlchemyError as exc:
+                    note_cause(exc)
+                    consecutive_db_errors += 1
+                    if consecutive_db_errors >= 3:
+                        yield sse_event('error', 'Cloud data is temporarily unavailable. Refresh to reconnect.')
+                        yield 'data: [DONE]\n\n'
+                        return
+                    yield KEEPALIVE
+                    await signal.wait()
+                    continue
                 for number, frame in rows:
                     sequence = number
                     yield frame
@@ -228,7 +244,7 @@ async def message(conv_id: str, request: Request):
 @router.post('/generate/cancel')
 @router.post('/messages/cancel')
 @router.post('/stop')
-def cancel(conv_id: str, db=Depends(get_seller_db)):
+def cancel(conv_id: str, db=Depends(get_seller_db, scope="function")):
     owned_conversation(db, conv_id, lock=True)
     tasks = db.scalars(select(BackgroundTask).where(
         BackgroundTask.conversation_id == conv_id, BackgroundTask.status.in_(queue.ACTIVE))).all()

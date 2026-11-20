@@ -4,13 +4,13 @@ import asyncio
 import unittest
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, text, update
 from sqlalchemy import exc as sqlalchemy_exc
 from sqlalchemy.sql.dml import Update
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from anteroom.database import Base, get_db
@@ -89,7 +89,9 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.bridge.side_effect = answer
 
     def check_likes(self):
-        return asyncio.run(promotion_automations.check_new_likes(self.db, sleep=AsyncMock()))
+        count = asyncio.run(promotion_automations.check_new_likes(sleep=AsyncMock()))
+        self.db.expire_all()
+        return count
 
     def test_recent_like_sends_before_round_due_and_repeated_feed_never_resends(self):
         saved = self.create(OFFER)
@@ -256,7 +258,7 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.like_feed([{"listing_id": post, "at": at.isoformat() + "Z"}])
         with patch.object(listing_promotions, "blocking", wraps=listing_promotions.blocking) as blocking:
             self.assertEqual(self.check_likes(), 0)
-        blocking.assert_called_once_with(self.db, "poshmark", post, "offer", new_like_at=at)
+        blocking.assert_called_once_with(ANY, "poshmark", post, "offer", new_like_at=at)
         self.assertEqual(self.checked(), [])
         self.assertEqual(self.promoted(), [])
 
@@ -276,7 +278,9 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.db.commit()
 
     def tick(self):
-        return asyncio.run(promotion_automations.tick(self.db, sleep=AsyncMock()))
+        ran = asyncio.run(promotion_automations.tick(sleep=AsyncMock()))
+        self.db.expire_all()
+        return ran
 
     def test_saved_off_and_enabling_or_editing_sends_nothing(self):
         saved = self.create(SHARE)
@@ -851,7 +855,8 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.assertGreater(sent, 0)
         due_at = self.db.get(PromotionAutomation, saved["id"]).next_run_at
         self.assertNotEqual(stale.next_run_at, due_at)
-        self.assertIsNone(asyncio.run(promotion_automations.run_round(machine_b, stale, sleep=AsyncMock())))
+        self.assertIsNone(asyncio.run(promotion_automations.run_round(stale.id, expected_next_run_at=stale.next_run_at,
+                                                                      sleep=AsyncMock())))
         self.db.expire_all()
         self.assertEqual(len(self.promoted()), sent)
         self.assertEqual(self.db.query(PromotionRun).count(), 1)
@@ -1350,18 +1355,21 @@ class PromotionAutomationsTest(unittest.TestCase):
         saved = self.create({**OFFER, "minimum_price": "30"})
         self.enable(saved["id"])
         self.due(saved["id"])
-        execute = self.db.execute
+        orig_execute = Session.execute
         changed = False
 
-        def intercept(statement, *args, **kwargs):
+        def intercept(session, statement, *args, **kwargs):
             nonlocal changed
-            if isinstance(statement, Update) and statement.table.name == "promotion_automations" and not changed:
+            if (isinstance(statement, Update) and statement.table.name == "promotion_automations"
+                    and "minimum_price_cents" in str(statement) and not changed):
                 changed = True
-                execute(update(PromotionAutomation).where(PromotionAutomation.id == saved["id"]).values(minimum_price_cents=4500))
-                self.db.commit()
-            return execute(statement, *args, **kwargs)
+                orig_execute(
+                    session,
+                    update(PromotionAutomation).where(PromotionAutomation.id == saved["id"]).values(minimum_price_cents=4500),
+                )
+            return orig_execute(session, statement, *args, **kwargs)
 
-        with patch.object(self.db, "execute", side_effect=intercept):
+        with patch.object(Session, "execute", intercept):
             self.tick()
         self.assertTrue(changed)
         self.assertEqual(self.promoted(), [])
@@ -1428,10 +1436,11 @@ class PromotionAutomationsTest(unittest.TestCase):
             saved = self.create({**OFFER, "scope": "items", "conversation_ids": [self.items[0][0].id]})
             enabled = self.enable(saved["id"])
         self.assertEqual(datetime.fromisoformat(enabled["next_run_at"].rstrip("Z")), moment + timedelta(minutes=15))
-        self.assertEqual(asyncio.run(promotion_automations.tick(self.db, now=moment + timedelta(minutes=14), sleep=AsyncMock())), 0)
+        self.assertEqual(asyncio.run(promotion_automations.tick(now=moment + timedelta(minutes=14), sleep=AsyncMock())), 0)
         self.assertEqual(self.promoted(), [])
         with patch.object(promotion_automations, "_now", return_value=moment + timedelta(minutes=15)):
-            self.assertEqual(asyncio.run(promotion_automations.tick(self.db, now=moment + timedelta(minutes=15), sleep=AsyncMock())), 1)
+            self.assertEqual(asyncio.run(promotion_automations.tick(now=moment + timedelta(minutes=15), sleep=AsyncMock())), 1)
+        self.db.expire_all()
         self.assertEqual(len(self.promoted()), 1)
         self.assertEqual(self.db.get(PromotionAutomation, saved["id"]).next_run_at, moment + timedelta(minutes=30))
 

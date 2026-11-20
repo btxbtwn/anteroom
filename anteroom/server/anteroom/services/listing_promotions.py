@@ -236,14 +236,21 @@ def offer_floor(db: Session, row: ListingPromotion) -> int:
     return saved.floor_cents
 
 
-async def review(db: Session, row: ListingPromotion, conv: Conversation, floor_price: str | None = None,
+async def review(row: ListingPromotion, conv_id: str, floor_price: str | None = None,
                  *, new_like_at: datetime | None = None) -> None:
     """Read one listing now and fill in what would be sent. Raises PromotionError when it would not be."""
-    listing_id = _review_local(db, row, conv, floor_price, new_like_at=new_like_at)
-    # Only reads are open here. End them before Chrome answers, which can take
-    # minutes: a held connection is one the seller's own pages cannot use.
-    db.commit()
+    listing_id = await in_worker_session(_review_local_by_id, row, conv_id, floor_price, new_like_at)
     await _review_remote(row, listing_id)
+
+
+def _review_local_by_id(db: Session, row: ListingPromotion, conv_id: str, floor_price: str | None,
+                        new_like_at: datetime | None) -> str:
+    conv = db.get(Conversation, conv_id)
+    if conv is None:
+        raise PromotionError(409, "This listing was deleted.")
+    listing_id = _review_local(db, row, conv, floor_price, new_like_at=new_like_at)
+    db.commit()
+    return listing_id
 
 
 def _review_local(db: Session, row: ListingPromotion, conv: Conversation, floor_price: str | None,

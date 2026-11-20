@@ -15,6 +15,6 @@ router = APIRouter(prefix="/api/errors", tags=["errors"])
 
 
 @router.get("")
-def list_errors(db: Session = Depends(get_db)):
+def list_errors(db: Session = Depends(get_db, scope="function")):
     """Listings a relist left down. Each one still needs a relist."""
     return automations.list_open_gaps(db)

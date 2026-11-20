@@ -134,6 +134,9 @@ def json_text(column, path: str):
 
 def get_db():
     db = SessionLocal()
+    enable_reuse = getattr(db, "enable_request_context_reuse", None)
+    if enable_reuse is not None:
+        enable_reuse()
     try:
         yield db
     finally:

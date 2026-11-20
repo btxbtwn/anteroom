@@ -72,4 +72,41 @@ describe("page prefetch", () => {
     expect(client.getQueryData(sourcingQuery.queryKey)).toBeDefined();
     vi.useRealTimers();
   });
+
+  it("caps concurrent prefetch reads to at most two in flight and skips recently warmed queries", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const track = <T,>(fn: ReturnType<typeof vi.fn>, value: T) => {
+      fn.mockImplementation(async () => {
+        inFlight += 1;
+        peak = Math.max(peak, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        inFlight -= 1;
+        return value;
+      });
+    };
+    track(api.settings.ui, { read: "settings-ui" });
+    track(api.salesLedger.list, { read: "sales-ledger" });
+    track(api.analytics.overview, { read: "overview" });
+    track(api.sourcing.get, { read: "sourcing" });
+    track(api.boxes.list, { read: "boxes" });
+    track(api.automations.list, { read: "automations" });
+    track(api.automations.approvals, { read: "approvals" });
+    track(api.errors.list, { read: "gaps" });
+    track(api.ebayOffers.status, { read: "ebay-offers" });
+    track(api.promotionAutomations.list, { read: "promotions" });
+    track(api.directConnections.status, { accounts: { ebay: { connected: true } } });
+    track(api.ebay.read, { read: "ebay" });
+
+    const client = new QueryClient();
+    const now = Date.now();
+    await prefetchPageReads(client, allViews, now);
+    expect(peak).toBeLessThanOrEqual(2);
+    expect(api.sourcing.get).toHaveBeenCalledTimes(1);
+
+    // A second immediate pass skips already-warm queries.
+    await prefetchPageReads(client, allViews, now + 1000);
+    expect(api.sourcing.get).toHaveBeenCalledTimes(1);
+    expect(api.boxes.list).toHaveBeenCalledTimes(1);
+  });
 });

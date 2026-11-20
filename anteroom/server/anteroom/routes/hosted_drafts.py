@@ -41,12 +41,12 @@ class DraftResponse(BaseModel):
 
 
 @router.get('', response_model=list[DraftResponse])
-def list_drafts(offset: int = Query(0, ge=0, le=1000000), search: str = Query('', max_length=200), db=Depends(get_seller_db)):
+def list_drafts(offset: int = Query(0, ge=0, le=1000000), search: str = Query('', max_length=200), db=Depends(get_seller_db, scope="function")):
     return drafts.recent(db, offset, search)
 
 
 @router.post('', response_model=DraftResponse, status_code=201)
-def create_draft(body: DraftInput, db=Depends(get_seller_db)):
+def create_draft(body: DraftInput, db=Depends(get_seller_db, scope="function")):
     return drafts.create(db, body.title, body.notes)
 
 
@@ -59,7 +59,7 @@ def detail(db, draft):
 
 
 @router.get('/{draft_id}', response_model=DraftDetail)
-def get_draft(draft_id: str, db=Depends(get_seller_db)):
+def get_draft(draft_id: str, db=Depends(get_seller_db, scope="function")):
     draft = drafts.get(db, draft_id)
     if draft is None:
         raise HTTPException(404, 'Draft not found')
@@ -67,7 +67,7 @@ def get_draft(draft_id: str, db=Depends(get_seller_db)):
 
 
 @router.patch('/{draft_id}', response_model=DraftDetail)
-def save_draft(draft_id: str, body: DraftSave, db=Depends(get_seller_db)):
+def save_draft(draft_id: str, body: DraftSave, db=Depends(get_seller_db, scope="function")):
     if drafts.get(db, draft_id) is None:
         raise HTTPException(404, 'Draft not found')
     draft = drafts.save(db, draft_id, body.title, body.notes, body.expected_updated_at, body.fields)

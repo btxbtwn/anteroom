@@ -34,7 +34,7 @@ def listings(conv_id: str, db: Session = Depends(get_db, scope="function")):
 
 
 @router.post("/{marketplace}/mark")
-def mark(conv_id: str, marketplace: str, body: MarkRequest, db: Session = Depends(get_db)):
+def mark(conv_id: str, marketplace: str, body: MarkRequest, db: Session = Depends(get_db, scope="function")):
     try:
         return marketplace_delist.mark(db, conv_id, marketplace, body.state, body.url, body.relink_deleted)
     except marketplace_delist.DelistError as exc:
@@ -61,7 +61,7 @@ async def check_sales(conv_id: str):
 
 
 @router.post("/sold")
-def record_sale(conv_id: str, body: sales_ledger.SellerSale, db: Session = Depends(get_db)):
+def record_sale(conv_id: str, body: sales_ledger.SellerSale, db: Session = Depends(get_db, scope="function")):
     """Mark as sold: record the sale and its amounts. Delisting the rest is the seller's separate, confirmed step."""
     try:
         return sales_ledger.record_seller_sale(db, conv_id, body)

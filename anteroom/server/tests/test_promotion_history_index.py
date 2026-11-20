@@ -9,7 +9,7 @@ from alembic import command
 from alembic.autogenerate import compare_metadata
 from alembic.runtime.migration import MigrationContext
 import sqlalchemy as sa
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from test_seller_ownership import migration_config, migration_engine  # noqa: F401
 from anteroom.database import Base
@@ -88,7 +88,8 @@ def test_conflicting_timestamp_ties_never_allow_an_unconfirmed_send_to_repeat(mi
         db.commit()
         # Exercise the real waiting lookup, blocking lookup and round. Every
         # alternative winner of the ambiguous tie must still refuse a resend.
-        with patch.object(promotion_automations, "_now", return_value=now), \
+        with patch("anteroom.database.SessionLocal", sessionmaker(bind=engine)), \
+             patch.object(promotion_automations, "_now", return_value=now), \
              patch.object(promotion_automations, "_covered", return_value=[(SimpleNamespace(id="item"), "item", None)]), \
              patch.object(promotion_automations.promotions, "require_chrome"), \
              patch.object(promotion_automations.promotions, "review", new_callable=AsyncMock) as review, \
@@ -114,7 +115,9 @@ def test_conflicting_timestamp_ties_never_allow_an_unconfirmed_send_to_repeat(mi
                                                 sent_at=now - timedelta(days=2) if state == "done" else None))
                     rule.next_run_at = now
                     db.commit()
-                    run = asyncio.run(promotion_automations.run_round(db, rule, sleep=AsyncMock()))
+                    run = asyncio.run(promotion_automations.run_round(rule.id, expected_next_run_at=rule.next_run_at,
+                                                                      sleep=AsyncMock()))
+                    db.expire_all()
                     assert run is not None and run.sent == 0 and run.skipped == 1, case
                     assert db.query(ListingPromotion).count() == 2, case
                     assert db.query(ListingPromotion).filter_by(state=pending).count() == 1, case

@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from anteroom.database import SessionLocal
+from anteroom.database import SessionLocal, in_worker_session
 from anteroom.services import promotion_automations
 from anteroom.services.hosted_browser_relay import MARKETPLACE_PROMOTIONS, ready_sellers
 from anteroom.services.hosted_context import for_seller
@@ -20,15 +20,19 @@ from anteroom.services.service_context import use
 log = logging.getLogger(__name__)
 
 
+def _prepare_seller(db, owner: str, recovered: set[str]) -> None:
+    promotion_automations.report_overdue(db)
+    if owner not in recovered:
+        fail_stalled_jobs(db)
+        promotion_automations.recover(db)
+        recovered.add(owner)
+
+
 async def check_seller(owner: str, recovered: set[str]) -> None:
-    with use(for_seller(owner)), SessionLocal() as db:
-        promotion_automations.report_overdue(db)
-        if owner not in recovered:
-            fail_stalled_jobs(db)
-            promotion_automations.recover(db)
-            recovered.add(owner)
-        await promotion_automations.check_new_likes(db)
-        await promotion_automations.tick(db)
+    with use(for_seller(owner)):
+        await in_worker_session(_prepare_seller, owner, recovered)
+        await promotion_automations.check_new_likes()
+        await promotion_automations.tick()
 
 
 async def check_ready_sellers(recovered: set[str]) -> None:

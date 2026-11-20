@@ -78,30 +78,30 @@ def require_conversation(db, identity):
 
 
 @router.get('/hidden-fields')
-def hidden_fields(conversation_id: str | None = None, db=Depends(get_seller_db)):
+def hidden_fields(conversation_id: str | None = None, db=Depends(get_seller_db, scope="function")):
     require_conversation(db, conversation_id)
     return settings.get_hidden_fields(conversation_id)
 
 
 @router.put('/hidden-fields')
-def hide_field(body: settings.HiddenFieldConfig, db=Depends(get_seller_db)):
+def hide_field(body: settings.HiddenFieldConfig, db=Depends(get_seller_db, scope="function")):
     require_conversation(db, body.conversation_id)
     return settings.hide_hidden_field(body)
 
 
 @router.delete('/hidden-fields')
-def restore_field(body: settings.HiddenFieldConfig, db=Depends(get_seller_db)):
+def restore_field(body: settings.HiddenFieldConfig, db=Depends(get_seller_db, scope="function")):
     require_conversation(db, body.conversation_id)
     return settings.restore_hidden_field(body)
 
 
 @router.post('/hidden-fields/restore-all')
-def restore_all(body: settings.RestoreAllHiddenFields, db=Depends(get_seller_db)):
+def restore_all(body: settings.RestoreAllHiddenFields, db=Depends(get_seller_db, scope="function")):
     require_conversation(db, body.conversation_id)
     return settings.restore_all_hidden_fields(body)
 
 
 @router.post('/hidden-fields/restore-matching')
-def restore_matching(body: settings.RestoreMatchingHiddenFields, db=Depends(get_seller_db)):
+def restore_matching(body: settings.RestoreMatchingHiddenFields, db=Depends(get_seller_db, scope="function")):
     require_conversation(db, body.conversation_id)
     return settings.restore_matching_hidden_fields(body)

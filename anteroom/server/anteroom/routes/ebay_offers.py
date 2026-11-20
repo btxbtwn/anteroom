@@ -46,7 +46,7 @@ def _error(exc: Exception) -> HTTPException:
 
 
 @router.get("")
-def status(db: Session = Depends(get_db)):
+def status(db: Session = Depends(get_db, scope="function")):
     return ebay_offers.status(db)
 
 
@@ -64,7 +64,7 @@ async def send(body: Approval):
 
 
 @router.post("/enable")
-def enable(body: Approval, db: Session = Depends(get_db)):
+def enable(body: Approval, db: Session = Depends(get_db, scope="function")):
     try:
         return ebay_offers.enable(db, list(dict.fromkeys(body.attempt_ids)))
     except (ValueError, SignInRequired) as exc:
@@ -72,7 +72,7 @@ def enable(body: Approval, db: Session = Depends(get_db)):
 
 
 @router.post("/pause")
-def pause_all(db: Session = Depends(get_db)):
+def pause_all(db: Session = Depends(get_db, scope="function")):
     try:
         return ebay_offers.pause(db)
     except SignInRequired as exc:
@@ -80,7 +80,7 @@ def pause_all(db: Session = Depends(get_db)):
 
 
 @router.post("/enable-all")
-def enable_all(body: AllListingsApproval, db: Session = Depends(get_db)):
+def enable_all(body: AllListingsApproval, db: Session = Depends(get_db, scope="function")):
     try:
         return ebay_offers.enable_all(db, body.discount_percent, body.minimum_price)
     except (ValueError, SignInRequired) as exc:
@@ -88,7 +88,7 @@ def enable_all(body: AllListingsApproval, db: Session = Depends(get_db)):
 
 
 @router.post("/rules/{rule_id}/pause")
-def pause(rule_id: str, db: Session = Depends(get_db)):
+def pause(rule_id: str, db: Session = Depends(get_db, scope="function")):
     try:
         return ebay_offers.pause(db, rule_id)
     except SignInRequired as exc:
@@ -96,7 +96,7 @@ def pause(rule_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/attempts/{attempt_id}/checked")
-def resolve(attempt_id: str, body: Confirm, db: Session = Depends(get_db)):
+def resolve(attempt_id: str, body: Confirm, db: Session = Depends(get_db, scope="function")):
     try:
         return ebay_offers.resolve(db, attempt_id)
     except (ValueError, SignInRequired) as exc:

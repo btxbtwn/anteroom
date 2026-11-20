@@ -724,7 +724,7 @@ export const api = {
       request<ExtensionSessionConnect>(`/marketplaces/${marketplace}/connect`, { method: "POST" }),
   },
   marketplaceListings: {
-    get: (convId: string) => request<MarketplaceListings>(`/conversations/${convId}/marketplace-listings`),
+    get: (convId: string, options?: ReadOptions) => read<MarketplaceListings>(`/conversations/${convId}/marketplace-listings`, options),
     delist: (convId: string, marketplaces: DelistMarketplace[]) =>
       request<MarketplaceListings>(`/conversations/${convId}/marketplace-listings/delist`, {
         method: "POST", body: JSON.stringify({ marketplaces, confirm: true }),
@@ -749,7 +749,7 @@ export const api = {
         `/conversations/${convId}/native-marketplaces/${marketplace}/form${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`,
         options,
       ),
-    status: (convId: string) => request<NativeDrafts>(`/conversations/${convId}/native-marketplaces`),
+    status: (convId: string, options?: ReadOptions) => read<NativeDrafts>(`/conversations/${convId}/native-marketplaces`, options),
     preflight: (convId: string) =>
       request<NativePreflight>(`/conversations/${convId}/native-marketplaces/preflight`),
     /** The fields each listing still needs per marketplace; the inventory asks for the rows on screen. */
@@ -852,10 +852,10 @@ export const api = {
     reconcile: (marketplace?: string) => request<{ matched: number; unmatched: number }>(
       `/marketplace-sales/reconcile${marketplace ? `?${new URLSearchParams({ marketplace })}` : ""}`, { method: "POST" },
     ),
-    list: (options: { state?: MarketplaceSaleState; conversationId?: string } = {}) => {
+    list: (options: { state?: MarketplaceSaleState; conversationId?: string } = {}, readOptions?: ReadOptions) => {
       const params = new URLSearchParams({ state: options.state ?? "new" });
       if (options.conversationId) params.set("conversation_id", options.conversationId);
-      return request<{ sales: MarketplaceSale[] }>(`/marketplace-sales?${params}`);
+      return read<{ sales: MarketplaceSale[] }>(`/marketplace-sales?${params}`, readOptions);
     },
     dismiss: (saleId: string) => request<OkResponse>(`/marketplace-sales/${saleId}/dismiss`, { method: "POST" }),
   },

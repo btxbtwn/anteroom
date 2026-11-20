@@ -181,7 +181,7 @@ class Checked(BaseModel):
 
 
 @router.post("/actions/{action_id}/checked")
-def checked(action_id: str, body: Checked, db: Session = Depends(get_db)):
+def checked(action_id: str, body: Checked, db: Session = Depends(get_db, scope="function")):
     action = db.get(EbayAction, action_id)
     try:
         if not action or action.account_id != identity()[0] or action.state != "unknown":

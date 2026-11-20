@@ -120,7 +120,7 @@ def _apply_edit(repo: ConversationRepo, conv_id: str, photo_id: str, resolve_edi
 
 
 @edit_router.post("/api/conversations/{conv_id}/photos/{photo_id}/rotate")
-def rotate_photo(conv_id: str, photo_id: str, body: RotateRequest, db: Session = Depends(get_db)):
+def rotate_photo(conv_id: str, photo_id: str, body: RotateRequest, db: Session = Depends(get_db, scope="function")):
     if body.degrees not in (90, -90, 180):
         raise HTTPException(400, "Rotate by 90, -90 or 180 degrees")
     repo = ConversationRepo(db)
@@ -133,7 +133,7 @@ def rotate_photo(conv_id: str, photo_id: str, body: RotateRequest, db: Session =
 
 
 @edit_router.put("/api/conversations/{conv_id}/photos/{photo_id}/edits")
-def edit_photo(conv_id: str, photo_id: str, body: PhotoEdits, db: Session = Depends(get_db)):
+def edit_photo(conv_id: str, photo_id: str, body: PhotoEdits, db: Session = Depends(get_db, scope="function")):
     """Replace the photo's edits; they render from the original upload, which is kept."""
     repo = ConversationRepo(db)
     target = None if body.is_original() else body
@@ -141,7 +141,7 @@ def edit_photo(conv_id: str, photo_id: str, body: PhotoEdits, db: Session = Depe
 
 
 @edit_router.delete("/api/conversations/{conv_id}/photos/{photo_id}/edits")
-def reset_photo(conv_id: str, photo_id: str, db: Session = Depends(get_db)):
+def reset_photo(conv_id: str, photo_id: str, db: Session = Depends(get_db, scope="function")):
     repo = ConversationRepo(db)
     return _apply_edit(
         repo,
@@ -153,7 +153,7 @@ def reset_photo(conv_id: str, photo_id: str, db: Session = Depends(get_db)):
 
 
 @edit_router.post("/api/conversations/{conv_id}/photos/{photo_id}/edits/preview")
-def preview_photo_edits(conv_id: str, photo_id: str, body: PhotoEdits, crop: bool = True, db: Session = Depends(get_db)):
+def preview_photo_edits(conv_id: str, photo_id: str, body: PhotoEdits, crop: bool = True, db: Session = Depends(get_db, scope="function")):
     """A smaller JPEG of the edits, for the editor; ``crop=false`` leaves the frame whole to draw the crop on."""
     from fastapi.responses import Response
 
