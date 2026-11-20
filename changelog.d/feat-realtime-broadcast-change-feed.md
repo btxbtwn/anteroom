@@ -1,1 +1,0 @@
-- Live updates between your devices now arrive by push instead of the database checking for changes twice a second, which frees database time for everything else.

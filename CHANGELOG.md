@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1072 — 2026-11-20
+
+- Live updates between your devices now arrive by push instead of the database checking for changes twice a second, which frees database time for everything else.
+
 ## 0.1.1071 — 2026-11-20
 
 - Anteroom stays responsive while Sourcing checks in the background whether your buy list needs a refresh.
