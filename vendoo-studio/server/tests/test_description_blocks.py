@@ -160,3 +160,57 @@ def test_clearing_every_section_accepts_one_sentence():
     set_listing_formulas(description=skill_formulas.NO_SECTION_DESCRIPTION)
     sentence = "Black cotton tee with a soft wash and a straight hem."
     assert _description_follows_formula(sentence) is True
+
+
+def test_readiness_separates_inline_measurements_without_losing_custom_prose():
+    from vendoo_studio.services.listing_generate import apply_send_readiness_fixes
+    from vendoo_studio.services.user_settings import set_listing_formulas
+    from vendoo_studio.services.validation import _description_follows_formula
+
+    set_listing_formulas(description="{custom prose}\n\nMeasurements: {measurements}")
+    listing = {"description": "Soft black cotton tee. Measurements: 20 inches."}
+    assert not _description_follows_formula(listing["description"])
+    assert apply_send_readiness_fixes(listing)
+    assert listing["description"] == "Soft black cotton tee.\n\nMeasurements: 20 inches."
+    assert _description_follows_formula(listing["description"])
+    original = listing["description"]
+    apply_send_readiness_fixes(listing)
+    assert listing["description"] == original
+
+
+@pytest.mark.parametrize("flaws_label,measurements_label", [("Flaw", "Measurement"), ("Flaws", "Measurements")])
+def test_typed_headings_receive_seller_facts(flaws_label, measurements_label):
+    from vendoo_studio.services.listing_generate import apply_seller_description_facts
+    from vendoo_studio.services.user_settings import set_listing_formulas
+    from vendoo_studio.services.validation import _description_follows_formula
+
+    set_listing_formulas(
+        description=f"{{prose}}\n\n{flaws_label}: {{flaw}}\n\n{measurements_label}: {{measurements}}"
+    )
+    listing = {
+        "description": f"Soft black cotton tee.\n\n{flaws_label}: None.\n\n{measurements_label}: See photos"
+    }
+    assert apply_seller_description_facts(
+        listing, {"knownFlaws": "small stain on hem", "descriptionMeasurements": "20 inches"}
+    )
+    assert f"{flaws_label}: small stain on hem." in listing["description"]
+    assert f"{measurements_label}: 20 inches" in listing["description"]
+    assert _description_follows_formula(listing["description"])
+    assert not apply_seller_description_facts(
+        listing, {"knownFlaws": "small stain on hem", "descriptionMeasurements": "20 inches"}
+    )
+
+
+def test_typed_material_is_required_but_catalog_material_is_optional():
+    from vendoo_studio.services.user_settings import set_listing_formulas
+    from vendoo_studio.services.validation import _description_follows_formula
+
+    set_listing_formulas(description="Material: {composition}\n\nNotes: {detail}")
+    description = "Soft black tee with a straight hem.\n\nNotes: Light wear."
+    assert skill_formulas.description_formula_markers() == ("material:", "notes:")
+    assert not _description_follows_formula(description)
+    assert _description_follows_formula(f"Material: Cotton\n\n{description}")
+
+    set_listing_formulas(description=skill_formulas.compile_description_blocks(["vibe", "material"]))
+    assert skill_formulas.description_formula_markers() == ()
+    assert _description_follows_formula(description)
