@@ -155,7 +155,7 @@ async function handleNativeMarketplaceMessage(msg, reply = result => sendBrowser
         const recovered = await recoverNativeMarketplace({ ...stored.context, ...msg.payload.context,
           draft_url: msg.payload.context?.draft_url || stored.receipt_url || stored.context.draft_url,
           expected_photo_count: stored.expected_photo_count ?? msg.payload.context?.expected_photo_count,
-          publish_job_id: stored.publish_job_id });
+          publish_job_id: stored.publish_job_id, shop_before: stored.shop_before });
         if (recovered) {
           await chrome.storage.local.set({ [key]: { ...stored, finished: true, result: recovered } });
           reply({ finished: true, result: recovered });
