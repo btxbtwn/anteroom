@@ -650,3 +650,167 @@ class InventoryCountsItemsTest(unittest.TestCase):
             (1, 1, 1, 1, 1),
         )
 
+
+
+class AnalyticsInputsCacheTest(unittest.TestCase):
+    """The whole-shop read is kept on Postgres until one of its rows changes."""
+
+    setUp = LoadAnalyticsTest.setUp
+    tearDown = LoadAnalyticsTest.tearDown
+
+    def _add_sale(self):
+        from anteroom.models.marketplace_sale import MarketplaceSale
+
+        # Tests share this worker's database: each sale has its own order.
+        self.order_id = f"cache-{self.sold.id}"
+        self.db.add(MarketplaceSale(marketplace="depop", order_id=self.order_id, line_id="l1", listing_id="shop-tee",
+                                    conversation_id=self.sold.id, quantity=1, order_status="paid"))
+        self.db.commit()
+
+    def _tables_read(self, read):
+        import re
+
+        statements = self._statements(read)
+        # Common table expressions are named in the statement; they are not tables.
+        named = {name for statement in statements
+                 for name in re.findall(r'(\w+)\s*(?:\([^)]*\))?\s+AS\s*\(', statement, re.IGNORECASE)}
+        return {name for statement in statements
+                for name in re.findall(r'\b(?:FROM|JOIN)\s+"?(\w+)', statement, re.IGNORECASE)} - named
+
+    def _statements(self, read):
+        from sqlalchemy import event
+
+        statements = []
+
+        def record(_conn, _cursor, statement, *_args):
+            statements.append(statement)
+
+        engine = self.db.get_bind()
+        event.listen(engine, "before_cursor_execute", record)
+        try:
+            read()
+        finally:
+            event.remove(engine, "before_cursor_execute", record)
+        return statements
+
+    def test_the_version_covers_every_table_the_read_uses(self):
+        from anteroom.services import inventory_analytics
+
+        self._add_sale()
+        tables = self._tables_read(lambda: inventory_analytics._read_analytics_inputs(self.db, None))
+        self.assertIn("marketplace_sales", tables)
+        self.assertLessEqual(tables, set(inventory_analytics.ANALYTICS_INPUT_TABLES))
+
+    def test_an_unchanged_shop_is_not_read_again_and_any_change_is(self):
+        from anteroom.services import inventory_analytics
+        from anteroom.services.inventory_analytics import read_analytics_inputs
+
+        if self.db.get_bind().dialect.name != "postgresql":
+            self.skipTest("Only the hosted Postgres database is read over the network")
+        self._add_sale()
+        first = read_analytics_inputs(self.db)
+        again = self._statements(lambda: read_analytics_inputs(self.db))
+        self.assertFalse([statement for statement in again if "notes" in statement or "marketplace_sales.id" in statement])
+        self.assertIs(read_analytics_inputs(self.db).conversations, first.conversations)
+
+        # A changed note, a new sale and a removed sale each read the shop again.
+        notes = json.loads(self.sold.notes)
+        notes["vendooLabels"] = "Shelf 2"
+        self.sold.notes = json.dumps(notes)
+        self.db.commit()
+        changed = read_analytics_inputs(self.db)
+        self.assertIsNot(changed, first)
+        rows = {row.conversation_id: row for row in inventory_analytics.rows_from_inputs(changed)}
+        self.assertEqual(rows[self.sold.id].labels, ("Shelf 2",))
+
+        from anteroom.models.marketplace_sale import MarketplaceSale
+
+        sale = self.db.query(MarketplaceSale).filter_by(order_id=self.order_id).one()
+        self.db.delete(sale)
+        self.db.commit()
+        removed = read_analytics_inputs(self.db)
+        self.assertIsNot(removed, changed)
+        self.assertNotIn(sale.id, [line.id for line in removed.sales.get(self.sold.id, [])])
+
+    def test_a_sessions_uncommitted_writes_are_never_kept(self):
+        from anteroom.models.marketplace_sale import MarketplaceSale
+        from anteroom.services.inventory_analytics import read_analytics_inputs
+
+        if self.db.get_bind().dialect.name != "postgresql":
+            self.skipTest("Only the hosted Postgres database is read over the network")
+        self._add_sale()
+        read_analytics_inputs(self.db)  # Keeps the fixture's Vendoo sale on the ledger first.
+        self.db.commit()
+        sale = self.db.query(MarketplaceSale).filter_by(conversation_id=self.sold.id).first()
+        sale_id = sale.id
+        self.db.delete(sale)
+        self.db.flush()
+        self.assertNotIn(sale_id, [line.id for line in read_analytics_inputs(self.db).sales.get(self.sold.id, [])])
+        self.db.rollback()
+        self.assertIn(sale_id, [line.id for line in read_analytics_inputs(self.db).sales.get(self.sold.id, [])])
+
+    def test_a_sale_this_session_loaded_earlier_is_never_kept(self):
+        from anteroom.models.marketplace_sale import MarketplaceSale
+        from anteroom.services.inventory_analytics import read_analytics_inputs
+
+        if self.db.get_bind().dialect.name != "postgresql":
+            self.skipTest("Only the hosted Postgres database is read over the network")
+        self._add_sale()
+        read_analytics_inputs(self.db)  # Keeps the fixture's Vendoo sale on the ledger first.
+        self.db.commit()
+        held = self.db.query(MarketplaceSale).filter_by(order_id=self.order_id).one()
+        other = SessionLocal()
+        try:
+            other.query(MarketplaceSale).filter_by(id=held.id).one().quantity = 3
+            other.commit()
+        finally:
+            other.close()
+        # This session's copy still says 1; what it reads must not reach anyone else.
+        read_analytics_inputs(self.db)
+        fresh = SessionLocal()
+        try:
+            lines = read_analytics_inputs(fresh).sales[self.sold.id]
+        finally:
+            fresh.close()
+        self.assertEqual(next(line.quantity for line in lines if line.id == held.id), 3)
+
+    def test_kept_sales_are_attached_to_no_session(self):
+        from anteroom.services.inventory_analytics import read_analytics_inputs
+
+        if self.db.get_bind().dialect.name != "postgresql":
+            self.skipTest("Only the hosted Postgres database is read over the network")
+        self._add_sale()
+        lines = read_analytics_inputs(self.db).sales[self.sold.id]
+        self.assertTrue(lines)
+        self.assertFalse(any(line in self.db for line in lines))
+        self.db.close()
+        self.assertEqual(lines[0].order_id, self.order_id)
+        self.assertTrue(isinstance(lines[0].is_order_backed, bool))
+
+    def test_reassigning_a_callers_inputs_leaves_the_kept_ones_alone(self):
+        from anteroom.services.inventory_analytics import read_analytics_inputs
+
+        if self.db.get_bind().dialect.name != "postgresql":
+            self.skipTest("Only the hosted Postgres database is read over the network")
+        first = read_analytics_inputs(self.db)
+        original = first.conversations
+        first.conversations = []
+        self.assertEqual(read_analytics_inputs(self.db).conversations, original)
+
+    def test_a_row_written_twice_in_one_transaction_is_read_as_committed(self):
+        from anteroom.services.inventory_analytics import read_analytics_inputs
+
+        if self.db.get_bind().dialect.name != "postgresql":
+            self.skipTest("Only the hosted Postgres database is read over the network")
+        self.db.autoflush = True
+        self.sold.notes = json.dumps({"vendooLabels": "First"})
+        self.db.flush()
+        read_analytics_inputs(self.db)
+        self.sold.notes = json.dumps({"vendooLabels": "Second"})
+        self.db.commit()
+        fresh = SessionLocal()
+        try:
+            notes = {row[0]: row[3] for row in read_analytics_inputs(fresh).conversations}
+        finally:
+            fresh.close()
+        self.assertEqual(notes[self.sold.id].get("vendooLabels"), "Second")

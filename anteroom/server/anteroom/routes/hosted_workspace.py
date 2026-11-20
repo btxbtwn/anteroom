@@ -3,6 +3,7 @@
 Every query uses the verified seller session. No desktop services are imported
 or started, and no request accepts an owner, file path or operational identity.
 """
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -161,8 +162,9 @@ def inventory_response(db):
     # Parsed once for analytics; the rows themselves leave notes unloaded.
     notes = {identity: parsed for identity, _title, _status, parsed, _box in analytics.conversations}
     # Another device may create or delete a draft between these committed reads.
-    analytics.conversations = [(identity, title, reconciled.get(identity, status), notes, box)
-                              for identity, title, status, notes, box in analytics.conversations]
+    # The inputs are shared with other requests: replace them, never change them.
+    analytics = replace(analytics, conversations=[(identity, title, reconciled.get(identity, status), notes, box)
+                                                  for identity, title, status, notes, box in analytics.conversations])
     with snapshot_step(db, 'covers'):
         ordered = select(Photo.conversation_id, Photo.id, Photo.checksum, func.row_number().over(
             partition_by=Photo.conversation_id, order_by=(Photo.display_order, Photo.id)).label('position')).where(
