@@ -26,6 +26,7 @@ never matches again and ordinary gating applies unchanged.
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 from pathlib import Path
@@ -47,6 +48,10 @@ RELEASE_PREFIX = "Release Anteroom "
 DEPLOYED_TITLE = "Deployed commit"
 MAX_HEALTH_BYTES = 64 * 1024
 
+# Single-base recovery checkpoint for historical fa824f9a (fixed in #1653).
+# Inert once Deploy hosted records a commit after b73c5347 (or after artifact
+# 14596571781 expires on 2026-12-20); remove this pin in a cleanup PR once
+# production is verified past b73c5347.
 HISTORICAL_RECOVERY_CHECKPOINT = recovery_evidence.EvidencePin(
     repository="btxbtwn/anteroom",
     repository_id=1183824317,
@@ -150,7 +155,7 @@ def live_health_version(url: str) -> str:
             if response.status != 200:
                 raise ValueError(f"Live health endpoint returned HTTP {response.status}.")
             raw = response.read(MAX_HEALTH_BYTES + 1)
-    except (urllib.error.URLError, TimeoutError, OSError) as error:
+    except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as error:
         raise ValueError("Live health endpoint could not be read.") from error
     if len(raw) > MAX_HEALTH_BYTES:
         raise ValueError("Live health response exceeded its size bound.")

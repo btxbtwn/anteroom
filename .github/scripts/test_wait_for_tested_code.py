@@ -290,6 +290,11 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
                 fetch=self.fake_fetch, download=self.downloads.__getitem__,
                 git_fn=self.fake_git, live_version_fn=lambda _: "0.1.1011",
             )
+        # Missing recorded production commit fails closed.
+        eligible, _ = self.gate.checkpoint_eligible(
+            self.repo, self.head, None, self.hist, pin=self.pin, git_fn=self.fake_git
+        )
+        self.assertFalse(eligible)
 
     def test_stale_evidence_and_live_version_drift_fail_closed(self):
         # Expired receipt artifact fails closed.
@@ -341,6 +346,18 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
         with patch.object(self.gate.urllib.request, "urlopen", return_value=FakeHealthResponse(ok_body)):
             self.assertEqual(self.gate.live_health_version("https://myanteroom.com/api/health"), "0.1.1011")
 
+        # Network/HTTP errors fail closed.
+        for exc in (
+            self.gate.urllib.error.HTTPError("https://myanteroom.com/api/health", 503, "Unavailable", {}, None),
+            self.gate.http.client.IncompleteRead(b"partial"),
+        ):
+            with (
+                self.subTest(exc=type(exc).__name__),
+                patch.object(self.gate.urllib.request, "urlopen", side_effect=exc),
+                self.assertRaises(ValueError),
+            ):
+                self.gate.live_health_version("https://myanteroom.com/api/health")
+
         # Redirect to another host or http fails closed.
         for bad_dest in ("http://myanteroom.com/api/health", "https://evil.example/api/health"):
             with (
@@ -353,8 +370,9 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
             ):
                 self.gate.live_health_version("https://myanteroom.com/api/health")
 
-        # Degraded status, wrong service, missing version, or oversized payload fails closed.
+        # Degraded status, wrong service, missing version, non-JSON, or oversized payload fails closed.
         bad_bodies = [
+            b"not-json",
             json.dumps({"status": "degraded", "service": "anteroom-hosted", "version": "0.1.1011"}).encode(),
             json.dumps({"status": "ok", "service": "other", "version": "0.1.1011"}).encode(),
             json.dumps({"status": "ok", "service": "anteroom-hosted", "version": ""}).encode(),
