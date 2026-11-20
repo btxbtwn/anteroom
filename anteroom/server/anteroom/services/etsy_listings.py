@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import asyncio
 import html
+import inspect
 import re
 import unicodedata
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Literal
 from decimal import Decimal, InvalidOperation
 
@@ -29,6 +30,22 @@ from anteroom.services.native_form import vendoo_form
 from anteroom.services.relay_client import RelayError
 from anteroom.services.vendoo_marketplace_fields import ETSY_WHAT_CODES, ETSY_WHO_CODES
 from anteroom.services.vendoo_specifics import is_not_applicable
+
+RecordFn = Callable[[dict], Awaitable[None] | None]
+ActiveFn = Callable[[], Awaitable[bool] | bool]
+
+
+async def _record(record: RecordFn, values: dict) -> None:
+    result = record(values)
+    if inspect.isawaitable(result):
+        await result
+
+
+async def _is_active(active: ActiveFn) -> bool:
+    result = active()
+    if inspect.isawaitable(result):
+        return bool(await result)
+    return bool(result)
 
 
 def connected_shop_id() -> str:
@@ -588,8 +605,16 @@ async def find_draft(shop_id: str, snapshot: dict) -> str | None:
     return edit_url(matches[0]) if matches else None
 
 
+def _photo_file(photo) -> tuple[str, bytes]:
+    try:
+        path = photo_store().local_path(photo.stored_filename)
+        return path.name, path.read_bytes()
+    except (FileNotFoundError, ValueError):
+        raise missing("An Etsy photo is missing from Anteroom. Restore it before continuing.", "photos") from None
+
+
 async def _sync_photos(write, shop_id: str, item_id: str, remote: dict, photos: list, binding: dict,
-                       record: Callable[[dict], None]) -> None:
+                       record: RecordFn) -> None:
     """Make the Etsy listing's photos the item's photos: upload new ones, remove dropped ones.
 
     Every image ID is saved as Etsy confirms it, so a retry never uploads a photo twice.
@@ -608,29 +633,25 @@ async def _sync_photos(write, shop_id: str, item_id: str, remote: dict, photos: 
     observed = {str(image.get("listing_image_id")) for image in remote.get("images") or []}
     if observed != set(images.values()):
         raise ValueError("Etsy has draft photos Anteroom has not confirmed. Check the listing in Etsy before another upload.")
-    record({"etsy_photo_ids": wanted, "etsy_photos_complete": False})
+    await _record(record, {"etsy_photo_ids": wanted, "etsy_photos_complete": False})
     for photo_id in [key for key in images if key not in wanted or key in edited]:
         await write("DELETE", f"shops/{shop_id}/listings/{item_id}/images/{images[photo_id]}", "photo")
         images.pop(photo_id)
         checksums.pop(photo_id, None)
-        record({"etsy_image_ids": dict(images), "etsy_image_checksums": dict(checksums), "etsy_pending_write": None})
+        await _record(record, {"etsy_image_ids": dict(images), "etsy_image_checksums": dict(checksums), "etsy_pending_write": None})
     for rank, photo in enumerate(photos, start=1):
         if photo.id in images:
             continue
-        try:
-            path = photo_store().local_path(photo.stored_filename)
-        except (FileNotFoundError, ValueError):
-            raise missing("An Etsy photo is missing from Anteroom. Restore it before continuing.", "photos") from None
-        with path.open("rb") as image:
-            uploaded = await write("POST", f"shops/{shop_id}/listings/{item_id}/images", "photo",
-                                   data={"rank": str(rank)}, files={"image": (path.name, image, photo.mime_type)}, timeout=60)
+        name, data = await asyncio.to_thread(_photo_file, photo)
+        uploaded = await write("POST", f"shops/{shop_id}/listings/{item_id}/images", "photo",
+                               data={"rank": str(rank)}, files={"image": (name, data, photo.mime_type)}, timeout=60)
         image_id = str(uploaded.get("listing_image_id") or "")
         if not re.fullmatch(r"[1-9]\d*", image_id):
             raise ValueError("Etsy did not confirm a photo ID. Check the draft before another upload.")
         images[photo.id] = image_id
         checksums[photo.id] = photo.checksum
-        record({"etsy_image_ids": dict(images), "etsy_image_checksums": dict(checksums), "etsy_pending_write": None})
-    record({"etsy_photos_complete": True})
+        await _record(record, {"etsy_image_ids": dict(images), "etsy_image_checksums": dict(checksums), "etsy_pending_write": None})
+    await _record(record, {"etsy_photos_complete": True})
 
 
 VIDEO_FIELD = "etsy_specifics.videoId"
@@ -665,7 +686,7 @@ def _active_videos(videos: list[dict]) -> list[str]:
 
 
 async def _sync_video(write, shop_id: str, item_id: str, snapshot: dict, binding: dict,
-                      record: Callable[[dict], None]) -> None:
+                      record: RecordFn) -> None:
     """Make the listing's one video the selected file, or none. Each file is uploaded once.
 
     A removed video stays on Etsy's servers, so it is attached again by ID
@@ -690,12 +711,12 @@ async def _sync_video(write, shop_id: str, item_id: str, snapshot: dict, binding
             raise ValueError("Etsy has more than one video on this listing and has not confirmed which Anteroom uploaded. "
                              "Check the listing in Etsy before trying again.")
         known = active[0]
-        record({"etsy_video": {"checksum": choice["checksum"], "video_id": known}})
+        await _record(record, {"etsy_video": {"checksum": choice["checksum"], "video_id": known}})
     for video_id in [video_id for video_id in active if video_id != known]:
         await write("DELETE", f"shops/{shop_id}/listings/{item_id}/videos/{video_id}", "video")
-        record({"etsy_pending_write": None})
+        await _record(record, {"etsy_pending_write": None})
     if choice is None:
-        record({"etsy_video": None})
+        await _record(record, {"etsy_video": None})
         return
     if any(str(video.get("video_id")) == known and video.get("video_state") == "flagged" for video in videos):
         raise missing("Etsy flagged this video. Choose another video or clear it.", VIDEO_FIELD)
@@ -704,7 +725,7 @@ async def _sync_video(write, shop_id: str, item_id: str, snapshot: dict, binding
     if known:
         uploaded = await write("POST", f"shops/{shop_id}/listings/{item_id}/videos", "video", data={"video_id": known})
     else:
-        record({"etsy_video": {"checksum": choice["checksum"], "pending": True}})
+        await _record(record, {"etsy_video": {"checksum": choice["checksum"], "pending": True}})
         data = await asyncio.to_thread(video_bytes, choice)
         name = f"{choice['id']}.{_VIDEO_EXTENSIONS.get(choice.get('mime_type') or '', 'mp4')}"
         uploaded = await write("POST", f"shops/{shop_id}/listings/{item_id}/videos", "video",
@@ -712,7 +733,7 @@ async def _sync_video(write, shop_id: str, item_id: str, snapshot: dict, binding
     video_id = str(uploaded.get("video_id") or "") if isinstance(uploaded, dict) else ""
     if not re.fullmatch(r"[1-9]\d*", video_id):
         raise ValueError("Etsy did not confirm the video. Check the listing before another upload.")
-    record({"etsy_video": {"checksum": choice["checksum"], "video_id": video_id}, "etsy_pending_write": None})
+    await _record(record, {"etsy_video": {"checksum": choice["checksum"], "video_id": video_id}, "etsy_pending_write": None})
 
 
 async def _video_kept(item_id: str, snapshot: dict, binding: dict) -> bool:
@@ -732,35 +753,42 @@ async def _video_kept(item_id: str, snapshot: dict, binding: dict) -> bool:
 
 
 async def execute(action: str, snapshot: dict, photos: list, binding: dict,
-                  record: Callable[[dict], None], active: Callable[[], bool], *, confirm: bool = False,
+                  record: RecordFn, active: ActiveFn, *, confirm: bool = False,
                   shipping_profile_id: str | None = None, readiness_state_id: str | None = None,
                   return_policy_id: str | None = None, package: dict | None = None,
                   default_renewal: str | None = None) -> dict:
     attempted = False
     rejected = False
     try:
-        shop_id = connected_shop_id()
+        shop_id = await asyncio.to_thread(connected_shop_id)
         if binding.get("etsy_shop_id") and binding["etsy_shop_id"] != shop_id:
             raise ValueError("This Etsy draft belongs to a different connected shop.")
-        record({"etsy_shop_id": shop_id})
+        await _record(record, {"etsy_shop_id": shop_id})
 
         async def write(method: str, path: str, kind: str, **kwargs):
             nonlocal attempted, rejected
-            if not active() or connected_shop_id() != shop_id:
+            if await asyncio.to_thread(connected_shop_id) != shop_id or not await _is_active(active):
                 raise ValueError("The Etsy action stopped or the connected shop changed. Check its result.")
-            record({"etsy_pending_write": kind})
+            await _record(record, {"etsy_pending_write": kind})
+            try:
+                if await asyncio.to_thread(connected_shop_id) != shop_id or not await _is_active(active):
+                    raise ValueError("The Etsy action stopped or the connected shop changed. Check its result.")
+            except (Exception, asyncio.CancelledError):
+                # No request has been sent, so this journal entry is safe to clear.
+                await _record(record, {"etsy_pending_write": None})
+                raise
             attempted = True
             try:
                 response = await marketplace_accounts.etsy_api(method, path, **kwargs)
             except marketplace_accounts.SignInRequired:
                 # Refresh failure or a definite 401 cannot have committed this write.
                 rejected = True
-                record({"etsy_pending_write": None})
+                await _record(record, {"etsy_pending_write": None})
                 raise
             except httpx.HTTPStatusError as exc:
                 if 400 <= exc.response.status_code < 500 and exc.response.status_code not in {408, 409}:
                     rejected = True
-                    record({"etsy_pending_write": None})
+                    await _record(record, {"etsy_pending_write": None})
                 raise
             return response
 
@@ -777,9 +805,9 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             inventory = remote.get("_inventory") or {}
             if _remote_price(remote) != _price(etsy_price(snapshot)):
                 await write("PUT", f"listings/{item_id}/inventory", "price", json_body=_inventory_price(inventory, _price(etsy_price(snapshot))))
-                record({"etsy_pending_write": None})
+                await _record(record, {"etsy_pending_write": None})
             await write("PATCH", f"shops/{shop_id}/listings/{item_id}", "update", data={key: value for key, value in fields.items() if key != "price"})
-            record({"etsy_pending_write": None})
+            await _record(record, {"etsy_pending_write": None})
             await _sync_photos(write, shop_id, item_id, remote, photos, binding, record)
             await _sync_video(write, shop_id, item_id, snapshot, binding, record)
             remote = await _read(shop_id, item_id)
@@ -796,7 +824,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             remote = await _read(shop_id, item_id)
             if remote.get("state") == "active" and _matches(remote, snapshot):
                 # An earlier activation finished after its reply was lost.
-                record({"etsy_pending_write": None})
+                await _record(record, {"etsy_pending_write": None})
                 return _success(remote)
             if remote.get("state") != "draft" or not _matches(remote, snapshot):
                 raise ValueError("Etsy did not accept this listing's fields or photos.")
@@ -808,7 +836,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             # A successful response is a receipt; a later read failure must not
             # discard it and invite a second paid activation.
             if str(remote.get("listing_id")) == item_id and str(remote.get("shop_id")) == shop_id and remote.get("state") == "active":
-                record({"etsy_pending_write": None})
+                await _record(record, {"etsy_pending_write": None})
                 return _success(remote)
             raise ValueError("Etsy has not confirmed activation. Check the result; publishing will not be retried.")
 
@@ -834,7 +862,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             item_id = str(remote.get("listing_id") or "")
             if str(remote.get("shop_id")) != shop_id or remote.get("state") != "draft":
                 raise ValueError("Etsy did not confirm a private draft. Check its result before trying again.")
-            record({"draft_url": edit_url(item_id), "etsy_pending_write": None,
+            await _record(record, {"draft_url": edit_url(item_id), "etsy_pending_write": None,
                     "etsy_photo_ids": [p.id for p in photos], "etsy_image_ids": {}, "etsy_image_checksums": {}, "etsy_photos_complete": False,
                     "etsy_shipping_profile_id": selected, "etsy_readiness_state_id": processing})
         else:
@@ -849,12 +877,12 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             if price_changed:
                 inventory_body = _inventory_price(inventory, _price(etsy_price(snapshot)))
                 await write("PUT", f"listings/{item_id}/inventory", "price", json_body=inventory_body)
-                record({"etsy_pending_write": None})
+                await _record(record, {"etsy_pending_write": None})
             await write("PATCH", f"shops/{shop_id}/listings/{item_id}", "update", data={key: value for key, value in fields.items() if key != "price"})
-            record({"etsy_pending_write": None})
+            await _record(record, {"etsy_pending_write": None})
         # Each property write replaces that property, so writing it again is safe.
         await _write_properties(write, shop_id, item_id, assignments)
-        record({"etsy_pending_write": None})
+        await _record(record, {"etsy_pending_write": None})
         lost = await unkept_properties(shop_id, item_id, assignments)
         if lost:
             rejected = True
@@ -879,7 +907,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
 async def check(snapshot: dict, binding: dict, candidate: str | None) -> dict:
     """Read the shop for this action's result. Never writes."""
     try:
-        shop_id = connected_shop_id()
+        shop_id = await asyncio.to_thread(connected_shop_id)
         if binding.get("etsy_shop_id") and binding["etsy_shop_id"] != shop_id:
             raise ValueError("This Etsy draft belongs to a different connected shop.")
         found = not candidate

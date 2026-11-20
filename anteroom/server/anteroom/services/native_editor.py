@@ -199,11 +199,14 @@ def save_refreshed_form(db: Session, conv_id: str, marketplace: str, revision_id
     revision = repo.get_revision(revision_id)
     if revision is None:
         raise NativeMarketplaceError(404, "Listing revision not found")
+    from anteroom.services import choice_lists
+
     listing = native_contract.copy_listing(revision.listing_json)
     existing_contracts = listing.get(native_contract.KEY) or {}
+    compacted_existing = choice_lists.compact_contracts(existing_contracts)
     captured = native_contract.capture(listing, {marketplace: form}, [marketplace])
-    if captured.get(marketplace) != existing_contracts.get(marketplace):
-        listing[native_contract.KEY] = {**existing_contracts, **captured}
+    if compacted_existing is not existing_contracts or captured.get(marketplace) != compacted_existing.get(marketplace):
+        listing[native_contract.KEY] = {**compacted_existing, **captured}
         try:
             revision = listing_persistence.save_revision(
                 db, conv_id, listing, "native_schema", parent_revision_id=revision_id, expected_revision_id=revision_id)

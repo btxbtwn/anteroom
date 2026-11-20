@@ -36,8 +36,11 @@ TOOL_RULES = (
 
 def project_row(row: dict) -> dict:
     """Keep field constraints but defer large dropdowns, without modifying the form."""
-    result = dict(row)
-    options = row.get("options") or []
+    from anteroom.services.choice_lists import hydrate_row
+
+    hydrated = hydrate_row(row)
+    result = dict(hydrated)
+    options = hydrated.get("options") or []
     if len(options) > INLINE_LIMIT:
         for key in ("options", "option_values", "value_constraints"):
             result.pop(key, None)
@@ -51,9 +54,16 @@ class OptionCatalog:
         self.add_forms(forms)
 
     def add_forms(self, forms: dict) -> None:
+        from anteroom.services import choice_lists
+
         # Own a snapshot: another edit cannot change pages during this request.
-        self.rows.update({(market, str(row.get("path") or row.get("key") or "")): copy.deepcopy(row)
-                     for market, form in forms.items() for row in form.get("fields") or []})
+        # Compact static choice lists before deepcopy so tens of thousands of
+        # immutable catalog strings are never duplicated in memory.
+        for market, form in forms.items():
+            for row in form.get("fields") or []:
+                path = str(row.get("path") or row.get("key") or "")
+                compacted = choice_lists.compact_row(market, row)
+                self.rows[(market, path)] = choice_lists.hydrate_row(copy.deepcopy(compacted))
 
     @property
     def needed(self) -> bool:

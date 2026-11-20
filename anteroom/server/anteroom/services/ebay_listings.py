@@ -14,8 +14,9 @@ import asyncio
 import base64
 import hashlib
 import html
+import inspect
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 from math import isfinite
@@ -36,6 +37,22 @@ from anteroom.services import marketplace_schemas
 from anteroom.services.direct_preflight import Context, gap, requirement, seeded_leaf
 from anteroom.services.user_settings import get_ebay_listing_defaults, get_package_dimensions
 from anteroom.services.vendoo_specifics import is_not_applicable
+
+RecordFn = Callable[[dict], Awaitable[None] | None]
+ActiveFn = Callable[[], Awaitable[bool] | bool]
+
+
+async def _record(record: RecordFn, values: dict) -> None:
+    result = record(values)
+    if inspect.isawaitable(result):
+        await result
+
+
+async def _is_active(active: ActiveFn) -> bool:
+    result = active()
+    if inspect.isawaitable(result):
+        return bool(await result)
+    return bool(result)
 
 _SKIP = {
     "categoryid", "categorypath", "category_specifics", "categoryspecifics",
@@ -455,10 +472,10 @@ def resumable(error: str, **extra) -> dict:
     return {"ok": False, "safe_to_retry": True, "error": error, **extra}
 
 
-def _published(offer: dict, record: Callable[[dict], None]) -> dict | None:
+async def _published(offer: dict, record: RecordFn) -> dict | None:
     listing_id = str((offer.get("listing") or {}).get("listingId") or "")
     if offer.get("status") == "PUBLISHED" and listing_id:
-        record({"ebay_listing_id": listing_id})
+        await _record(record, {"ebay_listing_id": listing_id})
         return {"ok": True, "state": "published", "listing_url": _listing_url(listing_id)}
     return None
 
@@ -497,7 +514,7 @@ def _ship_from_postal_code() -> str | None:
 
 async def _create_ship_from_location(client: EbayClient) -> dict:
     """Make the eBay inventory location from the ships-from ZIP in Settings → Listings."""
-    postal = _ship_from_postal_code()
+    postal = await asyncio.to_thread(_ship_from_postal_code)
     if not postal:
         raise missing(
             "eBay has no inventory location. Enter your ships-from ZIP under Settings → Listings.",
@@ -566,7 +583,7 @@ def own_listing_choices(snapshot: dict | None) -> dict[str, str]:
 
 async def listing_choices(client: EbayClient, snapshot: dict | None = None) -> dict[str, str]:
     profiles = await listing_profiles(client)
-    defaults = {**get_ebay_listing_defaults(),
+    defaults = {**(await asyncio.to_thread(get_ebay_listing_defaults)),
                 **{LISTING_CHOICE_KEYS[key]: value for key, value in own_listing_choices(snapshot).items()}}
     chosen = {
         "fulfillmentPolicyId": _pick(profiles["fulfillment"], defaults.get("fulfillment_policy_id")),
@@ -574,7 +591,7 @@ async def listing_choices(client: EbayClient, snapshot: dict | None = None) -> d
         "returnPolicyId": _pick(profiles["return"], defaults.get("return_policy_id")),
     }
     locations = profiles["locations"]
-    if not locations and _ship_from_postal_code():
+    if not locations and await asyncio.to_thread(_ship_from_postal_code):
         locations = [await _create_ship_from_location(client)]
     chosen["merchantLocationKey"] = _pick(locations, defaults.get("merchant_location_key"))
     return chosen
@@ -774,7 +791,8 @@ def ebay_picture_url(url: str) -> str:
 
 
 async def _image_url(client: EbayClient, photo) -> str:
-    uploaded = await client.request("POST", "/commerce/media/v1_beta/image/create_image_from_file", upload=_photo_upload(photo))
+    upload = await asyncio.to_thread(_photo_upload, photo)
+    uploaded = await client.request("POST", "/commerce/media/v1_beta/image/create_image_from_file", upload=upload)
     url = str(uploaded.get("imageUrl") or "")
     image_id = str(uploaded.get("imageId") or uploaded.get("fileId") or "")
     if not url and image_id:
@@ -789,24 +807,24 @@ def _photo_checksum(photo) -> str:
     return hashlib.sha256(_photo_bytes(photo)).hexdigest()
 
 
-async def _image_urls(client: EbayClient, photos: list, binding: dict, record: Callable[[dict], None],
-                      active: Callable[[], bool]) -> list[str]:
+async def _image_urls(client: EbayClient, photos: list, binding: dict, record: RecordFn,
+                      active: ActiveFn) -> list[str]:
     """eBay picture URLs in listing order. A photo already on eBay is reused only when it is the same file."""
     uploaded = {(entry.get("photo_id"), entry.get("checksum")): entry.get("url")
                 for entry in binding.get("ebay_images") or [] if isinstance(entry, dict) and entry.get("url")}
     images: list[dict] = []
     for photo in photos:
-        checksum = _photo_checksum(photo)
+        checksum = await asyncio.to_thread(_photo_checksum, photo)
         url = ebay_picture_url(uploaded.get((photo.id, checksum)) or "")
         if not url:
-            if not active():
+            if not await _is_active(active):
                 raise ValueError("The eBay listing stopped before it finished. List again to continue.")
             url = await _image_url(client, photo)
         images.append({"photo_id": photo.id, "checksum": checksum, "url": url})
         # Keep earlier uploads too, so a retry after a failure does not upload them again.
         known = [entry for entry in binding.get("ebay_images") or [] if entry.get("photo_id") not in {i["photo_id"] for i in images}]
-        record({"ebay_images": images + known})
-    record({"ebay_images": images})
+        await _record(record, {"ebay_images": images + known})
+    await _record(record, {"ebay_images": images})
     return [image["url"] for image in images]
 
 
@@ -836,8 +854,8 @@ async def _video_status(client: EbayClient, video_id: str) -> dict | None:
     return await _not_found(client.request("GET", f"/commerce/media/v1_beta/video/{segment(video_id)}"))
 
 
-async def _video_ids(client: EbayClient, snapshot: dict, binding: dict, record: Callable[[dict], None],
-                     active: Callable[[], bool]) -> list[str]:
+async def _video_ids(client: EbayClient, snapshot: dict, binding: dict, record: RecordFn,
+                     active: ActiveFn) -> list[str]:
     """The eBay video ID for this revision. Each file is created once and uploaded only while eBay waits for it.
 
     A video whose create reply was lost is never attached to anything, and eBay
@@ -854,7 +872,7 @@ async def _video_ids(client: EbayClient, snapshot: dict, binding: dict, record: 
     video_id = str(saved.get("video_id") or "") if saved.get("checksum") == video["checksum"] else ""
     status = await _video_status(client, video_id) if video_id else None
     data = await asyncio.to_thread(video_bytes, video) if status is None or status.get("status") == "PENDING_UPLOAD" else b""
-    if not active():
+    if not await _is_active(active):
         raise ValueError("The eBay listing stopped before it finished. List again to continue.")
     if status is None:
         # Never created for this file, or eBay removed it after 30 unused days.
@@ -863,7 +881,7 @@ async def _video_ids(client: EbayClient, snapshot: dict, binding: dict, record: 
         video_id = str(created.get("videoId") or created.get("receiptId") or "")
         if not re.fullmatch(r"[A-Za-z0-9._:-]{1,200}", video_id):
             raise EbayFailure("eBay did not confirm the video. Check the item before trying again.")
-        record({"ebay_video": {"checksum": video["checksum"], "video_id": video_id}})
+        await _record(record, {"ebay_video": {"checksum": video["checksum"], "video_id": video_id}})
         status = {"status": "PENDING_UPLOAD"}
     if status.get("status") == "PENDING_UPLOAD":
         # Upload only while eBay still waits for the file; once it has it, the status moves on.
@@ -871,7 +889,7 @@ async def _video_ids(client: EbayClient, snapshot: dict, binding: dict, record: 
     return [video_id]
 
 
-async def _wait_for_video(client: EbayClient, video_ids: list[str], active: Callable[[], bool]) -> None:
+async def _wait_for_video(client: EbayClient, video_ids: list[str], active: ActiveFn) -> None:
     """Wait until eBay has processed the video. A blocked or failed video is never attached."""
     if not video_ids:
         return
@@ -886,7 +904,7 @@ async def _wait_for_video(client: EbayClient, video_ids: list[str], active: Call
         if state in {"BLOCKED", "PROCESSING_FAILED"}:
             reason = "blocked it" if state == "BLOCKED" else "could not process it"
             raise missing(f"eBay {reason}. Choose another video or clear it.", VIDEO_FIELD)
-        if time.monotonic() >= deadline or not active():
+        if time.monotonic() >= deadline or not await _is_active(active):
             raise ValueError("eBay is still processing the video. Try again in a few minutes; it will not be uploaded again.")
         await asyncio.sleep(VIDEO_POLL_S)
 
@@ -1185,14 +1203,14 @@ def _offer_body(sku: str, fields: dict, location: str | None, policies: dict) ->
     return body
 
 
-async def _update_live(snapshot: dict, photos: list, binding: dict, record: Callable[[dict], None],
-                       active: Callable[[], bool], conversation_id: str = "") -> dict:
+async def _update_live(snapshot: dict, photos: list, binding: dict, record: RecordFn,
+                       active: ActiveFn, conversation_id: str = "") -> dict:
     """Replace fields on the listing that is already live. Never publishes a second one.
 
     Every write here is a replace, so a lost reply is safe to send again.
     """
     try:
-        if not active():
+        if not await _is_active(active):
             raise ValueError("The eBay update stopped. Check its result before trying again.")
         client = await EbayClient.connect()
         form = snapshot.get("form")
@@ -1230,12 +1248,13 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
         sku = str(offer.get("sku") or binding.get("ebay_sku") or "")
         if not sku:
             raise ValueError("eBay did not return this listing's SKU. Check eBay before updating it.")
-        record({"ebay_sku": sku, "ebay_offer_id": offer_id, "ebay_listing_id": listing_id})
+        await _record(record, {"ebay_sku": sku, "ebay_offer_id": offer_id, "ebay_listing_id": listing_id})
         image_urls = await _image_urls(client, photos, binding, record, active)
         video_ids = await _video_ids(client, snapshot, binding, record, active)
         await _wait_for_video(client, video_ids, active)
+        inventory_body = await asyncio.to_thread(_inventory_body, fields, aspects, image_urls, snapshot, form, video_ids)
         await client.request("PUT", f"/sell/inventory/v1/inventory_item/{segment(sku)}",
-                             body=_inventory_body(fields, aspects, image_urls, snapshot, form, video_ids))
+                             body=inventory_body)
         await _confirm_video(client, sku, snapshot, video_ids)
         policies = offer.get("listingPolicies")
         if not isinstance(policies, dict):
@@ -1256,7 +1275,7 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
 
 
 async def execute(action: str, snapshot: dict, photos: list, binding: dict,
-                  record: Callable[[dict], None], active: Callable[[], bool], *, confirm: bool = False,
+                  record: RecordFn, active: ActiveFn, *, confirm: bool = False,
                   conversation_id: str = "") -> dict:
     if action == "update":
         if confirm is not True:
@@ -1266,7 +1285,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
     try:
         if action not in {"list", "save_draft"} or (action == "list" and confirm is not True):
             raise ValueError("Confirm listing on eBay.")
-        if not active():
+        if not await _is_active(active):
             raise ValueError("The eBay listing stopped before it started.")
         client = await EbayClient.connect()
         form = snapshot.get("form")
@@ -1297,8 +1316,8 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
         kind = fields["format"]["format"]
         offer = await _offer_for(client, sku, binding, kind)
         if offer:
-            record({"ebay_sku": sku, "ebay_offer_id": str(offer.get("offerId") or binding["ebay_offer_id"])})
-            live = _published(offer, record)
+            await _record(record, {"ebay_sku": sku, "ebay_offer_id": str(offer.get("offerId") or binding["ebay_offer_id"])})
+            live = await _published(offer, record)
             if live:
                 return live
         image_urls = await _image_urls(client, photos, binding, record, active)
@@ -1306,9 +1325,10 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
         # Save Draft and List both wait: eBay attaches only a processed video.
         await _wait_for_video(client, video_ids, active)
         # From here eBay may hold an inventory item under this SKU, and it is this item's.
-        record({"ebay_sku": sku, "ebay_inventory_written": True})
+        await _record(record, {"ebay_sku": sku, "ebay_inventory_written": True})
+        inventory_body = await asyncio.to_thread(_inventory_body, fields, aspects, image_urls, snapshot, form, video_ids)
         await client.request("PUT", f"/sell/inventory/v1/inventory_item/{segment(sku)}",
-                             body=_inventory_body(fields, aspects, image_urls, snapshot, form, video_ids))
+                             body=inventory_body)
         await _confirm_video(client, sku, snapshot, video_ids)
         body = _offer_body(sku, fields, choices["merchantLocationKey"], {
             "fulfillmentPolicyId": choices["fulfillmentPolicyId"], "paymentPolicyId": choices["paymentPolicyId"],
@@ -1324,7 +1344,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             offer_id = str(created.get("offerId") or "")
             if not offer_id:
                 raise EbayFailure("eBay did not confirm the offer. Check eBay before listing again.")
-            record({"ebay_offer_id": offer_id})
+            await _record(record, {"ebay_offer_id": offer_id})
             pending = None
         if action == "save_draft":
             # Saved on eBay, not listed: an unpublished offer buyers cannot see. Read it back.
@@ -1333,19 +1353,19 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             if differences:
                 raise ValueError(f"eBay saved different values for: {', '.join(differences)}. Check the item before listing.")
             return {"ok": True, "state": "draft"}
-        if not active():
+        if not await _is_active(active):
             raise ValueError("The eBay listing stopped before it was published. List again to publish it.")
         pending = "publish"
         published = await client.request("POST", f"/sell/inventory/v1/offer/{segment(offer_id)}/publish", body={})
         listing_id = str(published.get("listingId") or "")
         url = _listing_url(listing_id)
-        record({"ebay_listing_id": listing_id})
+        await _record(record, {"ebay_listing_id": listing_id})
         return {"ok": True, "state": "published", "listing_url": url}
     except Exception as exc:
         return _failure(exc, pending)
 
 
-async def check(binding: dict, snapshot: dict | None = None, record: Callable[[dict], None] | None = None) -> dict:
+async def check(binding: dict, snapshot: dict | None = None, record: RecordFn | None = None) -> dict:
     """Read what eBay has for this item. Never writes."""
     record = record or (lambda values: None)
     try:
@@ -1367,8 +1387,8 @@ async def check(binding: dict, snapshot: dict | None = None, record: Callable[[d
             kind = FIXED_PRICE
         offer = await _offer_for(client, sku, binding, kind)
         if offer:
-            record({"ebay_offer_id": str(offer.get("offerId") or binding.get("ebay_offer_id"))})
-            live = _published(offer, record)
+            await _record(record, {"ebay_offer_id": str(offer.get("offerId") or binding.get("ebay_offer_id"))})
+            live = await _published(offer, record)
             if live:
                 return live
             if binding.get("action") == "save_draft" and snapshot:

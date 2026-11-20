@@ -5,6 +5,7 @@ the CLI, which works on the packaged Mac app's file.
 """
 from __future__ import annotations
 
+import hashlib
 import gzip
 import json
 from datetime import datetime, UTC
@@ -210,6 +211,16 @@ def _seed_rows(seed_path: Path) -> tuple[list[dict], list[dict]]:
         for node in payload["category_tree_nodes"]
         if node["marketplace"] in MARKETPLACES
     ]
+    # Persist a content version independently of the seed's timestamp/source.
+    # CLI imports run outside the API process and cannot clear its memory cache.
+    for tree in trees:
+        content = sorted(
+            (node for node in nodes if node["marketplace"] == tree["marketplace"]),
+            key=lambda node: node["category_id"],
+        )
+        tree["content_hash"] = hashlib.sha256(
+            json.dumps(content, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
     return trees, nodes
 
 

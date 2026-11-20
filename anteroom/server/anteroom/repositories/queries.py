@@ -493,10 +493,18 @@ class JobRepo:
         status: str = "queued",
         current_step: str | None = None,
     ) -> Job:
+        # Saved native form catalogs belong to listing revisions, never to job
+        # rows: no job consumer reads _native_forms and storing megabytes per
+        # job bloats Postgres snapshots and slows JSON extraction.
+        snapshot = (
+            {key: value for key, value in listing_snapshot.items() if key != "_native_forms"}
+            if isinstance(listing_snapshot, dict) and "_native_forms" in listing_snapshot
+            else listing_snapshot
+        )
         job = Job(
             conversation_id=conv_id,
             approved_revision_id=approved_revision_id,
-            listing_snapshot=listing_snapshot,
+            listing_snapshot=snapshot,
             status=status,
             current_step=current_step if current_step is not None else ("queued" if status == "queued" else status),
         )
@@ -511,15 +519,34 @@ class JobRepo:
     def photo_source(self, job_id: str):
         # A listing snapshot can contain megabytes of marketplace catalogs.
         # Photo downloads need only the pinned manifest, not those catalogs.
-        manifest = json_value(Job.listing_snapshot, "_approved_photos")
-        # JSON null is still an explicitly pinned manifest, never permission
-        # to fall back to the conversation's current photographs.
-        present = (func.json_type(Job.listing_snapshot, '$._approved_photos').isnot(None)
-                   if self.db.get_bind().dialect.name == 'sqlite' else manifest.isnot(None))
-        return self.db.query(
-            Job.conversation_id,
-            manifest.label("approved_photos"), present.label("has_approved_photos"),
-        ).filter(Job.id == job_id).first()
+        if self.db.get_bind().dialect.name == "sqlite":
+            manifest = json_value(Job.listing_snapshot, "_approved_photos")
+            # JSON null is still an explicitly pinned manifest, never permission
+            # to fall back to the conversation's current photographs.
+            present = func.json_type(Job.listing_snapshot, "$._approved_photos").isnot(None)
+            return self.db.query(
+                Job.conversation_id,
+                manifest.label("approved_photos"),
+                present.label("has_approved_photos"),
+            ).filter(Job.id == job_id).first()
+        # On Postgres, listing_snapshot is JSON text; extract once inside a
+        # LIMIT 1 subquery rather than parsing the JSON document twice.
+        extracted = (
+            select(
+                Job.conversation_id.label("conversation_id"),
+                json_value(Job.listing_snapshot, "_approved_photos").label("approved_photos"),
+            )
+            .where(Job.id == job_id)
+            .limit(1)
+            .subquery()
+        )
+        return self.db.execute(
+            select(
+                extracted.c.conversation_id,
+                extracted.c.approved_photos,
+                extracted.c.approved_photos.isnot(None).label("has_approved_photos"),
+            )
+        ).first()
 
     def get_active(self) -> list[Job]:
         return (

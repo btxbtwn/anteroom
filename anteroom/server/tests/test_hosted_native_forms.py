@@ -135,3 +135,42 @@ def test_hosted_ebay_form_reads_the_sellers_own_schema_and_policies(cloud, signi
     assert 'ebay' in client.get('/api/runtime', headers=alice).json()['marketplace_forms']
     with Session(engine) as db:
         assert db.scalar(select(func.count()).select_from(Job)) == 0
+
+
+def test_hosted_job_repo_strips_native_forms_and_reads_photo_source_on_postgres(cloud, signing_keys):  # noqa: F811
+    from anteroom.repositories.queries import JobRepo
+    from anteroom.services import listing_persistence
+
+    client, engine = cloud
+    alice = headers(signing_keys)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'Coat'}).json()['id']
+    with use(for_seller(USER_ID)), SellerDatabaseSession(user_id=USER_ID, bind=engine) as db:
+        rev = listing_persistence.save_revision(db, identity, {'title': 'Coat', 'price': 20}, 'user_form')
+        jobs = JobRepo(db)
+        # Missing _approved_photos -> has_approved_photos is False
+        missing_job = jobs.create(identity, rev.id, {'title': 'Coat', '_native_forms': {'depop': {'fields': []}}})
+        missing_source = jobs.photo_source(missing_job.id)
+        assert missing_source.conversation_id == identity
+        assert missing_source.approved_photos is None
+        assert missing_source.has_approved_photos is False
+        # Explicit JSON null _approved_photos -> has_approved_photos is True
+        null_job = jobs.create(identity, rev.id, {'title': 'Coat', '_approved_photos': None})
+        null_source = jobs.photo_source(null_job.id)
+        assert null_source.conversation_id == identity
+        assert null_source.approved_photos is None
+        assert null_source.has_approved_photos is True
+        # Populated _approved_photos with _native_forms stripped
+        job = jobs.create(
+            identity,
+            rev.id,
+            {
+                'title': 'Coat',
+                '_approved_photos': [{'id': 'photo-1', 'filename': 'coat.jpg'}],
+                '_native_forms': {'depop': {'fields': [{'path': 'depop_specifics.brand', 'options': ['A', 'B']}]}},
+            },
+        )
+        assert '_native_forms' not in job.listing_snapshot
+        source = jobs.photo_source(job.id)
+        assert source.conversation_id == identity
+        assert source.approved_photos == [{'id': 'photo-1', 'filename': 'coat.jpg'}]
+        assert source.has_approved_photos is True

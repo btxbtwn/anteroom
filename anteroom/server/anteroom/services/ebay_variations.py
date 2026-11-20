@@ -19,13 +19,32 @@ blank row price uses the listing price.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import inspect
 import re
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from anteroom.services.ebay_api import dollars, money_cents
 from anteroom.services.ebay_client import EbayClient, EbayFailure, segment
 from anteroom.services.listing_result import missing
+
+RecordFn = Callable[[dict], Awaitable[None] | None]
+ActiveFn = Callable[[], Awaitable[bool] | bool]
+
+
+async def _record(record: RecordFn, values: dict) -> None:
+    result = record(values)
+    if inspect.isawaitable(result):
+        await result
+
+
+async def _is_active(active: ActiveFn) -> bool:
+    result = active()
+    if inspect.isawaitable(result):
+        return bool(await result)
+    return bool(result)
+
 
 FIELD = "ebay_specifics.variations"
 MAX_SKU_LENGTH = 50
@@ -291,7 +310,7 @@ async def _verify_draft(client: EbayClient, group_key: str, fields: dict, chosen
 
 
 async def execute(action: str, client: EbayClient, snapshot: dict, form: dict, fields: dict, photos: list, binding: dict,
-                  record: Callable[[dict], None], active: Callable[[], bool], conversation_id: str,
+                  record: RecordFn, active: ActiveFn, conversation_id: str,
                   pending: dict, aspects: dict[str, list[str]]) -> dict:
     """Save Draft or List for a listing with variations. ``pending`` names the unrepeatable write in flight."""
     from anteroom.services import ebay_listings as single
@@ -307,19 +326,19 @@ async def execute(action: str, client: EbayClient, snapshot: dict, form: dict, f
     offers = await _offers(client, chosen, binding)
     known = {sku: str(offer["offerId"]) for sku, offer in offers.items()}
     if known:
-        record({"ebay_sku": base, "ebay_group_key": group_key, "ebay_variant_offers": known})
+        await _record(record, {"ebay_sku": base, "ebay_group_key": group_key, "ebay_variant_offers": known})
     live = _live_listing_id(offers)
     if live:
-        record({"ebay_listing_id": live})
+        await _record(record, {"ebay_listing_id": live})
         return {"ok": True, "state": "published", "listing_url": single._listing_url(live)}
     image_urls = await single._image_urls(client, photos, binding, record, active)
     by_photo = dict(zip([photo.id for photo in photos], image_urls, strict=True))
     main = image_urls[:single.MAX_PHOTOS]
     shared = common_aspects(aspects, chosen)
-    record({"ebay_sku": base, "ebay_group_key": group_key, "ebay_inventory_written": True})
-    template = single._inventory_body({**fields, "quantity": 0}, {}, [], snapshot, form)
+    await _record(record, {"ebay_sku": base, "ebay_group_key": group_key, "ebay_inventory_written": True})
+    template = await asyncio.to_thread(single._inventory_body, {**fields, "quantity": 0}, {}, [], snapshot, form)
     for row in chosen["rows"]:
-        if not active():
+        if not await _is_active(active):
             raise ValueError("The eBay listing stopped before it finished. Try again to continue.")
         await client.request("PUT", f"/sell/inventory/v1/inventory_item/{segment(row['sku'])}",
                              body=item_body(template, row, shared, _photo_urls(chosen, by_photo, row)))
@@ -338,25 +357,25 @@ async def execute(action: str, client: EbayClient, snapshot: dict, form: dict, f
         if not offer_id:
             raise EbayFailure("eBay did not confirm a variation's offer. Check eBay before trying again.")
         known[row["sku"]] = offer_id
-        record({"ebay_variant_offers": dict(known)})
+        await _record(record, {"ebay_variant_offers": dict(known)})
         pending["write"] = None
     await _drop_removed(client, previous, chosen, known, record)
     if action == "save_draft":
         await _verify_draft(client, group_key, fields, chosen, known)
         return {"ok": True, "state": "draft"}
-    if not active():
+    if not await _is_active(active):
         raise ValueError("The eBay listing stopped before it was published. List again to publish it.")
     pending["write"] = "publish"
     published = await client.request("POST", "/sell/inventory/v1/offer/publish_by_inventory_item_group",
                                      body={"inventoryItemGroupKey": group_key, "marketplaceId": "EBAY_US"})
     listing_id = str(published.get("listingId") or "")
     url = single._listing_url(listing_id)
-    record({"ebay_listing_id": listing_id})
+    await _record(record, {"ebay_listing_id": listing_id})
     return {"ok": True, "state": "published", "listing_url": url}
 
 
 async def _drop_removed(client: EbayClient, previous: dict, chosen: dict, current: dict[str, str],
-                        record: Callable[[dict], None]) -> None:
+                        record: RecordFn) -> None:
     """Delete the unpublished offers of rows the seller removed, so a later List cannot publish them."""
     from anteroom.services.ebay_listings import _not_found
 
@@ -367,11 +386,11 @@ async def _drop_removed(client: EbayClient, previous: dict, chosen: dict, curren
         offer = await _not_found(client.request("GET", f"/sell/inventory/v1/offer/{segment(str(offer_id))}"))
         if offer is not None and offer.get("status") != "PUBLISHED":
             await client.request("DELETE", f"/sell/inventory/v1/offer/{segment(str(offer_id))}")
-    record({"ebay_variant_offers": dict(current)})
+    await _record(record, {"ebay_variant_offers": dict(current)})
 
 
 async def update_live(client: EbayClient, snapshot: dict, form: dict, fields: dict, photos: list, binding: dict,
-                      record: Callable[[dict], None], active: Callable[[], bool], aspects: dict[str, list[str]]) -> dict:
+                      record: RecordFn, active: ActiveFn, aspects: dict[str, list[str]]) -> dict:
     """Replace the live listing's group, variations and offers. Never publishes and never adds a listing."""
     from anteroom.services import ebay_listings as single
 
@@ -392,9 +411,9 @@ async def update_live(client: EbayClient, snapshot: dict, form: dict, fields: di
     image_urls = await single._image_urls(client, photos, binding, record, active)
     by_photo = dict(zip([photo.id for photo in photos], image_urls, strict=True))
     shared = common_aspects(aspects, chosen)
-    template = single._inventory_body({**fields, "quantity": 0}, {}, [], snapshot, form)
+    template = await asyncio.to_thread(single._inventory_body, {**fields, "quantity": 0}, {}, [], snapshot, form)
     for row in chosen["rows"]:
-        if not active():
+        if not await _is_active(active):
             raise ValueError("The eBay update stopped. Check its result before trying again.")
         await client.request("PUT", f"/sell/inventory/v1/inventory_item/{segment(row['sku'])}",
                              body=item_body(template, row, shared, _photo_urls(chosen, by_photo, row)))
@@ -411,7 +430,7 @@ async def update_live(client: EbayClient, snapshot: dict, form: dict, fields: di
         body = offer_body(row, fields, own.get("merchantLocationKey") or offer.get("merchantLocationKey"), policies)
         body.pop("includeCatalogProductDetails", None)
         await client.request("PUT", f"/sell/inventory/v1/offer/{segment(str(offer['offerId']))}", body=body)
-    record({"ebay_variant_offers": {sku: str(offer["offerId"]) for sku, offer in offers.items()}})
+    await _record(record, {"ebay_variant_offers": {sku: str(offer["offerId"]) for sku, offer in offers.items()}})
     await _confirm_live(client, chosen, offers, listing_id, fields)
     return {"ok": True, "state": "published", "listing_url": single._listing_url(listing_id)}
 
@@ -428,7 +447,7 @@ async def _confirm_live(client: EbayClient, chosen: dict, offers: dict[str, dict
             raise ValueError("eBay has not confirmed the update on the same listing. Check eBay before trying again.")
 
 
-async def check(client: EbayClient, binding: dict, snapshot: dict | None, record: Callable[[dict], None]) -> dict:
+async def check(client: EbayClient, binding: dict, snapshot: dict | None, record: RecordFn) -> dict:
     """Read what eBay has for this group. Never writes."""
     from anteroom.services import ebay_listings as single
     from anteroom.services.native_form import vendoo_form
@@ -448,7 +467,7 @@ async def check(client: EbayClient, binding: dict, snapshot: dict | None, record
     rows = chosen["rows"] if chosen else [{"sku": sku} for sku in known]
     offers = await _offers(client, {"rows": rows}, binding) if rows else {}
     if offers:
-        record({"ebay_variant_offers": {sku: str(offer["offerId"]) for sku, offer in offers.items()}})
+        await _record(record, {"ebay_variant_offers": {sku: str(offer["offerId"]) for sku, offer in offers.items()}})
     live = _live_listing_id(offers)
     if binding.get("action") == "update" and chosen and fields:
         listing_id = str(binding.get("listing_id") or binding.get("ebay_listing_id") or "")
@@ -457,7 +476,7 @@ async def check(client: EbayClient, binding: dict, snapshot: dict | None, record
         await _confirm_live(client, chosen, offers, listing_id, fields)
         return {"ok": True, "state": "published", "listing_url": single._listing_url(listing_id)}
     if live:
-        record({"ebay_listing_id": live})
+        await _record(record, {"ebay_listing_id": live})
         return {"ok": True, "state": "published", "listing_url": single._listing_url(live)}
     if binding.get("action") == "save_draft" and chosen and fields and len(offers) == len(chosen["rows"]):
         await _verify_draft(client, str(binding.get("ebay_group_key") or ""), fields, chosen,

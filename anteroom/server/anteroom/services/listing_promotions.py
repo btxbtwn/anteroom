@@ -33,7 +33,7 @@ from anteroom.models.listing_promotion import ListingPromotion, MarketplaceOffer
 from anteroom.models.promotion_automation import PromotionAutomation
 from anteroom.repositories.queries import JobRepo, ListingRepo
 from anteroom.services import browser_bridge, listing_mode, mercari_offer_cooldown, offer_preview_refusals
-from anteroom.services.depop_offer_eligibility import expected_multisize
+from anteroom.services.depop_offer_eligibility import expected_preview_refusal
 from anteroom.services.api_job_lock import claim_api_job, release_api_job
 from anteroom.services.ebay_api import dollars, money_cents
 from anteroom.services.listing_result import scrub
@@ -289,7 +289,7 @@ async def _review_remote(row: ListingPromotion, listing_id: str) -> None:
             row.like_count = facts["like_count"]
         cooldown = mercari_offer_cooldown.preview_wait(
             row.marketplace, "marketplace.promotion_check", row.action, facts) is not None
-        expected_skip = expected_multisize(row.marketplace, "marketplace.promotion_check", row.action, facts)
+        expected_skip = expected_preview_refusal(row.marketplace, "marketplace.promotion_check", row.action, facts)
         report = log.info if cooldown or expected_skip else log.error
         report("%s %s preview rejected for listing %s, automation %s: %s; %s",
                   row.marketplace, row.action, listing_id, row.automation_id,

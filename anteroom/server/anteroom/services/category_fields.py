@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import and_, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from anteroom.database import SessionLocal
@@ -123,7 +124,20 @@ def save_rows(marketplace: str, category_id: str, rows: list[dict[str, Any]]) ->
             db.add(CategoryFieldSchema(
                 marketplace=str(marketplace), category_id=str(category_id), fields=rows
             ))
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            existing = (
+                db.query(CategoryFieldSchema)
+                .filter_by(marketplace=str(marketplace), category_id=str(category_id))
+                .one_or_none()
+            )
+            if existing is None:
+                raise
+            existing.fields = rows
+            existing.fetched_at = datetime.now(UTC)
+            db.commit()
 
 
 def cached_marketplaces(category_ids: dict[str, str]) -> dict[str, dict[str, FieldSpec]]:

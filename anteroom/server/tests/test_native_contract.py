@@ -187,7 +187,13 @@ class NativeContractTest(unittest.TestCase):
             self.assertEqual(field["options_lookup"]["count"], 21697)
             self.assertEqual(contracts, before)
             self.assertLess(len(json.dumps(field)), 500)
-            self.assertEqual(len(next(row for row in contracts["depop"]["fields"]
+            stored_row = next(row for row in contracts["depop"]["fields"]
+                              if row["path"] == "depop_specifics.brand")
+            self.assertNotIn("options", stored_row)
+            self.assertEqual(stored_row["choice_list"]["name"], "depop-brands")
+            editor = contract.editor_form({**listing, contract.KEY: contracts}, "depop")
+            self.assertIsNotNone(editor)
+            self.assertEqual(len(next(row for row in editor["fields"]
                                       if row["path"] == "depop_specifics.brand")["options"]), 21697)
 
     def test_large_aspect_catalog_is_narrowed_without_changing_validation(self):
@@ -560,3 +566,148 @@ class NativeContractRevisionTest(unittest.TestCase):
         self.assertEqual(text.count("--- Authoritative native marketplace forms ---"), 1)
         self.assertIn("mercari_specifics.material", text)
         self.assertIn("Canonical prose rules", text)
+
+    def test_save_revision_compacts_legacy_uncompressed_native_forms(self):
+        from anteroom.services import depop_form
+
+        brands = depop_form.brand_choices()
+        self.assertGreater(len(brands["options"]), 1000)
+        ebay_brands = [f"Brand {i}" for i in range(200)] + ["Nike"]
+        legacy_forms = {
+            "depop": {
+                "category_id": "mens_tshirts",
+                "category_path": "Menswear > Tops > T-shirts",
+                "fields": [
+                    {
+                        "path": "depop_specifics.brand",
+                        "label": "Brand",
+                        "type": "select",
+                        "required": False,
+                        "multi": False,
+                        **brands,
+                    },
+                ],
+            },
+            "ebay": {
+                "category_id": "15687",
+                "page_labels": True,
+                "fields": [
+                    {
+                        "path": "ebay_specifics.Brand",
+                        "label": "Brand",
+                        "selection_only": True,
+                        "options": ebay_brands,
+                        "option_values": {name: name for name in ebay_brands},
+                    },
+                    {
+                        "path": "ebay_specifics.condition",
+                        "label": "Condition",
+                        "selection_only": True,
+                        "options": ["Pre-Owned - Good"],
+                        "option_values": {"Pre-Owned - Good": "3000"},
+                    },
+                ],
+            },
+        }
+        current = self.repo.get_current(self.conv.id)
+        rev = self.repo.get_revision(current.current_revision_id)
+        rev.listing_json = {"title": "Vintage Tee", "price": 20, contract.KEY: legacy_forms}
+        self.db.commit()
+        saved = listing_persistence.save_revision(self.repo.db, self.conv.id, {"title": "Vintage Tee Updated", "price": 22}, "user_form")
+        stored_row = saved.listing_json[contract.KEY]["depop"]["fields"][0]
+        self.assertEqual(stored_row.get("choice_list", {}).get("name"), "depop-brands")
+        self.assertNotIn("options", stored_row)
+        self.assertNotIn("option_values", stored_row)
+        ebay_by_path = {row["path"]: row for row in saved.listing_json[contract.KEY]["ebay"]["fields"]}
+        self.assertNotIn("option_values", ebay_by_path["ebay_specifics.Brand"])
+        self.assertEqual(ebay_by_path["ebay_specifics.condition"]["option_values"], {"Pre-Owned - Good": "3000"})
+
+    def test_capture_stores_shared_lists_by_reference_and_omits_identity_option_values(self):
+        from anteroom.services import depop_form, mercari_form, poshmark_form
+        from anteroom.services.option_lookup import OptionCatalog
+
+        listing = {
+            "title": "Nike tee",
+            "brand": "Nike",
+            "condition": "Pre-Owned - Good",
+            "direct_category_ids": {"mercari": "275", "depop": "menswear_jeans", "ebay": "15687"},
+            "ebay_specifics": {"condition": "3000"},
+        }
+        ebay_brands = [f"Brand {i}" for i in range(200)] + ["Nike"]
+        ebay_form = {
+            "marketplace": "ebay",
+            "native": True,
+            "known": True,
+            "page_labels": True,
+            "category_id": "15687",
+            "fields": [
+                {
+                    "path": "ebay_specifics.condition",
+                    "label": "Item condition",
+                    "selection_only": True,
+                    "options": ["Pre-Owned - Good"],
+                    "option_values": {"Pre-Owned - Good": "3000"},
+                },
+                {
+                    "path": "ebay_specifics.Brand",
+                    "label": "Brand",
+                    "selection_only": True,
+                    "options": ebay_brands,
+                    "option_values": {name: name for name in ebay_brands},
+                },
+            ],
+        }
+        forms = {
+            "mercari": mercari_form.form(listing),
+            "depop": depop_form.form(listing),
+            "poshmark": poshmark_form.form(listing),
+            "ebay": ebay_form,
+        }
+        contracts = contract.capture(listing, forms, ("mercari", "depop", "poshmark", "ebay"))
+        listing[contract.KEY] = contracts
+        for market, path, list_name in (
+            ("mercari", "mercari_specifics.brand", "mercari-brands"),
+            ("mercari", "direct_category_ids.mercari", "mercari-categories"),
+            ("depop", "depop_specifics.brand", "depop-brands"),
+            ("depop", "direct_category_ids.depop", "depop-categories"),
+            ("poshmark", "direct_category_ids.poshmark", "poshmark-categories"),
+        ):
+            stored = next(row for row in contracts[market]["fields"] if row["path"] == path)
+            self.assertEqual(stored["choice_list"]["name"], list_name)
+            self.assertNotIn("options", stored)
+            self.assertNotIn("option_values", stored)
+        ebay_by_path = {row["path"]: row for row in contracts["ebay"]["fields"]}
+        self.assertNotIn("option_values", ebay_by_path["ebay_specifics.Brand"])
+        self.assertEqual(ebay_by_path["ebay_specifics.condition"]["option_values"], {"Pre-Owned - Good": "3000"})
+        stored_brand = next(row for row in contracts["mercari"]["fields"] if row["path"] == "mercari_specifics.brand")
+        self.assertIsNone(contract.value_error(stored_brand, "Nike"))
+        self.assertEqual(contract.value_error(stored_brand, "Definitely Not A Real Brand XYZ123"), contract.NOT_AN_OPTION)
+        catalog = OptionCatalog(contracts)
+        self.assertTrue(catalog.needed)
+        found = catalog.search({"marketplace": "mercari", "field": "mercari_specifics.brand", "query": "Nike", "offset": 0})
+        self.assertTrue(any(item["label"] == "Nike" for item in found["results"]))
+        self.assertNotIn("choice_list", contract.prompt(contracts))
+        from anteroom.services import choice_lists
+        shared_ebay = choice_lists.share(ebay_form)
+        shared_brand = next(row for row in shared_ebay["fields"] if row["path"] == "ebay_specifics.Brand")
+        self.assertEqual(shared_brand["option_values"], {name: name for name in ebay_brands})
+
+    def test_job_repo_strips_native_forms_and_keeps_approved_photos(self):
+        from anteroom.repositories.queries import JobRepo
+
+        rev = listing_persistence.save_revision(self.db, self.conv.id, seed(), "user_form")
+        snapshot = {
+            "title": "Vintage Tee",
+            "_approved_photos": [{"id": "p1", "filename": "a.jpg"}],
+            contract.KEY: seed()[contract.KEY],
+        }
+        jobs = JobRepo(self.db)
+        job = jobs.create(self.conv.id, rev.id, snapshot)
+        self.assertNotIn(contract.KEY, job.listing_snapshot)
+        self.assertEqual(job.listing_snapshot["_approved_photos"], [{"id": "p1", "filename": "a.jpg"}])
+        source = jobs.photo_source(job.id)
+        self.assertEqual(source.conversation_id, self.conv.id)
+        self.assertEqual(source.approved_photos, [{"id": "p1", "filename": "a.jpg"}])
+        self.assertTrue(source.has_approved_photos)
+        # Original caller dict is not mutated.
+        self.assertIn(contract.KEY, snapshot)

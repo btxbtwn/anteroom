@@ -1224,6 +1224,7 @@ async def fill_validation_gaps(provider, listing: dict, *, analysis: str = "", n
         allowed[pointer] = field
     if not allowed:
         return None
+    from anteroom.services.choice_lists import hydrate_row
     from anteroom.services.fill_log import prompt_options
 
     requirements = []
@@ -1231,7 +1232,8 @@ async def fill_validation_gaps(provider, listing: dict, *, analysis: str = "", n
         for row in contract.get("fields") or []:
             if row.get("path") not in allowed.values():
                 continue
-            options, complete = prompt_options(row.get("options") or [], analysis)
+            hydrated = hydrate_row(row)
+            options, complete = prompt_options(hydrated.get("options") or [], analysis)
             requirements.append({
                 "path": row["path"], "options": options, "options_complete": complete,
                 **{key: row[key] for key in ("input_type", "multi", "max_values", "min_value", "max_value", "max_length")

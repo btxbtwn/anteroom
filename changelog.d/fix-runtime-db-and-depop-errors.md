@@ -1,0 +1,2 @@
+- Keep marketplace form schemas out of the listing database payload and prevent database pool timeouts during category lookups and listing publishes.
+- Refuse Depop offer previews when no eligible likers exist instead of reporting a server error.

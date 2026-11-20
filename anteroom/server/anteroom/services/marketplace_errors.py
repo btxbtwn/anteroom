@@ -6,7 +6,7 @@ from functools import wraps
 import logging
 from typing import Any, ParamSpec, TypeVar
 
-from anteroom.services.depop_offer_eligibility import expected_multisize
+from anteroom.services.depop_offer_eligibility import expected_preview_refusal
 from anteroom.services.listing_result import scrub
 from anteroom.services.mercari_offer_cooldown import preview_wait
 
@@ -38,7 +38,7 @@ def report_result(marketplace: str, operation: str, result: Any, *, depth: int =
         # caller. Nested envelopes may represent another action or marketplace.
         expected_preview = depth == 0 and (
             preview_wait(marketplace, operation, context.get("action"), result) is not None
-            or expected_multisize(marketplace, operation, context.get("action"), result))
+            or expected_preview_refusal(marketplace, operation, context.get("action"), result))
         report = log.info if expected_preview else log.error
         report("%s %s failed (%s): %s; %s", scrub(marketplace), scrub(operation),
                   scrub(result.get("error_code") or status or result.get("state") or "rejected"),

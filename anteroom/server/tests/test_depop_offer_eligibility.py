@@ -79,3 +79,82 @@ def test_hosted_multisize_preview_keeps_reply_and_info_evidence(monkeypatch, cap
     assert MESSAGE in caplog.text
     assert reply == BASE
     request.assert_awaited_once()
+
+
+NO_RECIPIENTS_MESSAGE = (
+    'Depop has nobody to send an offer to on this listing: '
+    'no one has liked it, or every liker already has an offer.'
+)
+NO_RECIPIENTS_BASE = {
+    'ok': False,
+    'like_count': 0,
+    'error': NO_RECIPIENTS_MESSAGE,
+    'error_code': 'rejected',
+    'safe_to_retry': True,
+}
+
+
+def test_no_recipients_preview_logs_info_at_both_layers_and_records_zero_likes(monkeypatch, caplog):
+    reply = deepcopy(NO_RECIPIENTS_BASE)
+    request = AsyncMock(return_value=reply)
+    monkeypatch.setattr(browser_bridge, '_request', request)
+    row = ListingPromotion(marketplace='depop', action='offer', batch_id='fixture', discount_percent=10)
+    with caplog.at_level(logging.INFO), pytest.raises(listing_promotions.PromotionError) as raised:
+        asyncio.run(listing_promotions._review_remote(row, 'fixture-slug'))
+    records = [r for r in caplog.records if r.name in ('anteroom.marketplaces', 'anteroom.listing_promotions')]
+    assert [r.levelname for r in records] == ['INFO', 'INFO']
+    assert all(NO_RECIPIENTS_MESSAGE in r.getMessage() for r in records)
+    assert str(raised.value) == NO_RECIPIENTS_MESSAGE
+    assert raised.value.code == 'rejected'
+    assert row.like_count == 0
+    assert row.offer_price_cents is None
+    assert reply == NO_RECIPIENTS_BASE
+    request.assert_awaited_once()
+
+
+@pytest.mark.parametrize('override', [
+    {'like_count': 1}, {'like_count': None}, {'like_count': False}, {'like_count': '0'},
+    {'safe_to_retry': False}, {'safe_to_retry': None},
+    {'error_code': 'uncertain'}, {'error_code': 'schema_drift'},
+    {'error': NO_RECIPIENTS_MESSAGE + ' extra'}, {'state': 'unknown'},
+    {'errors': [{'message': 'Other failure'}]}, {'statusCode': 400},
+    {'marketplace_message': 'Does the product have variants?'},
+    {'marketplace': 'mercari'}, {'action': 'share'}, {'operation': 'marketplace.promote'},
+])
+def test_no_recipients_with_other_failure_indicators_stays_error(monkeypatch, caplog, override):
+    request = AsyncMock(return_value={**NO_RECIPIENTS_BASE, **override})
+    monkeypatch.setattr(browser_bridge, '_request', request)
+    row = ListingPromotion(marketplace='depop', action='offer', batch_id='fixture', discount_percent=10)
+    with caplog.at_level(logging.INFO), pytest.raises(listing_promotions.PromotionError):
+        asyncio.run(listing_promotions._review_remote(row, 'fixture-slug'))
+    assert [r.levelname for r in caplog.records if r.name in (
+        'anteroom.marketplaces', 'anteroom.listing_promotions')] == ['ERROR', 'ERROR']
+    request.assert_awaited_once()
+
+
+def test_no_recipients_missing_like_count_stays_error(caplog):
+    reply = {k: v for k, v in NO_RECIPIENTS_BASE.items() if k != 'like_count'}
+    with caplog.at_level(logging.INFO):
+        report_result('depop', 'marketplace.promotion_check', reply, context={'action': 'offer'})
+    assert [r.levelname for r in caplog.records] == ['ERROR']
+
+
+def test_nested_no_recipients_does_not_inherit_expected_classification(caplog):
+    result = {**NO_RECIPIENTS_BASE, 'results': [deepcopy(NO_RECIPIENTS_BASE)]}
+    with caplog.at_level(logging.INFO):
+        report_result('depop', 'marketplace.promotion_check', result, context={'action': 'offer'})
+    assert [r.levelname for r in caplog.records] == ['INFO', 'ERROR']
+
+
+def test_hosted_no_recipients_preview_keeps_reply_and_info_evidence(monkeypatch, caplog):
+    from anteroom.services.hosted_browser_relay import BrowserRelay
+    relay = BrowserRelay()
+    reply = deepcopy(NO_RECIPIENTS_BASE)
+    request = AsyncMock(return_value=reply)
+    monkeypatch.setattr(relay, '_read', request)
+    with caplog.at_level(logging.INFO):
+        assert asyncio.run(relay.read('marketplace.promotion_check', {'marketplace': 'depop', 'action': 'offer'}, 90)) is reply
+    assert [r.levelname for r in caplog.records] == ['INFO']
+    assert NO_RECIPIENTS_MESSAGE in caplog.text
+    assert reply == NO_RECIPIENTS_BASE
+    request.assert_awaited_once()

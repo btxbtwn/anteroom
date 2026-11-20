@@ -371,7 +371,9 @@ def _record_forms(db: Session, conv_id: str, revision_id: str, saved: dict, form
     latest = ListingRepo(db).get_current(conv_id)
     if not latest or latest.current_revision_id != revision_id:
         return {}
-    listing = copy.deepcopy(saved)
+    from anteroom.services import choice_lists
+
+    listing = native_contract.copy_listing(saved)
     if reset_evidence:
         listing[native_contract.EVIDENCE_KEY] = {}
     for market, form in forms.items():
@@ -384,7 +386,7 @@ def _record_forms(db: Session, conv_id: str, revision_id: str, saved: dict, form
             if (path.startswith(f"{market}_specifics.") and ".package." not in path and sale_field
                     and path not in CATEGORY_PATHS and not _empty(value) and not native_contract.value_error(row, value)):
                 write_value(listing, path, value)
-    listing[native_contract.KEY] = {**(listing.get(native_contract.KEY) or {}),
+    listing[native_contract.KEY] = {**choice_lists.compact_contracts(listing.get(native_contract.KEY) or {}),
                                     **native_contract.capture(listing, forms, markets)}
     native_contract.constrain_generated(listing, listing, freeze_categories=False)
     if listing != saved:
