@@ -270,3 +270,48 @@ test('cancel buckets are isolated per account and expired legacy numeric entries
   }, BOB, { seconds: NOW });
   assert.equal(await verifier.verify(bobCancel, BOB), null);
 });
+
+test('aggregate replay bytes reserve cancellation space without evicting live nonces', async () => {
+  const s = await setup();
+  const store = storage();
+  const maxStorageBytes = 2048;
+  let seconds = NOW;
+  const options = { publicKey: s.signer.publicKey, now: () => seconds * 1000, maxStorageBytes };
+  let verifier = createApprovalVerifier({ storage: store }, options);
+  const accepted = [];
+  let refused;
+  for (let i = 0; i < 40; i += 1) {
+    const account = `account-${i}`;
+    const command = await s.signer.sign(update(), account, { seconds: NOW });
+    const result = await verifier.verify(command, account);
+    if (result) { refused = result; break; }
+    accepted.push([command, account]);
+  }
+  assert.equal(refused?.approval, 'capacity');
+  assert.ok(accepted.length > 1);
+  const snapshot = async () => ({
+    ...(await store.local.get('anteroom_used_approvals')),
+    ...(await store.local.get('anteroom_approval_buckets')),
+  });
+  const size = data => Object.entries(data).reduce((sum, [key, value]) =>
+    sum + Buffer.byteLength(key) + Buffer.byteLength(JSON.stringify(value)), 0);
+  assert.ok(size(await snapshot()) <= maxStorageBytes * 7 / 8);
+  let cancels = 0;
+  for (let i = 0; i < 40; i += 1) {
+    const account = `cancel-account-${i}`;
+    const command = await s.signer.sign({ type: 'job.cancel', message_id: MESSAGE, job_id: 'job-1', payload: {} }, account, { seconds: NOW });
+    const result = await verifier.verify(command, account);
+    if (result) { assert.equal(result.approval, 'capacity'); break; }
+    accepted.push([command, account]);
+    cancels += 1;
+  }
+  assert.ok(cancels > 0 && cancels < 40);
+  const full = await snapshot();
+  assert.ok(size(full) <= maxStorageBytes);
+  verifier = createApprovalVerifier({ storage: store }, options);
+  for (const [command, account] of accepted) assert.equal((await verifier.verify(command, account)).approval, 'replayed');
+  assert.deepEqual(await snapshot(), full);
+  seconds += 400;
+  assert.equal(await verifier.verify(await s.signer.sign(update(), ALICE, { seconds }), ALICE), null);
+  assert.equal(Object.keys((await snapshot()).anteroom_used_approvals).length, 1);
+});

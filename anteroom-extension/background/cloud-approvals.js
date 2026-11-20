@@ -19,6 +19,10 @@
   const MAX_LIFE_S = 600;
   // Cap stored nonces alongside the 660 s TTL so a burst cannot fill chrome.storage.local.
   const MAX_USED_APPROVALS = 2000;
+  // Bound both replay maps to 1 MiB of the shared local storage quota, leaving
+  // room for journals. Ordinary commands cannot consume the last eighth, which
+  // is reserved for cancellation. Never evict a live nonce to admit new work.
+  const MAX_REPLAY_BYTES = 1024 * 1024;
   // The claims carry an id and SHA-256 for each of up to 30 photos.
   const TOKEN = /^[A-Za-z0-9_-]{10,200}\.[A-Za-z0-9_-]{10,10000}\.[A-Za-z0-9_-]{80,90}$/;
   const REFUSALS = {
@@ -55,7 +59,7 @@
     return JSON.stringify(value);
   }
 
-  function createApprovalVerifier(api, { publicKey = BRIDGE_APPROVAL_PUBLIC_KEY, now = Date.now, subtle = crypto.subtle, maxUsed = MAX_USED_APPROVALS } = {}) {
+  function createApprovalVerifier(api, { publicKey = BRIDGE_APPROVAL_PUBLIC_KEY, now = Date.now, subtle = crypto.subtle, maxUsed = MAX_USED_APPROVALS, maxStorageBytes = MAX_REPLAY_BYTES } = {}) {
     let key = null;
     let tail = Promise.resolve();
     async function commandHash(command) {
@@ -81,7 +85,8 @@
     }
     // Remember each approval until it expires, so a copy of it cannot run again.
     // Partition capacity per account and reserve a separate bucket for Cancel so one
-    // high-volume account cannot block unrelated accounts or Cancel commands.
+    // high-volume account cannot exhaust another bucket. The shared byte budget
+    // below still bounds physical storage across all accounts.
     function use(id, expires, bucket) {
       const result = tail.then(async () => {
         const used = (await api.storage.local.get(USED_KEY))[USED_KEY] || {};
@@ -114,6 +119,12 @@
         if (bucketCount >= cap) return 'capacity';
         used[id] = expires;
         buckets[id] = bucket;
+        const budget = Number.isInteger(maxStorageBytes) && maxStorageBytes > 0 ? maxStorageBytes : MAX_REPLAY_BYTES;
+        const limit = bucket === 'cancel' || bucket.startsWith('cancel:') ? budget : Math.floor(budget * 7 / 8);
+        const storedBytes = new TextEncoder().encode(
+          USED_KEY + JSON.stringify(used) + BUCKETS_KEY + JSON.stringify(buckets),
+        ).byteLength;
+        if (storedBytes > limit) return 'capacity';
         await api.storage.local.set({ [USED_KEY]: used, [BUCKETS_KEY]: buckets });
         return null;
       });
