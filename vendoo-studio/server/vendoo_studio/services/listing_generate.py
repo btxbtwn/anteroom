@@ -624,7 +624,11 @@ def ensure_physical_description(listing: dict) -> bool:
     seller_chose = bool(custom.strip()) and custom.strip() != DEFAULT_DESCRIPTION_FORMULA.strip()
     if seller_chose or ("\n" in desc and len(desc) >= 40 and "measurements:" not in desc.lower()):
         if "measurements:" in desc.lower():
-            return False
+            repaired = re.sub(r"(?i)(?<=\S)[ \t]+(?=measurements\s*:)", "\n\n", desc)
+            if repaired == desc or not _description_follows_formula(repaired):
+                return False
+            listing["description"] = repaired
+            return True
         listing["description"] = f"{desc.rstrip()}\n\nMeasurements: {meas}"
         return True
 
@@ -1353,17 +1357,20 @@ def apply_seller_description_facts(listing: dict, seller: dict) -> bool:
     # A model that names the seller's flaws and adds ones it saw keeps its block.
     seller_flaws = "; ".join(flaw_items(flaws))
     described = _comparable(description_block(updated, "flaws?"))
-    if seller_flaws and description_has_section("Flaws") and _comparable(seller_flaws) not in described:
+    flaws_label = "Flaws" if description_has_section("Flaws") else "Flaw"
+    if seller_flaws and description_has_section(flaws_label) and _comparable(seller_flaws) not in described:
         block = render_flaws_block(flaws, as_list=description_lists_flaws())
         if block:
+            block = block.replace("Flaws:", f"{flaws_label}:", 1)
             updated = set_description_block(updated, "flaws?", block, before="measurements?")
     measurements = _description_measurements(seller)
+    measurements_label = "Measurements" if description_has_section("Measurements") else "Measurement"
     if (
         measurements
-        and description_has_section("Measurements")
+        and description_has_section(measurements_label)
         and description_block(updated, "measurements?") != measurements.rstrip(".")
     ):
-        updated = set_description_block(updated, "measurements?", f"Measurements: {measurements}")
+        updated = set_description_block(updated, "measurements?", f"{measurements_label}: {measurements}")
     if updated == desc:
         return False
     listing["description"] = updated

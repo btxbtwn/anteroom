@@ -218,10 +218,10 @@ def description_has_section(label: str) -> bool:
     return re.search(rf"(?im)^{re.escape(label)}\s*:", active_description_template()) is not None
 
 
-def _optional_description_markers() -> frozenset[str]:
+def _optional_description_markers(template: str) -> frozenset[str]:
     labels = set(OPTIONAL_DESCRIPTION_MARKERS)
     for block in DESCRIPTION_BLOCKS:
-        if not block.optional:
+        if not block.optional or block.snippet not in template:
             continue
         for match in _MARKER_LINE_RE.finditer(block.snippet):
             labels.add(f"{match.group(1).strip().lower()}:")
@@ -287,7 +287,7 @@ def description_formula_markers() -> tuple[str, ...]:
     custom = get_listing_formulas().get("description")
     template = custom or DEFAULT_DESCRIPTION_FORMULA
     labels = {f"{m.group(1).strip().lower()}:" for m in _MARKER_LINE_RE.finditer(template)}
-    found = tuple(sorted(labels - _optional_description_markers()))
+    found = tuple(sorted(labels - _optional_description_markers(template)))
     if custom:
         return found
     return found or DEFAULT_DESCRIPTION_MARKERS
