@@ -168,7 +168,7 @@ def test_failed_answers_keep_a_safe_reason_on_resume_and_retry_without_duplicate
         'prepare': 'Anteroom could not read your shop for this answer. Try again.',
     }[failure]
 
-    async def answer(_provider, _messages, _shop):
+    async def answer(_provider, _messages, _shop, timing=None):
         if partial:
             yield 'text', partial
         if failure == 'provider':
@@ -215,7 +215,7 @@ def test_failed_answers_keep_a_safe_reason_on_resume_and_retry_without_duplicate
             assert client.post('/api/assistant/messages/retry?thread_id=' + thread, headers=alice).status_code == 409
         else:
             monkeypatch.setattr(assistant_route, '_prepare', prepare)
-            async def recovered(_provider, _messages, _shop):
+            async def recovered(_provider, _messages, _shop, timing=None):
                 yield 'text', 'Buy coats.'
             monkeypatch.setattr(business_assistant, 'answer', recovered)
             assert 'Buy coats.' in client.post('/api/assistant/messages/retry?thread_id=' + thread, headers=alice).text

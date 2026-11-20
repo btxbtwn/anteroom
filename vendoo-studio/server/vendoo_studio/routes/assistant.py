@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import traceback
 from collections.abc import Callable
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -48,6 +50,7 @@ from vendoo_studio.services.user_settings import (
 )
 
 log = logging.getLogger("vendoo_studio.assistant")
+timing_log = logging.getLogger("vendoo_studio.assistant.timing")
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 
@@ -166,15 +169,29 @@ def _prepare(question: str, attachments: list[dict] | None = None, thread_id: st
         db.close()
 
 
+def elapsed_ms_since(moment: datetime) -> int:
+    """Whole milliseconds since a stored time, never negative and capped like every timing field."""
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    seconds = (datetime.now(UTC) - moment).total_seconds()
+    return min(business_assistant.TIMING_CAP_MS, max(0, round(seconds * 1000)))
+
+
 async def _answer(
     run: GenerationRun, provider, question: str, attachments: list[dict] | None = None,
     thread_id: str | None = None, settle: Callable[[Session, str | None], None] | None = None,
+    queued_at: datetime | None = None,
 ) -> str | None:
     """Answer in the background and publish each piece to whoever is following.
 
     The answer belongs to Studio, not to the connection that asked: a phone
     that locks or drops off the network mid-answer finds it when it comes back.
+    One log line says where the time went (``AnswerTiming``), however it ends.
     """
+    timing = business_assistant.AnswerTiming()
+    if queued_at is not None:
+        timing.queue_wait_ms = elapsed_ms_since(queued_at)
+    outcome = "cancelled"
     answer = ""
     changes = None
     memory_block = None
@@ -184,11 +201,14 @@ async def _answer(
     preparing = True
     try:
         run.publish(sse_event("status", "Reading your shop…"))
-        messages, shop = await await_with_pulses(
-            run, asyncio.to_thread(_prepare, question, attachments, thread_id), [],
-        )
+        try:
+            messages, shop = await await_with_pulses(
+                run, asyncio.to_thread(_prepare, question, attachments, thread_id), [],
+            )
+        finally:
+            timing.prepare_ms = business_assistant.elapsed_ms(timing.started)
         preparing = False
-        async for item in iter_with_keepalives(business_assistant.answer(provider, messages, shop)):
+        async for item in iter_with_keepalives(business_assistant.answer(provider, messages, shop, timing)):
             if item is None:
                 # A comment alone does not keep some mobile connections open; pulse repeats the status too.
                 run.pulse()
@@ -225,9 +245,15 @@ async def _answer(
         if not answer.strip() and error is None:
             error = "The assistant returned an empty answer. Ask again."
             run.publish(sse_event("error", error))
+        outcome = "error" if error else "answered"
+    except background_tasks.TaskStopped:
+        outcome = "cancelled"
+        raise
     except background_tasks.TaskLeaseExpired:
+        outcome = "lease_lost"
         raise
     except Exception as exc:
+        outcome = "error"
         _log_answer_failure(exc)
         # Provider/SQL exception bodies can include credentials and private shop
         # data. Only our deadline error has a controlled seller-facing message.
@@ -244,12 +270,49 @@ async def _answer(
         # Also reached when the seller presses Stop: keep what was written so far.
         # Off the event loop: a save that waits on SQLite's write lock must not
         # freeze every other request, or hold this answer's stream open.
-        if answer.strip():
-            await asyncio.to_thread(
-                _save_answer, provider, answer, changes, memory_block, automation_block, thread_id, settle,
-                error,
-            )
+        try:
+            if answer.strip():
+                save_started = time.monotonic()
+                on_committed = None
+                if isinstance(run, _Journal):
+                    saved_outcome = outcome
+
+                    def confirm_committed() -> None:
+                        run.confirm_saved(saved_outcome)
+
+                    on_committed = confirm_committed
+                try:
+                    await asyncio.to_thread(
+                        _save_answer, provider, answer, changes, memory_block, automation_block, thread_id, settle,
+                        error,
+                        on_committed=on_committed,
+                    )
+                except asyncio.CancelledError:
+                    outcome = "cancelled"
+                    raise
+                except background_tasks.TaskStopped:
+                    outcome = "cancelled"
+                    raise
+                except background_tasks.TaskLeaseExpired:
+                    outcome = "lease_lost"
+                    raise
+                except Exception:
+                    outcome = "error"
+                    raise
+                finally:
+                    timing.save_ms = business_assistant.elapsed_ms(save_started)
+        finally:
+            total_ms = business_assistant.elapsed_ms(timing.started)
+            if isinstance(run, _Journal) and settle is not None:
+                run.timing_sample = (timing, outcome, total_ms)
+            else:
+                _emit_timing(timing, outcome, total_ms)
     return error
+
+
+def _emit_timing(timing: business_assistant.AnswerTiming, outcome: str, total_ms: int) -> None:
+    slow = total_ms >= business_assistant.SLOW_ANSWER_MS
+    timing_log.log(logging.WARNING if slow else logging.INFO, "%s", timing.line(outcome, total_ms))
 
 
 def _log_answer_failure(exc: Exception) -> None:
@@ -266,6 +329,7 @@ def _save_answer(
     provider, answer: str, changes: dict | None, memory_block: str | None,
     automation_block: str | None, thread_id: str | None, settle: Callable[[Session, str | None], None] | None = None,
     error: str | None = None,
+    on_committed: Callable[[], None] | None = None,
 ) -> None:
     save_db = SessionLocal()
     try:
@@ -294,6 +358,7 @@ def _save_answer(
             changes=changes,
             automation=automation,
             thread_id=thread_id,
+            on_committed=on_committed,
         )
     finally:
         save_db.close()
@@ -529,6 +594,12 @@ class _Journal(GenerationRun):
     def __init__(self) -> None:
         super().__init__()
         self.pending: list[str] = []
+        self.stop_outcome: str | None = None
+        self.saved_outcome: str | None = None
+        self.timing_sample: tuple[business_assistant.AnswerTiming, str, int] | None = None
+
+    def confirm_saved(self, outcome: str) -> None:
+        self.saved_outcome = outcome
 
     def publish(self, item: str, *, record: bool = True) -> None:
         # Pulses only keep a live connection open; followers poll the journal.
@@ -559,7 +630,7 @@ async def answer_task(task_id: str, token: str, task) -> bool:
         provider = _require_provider()
         work = asyncio.create_task(_answer(
             journal, provider, payload.get("question", ""), payload.get("attachments") or None,
-            task.assistant_thread_id, settle=settle,
+            task.assistant_thread_id, settle=settle, queued_at=task.created_at,
         ))
         while not work.done():
             await asyncio.wait({work}, timeout=background_tasks.EVENT_INTERVAL)
@@ -574,7 +645,10 @@ async def answer_task(task_id: str, token: str, task) -> bool:
         shutting_down = True
         raise
     except Exception as exc:
+        if isinstance(exc, background_tasks.TaskLeaseExpired):
+            journal.stop_outcome = "cancelled" if isinstance(exc, background_tasks.TaskStopped) else "lease_lost"
         if not isinstance(exc, background_tasks.TaskLeaseExpired):
+            journal.stop_outcome = "error"
             _log_answer_failure(exc)
         try:
             await asyncio.to_thread(background_tasks.finish, task_id, token,
@@ -583,8 +657,23 @@ async def answer_task(task_id: str, token: str, task) -> bool:
             pass
     finally:
         if work is not None and not work.done():
+            # settle() runs before commit and cannot prove persistence. Preserve
+            # cancellation even then; an unconfirmed thread save may finish later.
             work.cancel()
             await asyncio.gather(work, return_exceptions=True)
+        if journal.timing_sample is not None:
+            from vendoo_studio.services.service_context import current
+
+            timing, outcome, total_ms = journal.timing_sample
+            context = current()
+            stop = journal.stop_outcome or (context.task_outcome.get("stop") if context else None)
+            if stop is None and shutting_down:
+                stop = "interrupted"
+            if journal.saved_outcome is not None:
+                outcome = journal.saved_outcome
+            elif stop is not None:
+                outcome = stop
+            _emit_timing(timing, outcome, total_ms)
     return True
 
 

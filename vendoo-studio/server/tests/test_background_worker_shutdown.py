@@ -142,3 +142,46 @@ def test_blocked_marketplace_scheduler_cannot_stop_draft_heartbeats(monkeypatch)
         finally:
             release.set()
     assert all(not loop.thread.is_alive() for loop in loops)
+
+
+def test_heartbeat_reason_reaches_answer_before_cancellation(monkeypatch, caplog):
+    from types import SimpleNamespace
+    from datetime import UTC, datetime
+    from concurrent.futures import Future
+    from vendoo_studio.routes import assistant
+    from vendoo_studio.services.service_context import ServiceContext
+
+    caplog.set_level('INFO', logger='vendoo_studio.assistant')
+
+    async def exercise():
+        started = asyncio.Event()
+        pulse = Future()
+        context = ServiceContext('seller', lambda: None, None, None, None)
+        monkeypatch.setattr(background_worker, 'for_seller', lambda *_, **kwargs: context)
+
+        async def preparing(_run, work, *_):
+            work.close()
+            started.set()
+            await asyncio.Future()
+
+        async def execute(*_):
+            task = SimpleNamespace(payload={}, assistant_thread_id=None, created_at=datetime.now(UTC))
+            return await assistant.answer_task('task', 'token', task)
+
+        class Heartbeats:
+            def run(self, coroutine):
+                coroutine.close()
+                return pulse
+
+        monkeypatch.setattr(assistant, 'await_with_pulses', preparing)
+        monkeypatch.setattr(assistant, '_require_provider', lambda: object())
+        monkeypatch.setattr(background_worker, '_execute', execute)
+        worker = asyncio.create_task(background_worker.run_claimed(
+            'task', 'seller', 'token', heartbeat_loop=Heartbeats()))
+        await asyncio.wait_for(started.wait(), 2)
+        pulse.set_exception(background_worker.queue.TaskLeaseExpired())
+        await asyncio.wait_for(worker, 2)
+
+    asyncio.run(exercise())
+    lines = [record.getMessage() for record in caplog.records if 'assistant answer timing:' in record.getMessage()]
+    assert len(lines) == 1 and 'outcome=lease_lost ' in lines[0]

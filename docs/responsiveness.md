@@ -11,13 +11,75 @@ and accounts must overlap; long work must leave navigation, input and unrelated
 drafts usable. This is a product requirement, not a promise of infinite hardware
 capacity or zero model/network latency.
 
+## Assistant answer stage timing, 2026-11-18
+
+A hosted answer reported as "Worked for 1m 21s" (question to saved answer
+80.4 s, from persisted turn times) could not be attributed: Anteroom recorded no
+per-stage assistant timing. Each answer now logs one line, `assistant answer
+timing:`, with only fixed field names and whole milliseconds: `outcome`,
+`queue_wait_ms` (hosted task creation to the worker starting it, `-` on the
+Mac), `prepare_ms` (shop read and prompt), `rounds`, per-round
+`first_token_ms` (first piece including thinking, `-` when none arrived) and
+`round_ms`, `lookups`, `lookup_ms`, `save_ms` and `total_ms`. Values are capped
+at 600,000. The timing message contains only fixed labels and numeric timing
+values: no question, answer, SQL, provider text, URLs or tokens. This describes
+the message, not the full operator report: existing alert enrichment may attach
+seller identifiers and request/environment metadata. That policy is unchanged.
+
+`total_ms` starts when `_answer` starts and ends after its save/cleanup wait;
+queue wait is separate. First-token time is a point within its round, not an
+additional duration to sum. Round time includes local processing and streaming
+handoff while consuming the provider, so it is not pure provider/network time.
+Preparation and save measure their awaited intervals, including thread dispatch;
+on cancellation a thread may still finish after the await ends. Parsing,
+proposal processing and cleanup can leave time outside the named stages.
+
+Hosted timing is emitted once after journal settlement/cleanup so journal and
+heartbeat stop reasons can distinguish seller Stop (`cancelled`), lease loss
+(`lease_lost`) and ordinary shutdown (`interrupted`). The final message's commit
+confirms its answer outcome synchronously, before the post-commit row refresh;
+earlier memory/thread commits and the pre-commit settle callback do not confirm
+it. Unfinished work is still cancelled during cleanup, including after settle.
+A thread that commits only after the sample is emitted remains unconfirmed in
+that sample. A confirmed save retains its answer outcome
+despite a concurrent lease revocation. `total_ms` ends with the answer's cleanup
+wait, not the later journal settlement or log emission.
+
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:c16ae77c1fa266df95938d44689e61b2522ff68f559affd05d4c47994dd17247 -->
+
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:a7bf8ddaba1ad12e7f8db7edee06b4c705d6b50d207af17c02a51d566f3f7868 -->
+
+Answers under 30 s log at INFO, which hosted logging drops; slower ones log at
+WARNING and, when operator alerts are enabled, enter the hourly batched operator alert email (grouped by call site,
+as `Slow response` lines are). The digest retains only the latest sample in each
+group. Hosted workers also retain individual warnings in the existing local
+`logs/anteroom.jsonl` diagnostic sink under the configured data directory. Once
+the file exceeds 512,000 bytes and has more than 2,000 entries it is trimmed to
+its last 2,000 entries; this is a rolling entry limit, not a 512,000-byte hard cap. Messages
+are capped at 4,000 characters. Operators can read this worker-local file; it is
+not shared across Machines and can be lost with the filesystem. Disk logging is
+best effort and does not change alert delivery. No stderr handler is added.
+
+<!-- /coderabbit-ai-generated:v1 -->
+`queue_wait_ms` compares the worker clock with the database's `created_at`;
+skew is clamped at zero, not corrected. Time between `total_ms` and the
+follower seeing `[DONE]` (journal polling) is not included. This line measures;
+it changes no answer behavior and proves no cause by itself.
+
+<!-- /coderabbit-ai-generated:v1 -->
+
+
 ## Assistant shop read: shared range inputs, 2026-11-18
 
 Seller report: a hosted assistant answer ("What is selling best the last two
 months?") showed "Worked for 1m 21s". Its persisted turns, read seller-scoped
 without replay, were saved 06:03:21.005Z and 06:04:41.426Z UTC: 80.4 s from
 question to saved answer. That span covers queue wait, the shop read, every
-model round and lookup, and the save. Anteroom records no per-stage assistant
+model round and lookup, and the save. At the time, Anteroom recorded no per-stage assistant
 timing, and the task row and journal were not reachable, so how the 80.4 s
 divides between them is unknown. The worker Machine was shared-CPU, 1 vCPU.
 
@@ -40,7 +102,7 @@ These are local CPU and statement counts, not production latency. Hosted
 statements each cost a Postgres round trip (about 24 ms measured 2026-11-11),
 and the shared-CPU worker may run slower than this machine. This does not
 establish what part of the reported 80.4 s the shop read took; model rounds,
-lookups and queue wait remain unmeasured.
+lookups and queue wait were unmeasured for that answer.
 
 ## eBay refused sign-in status, 2026-11-16
 

@@ -36,6 +36,7 @@ class ServiceContext:
     photos: Any
     catalog: Any = None
     provider_factory: Callable[[str], Any] | None = None
+    task_outcome: dict[str, str] = field(default_factory=dict, compare=False)
     spawned_tasks: set[Any] = field(default_factory=set, compare=False)
 
 
