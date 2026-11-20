@@ -753,9 +753,13 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
             if await asyncio.to_thread(connected_shop_id) != shop_id or not await _is_active(active):
                 raise ValueError("The Etsy action stopped or the connected shop changed. Check its result.")
             await _record(record, {"etsy_pending_write": kind})
-            if await asyncio.to_thread(connected_shop_id) != shop_id or not await _is_active(active):
+            try:
+                if await asyncio.to_thread(connected_shop_id) != shop_id or not await _is_active(active):
+                    raise ValueError("The Etsy action stopped or the connected shop changed. Check its result.")
+            except (Exception, asyncio.CancelledError):
+                # No request has been sent, so this journal entry is safe to clear.
                 await _record(record, {"etsy_pending_write": None})
-                raise ValueError("The Etsy action stopped or the connected shop changed. Check its result.")
+                raise
             attempted = True
             try:
                 response = await marketplace_accounts.etsy_api(method, path, **kwargs)

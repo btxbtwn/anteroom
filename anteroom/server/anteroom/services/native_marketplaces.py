@@ -784,7 +784,23 @@ async def run_job(job_id: str, conv_id: str, marketplace: str, steps: list[str],
     """Run a List or Update job's steps in order, holding the automation slot until the last answer."""
     try:
         for index, step in enumerate(steps):
-            opened = await in_worker_session(_open_step, job_id, conv_id, marketplace, index, step, len(steps))
+            opening = asyncio.create_task(in_worker_session(
+                _open_step, job_id, conv_id, marketplace, index, step, len(steps)))
+            try:
+                opened = await asyncio.shield(opening)
+            except asyncio.CancelledError:
+                # Cancelling an await cannot stop its database worker. Join it
+                # before finalization can settle the record and release the slot.
+                while not opening.done():
+                    try:
+                        await asyncio.shield(opening)
+                    except asyncio.CancelledError:
+                        continue
+                    except Exception:
+                        break  # Finalization still runs when initialization fails.
+                if not opening.cancelled():
+                    opening.exception()  # Retrieve a worker failure before propagating cancellation.
+                raise
             if opened is None:
                 break
             snapshot, binding = opened

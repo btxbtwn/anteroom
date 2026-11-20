@@ -1,4 +1,6 @@
 """Async services and routes keep blocking database work off the event loop (see ``loop_checkouts``)."""
+import pytest
+
 from loop_checkouts import loop_session_functions
 
 # Async functions that still open or use a blocking session on the event loop.
@@ -422,3 +424,92 @@ def test_etsy_write_clears_pending_marker_when_canceled_during_journal(monkeypat
     assert recorded[-1] == {"etsy_pending_write": None}
 
 
+
+
+@pytest.mark.parametrize("failing_guard", ["shop", "active"])
+def test_etsy_post_journal_guard_errors_clear_pending_marker(monkeypatch, failing_guard):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from anteroom.services import etsy_listings, marketplace_accounts
+
+    recorded = []
+    journaled = False
+
+    async def record(updates):
+        nonlocal journaled
+        recorded.append(dict(updates))
+        if updates.get("etsy_pending_write"):
+            journaled = True
+
+    def shop():
+        if journaled and failing_guard == "shop":
+            raise ValueError("Shop disconnected")
+        return "shop-1"
+
+    async def active():
+        if journaled and failing_guard == "active":
+            raise ValueError("Activity check failed")
+        return True
+
+    api = AsyncMock()
+    monkeypatch.setattr(etsy_listings, "connected_shop_id", shop)
+    monkeypatch.setattr(marketplace_accounts, "etsy_api", api)
+    monkeypatch.setattr(etsy_listings, "draft_fields", lambda *_args, **_kwargs: {"title": "Tee", "taxonomy_id": ""})
+    result = asyncio.run(etsy_listings.execute("save_draft", {"title": "Tee", "price": 20}, [], {}, record, active))
+    assert result["ok"] is False
+    assert result["safe_to_retry"] is True
+    api.assert_not_awaited()
+    assert {"etsy_pending_write": "create"} in recorded
+    assert recorded[-1] == {"etsy_pending_write": None}
+
+
+def test_cancelled_job_joins_next_step_before_finalizing(monkeypatch):
+    import asyncio
+    import threading
+
+    from anteroom.services import native_marketplaces as native
+
+    entered = threading.Event()
+    release = threading.Event()
+    events = []
+
+    def open_step(_db, _job, _conv, _marketplace, index, *_args):
+        if index:
+            entered.set()
+            assert release.wait(5), "test did not release initialization"
+            events.append("initialized")
+        return {}, {}
+
+    def finish(*_args):
+        events.append("finished")
+
+    async def worker(work, *args):
+        return await asyncio.to_thread(work, None, *args)
+
+    async def execute(*_args):
+        return {"state": "draft", "draft_url": "https://example.test/draft"}
+
+    monkeypatch.setattr(native, "in_worker_session", worker)
+    monkeypatch.setattr(native, "_open_step", open_step)
+    monkeypatch.setattr(native, "_finish_job", finish)
+    monkeypatch.setattr(native, "_execute_step", execute)
+    monkeypatch.setattr(native, "release_api_job", lambda *_args: events.append("released"))
+
+    async def run():
+        task = asyncio.create_task(native.run_job("job", "conv", "etsy", ["save_draft", "publish"], {}))
+        try:
+            assert await asyncio.to_thread(entered.wait, 5)
+            task.cancel()
+            for _ in range(20):
+                await asyncio.sleep(0)
+            assert "finished" not in events
+        finally:
+            release.set()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    asyncio.run(run())
+    assert events == ["initialized", "finished", "released"]
