@@ -178,7 +178,7 @@ async function walk(key: string, id: number, importer: Importer, expected: strin
         // Only a Bridge that says which account it read can keep a run that reads page after page on one account.
         // Older ones still import listings one at a time, which the seller picks themselves.
         if (!data.account) {
-          return update(key, id, { status: "failed", error: `Update Anteroom Bridge in Chrome to import all your ${marketplaceName(marketplace)} listings at once. You can still import them one at a time below.` });
+          return update(key, id, { status: "failed", error: `Update Anteroom Bridge in Chrome to 0.2.79 or later to import all your ${marketplaceName(marketplace)} listings at once. You can still import them one at a time below.` });
         }
         chromeAccount ??= data.account;
         if (data.account !== chromeAccount) {

@@ -179,7 +179,7 @@ describe("import all active listings", () => {
     const { importer, importNew } = fakeImporter([{ total: null, has_more: false, next_cursor: null, account: null, rows: [row("a")] }]);
     startImportAll("depop:depop", "depop", importer, vi.fn());
     expect(await finished("depop:depop")).toMatchObject({ status: "failed", imported: 0,
-      error: "Update Anteroom Bridge in Chrome to import all your Depop listings at once. You can still import them one at a time below." });
+      error: "Update Anteroom Bridge in Chrome to 0.2.79 or later to import all your Depop listings at once. You can still import them one at a time below." });
     expect(importNew).not.toHaveBeenCalled();
   });
 

@@ -283,7 +283,7 @@ async def import_listing(marketplace: str, listing: str, *, unless_matched: bool
     if account is not None:
         signed_in = _account(read.get("account"))
         if signed_in is None:
-            raise ChromeImportError(409, f"Update Anteroom Bridge in Chrome to import all your {_name(marketplace)} listings at once.")
+            raise ChromeImportError(409, f"Update Anteroom Bridge in Chrome to 0.2.79 or later to import all your {_name(marketplace)} listings at once.")
         if signed_in != account:
             raise ChromeImportError(409, f"Chrome is signed in to a different {_name(marketplace)} account now. Nothing was imported.")
     data, photos = snapshot(marketplace, read)
