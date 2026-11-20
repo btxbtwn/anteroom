@@ -103,6 +103,8 @@ class MarketplaceListing(SellerOwned, Base):
     # sent, a verified read of the marketplace, or the imported listing's own.
     # Null when unknown, such as a listing the seller linked by hand.
     listed_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Only a price write advances this; unrelated row updates are not price evidence.
+    price_recorded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # When Anteroom's last confirmed List put this listing up. An Update keeps
     # it; a relist replaces it. Null for a listing the seller linked by hand.
     listed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -118,5 +120,5 @@ class MarketplaceListing(SellerOwned, Base):
 # The fields services read and write as a plain dict.
 FIELDS = tuple(
     column.name for column in MarketplaceListing.__table__.columns
-    if column.name not in {"id", "conversation_id", "marketplace", "created_at", "updated_at"}
+    if column.name not in {"id", "conversation_id", "marketplace", "created_at", "updated_at", "price_recorded_at"}
 )

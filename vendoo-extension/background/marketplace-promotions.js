@@ -255,9 +255,14 @@ function mercariPersisted(request, variables) {
 }
 
 // Fixed read labels only; never export URLs, account documents or request bodies.
-async function promotionRead(step, read) {
+// A refusal after the item read also carries the price that read returned.
+async function promotionRead(step, read, priceCents) {
   try { return await read(); }
-  catch (error) { error.preview_step = step; throw error; }
+  catch (error) {
+    error.preview_step = step;
+    if (Number.isSafeInteger(priceCents) && priceCents > 0) error.price_cents = priceCents;
+    throw error;
+  }
 }
 
 // The item, its likers and Mercari's own offer range, all read before anything is sent.
@@ -272,13 +277,13 @@ async function mercariOfferState(requests, id, deadline) {
   const price = Number(item.price);
   if (!(price > 0)) throw marketplaceError('Mercari did not return this listing’s price.', { code: 'schema_drift' });
   const likers = requests.likers.read(await promotionRead('mercari-eligibility', () => mercariRequest(mercariPersisted(requests.likers, requests.likers.variables(id)),
-    { deadline, retry: true })));
+    { deadline, retry: true }), price));
   if (typeof likers.eligible !== 'boolean' || Number(likers.price_cents) !== price || !Number.isInteger(likers.like_count)) {
     throw marketplaceError('Mercari’s offer screen changed. Anteroom needs an update before sending offers.', { code: 'schema_drift' });
   }
   if (!likers.eligible) throw marketplaceError('Mercari says this listing cannot get an offer to likers right now.');
   const bounds = requests.bounds.read(await promotionRead('mercari-bounds', () => mercariRequest(mercariPersisted(requests.bounds, requests.bounds.variables(id)),
-    { deadline, retry: true })));
+    { deadline, retry: true }), price));
   const lower = Number(bounds.lowest_cents), higher = Number(bounds.highest_cents);
   // Cents below the price; anything else means the units or the rule changed.
   if (!Number.isInteger(lower) || !Number.isInteger(higher) || lower < 100 || higher < lower || higher >= price) {
@@ -469,7 +474,8 @@ async function checkMarketplacePromotion(payload) {
   }
   try { return await entry.check(payload, Date.now() + PROMOTION_DEADLINE_MS); }
   catch (error) { return marketplaceFailure(error, true, { ...(Number.isInteger(error?.like_count) ? { like_count: error.like_count } : {}),
-    ...(error?.preview_step ? { preview_step: error.preview_step } : {}) }); }
+    ...(error?.preview_step ? { preview_step: error.preview_step } : {}),
+    ...(Number.isSafeInteger(error?.price_cents) ? { price_cents: error.price_cents } : {}) }); }
 }
 
 async function runMarketplacePromotion(payload) {

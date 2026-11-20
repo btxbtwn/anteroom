@@ -203,6 +203,22 @@ def test_preview_read_step_reaches_both_reporting_layers(monkeypatch, caplog, st
     request.assert_awaited_once()
 
 
+def test_a_refused_mercari_preview_reports_the_price_its_item_read_returned(monkeypatch, caplog):
+    result = {'ok': False, 'error': 'Mercari refused the request.', 'error_code': 'rejected', 'safe_to_retry': True,
+              'marketplace_message': "Oops! Your offer can't be less than $1.00.", 'preview_step': 'mercari-eligibility',
+              'price_cents': 150}
+    monkeypatch.setattr(browser_bridge, '_request', AsyncMock(return_value=result))
+    row = ListingPromotion(marketplace='mercari', action='offer', batch_id='fixture', discount_percent=12)
+    with caplog.at_level(logging.ERROR), pytest.raises(listing_promotions.PromotionError):
+        asyncio.run(listing_promotions._review_remote(row, 'm12345678901'))
+    records = [r for r in caplog.records if r.name in ('vendoo_studio.marketplaces', 'vendoo_studio.listing_promotions')]
+    assert len(records) == 2
+    for record in records:
+        context = build_report(record)['marketplace_context']
+        assert (context['read_price_cents'], context['preview_step']) == (150, 'mercari-eligibility')
+    assert row.price_cents == 150
+
+
 @pytest.mark.parametrize('step', ['https://private/item', 'private-token', {}, ['mercari-item'], None])
 def test_preview_read_step_rejects_arbitrary_values(step):
     from vendoo_studio.services.marketplace_diagnostics import failure_context, sanitize_context
