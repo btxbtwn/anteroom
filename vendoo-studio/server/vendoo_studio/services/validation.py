@@ -132,15 +132,25 @@ def _title_follows_formula(title: str, brand: str, size: str) -> bool:
 
 def _description_follows_formula(description: str) -> bool:
     from vendoo_studio.services.skill_formulas import (
+        DESCRIPTION_BLOCKS,
         active_description_template,
+        match_description_blocks,
         description_formula_markers,
     )
 
     text = description.strip()
     if not text:
         return False
-    # A one-line formula, such as no labeled sections, does not demand a line break.
-    if "\n" in active_description_template() and (len(text) < 40 or "\n" not in text):
+    template = active_description_template()
+    selected = match_description_blocks(template)
+    if selected is not None:
+        # Optional facts (including Flaws on a flawless item) can leave one block.
+        template = "\n\n".join(
+            block.snippet for block in DESCRIPTION_BLOCKS
+            if block.id in selected and not block.optional and block.id != "flaws"
+        )
+    # Typed formulas retain their layout; catalog formulas require only their mandatory blocks.
+    if "\n" in template and (len(text) < 40 or "\n" not in text):
         return False
     lower = text.lower()
     return all(marker in lower for marker in description_formula_markers())

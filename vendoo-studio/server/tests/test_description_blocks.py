@@ -214,3 +214,26 @@ def test_typed_material_is_required_but_catalog_material_is_optional():
     set_listing_formulas(description=skill_formulas.compile_description_blocks(["vibe", "material"]))
     assert skill_formulas.description_formula_markers() == ()
     assert _description_follows_formula(description)
+
+
+@pytest.mark.parametrize("blocks", [["vibe", "material"], ["vibe", "flaws", "material"], ["material"]])
+@pytest.mark.parametrize("description", ["Black cotton tee with a straight hem.", "Black tee."])
+def test_omitted_optional_blocks_do_not_require_multiline_layout(blocks, description):
+    from vendoo_studio.services.user_settings import set_listing_formulas
+    from vendoo_studio.services.validation import _description_follows_formula
+
+    set_listing_formulas(description=skill_formulas.compile_description_blocks(blocks))
+    assert _description_follows_formula(description)
+
+
+@pytest.mark.parametrize(
+    "template",
+    [skill_formulas.DEFAULT_DESCRIPTION_FORMULA, "{custom prose}\n\nMeasurements: {measurements}"],
+)
+def test_required_multiline_layout_is_preserved(template):
+    from vendoo_studio.services.user_settings import set_listing_formulas
+    from vendoo_studio.services.validation import _description_follows_formula
+
+    set_listing_formulas(description=template)
+    assert not _description_follows_formula("Soft black cotton tee. Measurements: 20 inches.")
+    assert _description_follows_formula("Soft black cotton tee.\n\nMeasurements: 20 inches.")
