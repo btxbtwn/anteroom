@@ -161,8 +161,74 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
             saved = await fill_native_fields(self.conv.id, object(), evidence="Tag: high rise", markets={"ebay"})
         self.assertEqual(saved["ebay_specifics"]["Rise"], "High")
         self.assertEqual(native_contract.gaps(saved, "ebay"), [])
-        # Category inspection, capture before filling, and final capture only.
+        # The saved form's controlling inputs already match, so no reload is needed.
+        self.assertEqual(load.await_count, 0)
+
+    async def test_finishing_reloads_only_stale_markets(self):
+        from anteroom.services import native_contract
+
+        ebay_form = {"category_id": "12", "page_labels": True, "fields": [
+            row("ebay_specifics.Rise", "Rise", ["High"], required=True)]}
+        old_depop = {"category_id": "menswear_jeans", "page_labels": True, "fields": [
+            row("depop_specifics.age", "Age", ["90s"], required=True)]}
+        new_depop = {"category_id": "menswear_trousers", "page_labels": True, "fields": [
+            row("depop_specifics.age", "Age", ["Modern"], required=True)]}
+        listing = {"title": "Pants", "direct_category_ids": {"ebay": "12", "depop": "menswear_jeans"}}
+        listing[native_contract.KEY] = native_contract.capture(
+            listing, {"ebay": ebay_form, "depop": old_depop}, ("ebay", "depop"))
+        # Only Depop's category changed after capture; eBay's form is still fresh.
+        listing["direct_category_ids"]["depop"] = "menswear_trousers"
+        listing_persistence.save_revision(self.db, self.conv.id, listing, "native_schema")
+        reply = json.dumps({"fields": {
+            "ebay_specifics.Rise": {"value": "High", "evidence": "high rise"},
+            "depop_specifics.age": {"value": "Modern", "evidence": "modern pants"},
+        }})
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"depop": new_depop})) as load, \
+                patch("anteroom.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
+            saved = await fill_native_fields(self.conv.id, object(), evidence="Tag: high rise modern pants",
+                                             markets={"ebay", "depop"})
+        self.assertEqual(saved["ebay_specifics"]["Rise"], "High")
+        self.assertEqual(saved["depop_specifics"]["age"], "Modern")
+        self.assertEqual(load.await_count, 2)
+        self.assertTrue(all(call.args[1] == {"depop"} for call in load.call_args_list))
+
+    async def test_finishing_final_refresh_records_recovered_unavailable_market(self):
+        from anteroom.services import native_contract
+
+        ebay_form = {"category_id": "12", "page_labels": True, "fields": [
+            row("ebay_specifics.Rise", "Rise", ["High"], required=True)]}
+        listing = {"title": "Jeans", "direct_category_ids": {"ebay": "12"}}
+        listing[native_contract.KEY] = {"ebay": {"unavailable": True}}
+        listing_persistence.save_revision(self.db, self.conv.id, listing, "native_schema")
+        reply = json.dumps({"fields": {"ebay_specifics.Rise": {"value": "High", "evidence": "high rise"}}})
+        # Category check and post-category capture fail transiently; field fill recovers and records the contract.
+        load = AsyncMock(side_effect=[{}, {}, {"ebay": ebay_form}])
+        with patch.object(native_field_fill, "load_forms", load), \
+                patch("anteroom.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
+            saved = await fill_native_fields(self.conv.id, object(), evidence="Tag: high rise", markets={"ebay"})
+        persisted = self._current().listing_json
+        self.assertEqual(saved["ebay_specifics"]["Rise"], "High")
+        self.assertEqual(persisted["ebay_specifics"]["Rise"], "High")
+        self.assertFalse(persisted[native_contract.KEY]["ebay"].get("unavailable"))
+        self.assertEqual(native_contract.gaps(persisted, "ebay"), [])
         self.assertEqual(load.await_count, 3)
+
+    async def test_finishing_final_refresh_retries_still_unavailable_market(self):
+        from anteroom.services import native_contract
+
+        ebay_form = {"category_id": "12", "page_labels": True, "fields": [
+            row("ebay_specifics.Rise", "Rise", ["High"], required=True)]}
+        listing = {"title": "Jeans", "direct_category_ids": {"ebay": "12"}}
+        listing[native_contract.KEY] = {"ebay": {"unavailable": True}}
+        listing_persistence.save_revision(self.db, self.conv.id, listing, "native_schema")
+        # Unavailable through category check, post-category capture, and field fill; recovers at final refresh.
+        load = AsyncMock(side_effect=[{}, {}, {}, {"ebay": ebay_form}])
+        with patch.object(native_field_fill, "load_forms", load), \
+                patch("anteroom.services.listing_generate.collect_provider_text", AsyncMock(return_value='{"fields":{}}')):
+            await fill_native_fields(self.conv.id, object(), evidence="Tag: high rise", markets={"ebay"})
+        persisted = self._current().listing_json
+        self.assertFalse(persisted[native_contract.KEY]["ebay"].get("unavailable"))
+        self.assertEqual(load.await_count, 4)
 
     async def test_changed_category_does_not_reuse_previous_choices(self):
         from anteroom.services import native_contract
@@ -183,6 +249,36 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("choices: M", ask.call_args.args[1][1]["content"])
         self.assertNotIn("choices: S", ask.call_args.args[1][1]["content"])
         self.assertEqual(saved["ebay_specifics"]["Size"], "M")
+
+    async def test_category_edit_after_recording_forms_stops_stale_fill(self):
+        from anteroom.services import native_contract
+
+        form = {"category_id": "12", "fields": [
+            row("ebay_specifics.Size", "Size", ["S"], required=True)]}
+        listing = {"title": "Jeans", "direct_category_ids": {"ebay": "12"},
+                   native_contract.KEY: {"ebay": {"unavailable": True}}}
+        listing_persistence.save_revision(self.db, self.conv.id, listing, "native_schema")
+        original = native_field_fill._record_forms
+
+        def record_then_edit(db, *args):
+            recorded = original(db, *args)
+            current = native_field_fill._current_listing(db, self.conv.id)
+            edited = native_contract.copy_listing(current)
+            edited["direct_category_ids"]["ebay"] = "13"
+            listing_persistence.save_revision(db, self.conv.id, edited, "user_form")
+            return recorded
+
+        reply = json.dumps({"fields": {"ebay_specifics.Size": {"value": "S", "evidence": "size S"}}})
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
+                patch.object(native_field_fill, "_record_forms", side_effect=record_then_edit), \
+                patch("anteroom.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)) as ask:
+            saved = await native_field_fill._fill_native_fields(
+                self.conv.id, object(), evidence="Tag: size S", markets={"ebay"}, categories=False)
+        self.assertIsNone(saved)
+        ask.assert_not_awaited()
+        current = self._current().listing_json
+        self.assertEqual(current["direct_category_ids"]["ebay"], "13")
+        self.assertFalse(current.get("ebay_specifics", {}).get("Size"))
 
     async def test_required_gap_gets_a_focused_evidence_checked_repair(self):
         from anteroom.services import native_contract

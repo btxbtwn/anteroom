@@ -154,6 +154,31 @@ class SuggestionsTest(unittest.TestCase):
         self.assertEqual(validate.call_args.args[1], 1)
         self.assertEqual(self.listings.get_current(conv.id).validation_status, "valid")
 
+    def test_recheck_error_flag_shares_native_forms_without_deep_copy(self):
+        from anteroom.services import native_contract
+
+        conv = self.convs.create(title="Flagged forms")
+        forms = {"ebay": {"fields": [{"path": "ebay_specifics.Rise", "options": ["High"]}]}}
+        listing_persistence.save_revision(
+            self.listings.db, conv.id,
+            {"title": "Flagged forms", "price": 18, native_contract.KEY: forms}, "native_schema",
+        )
+        listing = self.listings.get_current(conv.id)
+        listing.validation_status = "error"
+        self.db.commit()
+        rev = self.listings.get_revision(listing.current_revision_id)
+        seen = []
+
+        def fake_validate(data, photo_count, require_photos=True):
+            seen.append(data)
+            return ValidationResult(valid=True)
+
+        with patch("anteroom.services.validation.validate_listing", side_effect=fake_validate):
+            listing_persistence._recheck_error_flag(self.listings.db, conv.id)
+        self.assertEqual(len(seen), 1)
+        self.assertIsNot(seen[0], rev.listing_json)
+        self.assertIs(seen[0][native_contract.KEY], rev.listing_json[native_contract.KEY])
+
     def test_listing_suggestions_never_writes(self):
         conv = self.convs.create(title="Flagged")
         listing_persistence.save_revision(self.listings.db, conv.id, {"title": "Flagged", "price": 18}, "user_form")

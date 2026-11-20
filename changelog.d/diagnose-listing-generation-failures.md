@@ -1,0 +1,1 @@
+- Keep concurrent listing generations from timing out while saving marketplace fields by reusing fresh saved forms instead of reloading unchanged marketplaces, avoiding deep copies of saved forms during validation rechecks, and retrying brief database hiccups on background task heartbeats.
