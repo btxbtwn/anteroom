@@ -1,1 +1,1 @@
-- <!-- coderabbit-ai-generated:v1 --> <!-- coderabbit-ai-generated-section:v1:25ee461cd2a9b7f028293d79cf440025c6c0af70af76ed4e6c41f8f42e520b25 --> Fix hosted deploys that get stuck waiting for CI after a rebase merge. <!-- /coderabbit-ai-generated:v1 -->
+- Fix hosted deploys that get stuck waiting for CI after a rebase merge.
