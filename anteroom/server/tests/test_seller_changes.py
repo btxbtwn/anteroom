@@ -124,6 +124,56 @@ def test_a_subscriber_reads_only_its_own_feed_and_no_seller_data(feed_engine):
             connection.execute(text(statement), {"me": ALICE})
 
 
+def broadcasts(engine):
+    with engine.connect() as connection:
+        return connection.execute(text(
+            "SELECT topic, event, payload ->> 'topic', private, extension FROM realtime.messages ORDER BY inserted_at, topic"
+        )).all()
+
+
+def test_a_committed_change_is_broadcast_once_on_the_sellers_private_channel(feed_engine):
+    with SellerDatabaseSession(bind=feed_engine, user_id=ALICE) as db:
+        db.add(Conversation(id="coat", title="Coat"))
+        db.commit()
+        db.get(Conversation, "coat").title = "Wool coat"
+        db.flush()
+        db.rollback()  # a rolled-back change announces nothing
+        db.get(Conversation, "coat").title = "Edited"
+        db.commit()
+    channel = f"seller-changes:{ALICE}"
+    assert broadcasts(feed_engine) == [(channel, "change", "listings", True, "broadcast")] * 2
+
+
+def joinable(engine, user, channel):
+    """Whether Realtime would let this signed-in seller join the private channel."""
+    with engine.begin() as connection:
+        connection.execute(text("SET LOCAL ROLE authenticated"))
+        connection.execute(text("SELECT set_config('request.jwt.claims', :claims, true), "
+                                "set_config('realtime.topic', :channel, true)"),
+                           {"claims": json.dumps({"sub": user, "role": "authenticated"}), "channel": channel})
+        return connection.scalar(text("SELECT count(*) FROM realtime.messages")) > 0
+
+
+def test_a_seller_may_receive_only_its_own_channel_and_never_send(feed_engine):
+    for user in (ALICE, BOB):
+        with SellerDatabaseSession(bind=feed_engine, user_id=user) as db:
+            db.add(Conversation(id=f"coat-{user}", title="Coat"))
+            db.commit()
+    assert joinable(feed_engine, ALICE, f"seller-changes:{ALICE}")
+    assert not joinable(feed_engine, ALICE, f"seller-changes:{BOB}")
+    assert not joinable(feed_engine, BOB, f"seller-changes:{ALICE}")
+    with pytest.raises(DBAPIError), feed_engine.begin() as connection:
+        connection.execute(text("SET LOCAL ROLE authenticated"))
+        connection.execute(text("SELECT set_config('request.jwt.claims', :claims, true), "
+                                "set_config('realtime.topic', :channel, true)"),
+                           {"claims": json.dumps({"sub": ALICE}), "channel": f"seller-changes:{ALICE}"})
+        connection.execute(text("INSERT INTO realtime.messages (topic, extension, event, payload, private) "
+                                "VALUES (:channel, 'broadcast', 'change', '{}', true)"),
+                           {"channel": f"seller-changes:{ALICE}"})
+
+
+# Until 2026-12-20: iPhone builds from before Broadcast still follow the table
+# through Postgres Changes (see revision 26c67b32452c).
 def test_the_feed_is_published_to_realtime(feed_engine):
     with feed_engine.connect() as connection:
         assert connection.scalar(text(

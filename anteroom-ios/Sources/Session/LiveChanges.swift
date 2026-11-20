@@ -4,7 +4,7 @@ import Supabase
 
 /// Changes the seller makes on their other devices. The hosted API records
 /// which part of their data changed in `seller_changes` (topic names and
-/// times only); Supabase Realtime tells this phone, and open screens reload
+/// times only); Supabase Realtime broadcasts each change to this phone, and open screens reload
 /// the way pull-to-refresh does. Without a connection nothing is lost:
 /// pull-to-refresh and returning to the app still reload.
 @MainActor
@@ -21,9 +21,10 @@ final class LiveChanges {
     /// Follows the seller's feed until the calling task is cancelled.
     func follow(client: SupabaseClient, userID: UUID) async {
         let owner = userID.uuidString.lowercased()
-        let channel = client.channel("seller-changes:\(owner)")
-        let changes = channel.postgresChange(
-            AnyAction.self, schema: "public", table: "seller_changes", filter: .eq("user_id", value: owner))
+        // A private Broadcast channel: the database sends each topic once its
+        // save commits, and only this seller's devices may join it.
+        let channel = client.channel("seller-changes:\(owner)") { $0.isPrivate = true }
+        let changes = channel.broadcastStream(event: "change")
         do {
             try await channel.subscribeWithError()
             for await change in changes {
@@ -34,11 +35,8 @@ final class LiveChanges {
         await client.removeChannel(channel)
     }
 
-    private static func topic(of change: AnyAction) -> String? {
-        switch change {
-        case .insert(let action): return action.record["topic"]?.stringValue
-        case .update(let action): return action.record["topic"]?.stringValue
-        case .delete: return nil
-        }
+    /// The broadcast message is `{"event": "change", "payload": {"topic": ...}}`.
+    private static func topic(of message: JSONObject) -> String? {
+        message["payload"]?.objectValue?["topic"]?.stringValue
     }
 }

@@ -1,7 +1,7 @@
 /**
  * Live updates for the hosted workspace. The API records which part of the
  * seller's data changed in `seller_changes` (topic names and times only);
- * Supabase Realtime tells every signed-in device, and each re-reads the
+ * Supabase Realtime broadcasts each change to every signed-in device, and each re-reads the
  * screens that topic covers, so reads stay fresh longer while it is subscribed.
  * Without a live channel, polling carries on.
  */
@@ -84,11 +84,13 @@ export function followSellerChanges(
     void invalidateTopics(queryClient, topics, INVENTORY_KEY).catch(() => {});
     if ([...topics].some(coversInventory)) refreshInventory(queryClient);
   };
-  const channel = supabase.channel(`seller-changes:${userId}`).on(
-    "postgres_changes",
-    { event: "*", schema: "public", table: "seller_changes", filter: `user_id=eq.${userId}` },
-    (payload: { new?: { topic?: unknown } }) => {
-      const topic = payload.new?.topic;
+  // A private Broadcast channel: the database sends each topic once its save
+  // commits, and only this seller's devices may join (revision 26c67b32452c).
+  const channel = supabase.channel(`seller-changes:${userId}`, { config: { private: true } }).on(
+    "broadcast",
+    { event: "change" },
+    (message: { payload?: { topic?: unknown } }) => {
+      const topic = message.payload?.topic;
       if (stopped || typeof topic !== "string") return;
       pending.add(topic);
       timer ??= setTimeout(flush, COALESCE_MS);
