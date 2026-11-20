@@ -409,3 +409,40 @@ def test_concurrent_seller_writes_do_not_serialize_under_deletion_fence(cloud): 
         tx1.commit()
     assert owned_rows(engine, ALICE)['conversations'] == 2
 
+
+
+@pytest.mark.parametrize('phase', ['_delete_records', '_finish_deletion'])
+def test_deadlock_rolls_back_and_retries_database_phase(cloud, monkeypatch, phase):  # noqa: F811
+    from anteroom.services.hosted_database import SellerDatabaseSession
+
+    _client, engine = cloud
+    supabase_schemas(engine)
+    seed(engine, ALICE)
+    keys = []
+    if phase == '_finish_deletion':
+        keys = account_deletion._delete_records(ALICE)
+    original_commit = SellerDatabaseSession.commit
+    attempts = []
+
+    def commit(db):
+        attempts.append(db)
+        if len(attempts) == 1:
+            # Raise the server's deadlock SQLSTATE inside the transaction after
+            # its writes, so the retry must survive a real aborted transaction.
+            db.execute(text("DO $$ BEGIN RAISE EXCEPTION 'injected deadlock' USING ERRCODE = '40P01'; END $$"))
+        return original_commit(db)
+
+    monkeypatch.setattr(SellerDatabaseSession, 'commit', commit)
+    result = getattr(account_deletion, phase)(ALICE)
+    assert len(attempts) == 2 and attempts[0] is not attempts[1]
+    with engine.connect() as db:
+        receipt = db.scalar(text('SELECT object_keys FROM anteroom_private.account_cleanup WHERE user_id = :owner'),
+                            {'owner': ALICE})
+        if phase == '_delete_records':
+            assert sorted(result) == sorted(receipt)
+            assert len(receipt) == 2
+            assert db.scalar(text('SELECT count(*) FROM auth.users WHERE id = :owner'), {'owner': ALICE}) == 1
+        else:
+            assert keys and receipt == []
+            assert db.scalar(text('SELECT count(*) FROM auth.users WHERE id = :owner'), {'owner': ALICE}) == 0
+    assert owned_rows(engine, ALICE) == {}

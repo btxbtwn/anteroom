@@ -10,8 +10,12 @@ Every step can run again, so a failure part-way is finished by retrying.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
+from functools import wraps
+import time
 
 from sqlalchemy import Table, select, text
+from sqlalchemy.exc import DBAPIError
 
 from anteroom.models.job import ACTIVE_JOB_STATUSES, Job
 from anteroom.models.marketplace_listing import UNSETTLED_STATES, MarketplaceListing
@@ -54,6 +58,23 @@ def _check(db: SellerDatabaseSession, *, finishing: bool = False) -> None:
                                           'Let it finish, or check its result, then try again.' + unchanged)
 
 
+def _retry_deadlocks[Result](operation: Callable[[str], Result]) -> Callable[[str], Result]:
+    @wraps(operation)
+    def run(owner: str) -> Result:
+        for attempt in range(3):
+            try:
+                return operation(owner)
+            except DBAPIError as exc:
+                if getattr(exc.orig, 'sqlstate', None) != '40P01' or attempt == 2:
+                    raise
+                # The session context has rolled back and closed before retrying.
+                # Reacquire the fence and recheck safety/cleanup receipts in full.
+                time.sleep(0.05 * (attempt + 1))
+        raise AssertionError('unreachable')
+    return run
+
+
+@_retry_deadlocks
 def _delete_records(owner: str) -> list[str]:
     with _session(owner) as db:
         # The account is going: no other device needs to hear about these deletes.
@@ -80,6 +101,7 @@ def _read_relay_device() -> dict | None:
     return get_relay_device()
 
 
+@_retry_deadlocks
 def _finish_deletion(owner: str) -> None:
     with _session(owner) as db:
         db.info['quiet_changes'] = True
