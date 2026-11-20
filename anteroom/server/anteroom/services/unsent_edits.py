@@ -39,7 +39,13 @@ def normalized_listing_hash(listing: dict | None) -> str | None:
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
-def unsent_edits(db: Session, conversations: list, revisions: dict[str, str]) -> set[str]:
+def unsent_edits(
+    db: Session,
+    conversations: list,
+    revisions: dict[str, str],
+    *,
+    commit_backfill: bool = False,
+) -> set[str]:
     """Conversations whose listing moved on after it was last listed.
 
     A listing live on a marketplace through Anteroom is measured against the
@@ -77,7 +83,11 @@ def unsent_edits(db: Session, conversations: list, revisions: dict[str, str]) ->
                 if digest is not None:
                     hashes[rev_id] = digest
                     computed[rev_id] = digest
-            if computed and not (db.new or db.dirty or db.deleted or db.info.get("changed_topics")):
+            if (
+                commit_backfill
+                and computed
+                and not (db.new or db.dirty or db.deleted or db.info.get("changed_topics"))
+            ):
                 was_quiet = db.info.get("quiet_changes")
                 db.info["quiet_changes"] = True
                 try:

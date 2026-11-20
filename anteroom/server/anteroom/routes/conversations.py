@@ -60,7 +60,7 @@ def list_conversations(db: Session = Depends(get_db)):
     facets = inventory_facets.listing_facets(repo.db)
     revisions = repo.current_revision_ids()
     conversations = repo.list_all()
-    unsent = unsent_edits(db, conversations, revisions)
+    unsent = unsent_edits(db, conversations, revisions, commit_backfill=True)
     from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
 
     direct = MarketplaceListingRepo(db).summaries()
@@ -528,7 +528,7 @@ def _extras_for(db: Session, conv_id: str) -> dict:
     repo = ConversationRepo(db)
     conv = repo.get(conv_id)
     revision_id = repo.current_revision_id(conv_id)
-    unsent = unsent_edits(db, [conv] if conv else [], {conv_id: revision_id} if revision_id else {})
+    unsent = unsent_edits(db, [conv] if conv else [], {conv_id: revision_id} if revision_id else {}, commit_backfill=True)
     from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
 
     from anteroom.services.item_status import sold_units

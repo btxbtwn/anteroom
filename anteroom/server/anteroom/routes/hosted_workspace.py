@@ -203,7 +203,7 @@ def inventory_response(db):
     from anteroom.services.unsent_edits import unsent_edits
 
     with snapshot_step(db, 'unsent'):
-        unsent = unsent_edits(db, rows, revisions)
+        unsent = unsent_edits(db, rows, revisions, commit_backfill=True)
     # Ledger validation, cost allocation and hashing are CPU work over loaded
     # values. Keep scarce connections available while that work runs.
     db.close()

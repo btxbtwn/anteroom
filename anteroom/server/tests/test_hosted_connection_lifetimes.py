@@ -594,7 +594,7 @@ def test_inventory_list_closes_the_seller_session_before_returning(monkeypatch):
             assert closed == []
             return {}
 
-    def unsent_edits(db, conversations, revisions):
+    def unsent_edits(db, conversations, revisions, **_kwargs):
         assert closed == []
         assert conversations == []
         assert revisions == {}

@@ -262,13 +262,14 @@ def test_unsent_edits_uses_stored_normalized_hash_without_reading_listing_json(m
         assert reads
         assert not any("listing_json" in sql for sql in reads)
 
-        # Legacy pre-migration rows with NULL normalized_hash backfill on first read,
-        # so the next cold start never reads listing_json for them again.
+        # Legacy pre-migration rows with NULL normalized_hash backfill on first read
+        # when the caller opts in with commit_backfill=True, so the next cold start
+        # never reads listing_json for them again.
         db.query(ListingRevision).update({"normalized_hash": None})
         db.commit()
         convs = db.query(Conversation).all()
         unsent_module._REVISIONS_MATCH.clear()
-        assert unsent_module.unsent_edits(db, convs, {"item": rev3_id}) == {"item"}
+        assert unsent_module.unsent_edits(db, convs, {"item": rev3_id}, commit_backfill=True) == {"item"}
         db.expire_all()
         assert db.get(ListingRevision, rev1_id).normalized_hash is not None
         assert db.get(ListingRevision, rev3_id).normalized_hash is not None
@@ -424,6 +425,15 @@ def test_legacy_hash_backfill_batches_updates_into_one_statement(migration_engin
         db.commit()
 
         convs = db.query(Conversation).all()
+        # Default commit_backfill=False never writes or commits a caller-owned transaction.
+        db.add(Conversation(id="staged", title="Staged"))
+        db.flush()
+        unsent_module._REVISIONS_MATCH.clear()
+        assert unsent_module.unsent_edits(db, convs, revisions) == set(revisions)
+        db.rollback()
+        assert db.get(Conversation, "staged") is None
+
+        convs = db.query(Conversation).all()
         unsent_module._REVISIONS_MATCH.clear()
         updates: list[str] = []
 
@@ -433,7 +443,7 @@ def test_legacy_hash_backfill_batches_updates_into_one_statement(migration_engin
 
         event.listen(engine, "before_cursor_execute", capture)
         try:
-            changed = unsent_module.unsent_edits(db, convs, revisions)
+            changed = unsent_module.unsent_edits(db, convs, revisions, commit_backfill=True)
         finally:
             event.remove(engine, "before_cursor_execute", capture)
 
