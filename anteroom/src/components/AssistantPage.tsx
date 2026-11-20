@@ -15,8 +15,8 @@ import { newQueuedChatMessage, type QueuedChatMessage } from "./chatMessageQueue
 import { coalesceSseEvents, emptySseParts, type SseParts } from "./sseCoalesce";
 import { streamingDisplayText } from "./streamingText";
 import { settleAgents } from "./liveTrace";
-import { useComposerImages } from "./chat/ComposerAttachments";
-import { getComposerDraft, removeComposerDraftImages, setComposerDraftText, transferComposerDraftRemainder, useComposerDraftText } from "./chat/composerDrafts";
+import { useComposerImages, type ComposerImage } from "./chat/ComposerAttachments";
+import { getComposerDraft, removeComposerDraftImages, restoreComposerDraftImages, setComposerDraftText, transferComposerDraftRemainder, useComposerDraftText } from "./chat/composerDrafts";
 import { ChatComposer } from "./chat/ChatComposer";
 import { chatTime } from "./chat/chatHistory";
 import { foldSseEvent } from "./chat/chatStream";
@@ -98,6 +98,8 @@ interface Props {
 export interface QueuedQuestion extends QueuedChatMessage {
   uploads: ChatAttachmentUpload[];
   shown: ChatAttachment[];
+  /** Original composer attachments so a failed send can restore them to the draft. */
+  attached?: ComposerImage[];
   /** The conversation it was asked in; null on a home screen that has not started one. */
   threadId: string | null;
 }
@@ -125,6 +127,8 @@ export interface LiveTurn {
 
 /** Finished turns of this session keep their "Worked for" rows while the app is open, per conversation. */
 const sessionFolds = new Map<string, FoldedTurn[]>();
+/** Background and per-thread send errors stay visible on their thread until cleared by a new ask or retry. */
+const sessionErrors = new Map<string, string>();
 let foldSeq = 0;
 
 function foldsFor(threadId: string): FoldedTurn[] {
@@ -151,7 +155,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   const [input, setInput] = useComposerDraftText(draftKey);
   const [live, setLive] = useState<LiveTurn | null>(null);
   const [folds, setFolds] = useState<FoldedTurn[]>(() => (threadId ? foldsFor(threadId) : []));
-  const [error, setError] = useState("");
+  const [error, setError] = useState(() => (threadId ? (sessionErrors.get(threadId) ?? "") : ""));
   const [stopping, setStopping] = useState(false);
   /** True while this page follows an answer, including a reattach that has not heard anything yet. */
   const [following, setFollowing] = useState(false);
@@ -173,11 +177,32 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   const draftSessionRef = useRef(0);
   /** Maps a new-chat session to the thread ID created for it, so async prepare() stays bound to its own thread. */
   const createdThreadBySession = useRef<Map<number, string>>(new Map());
+  /** Shares an in-flight createThread() across concurrent submissions from the same new-chat session. */
+  const pendingCreateBySession = useRef<Map<number, Promise<string>>>(new Map());
+  /** Serializes background asks per thread while keeping independent threads concurrent. */
+  const backgroundChainByThread = useRef<Map<string, Promise<void>>>(new Map());
 
   const keepFold = (id: string, fold: FoldedTurn) => {
     const next = [...foldsFor(id), fold];
     sessionFolds.set(id, next);
     if (threadIdRef.current === id) setFolds(next);
+  };
+
+  const reportThreadError = (targetId: string | null, message: string, notifyIfInactive = false, originSession?: number) => {
+    if (targetId) sessionErrors.set(targetId, message);
+    const isActive = targetId !== null
+      ? threadIdRef.current === targetId
+      : threadIdRef.current === null && (originSession === undefined || draftSessionRef.current === originSession);
+    if (isActive) {
+      setError(message);
+    } else if (notifyIfInactive) {
+      addToast({ type: "error", title: message });
+    }
+  };
+
+  const clearThreadError = (targetId: string | null) => {
+    if (targetId) sessionErrors.delete(targetId);
+    if (threadIdRef.current === targetId) setError("");
   };
 
   /**
@@ -194,67 +219,109 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     retry = false,
     clearDraft = question !== null,
     originSession = draftSessionRef.current,
+    attachedImages: readonly ComposerImage[] = [],
   ) => {
     let id = inThread;
     let transferred = false;
     const originDraftKey = `assistant:${inThread ?? "__new__"}`;
-    const restoreQuestion = (targetId: string | null, text: string) => {
+    const restoreSubmission = (targetId: string | null, text: string, imagesToRestore: readonly ComposerImage[]) => {
       const targetKey = `assistant:${targetId ?? "__new__"}`;
-      if (!getComposerDraft(targetKey).text) setComposerDraftText(targetKey, text);
+      if (text && !getComposerDraft(targetKey).text) setComposerDraftText(targetKey, text);
+      if (imagesToRestore.length) restoreComposerDraftImages(targetKey, imagesToRestore);
+    };
+    const clearMatchingDraftText = (draftKeyToClear: string, text: string) => {
+      if (text && getComposerDraft(draftKeyToClear).text.trim() === text.trim()) {
+        setComposerDraftText(draftKeyToClear, "");
+      }
     };
     const sendInBackground = (targetId: string, text: string) => {
-      void api.assistant.ask(text, { onEvent: () => undefined }, new AbortController().signal, uploads, targetId)
+      const previous = backgroundChainByThread.current.get(targetId) ?? Promise.resolve();
+      const task = previous
+        .catch(() => undefined)
+        .then(() => api.assistant.ask(text, { onEvent: () => undefined }, new AbortController().signal, uploads, targetId))
         .then((result) => {
           if (result.error) {
-            restoreQuestion(targetId, text);
-            if (threadIdRef.current === targetId) setError(result.error);
+            restoreSubmission(targetId, text, attachedImages);
+            reportThreadError(targetId, result.error, true);
+          } else {
+            clearThreadError(targetId);
           }
         })
         .catch((failure) => {
-          restoreQuestion(targetId, text);
-          if (threadIdRef.current === targetId) {
-            setError(failure instanceof Error ? failure.message : "Could not send message.");
-          }
+          restoreSubmission(targetId, text, attachedImages);
+          reportThreadError(targetId, failure instanceof Error ? failure.message : "Could not send message.", true);
         })
         .finally(() => {
+          if (backgroundChainByThread.current.get(targetId) === task) {
+            backgroundChainByThread.current.delete(targetId);
+          }
           void queryClient.invalidateQueries({ queryKey: THREADS_KEY });
           void queryClient.invalidateQueries({ queryKey: messagesKey(targetId) });
         });
+      backgroundChainByThread.current.set(targetId, task);
     };
-    if (question !== null && id && threadIdRef.current !== id && followThread.current !== id) {
-      if (clearDraft && getComposerDraft(originDraftKey).text.trim() === question.trim()) {
-        setComposerDraftText(originDraftKey, "");
+    if (question !== null && !id) {
+      const existingId = createdThreadBySession.current.get(originSession);
+      if (existingId) {
+        id = existingId;
+      } else {
+        let creating = pendingCreateBySession.current.get(originSession);
+        const isCreator = !creating;
+        if (!creating) {
+          creating = api.assistant.createThread().then((created) => {
+            createdThreadBySession.current.set(originSession, created.id);
+            // The sidebar lists it while the answer is still being written.
+            void queryClient.invalidateQueries({ queryKey: THREADS_KEY });
+            return created.id;
+          });
+          pendingCreateBySession.current.set(originSession, creating);
+        }
+        try {
+          id = await creating;
+        } catch (failure) {
+          const message = failure instanceof Error ? failure.message : "Could not start a conversation.";
+          if (draftSessionRef.current === originSession) restoreSubmission(null, question, attachedImages);
+          reportThreadError(null, message, isCreator, originSession);
+          return;
+        } finally {
+          if (isCreator && pendingCreateBySession.current.get(originSession) === creating) {
+            pendingCreateBySession.current.delete(originSession);
+          }
+        }
+        const stillOnOriginDraft = threadIdRef.current === null && draftSessionRef.current === originSession;
+        if (isCreator && stillOnOriginDraft) {
+          followThread.current = id;
+          // Move any remaining images or newer text off assistant:__new__ before switching threads.
+          transferComposerDraftRemainder(originDraftKey, `assistant:${id}`, clearDraft ? question : null);
+          transferred = true;
+          onThreadReady?.(id);
+        }
+      }
+    }
+    if (!id) return;
+    const stillOnOriginDraft = inThread === null && threadIdRef.current === null && draftSessionRef.current === originSession;
+    const targetsActiveThread = stillOnOriginDraft || threadIdRef.current === id || followThread.current === id;
+    if (question !== null && !targetsActiveThread) {
+      if (clearDraft && (inThread !== null || draftSessionRef.current === originSession)) {
+        clearMatchingDraftText(originDraftKey, question);
       }
       sendInBackground(id, question);
       return;
     }
-    if (controller.current) return;
-    if (question !== null && !id) {
-      try {
-        const created = await api.assistant.createThread();
-        id = created.id;
-        createdThreadBySession.current.set(originSession, id);
-        // The sidebar lists it while the answer is still being written.
-        void queryClient.invalidateQueries({ queryKey: THREADS_KEY });
-        const stillOnOriginDraft = threadIdRef.current === null && draftSessionRef.current === originSession;
-        if (!stillOnOriginDraft) {
-          // The seller already left this new-chat composer; leave assistant:__new__ untouched
-          // (it may belong to a fresh session) and deliver to the created thread without hijacking focus.
-          sendInBackground(id, question);
-          return;
+    if (controller.current) {
+      if (question !== null) {
+        if (clearDraft) {
+          if (inThread !== null || stillOnOriginDraft) clearMatchingDraftText(originDraftKey, question);
+          clearMatchingDraftText(`assistant:${id}`, question);
         }
-        followThread.current = id;
-        // Move any remaining images or newer text off assistant:__new__ before switching threads.
-        transferComposerDraftRemainder(originDraftKey, `assistant:${id}`, clearDraft ? question : null);
-        transferred = true;
-        onThreadReady?.(id);
-      } catch (failure) {
-        setError(failure instanceof Error ? failure.message : "Could not start a conversation.");
-        if (inThread !== null || draftSessionRef.current === originSession) restoreQuestion(inThread, question);
-        return;
+        scroll.pinChatToBottom();
+        setQueued((current) => [
+          ...current,
+          { ...newQueuedChatMessage(question), uploads, shown: shownImages, attached: [...attachedImages], threadId: id },
+        ]);
       }
+      return;
     }
-    if (!id) return;
     followThread.current = id;
     const threadKey = messagesKey(id);
     const abort = new AbortController();
@@ -272,9 +339,9 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
       setLive({ question, questionImages: shownImages, asked, startedAtMs, parts: { ...parts } });
     if (question !== null || retry) {
       scroll.pinChatToBottom();
-      setError("");
-      if (clearDraft && !transferred && question !== null && getComposerDraft(originDraftKey).text.trim() === question.trim()) {
-        setComposerDraftText(originDraftKey, "");
+      clearThreadError(id);
+      if (clearDraft && !transferred && question !== null) {
+        clearMatchingDraftText(originDraftKey, question);
       }
       parts.status = "Reading your shop…";
       show();
@@ -298,7 +365,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
               ? await api.assistant.retry(handlers, abort.signal, id)
               : await api.assistant.resume(handlers, abort.signal, id);
           paint.flush();
-          if (result.error) setError(result.error);
+          if (result.error) reportThreadError(id, result.error);
           break;
         } catch (failure) {
           paint.flush();
@@ -307,15 +374,15 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
             break;
           }
           if (failure instanceof AssistantRefused) {
-            setError(failure.message);
-            if (asking && question !== null) restoreQuestion(id, question);
+            reportThreadError(id, failure.message);
+            if (asking && question !== null) restoreSubmission(id, question, attachedImages);
             break;
           }
           asking = false;
           retrying = false;
           dropped = true;
           if (tries >= RECONNECT_TRIES) {
-            setError(LOST_CONNECTION);
+            reportThreadError(id, LOST_CONNECTION);
             break;
           }
           if (question !== null) {
@@ -351,8 +418,8 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         // The connection may have dropped before Studio ever received the question.
         const saved = queryClient.getQueryData<AssistantMessage[]>(threadKey);
         if (saved && !saved.some((turn) => turn.role === "user" && turn.text === question)) {
-          setError("Could not reach Anteroom. Check the connection and ask again.");
-          restoreQuestion(id, question);
+          reportThreadError(id, "Could not reach Anteroom. Check the connection and ask again.");
+          restoreSubmission(id, question, attachedImages);
         }
       }
       // A newer follow may own the page by now; leave its turn alone.
@@ -374,7 +441,12 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
 
   // Pick an answer back up after opening a conversation, leaving the page, or locking the phone.
   useEffect(() => {
-    if (!threadId) return;
+    if (!threadId) {
+      setLive(null);
+      setError("");
+      setFolds([]);
+      return;
+    }
     const reattach = () => {
       if (document.hidden || controller.current) return;
       setError((current) => (current === LOST_CONNECTION ? "" : current));
@@ -383,7 +455,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     // A question that just created this thread is already being followed.
     if (!(followThread.current === threadId && controller.current)) {
       setLive(null);
-      setError("");
+      setError(sessionErrors.get(threadId) ?? "");
       setFolds(foldsFor(threadId));
       reattach();
     }
@@ -415,7 +487,16 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     if (live || controller.current || !queued.length) return;
     const [next, ...rest] = queued;
     setQueued(rest);
-    void followRef.current(next.text, next.uploads, next.shown, next.threadId ?? followThread.current ?? threadIdRef.current, false, false);
+    void followRef.current(
+      next.text,
+      next.uploads,
+      next.shown,
+      next.threadId ?? followThread.current ?? threadIdRef.current,
+      false,
+      false,
+      draftSessionRef.current,
+      next.attached ?? [],
+    );
   }, [live, queued]);
 
   const ask = async (raw: string) => {
@@ -447,11 +528,11 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         setComposerDraftText(targetDraftKey, "");
       }
       scroll.pinChatToBottom();
-      setQueued((current) => [...current, { ...newQueuedChatMessage(question), uploads, shown, threadId: targetThread }]);
+      setQueued((current) => [...current, { ...newQueuedChatMessage(question), uploads, shown, attached, threadId: targetThread }]);
       return;
     }
     const clearDraft = targetThread !== null || stillOnOriginNew;
-    void follow(question, uploads, shown, targetThread, false, clearDraft, originSession);
+    void follow(question, uploads, shown, targetThread, false, clearDraft, originSession, attached);
   };
 
   const stop = async () => {
@@ -500,7 +581,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   // An answer that failed, or that a restart cut off, left the last question unanswered.
   const unanswered = !live && !following && !messages.isFetching && turns[turns.length - 1]?.role === "user";
   const retry = () => {
-    setError("");
+    clearThreadError(threadIdRef.current);
     void follow(null, [], [], threadIdRef.current, true);
   };
   const foldPositions = placeTurnFolds(turns, folds);
@@ -539,6 +620,19 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
           {/* Centered a little above the middle, as wide as the composer's surface so the questions line up with it. */}
           <div className="my-auto flex w-full max-w-[calc(var(--chat-content-max-width)+2rem)] flex-col pt-8 pb-[12vh] max-[900px]:pb-6">
             <h1 className="mx-3 mb-5 text-center font-semibold sm:mx-4 text-2xl tracking-tight text-foreground">{greeting()}</h1>
+            {error ? (
+              <Alert variant="error" className="mx-3 mb-3 sm:mx-4">
+                <CircleAlertIcon />
+                <AlertTitle className="whitespace-pre-wrap">{error}</AlertTitle>
+                {needsProvider ? (
+                  <AlertAction>
+                    <Button type="button" size="xs" variant="outline" onClick={onOpenProviders}>
+                      Open provider settings
+                    </Button>
+                  </AlertAction>
+                ) : null}
+              </Alert>
+            ) : null}
             {/* On a phone the box stays at the bottom, within thumb reach, as in the conversation. */}
             {phone ? null : composer}
             <ul aria-label="Example questions" className="mx-3 mt-2 list-none divide-y sm:mx-4 divide-border/60 p-0">

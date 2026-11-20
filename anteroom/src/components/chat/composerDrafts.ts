@@ -60,6 +60,16 @@ export function removeComposerDraftImages(key: string, ids: readonly string[]): 
   setComposerDraftImages(key, remaining);
 }
 
+/** Restores attachments from a failed send without duplicating or dropping newer images. */
+export function restoreComposerDraftImages(key: string, restored: readonly ComposerImage[]): void {
+  if (!restored.length) return;
+  const current = drafts.get(key) ?? EMPTY_DRAFT;
+  const existingIds = new Set(current.images.map((image) => image.id));
+  const missing = restored.filter((image) => !existingIds.has(image.id));
+  if (!missing.length) return;
+  setComposerDraftImages(key, [...missing, ...current.images]);
+}
+
 export function clearComposerDraft(key: string): void {
   if (!drafts.delete(key)) return;
   emit();
