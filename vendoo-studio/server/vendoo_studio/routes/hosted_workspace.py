@@ -74,6 +74,7 @@ def conversation_response(row, listing=None, direct=None, *, notes=None, include
             'quantity': (listing or {}).get('quantity'),
             'direct_marketplaces': [market for market, record in (direct or {}).items() if record['state'] in LIVE_STATES],
             'direct_records': direct or {},
+            'sold_marketplaces': list(sold.sold_on) if sold else [],
             'units_sold': sold.units_sold if sold else 0,
             'sold_at': sold.sold_at.isoformat() if sold and sold.sold_at else None,
             'missing_sale_data': missing_sale_data or [], **imported_fields(notes, direct or {})}

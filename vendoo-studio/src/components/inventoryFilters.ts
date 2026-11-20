@@ -71,6 +71,7 @@ export type FilterableListing = {
   vendoo_labels?: string[];
   vendoo_marketplaces?: string[];
   direct_marketplaces?: string[];
+  sold_marketplaces?: string[];
   removed_marketplaces?: string[];
   sold_at?: string | null;
   /** When the longest-standing live listing went up. A relist starts its marketplace over. */
@@ -129,8 +130,13 @@ function lower(value: string | null | undefined): string {
   return String(value || "").toLowerCase();
 }
 
+/**
+ * The marketplaces an item is on for the filter: live there, or sold there.
+ * A sold listing is not live, but the Sold tab is still searched by where it
+ * sold, and a sold item has nothing left to list there.
+ */
 function listedOn(listing: FilterableListing): string[] {
-  return liveMarketplaces(listing);
+  return [...new Set([...liveMarketplaces(listing), ...(listing.sold_marketplaces || [])])];
 }
 
 /** Search covers title, SKU and the labels a listing wears. */

@@ -403,3 +403,19 @@ describe("sold-date sort across shelves", () => {
     expect(sortListings([openSale, settledSale], "sold_desc").map((l) => l.id)).toEqual(["b", "a"]);
   });
 });
+
+
+describe("an item Anteroom recorded as sold", () => {
+  const top: FilterableListing = {
+    title: "Crop top", status: "sold", created_at: "2026-11-01T00:00:00Z", updated_at: "2026-11-17T00:00:00Z",
+    direct_marketplaces: ["poshmark"], sold_marketplaces: ["poshmark"],
+  };
+
+  it("is still found by the marketplace it sold on, and is not left to list there", () => {
+    const sold = { ...DEFAULT_LISTING_FILTERS, status: "sold" as const };
+    expect(filterListings([top], "", { ...sold, marketplaces: ["poshmark"] })).toHaveLength(1);
+    expect(filterListings([top], "", { ...sold, marketplaces: ["mercari"] })).toHaveLength(0);
+    expect(notListedCount([top])).toBe(0);
+    expect(marketplaceCounts([top])).toEqual({ poshmark: 1 });
+  });
+});

@@ -1,0 +1,1 @@
+- The listings sidebar shows a marketplace an item sold on as sold, instead of still listed there.

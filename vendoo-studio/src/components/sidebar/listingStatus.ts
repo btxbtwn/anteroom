@@ -49,10 +49,14 @@ export function liveMarketplaces(listing: {
   vendoo_marketplaces?: string[];
   direct_marketplaces?: string[];
   removed_marketplaces?: string[];
+  sold_marketplaces?: string[];
 }): string[] {
   const removed = new Set((listing.removed_marketplaces || []).map((id) => MARKETPLACE_ID_ALIASES[id] || id));
+  // A listing that sold has ended, though its record can still read live.
+  const sold = new Set((listing.sold_marketplaces || []).map((id) => MARKETPLACE_ID_ALIASES[id] || id));
   const vendoo = (listing.vendoo_marketplaces || []).filter((id) => !removed.has(MARKETPLACE_ID_ALIASES[id] || id));
-  return [...new Set([...vendoo, ...(listing.direct_marketplaces || [])])];
+  return [...new Set([...vendoo, ...(listing.direct_marketplaces || [])])]
+    .filter((id) => !sold.has(MARKETPLACE_ID_ALIASES[id] || id));
 }
 
 /**
@@ -86,8 +90,13 @@ export function withDirectListings(
   direct: string[] | undefined,
   visible?: Set<string>,
   removed?: string[],
+  sold?: string[],
 ): { id: string; label: string; status: string }[] {
   const gone = new Set((removed || []).map((id) => MARKETPLACE_ID_ALIASES[id] || id));
+  // Where Anteroom recorded the sale. The listing record can still read live
+  // (a sale never changes it), so the sale wins over it.
+  const soldHere = new Set((sold || []).map((id) => MARKETPLACE_ID_ALIASES[id] || id)
+    .filter((id) => !visible || visible.has(id)));
   // Vendoo is not told about a direct delist, so its "listed" is stale there.
   // A sale still stands.
   const kept = gone.size
@@ -95,12 +104,18 @@ export function withDirectListings(
       ? { ...row, status: "DELISTED" }
       : row))
     : rows;
-  if (!direct?.length) return kept;
+  if (!direct?.length && !soldHere.size) return kept;
   const byId = new Map(kept.map((row) => [row.id, row]));
   let changed = false;
-  for (const rawId of direct) {
+  for (const id of soldHere) {
+    const existing = byId.get(id);
+    if (existing?.status === "SOLD" || existing?.status === "SHIPPED") continue;
+    byId.set(id, { ...(existing ?? { id, label: marketplaceLabel(id) }), status: "SOLD" });
+    changed = true;
+  }
+  for (const rawId of direct ?? []) {
     const id = MARKETPLACE_ID_ALIASES[rawId] || rawId;
-    if (!id || id === "general" || id === "validate") continue;
+    if (!id || id === "general" || id === "validate" || soldHere.has(id)) continue;
     if (visible && !visible.has(id)) continue;
     const existing = byId.get(id);
     if (!existing) {
@@ -164,4 +179,13 @@ export function quantityLabel(listing: { units_sold?: number; quantity?: number 
 export function listingRowPrice(listing: { price?: number | null }, status: string): string | null {
   const price = listing.price;
   return status !== "sold" && price != null && Number.isFinite(price) && price > 0 ? formatMoney(price) : null;
+}
+
+/** What the row's marketplace logos say to a screen reader: live and sold apart. */
+export function marketplacesLabel(rows: { label: string; status: string }[]): string {
+  const sold = (status: string) => status === "SOLD" || status === "SHIPPED";
+  const live = rows.filter((row) => !sold(row.status)).map((row) => row.label);
+  const ended = rows.filter((row) => sold(row.status)).map((row) => row.label);
+  return [live.length ? `Listed on ${live.join(", ")}` : "", ended.length ? `Sold on ${ended.join(", ")}` : ""]
+    .filter(Boolean).join("; ");
 }

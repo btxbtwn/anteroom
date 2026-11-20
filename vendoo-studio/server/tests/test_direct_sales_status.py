@@ -1132,3 +1132,27 @@ def test_a_sale_of_the_newer_listing_counts_despite_the_superseded_seller_link(e
     line(env.db, "coat", marketplace, order="new-sale", listing_id=marketplace_delist.listing_id(marketplace, new))
     entry = marketplace_delist.listings(env.db, "coat")[marketplace]
     assert entry["sold_here"] is True and entry["listing_id"] == marketplace_delist.listing_id(marketplace, new)
+
+
+def test_the_mac_list_names_the_marketplace_a_sold_item_sold_on(env):
+    item(env.db, "top", notes={"vendooStatus": "active"})
+    item(env.db, "tees", quantity=2, notes={"vendooStatus": "active"})
+    for conv_id in ("top", "tees"):
+        MarketplaceListingRepo(env.db).save(conv_id, "poshmark", {"state": "published", "listing_url": POSH_URL})
+        line(env.db, conv_id, "poshmark", order=f"o-{conv_id}", listing_id="65a1b2c3d4e5f6a7b8c9d0e1")
+    rows = {row["id"]: row for row in env.client.get("/api/conversations").json()}
+    assert rows["top"]["status"] == "sold"
+    assert rows["top"]["sold_marketplaces"] == ["poshmark"]
+    assert rows["tees"]["sold_marketplaces"] == []
+
+
+def test_a_cleanup_report_after_the_sale_is_not_named_as_where_it_sold(env):
+    # The coat sold on eBay; clearing its Mercari listing later read as "sold" there.
+    item(env.db, "coat", notes={"vendooStatus": "active"})
+    line(env.db, "coat", "ebay", order="o1", order_line="l1", when=datetime(2026, 11, 1))
+    env.db.add(MarketplaceSale(marketplace="mercari", order_id="m123", line_id="m123", listing_id="m123",
+                               conversation_id="coat", sold_at=datetime(2026, 11, 2)))
+    env.db.commit()
+    rows = {row["id"]: row for row in env.client.get("/api/conversations").json()}
+    assert rows["coat"]["status"] == "sold"
+    assert rows["coat"]["sold_marketplaces"] == ["ebay"]

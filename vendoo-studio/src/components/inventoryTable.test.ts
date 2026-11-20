@@ -102,3 +102,19 @@ describe("inventoryRows", () => {
     expect(inventoryRows(rows, "", "all", "price_desc").map((row) => row.id)).toEqual(["a", "b"]);
   });
 });
+
+
+describe("a sale Anteroom recorded", () => {
+  it("reads Sold in the marketplace's cell, though its listing record is still live", () => {
+    const sold = { direct_records: { poshmark: { state: "published", listing_url: "https://poshmark.com/listing/1" } }, sold_marketplaces: ["poshmark"] };
+    expect(marketplaceCell(sold, "poshmark")).toEqual({ kind: "sold", label: "Sold", url: "https://poshmark.com/listing/1" });
+  });
+
+  it("is not counted as listed there, and other live listings still are", () => {
+    const sold = {
+      direct_records: { poshmark: { state: "published" }, mercari: { state: "published" } },
+      sold_marketplaces: ["poshmark"],
+    };
+    expect(listedCounts([sold], ["poshmark", "mercari"])).toEqual({ poshmark: 0, mercari: 1 });
+  });
+});
