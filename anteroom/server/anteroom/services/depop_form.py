@@ -2,11 +2,58 @@
 from __future__ import annotations
 
 import json
+import re
 from functools import lru_cache
 from typing import Any
 
 from anteroom.config import skills_dir
 from anteroom.services.seller_overrides import get_path, marketplace_text, price_for
+
+DEPOP_CONDITIONS = frozenset({"brand_new", "used_like_new", "used_excellent", "used_good", "used_fair"})
+DEPOP_COLOURS = frozenset({
+    "black", "grey", "white", "brown", "tan", "cream", "yellow", "red", "burgundy",
+    "pink", "purple", "blue", "navy", "green", "khaki", "orange", "silver", "gold", "multi",
+})
+
+
+def _condition_from_text(value: Any) -> str:
+    """Depop's condition slug from a plain label, matching depop-native.js."""
+    text = str(value or "").strip().lower()
+    if text in DEPOP_CONDITIONS:
+        return text
+    for pattern, slug in (
+        (r"defect|imperfection", "used_good"),
+        (r"fair|poor", "used_fair"),
+        (r"excellent", "used_excellent"),
+        (r"like new|nwot|new without", "used_like_new"),
+        (r"brand new|nwt|new with tags|^new\b", "brand_new"),
+        (r"good|pre-owned|preowned|used", "used_good"),
+    ):
+        if re.search(pattern, text):
+            return slug
+    return ""
+
+
+def general_condition(listing: dict) -> str:
+    """The condition Depop sends when this form has none of its own, else empty."""
+    form_data = listing.get("form")
+    prepared = ((form_data.get("overrides") if isinstance(form_data, dict) else None) or {}).get("condition")
+    return _condition_from_text(prepared) or _condition_from_text(listing.get("condition"))
+
+
+def _colour_slug(value: Any) -> str:
+    name = str(value or "").strip().lower().replace("gray", "grey").replace("beige", "tan")
+    name = re.sub(r"^multi[- ]?colou?r(?:ed)?$", "multi", name)
+    return name if name in DEPOP_COLOURS else ""
+
+
+def general_colours(listing: dict) -> list[str]:
+    """Up to two Depop colour slugs from General colors, matching depop-native.js."""
+    colours = list(dict.fromkeys(
+        slug for raw in (listing.get("primaryColor"), listing.get("secondaryColor"))
+        if (slug := _colour_slug(raw))
+    ))
+    return colours[:2]
 
 
 @lru_cache(maxsize=1)
@@ -130,7 +177,11 @@ def form(listing: dict) -> dict:
             row = choice("depop_specifics." + key, label, fixed[fixed_keys[key]],
                          section="Enhance your listing" if enhance else "Info", **extra)
             row["option_values"] = dict(catalog()["fixed_option_values"][key])
-            if key == "colour":
+            if key == "condition" and "condition" not in specifics:
+                row["value"] = general_condition(listing)
+            elif key == "colour":
+                if "colour" not in specifics:
+                    row["value"] = general_colours(listing)
                 row["help"] = "Select up to two colors"
             elif key == "source":
                 row["help"] = f"What kind of item is this? Add up to {row['max_values']}"

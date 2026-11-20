@@ -520,6 +520,71 @@ class NativeContractTest(unittest.TestCase):
         self.assertIn("Cotton", text)
         self.assertNotIn("inventedField", text)
 
+    def test_mercari_boolean_package_weights_match_shipping_calculation(self):
+        from anteroom.services import mercari_form
+
+        for key in ("pounds", "ounces"):
+            for value in (True, False):
+                with self.subTest(key=key, value=value):
+                    saved = {"weight_oz": 12, "mercari_specifics": {"package": {key: value}}}
+                    numeric = copy.deepcopy(saved)
+                    numeric["mercari_specifics"]["package"] = {"pounds": 0, "ounces": 0, key: int(value)}
+                    removed = {"weight_oz": 12, "mercari_specifics": {"package": {}}}
+                    self.assertEqual(mercari_form.package(saved)[0], mercari_form.package(numeric)[0])
+                    self.assertNotEqual(mercari_form.package(saved)[0], mercari_form.package(removed)[0])
+                    for left, right in ((saved, numeric), (numeric, saved)):
+                        self.assertTrue(contract.inputs_match(right, "mercari", [], contract.inputs(left, "mercari", [])))
+                    for left, right in ((saved, removed), (removed, saved)):
+                        self.assertFalse(contract.inputs_match(right, "mercari", [], contract.inputs(left, "mercari", [])))
+
+    def test_mercari_zero_weight_and_package_casing_stay_fresh_across_preparation(self):
+        from anteroom.services import job_snapshot, mercari_form
+
+        raw = {
+            "title": "Hind Performance S Vintage Tee",
+            "description": "Vintage long sleeve tee.",
+            "brand": "Hind Performance",
+            "condition": "Good",
+            "size": "S",
+            "weight_oz": 8,
+            "price": 18,
+            "category_path": "Men > Shirts > T-Shirts",
+            "direct_category_ids": {"mercari": "303"},
+            "mercari_specifics": {"shippingMethod": "MERCARI", "shipsFrom": "70115",
+                                  "package": {"pounds": "", "ounces": 8, "fitsShoebox": "Yes"}},
+        }
+        prepared = copy.deepcopy(raw)
+        job_snapshot.ensure_listing_defaults(prepared)
+        prepared["mercari_specifics"]["package"] = {"pounds": 0, "ounces": "8", "fitsShoebox": "yes", "skipDimensions": False}
+        fields = mercari_form.form(prepared)["fields"]
+        stored = contract.capture(raw, {"mercari": {"category_id": "303", "fields": fields, "page_labels": True}}, ["mercari"])
+        self.assertTrue(contract.inputs_match(prepared, "mercari", fields, stored["mercari"]["inputs"]))
+        self.assertEqual(contract.changed_inputs(prepared, "mercari", fields, stored["mercari"]["inputs"]), set())
+
+        heavier = copy.deepcopy(prepared)
+        heavier["weight_lb"] = 1
+        self.assertFalse(contract.inputs_match(heavier, "mercari", fields, stored["mercari"]["inputs"]))
+        self.assertEqual(contract.changed_inputs(heavier, "mercari", fields, stored["mercari"]["inputs"]), {"weight_lb"})
+
+        different_box = copy.deepcopy(prepared)
+        different_box["mercari_specifics"]["package"]["fitsShoebox"] = "no"
+        self.assertFalse(contract.inputs_match(different_box, "mercari", fields, stored["mercari"]["inputs"]))
+
+        # An explicit 0 package weight or dimension overrides General fallback in
+        # mercari_form.package(), so removing that zero override must mark the form stale.
+        for zero_pkg in ({"ounces": 0}, {"pounds": 0}, {"length": 0}):
+            with_zero = copy.deepcopy(raw)
+            with_zero["mercari_specifics"]["package"] = zero_pkg
+            without_zero = copy.deepcopy(raw)
+            without_zero["mercari_specifics"]["package"] = {}
+            zero_stored = contract.capture(
+                with_zero, {"mercari": {"category_id": "303", "fields": fields, "page_labels": True}}, ["mercari"],
+            )
+            self.assertFalse(
+                contract.inputs_match(without_zero, "mercari", fields, zero_stored["mercari"]["inputs"]),
+                zero_pkg,
+            )
+
 
 class NativeContractRevisionTest(unittest.TestCase):
     def setUp(self):

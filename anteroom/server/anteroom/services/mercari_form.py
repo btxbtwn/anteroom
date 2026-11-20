@@ -145,6 +145,14 @@ def _condition(value):
     return ""
 
 
+def general_condition(listing: dict) -> str:
+    """The Mercari condition code from General when Mercari has not set or cleared one."""
+    specifics = listing.get("mercari_specifics") or {}
+    if "condition" in specifics:
+        return _condition(specifics.get("condition"))
+    return _condition(listing.get("condition"))
+
+
 def _sizes(category: dict | None) -> list[dict]:
     if not category or not category["itemSizeGroupId"]:
         return []
@@ -157,6 +165,68 @@ def _sizes(category: dict | None) -> list[dict]:
              "label": label + (" · " + (subgroups.get(row["itemSizeSubGroupId"]) or str(row["id"]))
                                if counts[label] > 1 else "")}
             for row, label in zip(rows, labels, strict=True)]
+
+
+def _size_token(value: str) -> str:
+    from anteroom.models.sizes import size_key
+
+    compact = re.sub(r"[^a-z0-9]+", "", value.casefold())
+    if compact in {"os", "onesize", "onesizefitsall", "osfa"}:
+        return "ONESIZE"
+    return size_key(value)
+
+
+def match_size_id(listing: dict, category_or_sizes: str | dict | list[dict] | None) -> str:
+    """Match General/Mercari size to Mercari's nativeSizeId, preferring Regular/Standard."""
+    specifics = listing.get("mercari_specifics") or {}
+    if "nativeSizeId" in specifics:
+        return str(specifics.get("nativeSizeId") or "")
+    if isinstance(category_or_sizes, list):
+        sizes = category_or_sizes
+    elif isinstance(category_or_sizes, dict):
+        sizes = _sizes(category_or_sizes)
+    elif category_or_sizes:
+        category = _categories_by_id().get(str(category_or_sizes))
+        sizes = _sizes(category)
+    else:
+        sizes = []
+    if not sizes:
+        return ""
+    raw_size = specifics["size"] if "size" in specifics else listing.get("size")
+    wanted = str(raw_size or "").strip()
+    if not wanted:
+        return ""
+    folded = wanted.casefold()
+    wanted_key = _size_token(wanted)
+    fit = str(specifics.get("sizeType") or listing.get("sizeType") or "").strip().casefold()
+
+    def narrow(candidates: list[dict]) -> list[dict]:
+        if fit:
+            if fit in {"regular", "standard"}:
+                return [row for row in candidates if row["group"].casefold() in {"standard", "regular", ""}]
+            return [row for row in candidates if fit in row["group"].casefold()]
+        if len(candidates) > 1:
+            regular = [row for row in candidates if row["group"].casefold() in {"standard", "regular"}]
+            if regular:
+                return regular
+        return candidates
+
+    exact = [row for row in sizes if folded in (row["label"].casefold(), row["name"].casefold())]
+    keyed = [row for row in sizes if wanted_key and _size_token(row["name"]) == wanted_key] if wanted_key else []
+    for candidates in (exact, keyed):
+        if not candidates:
+            continue
+        # Plain "M" in Men's T-shirts matches Tall "M" exactly, while Regular
+        # spells it "M (38-40)". Prefer Regular unless the seller asked for Tall.
+        if candidates is exact and not fit and keyed:
+            exact_regular = [row for row in exact if row["group"].casefold() in {"standard", "regular", ""}]
+            keyed_regular = [row for row in keyed if row["group"].casefold() in {"standard", "regular"}]
+            if not exact_regular and keyed_regular:
+                continue
+        picked = narrow(candidates)
+        if len(picked) == 1:
+            return picked[0]["id"]
+    return ""
 
 
 def form(listing: dict, shipping_classes: list[dict] | None = None, *, notes: list[str] | None = None) -> dict:
@@ -185,8 +255,12 @@ def form(listing: dict, shipping_classes: list[dict] | None = None, *, notes: li
     unconfirmed = not blank and specifics.get("noBrand") is not True and known is None
     brand = NO_BRAND if blank or specifics.get("noBrand") is True else known or brand
     picker = brand_choices()
+    # The bundled catalog is a dated reference copy, not a live exhaustive list:
+    # List checks Mercari's current brand list, so the editor should not flag
+    # unconfirmed brands as unavailable above the explanatory help note.
     fields["mercari_specifics.brand"].update(value=brand, options=picker["options"],
-                                            option_values=picker["option_values"])
+                                            option_values=picker["option_values"],
+                                            options_source="reference")
     if unconfirmed:
         # This catalog is a dated copy, so a missing name is not proof Mercari
         # lacks the brand. List checks Mercari's current list and sends no brand
@@ -195,20 +269,10 @@ def form(listing: dict, shipping_classes: list[dict] | None = None, *, notes: li
             f"“{brand}” isn't in Anteroom's copy of Mercari's brand list. When you list, Anteroom checks "
             "Mercari's current list: if Mercari has this brand it's used, otherwise the item is listed with "
             "No brand. Choose a brand or No brand / Not sure to decide now.")
-    fields["mercari_specifics.condition"]["value"] = _condition(specifics.get("condition") or listing.get("condition"))
+    fields["mercari_specifics.condition"]["value"] = general_condition(listing)
     sizes = _sizes(category)
     if sizes:
-        value = specifics.get("nativeSizeId", "")
-        if "nativeSizeId" not in specifics:
-            wanted = str(specifics.get("size") or listing.get("size") or "").strip().casefold()
-            matches = [row for row in sizes if wanted in (row["label"].casefold(), row["name"].casefold())]
-            fit = str(specifics.get("sizeType") or listing.get("sizeType") or "").strip().casefold()
-            if fit:
-                matches = [row for row in matches if fit in row["group"].casefold()]
-            elif len(matches) > 1:
-                matches = [row for row in matches if row["group"].casefold() in {"standard", "regular"}]
-            if len(matches) == 1:
-                value = matches[0]["id"]
+        value = match_size_id(listing, sizes)
         row = field("mercari_specifics.nativeSizeId", "Size", value, required=True, selection_only=True,
                     options=[row["label"] for row in sizes], option_values={row["label"]: row["id"] for row in sizes},
                     option_groups={row["label"]: row["group"] for row in sizes if row["group"]},

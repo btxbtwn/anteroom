@@ -125,3 +125,57 @@ class DepopFormTest(unittest.TestCase):
         again = {row["path"]: row for row in depop_form.form(listing)["fields"]}
         self.assertIn("Cotton", again["depop_specifics.attributes.material"]["options"])
         self.assertEqual(listing, original)
+
+    def test_condition_and_colour_follow_general_without_overwriting_seller_clears(self):
+        listing = {
+            "direct_category_ids": {"depop": "menswear_tshirts"},
+            "condition": "Good",
+            "primaryColor": "White",
+            "secondaryColor": "Gray",
+            "size": "S",
+        }
+        fields = {row["path"]: row for row in depop_form.form(listing)["fields"]}
+        self.assertEqual(fields["depop_specifics.condition"]["value"], "used_good")
+        self.assertEqual(fields["depop_specifics.colour"]["value"], ["white", "grey"])
+        self.assertEqual(fields["depop_specifics.size"]["value"], "S")
+
+        # An explicit seller clear on Depop stays blank instead of re-inheriting General.
+        cleared = {
+            **listing,
+            "depop_specifics": {"condition": "", "colour": [], "size": ""},
+        }
+        cleared_fields = {row["path"]: row for row in depop_form.form(cleared)["fields"]}
+        self.assertEqual(cleared_fields["depop_specifics.condition"]["value"], "")
+        self.assertEqual(cleared_fields["depop_specifics.colour"]["value"], [])
+        self.assertEqual(cleared_fields["depop_specifics.size"]["value"], "")
+
+    def test_depop_followed_size_and_condition_have_no_empty_gaps(self):
+        from anteroom.services import native_contract
+
+        listing = {
+            "description": "Vintage sun valley long sleeve t-shirt.",
+            "brand": "Hind Performance",
+            "condition": "Good",
+            "primaryColor": "White",
+            "size": "S",
+            "price": 18,
+            "direct_category_ids": {"depop": "menswear_tshirts"},
+            "depop_specifics": {"parcelSize": "Small"},
+        }
+        listing[native_contract.KEY] = native_contract.capture(
+            listing, {"depop": depop_form.form(listing)}, ["depop"],
+        )
+        blocking = [gap["field"] for gap in native_contract.gaps(listing, "depop") if gap.get("blocking")]
+        self.assertEqual(blocking, [])
+
+        # Explicit seller clears on required fields still block.
+        cleared = copy.deepcopy(listing)
+        cleared["depop_specifics"] = {"size": "", "condition": "", "parcelSize": ""}
+        cleared[native_contract.KEY] = native_contract.capture(
+            cleared, {"depop": depop_form.form(cleared)}, ["depop"],
+        )
+        cleared_blocking = {gap["field"] for gap in native_contract.gaps(cleared, "depop") if gap.get("blocking")}
+        self.assertEqual(
+            cleared_blocking,
+            {"depop_specifics.size", "depop_specifics.condition", "depop_specifics.parcelSize"},
+        )

@@ -1719,15 +1719,25 @@ def persist_generated_listing(
     from anteroom.services.native_contract import constrain_generated
 
     # Men's bottoms: normalization stored the inseam on the generated eBay block,
-    # which the model's native eBay block (copied before it) is about to replace.
+    # and apply_send_readiness_fixes computed Depop's weight-derived parcelSize;
+    # the model's native blocks (copied before them) are about to replace both.
     stored_inseam = str((listing.get("ebay_specifics") or {}).get("inseam") or "").strip() \
         if isinstance(listing.get("ebay_specifics"), dict) else ""
+    stored_parcel = str((listing.get("depop_specifics") or {}).get("parcelSize") or "").strip() \
+        if isinstance(listing.get("depop_specifics"), dict) else ""
     for market, block in native_blocks.items():
         listing[f"{market}_specifics"] = block
     restored_ebay = native_blocks.get("ebay")
     if stored_inseam and isinstance(restored_ebay, dict) and not _size_key_locked(seed, "ebay", "inseam") \
             and not any(key.casefold() == "inseam" and str(value or "").strip() for key, value in restored_ebay.items()):
         listing["ebay_specifics"] = {**restored_ebay, "inseam": stored_inseam}
+    restored_depop = native_blocks.get("depop")
+    if isinstance(restored_depop, dict) \
+            and not any(key in restored_depop for key in ("parcelSize", "parcel_size")):
+        from anteroom.services.depop_fields import _infer_depop_parcel_size
+
+        parcel = stored_parcel or _infer_depop_parcel_size(listing) or "Medium"
+        listing["depop_specifics"] = {**restored_depop, "parcelSize": parcel}
     if follow_locked_size and native_blocks:
         _apply_locked_size_types(listing, seed)
         # The direct tabs' blocks were copied from the model before alignment.

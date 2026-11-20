@@ -237,3 +237,44 @@ class MercariParentCategoryTest(unittest.TestCase):
         self.assertFalse(any(gap["blocking"] and gap["field"] == "mercari_specifics.size" for gap in unread))
         self.assertEqual(self._gaps(**leaf, form={"overrides": {}, "sizes": [{"id": 168}]}), [])
         self.assertEqual(self._gaps(direct_category_ids={"mercari": "1931"}, form={"overrides": {}}), [])
+
+
+class DepopParcelGenerationTest(unittest.TestCase):
+    def test_persist_generated_listing_keeps_depop_parcel_size_with_native_forms(self):
+        import json
+
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+
+        from anteroom.database import Base
+        from anteroom.repositories.queries import ConversationRepo
+        from anteroom.services import depop_form, listing_generate, listing_persistence, native_contract
+
+        engine = create_engine("sqlite:///:memory:")
+        Base.metadata.create_all(engine)
+        db = sessionmaker(bind=engine)()
+        try:
+            for extra in ({"depop_specifics": {"source": ["preloved"]}}, {}):
+                conv = ConversationRepo(db).create(title="Tee")
+                seed = {"direct_category_ids": {"depop": "menswear_tshirts"}}
+                seed[native_contract.KEY] = native_contract.capture(seed, {"depop": depop_form.form(seed)}, ["depop"])
+                listing_persistence.save_revision(db, conv.id, seed, source="native_schema")
+                generated = {
+                    "title": "Hind Performance S Vintage Tee",
+                    "description": "Vintage tee.",
+                    "brand": "Hind Performance",
+                    "condition": "Good",
+                    "size": "S",
+                    "weight_oz": 8,
+                    "price": 18,
+                    "direct_category_ids": {"depop": "menswear_tshirts"},
+                    **extra,
+                }
+                saved = listing_generate.persist_generated_listing(
+                    db, conv.id, json.dumps(generated), provider_name="test", model_name="test", parsed=generated,
+                )
+                self.assertIsNotNone(saved)
+                self.assertEqual((saved.get("depop_specifics") or {}).get("parcelSize"), "Small")
+        finally:
+            db.close()
+            engine.dispose()

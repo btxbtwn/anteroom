@@ -151,3 +151,71 @@ class MercariFormTest(unittest.IsolatedAsyncioTestCase):
         listing['mercari_specifics']['shipsFrom'] = '90210'
         field = next(row for row in mercari_form.form(listing)['fields'] if row['path'] == 'mercari_specifics.shipsFrom')
         self.assertEqual(field['value'], '90210')
+
+    def test_general_letter_size_matches_ranged_regular_size_not_tall(self):
+        # Men > Tops > T-shirts (303) spells Regular sizes "S (34-36)" and "M (38-40)"
+        # while Tall sizes are plain "M", "L", "XL".
+        def size_value(listing):
+            return next(
+                row for row in mercari_form.form(listing)['fields']
+                if row['path'] == 'mercari_specifics.nativeSizeId'
+            )['value']
+
+        self.assertEqual(size_value({'direct_category_ids': {'mercari': '303'}, 'size': 'S'}), '9')
+        self.assertEqual(size_value({'direct_category_ids': {'mercari': '303'}, 'size': 'M'}), '10')
+        self.assertEqual(size_value({'direct_category_ids': {'mercari': '303'}, 'size': 'M', 'sizeType': 'Tall'}), '340')
+        self.assertEqual(size_value({'direct_category_ids': {'mercari': '303'}, 'size': '2XL'}), '13')
+        self.assertEqual(size_value({'direct_category_ids': {'mercari': '275'}, 'size': 'S'}), '3')
+        self.assertEqual(size_value({'direct_category_ids': {'mercari': '275'}, 'size': 'S', 'sizeType': 'Petite'}), '292')
+        self.assertEqual(size_value({'direct_category_ids': {'mercari': '303'}, 'size': 'S',
+                                     'mercari_specifics': {'nativeSizeId': ''}}), '')
+        self.assertEqual(size_value({'direct_category_ids': {'mercari': '303'}, 'size': 'S',
+                                     'mercari_specifics': {'size': ''}}), '')
+
+    def test_brand_uses_reference_options_source_so_editor_skips_contradictory_alert(self):
+        row = next(row for row in mercari_form.form({'brand': 'Hind Performance'})['fields']
+                   if row['path'] == 'mercari_specifics.brand')
+        self.assertEqual(row['value'], 'Hind Performance')
+        self.assertEqual(row['options_source'], 'reference')
+        self.assertTrue(row['selection_only'])
+        self.assertIn("isn't in Anteroom's copy of Mercari's brand list", row['help'])
+
+    def test_mercari_followed_size_and_condition_have_no_empty_gaps(self):
+        from anteroom.services import native_contract
+
+        listing = {
+            'title': 'Hind Performance S Vintage Tee',
+            'description': 'Vintage long sleeve graphic tee.',
+            'brand': 'Hind Performance',
+            'condition': 'Good',
+            'size': 'S',
+            'price': 18,
+            'direct_category_ids': {'mercari': '303'},
+            'mercari_specifics': {'shippingMethod': 'SOYO', 'shipsFrom': '70115',
+                                  'smartPricing': {'enabled': False}},
+        }
+        listing[native_contract.KEY] = native_contract.capture(
+            listing, {'mercari': mercari_form.form(listing)}, ['mercari'],
+        )
+        blocking = [gap['field'] for gap in native_contract.gaps(listing, 'mercari') if gap.get('blocking')]
+        self.assertEqual(blocking, [])
+
+        cleared = copy.deepcopy(listing)
+        cleared['mercari_specifics']['nativeSizeId'] = ''
+        cleared['mercari_specifics']['condition'] = ''
+        cleared[native_contract.KEY] = native_contract.capture(
+            cleared, {'mercari': mercari_form.form(cleared)}, ['mercari'],
+        )
+        cleared_blocking = {gap['field'] for gap in native_contract.gaps(cleared, 'mercari') if gap.get('blocking')}
+        self.assertEqual(cleared_blocking, {'mercari_specifics.nativeSizeId', 'mercari_specifics.condition'})
+
+        # Explicitly clearing mercari_specifics.size without nativeSizeId also stays empty and blocks.
+        cleared_size_key = copy.deepcopy(listing)
+        cleared_size_key['mercari_specifics']['size'] = ''
+        cleared_size_key[native_contract.KEY] = native_contract.capture(
+            cleared_size_key, {'mercari': mercari_form.form(cleared_size_key)}, ['mercari'],
+        )
+        cleared_size_blocking = {
+            gap['field'] for gap in native_contract.gaps(cleared_size_key, 'mercari') if gap.get('blocking')
+        }
+        self.assertEqual(cleared_size_blocking, {'mercari_specifics.nativeSizeId'})
