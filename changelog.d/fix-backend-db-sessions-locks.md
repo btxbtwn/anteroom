@@ -1,1 +1,0 @@
-- Improve backend reliability and responsiveness during photo editing, background draft generation, and multi-seller automations by releasing database transactions before external photo I/O, replacing global photo and automation locks with scoped locks, and capping concurrent background worker jobs.

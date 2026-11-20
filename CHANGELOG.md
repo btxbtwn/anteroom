@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1060 — 2026-11-20
+
+- Improve backend reliability and responsiveness during photo editing, background draft generation, and multi-seller automations by releasing database transactions before external photo I/O, replacing global photo and automation locks with scoped locks, and capping concurrent background worker jobs.
+
 ## 0.1.1059 — 2026-11-20
 
 - Finish renaming a Vendoo database file only when an update was clearly in progress, and leave mixed leftover files alone so listing data is not attached by mistake.
