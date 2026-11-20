@@ -1,6 +1,6 @@
 [project]
 name = "anteroom"
-version = "0.1.1069"
+version = "0.1.1070"
 description = "Cross-listing app for generating and automating marketplace listings"
 requires-python = ">=3.12"
 dependencies = [

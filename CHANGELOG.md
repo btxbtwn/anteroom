@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1070 — 2026-11-20
+
+- Default hosted managed AI and Google Gemini providers to Gemini 3.1 Flash Lite (`google/gemini-3.1-flash-lite`) for faster, lower-cost listings.
+
 ## 0.1.1069 — 2026-11-20
 
 - List, Save draft and Update wait until the listing has loaded, instead of saying "Fill in the listing first." on a slow connection.

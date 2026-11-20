@@ -1,1 +1,0 @@
-- Default hosted managed AI and Google Gemini providers to Gemini 3.1 Flash Lite (`google/gemini-3.1-flash-lite`) for faster, lower-cost listings.
