@@ -1,7 +1,7 @@
 import { hasHostedApiSession } from "./transport";
 import { loadPrivateImage } from "./privateImages";
 import { registerBackgroundSignal } from "./requestScheduler";
-import type { QueryClient } from "@tanstack/react-query";
+import type { Query, QueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import { photoThumbUrl } from "../photoThumb";
 import type { ListingPhoto } from "./types";
@@ -9,27 +9,7 @@ import type { ListingPhoto } from "./types";
 const warmingPhotos = new Map<string, HTMLImageElement>();
 const warmedPhotos = new Set<string>();
 
-function combineSignals(
-  querySignal: AbortSignal,
-  callerSignal: AbortSignal | undefined,
-  background: boolean,
-): AbortSignal {
-  if (!callerSignal && !background) return querySignal;
-  const controller = new AbortController();
-  if (background) registerBackgroundSignal(controller.signal);
-  const forward = (source: AbortSignal) => {
-    if (!controller.signal.aborted) controller.abort(source.reason);
-  };
-  if (querySignal.aborted) {
-    forward(querySignal);
-  } else if (callerSignal?.aborted) {
-    forward(callerSignal);
-  } else {
-    querySignal.addEventListener("abort", () => forward(querySignal), { once: true });
-    callerSignal?.addEventListener("abort", () => forward(callerSignal), { once: true });
-  }
-  return controller.signal;
-}
+const releaseHover = new WeakMap<Query, () => void>();
 
 function warmPhotoThumbnails(photos: ListingPhoto[], signal?: AbortSignal) {
   if (signal?.aborted) return;
@@ -71,9 +51,38 @@ export function prefetchListingReads(client: QueryClient, id: string, options?: 
   const callerSignal = options?.signal;
   const background = Boolean(options?.background);
   if (callerSignal?.aborted) return Promise.resolve([]);
-  const link = (rqSignal: AbortSignal) => combineSignals(rqSignal, callerSignal, background);
-  const read = (queryKey: unknown[], queryFn: (context: { signal: AbortSignal }) => Promise<unknown>) =>
-    client.prefetchQuery({ queryKey, queryFn: ({ signal }) => queryFn({ signal: link(signal) }), retry: false });
+  const read = (queryKey: string[], fetch: (signal: AbortSignal) => Promise<unknown>) => {
+    const findQuery = () => client.getQueryCache().find({ queryKey, exact: true });
+    // Opening can join the existing fetch before the editor has subscribed.
+    const existing = findQuery();
+    if (!background && !callerSignal && existing) releaseHover.get(existing)?.();
+    return client.prefetchQuery({
+      queryKey,
+      retry: false,
+      queryFn: async ({ signal }) => {
+        if (background) registerBackgroundSignal(signal);
+        const query = callerSignal && findQuery();
+        if (!callerSignal || !query) return fetch(signal);
+
+        // The query owns the transport. Leaving the row cancels only work
+        // started here that has no active destination using it.
+        const cancel = () => {
+          if (!signal.aborted && !query.isActive()) void query.cancel({ revert: true });
+        };
+        const release = () => {
+          callerSignal.removeEventListener("abort", cancel);
+          if (releaseHover.get(query) === release) releaseHover.delete(query);
+        };
+        releaseHover.set(query, release);
+        callerSignal.addEventListener("abort", cancel, { once: true });
+        try {
+          return await fetch(signal);
+        } finally {
+          release();
+        }
+      },
+    });
+  };
   const thumbSignal = background
     ? (() => {
         if (callerSignal) return registerBackgroundSignal(callerSignal);
@@ -82,17 +91,17 @@ export function prefetchListingReads(client: QueryClient, id: string, options?: 
       })()
     : callerSignal;
   return Promise.all([
-    read(["jobs", id], ({ signal }) => api.jobs.list(id, { signal })),
-    read(["activity", id], ({ signal }) => api.conversations.activity(id, { signal })),
-    read(["listing-fields", id], ({ signal }) => api.listings.fields(id, { signal })),
-    read(["marketplace-listings", id], ({ signal }) => api.marketplaceListings.get(id, { signal })),
-    read(["native-marketplaces", id], ({ signal }) => api.nativeMarketplaces.status(id, { signal })),
-    read(["marketplace-sales", id], ({ signal }) => api.marketplaceSales.list({ conversationId: id }, { signal })),
-    client.prefetchQuery({ queryKey: ["conversation", id], queryFn: ({ signal }) => api.conversations.get(id, { signal: link(signal) }), retry: false }),
-    client.prefetchQuery({ queryKey: ["listing", id], queryFn: ({ signal }) => api.listings.get(id, { signal: link(signal) }), retry: false }),
-    client.prefetchQuery({ queryKey: ["photos", id], queryFn: ({ signal }) => api.conversations.photos(id, undefined, { signal: link(signal) }), retry: false })
+    read(["jobs", id], (signal) => api.jobs.list(id, { signal })),
+    read(["activity", id], (signal) => api.conversations.activity(id, { signal })),
+    read(["listing-fields", id], (signal) => api.listings.fields(id, { signal })),
+    read(["marketplace-listings", id], (signal) => api.marketplaceListings.get(id, { signal })),
+    read(["native-marketplaces", id], (signal) => api.nativeMarketplaces.status(id, { signal })),
+    read(["marketplace-sales", id], (signal) => api.marketplaceSales.list({ conversationId: id }, { signal })),
+    read(["conversation", id], (signal) => api.conversations.get(id, { signal })),
+    read(["listing", id], (signal) => api.listings.get(id, { signal })),
+    read(["photos", id], (signal) => api.conversations.photos(id, undefined, { signal }))
       .then(() => warmPhotoThumbnails(client.getQueryData<ListingPhoto[]>(["photos", id]) ?? [], thumbSignal)),
-    client.prefetchQuery({ queryKey: ["messages", id], queryFn: ({ signal }) => api.conversations.messages(id, { signal: link(signal) }), retry: false }),
+    read(["messages", id], (signal) => api.conversations.messages(id, { signal })),
   ]);
 }
 
