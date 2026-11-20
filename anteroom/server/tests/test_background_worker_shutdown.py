@@ -237,6 +237,9 @@ def test_heartbeat_stops_task_when_db_errors_outlast_lease(monkeypatch):
 
     async def exercise():
         finished = []
+        cancelled = Event()
+        finish_started = Event()
+        release_finish = Event()
         context = ServiceContext('seller', lambda: None, None, None, None)
         monkeypatch.setattr(background_worker, 'for_seller', lambda *_, **kwargs: context)
         monkeypatch.setattr(background_worker, 'HEARTBEAT_INTERVAL_S', 0.01)
@@ -247,15 +250,29 @@ def test_heartbeat_stops_task_when_db_errors_outlast_lease(monkeypatch):
             raise OperationalError('UPDATE background_tasks', {}, Exception('connection refused'))
 
         async def execute(*_):
-            await asyncio.Future()
+            try:
+                await asyncio.Future()
+            finally:
+                cancelled.set()
 
         monkeypatch.setattr(background_worker.queue, 'renew', renew)
-        monkeypatch.setattr(background_worker.queue, 'finish', lambda *args, **kwargs: finished.append((args, kwargs)))
+        def finish(*args, **kwargs):
+            finish_started.set()
+            release_finish.wait(timeout=5)
+            finished.append((args, kwargs))
+
+        monkeypatch.setattr(background_worker.queue, 'finish', finish)
         monkeypatch.setattr(background_worker, '_execute', execute)
         heartbeats = BackgroundLoop('test-heartbeat-expiry')
         try:
-            await asyncio.wait_for(
-                background_worker.run_claimed('task', 'seller', 'token', heartbeat_loop=heartbeats), 2)
+            task = asyncio.create_task(
+                background_worker.run_claimed('task', 'seller', 'token', heartbeat_loop=heartbeats))
+            try:
+                assert await asyncio.to_thread(finish_started.wait, 2)
+                assert await asyncio.to_thread(cancelled.wait, 0.5), 'Work continued during the failure write'
+            finally:
+                release_finish.set()
+                await asyncio.wait_for(task, 2)
         finally:
             await asyncio.to_thread(heartbeats.stop)
         assert context.task_outcome == {'stop': 'error'}

@@ -440,6 +440,13 @@ async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
             if refreshed is None or refreshed[0] != fingerprint:
                 return None
             fingerprint, revision_id, listing = refreshed
+            # A seller may edit controlling inputs after recording. Use only
+            # definitions that belong to the revision we will fill and fence.
+            refreshed_forms = {market: form for market in forms
+                               if (form := native_contract.editor_form(listing, market)) is not None}
+            if refreshed_forms.keys() != forms.keys():
+                return None
+            forms = refreshed_forms
     rows_by_market = {market: rows for market, form in forms.items()
                       if (rows := category_rows(form, listing) if categories else fillable_rows(form, market, listing, evidence=evidence))}
     if required_only:

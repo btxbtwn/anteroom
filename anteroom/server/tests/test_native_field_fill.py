@@ -250,6 +250,36 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("choices: S", ask.call_args.args[1][1]["content"])
         self.assertEqual(saved["ebay_specifics"]["Size"], "M")
 
+    async def test_category_edit_after_recording_forms_stops_stale_fill(self):
+        from anteroom.services import native_contract
+
+        form = {"category_id": "12", "fields": [
+            row("ebay_specifics.Size", "Size", ["S"], required=True)]}
+        listing = {"title": "Jeans", "direct_category_ids": {"ebay": "12"},
+                   native_contract.KEY: {"ebay": {"unavailable": True}}}
+        listing_persistence.save_revision(self.db, self.conv.id, listing, "native_schema")
+        original = native_field_fill._record_forms
+
+        def record_then_edit(db, *args):
+            recorded = original(db, *args)
+            current = native_field_fill._current_listing(db, self.conv.id)
+            edited = native_contract.copy_listing(current)
+            edited["direct_category_ids"]["ebay"] = "13"
+            listing_persistence.save_revision(db, self.conv.id, edited, "user_form")
+            return recorded
+
+        reply = json.dumps({"fields": {"ebay_specifics.Size": {"value": "S", "evidence": "size S"}}})
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
+                patch.object(native_field_fill, "_record_forms", side_effect=record_then_edit), \
+                patch("anteroom.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)) as ask:
+            saved = await native_field_fill._fill_native_fields(
+                self.conv.id, object(), evidence="Tag: size S", markets={"ebay"}, categories=False)
+        self.assertIsNone(saved)
+        ask.assert_not_awaited()
+        current = self._current().listing_json
+        self.assertEqual(current["direct_category_ids"]["ebay"], "13")
+        self.assertFalse(current.get("ebay_specifics", {}).get("Size"))
+
     async def test_required_gap_gets_a_focused_evidence_checked_repair(self):
         from anteroom.services import native_contract
 

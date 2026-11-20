@@ -176,6 +176,7 @@ async def run_claimed(task_id, owner, token, *, heartbeat_loop: BackgroundLoop):
             locations = ' > '.join(f'{frame.filename.rsplit("/", 1)[-1]}:{frame.lineno}:{frame.name}'
                                    for frame in traceback.extract_tb(exc.__traceback__))
             logging.getLogger(__name__).error('Draft task failed (%s at %s)', type(exc).__name__, locations)
+            work.cancel()
             try:
                 await asyncio.to_thread(queue.finish, task_id, token,
                                         error='The draft task stopped. Review the saved draft and try again.')
