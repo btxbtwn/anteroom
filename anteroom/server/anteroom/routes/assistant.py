@@ -25,7 +25,8 @@ from anteroom.database import SessionLocal, get_db, in_worker_session
 from anteroom.models.assistant import AssistantMessage, AssistantThread
 from anteroom.routes.attachments import AttachmentUpload, store_uploads
 from anteroom.services import assistant_changes, assistant_memory, background_tasks, business_assistant
-from anteroom.services.chat_attachments import attach_to_last_user_turn
+from anteroom.services.chat_attachments import MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, attach_to_last_user_turn
+from anteroom.services.hosted_limits import bounded_route_class
 from anteroom.services.listing_provider import get_listing_provider
 from anteroom.services.provider_deadlines import ProviderStalled, provider_label
 from anteroom.services.streaming import (
@@ -52,7 +53,22 @@ from anteroom.services.user_settings import (
 log = logging.getLogger("anteroom.assistant")
 timing_log = logging.getLogger("anteroom.assistant.timing")
 
-router = APIRouter(prefix="/api/assistant", tags=["assistant"])
+# Six 10 MB images as base64, plus names and an 8 KB prompt.
+MAX_ASSISTANT_MESSAGE_BYTES = MAX_ATTACHMENTS * (MAX_ATTACHMENT_BYTES * 4 // 3 + 4096) + 256_000
+MAX_ASSISTANT_BODY_BYTES = 256 * 1024
+
+router = APIRouter(
+    prefix="/api/assistant",
+    tags=["assistant"],
+    route_class=bounded_route_class(lambda: MAX_ASSISTANT_BODY_BYTES),
+)
+_message_router = APIRouter(
+    route_class=bounded_route_class(
+        lambda: MAX_ASSISTANT_MESSAGE_BYTES,
+        too_large_detail="This message has too much image data",
+        use_upload_slots=True,
+    ),
+)
 
 # The one answer that can be in progress, in the registry listing generations use.
 ANSWER_RUN = "assistant"
@@ -75,8 +91,8 @@ UNREADABLE_CHANGES = (
 
 class AssistantQuestion(BaseModel):
     text: str = Field(default="", max_length=8000)
-    attachments: list[AttachmentUpload] = Field(default_factory=list)
-    thread_id: str | None = None
+    attachments: list[AttachmentUpload] = Field(default_factory=list, max_length=MAX_ATTACHMENTS)
+    thread_id: str | None = Field(default=None, max_length=100)
 
 
 class BusinessNote(BaseModel):
@@ -110,8 +126,12 @@ def remove_thread(thread_id: str, db: Session = Depends(get_db)):
     background_tasks.delete_answers(db, thread_id)
     if not business_assistant.delete_thread(db, thread_id):
         raise HTTPException(404, "That conversation is gone.")
-    # The conversation is gone; its images go with it.
-    delete_attachments(images)
+    # The conversation is already deleted in DB; external Storage cleanup is best-effort.
+    if images:
+        try:
+            delete_attachments(images)
+        except Exception:
+            log.warning("Post-commit attachment cleanup failed for deleted assistant thread %s", thread_id)
     return {"ok": True}
 
 
@@ -364,7 +384,7 @@ def _save_answer(
         save_db.close()
 
 
-@router.post("/messages")
+@_message_router.post("/messages")
 async def ask(body: AssistantQuestion, request: Request):
     question = body.text.strip()
     if not question and not body.attachments:
@@ -503,7 +523,11 @@ def _queue_question(db: Session, request: Request, question: str, body: Assistan
         business_assistant.add_message(db, "user", question, attachments=attachments, thread_id=thread_id)
     except Exception as exc:
         db.rollback()
-        delete_attachments(attachments)
+        if attachments:
+            try:
+                delete_attachments(attachments)
+            except Exception:
+                log.warning("Failed to clean up uploaded attachments after assistant enqueue failure")
         if isinstance(exc, IntegrityError):
             raise HTTPException(409, "The assistant is still answering your last question.") from None
         raise
@@ -678,7 +702,7 @@ async def answer_task(task_id: str, token: str, task) -> bool:
 
 
 def _proposal(message_id: str, db: Session) -> AssistantMessage:
-    row = db.get(AssistantMessage, message_id)
+    row = db.scalar(select(AssistantMessage).where(AssistantMessage.id == message_id).with_for_update())
     if row is None or not row.changes:
         raise HTTPException(404, "Those changes are no longer in the conversation.")
     if row.changes.get("status") != "proposed":
@@ -751,8 +775,13 @@ def apply_changes(message_id: str, db: Session = Depends(get_db)):
     skipped and says why; the rest still apply.
     """
     row = _proposal(message_id, db)
+    assert row.changes is not None
+    original_items = list(row.changes["items"])
+    # Claim the locked proposal before per-listing commits release the row lock.
+    row.changes = {**row.changes, "status": "applying"}
+    db.commit()
     items = []
-    for item in row.changes["items"]:
+    for item in original_items:
         skipped = _apply_to_listing(item, db)
         items.append({**item, "skipped": skipped} if skipped else item)
     row.changes = {"status": "applied", "items": items}
@@ -761,7 +790,7 @@ def apply_changes(message_id: str, db: Session = Depends(get_db)):
 
 
 def _automation_message(message_id: str, db: Session) -> AssistantMessage:
-    row = db.get(AssistantMessage, message_id)
+    row = db.scalar(select(AssistantMessage).where(AssistantMessage.id == message_id).with_for_update())
     if row is None or not row.automation:
         raise HTTPException(404, "That automation is no longer in the conversation.")
     if row.automation.get("status") != "proposed":
@@ -776,11 +805,21 @@ def confirm_automation_message(message_id: str, db: Session = Depends(get_db)):
     from anteroom.services.automations import AutomationError
 
     row = _automation_message(message_id, db)
+    assert row.automation is not None
+    proposal = row.automation.get("proposal") or {}
+    # Flush the claim inside the locked transaction so confirm_proposal's commit
+    # transitions state atomically and concurrent confirms receive 409.
+    row.automation = {**row.automation, "status": "confirming"}
+    db.flush()
     try:
-        saved = automations.confirm_proposal(db, row.automation.get("proposal") or {})
+        saved = automations.confirm_proposal(db, proposal)
     except AutomationError as exc:
+        db.rollback()
         raise HTTPException(exc.status_code, str(exc)) from exc
-    row.automation = {"status": "confirmed", "proposal": row.automation.get("proposal"), "automation_id": saved.get("id")}
+    except Exception:
+        db.rollback()
+        raise
+    row.automation = {"status": "confirmed", "proposal": proposal, "automation_id": saved.get("id")}
     db.commit()
     return business_assistant.message_view(row)
 
@@ -788,6 +827,7 @@ def confirm_automation_message(message_id: str, db: Session = Depends(get_db)):
 @router.post("/messages/{message_id}/automation/dismiss")
 def dismiss_automation_message(message_id: str, db: Session = Depends(get_db)):
     row = _automation_message(message_id, db)
+    assert row.automation is not None
     row.automation = {**row.automation, "status": "dismissed"}
     db.commit()
     return business_assistant.message_view(row)
@@ -796,6 +836,10 @@ def dismiss_automation_message(message_id: str, db: Session = Depends(get_db)):
 @router.post("/messages/{message_id}/changes/dismiss")
 def dismiss_changes(message_id: str, db: Session = Depends(get_db)):
     row = _proposal(message_id, db)
+    assert row.changes is not None
     row.changes = {**row.changes, "status": "dismissed"}
     db.commit()
     return business_assistant.message_view(row)
+
+
+router.include_router(_message_router)

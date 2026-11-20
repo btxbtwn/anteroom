@@ -18,10 +18,24 @@ from anteroom.repositories.queries import ConversationRepo
 from anteroom.routes.api_contract import SIZE_TAG_READ_ERRORS, SizeTagReadResult
 from anteroom.services import hosted_photos, measure_read, size_tag_read
 from anteroom.services.hosted_database import SellerDatabaseSession, in_seller_session
+from anteroom.services.hosted_limits import bounded_route_class, hold_upload_slot, stream_upload_to_path
 from anteroom.services.listing_provider import get_photo_provider
 from anteroom.services.photo_store import photo_store
 
-router = APIRouter(tags=["measurements"])
+MAX_UPLOAD_FILES = 20
+_MULTIPART_OVERHEAD_BYTES = 2 * 1024 * 1024
+
+
+def _max_batch_bytes() -> int:
+    return MAX_UPLOAD_FILES * MAX_PHOTO_SIZE_MB * 1024 * 1024 + _MULTIPART_OVERHEAD_BYTES
+
+
+_measurement_route = bounded_route_class(
+    _max_batch_bytes,
+    too_large_detail=f"Upload exceeds maximum size ({MAX_PHOTO_SIZE_MB}MB per photo)",
+)
+router = APIRouter(tags=["measurements"], route_class=_measurement_route)
+hosted_router = APIRouter(tags=["measurements"], route_class=_measurement_route)
 log = logging.getLogger(__name__)
 
 GARMENTS = ("top", "pants", "skirt")
@@ -45,16 +59,19 @@ def _provider(garment: str):
 
 
 async def _write_uploads(files: list[UploadFile], workdir: str) -> list[Path]:
-    """Photos not saved yet (bulk upload), written to `workdir` in their order."""
-    if len(files) > 20:
-        raise HTTPException(400, "Maximum 20 photos per listing")
+    """Photos not saved yet (bulk upload), streamed to `workdir` in their order."""
+    if len(files) > MAX_UPLOAD_FILES:
+        raise HTTPException(400, f"Maximum {MAX_UPLOAD_FILES} photos per listing")
+    max_bytes = MAX_PHOTO_SIZE_MB * 1024 * 1024
     paths = []
     for index, upload in enumerate(files):
-        contents = await upload.read()
-        if len(contents) > MAX_PHOTO_SIZE_MB * 1024 * 1024:
-            raise HTTPException(400, f"{upload.filename or 'Photo'} is over {MAX_PHOTO_SIZE_MB}MB")
         path = Path(workdir) / f"{index:02d}{Path(upload.filename or 'photo.jpg').suffix.lower() or '.jpg'}"
-        path.write_bytes(contents)
+        await stream_upload_to_path(
+            upload,
+            path,
+            max_bytes,
+            too_large_detail=f"{upload.filename or 'Photo'} is over {MAX_PHOTO_SIZE_MB}MB",
+        )
         paths.append(path)
     return paths
 
@@ -87,19 +104,24 @@ async def _read(provider, paths: list[Path], garment: str) -> dict:
 
 
 @router.post("/api/measurements/read")
-async def read_measurements(files: list[UploadFile] = File(...), garment: str = Form(...)):
+@hosted_router.post("/api/measurements/read")
+async def read_measurements(request: Request, files: list[UploadFile] = File(...), garment: str = Form(...)):
     """Suggest an item's measurements from photos not saved yet (bulk upload). Saves nothing."""
     provider = _provider(garment)
     with tempfile.TemporaryDirectory(prefix="measure-upload-") as workdir:
-        return await _read(provider, await _write_uploads(files, workdir), garment)
+        async with hold_upload_slot(request):
+            paths = await _write_uploads(files, workdir)
+        return await _read(provider, paths, garment)
 
 
 @router.post("/api/size-tags/read", response_model=SizeTagReadResult, responses=SIZE_TAG_READ_ERRORS)
-async def read_size_tags(files: list[UploadFile] = File(...)):
+@hosted_router.post("/api/size-tags/read", response_model=SizeTagReadResult, responses=SIZE_TAG_READ_ERRORS)
+async def read_size_tags(request: Request, files: list[UploadFile] = File(...)):
     """Suggest an item's clothing size from its size tag in photos not saved yet (bulk upload). Saves nothing."""
     provider = _photo_provider("size tags")
     with tempfile.TemporaryDirectory(prefix="size-tag-upload-") as workdir:
-        paths = await _write_uploads(files, workdir)
+        async with hold_upload_slot(request):
+            paths = await _write_uploads(files, workdir)
         return await _explained(size_tag_read.read_size_tag(provider, paths), "size", provider)
 
 
@@ -119,6 +141,7 @@ def _photo_filenames(db: Session, conv_id: str) -> list[str]:
     return [photo.stored_filename for photo in repo.get_photos(conv_id)]
 
 
+@hosted_router.post("/api/conversations/{conv_id}/measurements/read")
 async def read_hosted_saved_measurements(conv_id: str, body: ReadSavedRequest, request: Request):
     """The hosted read of a saved listing: its photos come from private storage. Saves nothing."""
     provider = _provider(body.garment)

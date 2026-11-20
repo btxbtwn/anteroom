@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -11,10 +11,21 @@ from anteroom.config import MAX_PHOTO_SIZE_MB
 from anteroom.database import get_db, in_worker_session
 from anteroom.models.scout import ScoutCheck
 from anteroom.services import scout
+from anteroom.services.hosted_limits import bounded_route_class, hold_upload_slot, read_bounded_upload
 from anteroom.services.photo_store import photo_store
 from anteroom.services.photos import process_bytes
 
-router = APIRouter(prefix="/api/scout", tags=["scout"])
+
+def _max_scout_body_bytes() -> int:
+    # Multipart envelope around at most MAX_PHOTOS images; extra small files still reach the 400 count check.
+    return scout.MAX_PHOTOS * MAX_PHOTO_SIZE_MB * 1024 * 1024 + 2 * 1024 * 1024
+
+
+router = APIRouter(
+    prefix="/api/scout",
+    tags=["scout"],
+    route_class=bounded_route_class(_max_scout_body_bytes, too_large_detail="Upload is too large"),
+)
 
 
 class ScoutCheckResponse(BaseModel):
@@ -80,6 +91,7 @@ def list_checks(db: Session = Depends(get_db)):
 
 @router.post("", response_model=ScoutCheckResponse)
 async def create_check(
+    request: Request,
     files: list[UploadFile] = File(...),
     asking_price: float | None = Form(None, ge=0),
 ):
@@ -87,18 +99,24 @@ async def create_check(
         raise HTTPException(400, f"Up to {scout.MAX_PHOTOS} photos per check")
     from anteroom.models.conversation import new_id
     collection_id = 'scout-' + new_id()
-    for upload in files:
-        if upload.size is not None and upload.size > MAX_PHOTO_SIZE_MB * 1024 * 1024:
-            raise HTTPException(413, f"{upload.filename or 'Photo'}: File too large. Max {MAX_PHOTO_SIZE_MB}MB")
+    max_photo_bytes = MAX_PHOTO_SIZE_MB * 1024 * 1024
     photos = []
-    for upload in files:
-        try:
-            # Decoding, hashing and storing a photo run on a worker thread, never the event loop.
-            photos.append(await asyncio.to_thread(
-                process_bytes, await upload.read(), upload.filename, upload.content_type, collection_id=collection_id,
-            ))
-        except ValueError as exc:
-            raise HTTPException(400, f"{upload.filename or 'Photo'}: {exc}") from exc
+    async with hold_upload_slot(request):
+        for upload in files:
+            raw = await read_bounded_upload(
+                upload,
+                max_photo_bytes,
+                too_large_detail=f"{upload.filename or 'Photo'}: File too large. Max {MAX_PHOTO_SIZE_MB}MB",
+            )
+            try:
+                # Decoding, hashing and storing a photo run on a worker thread, never the event loop.
+                photos.append(await asyncio.to_thread(
+                    process_bytes, bytes(raw), upload.filename, upload.content_type, collection_id=collection_id,
+                ))
+            except ValueError as exc:
+                raise HTTPException(400, f"{upload.filename or 'Photo'}: {exc}") from exc
+            finally:
+                del raw
     check_id, response = await in_worker_session(_create, photos, asking_price)
     scout.start(check_id)
     return response
@@ -129,12 +147,17 @@ def decide(check_id: str, body: DecisionRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/{check_id}/photos/{index}")
-def serve_photo(check_id: str, index: int, db: Session = Depends(get_db)):
+def serve_photo(check_id: str, index: int, db: Session = Depends(get_db, scope="function")):
     check = _check(db, check_id)
-    if not 0 <= index < len(check.photos or []):
+    photo_list = list(check.photos or [])
+    if not 0 <= index < len(photo_list):
         raise HTTPException(404, "Photo not found")
+    photo_key = photo_list[index]
+    # Ownership and index were verified above. Release the read transaction before
+    # synchronous photo_store() I/O (which may download from Storage in hosted mode).
+    db.rollback()
     try:
-        path = photo_store().local_path(check.photos[index])
+        path = photo_store().local_path(photo_key)
     except (FileNotFoundError, ValueError):
         raise HTTPException(404, "Photo not found") from None
     return FileResponse(path)

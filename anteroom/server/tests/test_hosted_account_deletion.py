@@ -245,3 +245,71 @@ def test_mac_app_has_no_account_deletion():
     from anteroom.main import app
     assert not any(getattr(route, 'path', None) == '/api/account' for route in app.routes)
     assert TestClient(app).request('DELETE', '/api/account', json={'confirm': True}).status_code in {404, 405}
+
+
+def test_concurrent_active_job_refuses_without_touching_storage_or_relay(cloud, signing_keys, monkeypatch):  # noqa: F811
+    client, engine = cloud
+    supabase_schemas(engine)
+    item_id = seed(engine, ALICE, job_status='completed')
+    storage_calls = []
+    relay_calls = []
+
+    monkeypatch.setattr('anteroom.services.hosted_photos.remove_objects',
+                        lambda keys, token: storage_calls.append((list(keys), token)))
+
+    async def fail_relay(method, path, **_kwargs):
+        relay_calls.append((method, path))
+        pytest.fail('Relay must not be called when account deletion is refused by an active job')
+
+    monkeypatch.setattr('anteroom.services.relay_client.relay_request', fail_relay)
+
+    # Simulate a job starting concurrently right before _delete_records acquires
+    # pg_advisory_xact_lock and re-checks active jobs.
+    def read_relay_and_start_job():
+        with Session(engine) as db:
+            db.add(Job(user_id=ALICE, conversation_id=item_id, approved_revision_id='r2',
+                       listing_snapshot={}, status='dispatched'))
+            db.commit()
+        return {'deviceId': 'dev-1', 'token': 'tok-1'}
+
+    monkeypatch.setattr(account_deletion, '_read_relay_device', read_relay_and_start_job)
+    before = owned_rows(engine, ALICE)
+
+    response = client.request('DELETE', '/api/account', headers=headers(signing_keys), json={'confirm': True})
+    assert response.status_code == 409
+    assert 'Nothing was deleted' in response.json()['detail']
+    assert storage_calls == []
+    assert relay_calls == []
+    assert owned_rows(engine, ALICE)['conversations'] == before['conversations']
+    with engine.connect() as db:
+        assert ALICE in set(map(str, db.scalars(text('SELECT id FROM auth.users'))))
+
+
+def test_post_commit_storage_and_relay_failures_log_and_succeed(cloud, signing_keys, monkeypatch, caplog):  # noqa: F811
+    import logging
+
+    client, engine = cloud
+    supabase_schemas(engine)
+    seed(engine, ALICE, job_status='completed')
+    monkeypatch.setattr(account_deletion, '_read_relay_device', lambda: {'deviceId': 'dev-1', 'token': 'tok-1'})
+
+    async def broken_relay(*_args, **_kwargs):
+        raise RuntimeError('relay offline')
+
+    def broken_storage(*_args, **_kwargs):
+        raise RuntimeError('storage unavailable')
+
+    monkeypatch.setattr('anteroom.services.relay_client.relay_request', broken_relay)
+    monkeypatch.setattr('anteroom.services.hosted_photos.remove_objects', broken_storage)
+
+    with caplog.at_level(logging.WARNING, logger='anteroom.services.account_deletion'):
+        response = client.request('DELETE', '/api/account', headers=headers(signing_keys), json={'confirm': True})
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {'deleted': True}
+    assert owned_rows(engine, ALICE) == {}
+    with engine.connect() as db:
+        assert set(map(str, db.scalars(text('SELECT id FROM auth.users')))) == {BOB}
+    messages = '\n'.join(record.getMessage() for record in caplog.records)
+    assert 'relay deregistration failed' in messages
+    assert 'Storage cleanup failed' in messages
