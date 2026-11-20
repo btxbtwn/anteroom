@@ -42,7 +42,7 @@ API = "https://chromewebstore.googleapis.com"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 SCOPE = "https://www.googleapis.com/auth/chromewebstore"
 # Top-level names Chrome never loads; kept equal to chrome_bridge.EXTENSION_SKIP by a test.
-SKIP = frozenset({"AGENTS.md", ".git", ".gitignore", ".playwright-mcp", "README.md", "__pycache__",
+SKIP = frozenset({"AGENTS.md", ".git", ".gitignore", ".oxlintrc.json", ".playwright-mcp", "README.md", "__pycache__",
                   "node_modules", "sample-listing.json", "studio-build.js", "tests", "tools"})
 # Written by the Mac app beside its own copy; background.js loads it only if present.
 OPTIONAL = frozenset({"studio-build.js"})
@@ -63,7 +63,7 @@ def tracked_files(root: Path = ROOT) -> list[str]:
     files = []
     for path in filter(None, listed):
         relative = path.removeprefix(EXTENSION + "/")
-        if not any(part in SKIP for part in relative.split("/")):
+        if not any(part in SKIP or part.startswith(".") for part in relative.split("/")):
             files.append(relative)
     return sorted(files)
 

@@ -4,19 +4,32 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PYTHON="${PYTHON:-$ROOT/.venv/bin/python}"
 DEVELOPMENT=0
-if [[ "${1:-}" == "--development" ]]; then
-  DEVELOPMENT=1
-  export MACOS_SIGNING_IDENTITY=-
-elif [[ $# != 0 ]]; then
-  echo 'Usage: package-connector.sh [--development]' >&2
-  exit 2
-fi
+PREBUILT=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --development)
+      DEVELOPMENT=1
+      export MACOS_SIGNING_IDENTITY=-
+      shift
+      ;;
+    --prebuilt)
+      PREBUILT=1
+      shift
+      ;;
+    *)
+      echo 'Usage: package-connector.sh [--development] [--prebuilt]' >&2
+      exit 2
+      ;;
+  esac
+done
 if [[ "$DEVELOPMENT" == 0 && ( -z "${MACOS_SIGNING_IDENTITY:-}" || "$MACOS_SIGNING_IDENTITY" == '-' ) ]]; then
   echo 'Set MACOS_SIGNING_IDENTITY to the release certificate, or use --development for a local-only build.' >&2
   exit 1
 fi
 cd "$ROOT"
-./scripts/install-locked.sh "$PYTHON" package
+if [[ "$PREBUILT" == 0 ]]; then
+  ./scripts/install-locked.sh "$PYTHON" package
+fi
 "$PYTHON" desktop/make_icon.py desktop/AppIcon.icns
 "$PYTHON" -m PyInstaller --noconfirm --distpath "$ROOT/release" --workpath "$ROOT/build/connector" desktop/Connector.spec
 APP="$ROOT/release/Anteroom Connector.app"

@@ -87,3 +87,38 @@ class PackageMacosScriptTest(unittest.TestCase):
             self.assertIn("scripts/sign_macos_bundle.py", text)
             self.assertIn("notarize-macos-app.sh", text)
         self.assertIn("_validate_zip_members", (scripts / "package-macos-app.sh").read_text(encoding="utf-8"))
+
+    def test_package_script_uses_npm_ci_not_npm_install(self):
+        script = (Path(__file__).resolve().parents[2] / "scripts" / "package-macos-app.sh").read_text(encoding="utf-8")
+        self.assertIn("npm ci", script)
+        self.assertNotIn("npm install", script)
+
+    def test_macos_workflow_installs_before_signing_secrets_and_disables_checkout_credentials(self):
+        import yaml
+
+        workflow_path = Path(__file__).resolve().parents[3] / ".github" / "workflows" / "studio-macos.yml"
+        raw = workflow_path.read_text(encoding="utf-8")
+        self.assertNotIn("pip install -U pip", raw)
+
+        workflow = yaml.safe_load(raw)
+        package_steps = workflow["jobs"]["package"]["steps"]
+        names = [step.get("name", "") for step in package_steps]
+        install_idx = names.index("Install dependencies and build frontend")
+        certs_idx = names.index("Import signing certificates")
+        notary_idx = names.index("Write the notarization key")
+        package_idx = names.index("Package app")
+        connector_idx = names.index("Package standalone subscription connector")
+        self.assertLess(install_idx, certs_idx)
+        self.assertLess(install_idx, notary_idx)
+        self.assertLess(notary_idx, package_idx)
+        self.assertIn("--prebuilt", package_steps[package_idx]["run"])
+        self.assertIn("--prebuilt", package_steps[connector_idx]["run"])
+
+        for job_name, job in workflow["jobs"].items():
+            for step in job.get("steps", []):
+                if str(step.get("uses", "")).startswith("actions/checkout@"):
+                    self.assertIs(
+                        step.get("with", {}).get("persist-credentials"),
+                        False,
+                        f"{job_name} checkout must set persist-credentials: false",
+                    )

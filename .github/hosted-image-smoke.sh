@@ -46,8 +46,10 @@ print('PASS Python3.12, nonroot10001, native dependencies, photo codec and packa
 PY
 docker network create --internal "$network" >/dev/null
 # Synthetic password and empty database, confined to this disposable network.
+# Pinned by digest matching .github/workflows/ci.yml.
 docker run -d --name anteroom-image-smoke-pg --network "$network" \
-  -e POSTGRES_PASSWORD=synthetic-smoke-password -e POSTGRES_DB=smoke postgres:16 >/dev/null
+  -e POSTGRES_PASSWORD=synthetic-smoke-password -e POSTGRES_DB=smoke \
+  postgres:16@sha256:f9a7b9ebf6f56201f949db745e47bc423c0f0f8294bafe991cc10bf74b029657 >/dev/null
 # The official entrypoint's temporary initialization server is socket-only.
 # Wait for the final TCP listener instead of accepting that temporary server.
 for attempt in $(seq 1 60); do
