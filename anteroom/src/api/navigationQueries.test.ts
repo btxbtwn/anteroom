@@ -128,6 +128,44 @@ it("tags background hover prefetches and aborts them when the caller cancels", a
   } finally { client.clear(); }
 });
 
+it.each(["opening", "mounted"] as const)("keeps the in-flight listing read when the destination is %s", async (destination) => {
+  const client = createStudioQueryClient();
+  const hover = new AbortController();
+  const document: Awaited<ReturnType<typeof api.listings.get>> = {
+    conversation_id: "item", current_revision_id: "saved", revision_count: 1,
+    listing: { title: "Saved listing" }, can_send: false,
+  };
+  let finish!: () => void;
+  const read = vi.spyOn(api.listings, "get").mockImplementation((_id, options) =>
+    new Promise((resolve, reject) => {
+      finish = () => resolve(document);
+      options?.signal?.addEventListener("abort", () => reject(options.signal!.reason), { once: true });
+    }),
+  );
+  vi.spyOn(api.conversations, "photos").mockResolvedValue([]);
+  const observer = new QueryObserver(client, {
+    queryKey: ["listing", "item"], queryFn: ({ signal }) => api.listings.get("item", { signal }),
+  });
+  let unsubscribe: (() => void) | undefined;
+  try {
+    const hovered = prefetchListingReads(client, "item", { signal: hover.signal, background: true });
+    expect(read).toHaveBeenCalledTimes(1);
+    // The click starts foreground prefetch before React mounts the editor.
+    const opened = destination === "opening" ? prefetchListingReads(client, "item") : undefined;
+    if (destination === "mounted") unsubscribe = observer.subscribe(() => {});
+    hover.abort();
+    unsubscribe ??= observer.subscribe(() => {});
+    expect(read.mock.calls[0][1]?.signal?.aborted).toBe(false);
+    finish();
+    await Promise.all([hovered, opened]);
+    expect(observer.getCurrentResult().data).toEqual(document);
+    expect(read).toHaveBeenCalledTimes(1);
+  } finally {
+    unsubscribe?.();
+    client.clear();
+  }
+});
+
 it("mounting a prefetched thread shows its messages synchronously without another request", async () => {
   const client = createStudioQueryClient();
   const messages = [{ id: "answer", role: "assistant" as const, text: "Saved answer", created_at: null }];
