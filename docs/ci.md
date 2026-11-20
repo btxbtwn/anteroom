@@ -89,7 +89,10 @@ verified as live. Detected native changes are listed; the list is not exhaustive
 Python/packaging changes. Native impact assessment and pinned native receipts
 remain separate requirements; hosted image validation, live schema/Machine reconciliation, backup
 readiness and production load measurements are not established by this run.
-There is no approval consumer, historical-CI override or deploy integration.
+This standalone workflow itself has no approval consumer, historical-CI
+override, or deploy trigger (see
+[Hosted deploy gate recovery checkpoint](#hosted-deploy-gate-recovery-checkpoint)
+for how `Deploy hosted` consumes a pinned receipt).
 No production secrets, write permissions, migration, image push or rollout are
 available to this workflow. Its name is different from CI, so it does not match
 Deploy hosted's workflow_run trigger. A CI workflow_dispatch also does not
