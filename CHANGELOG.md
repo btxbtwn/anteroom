@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1063 — 2026-11-20
+
+- Speed up marketplace form loading by running eBay schema reads in parallel, releasing database connections before marketplace waits, and caching public Mercari shipping quotes and marketplace choice lists across reloads.
+- Automatically reload stale or unavailable marketplace fields when you open a marketplace tab or change its category or dependent choices, and recover cleanly from transient network drops ("Load failed") when reloading fields.
+
 ## 0.1.1062 — 2026-11-20
 
 - Harden hosted upload limits, account deletion ordering, assistant proposal locking, and network/log security safeguards.

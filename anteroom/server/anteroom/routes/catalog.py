@@ -209,4 +209,8 @@ def choice_list(name: str, v: str = ""):
         raise HTTPException(404, "Unknown choice list")
     body, version = listed
     cache = "private, max-age=31536000, immutable" if v == version else "no-cache"
-    return Response(body, media_type="application/json", headers={"Cache-Control": cache})
+    return Response(
+        body,
+        media_type="application/json",
+        headers={"Cache-Control": cache, "X-Choice-List-Version": version},
+    )

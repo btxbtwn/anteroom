@@ -31,6 +31,16 @@ def category_choices() -> dict:
     return {key: row[key] for key in ("options", "option_values", "cascade") if key in row}
 
 
+@lru_cache(maxsize=1)
+def _category_index() -> tuple[frozenset[str], dict[str, str]]:
+    values = frozenset(category_choices()["option_values"].values())
+    by_leaf: dict[str, set[str]] = {}
+    for value in values:
+        by_leaf.setdefault(value.split("/")[-1], set()).add(value)
+    unique_leaves = {leaf: next(iter(matches)) for leaf, matches in by_leaf.items() if len(matches) == 1}
+    return values, unique_leaves
+
+
 def _multiple(listing: dict) -> bool:
     def many(value):
         try:
@@ -128,16 +138,11 @@ def _initial_inventory(listing: dict, groups: list) -> list:
 
 def form(listing: dict) -> dict:
     data = catalog()
-    rows = copy.deepcopy(data["fields"])
-    category_row = next(row for row in rows if row["path"] == "direct_category_ids.poshmark")
-    choices = category_row["option_values"]
+    rows = [dict(row) for row in data["fields"]]
+    category_ids, unique_leaves = _category_index()
     wanted = str((listing.get("direct_category_ids") or {}).get("poshmark") or "")
-    category_id = wanted if wanted in choices.values() else ""
-    if not category_id:
-        matches = {value for value in choices.values() if wanted and value.split("/")[-1] == wanted}
-        if len(matches) == 1:
-            category_id = matches.pop()
-    groups = copy.deepcopy(data["inventory_groups"].get("/".join(category_id.split("/")[:2]), []))
+    category_id = wanted if wanted in category_ids else unique_leaves.get(wanted, "")
+    groups = data["inventory_groups"].get("/".join(category_id.split("/")[:2]), [])
     specifics = listing.get("poshmark_specifics") or {}
     for row in rows:
         path = row["path"]

@@ -11,10 +11,13 @@ optional fields a category unlocks — without going through Chrome.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
 from anteroom.database import SessionLocal
 from anteroom.models.catalog import CategoryFieldSchema
@@ -28,29 +31,69 @@ log = logging.getLogger("anteroom.category_fields")
 SCHEMA_MAX_AGE = timedelta(days=7)
 
 __all__ = ["load_fields", "save_fields", "save_rows", "cached_marketplaces", "load_rows",
-           "listing_category_ids"]
+           "load_rows_many", "listing_category_ids"]
 
 
-def load_rows(marketplace: str, category_id: str) -> list[dict[str, Any]] | None:
+def _fresh_rows(row: CategoryFieldSchema | None) -> list[dict[str, Any]] | None:
+    if row is None or row.fetched_at is None:
+        return None
+    fetched_at = row.fetched_at.replace(tzinfo=UTC) if row.fetched_at.tzinfo is None else row.fetched_at
+    if datetime.now(UTC) - fetched_at > SCHEMA_MAX_AGE:
+        return None
+    return list(row.fields or [])
+
+
+def load_rows(marketplace: str, category_id: str, *, db: Session | None = None) -> list[dict[str, Any]] | None:
     """The stored rows for one leaf, or None when nothing is cached."""
     if not marketplace or not category_id:
         return None
-    with SessionLocal() as db:
+    if db is not None:
         row = (
             db.query(CategoryFieldSchema)
             .filter_by(marketplace=str(marketplace), category_id=str(category_id))
             .one_or_none()
         )
-        if row is None or row.fetched_at is None:
-            return None
-        fetched_at = row.fetched_at.replace(tzinfo=UTC) if row.fetched_at.tzinfo is None else row.fetched_at
-        if datetime.now(UTC) - fetched_at > SCHEMA_MAX_AGE:
-            return None
-        return list(row.fields or [])
+        return _fresh_rows(row)
+    with SessionLocal() as session:
+        row = (
+            session.query(CategoryFieldSchema)
+            .filter_by(marketplace=str(marketplace), category_id=str(category_id))
+            .one_or_none()
+        )
+        return _fresh_rows(row)
 
 
-def load_fields(marketplace: str, category_id: str) -> dict[str, FieldSpec] | None:
-    rows = load_rows(marketplace, category_id)
+def load_rows_many(
+    keys: Iterable[tuple[str, str]],
+    *,
+    db: Session | None = None,
+) -> dict[tuple[str, str], list[dict[str, Any]] | None]:
+    """Batch-read cached schema rows for several ``(marketplace, category_id)`` pairs in one query."""
+    pairs = list(dict.fromkeys((str(m), str(c)) for m, c in keys if m and c))
+    out: dict[tuple[str, str], list[dict[str, Any]] | None] = {pair: None for pair in pairs}
+    if not pairs:
+        return out
+
+    def query(session: Session) -> list[CategoryFieldSchema]:
+        clauses = [
+            and_(CategoryFieldSchema.marketplace == marketplace, CategoryFieldSchema.category_id == category_id)
+            for marketplace, category_id in pairs
+        ]
+        return list(session.query(CategoryFieldSchema).filter(or_(*clauses)).all())
+
+    rows = query(db) if db is not None else _with_session(query)
+    for row in rows:
+        out[(str(row.marketplace), str(row.category_id))] = _fresh_rows(row)
+    return out
+
+
+def _with_session(work):
+    with SessionLocal() as session:
+        return work(session)
+
+
+def load_fields(marketplace: str, category_id: str, *, db: Session | None = None) -> dict[str, FieldSpec] | None:
+    rows = load_rows(marketplace, category_id, db=db)
     if rows is None:
         return None
     specs = specs_from_rows(rows)

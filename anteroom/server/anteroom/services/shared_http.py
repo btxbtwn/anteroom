@@ -30,11 +30,19 @@ async def close_connection() -> None:
         await shared[1].aclose()
 
 
-@asynccontextmanager
-async def http_client() -> AsyncIterator[httpx.AsyncClient]:
+def current_client() -> httpx.AsyncClient | None:
+    """The shared client when running on the server's loop, else None."""
     shared = _shared
     if shared is not None and shared[0] is asyncio.get_running_loop():
-        yield shared[1]
+        return shared[1]
+    return None
+
+
+@asynccontextmanager
+async def http_client() -> AsyncIterator[httpx.AsyncClient]:
+    shared = current_client()
+    if shared is not None:
+        yield shared
         return
     async with httpx.AsyncClient() as client:
         yield client

@@ -20,10 +20,12 @@ eBay names values by their text, so a value's ``id`` is its label there.
 from __future__ import annotations
 
 import asyncio
-
+import contextvars
 import re
 import time
-from typing import Literal, TypedDict
+from collections.abc import Iterator
+from contextlib import contextmanager
+from typing import Any, Literal, TypedDict
 
 from anteroom.services.category_fields import load_rows, save_rows
 
@@ -34,6 +36,74 @@ EBAY_LISTING_TYPES = "ebay_listing_types"
 EBAY_LISTING_STRUCTURE = "ebay_listing_structure"
 ETSY_PROPERTIES = "etsy_properties"
 _TAXONOMY_MAX_AGE_S = 24 * 3600
+
+
+class _LazyEbayClient:
+    """Connects to eBay at most once across concurrent schema reads that miss cache."""
+
+    def __init__(self) -> None:
+        self._client: Any = None
+        self._error: Exception | None = None
+        self._lock = asyncio.Lock()
+
+    async def get(self):
+        if self._client is not None:
+            return self._client
+        if self._error is not None:
+            raise self._error
+        async with self._lock:
+            if self._client is not None:
+                return self._client
+            if self._error is not None:
+                raise self._error
+            from anteroom.services.ebay_client import EbayClient
+
+            try:
+                self._client = await EbayClient.connect()
+            except Exception as exc:
+                self._error = exc
+                raise
+            return self._client
+
+
+_preloaded_rows: contextvars.ContextVar[dict[tuple[str, str], list[dict] | None] | None] = contextvars.ContextVar(
+    "marketplace_schemas_preloaded", default=None,
+)
+_ebay_client_holder: contextvars.ContextVar[_LazyEbayClient | None] = contextvars.ContextVar(
+    "marketplace_schemas_ebay_client", default=None,
+)
+
+
+@contextmanager
+def schema_session(preloaded: dict[tuple[str, str], list[dict] | None] | None = None) -> Iterator[None]:
+    """Scope preloaded DB cache rows and one lazy eBay client to a single form build."""
+    rows_token = _preloaded_rows.set(preloaded) if preloaded is not None else None
+    client_token = _ebay_client_holder.set(_LazyEbayClient())
+    try:
+        yield
+    finally:
+        _ebay_client_holder.reset(client_token)
+        if rows_token is not None:
+            _preloaded_rows.reset(rows_token)
+
+
+async def _cached_rows(marketplace: str, category_id: str) -> list[dict] | None:
+    preloaded = _preloaded_rows.get()
+    key = (marketplace, category_id)
+    if preloaded is not None and key in preloaded:
+        return preloaded[key]
+    return await asyncio.to_thread(load_rows, marketplace, category_id)
+
+
+async def _ebay_client(client):
+    if client is not None:
+        return client
+    holder = _ebay_client_holder.get()
+    if holder is not None:
+        return await holder.get()
+    from anteroom.services.ebay_client import EbayClient
+
+    return await EbayClient.connect()
 class _TaxonomyCache(TypedDict):
     at: float
     leaves: tuple[dict[str, str], ...]
@@ -146,11 +216,12 @@ async def ebay_aspects(client, category_id: str) -> list[dict]:
     """The leaf's item aspects, under eBay's exact names."""
     category_id = _category(category_id)
     # The cache is in the database: read and write it off the event loop.
-    cached = await asyncio.to_thread(load_rows, EBAY_ASPECTS, category_id)
+    cached = await _cached_rows(EBAY_ASPECTS, category_id)
     if cached is not None:
         return cached
-    body = await client.request("GET", "/commerce/taxonomy/v1/category_tree/0/get_item_aspects_for_category",
-                                params={"category_id": category_id}, app=True)
+    ebay = await _ebay_client(client)
+    body = await ebay.request("GET", "/commerce/taxonomy/v1/category_tree/0/get_item_aspects_for_category",
+                              params={"category_id": category_id}, app=True)
     fields = [_ebay_field(aspect) for aspect in body.get("aspects") or [] if aspect.get("localizedAspectName")]
     await asyncio.to_thread(save_rows, EBAY_ASPECTS, category_id, fields)
     return fields
@@ -159,11 +230,12 @@ async def ebay_aspects(client, category_id: str) -> list[dict]:
 async def ebay_conditions(client, category_id: str) -> dict:
     """``{"required", "conditions": [{"id", "label"}]}`` for the leaf. No conditions means eBay did not say."""
     category_id = _category(category_id)
-    cached = await asyncio.to_thread(load_rows, EBAY_CONDITIONS, category_id)
+    cached = await _cached_rows(EBAY_CONDITIONS, category_id)
     if cached:
         return cached[0]
-    body = await client.request("GET", "/sell/metadata/v1/marketplace/EBAY_US/get_item_condition_policies",
-                                params={"filter": f"categoryIds:{{{category_id}}}"})
+    ebay = await _ebay_client(client)
+    body = await ebay.request("GET", "/sell/metadata/v1/marketplace/EBAY_US/get_item_condition_policies",
+                              params={"filter": f"categoryIds:{{{category_id}}}"})
     policy = next((row for row in body.get("itemConditionPolicies") or [] if str(row.get("categoryId")) == category_id), {})
     answer = {"required": bool(policy.get("itemConditionRequired")),
               "conditions": [{"id": str(item["conditionId"]), "label": str(item.get("conditionDescription") or "")}
@@ -198,11 +270,12 @@ async def ebay_listing_types(client, category_id: str) -> dict[str, list[str]]:
     empty answer means eBay did not say.
     """
     category_id = _category(category_id)
-    cached = await asyncio.to_thread(load_rows, EBAY_LISTING_TYPES, category_id)
+    cached = await _cached_rows(EBAY_LISTING_TYPES, category_id)
     if cached:
         return cached[0]
-    body = await client.request("GET", "/sell/metadata/v1/marketplace/EBAY_US/get_listing_type_policies",
-                                params={"filter": f"categoryIds:{{{category_id}}}"})
+    ebay = await _ebay_client(client)
+    body = await ebay.request("GET", "/sell/metadata/v1/marketplace/EBAY_US/get_listing_type_policies",
+                              params={"filter": f"categoryIds:{{{category_id}}}"})
     policy = next((row for row in body.get("listingTypePolicies") or [] if str(row.get("categoryId")) == category_id), {})
     answer: dict[str, list[str]] = {}
     for row in policy.get("listingDurations") or []:
@@ -222,11 +295,12 @@ async def ebay_listing_types(client, category_id: str) -> dict[str, list[str]]:
 async def ebay_variations_supported(client, category_id: str) -> bool | None:
     """Whether eBay takes multi-variation listings in the leaf (``getListingStructurePolicies``). None: eBay did not say."""
     category_id = _category(category_id)
-    cached = await asyncio.to_thread(load_rows, EBAY_LISTING_STRUCTURE, category_id)
+    cached = await _cached_rows(EBAY_LISTING_STRUCTURE, category_id)
     if cached:
         return bool(cached[0].get("variations"))
-    body = await client.request("GET", "/sell/metadata/v1/marketplace/EBAY_US/get_listing_structure_policies",
-                                params={"filter": f"categoryIds:{{{category_id}}}"})
+    ebay = await _ebay_client(client)
+    body = await ebay.request("GET", "/sell/metadata/v1/marketplace/EBAY_US/get_listing_structure_policies",
+                              params={"filter": f"categoryIds:{{{category_id}}}"})
     policy = next((row for row in body.get("listingStructurePolicies") or [] if str(row.get("categoryId")) == category_id), None)
     if policy is None or "variationsSupported" not in policy:
         return None
@@ -252,7 +326,7 @@ async def etsy_properties(taxonomy_id: str) -> list[dict]:
     from anteroom.services import marketplace_accounts
 
     taxonomy_id = _category(taxonomy_id)
-    cached = await asyncio.to_thread(load_rows, ETSY_PROPERTIES, taxonomy_id)
+    cached = await _cached_rows(ETSY_PROPERTIES, taxonomy_id)
     if cached is not None:
         return cached
     body = await marketplace_accounts.etsy_api("GET", f"seller-taxonomy/nodes/{taxonomy_id}/properties")
@@ -298,11 +372,15 @@ async def fields(marketplace: SchemaMarketplace, category_id: str) -> list[dict]
         if _category(category_id) not in await etsy_leaves():
             raise ValueError("Etsy does not list items in that category. Choose a current, most specific Etsy category.")
         return await etsy_properties(category_id)
-    from anteroom.services.ebay_client import EbayClient
-
-    client = await EbayClient.connect()
-    aspects = await ebay_aspects(client, category_id)
-    conditions = await ebay_conditions(client, category_id)
+    if _ebay_client_holder.get() is None:
+        with schema_session():
+            aspects, conditions = await asyncio.gather(
+                ebay_aspects(None, category_id), ebay_conditions(None, category_id),
+            )
+    else:
+        aspects, conditions = await asyncio.gather(
+            ebay_aspects(None, category_id), ebay_conditions(None, category_id),
+        )
     if not conditions["conditions"]:
         return aspects
     condition = {"id": "condition", "name": "Condition", "required": conditions["required"], "usage": None, "mode": "selection",

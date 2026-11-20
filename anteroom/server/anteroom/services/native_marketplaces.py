@@ -562,7 +562,7 @@ def preflight(conv_id: str, db: Session) -> dict:
     records = MarketplaceListingRepo(db).for_conversation(conv_id)
     out = {}
     for marketplace in NAMES:
-        found = direct_preflight.gaps(attach_form(copy_listing(prepared), marketplace), marketplace,
+        found = direct_preflight.gaps(attach_form(copy_listing(prepared), marketplace, db=db), marketplace,
                                       _context(db, conv_id, marketplace, body))
         left_off = marketplace_media.photos_for(prepared, photos, marketplace)[1]
         if left_off:
