@@ -1,1 +1,0 @@
-- Import all your active listings from a marketplace in one step. Listings that look like items already in Anteroom wait for you to link them or import them as new, so nothing is duplicated, and nothing on the marketplace is changed.

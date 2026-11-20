@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1058 — 2026-11-20
+
+- Import all your active listings from a marketplace in one step. Listings that look like items already in Anteroom wait for you to link them or import them as new, so nothing is duplicated, and nothing on the marketplace is changed.
+
 ## 0.1.1057 — 2026-11-20
 
 - Keep unsent chat and assistant drafts when switching between listings or conversations, clearing them only when sent.
