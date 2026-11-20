@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1061 — 2026-11-20
+
+- Fix hosted deploys that get stuck waiting for CI after a rebase merge.
+
 ## 0.1.1060 — 2026-11-20
 
 - Improve backend reliability and responsiveness during photo editing, background draft generation, and multi-seller automations by releasing database transactions before external photo I/O, replacing global photo and automation locks with scoped locks, and capping concurrent background worker jobs.

@@ -1,1 +1,0 @@
-- Fix hosted deploys that get stuck waiting for CI after a rebase merge.
