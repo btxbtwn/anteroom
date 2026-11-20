@@ -195,7 +195,7 @@ run `44662061597`, attempt `1`, artifact `14596571781`) via
 `Deploy hosted`'s serialized `deploy-hosted` concurrency group:
 
 - Recorded `production_commit` equals `b73c534707b9ef9bd70e4dc589b9c4b10863a852`,
-  corroborated as a live backup by HTTPS `HEALTH_URL` reporting `status: ok`,
+  corroborated by HTTPS `HEALTH_URL` reporting `status: ok`,
   `service: anteroom-hosted`, and version `0.1.1011`.
 - The only non-green historical commit is `fa824f9a` (`conclusion == failure`),
   preceding correcting merge `#1653` (`5cc7fea1`) and exact checkpoint `b28ba4b3`
@@ -203,17 +203,25 @@ run `44662061597`, attempt `1`, artifact `14596571781`) via
 - Every other non-release commit in `production..HEAD` — including every commit
   merged after `b28ba4b3` — passes its own push `CI` first; the receipt is never
   applied to any other SHA.
-- Live verification runs immediately before build, migration, and rollout, using
-  only the existing read-only workflow permissions (`contents: read`,
-  `actions: read`, `checks: read`).
+- Before any build push, migration, category-tree write, or Fly rollout,
+  `Reconcile live production base for recovery` (`--reconcile-live-base`)
+  re-verifies that recorded `production_commit` is still `b73c5347`, live
+  `HEALTH_URL` still reports `0.1.1011`, **both** Fly `app` (web) and `worker`
+  Machines are `started` on exact image tag `v0.1.1011-b73c5347` and digest
+  `sha256:9a4b1bccee97d53d903e23d5ec0a8cbf6bb71b043cbb35a1ed88c165947c60ac`, and
+  the live Postgres Alembic revision (`python -m alembic current` over
+  `verify-full` TLS) is still `d0e4f3a92b68`.
+- Workflow permissions remain unchanged (`contents: read`, `actions: read`,
+  `checks: read`); no new environments, rulesets, or tokens are added.
 
-Once a single deploy succeeds and records a newer `Deployed commit` notice (or
-live `/api/health` moves off `0.1.1011`), the pinned checkpoint never matches
-again and ordinary gating applies unchanged. If a recovery deploy advances live
-web Machines off `0.1.1011` and then fails before emitting `Deployed commit`,
-subsequent deploys intentionally fail closed until an operator inspects Fly
-Machines and DB schema state and completes/records the rollout. Remove
-`HISTORICAL_RECOVERY_CHECKPOINT` in a cleanup PR once production is verified
-past `b73c5347` (artifact `14596571781` expires `2026-12-20`). The offline
-gate-recovery tests live in `.github/scripts/test_wait_for_tested_code.py` and
-run in `Repo checks`.
+Once a single deploy mutates the database past `d0e4f3a92b68`, moves either
+Fly `app` or `worker` Machine off `v0.1.1011-b73c5347`, or records a newer
+`Deployed commit` notice, the pinned checkpoint fails closed on any subsequent
+run and cannot be reused against partially mutated state. Post-rollout,
+`Confirm every Machine runs the new image` passes `--require-group app
+--require-group worker` to `check-fly-machines.py`, so both web and worker
+Machines must be `started` on the new image before `Deployed commit` is
+recorded. Remove `HISTORICAL_RECOVERY_CHECKPOINT` in a cleanup PR once
+production is verified past `b73c5347` (artifact `14596571781` expires
+`2026-12-20`). The offline gate-recovery tests live in
+`.github/scripts/test_wait_for_tested_code.py` and run in `Repo checks`.

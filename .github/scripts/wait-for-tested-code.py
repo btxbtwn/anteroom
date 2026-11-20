@@ -27,9 +27,11 @@ from __future__ import annotations
 
 import argparse
 import http.client
+import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -66,6 +68,31 @@ HISTORICAL_RECOVERY_CHECKPOINT = recovery_evidence.EvidencePin(
     receipt_artifact_id=14596571781,
     receipt_digest="sha256:4d0f38c8b8125c78810c0eecfb9301e74bd73a8e3f2df148cb38879c328ed791",
 )
+HISTORICAL_BASE_FLY_APP = "peaceful-meadowstone-6944"
+HISTORICAL_BASE_IMAGE_DIGEST = "sha256:9a4b1bccee97d53d903e23d5ec0a8cbf6bb71b043cbb35a1ed88c165947c60ac"
+HISTORICAL_BASE_DB_REVISION = "d0e4f3a92b68"
+HISTORICAL_BASE_FLY_GROUPS = ("app", "worker")
+ALEMBIC_CURRENT_RE = re.compile(r"([0-9a-f]{12})(?: \(head\))?")
+FLY_APP_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
+
+
+def _load_fly_machine_checker():
+    spec = importlib.util.spec_from_file_location(
+        "check_fly_machines",
+        Path(__file__).resolve().parent / "check-fly-machines.py",
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Could not load check-fly-machines.py.")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _write_github_output(name: str, value: str) -> None:
+    path = os.environ.get("GITHUB_OUTPUT")
+    if path:
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(f"{name}={value}\n")
 
 
 def git(*args: str) -> str:
@@ -262,6 +289,151 @@ def verify_historical_checkpoint(
     return {**report, "live_base_version": live_version}
 
 
+def parse_alembic_current(output: str) -> str:
+    """Parse stdout of `python -m alembic current`; require a single unambiguous revision."""
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    if len(lines) != 1:
+        raise ValueError(f"Expected exactly one live Alembic revision line, got {len(lines)}.")
+    match = ALEMBIC_CURRENT_RE.fullmatch(lines[0])
+    if not match:
+        raise ValueError(f"Unrecognized live Alembic current output: {lines[0]!r}.")
+    return match.group(1)
+
+
+def live_fly_machines(fly_app: str) -> list[dict]:
+    """Read live Fly Machines JSON via bounded read-only flyctl command without logging stderr."""
+    if not isinstance(fly_app, str) or not FLY_APP_RE.fullmatch(fly_app):
+        raise ValueError(f"Invalid Fly app name {fly_app!r}.")
+    raw = recovery_evidence.read_command(["flyctl", "machines", "list", "--app", fly_app, "--json"])
+    payload = json.loads(
+        raw,
+        object_pairs_hook=recovery_evidence.unique_object,
+        parse_constant=lambda _: (_ for _ in ()).throw(ValueError("Non-finite JSON.")),
+    )
+    if not isinstance(payload, list):
+        raise ValueError("Live Fly Machines payload must be a JSON list.")
+    return payload
+
+
+def live_alembic_revision(
+    alembic_cwd: str | Path,
+    *,
+    env: dict[str, str] | None = None,
+    retries: int = 3,
+    retry_delay: float = 15.0,
+) -> str:
+    """Read live hosted Postgres Alembic revision without logging credentials or raw stderr."""
+    source_env = dict(os.environ if env is None else env)
+    db_url = source_env.get("ANTEROOM_DATABASE_URL", "")
+    if not db_url.startswith(("postgres://", "postgresql://", "postgresql+psycopg://")):
+        raise ValueError("A Postgres ANTEROOM_DATABASE_URL is required to reconcile live DB schema.")
+    if source_env.get("PGSSLMODE") != "verify-full":
+        raise ValueError("PGSSLMODE=verify-full is required to reconcile live DB schema.")
+    ca_path = source_env.get("PGSSLROOTCERT", "")
+    if not ca_path or not Path(ca_path).is_file():
+        raise ValueError("An existing PGSSLROOTCERT file is required to reconcile live DB schema.")
+    cwd = Path(alembic_cwd)
+    if not (cwd / "alembic.ini").is_file():
+        raise ValueError(f"Alembic config not found in {cwd}.")
+    attempts = max(1, retries)
+    for attempt in range(1, attempts + 1):
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "alembic", "current"],
+                cwd=str(cwd),
+                env=source_env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except (subprocess.TimeoutExpired, OSError) as error:
+            if attempt == attempts:
+                raise ValueError("Live database Alembic revision query failed or timed out.") from error
+            time.sleep(retry_delay)
+            continue
+        if result.returncode == 0:
+            return parse_alembic_current(result.stdout)
+        if attempt == attempts:
+            raise ValueError("Live database Alembic revision query exited non-zero.")
+        time.sleep(retry_delay)
+    raise ValueError("Live database Alembic revision query did not succeed.")
+
+
+def reconcile_live_production_base(
+    repo: str,
+    *,
+    fly_app: str,
+    alembic_cwd: str | Path = "vendoo-studio",
+    health_url: str = "",
+    pin: recovery_evidence.EvidencePin | None = HISTORICAL_RECOVERY_CHECKPOINT,
+    expected_fly_app: str = HISTORICAL_BASE_FLY_APP,
+    expected_image_digest: str = HISTORICAL_BASE_IMAGE_DIGEST,
+    expected_db_revision: str = HISTORICAL_BASE_DB_REVISION,
+    required_groups: tuple[str, ...] = HISTORICAL_BASE_FLY_GROUPS,
+    production_fn=None,
+    git_fn=None,
+    live_version_fn=None,
+    fly_machines_fn=None,
+    db_revision_fn=None,
+) -> dict:
+    """Fail closed before any deploy effect if recorded SHA, live web/worker Machines, or DB schema drifted."""
+    if pin is None:
+        raise ValueError("No recovery checkpoint is configured.")
+    if repo != pin.repository:
+        raise ValueError(f"Repository {repo!r} does not match pinned repository {pin.repository!r}.")
+    if fly_app != expected_fly_app:
+        raise ValueError(f"Fly app {fly_app!r} does not match pinned app {expected_fly_app!r}.")
+
+    current_production = (production_fn or production_commit)(repo)
+    if current_production != pin.production_base:
+        raise ValueError(
+            f"Recorded production commit {current_production!r} does not match pinned recovery base "
+            f"{pin.production_base[:8]}."
+        )
+
+    run_git = git_fn or _read_git
+    expected_version = run_git("show", f"{pin.production_base}:vendoo-studio/VERSION").strip()
+    if not expected_version:
+        raise ValueError("Could not read expected VERSION for the pinned production base.")
+    live_version = (live_version_fn or live_health_version)(health_url)
+    if live_version != expected_version:
+        raise ValueError(
+            f"Live production version {live_version!r} does not match pinned base "
+            f"{pin.production_base[:8]} version {expected_version!r}."
+        )
+
+    expected_label = f"v{expected_version}-{pin.production_base[:8]}"
+    machines = (fly_machines_fn or live_fly_machines)(fly_app)
+    checker = _load_fly_machine_checker()
+    groups, wrong = checker.problems(
+        machines,
+        expected_label,
+        required_groups=required_groups,
+        expected_digest=expected_image_digest,
+    )
+    if wrong:
+        raise ValueError("Live Fly Machines do not match proven recovery base: " + "; ".join(wrong))
+
+    live_revision = (db_revision_fn or live_alembic_revision)(alembic_cwd)
+    if live_revision != expected_db_revision:
+        raise ValueError(
+            f"Live database Alembic revision {live_revision!r} does not match proven recovery base "
+            f"{expected_db_revision!r}; refusing to reuse recovery checkpoint."
+        )
+
+    return {
+        "production_base": pin.production_base,
+        "live_base_version": live_version,
+        "fly_app": fly_app,
+        "fly_label": expected_label,
+        "fly_groups": groups,
+        "fly_digest": expected_image_digest,
+        "db_revision": live_revision,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True)
@@ -269,7 +441,30 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, default=40 * 60)
     parser.add_argument("--interval", type=int, default=30)
     parser.add_argument("--health-url", default=os.environ.get("HEALTH_URL", ""))
+    parser.add_argument("--reconcile-live-base", action="store_true")
+    parser.add_argument("--fly-app", default=os.environ.get("FLY_APP", ""))
+    parser.add_argument("--alembic-cwd", default="vendoo-studio")
     args = parser.parse_args()
+
+    if args.reconcile_live_base:
+        try:
+            summary = reconcile_live_production_base(
+                args.repo,
+                fly_app=args.fly_app,
+                alembic_cwd=args.alembic_cwd,
+                health_url=args.health_url,
+                pin=HISTORICAL_RECOVERY_CHECKPOINT,
+            )
+        except (ValueError, RuntimeError, OSError, subprocess.SubprocessError, json.JSONDecodeError) as error:
+            print(f"::error::Live recovery base reconciliation failed: {error}")
+            return 1
+        groups_text = ", ".join(f"{group}={count}" for group, count in sorted(summary["fly_groups"].items()))
+        print(
+            f"Reconciled live recovery base {summary['production_base'][:8]}: "
+            f"health={summary['live_base_version']}, Fly {summary['fly_app']} ({groups_text}) "
+            f"on {summary['fly_label']}, DB Alembic revision={summary['db_revision']}."
+        )
+        return 0
 
     head_sha = git("rev-parse", args.head)
     production = production_commit(args.repo)
@@ -321,6 +516,7 @@ def main() -> int:
             waiting.append((sha, status))
         if not waiting:
             if superseded_historical is None:
+                _write_github_output("recovery_checkpoint", "false")
                 return 0
             try:
                 current_production = production_commit(args.repo)
@@ -339,6 +535,7 @@ def main() -> int:
             except (ValueError, RuntimeError, OSError, subprocess.SubprocessError, json.JSONDecodeError) as error:
                 print(f"::error::Recovery checkpoint rejected for {superseded_historical[:8]}: {error}")
                 return 1
+            _write_github_output("recovery_checkpoint", "true")
             print(
                 f"Historical CI failure on {superseded_historical[:8]} is superseded by verified Descendant "
                 f"verification checkpoint {report['target'][:8]} (run {report['run_id']} attempt {report['attempt']}, "

@@ -7,8 +7,11 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -515,6 +518,279 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
             patch.object(sys, "argv", ["gate", "--repo", self.repo, "--head", self.head, "--timeout", "0"]),
         ):
             self.assertEqual(self.gate.main(), 1)
+
+    def _base_machines(self, *, label=None, digest=None, include_worker=True, worker_state="started", worker_label=None, worker_digest=None):
+        base_label = label or f"v0.1.1011-{self.prod[:8]}"
+        base_digest = digest or self.gate.HISTORICAL_BASE_IMAGE_DIGEST
+        machines = [
+            {
+                "id": "web-1",
+                "state": "started",
+                "image_ref": {"tag": base_label, "digest": base_digest},
+                "config": {"metadata": {"fly_process_group": "app"}},
+            }
+        ]
+        if include_worker:
+            machines.append(
+                {
+                    "id": "worker-1",
+                    "state": worker_state,
+                    "image_ref": {"tag": worker_label or base_label, "digest": worker_digest or base_digest},
+                    "config": {"metadata": {"fly_process_group": "worker"}},
+                }
+            )
+        return machines
+
+    def test_migration_success_then_rollout_failure_blocks_checkpoint_reuse(self):
+        """Simulate Attempt 1 migrating DB then failing before moving web or recording Deployed commit."""
+        live_state = {
+            "recorded_production": self.prod,
+            "health_version": "0.1.1011",
+            "machines": self._base_machines(),
+            "db_revision": "d0e4f3a92b68",
+        }
+        effects = []
+
+        orig_verify = self.gate.verify_historical_checkpoint
+
+        def run_recovery_attempt():
+            # Step 1: Wait gate verifies receipt and sets recovery_checkpoint=true.
+            with tempfile.TemporaryDirectory() as tmp:
+                gh_out = Path(tmp) / "github_output"
+                with (
+                    patch.dict(os.environ, {"GITHUB_OUTPUT": str(gh_out)}),
+                    patch.object(self.gate, "HISTORICAL_RECOVERY_CHECKPOINT", self.pin),
+                    patch.object(self.gate, "git", side_effect=self.fake_git),
+                    patch.object(self.gate, "_read_git", side_effect=self.fake_git),
+                    patch.object(self.gate, "production_commit", side_effect=lambda _: live_state["recorded_production"]),
+                    patch.object(
+                        self.gate, "commits_to_check",
+                        return_value=([self.before_hist, self.hist, self.corr, self.post_merge], "span"),
+                    ),
+                    patch.object(
+                        self.gate, "ci_state",
+                        side_effect=lambda r, s: ("completed", "failure") if s == self.hist else ("completed", "success"),
+                    ),
+                    patch.object(
+                        self.gate, "verify_historical_checkpoint",
+                        side_effect=lambda *a, **kw: orig_verify(
+                            self.repo, self.head, live_state["recorded_production"], self.hist,
+                            pin=self.pin, health_url="https://myanteroom.com/api/health",
+                            fetch=self.fake_fetch, download=self.downloads.__getitem__,
+                            git_fn=self.fake_git, live_version_fn=lambda _: live_state["health_version"],
+                        ),
+                    ),
+                    patch.object(
+                        sys, "argv",
+                        ["gate", "--repo", self.repo, "--head", self.head, "--timeout", "0",
+                         "--health-url", "https://myanteroom.com/api/health"],
+                    ),
+                ):
+                    wait_rc = self.gate.main()
+                if wait_rc != 0:
+                    return wait_rc, ""
+                out_text = gh_out.read_text(encoding="utf-8")
+                self.assertIn("recovery_checkpoint=true\n", out_text)
+
+            # Step 2: Pre-effect live reconciliation checks recorded SHA, health, Fly web+worker, and live DB revision.
+            try:
+                self.gate.reconcile_live_production_base(
+                    self.repo,
+                    fly_app=self.gate.HISTORICAL_BASE_FLY_APP,
+                    health_url="https://myanteroom.com/api/health",
+                    pin=self.pin,
+                    production_fn=lambda _: live_state["recorded_production"],
+                    git_fn=self.fake_git,
+                    live_version_fn=lambda _: live_state["health_version"],
+                    fly_machines_fn=lambda _: copy.deepcopy(live_state["machines"]),
+                    db_revision_fn=lambda _: live_state["db_revision"],
+                )
+            except ValueError as err:
+                return 1, str(err)
+            effects.append("deploy-effects-started")
+            return 0, ""
+
+        # Attempt 1: untouched proven base passes both gate and pre-effect reconciliation.
+        rc1, err1 = run_recovery_attempt()
+        self.assertEqual((rc1, err1), (0, ""))
+        self.assertEqual(effects, ["deploy-effects-started"])
+
+        # Simulate migration succeeding (DB moves to a70c21f496e8) and Fly rollout failing before moving
+        # web or recording Deployed commit: web health STILL says 0.1.1011 and recorded SHA is STILL base.
+        live_state["db_revision"] = "a70c21f496e8"
+        effects.clear()
+        rc2, err2 = run_recovery_attempt()
+        self.assertEqual(rc2, 1)
+        self.assertIn("a70c21f496e8", err2)
+        self.assertIn("d0e4f3a92b68", err2)
+        self.assertEqual(effects, [], "Attempt 2 must fail closed before any build/migration/rollout effect")
+
+        # Worker drifted to new image while web still reports 0.1.1011 and DB was reset -> still fails closed.
+        live_state["db_revision"] = "d0e4f3a92b68"
+        live_state["machines"] = self._base_machines(worker_label="v0.1.1048-deadbeef")
+        rc3, err3 = run_recovery_attempt()
+        self.assertEqual(rc3, 1)
+        self.assertIn("worker Machine worker-1", err3)
+        self.assertEqual(effects, [])
+
+        # Web-only Fly Machine list (worker missing) -> fails closed.
+        live_state["machines"] = self._base_machines(include_worker=False)
+        rc4, err4 = run_recovery_attempt()
+        self.assertEqual(rc4, 1)
+        self.assertIn("required process group 'worker'", err4)
+        self.assertEqual(effects, [])
+
+        # Worker stopped or running same tag with different OCI digest -> fails closed.
+        live_state["machines"] = self._base_machines(worker_state="stopped")
+        rc5, err5 = run_recovery_attempt()
+        self.assertEqual(rc5, 1)
+        self.assertIn("stopped", err5)
+
+        live_state["machines"] = self._base_machines(worker_digest="sha256:" + "0" * 64)
+        rc6, err6 = run_recovery_attempt()
+        self.assertEqual(rc6, 1)
+        self.assertIn("digest", err6)
+
+    def test_reconcile_live_base_cli_and_alembic_validation(self):
+        # parse_alembic_current accepts exact single revision with or without (head).
+        self.assertEqual(self.gate.parse_alembic_current("d0e4f3a92b68\n"), "d0e4f3a92b68")
+        self.assertEqual(self.gate.parse_alembic_current("a70c21f496e8 (head)\n"), "a70c21f496e8")
+        for bad in ("", "\n", "d0e4f3a92b68\na70c21f496e8 (head)\n", "not-a-rev\n", "d0e4f3a92b68 (branch)\n"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                self.gate.parse_alembic_current(bad)
+
+        # live_alembic_revision validates Postgres URL, verify-full TLS, CA file, and alembic.ini
+        # without ever leaking ANTEROOM_DATABASE_URL.
+        secret_url = "postgresql://user:super-secret-password@db.example:5432/postgres"
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            ca_file = tmp_path / "ca.crt"
+            ca_file.write_text("dummy-ca\n", encoding="utf-8")
+            (tmp_path / "alembic.ini").write_text("[alembic]\n", encoding="utf-8")
+
+            with self.assertRaises(ValueError) as ctx:
+                self.gate.live_alembic_revision(tmp_path, env={"ANTEROOM_DATABASE_URL": "sqlite:///local.db"})
+            self.assertNotIn("sqlite:///local.db", str(ctx.exception))
+
+            with self.assertRaises(ValueError):
+                self.gate.live_alembic_revision(
+                    tmp_path,
+                    env={"ANTEROOM_DATABASE_URL": secret_url, "PGSSLMODE": "require", "PGSSLROOTCERT": str(ca_file)},
+                )
+
+            with self.assertRaises(ValueError):
+                self.gate.live_alembic_revision(
+                    tmp_path,
+                    env={"ANTEROOM_DATABASE_URL": secret_url, "PGSSLMODE": "verify-full", "PGSSLROOTCERT": str(tmp_path / "missing.crt")},
+                )
+
+            good_env = {
+                "ANTEROOM_DATABASE_URL": secret_url,
+                "PGSSLMODE": "verify-full",
+                "PGSSLROOTCERT": str(ca_file),
+            }
+            # Transient pooler failure retries once and succeeds; stderr is suppressed.
+            results = iter([
+                subprocess.CompletedProcess(["python"], 1, stdout=""),
+                subprocess.CompletedProcess(["python"], 0, stdout="d0e4f3a92b68\n"),
+            ])
+            with (
+                patch.object(self.gate.subprocess, "run", side_effect=lambda *a, **kw: next(results)),
+                patch.object(self.gate.time, "sleep", return_value=None),
+            ):
+                self.assertEqual(self.gate.live_alembic_revision(tmp_path, env=good_env, retries=2, retry_delay=0), "d0e4f3a92b68")
+
+            # Persistent non-zero exit fails closed without leaking the DB URL.
+            with (
+                patch.object(
+                    self.gate.subprocess, "run",
+                    return_value=subprocess.CompletedProcess(["python"], 1, stdout=""),
+                ),
+                patch.object(self.gate.time, "sleep", return_value=None),
+                self.assertRaises(ValueError) as err_ctx,
+            ):
+                self.gate.live_alembic_revision(tmp_path, env=good_env, retries=2, retry_delay=0)
+            self.assertNotIn("super-secret-password", str(err_ctx.exception))
+
+        # CLI --reconcile-live-base returns 0 on match and 1 on mismatch.
+        with (
+            patch.object(
+                self.gate, "reconcile_live_production_base",
+                return_value={
+                    "production_base": self.prod,
+                    "live_base_version": "0.1.1011",
+                    "fly_app": self.gate.HISTORICAL_BASE_FLY_APP,
+                    "fly_label": f"v0.1.1011-{self.prod[:8]}",
+                    "fly_groups": {"app": 1, "worker": 1},
+                    "fly_digest": self.gate.HISTORICAL_BASE_IMAGE_DIGEST,
+                    "db_revision": "d0e4f3a92b68",
+                },
+            ),
+            patch.object(
+                sys, "argv",
+                ["gate", "--repo", self.repo, "--reconcile-live-base", "--fly-app", self.gate.HISTORICAL_BASE_FLY_APP],
+            ),
+        ):
+            self.assertEqual(self.gate.main(), 0)
+
+        with (
+            patch.object(self.gate, "reconcile_live_production_base", side_effect=ValueError("DB drifted")),
+            patch.object(
+                sys, "argv",
+                ["gate", "--repo", self.repo, "--reconcile-live-base", "--fly-app", self.gate.HISTORICAL_BASE_FLY_APP],
+            ),
+        ):
+            self.assertEqual(self.gate.main(), 1)
+
+    def test_ordinary_deploy_writes_recovery_checkpoint_false(self):
+        new_commit = "a" * 40
+        with tempfile.TemporaryDirectory() as tmp:
+            gh_out = Path(tmp) / "github_output"
+            with (
+                patch.dict(os.environ, {"GITHUB_OUTPUT": str(gh_out)}),
+                patch.object(self.gate, "git", side_effect=lambda *a: new_commit if a == ("rev-parse", new_commit) else self.fake_git(*a)),
+                patch.object(self.gate, "production_commit", return_value=self.head),
+                patch.object(self.gate, "commits_to_check", return_value=([new_commit], "ordinary span")),
+                patch.object(self.gate, "ci_state", return_value=("completed", "success")),
+                patch.object(sys, "argv", ["gate", "--repo", self.repo, "--head", new_commit, "--timeout", "0"]),
+            ):
+                self.assertEqual(self.gate.main(), 0)
+            self.assertEqual(gh_out.read_text(encoding="utf-8"), "recovery_checkpoint=false\n")
+
+    def test_check_fly_machines_enforces_required_worker_and_app_groups(self):
+        checker = self.gate._load_fly_machine_checker()
+        both = self._base_machines(label="v0.1.1048-cafebabe", digest="sha256:" + "a" * 64)
+        groups, wrong = checker.problems(both, "v0.1.1048-cafebabe", required_groups=("app", "worker"))
+        self.assertEqual((groups, wrong), ({"app": 1, "worker": 1}, []))
+
+        web_only = self._base_machines(label="v0.1.1048-cafebabe", include_worker=False)
+        _, wrong_web_only = checker.problems(web_only, "v0.1.1048-cafebabe", required_groups=("app", "worker"))
+        self.assertTrue(any("required process group 'worker'" in item for item in wrong_web_only))
+
+        worker_only = [m for m in both if m["config"]["metadata"]["fly_process_group"] == "worker"]
+        _, wrong_worker_only = checker.problems(worker_only, "v0.1.1048-cafebabe", required_groups=("app", "worker"))
+        self.assertTrue(any("required process group 'app'" in item for item in wrong_worker_only))
+
+    def test_deploy_hosted_workflow_wires_pre_effect_reconciliation_and_worker_check(self):
+        workflow_text = (SCRIPTS_DIR.parent / "workflows" / "deploy-hosted.yml").read_text(encoding="utf-8")
+        wait_pos = workflow_text.index("name: Wait for CI on the code being shipped")
+        install_pos = workflow_text.index("name: Install the hosted server")
+        reconcile_pos = workflow_text.index("name: Reconcile live production base for recovery")
+        build_pos = workflow_text.index("name: Build the image")
+        migrate_pos = workflow_text.index("name: Apply pending migrations")
+        deploy_pos = workflow_text.index("name: Deploy to Fly.io")
+        confirm_pos = workflow_text.index("name: Confirm every Machine runs the new image")
+        self.assertLess(wait_pos, install_pos)
+        self.assertLess(install_pos, reconcile_pos)
+        self.assertLess(reconcile_pos, build_pos)
+        self.assertLess(build_pos, migrate_pos)
+        self.assertLess(migrate_pos, deploy_pos)
+        self.assertLess(deploy_pos, confirm_pos)
+        self.assertIn("RECOVERY_CHECKPOINT: ${{ steps.wait.outputs.recovery_checkpoint }}", workflow_text)
+        self.assertIn("--reconcile-live-base", workflow_text)
+        self.assertIn('if [ "$RECOVERY_CHECKPOINT" != "true" ]; then', workflow_text)
+        self.assertIn("--require-group app", workflow_text)
+        self.assertIn("--require-group worker", workflow_text)
 
 
 if __name__ == "__main__":
