@@ -5,6 +5,12 @@ import { currentHostedSession } from "./transport";
 // A shared request is aborted only once every caller that joined it has aborted; one listing closing never cancels another's read.
 interface ReadBatch { keys: Set<string>; promise: Promise<Record<string, unknown>>; controller: AbortController; waiting: number }
 const pending = new Map<string, ReadBatch>();
+const batchSignals = new WeakMap<AbortSignal, AbortSignal>();
+
+export function promoteListingScreenRead(signal: AbortSignal): void {
+  const batchSignal = batchSignals.get(signal);
+  if (batchSignal) promoteBackgroundSignal(batchSignal);
+}
 let owner = currentHostedSession();
 
 export type ScreenRead = <R>(path: string, signal?: AbortSignal) => Promise<R>;
@@ -87,13 +93,18 @@ export async function listingScreenRead<T>(path: string, read: ScreenRead, signa
   joined.keys.add(key);
   // A caller without a signal can never leave, so the shared read always finishes for it.
   joined.waiting += signal ? 1 : Infinity;
-  const result = await untilAborted(joined.promise, signal, () => {
-    joined.waiting -= 1;
-    if (joined.waiting > 0) return;
-    if (pending.get(id) === joined) pending.delete(id);
-    joined.controller.abort();
-  });
-  if (currentHostedSession() !== session) throw new Error("Your account changed.");
-  if (!(key in result)) return read<T>(path, signal);
-  return result[key] as T;
+  if (signal && callerIsBackground) batchSignals.set(signal, joined.controller.signal);
+  try {
+    const result = await untilAborted(joined.promise, signal, () => {
+      joined.waiting -= 1;
+      if (joined.waiting > 0) return;
+      if (pending.get(id) === joined) pending.delete(id);
+      joined.controller.abort();
+    });
+    if (currentHostedSession() !== session) throw new Error("Your account changed.");
+    if (!(key in result)) return read<T>(path, signal);
+    return result[key] as T;
+  } finally {
+    if (signal) batchSignals.delete(signal);
+  }
 }
