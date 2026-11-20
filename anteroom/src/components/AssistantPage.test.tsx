@@ -106,7 +106,24 @@ describe("AssistantPage", () => {
 
   it("holds the welcome back while the conversation loads, and reports a failed load", () => {
     expect(render(undefined, { isLoading: true })).not.toContain('aria-label="Example questions"');
-    expect(render(undefined, { error: new Error("Anteroom is not running") })).toContain("Anteroom is not running");
+    const errorHtml = render(undefined, { error: new Error("Anteroom is not running") });
+    expect(errorHtml).toContain("Anteroom is not running");
+    expect(errorHtml).toMatch(/<p role="alert" class="text-destructive-foreground text-sm">Anteroom is not running<\/p>/);
+  });
+
+  it("renders visible keyboard focus rings on starter and recent-chat buttons", () => {
+    const threads = [{ id: "t0", title: "Chat 0", created_at: null, updated_at: null }];
+    useQuery.mockImplementation(({ queryKey }: { queryKey: readonly string[] }) => ({
+      data: queryKey[1] === "threads" ? threads : [], isLoading: false, isError: false, error: null,
+    }));
+    const html = renderToStaticMarkup(
+      <AssistantPage onOpenProviders={vi.fn()} onOpenListing={vi.fn()} />,
+    );
+    useQuery.mockReset();
+    const startersList = html.slice(html.indexOf('aria-label="Example questions"'), html.indexOf("</ul>"));
+    const recentList = html.slice(html.indexOf('aria-label="Recent chats"'));
+    expect(startersList).toContain("focus-visible:ring-2 focus-visible:ring-ring");
+    expect(recentList).toContain("focus-visible:ring-2 focus-visible:ring-ring");
   });
 
   it("reads the listing an answer links to, and leaves other links alone", () => {

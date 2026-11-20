@@ -59,39 +59,41 @@ export function SignIn({ client, notice, sandbox }: { client: SupabaseClient; no
   const button = mode === "create_account" ? "Create account" : mode === "reset" ? "Email me a reset link" : "Sign in";
   const busy = mode === "create_account" ? "Creating…" : mode === "reset" ? "Sending…" : "Signing in…";
   return (
-    <main className="sign-in">
-      <div className="pywebview-drag-region cloud-drag" aria-hidden="true" />
-      <h1>{title}</h1>
-      <p>{mode === "reset" ? "Enter your account’s email. We’ll send a link to choose a new password." : SIGN_IN_INTRO}</p>
-      {sandbox && <p>Local sandbox: use alice@sandbox.test or bob@sandbox.test with the password <code>sandbox</code>.</p>}
-      {mode === "create_account" && <p className="hint">Create drafts without Chrome. eBay and Etsy use connected accounts; Poshmark, Mercari and Depop require desktop Chrome with the Bridge extension for marketplace actions.</p>}
-      {notice && <p role="status">{notice}</p>}
-      <form onSubmit={submit}>
-        <label htmlFor="email">Email address</label>
-        <input id="email" type="email" autoComplete="email" required value={email} onChange={event => setEmail(event.target.value)} disabled={pending} />
-        {mode !== "reset" && <>
-          <label htmlFor="password">Password</label>
-          <input id="password" type="password" required minLength={mode === "create_account" ? MIN_PASSWORD : undefined}
-            autoComplete={mode === "create_account" ? "new-password" : "current-password"}
-            value={password} onChange={event => setPassword(event.target.value)} disabled={pending} />
-          {mode === "create_account" && <p className="hint">At least {MIN_PASSWORD} characters.</p>}
-        </>}
-        <button className="primary" disabled={pending}>{pending ? busy : button}</button>
-      </form>
-      {error && <p role="alert">{error}</p>}
-      {sent && <p role="status">{sent}</p>}
-      <nav className="sign-in-links" aria-label="Account">
-        {mode === "sign_in" && <>
-          <button type="button" className="link" onClick={() => switchTo("create_account")}>Create an account</button>
-          {mac
-            // A reset link opens in the default browser, which must be the one that asked for it.
-            ? <a className="link" href={`${HOSTED_ORIGIN}${RESET_PATH}`} target="_blank" rel="noreferrer">Forgot password? Reset it in your browser</a>
-            : <button type="button" className="link" onClick={() => switchTo("reset")}>Forgot password?</button>}
-        </>}
-        {mode !== "sign_in" && <button type="button" className="link" onClick={() => switchTo("sign_in")}>Back to sign in</button>}
-      </nav>
-      {mac && <p className="hint">To go back to this Mac’s listings, choose Account › This Mac’s Listings in the menu bar.</p>}
-    </main>
+    <div className="cloud-auth h-full overflow-y-auto">
+      <main className="sign-in">
+        <div className="pywebview-drag-region cloud-drag" aria-hidden="true" />
+        <h1>{title}</h1>
+        <p>{mode === "reset" ? "Enter your account’s email. We’ll send a link to choose a new password." : SIGN_IN_INTRO}</p>
+        {sandbox && <p>Local sandbox: use alice@sandbox.test or bob@sandbox.test with the password <code>sandbox</code>.</p>}
+        {mode === "create_account" && <p className="hint">Create drafts without Chrome. eBay and Etsy use connected accounts; Poshmark, Mercari and Depop require desktop Chrome with the Bridge extension for marketplace actions.</p>}
+        {notice && <p role="status">{notice}</p>}
+        <form onSubmit={submit}>
+          <label htmlFor="email">Email address</label>
+          <input id="email" type="email" autoComplete="email" required value={email} onChange={event => setEmail(event.target.value)} disabled={pending} />
+          {mode !== "reset" && <>
+            <label htmlFor="password">Password</label>
+            <input id="password" type="password" required minLength={mode === "create_account" ? MIN_PASSWORD : undefined}
+              autoComplete={mode === "create_account" ? "new-password" : "current-password"}
+              value={password} onChange={event => setPassword(event.target.value)} disabled={pending} />
+            {mode === "create_account" && <p className="hint">At least {MIN_PASSWORD} characters.</p>}
+          </>}
+          <button className="primary" disabled={pending}>{pending ? busy : button}</button>
+        </form>
+        {error && <p role="alert" className="text-destructive-foreground">{error}</p>}
+        {sent && <p role="status">{sent}</p>}
+        <nav className="sign-in-links" aria-label="Account">
+          {mode === "sign_in" && <>
+            <button type="button" className="link" onClick={() => switchTo("create_account")}>Create an account</button>
+            {mac
+              // A reset link opens in the default browser, which must be the one that asked for it.
+              ? <a className="link" href={`${HOSTED_ORIGIN}${RESET_PATH}`} target="_blank" rel="noreferrer">Forgot password? Reset it in your browser</a>
+              : <button type="button" className="link" onClick={() => switchTo("reset")}>Forgot password?</button>}
+          </>}
+          {mode !== "sign_in" && <button type="button" className="link" onClick={() => switchTo("sign_in")}>Back to sign in</button>}
+        </nav>
+        {mac && <p className="hint">To go back to this Mac’s listings, choose Account › This Mac’s Listings in the menu bar.</p>}
+      </main>
+    </div>
   );
 }
 
@@ -110,17 +112,19 @@ export function SetPassword({ client, onDone }: { client: SupabaseClient; onDone
     finally { setPending(false); }
   }
   return (
-    <main className="sign-in">
-      <div className="pywebview-drag-region cloud-drag" aria-hidden="true" />
-      <h1>Choose a new password</h1>
-      <form onSubmit={event => void submit(event)}>
-        <label htmlFor="new-password">New password</label>
-        <input id="new-password" type="password" autoComplete="new-password" required minLength={MIN_PASSWORD}
-          value={password} onChange={event => setPassword(event.target.value)} disabled={pending} />
-        <p className="hint">At least {MIN_PASSWORD} characters.</p>
-        <button className="primary" disabled={pending}>{pending ? "Saving…" : "Save password"}</button>
-      </form>
-      {error && <p role="alert">{error}</p>}
-    </main>
+    <div className="cloud-auth h-full overflow-y-auto">
+      <main className="sign-in">
+        <div className="pywebview-drag-region cloud-drag" aria-hidden="true" />
+        <h1>Choose a new password</h1>
+        <form onSubmit={event => void submit(event)}>
+          <label htmlFor="new-password">New password</label>
+          <input id="new-password" type="password" autoComplete="new-password" required minLength={MIN_PASSWORD}
+            value={password} onChange={event => setPassword(event.target.value)} disabled={pending} />
+          <p className="hint">At least {MIN_PASSWORD} characters.</p>
+          <button className="primary" disabled={pending}>{pending ? "Saving…" : "Save password"}</button>
+        </form>
+        {error && <p role="alert" className="text-destructive-foreground">{error}</p>}
+      </main>
+    </div>
   );
 }

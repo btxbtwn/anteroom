@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import page from "../../cloud.html?raw";
+import appIconUrl from "../../desktop/AppIcon.png";
 import themeBoot from "../../public/assets/theme-boot.js?raw";
 
 // The hosted API serves this page with `script-src 'self'`, which blocks inline scripts.
@@ -17,5 +18,13 @@ it("sets the theme before the stylesheet, so the first paint matches it", () => 
   const script = page.indexOf('<script src="/assets/theme-boot.js"></script>');
   expect(script).toBeGreaterThan(-1);
   expect(script).toBeLessThan(page.indexOf('rel="stylesheet"'));
+  expect(page).toContain('<meta name="theme-color" content="#000000" />');
   expect(themeBoot).toContain('localStorage.getItem("anteroom:theme")');
+  expect(themeBoot).toContain('meta[name="theme-color"]');
+});
+
+it("points the startup splash logo at an icon Vite bundles into /assets", () => {
+  const match = page.match(/<img\s+class="startup-logo"\s+src="([^"]+)"/);
+  expect(match?.[1]).toBe("/desktop/AppIcon.png");
+  expect(appIconUrl).toContain("AppIcon.png");
 });

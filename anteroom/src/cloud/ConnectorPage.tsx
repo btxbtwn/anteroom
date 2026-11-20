@@ -47,12 +47,12 @@ export function ConnectorPage({ email, onSignOut }: { email: string; onSignOut: 
     catch { setError("Could not complete that action. Check your connection and try again."); }
     finally { setBusy(current => ({ ...current, [name]: false })); }
   };
-  if (!bridge) return <main className="mx-auto grid max-w-lg gap-4 p-6">
+  if (!bridge) return <div className="h-full overflow-y-auto"><main className="mx-auto grid max-w-lg gap-4 p-6">
     <h1 className="text-xl font-medium">Anteroom Connector</h1>
     <p>Open this page in Anteroom Connector to connect your subscriptions.</p>
     <a href={DOWNLOAD}>Download for Mac</a>
-  </main>;
-  return <main className="mx-auto grid max-w-2xl gap-6 p-6">
+  </main></div>;
+  return <div className="h-full overflow-y-auto"><main className="mx-auto grid max-w-2xl gap-6 p-6">
     <header className="grid gap-2">
       <h1 className="flex items-center gap-2 text-xl font-medium"><LinkIcon className="size-5" />Anteroom Connector</h1>
       <p className="text-sm text-muted-foreground">Use your subscriptions from the web and iPhone.</p>
@@ -95,5 +95,5 @@ export function ConnectorPage({ email, onSignOut }: { email: string; onSignOut: 
     <SettingsNote>Keep this computer awake, online, and the connector running. Closing this window keeps it in the menu bar. Subscription credentials stay on this computer.</SettingsNote>
     {error && <p role="alert" className="text-sm text-destructive-foreground">{error}</p>}
     <Button variant="ghost" size="sm" disabled={busy.account} onClick={() => { void run("account", onSignOut); }}>Disconnect Anteroom account</Button>
-  </main>;
+  </main></div>;
 }

@@ -4,6 +4,7 @@ import { api } from "../api/client";
 import { deletableRows, type BulkDeleteRow } from "../api/bulkDelete";
 import { PriceDialog } from "./PriceDropParts";
 import { PageError, PageNote } from "./WorkspacePage";
+import { clearComposerDraft } from "./chat/composerDrafts";
 import { Button } from "./ui/button";
 import { Checkbox } from "./ui/checkbox";
 
@@ -16,6 +17,7 @@ export function BulkDeleteDialog({ conversationIds, onClose }: { conversationIds
   const preview = useMutation({ mutationFn: () => api.bulkDelete.preview(conversationIds), retry: false,
     onSuccess: (result) => { setRows(result.rows); setUnchecked(new Set()); setConfirmed(false); } });
   const remove = useMutation({ mutationFn: (approved: { conversation_id: string; review_token: string }[]) => api.bulkDelete.delete(approved), retry: false,
+    onSuccess: (result) => { for (const id of result.deleted) clearComposerDraft(`listing:${id}`); },
     onSettled: () => { for (const key of ["conversations", "suggestions", "analytics", "sales-ledger"]) void client.invalidateQueries({ queryKey: [key] }); } });
   const approved = rows ? deletableRows(rows, unchecked) : [];
   const busy = preview.isPending || remove.isPending;

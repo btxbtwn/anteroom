@@ -94,14 +94,14 @@ function CloudApp() {
     return () => { active = false; subscription.unsubscribe(); };
   }, []);
   if (!ready) return <StartupScreen/>;
-  if (session && newPassword) return <div className="cloud-auth"><SetPassword client={supabase} onDone={() => setNewPassword(false)}/></div>;
+  if (session && newPassword) return <SetPassword client={supabase} onDone={() => setNewPassword(false)}/>;
   if (session && connectorMode) return <ConnectorPage email={session.user.email || "Your Anteroom account"} onSignOut={async () => {
     const { error } = await supabase.auth.signOut({ scope: "local" });
     if (error) throw error;
   }}/>;
   if (session) return <HostedWorkspace key={session.user.id} session={session}/>;
   if (!error && showsLanding(window.location.search, mac)) return <Landing/>;
-  return <div className="cloud-auth"><SignIn client={supabase} notice={error} sandbox={sandbox}/></div>;
+  return <SignIn client={supabase} notice={error} sandbox={sandbox}/>;
 }
 
 function HostedWorkspace({ session }: { session: Session }) {
