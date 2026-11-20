@@ -212,7 +212,8 @@ describe("marketplaces section", () => {
   it("offers a result check instead of repeating an uncertain write", () => {
     const html = render({ mercari: { state: "unknown", revision_id: "current", error: "Check before trying again." } }, {}, { selected: "mercari" });
     expect(row(html, "Mercari")).toContain("Unconfirmed");
-    expect(row(html, "Mercari")).toContain('role="status"');
+    expect(row(html, "Mercari")).not.toContain('role="status"');
+    expect(row(html, "Mercari")).toContain("focus-visible:ring-2 focus-visible:ring-ring");
     expect(html).toContain("Check result");
     expect(html).not.toContain("Publish…");
   });

@@ -16,6 +16,7 @@ import { coalesceSseEvents, emptySseParts, type SseParts } from "./sseCoalesce";
 import { streamingDisplayText } from "./streamingText";
 import { settleAgents } from "./liveTrace";
 import { useComposerImages } from "./chat/ComposerAttachments";
+import { useComposerDraftText } from "./chat/composerDrafts";
 import { ChatComposer } from "./chat/ChatComposer";
 import { chatTime } from "./chat/chatHistory";
 import { foldSseEvent } from "./chat/chatStream";
@@ -146,7 +147,8 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     queryKey: THREADS_KEY,
     queryFn: ({ signal }) => api.assistant.threads({ signal }),
   });
-  const [input, setInput] = useState("");
+  const draftKey = `assistant:${threadId ?? "__new__"}`;
+  const [input, setInput] = useComposerDraftText(draftKey);
   const [live, setLive] = useState<LiveTurn | null>(null);
   const [folds, setFolds] = useState<FoldedTurn[]>(() => (threadId ? foldsFor(threadId) : []));
   const [error, setError] = useState("");
@@ -156,7 +158,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   const [queued, setQueued] = useState<QueuedQuestion[]>([]);
   const controller = useRef<AbortController | null>(null);
   const composerRef = useRef<ComposerPromptEditorHandle | null>(null);
-  const images = useComposerImages();
+  const images = useComposerImages(draftKey);
   const scroll = useChatScroll("assistant");
   const phone = useMobileLayout();
 
@@ -186,6 +188,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     shownImages: ChatAttachment[] = [],
     inThread: string | null = threadIdRef.current,
     retry = false,
+    clearDraft = question !== null,
   ) => {
     if (controller.current) return;
     let id = inThread;
@@ -222,7 +225,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     if (question !== null || retry) {
       scroll.pinChatToBottom();
       setError("");
-      if (question !== null) setInput("");
+      if (clearDraft) setInput("");
       parts.status = "Reading your shop…";
       show();
     }
@@ -358,7 +361,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     if (live || controller.current || !queued.length) return;
     const [next, ...rest] = queued;
     setQueued(rest);
-    void followRef.current(next.text, next.uploads, next.shown, next.threadId ?? followThread.current ?? threadIdRef.current);
+    void followRef.current(next.text, next.uploads, next.shown, next.threadId ?? followThread.current ?? threadIdRef.current, false, false);
   }, [live, queued]);
 
   const ask = async (raw: string) => {
@@ -472,7 +475,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
                 <li key={text}>
                   <button
                     type="button"
-                    className="group flex min-h-10 w-full cursor-pointer items-center gap-3 py-2 text-left text-muted-foreground text-sm transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none max-[900px]:min-h-11"
+                    className="group flex min-h-10 w-full cursor-pointer items-center gap-3 rounded-md py-2 text-left text-muted-foreground text-sm transition-colors hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-[900px]:min-h-11"
                     onClick={() => { void ask(text); }}
                   >
                     <Icon aria-hidden className="size-4 shrink-0" />
@@ -497,7 +500,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
                     <li key={thread.id}>
                       <button
                         type="button"
-                        className="flex min-h-10 w-full cursor-pointer items-center gap-3 py-2 text-left text-sm text-foreground transition-colors hover:text-foreground/80 focus-visible:outline-none focus-visible:underline max-[900px]:min-h-11"
+                        className="flex min-h-10 w-full cursor-pointer items-center gap-3 rounded-md py-2 text-left text-sm text-foreground transition-colors hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:underline max-[900px]:min-h-11"
                         onClick={() => onThreadReady?.(thread.id)}
                       >
                         <span className="min-w-0 flex-1 truncate">{thread.title}</span>
@@ -523,7 +526,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
             <div className="flex justify-center py-4"><Spinner size="md" tone="muted" /></div>
           ) : null}
           {messages.isError ? (
-            <p className="text-muted-foreground text-sm">{(messages.error as Error).message || "Could not load the conversation."}</p>
+            <p role="alert" className="text-destructive-foreground text-sm">{(messages.error as Error).message || "Could not load the conversation."}</p>
           ) : null}
           {turns.map((turn, index) => (
             <Fragment key={turn.id}>

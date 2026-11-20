@@ -1,4 +1,4 @@
-import { Fragment, useState, useRef, useEffect, useCallback } from "react";
+import { Fragment, useRef, useEffect, useCallback } from "react";
 import { usePhotosUploading } from "../photoUploads";
 import { newQueuedChatMessage } from "./chatMessageQueue";
 import { CiteSelectionToolbar } from "./CiteSelectionToolbar";
@@ -8,6 +8,7 @@ import { type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { currentPhaseIndex } from "./liveTrace";
 import { assistantDisplayText, extractJson, isListingJson, isStreamError } from "./chat/assistantDisplay";
 import { useComposerImages } from "./chat/ComposerAttachments";
+import { useComposerDraftText } from "./chat/composerDrafts";
 import { ChatComposer } from "./chat/ChatComposer";
 import { StreamErrorPanel, UnfinishedGenerationPanel } from "./chat/ChatErrors";
 import { ChatMessage } from "./chat/ChatMessage";
@@ -44,18 +45,13 @@ function messageRowPadding(m: Message): string {
 
 export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onStatusChange }: Props) {
   const uploadingPhotos = usePhotosUploading(convId);
+  const draftKey = `listing:${convId}`;
 
-  const [input, setInput] = useState("");
+  const [input, setInput] = useComposerDraftText(draftKey);
   // Quotes live inline in the composer itself, T3 Code style: `input` is the
   // markdown prompt, and a quote inside it is its citation link.
   const composerRef = useRef<ComposerPromptEditorHandle | null>(null);
-  const images = useComposerImages();
-  const clearImages = images.clear;
-
-  useEffect(() => {
-    setInput("");
-    clearImages();
-  }, [convId, clearImages]);
+  const images = useComposerImages(draftKey);
   const {
     streaming,
     generating,
@@ -126,7 +122,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
       images.clear();
       void sendMessage(text, uploads.length ? { attachments: uploads } : undefined);
     })();
-  }, [busy, input, sendMessage, pinChatToBottom, enqueue, images]);
+  }, [busy, input, setInput, sendMessage, pinChatToBottom, enqueue, images]);
 
   const hasPhotos = Boolean(photos && photos.length > 0);
   const hasMessages = Boolean(messages && messages.length > 0);

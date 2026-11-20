@@ -8,6 +8,7 @@ import { PaperclipIcon, XIcon } from "lucide-react";
 import type { ChatAttachmentUpload } from "../../api/types";
 import { Button } from "../ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { getComposerDraft, useComposerDraftImages } from "./composerDrafts";
 import {
   MAX_COMPOSER_IMAGES,
   createComposerImageThumbnail,
@@ -23,19 +24,22 @@ export interface ComposerImage {
 let imageSeq = 0;
 
 /** What is attached, and how to add, remove and turn it into the message's uploads. */
-export function useComposerImages() {
-  const [images, setImages] = useState<ComposerImage[]>([]);
-  const [error, setError] = useState("");
-  const imagesRef = useRef<ComposerImage[]>([]);
+export function useComposerImages(draftKey: string) {
+  const [images, setImages] = useComposerDraftImages(draftKey);
+  const [errorState, setErrorState] = useState({ key: draftKey, message: "" });
+  const error = errorState.key === draftKey ? errorState.message : "";
+  const setError = useCallback((message: string) => {
+    setErrorState({ key: draftKey, message });
+  }, [draftKey]);
 
   const addFiles = useCallback((files: readonly File[]): boolean => {
     const { images: accepted, rejected } = partitionComposerFiles(files);
     if (!accepted.length && !rejected.length) return false;
-    const room = Math.max(0, MAX_COMPOSER_IMAGES - imagesRef.current.length);
+    const current = getComposerDraft(draftKey).images;
+    const room = Math.max(0, MAX_COMPOSER_IMAGES - current.length);
     const dropped = Math.max(0, accepted.length - room);
     const added = accepted.slice(0, room).map((file) => ({ id: `img-${++imageSeq}`, file }));
-    imagesRef.current = [...imagesRef.current, ...added];
-    setImages(imagesRef.current);
+    setImages([...current, ...added]);
     setError(
       rejected.length
         ? `Only images can be attached (JPEG, PNG, WebP, HEIC). Skipped ${rejected.map((file) => file.name).join(", ")}.`
@@ -44,19 +48,18 @@ export function useComposerImages() {
           : "",
     );
     return accepted.length > 0;
-  }, []);
+  }, [draftKey, setImages, setError]);
 
   const remove = useCallback((id: string) => {
-    imagesRef.current = imagesRef.current.filter((image) => image.id !== id);
-    setImages(imagesRef.current);
+    const current = getComposerDraft(draftKey).images;
+    setImages(current.filter((image) => image.id !== id));
     setError("");
-  }, []);
+  }, [draftKey, setImages, setError]);
 
   const clear = useCallback(() => {
-    imagesRef.current = [];
     setImages([]);
     setError("");
-  }, []);
+  }, [setImages, setError]);
 
   /** Encode every image for the request; a file that cannot be read stops the send. */
   const prepare = useCallback(async (list: readonly ComposerImage[]): Promise<ChatAttachmentUpload[] | null> => {
@@ -67,7 +70,7 @@ export function useComposerImages() {
       return null;
     }
     return prepared.flatMap((item) => (item.ok ? [{ name: item.name, data_url: item.dataUrl }] : []));
-  }, []);
+  }, [setError]);
 
   return { images, error, setError, addFiles, remove, clear, prepare };
 }

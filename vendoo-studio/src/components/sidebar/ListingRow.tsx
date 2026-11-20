@@ -6,6 +6,7 @@ import { api } from "../../api/client";
 import { MarketplaceLogo } from "../MarketplaceLogo";
 import { LayoutTemplateIcon, CopyIcon, EllipsisIcon, PencilIcon, Trash2Icon, XIcon } from "lucide-react";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import { toastManager } from "../ui/toast";
 import { cn } from "../../lib/utils";
 import { confirmDialog } from "../../ui/confirmDialog";
 import { ListingStatusLabel, ListingTag, ListingThumb, SelectCheckbox } from "./ListingBits";
@@ -85,6 +86,13 @@ export const ListingRow = memo(function ListingRow({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       setRenaming(false);
+    },
+    onError: (err: Error) => {
+      toastManager.add({
+        type: "error",
+        title: "Could not rename the listing",
+        description: err.message || "Check your connection and try again.",
+      });
     },
   });
 

@@ -35,6 +35,7 @@ import { SuggestionsPanel } from "../components/SuggestionsPanel";
 import { isConfirmDialogOpen } from "../ui/confirmDialog";
 import { dismissSetupGuide, isSetupGuideDismissed } from "../onboarding";
 import { toastManager } from "../components/ui/toast";
+import { clearComposerDraft } from "../components/chat/composerDrafts";
 import { takeMarketplaceSignIn } from "../lib/marketplaceSignIn";
 import { Button } from "../components/ui/button";
 import { Empty, EmptyContent, EmptyHeader, EmptyTitle } from "../components/ui/empty";
@@ -544,6 +545,13 @@ export function App() {
       setMobilePane(runtime.hosted ? "editor" : "workspace");
       setMobileSidebarOpen(false);
     },
+    onError: (err: Error) => {
+      toastManager.add({
+        type: "error",
+        title: "Could not start a new listing",
+        description: err.message || "Check your connection and try again.",
+      });
+    },
   });
   const createListing = () => {
     if (createConv.isPending) return false;
@@ -649,6 +657,7 @@ export function App() {
   const { mutate: deleteConversation } = useMutation({
     mutationFn: (convId: string) => api.conversations.delete(convId),
     onSuccess: (_data, convId) => {
+      clearComposerDraft(`listing:${convId}`);
       dispatchOpenListing({ type: "close", id: convId });
       if (selectedConvId === convId) {
         setMobilePane(runtime.hosted ? "editor" : "workspace");
@@ -656,6 +665,13 @@ export function App() {
       }
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    },
+    onError: (err: Error) => {
+      toastManager.add({
+        type: "error",
+        title: "Could not delete the listing",
+        description: err.message || "Check your connection and try again.",
+      });
     },
   });
 

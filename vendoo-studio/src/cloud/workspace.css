@@ -1,5 +1,6 @@
-.cloud-auth{max-width:460px;margin:12vh auto;padding:24px;font-family:var(--font-sans)}
-.cloud-auth h1{font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:20px 0 8px}.cloud-auth p{margin:16px 0;color:var(--muted-foreground)}
+.cloud-auth{height:100%;overflow-y:auto;font-family:var(--font-sans)}
+.cloud-auth .sign-in{max-width:460px;margin:0 auto;padding:max(clamp(24px,12vh,96px),env(safe-area-inset-top,0px)) 24px max(24px,env(safe-area-inset-bottom,0px))}
+.cloud-auth h1{font-size:24px;font-weight:600;letter-spacing:-0.02em;margin:20px 0 8px}.cloud-auth p{margin:16px 0;color:var(--muted-foreground)}.cloud-auth p[role="alert"]{color:var(--destructive-foreground)}
 .cloud-auth label{display:block;margin:24px 0 8px}.cloud-auth input{width:100%;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--background)}
 .cloud-auth button,.cloud-account button{padding:8px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer}.cloud-auth button{margin-top:20px;width:100%}
 .cloud-auth button.primary{min-height:44px;border-color:var(--primary);background:var(--primary);color:var(--primary-foreground);font-weight:500}.cloud-auth button.primary:hover:not(:disabled){opacity:.9}.cloud-auth button.primary:disabled{opacity:.64;cursor:default}

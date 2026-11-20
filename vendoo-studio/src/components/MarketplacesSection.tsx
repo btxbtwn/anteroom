@@ -339,12 +339,16 @@ export function MarketplacesLayout({
     refetchInterval: (query) => Object.values(query.state.data ?? {}).some((draft) => isRunning(draft)) ? pollMs(1500) : false });
   const live = useQuery({ queryKey: liveKey, queryFn: () => api.marketplaceListings.get(convId) });
   // A save can fix the fields a failed List asked for, which clears that error on the server.
-  const seenRevision = useRef(revisionId);
+  const seenRevision = useRef({ convId, revisionId });
   useEffect(() => {
-    if (seenRevision.current === revisionId) return;
-    seenRevision.current = revisionId;
-    void queryClient.invalidateQueries({ queryKey: nativeKey });
-  });
+    if (seenRevision.current.convId !== convId) {
+      seenRevision.current = { convId, revisionId };
+      return;
+    }
+    if (seenRevision.current.revisionId === revisionId) return;
+    seenRevision.current = { convId, revisionId };
+    void queryClient.invalidateQueries({ queryKey: ["native-marketplaces", convId] });
+  }, [convId, revisionId, queryClient]);
   // Opening an item reads its own live listings once, so a sale shows while the
   // seller looks at it instead of waiting for that shop's next turn. Each shop
   // keeps its own gap between reads, so browsing items stays light.
@@ -369,15 +373,19 @@ export function MarketplacesLayout({
   }, [convId]);
   const drafts: NativeDrafts = native.data ?? {};
   const runningKey = Object.entries(drafts).filter(([, draft]) => isRunning(draft)).map(([name]) => name).join(",");
-  const wasRunning = useRef(runningKey);
+  const wasRunning = useRef({ convId, runningKey });
   useEffect(() => {
+    if (wasRunning.current.convId !== convId) {
+      wasRunning.current = { convId, runningKey };
+      return;
+    }
     // An action just ended: what is live, and the job list, changed with it.
-    if (wasRunning.current && wasRunning.current !== runningKey) {
-      void queryClient.invalidateQueries({ queryKey: liveKey });
+    if (wasRunning.current.runningKey && wasRunning.current.runningKey !== runningKey) {
+      void queryClient.invalidateQueries({ queryKey: ["marketplace-listings", convId] });
       void queryClient.invalidateQueries({ queryKey: ["jobs", convId] });
     }
-    wasRunning.current = runningKey;
-  });
+    wasRunning.current = { convId, runningKey };
+  }, [convId, runningKey, queryClient]);
   const [now, setNow] = useState(() => Date.now());
   const waiting = Object.values(drafts).some((draft) => secondsUntil(draft?.retry_after, now) > 0);
   useEffect(() => {
@@ -799,7 +807,7 @@ export function MarketplacesLayout({
     const line = <>
       {status && !quiet && (
         // A narrow rail wraps a status instead of cutting it off; the row's tooltip names it too.
-        <span role="status" className={cn("flex items-start gap-1 text-xs text-muted-foreground",
+        <span className={cn("flex items-start gap-1 text-xs text-muted-foreground",
           status.tone === "failed" && "text-destructive-foreground", status.tone === "attention" && "text-warning-foreground",
           status.tone === "sold" && "text-info-foreground")}>
           {TONE_ICON[status.tone]}
@@ -808,12 +816,12 @@ export function MarketplacesLayout({
       )}
       {status && quiet && !check && (rechecking
         // The previous revision's answer is not this one's; keep the line, not the answer.
-        ? <span role="status" className="flex items-center gap-1 truncate text-xs text-muted-foreground">
+        ? <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
             <span className="sr-only">{status.label}. </span><span className="truncate">Checking…</span>
           </span>
         : <span className="sr-only">{status.label}</span>)}
       {check && (
-        <span role="status" className={cn("flex items-center gap-1 truncate text-xs text-muted-foreground tabular-nums",
+        <span className={cn("flex items-center gap-1 truncate text-xs text-muted-foreground tabular-nums",
           missing > 0 && "text-warning-foreground")}>
           {missing > 0
             ? <AlertTriangleIcon aria-hidden className="size-3.5 text-warning" />
@@ -978,7 +986,7 @@ export function MarketplacesLayout({
               <li key={id} aria-label={name} className="group relative flex items-start">
                 <button type="button" aria-current={current ? "true" : undefined} title={check ? missingDetail(check.missing) : status?.label} onClick={() => onSelect(id)}
                   onPointerEnter={() => onPrepare?.(id)} onFocus={() => onPrepare?.(id)} onPointerDown={() => onPrepare?.(id)}
-                  className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1.5 pe-6 text-left hover:bg-accent",
+                  className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1.5 pe-6 text-left hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     current && "bg-accent text-foreground")}>
                   {marketplace ? <MarketplaceLogo id={marketplace} label={name} size={16} /> : <span aria-hidden className="size-4 shrink-0" />}
                   <span className="min-w-0">
