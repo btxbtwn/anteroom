@@ -115,7 +115,7 @@ describe("invalidateTopics", () => {
 });
 
 function fakeSupabase() {
-  let onChange: (payload: { new?: { topic?: unknown } }) => void = () => {};
+  let onChange: (message: { payload?: { topic?: unknown } }) => void = () => {};
   let onStatus: (status: string) => void = () => {};
   const channel = {
     on: vi.fn((_type: string, _filter: unknown, callback: typeof onChange) => { onChange = callback; return channel; }),
@@ -126,7 +126,7 @@ function fakeSupabase() {
     removeChannel: vi.fn(async () => "ok"),
     realtime: { setAuth: vi.fn(async () => {}) },
   };
-  return { client, channel, change: (topic: unknown) => onChange({ new: { topic } }), status: (value: string) => onStatus(value) };
+  return { client, channel, change: (topic: unknown) => onChange({ payload: { topic } }), status: (value: string) => onStatus(value) };
 }
 
 describe("followSellerChanges", () => {
@@ -136,8 +136,8 @@ describe("followSellerChanges", () => {
     const stop = followSellerChanges(fake.client as never, "seller-1", "token", new QueryClient());
     await Promise.resolve();
     expect(fake.client.realtime.setAuth).toHaveBeenCalledWith("token");
-    expect(fake.channel.on).toHaveBeenCalledWith("postgres_changes",
-      { event: "*", schema: "public", table: "seller_changes", filter: "user_id=eq.seller-1" }, expect.any(Function));
+    expect(fake.client.channel).toHaveBeenCalledWith("seller-changes:seller-1", { config: { private: true } });
+    expect(fake.channel.on).toHaveBeenCalledWith("broadcast", { event: "change" }, expect.any(Function));
     expect(pollMs(IDLE_POLL_MS)).toBe(IDLE_POLL_MS);
     fake.status("SUBSCRIBED");
     expect(pollMs(IDLE_POLL_MS)).toBe(LIVE_IDLE_POLL_MS);
