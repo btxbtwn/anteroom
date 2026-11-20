@@ -50,6 +50,16 @@ export function setComposerDraftImages(key: string, images: ComposerImage[]): vo
   emit();
 }
 
+export function removeComposerDraftImages(key: string, ids: readonly string[]): void {
+  if (!ids.length) return;
+  const current = drafts.get(key);
+  if (!current || !current.images.length) return;
+  const sent = new Set(ids);
+  const remaining = current.images.filter((image) => !sent.has(image.id));
+  if (remaining.length === current.images.length) return;
+  setComposerDraftImages(key, remaining);
+}
+
 export function clearComposerDraft(key: string): void {
   if (!drafts.delete(key)) return;
   emit();

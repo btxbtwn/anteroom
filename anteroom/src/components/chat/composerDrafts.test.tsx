@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import { useComposerImages } from "./ComposerAttachments";
-import { clearComposerDraft, getComposerDraft, resetComposerDrafts, setComposerDraftImages, setComposerDraftText, transferComposerDraftRemainder, useComposerDraftText } from "./composerDrafts";
+import { clearComposerDraft, getComposerDraft, removeComposerDraftImages, resetComposerDrafts, setComposerDraftImages, setComposerDraftText, transferComposerDraftRemainder, useComposerDraftText } from "./composerDrafts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -158,5 +158,12 @@ describe("composer draft persistence", () => {
     expect(getComposerDraft("assistant:__new__")).toEqual({ text: "", images: [] });
     expect(getComposerDraft("assistant:thread-2").text).toBe("Follow-up thought");
     expect(getComposerDraft("assistant:thread-2").images).toEqual([imgB]);
+
+    // Case 3: if imgB was already preparing for a queued send when transferred, removing its ID
+    // from the destination thread clears imgB while preserving any newer imgC attached later.
+    const imgC = { id: "img-c", file: makeImageFile("third.png"), previewUrl: "blob:third" };
+    setComposerDraftImages("assistant:thread-2", [imgB, imgC]);
+    removeComposerDraftImages("assistant:thread-2", [imgB.id]);
+    expect(getComposerDraft("assistant:thread-2").images).toEqual([imgC]);
   });
 });

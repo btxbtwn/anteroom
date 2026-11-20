@@ -16,7 +16,7 @@ import { coalesceSseEvents, emptySseParts, type SseParts } from "./sseCoalesce";
 import { streamingDisplayText } from "./streamingText";
 import { settleAgents } from "./liveTrace";
 import { useComposerImages } from "./chat/ComposerAttachments";
-import { getComposerDraft, setComposerDraftText, transferComposerDraftRemainder, useComposerDraftText } from "./chat/composerDrafts";
+import { getComposerDraft, removeComposerDraftImages, setComposerDraftText, transferComposerDraftRemainder, useComposerDraftText } from "./chat/composerDrafts";
 import { ChatComposer } from "./chat/ChatComposer";
 import { chatTime } from "./chat/chatHistory";
 import { foldSseEvent } from "./chat/chatStream";
@@ -169,6 +169,8 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   threadIdRef.current = threadId;
   /** The conversation the in-flight follow belongs to, so selecting a thread this page just created does not cancel the question. */
   const followThread = useRef<string | null>(null);
+  /** Increments on thread transitions so a late createThread() only transfers drafts from its own new-chat session. */
+  const draftSessionRef = useRef(0);
 
   const keepFold = (id: string, fold: FoldedTurn) => {
     const next = [...foldsFor(id), fold];
@@ -194,6 +196,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     let id = inThread;
     let transferred = false;
     const originDraftKey = `assistant:${inThread ?? "__new__"}`;
+    const originSession = draftSessionRef.current;
     const restoreQuestion = (targetId: string | null, text: string) => {
       const targetKey = `assistant:${targetId ?? "__new__"}`;
       if (!getComposerDraft(targetKey).text) setComposerDraftText(targetKey, text);
@@ -202,13 +205,29 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
       try {
         const created = await api.assistant.createThread();
         id = created.id;
+        // The sidebar lists it while the answer is still being written.
+        void queryClient.invalidateQueries({ queryKey: THREADS_KEY });
+        const stillOnOriginDraft = threadIdRef.current === null && draftSessionRef.current === originSession;
+        if (!stillOnOriginDraft) {
+          // The seller already left this new-chat composer; clear only matching submitted text,
+          // leave newer drafts untouched, and deliver the question without hijacking the view.
+          if (clearDraft && getComposerDraft(originDraftKey).text.trim() === question.trim()) {
+            setComposerDraftText(originDraftKey, "");
+          }
+          const createdId = id;
+          void api.assistant.ask(question, { onEvent: () => undefined }, new AbortController().signal, uploads, createdId)
+            .catch(() => undefined)
+            .finally(() => {
+              void queryClient.invalidateQueries({ queryKey: THREADS_KEY });
+              void queryClient.invalidateQueries({ queryKey: messagesKey(createdId) });
+            });
+          return;
+        }
         followThread.current = id;
         // Move any remaining images or newer text off assistant:__new__ before switching threads.
         transferComposerDraftRemainder(originDraftKey, `assistant:${id}`, clearDraft ? question : null);
         transferred = true;
         onThreadReady?.(id);
-        // The sidebar lists it, and the page selects it, while the answer is still being written.
-        void queryClient.invalidateQueries({ queryKey: THREADS_KEY });
       } catch (failure) {
         setError(failure instanceof Error ? failure.message : "Could not start a conversation.");
         restoreQuestion(inThread, question);
@@ -329,6 +348,10 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     followRef.current = follow;
   });
 
+  useEffect(() => {
+    draftSessionRef.current += 1;
+  }, [threadId]);
+
   // Pick an answer back up after opening a conversation, leaving the page, or locking the phone.
   useEffect(() => {
     if (!threadId) return;
@@ -383,12 +406,21 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     if (uploads === null) return;
     // The live bubble shows the images by name until the saved turn brings them back.
     const shown = attached.map((image, index) => ({ id: "", name: uploads[index]?.name ?? image.file.name, mime_type: image.file.type }));
-    images.clear(attached.map((image) => image.id));
+    const sentIds = attached.map((image) => image.id);
+    images.clear(sentIds);
+    const activeThread = followThread.current ?? threadIdRef.current;
+    const activeDraftKey = `assistant:${activeThread ?? "__new__"}`;
+    if (activeDraftKey !== draftKey) {
+      // A concurrent new-thread transfer may have moved these images off assistant:__new__ during prepare().
+      removeComposerDraftImages(activeDraftKey, sentIds);
+    }
     if (askNow(Boolean(live || controller.current), queued) === "queue") {
-      setInput("");
+      if (getComposerDraft(draftKey).text.trim() === question) setComposerDraftText(draftKey, "");
+      if (activeDraftKey !== draftKey && getComposerDraft(activeDraftKey).text.trim() === question) {
+        setComposerDraftText(activeDraftKey, "");
+      }
       scroll.pinChatToBottom();
-      const asked = followThread.current ?? threadIdRef.current;
-      setQueued((current) => [...current, { ...newQueuedChatMessage(question), uploads, shown, threadId: asked }]);
+      setQueued((current) => [...current, { ...newQueuedChatMessage(question), uploads, shown, threadId: activeThread }]);
       return;
     }
     void follow(question, uploads, shown);
