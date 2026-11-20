@@ -105,6 +105,7 @@ def test_marketplace_schema_and_native_job_run_off_the_event_loop(monkeypatch):
     from sqlalchemy.orm import Session
 
     from anteroom.database import Base, load_models
+    from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
     from anteroom.repositories.queries import ConversationRepo, JobRepo
     from anteroom.services import (
         ebay_listings,
@@ -128,9 +129,11 @@ def test_marketplace_schema_and_native_job_run_off_the_event_loop(monkeypatch):
             status="dispatched",
             current_step="native_ebay_save_draft",
         )
+        MarketplaceListingRepo(db).save(conv.id, "ebay", {"state": "saving_draft", "action": "save_draft", "job_id": job.id})
         conv_id = conv.id
         job_id = job.id
     on_the_loop: list[bool] = []
+    executed: list[str] = []
 
     def checkout(*_args):
         on_the_loop.append(asyncio._get_running_loop() is not None)
@@ -138,7 +141,8 @@ def test_marketplace_schema_and_native_job_run_off_the_event_loop(monkeypatch):
     async def fake_etsy_api(_method, _path, **_kwargs):
         return {"results": [{"property_id": 100, "name": "Color", "is_required": False, "possible_values": []}]}
 
-    async def fake_ebay_execute(_action, _snapshot, _photos, _binding, record, active, **_kwargs):
+    async def fake_ebay_execute(action, _snapshot, _photos, _binding, record, active, **_kwargs):
+        executed.append(action)
         assert await active() is True
         await record({"ebay_sku": "ar-off-loop", "ebay_offer_id": "42", "ebay_inventory_written": True})
         return {"ok": True, "state": "draft"}
@@ -156,10 +160,19 @@ def test_marketplace_schema_and_native_job_run_off_the_event_loop(monkeypatch):
     try:
         with worker_sessions(engine):
             rows = asyncio.run(run_both())
+        with Session(engine) as db:
+            saved_record = MarketplaceListingRepo(db).get(conv_id, "ebay")
+            saved_job = JobRepo(db).get(job_id)
     finally:
         event.remove(engine, "checkout", checkout)
         engine.dispose()
     assert rows and rows[0]["name"] == "Color"
+    assert executed == ["save_draft"]
+    assert saved_record is not None
+    assert saved_record.get("ebay_sku") == "ar-off-loop"
+    assert saved_record.get("ebay_offer_id") == "42"
+    assert saved_record.get("state") == "draft"
+    assert saved_job is not None and saved_job.status == "completed"
     assert on_the_loop and not any(on_the_loop)
 
 
@@ -322,4 +335,90 @@ def test_native_publish_holds_no_connection_across_awaits_and_offloads_io(tmp_pa
         ("etsy_check_enter", 0),
         ("after_etsy_job", 0),
     ]
+
+
+def test_save_rows_tolerates_concurrent_insert_race(monkeypatch):
+    """Concurrent off-loop schema saves for the same leaf must not fail on the unique constraint."""
+    from sqlalchemy.orm import Session
+
+    from anteroom.database import Base, load_models
+    from anteroom.models.catalog import CategoryFieldSchema
+    from anteroom.services import category_fields
+    from worker_sessions import memory_engine, worker_sessions
+
+    load_models()
+    engine = memory_engine()
+    Base.metadata.create_all(engine)
+
+    orig_commit = Session.commit
+    injected = False
+
+    def racing_commit(self):
+        nonlocal injected
+        if not injected:
+            injected = True
+            # Simulate a competing worker thread inserting the same (marketplace, category_id)
+            # between this session's one_or_none() check and commit().
+            with Session(engine) as peer:
+                peer.add(CategoryFieldSchema(
+                    marketplace="ebay_conditions",
+                    category_id="57988",
+                    fields=[{"required": False, "conditions": []}],
+                ))
+                peer.commit()
+        return orig_commit(self)
+
+    monkeypatch.setattr(Session, "commit", racing_commit)
+    try:
+        with worker_sessions(engine):
+            category_fields.save_rows(
+                "ebay_conditions",
+                "57988",
+                [{"required": True, "conditions": [{"id": "3000", "label": "Used"}]}],
+            )
+            loaded = category_fields.load_rows("ebay_conditions", "57988")
+    finally:
+        engine.dispose()
+
+    assert loaded == [{"required": True, "conditions": [{"id": "3000", "label": "Used"}]}]
+
+
+def test_etsy_write_clears_pending_marker_when_canceled_during_journal(monkeypatch):
+    """If an Etsy job is stopped while recording etsy_pending_write, clear it and do not call Etsy."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from anteroom.services import etsy_listings, marketplace_accounts
+
+    recorded: list[dict] = []
+    dispatched: list[tuple] = []
+    is_active = True
+
+    async def record(updates: dict):
+        nonlocal is_active
+        recorded.append(dict(updates))
+        if updates.get("etsy_pending_write"):
+            is_active = False
+
+    async def active() -> bool:
+        return is_active
+
+    async def fake_etsy_api(method: str, path: str, **kwargs):
+        dispatched.append((method, path))
+        return {"listing_id": 123456}
+
+    monkeypatch.setattr(etsy_listings, "connected_shop_id", lambda: "shop-1")
+    monkeypatch.setattr(marketplace_accounts, "etsy_api", fake_etsy_api)
+    monkeypatch.setattr(etsy_listings, "draft_fields", lambda _snap, creating=True: {"title": "Tee", "taxonomy_id": ""})
+    monkeypatch.setattr(etsy_listings, "_sync_photos", AsyncMock())
+
+    result = asyncio.run(
+        etsy_listings.execute("save_draft", {"title": "Tee", "price": 20}, [], {}, record, active)
+    )
+    assert result["ok"] is False
+    assert result["safe_to_retry"] is True
+    assert dispatched == []
+    assert {"etsy_pending_write": "create"} in recorded
+    assert recorded[-1] == {"etsy_pending_write": None}
+
 
