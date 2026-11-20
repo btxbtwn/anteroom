@@ -11,14 +11,33 @@ from pathlib import Path
 import httpx
 
 
+PORT = '4321'
+
+
+def sandbox_env(directory: str, base: dict[str, str] | None = None) -> dict[str, str]:
+    """Sandbox mode, a throwaway data folder and a spare port, for old and new builds alike.
+
+    The audit runs this against the installed app, which lags ``main``. Builds
+    from before the rename (0.1.1053 and earlier) read only ``VENDOO_STUDIO_DATA_DIR``
+    and ``VENDOO_STUDIO_PORT``; without them such a build opens the seller's real
+    data folder and port 4318. Remove the two old names once every installed
+    release is 0.1.1054 or later (no later than 2026-12-31).
+    """
+    paths = {'DATA_DIR': directory, 'PORT': PORT}
+    env = dict(os.environ if base is None else base, ANTEROOM_SANDBOX='1')
+    for prefix in ('ANTEROOM', 'VENDOO_STUDIO'):
+        env.update({f'{prefix}_{name}': value for name, value in paths.items()})
+    return env
+
+
 def main():
     executable = Path(sys.argv[1]).resolve() / 'Contents' / 'MacOS' / 'Anteroom'
     with tempfile.TemporaryDirectory(prefix='anteroom-package-smoke-') as directory:
-        env = dict(os.environ, ANTEROOM_SANDBOX='1', ANTEROOM_DATA_DIR=directory, ANTEROOM_PORT='4321')
+        env = sandbox_env(directory)
         with (Path(directory) / 'app.log').open('w') as log:
             process = subprocess.Popen([str(executable)], env=env, stdout=log, stderr=log)
             try:
-                with httpx.Client(base_url='http://127.0.0.1:4321', timeout=2) as client:
+                with httpx.Client(base_url=f'http://127.0.0.1:{PORT}', timeout=2) as client:
                     deadline = time.monotonic() + 90
                     while time.monotonic() < deadline:
                         if process.poll() is not None:
