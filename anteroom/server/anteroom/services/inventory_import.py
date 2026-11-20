@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+from contextlib import contextmanager
+from weakref import WeakValueDictionary
 from collections.abc import Awaitable, Callable
 from typing import NamedTuple
 
 import httpx
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from anteroom.config import MAX_PHOTO_COUNT
@@ -14,7 +18,7 @@ from anteroom.repositories import inventory_imports
 from anteroom.repositories.queries import ConversationRepo
 from anteroom.services import photos
 from anteroom.services.photo_store import photo_store
-from anteroom.services.api_job_lock import start_gate
+from anteroom.services.service_context import current
 from anteroom.services.relay_sales import matching_listings, reconcile_unmatched
 from anteroom.services.safe_fetch import DOWNLOAD_TIMEOUT_SEC, fetch_public, is_image_type
 
@@ -96,9 +100,34 @@ def _reused(db: Session, marketplace: str, listing_id: str) -> dict | None:
     return _result(db, existing.id, listing_id, reused=True, warnings=[_REUSED]) if existing else None
 
 
+# Keep live SQLite guards only; PostgreSQL coordinates through its transaction.
+_import_locks: WeakValueDictionary[str, threading.Lock] = WeakValueDictionary()
+_import_locks_gate = threading.Lock()
+
+
+@contextmanager
+def _import_guard(db: Session):
+    context = current()
+    seller = context.seller_id if context else "local"
+    if db.get_bind().dialect.name == "postgresql":
+        # create_import commits while this transaction lock is held. A waiting
+        # connection's following reads see the committed item (READ COMMITTED).
+        db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:identity, 0))"),
+                   {"identity": f"anteroom-inventory-import:{seller}"})
+        yield
+    else:
+        with _import_locks_gate:
+            lock = _import_locks.get(seller)
+            if lock is None:
+                lock = threading.Lock()
+                _import_locks[seller] = lock
+        with lock:
+            yield
+
+
 def _create(db: Session, marketplace: str, listing_id: str, snapshot: dict, urls: list[str], downloaded: list[dict],
             binding: dict | None, target_id: str, kept: dict, compared: _Compared | None) -> dict:
-    with start_gate():
+    with _import_guard(db):
         if reused := _reused(db, marketplace, listing_id):
             return reused
         # Checked again under the gate: another import may have saved a matching item, or one may have left this marketplace.

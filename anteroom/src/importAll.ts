@@ -95,13 +95,13 @@ const message = (error: unknown) => error instanceof Error ? error.message : "Th
  * waits in ``review`` for the seller. The server checks for a match again as
  * it saves, so marketplaces importing side by side do not import one item twice.
  */
-export function startImportAll(key: string, marketplace: ImportMarketplace, importer: Importer, onFinish: () => void) {
+export function startImportAll(key: string, marketplace: ImportMarketplace, importer: Importer, onFinish: () => void, expectedAccount?: string) {
   if (busy(runs.get(key))) return;
   counter += 1;
   const id = counter;
   runs.set(key, { run: id, marketplace, status: "running", page: 1, imported: 0, alreadyIn: 0, skipped: 0, review: [], failures: [], warnings: [], error: null });
   notify();
-  void walk(key, id, importer).finally(onFinish);
+  void walk(key, id, importer, expectedAccount).finally(onFinish);
 }
 
 export function stopImportAll(key: string) {
@@ -138,14 +138,13 @@ function update(key: string, id: number, change: Partial<ImportAllRun> | ((run: 
   notify();
 }
 
-async function walk(key: string, id: number, importer: Importer) {
+async function walk(key: string, id: number, importer: Importer, expectedAccount?: string) {
   const live = () => runs.get(key)?.run === id;
   const stopping = () => live() && runs.get(key)!.status === "stopping";
   const marketplace = runs.get(key)!.marketplace;
   const direct = marketplace === "ebay" || marketplace === "etsy";
   const seen = new Set<string>();
   const cursors = new Set<string>();
-  let account: string | null | undefined;
   let streak = 0;
   let page = 1;
   let cursor: string | null = null;
@@ -160,8 +159,7 @@ async function walk(key: string, id: number, importer: Importer) {
       // to the earlier account, and the server's ownership check refuses them once another one is connected.
       const changed = async () => {
         const now = await importer.account!();
-        if (account === undefined) account = now;
-        return !now || now !== account;
+        return !now || now !== expectedAccount;
       };
       if (importer.account && await changed()) return update(key, id, { status: "failed", error: ACCOUNT_CHANGED[marketplace] ?? "" });
       if (!live()) return;
@@ -203,7 +201,10 @@ async function walk(key: string, id: number, importer: Importer) {
     }
     // eBay and Etsy page by number; Chrome marketplaces by their own cursor, which must lead somewhere new.
     const next = data.next_cursor ?? null;
-    if (!data.has_more || (!direct && (!next || cursors.has(next)))) break;
+    if (!data.has_more) break;
+    if (!direct && (!next || cursors.has(next))) {
+      return update(key, id, { status: "failed", error: "The marketplace reported more listings without a new page cursor. This import stopped. Try again to read the remaining listings." });
+    }
     if (next) cursors.add(next);
     page += 1;
     cursor = next;

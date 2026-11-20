@@ -168,7 +168,7 @@ describe("import all active listings", () => {
     ];
     const { importer, candidates } = fakeImporter(pages);
     startImportAll("mercari:me", "mercari", importer, vi.fn());
-    expect(await finished("mercari:me")).toMatchObject({ status: "done", imported: 3 });
+    expect(await finished("mercari:me")).toMatchObject({ status: "failed", imported: 3, error: expect.stringContaining("cursor") });
     expect(candidates).toHaveBeenCalledTimes(3);
   });
 
@@ -179,7 +179,7 @@ describe("import all active listings", () => {
     ]);
     // Same account around page 1, then a different one before page 2.
     const account = vi.fn().mockResolvedValueOnce("seller-one:100").mockResolvedValueOnce("seller-one:100").mockResolvedValueOnce("seller-two:200");
-    startImportAll("ebay:seller-one:100", "ebay", { ...importer, account }, vi.fn());
+    startImportAll("ebay:seller-one:100", "ebay", { ...importer, account }, vi.fn(), "seller-one:100");
     const run = await finished("ebay:seller-one:100");
     expect(run).toMatchObject({ status: "failed", imported: 1, page: 2 });
     expect(run.error).toContain("The connected eBay account changed");
@@ -189,7 +189,7 @@ describe("import all active listings", () => {
   it("stops when the Etsy shop is disconnected mid-run", async () => {
     const { importer, candidates } = fakeImporter([{ total: 50, has_more: true, rows: [row("a")] }]);
     const account = vi.fn().mockResolvedValueOnce("shop:1").mockResolvedValueOnce("shop:1").mockResolvedValueOnce(null);
-    startImportAll("etsy:shop:1", "etsy", { ...importer, account }, vi.fn());
+    startImportAll("etsy:shop:1", "etsy", { ...importer, account }, vi.fn(), "shop:1");
     expect(await finished("etsy:shop:1")).toMatchObject({ status: "failed", imported: 1 });
     expect(candidates).toHaveBeenCalledOnce();
   });
@@ -200,7 +200,7 @@ describe("import all active listings", () => {
       { total: 2, has_more: false, rows: [row("b")] },
     ]);
     const account = vi.fn().mockResolvedValue("seller-one:100");
-    startImportAll("ebay:seller-one:100", "ebay", { ...importer, account }, vi.fn());
+    startImportAll("ebay:seller-one:100", "ebay", { ...importer, account }, vi.fn(), "seller-one:100");
     expect(await finished("ebay:seller-one:100")).toMatchObject({ status: "done", imported: 2 });
     expect(account).toHaveBeenCalledTimes(4);
   });
@@ -208,18 +208,33 @@ describe("import all active listings", () => {
   it("drops a page read while the account changed, importing nothing from it", async () => {
     const { importer, importNew } = fakeImporter([{ total: 1, has_more: false, rows: [row("from-new-account")] }]);
     const account = vi.fn().mockResolvedValueOnce("seller-one:100").mockResolvedValueOnce("seller-two:200");
-    startImportAll("ebay:seller-one:100", "ebay", { ...importer, account }, vi.fn());
+    startImportAll("ebay:seller-one:100", "ebay", { ...importer, account }, vi.fn(), "seller-one:100");
     expect(await finished("ebay:seller-one:100")).toMatchObject({ status: "failed", imported: 0 });
     expect(importNew).not.toHaveBeenCalled();
   });
 
-  it("stops at the last page when a marketplace gives no new cursor", async () => {
+  it("reports a failure when a marketplace repeats its cursor", async () => {
     const { importer, candidates } = fakeImporter([
       { total: null, has_more: true, next_cursor: "c2", rows: [row("a")] },
       { total: null, has_more: true, next_cursor: "c2", rows: [row("a")] },
     ]);
     startImportAll("depop:me", "depop", importer, vi.fn());
-    expect(await finished("depop:me")).toMatchObject({ status: "done", imported: 1 });
+    expect(await finished("depop:me")).toMatchObject({ status: "failed", imported: 1, error: expect.stringContaining("cursor") });
     expect(candidates).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects a replacement account on the first account read", async () => {
+    const { importer, candidates, importNew } = fakeImporter([{ total: 1, has_more: false, rows: [row("b")] }]);
+    const account = vi.fn().mockResolvedValue("replacement:2");
+    startImportAll("ebay:original:1", "ebay", { ...importer, account }, vi.fn(), "original:1");
+    expect(await finished("ebay:original:1")).toMatchObject({ status: "failed", imported: 0 });
+    expect(candidates).not.toHaveBeenCalled();
+    expect(importNew).not.toHaveBeenCalled();
+  });
+
+  it("reports a missing cursor while retaining completed imports", async () => {
+    const { importer } = fakeImporter([{ total: 2, has_more: true, rows: [row("a")] }]);
+    startImportAll("mercari:me", "mercari", importer, vi.fn());
+    expect(await finished("mercari:me")).toMatchObject({ status: "failed", imported: 1, error: expect.stringContaining("cursor") });
   });
 });

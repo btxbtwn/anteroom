@@ -94,7 +94,7 @@ export function InventoryImport({ marketplace, accountKey, onOpenListing }: { ma
   return <PageSection title={`Import from ${name}`} description={`Bring your active ${name} listings and photos into Anteroom. This reads ${name} and saves local inventory; it does not change or publish listings.`}>
     <PageNote>{SUPPORT[marketplace]} Existing Anteroom items are opened again without replacing their edits or photos. Linking a match only records that the item is live on {name}; check the suggested matches before linking them.</PageNote>
     <ImportAll name={name} run={all} busy={allBusy} disabled={run.isPending}
-      onStart={() => startImportAll(allKey, marketplace, importer, refreshInventory)} onStop={() => stopImportAll(allKey)}
+      onStart={() => startImportAll(allKey, marketplace, importer, refreshInventory, direct ? accountKey : undefined)} onStop={() => stopImportAll(allKey)}
       reviewing={run.isPending} results={results} onOpenListing={onOpenListing}
       onImport={(id, link) => run.mutate([link ? { id, link } : { id }])} />
     <form className="ebay-search-form" onSubmit={(event) => { event.preventDefault(); if (!run.isPending) run.mutate([{ id: itemId.trim() }]); }}>
