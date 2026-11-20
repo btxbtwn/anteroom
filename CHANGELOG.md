@@ -6,6 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1067 — 2026-11-20
+
+- Fill Depop condition and colors from the general listing details when not set on Depop, keep weight-based Depop package sizes during generation, and stop flagging inherited Depop, Mercari, and Poshmark fields as empty.
+- Match general letter sizes like S and M to Mercari's ranged regular sizes instead of leaving Size blank or selecting Tall.
+- Stop marking Mercari forms stale when an under-1 lb item's zero pounds or package casing is normalized, and remove the contradictory "unavailable" warning on unconfirmed Mercari brands.
+- Avoid holding a database session while loading local skill rules during native field finishing.
+
 ## 0.1.1066 — 2026-11-20
 
 - Bulk upload keeps going when one folder's draft can't be started: the drafts already made still generate, the folders after it are still added, and the message names the folder to add again.
