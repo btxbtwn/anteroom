@@ -272,3 +272,27 @@ def test_a_match_is_found_behind_more_than_five_items_already_on_that_marketplac
     chrome.db.commit()
     body = post(chrome, "poshmark", POST, unless_matched=True).json()
     assert body["conversation_id"] is None and body["match"]["conversation_id"] == eligible.id
+
+
+def test_import_all_holds_a_listing_when_a_look_alike_leaves_that_marketplace_while_photos_download(chrome, monkeypatch):
+    other = "e" * 24
+    item = ConversationRepo(chrome.db).create(title="Levi's denim jacket")
+    chrome.db.add(MarketplaceListing(conversation_id=item.id, marketplace="poshmark", state="published",
+                                     listing_url=f"https://poshmark.com/listing/{other}"))
+    chrome.db.commit()
+    real = inventory_import.download_photos
+
+    async def download_then_unlink(urls, collection_id):
+        downloaded = await real(urls, collection_id)
+
+        def unlink():
+            chrome.db.query(MarketplaceListing).filter_by(conversation_id=item.id).delete()
+            chrome.db.commit()
+
+        await asyncio.to_thread(unlink)
+        return downloaded
+
+    monkeypatch.setattr(inventory_import, "download_photos", download_then_unlink)
+    body = post(chrome, "poshmark", POST, unless_matched=True).json()
+    assert body["conversation_id"] is None and body["match"]["conversation_id"] == item.id
+    assert chrome.db.query(Conversation).count() == 1 and chrome.db.query(Photo).count() == 0

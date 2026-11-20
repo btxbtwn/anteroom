@@ -131,6 +131,14 @@ def _local_price(db: Session, conv_id: str) -> float | None:
     return _price((revision.listing_json or {}).get("price")) if revision else None
 
 
+def close_titles(title: str, items: list[tuple[str, str, set[str]]]) -> list[tuple[float, str, str]]:
+    """The items whose titles read like this one, closest first, whether or not they can be suggested."""
+    words = title_tokens(title)
+    # Only items that share a word are compared closely.
+    scored = sorted(((title_similarity(title, local), conv_id, local) for conv_id, local, tokens in items if tokens & words), reverse=True)
+    return [entry for entry in scored if entry[0] >= MATCH_THRESHOLD]
+
+
 def suggested_match(db: Session, marketplace: str, title: str, price: float | None,
                     items: list[tuple[str, str, set[str]]]) -> dict | None:
     """The local item that looks most like this listing and has no listing on that marketplace yet.
@@ -139,13 +147,8 @@ def suggested_match(db: Session, marketplace: str, title: str, price: float | No
     """
     from anteroom.services.marketplace_delist import listings
 
-    words = title_tokens(title)
-    # Only items that share a word are compared closely.
-    scored = sorted(((title_similarity(title, local), conv_id, local) for conv_id, local, tokens in items if tokens & words), reverse=True)
-    # Items already on this marketplace are passed over before counting, so they never hide one that is not.
-    for score, conv_id, local in scored:
-        if score < MATCH_THRESHOLD:
-            break
+    # Items already on this marketplace are passed over, so they never hide one that is not.
+    for score, conv_id, local in close_titles(title, items):
         if marketplace in listings(db, conv_id):
             continue
         local_price = _local_price(db, conv_id)

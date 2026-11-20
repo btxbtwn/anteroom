@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from typing import NamedTuple
 
 import httpx
 from sqlalchemy.orm import Session
@@ -58,24 +59,32 @@ def _result(db: Session, conv_id: str, listing_id: str, *, reused: bool, warning
 _REUSED = "Already in Anteroom. Existing edits and photos were kept."
 
 
-def _match(db: Session, marketplace: str, snapshot: dict,
-           compared: dict[str, str | None] | None = None) -> tuple[dict | None, dict[str, str | None]]:
+class _Compared(NamedTuple):
+    """What the first match check saw: each item's title, and the items whose titles read like the listing."""
+    titles: dict[str, str | None]
+    close: frozenset[str]
+
+
+def _match(db: Session, marketplace: str, snapshot: dict, compared: _Compared | None = None) -> tuple[dict | None, _Compared]:
     """An item that looks like this listing, which import all leaves for the seller instead of duplicating it.
 
-    Also returns each item's title as compared. Given ``compared``, only items added or retitled since are
-    scored: the full comparison runs before the import gate, and only this short one inside it.
+    The full comparison runs before the import gate. Given what it saw, the one inside the gate scores only
+    items added or retitled since, and checks the close ones again, since one may have left this marketplace.
     """
     from anteroom.models.conversation import Conversation
-    from anteroom.services.chrome_import import suggested_match, title_tokens
+    from anteroom.services.chrome_import import close_titles, suggested_match, title_tokens
 
     titles: dict[str, str | None] = dict(db.query(Conversation.id, Conversation.title).all())
-    changed = titles.items() if compared is None else [(conv_id, title) for conv_id, title in titles.items()
-                                                       if conv_id not in compared or compared[conv_id] != title]
-    items = [(conv_id, title, title_tokens(title)) for conv_id, title in changed if title and title.strip()]
+    title = str(snapshot.get("title") or "")
+    changed = titles.items() if compared is None else [
+        (conv_id, local) for conv_id, local in titles.items()
+        if conv_id not in compared.titles or compared.titles[conv_id] != local or conv_id in compared.close]
+    items = [(conv_id, local, title_tokens(local)) for conv_id, local in changed if local and local.strip()]
     value = snapshot.get("price")
     price = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
-    match = suggested_match(db, marketplace, str(snapshot.get("title") or ""), price, items) if items else None
-    return match, titles
+    match = suggested_match(db, marketplace, title, price, items) if items else None
+    close = frozenset(conv_id for _, conv_id, _ in close_titles(title, items)) if compared is None else compared.close
+    return match, _Compared(titles, close)
 
 
 def _held(listing_id: str, match: dict) -> dict:
@@ -88,11 +97,11 @@ def _reused(db: Session, marketplace: str, listing_id: str) -> dict | None:
 
 
 def _create(db: Session, marketplace: str, listing_id: str, snapshot: dict, urls: list[str], downloaded: list[dict],
-            binding: dict | None, target_id: str, kept: dict, compared: dict[str, str | None] | None) -> dict:
+            binding: dict | None, target_id: str, kept: dict, compared: _Compared | None) -> dict:
     with start_gate():
         if reused := _reused(db, marketplace, listing_id):
             return reused
-        # Checked again under the gate against items saved or retitled since: another import may have brought one in.
+        # Checked again under the gate: another import may have saved a matching item, or one may have left this marketplace.
         if compared is not None and (match := _match(db, marketplace, snapshot, compared)[0]):
             return _held(listing_id, match)
         conv = inventory_imports.create_import(db, marketplace, snapshot, listing_id, downloaded, binding, identity=target_id)
