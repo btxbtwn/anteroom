@@ -380,26 +380,35 @@ def save_ui(body: UiInput, db=Depends(get_seller_db, scope="function")):
 
 
 
-def job_response(row):
-    return {key: getattr(row, key) for key in ('id', 'conversation_id', 'approved_revision_id', 'status',
-        'current_step', 'attempt_count', 'last_error', 'created_at', 'updated_at')}
+def job_response(row, listing_title: str | None = None):
+    return {
+        **{key: getattr(row, key) for key in ('id', 'conversation_id', 'approved_revision_id', 'status',
+            'current_step', 'attempt_count', 'last_error', 'created_at', 'updated_at')},
+        'listing_title': listing_title or '',
+    }
 
 
 @router.get('/jobs')
 def jobs(conversation_id: str | None = None, db=Depends(get_seller_db, scope="function")):
     # The list shows status only; each job's listing copy is tens of kilobytes.
-    statement = select(Job).options(defer(Job.listing_snapshot, raiseload=True))
     if conversation_id:
-        conversation(db, conversation_id)
-        statement = statement.where(Job.conversation_id == conversation_id)
-    return [job_response(row) for row in db.scalars(statement.order_by(Job.created_at.desc()).limit(100)).all()]
+        row = conversation(db, conversation_id)
+        rows = db.scalars(select(Job).options(defer(Job.listing_snapshot, raiseload=True)).where(
+            Job.conversation_id == conversation_id).order_by(Job.created_at.desc()).limit(100)).all()
+        return [job_response(job, row.title) for job in rows]
+    rows = db.execute(select(Job, Conversation.title).outerjoin(
+        Conversation, (Conversation.id == Job.conversation_id) & (Conversation.user_id == Job.user_id),
+    ).options(defer(Job.listing_snapshot, raiseload=True)).order_by(Job.created_at.desc()).limit(100)).all()
+    return [job_response(job, title) for job, title in rows]
 
 
 @router.get('/jobs/queue')
 def queue(db=Depends(get_seller_db, scope="function")):
-    rows = db.scalars(select(Job).options(defer(Job.listing_snapshot, raiseload=True)).where(
+    rows = db.execute(select(Job, Conversation.title).outerjoin(
+        Conversation, (Conversation.id == Job.conversation_id) & (Conversation.user_id == Job.user_id),
+    ).options(defer(Job.listing_snapshot, raiseload=True)).where(
         Job.status.in_(ACTIVE_JOB_STATUSES)).order_by(Job.created_at)).all()
-    return {'work': [], 'jobs': [job_response(row) for row in rows]}
+    return {'work': [], 'jobs': [job_response(job, title) for job, title in rows]}
 
 
 @router.get('/conversations/{identity}/regenerate-details')
