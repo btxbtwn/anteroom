@@ -89,17 +89,18 @@ final class ReadRetryTests: XCTestCase {
     // MARK: Writes are never sent twice
 
     func testWritesAreNeverRetried() async {
-        let writes: [(String, () async throws -> Void)] = [
-            ("POST create", { _ = try await self.api.createListing() }),
-            ("PUT save", { _ = try await self.api.saveListing("a", ListingSave(listing: [:], expectedRevisionID: "r1")) }),
-            ("PATCH rename", { try await self.api.rename("a", title: "New") }),
-            ("DELETE", { try await self.api.deleteListing("a") }),
+        let api = self.api!
+        let writes: [(String, @Sendable () async throws -> Void)] = [
+            ("POST create", { _ = try await api.createListing() }),
+            ("PUT save", { _ = try await api.saveListing("a", ListingSave(listing: [:], expectedRevisionID: "r1")) }),
+            ("PATCH rename", { try await api.rename("a", title: "New") }),
+            ("DELETE", { try await api.deleteListing("a") }),
             ("POST list on a marketplace", {
-                try await self.api.listOnMarketplace("a", marketplace: "ebay", revisionID: "r1",
-                                                     confirmation: .unitTestOnly(.list, ["ebay"]))
+                try await api.listOnMarketplace("a", marketplace: "ebay", revisionID: "r1",
+                                                confirmation: .unitTestOnly(.list, ["ebay"]))
             }),
             ("POST delist", {
-                _ = try await self.api.delist("a", marketplaces: ["ebay"], confirmation: .unitTestOnly(.delist, ["ebay"]))
+                _ = try await api.delist("a", marketplaces: ["ebay"], confirmation: .unitTestOnly(.delist, ["ebay"]))
             }),
         ]
         for (name, write) in writes {
@@ -137,7 +138,12 @@ final class ReadRetryTests: XCTestCase {
         }
         let api = signIn.api(readRetry: clock.retry)
         let read = Task { try await api.listings() }
-        await Task.detached { started.wait() }.value
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                started.wait()
+                continuation.resume()
+            }
+        }
         read.cancel()
         proceed.signal()
         do {

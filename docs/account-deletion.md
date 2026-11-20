@@ -40,27 +40,31 @@ deletes for the verified seller only:
 ## Safety rules
 
 - The request is refused (409) while a marketplace job is queued or running,
-  or a marketplace action is waiting for its result. Nothing is deleted then.
-  Running generation and assistant answers are not a reason to refuse: their
-  task rows are deleted, which ends their write lease.
-- Every step can run again. A failure part-way (Storage or the relay offline,
-  a database error) answers 503, and repeating the request finishes the rest.
-  The seller's access token stays valid until it expires, so a retry still
-  authenticates after the Auth user is gone.
+  or a marketplace action is waiting for its result. Nothing is deleted then —
+  the check runs inside a locked Postgres transaction before any Storage or
+  relay mutation occurs. Running generation and assistant answers are not a
+  reason to refuse: their task rows are deleted, which ends their write lease.
+- Every step can run again. The locked first transaction records the seller's
+  Storage cleanup receipt (`anteroom_private.account_cleanup`) and removes
+  seller table rows while keeping Vault credentials and the Auth user intact
+  until relay deregistration and Storage deletion succeed. A failure part-way
+  (Storage or the relay offline) answers 503, and repeating the request retries
+  external cleanup from the durable receipt and finishes removing Vault and Auth.
 - Seller A can never delete seller B: the route takes only the verified JWT
   subject, the request body accepts nothing but `confirm`, table deletes run
   in the row-secured seller session, and each private function reads the owner
   from that session's verified claim.
-- Other signed-in devices cannot refresh their session once the Auth user is
-  deleted. An access token already issued stays valid until it expires (see
-  [hosted sessions](hosted-auth.md)); anything a device writes in that window
-  is not removed automatically.
+- Once deletion starts, a database write fence (`guard_account_write`) rejects
+  subsequent inserts or updates from any other signed-in device carrying an
+  already-issued access token, so stale tokens cannot resurrect deleted records
+  or upload new photos.
 
 ## How the Auth user is deleted without a service-role key
 
-The hosted API holds no service-role key. Revision `7c3e9a1d5b20` adds three
-`SECURITY DEFINER` functions in `anteroom_private`, owned by the migration
-account and executable only by the restricted `anteroom_seller` role:
+The hosted API holds no service-role key. Migrations `7c3e9a1d5b20`,
+`b81d24e7a930`, and `c92e35f8b041` add `SECURITY DEFINER` functions in
+`anteroom_private`, owned by the migration account and executable only by the
+restricted `anteroom_seller` role:
 
 - `account_deletion_ready()` checks that the owner may delete from
   `auth.users` and `vault.secrets` and read `storage.objects`. When it may not,
@@ -68,9 +72,13 @@ account and executable only by the restricted `anteroom_seller` role:
 - `account_photo_keys()` lists the seller's object names in the photo bucket.
   Supabase refuses direct deletes from `storage.objects`, so the API removes
   them through the Storage API.
-- `delete_account()` deletes the seller's Vault secrets (by their
-  `anteroom:<user id>:` name), secret references and device routes, then the
-  `auth.users` row.
+- `stage_account_deletion()` persists those object names in
+  `anteroom_private.account_cleanup` (which also activates the write fence for
+  the seller) and returns the deduplicated cleanup keys.
+- `finish_account_deletion()` calls `delete_account()` — deleting Vault secrets
+  (by their `anteroom:<user id>:` name), secret references, device routes, and
+  the `auth.users` row — then clears the stored object key list while keeping
+  the owner fence row.
 
 Each function takes the owner from `anteroom_private.seller_id()`, the verified
 claim the API sets on the transaction, and refuses without one. On Supabase

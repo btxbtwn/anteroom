@@ -86,7 +86,7 @@ def test_every_seller_table_in_the_database_is_deleted(cloud):  # noqa: F811
     # A new seller table must be added to the models (and so to the deletion) or this fails.
     assert public == policed == covered
     # anteroom_private.delete_account() clears each private seller table by name.
-    assert private == {'device_routes'}
+    assert private == {'device_routes', 'account_cleanup'}
 
 
 def test_seller_deletes_only_their_own_account(cloud, signing_keys, monkeypatch):  # noqa: F811
@@ -168,7 +168,8 @@ def test_private_functions_only_reach_the_claimed_seller(cloud):  # noqa: F811
     # Without a verified seller claim the functions refuse.
     with engine.connect() as db:
         db.execute(text("SELECT set_config('role', 'anteroom_seller', true)"))
-        for function in ('delete_account()', 'account_photo_keys()', 'account_deletion_ready()'):
+        for function in ('delete_account()', 'account_photo_keys()', 'account_deletion_ready()',
+                         'stage_account_deletion()', 'finish_account_deletion()'):
             with pytest.raises(DBAPIError, match='A verified seller is required'), db.begin_nested():
                 db.execute(text(f'SELECT anteroom_private.{function}')).all()
     with engine.connect() as db:
@@ -185,6 +186,7 @@ def test_vault_credentials_of_only_the_deleted_seller_go(vault_storage):  # noqa
     database.engine = engine
     try:
         account_deletion._delete_records(ALICE)
+        account_deletion._finish_deletion(ALICE)
     finally:
         database.engine = original
     with engine.connect() as db:
@@ -245,3 +247,202 @@ def test_mac_app_has_no_account_deletion():
     from anteroom.main import app
     assert not any(getattr(route, 'path', None) == '/api/account' for route in app.routes)
     assert TestClient(app).request('DELETE', '/api/account', json={'confirm': True}).status_code in {404, 405}
+
+
+def test_concurrent_active_job_refuses_without_touching_storage_or_relay(cloud, signing_keys, monkeypatch):  # noqa: F811
+    client, engine = cloud
+    supabase_schemas(engine)
+    item_id = seed(engine, ALICE, job_status='completed')
+    storage_calls = []
+    relay_calls = []
+
+    monkeypatch.setattr('anteroom.services.hosted_photos.remove_objects',
+                        lambda keys, token: storage_calls.append((list(keys), token)))
+
+    async def fail_relay(method, path, **_kwargs):
+        relay_calls.append((method, path))
+        pytest.fail('Relay must not be called when account deletion is refused by an active job')
+
+    monkeypatch.setattr('anteroom.services.relay_client.relay_request', fail_relay)
+
+    # Simulate a job starting concurrently right before _delete_records acquires
+    # pg_advisory_xact_lock and re-checks active jobs.
+    def read_relay_and_start_job():
+        with Session(engine) as db:
+            db.add(Job(user_id=ALICE, conversation_id=item_id, approved_revision_id='r2',
+                       listing_snapshot={}, status='dispatched'))
+            db.commit()
+        return {'deviceId': 'dev-1', 'token': 'tok-1'}
+
+    monkeypatch.setattr(account_deletion, '_read_relay_device', read_relay_and_start_job)
+    before = owned_rows(engine, ALICE)
+
+    response = client.request('DELETE', '/api/account', headers=headers(signing_keys), json={'confirm': True})
+    assert response.status_code == 409
+    assert 'Nothing was deleted' in response.json()['detail']
+    assert storage_calls == []
+    assert relay_calls == []
+    assert owned_rows(engine, ALICE)['conversations'] == before['conversations']
+    with engine.connect() as db:
+        assert ALICE in set(map(str, db.scalars(text('SELECT id FROM auth.users'))))
+
+
+@pytest.mark.parametrize("failure", ["storage", "relay"])
+def test_cleanup_failure_keeps_targets_and_credentials_for_retry(cloud, signing_keys, monkeypatch, failure):  # noqa: F811
+    client, engine = cloud
+    supabase_schemas(engine)
+    seed(engine, ALICE, job_status='completed')
+    device = {'deviceId': 'dev-1', 'token': 'tok-1'}
+    monkeypatch.setattr(account_deletion, '_read_relay_device', lambda: device)
+    calls = []
+    failing = True
+
+    async def relay(*_args, **kwargs):
+        assert kwargs['device'] == device
+        if failing and failure == 'relay':
+            raise RuntimeError('relay offline')
+        return type('Reply', (), {'status_code': 200})()
+
+    def remove_storage(keys, _token):
+        calls.append(list(keys))
+        if failing and failure == 'storage':
+            raise RuntimeError('storage unavailable')
+
+    monkeypatch.setattr('anteroom.services.relay_client.relay_request', relay)
+    monkeypatch.setattr('anteroom.services.hosted_photos.remove_objects', remove_storage)
+    alice = headers(signing_keys)
+    response = client.request('DELETE', '/api/account', headers=alice, json={'confirm': True})
+    assert response.status_code == 503, response.text
+    with engine.connect() as db:
+        assert ALICE in set(map(str, db.scalars(text('SELECT id FROM auth.users'))))
+        keys = db.scalar(text('SELECT object_keys FROM anteroom_private.account_cleanup WHERE user_id = :owner'),
+                         {'owner': ALICE})
+        assert sorted(keys) == [f'{ALICE}/item/{"a" * 32}.jpg', f'{ALICE}/thread/{"b" * 32}.jpg']
+    # A fresh request must use the durable targets even if Storage enumeration
+    # no longer returns them (for example a partial batch delete before failure).
+    with engine.begin() as db:
+        db.execute(text('DELETE FROM storage.objects WHERE name LIKE :prefix'), {'prefix': ALICE + '/%'})
+    failing = False
+    again = client.request('DELETE', '/api/account', headers=alice, json={'confirm': True})
+    assert again.status_code == 200, again.text
+    assert sorted(calls[-1]) == sorted(keys)
+    with engine.connect() as db:
+        assert ALICE not in set(map(str, db.scalars(text('SELECT id FROM auth.users'))))
+        assert db.scalar(text('SELECT object_keys FROM anteroom_private.account_cleanup WHERE user_id = :owner'),
+                         {'owner': ALICE}) == []
+    assert owned_rows(engine, ALICE) == {}
+
+
+def test_pending_deletion_fences_late_import_and_preserves_other_seller(cloud):  # noqa: F811
+    from anteroom.services.hosted_database import SellerDatabaseSession
+    _client, engine = cloud
+    supabase_schemas(engine)
+    seed(engine, ALICE)
+    account_deletion._delete_records(ALICE)
+    for finalize in (False, True):
+        if finalize:
+            account_deletion._finish_deletion(ALICE)
+        with SellerDatabaseSession(user_id=ALICE, bind=engine) as db:
+            db.add(Conversation(title='late import'))
+            with pytest.raises(DBAPIError, match='Account deletion is pending'):
+                db.commit()
+        with SellerDatabaseSession(user_id=BOB, bind=engine) as db:
+            db.add(Conversation(title='Other seller'))
+            db.commit()
+    assert owned_rows(engine, ALICE) == {}
+
+
+def test_storage_trigger_serializes_with_deletion(migration_engine):  # noqa: F811
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from anteroom.services import schema_migrations
+    from anteroom.services.hosted_database import SellerDatabaseSession
+    engine = migration_engine
+    if engine.dialect.name != 'postgresql':
+        pytest.skip('Deletion fences require Postgres')
+    # Add the managed Storage stand-in after older Storage-policy migrations;
+    # the new fence migration must attach to an existing Storage table.
+    from alembic import command
+    command.upgrade(schema_migrations.alembic_config(engine.url.render_as_string(hide_password=False)), 'b81d24e7a930')
+    with engine.begin() as db:
+        db.execute(text('CREATE SCHEMA storage; CREATE TABLE storage.objects (bucket_id text, name text)'))
+    schema_migrations.ensure_schema(engine)
+    started = Event()
+    key = f'{ALICE}/item/{"a" * 32}.jpg'
+    with engine.connect() as writer, ThreadPoolExecutor() as workers:
+        writer.execute(text("INSERT INTO storage.objects VALUES ('anteroom-photos', :key)"), {'key': key})
+
+        def stage():
+            with SellerDatabaseSession(user_id=ALICE, bind=engine) as db:
+                started.set()
+                db.execute(text('SELECT pg_advisory_xact_lock(hashtextextended(:identity, 0))'),
+                           {'identity': f'anteroom-account-delete:{ALICE}'})
+                keys = list(db.scalars(text('SELECT * FROM anteroom_private.stage_account_deletion()')))
+                db.commit()
+                return keys
+
+        pending = workers.submit(stage)
+        assert started.wait(5)
+        with engine.begin() as probe:
+            assert probe.scalar(
+                text('SELECT pg_try_advisory_xact_lock(hashtextextended(:identity, 0))'),
+                {'identity': f'anteroom-account-delete:{ALICE}'},
+            ) is False
+        assert not pending.done()
+        writer.commit()
+        assert pending.result(timeout=10) == [key]
+    with engine.begin() as db:
+        with pytest.raises(DBAPIError, match='Account deletion is pending'):
+            db.execute(text("INSERT INTO storage.objects VALUES ('anteroom-photos', :key)"), {'key': key + '-late'})
+
+
+def test_concurrent_seller_writes_do_not_serialize_under_deletion_fence(cloud):  # noqa: F811
+    from anteroom.services.hosted_database import SellerDatabaseSession
+    _client, engine = cloud
+    with SellerDatabaseSession(user_id=ALICE, bind=engine) as tx1:
+        tx1.add(Conversation(title='First concurrent write'))
+        tx1.flush()
+        with SellerDatabaseSession(user_id=ALICE, bind=engine) as tx2:
+            tx2.execute(text("SET LOCAL lock_timeout = '2s'"))
+            tx2.add(Conversation(title='Second concurrent write'))
+            tx2.commit()
+        tx1.commit()
+    assert owned_rows(engine, ALICE)['conversations'] == 2
+
+
+
+@pytest.mark.parametrize('phase', ['_delete_records', '_finish_deletion'])
+def test_deadlock_rolls_back_and_retries_database_phase(cloud, monkeypatch, phase):  # noqa: F811
+    from anteroom.services.hosted_database import SellerDatabaseSession
+
+    _client, engine = cloud
+    supabase_schemas(engine)
+    seed(engine, ALICE)
+    keys = []
+    if phase == '_finish_deletion':
+        keys = account_deletion._delete_records(ALICE)
+    original_commit = SellerDatabaseSession.commit
+    attempts = []
+
+    def commit(db):
+        attempts.append(db)
+        if len(attempts) == 1:
+            # Raise the server's deadlock SQLSTATE inside the transaction after
+            # its writes, so the retry must survive a real aborted transaction.
+            db.execute(text("DO $$ BEGIN RAISE EXCEPTION 'injected deadlock' USING ERRCODE = '40P01'; END $$"))
+        return original_commit(db)
+
+    monkeypatch.setattr(SellerDatabaseSession, 'commit', commit)
+    result = getattr(account_deletion, phase)(ALICE)
+    assert len(attempts) == 2 and attempts[0] is not attempts[1]
+    with engine.connect() as db:
+        receipt = db.scalar(text('SELECT object_keys FROM anteroom_private.account_cleanup WHERE user_id = :owner'),
+                            {'owner': ALICE})
+        if phase == '_delete_records':
+            assert sorted(result) == sorted(receipt)
+            assert len(receipt) == 2
+            assert db.scalar(text('SELECT count(*) FROM auth.users WHERE id = :owner'), {'owner': ALICE}) == 1
+        else:
+            assert keys and receipt == []
+            assert db.scalar(text('SELECT count(*) FROM auth.users WHERE id = :owner'), {'owner': ALICE}) == 0
+    assert owned_rows(engine, ALICE) == {}

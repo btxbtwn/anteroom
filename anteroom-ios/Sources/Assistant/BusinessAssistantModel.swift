@@ -183,7 +183,7 @@ final class BusinessAssistantModel {
                 }
                 if let failure, threadID == thread { error = failure }
                 break
-            } catch is CancellationError {
+            } catch let stopped where stopped.isCancellation {
                 break
             } catch let refused as APIError where refused.status > 0 {
                 if threadID == thread {

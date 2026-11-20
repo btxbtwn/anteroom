@@ -153,14 +153,19 @@ final class EditorDraftRecoveryTests: XCTestCase {
         stubScreen(id, title: "Current title")
         let model = ListingEditorModel(api: StubSignIn().api(), listing: .init(id: id, title: "Current title"))
         await model.load()
-        let entered = expectation(description: "Screen read entered")
+        let entered = DispatchSemaphore(value: 0)
         let release = DispatchSemaphore(value: 0)
         stubScreen(id, title: "Reloaded title", beforeScreen: {
-            entered.fulfill()
+            entered.signal()
             _ = release.wait(timeout: .now() + 5)
         })
         let loading = Task { await model.load() }
-        await fulfillment(of: [entered], timeout: 2)
+        let arrived = await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                continuation.resume(returning: entered.wait(timeout: .now() + 2) == .success)
+            }
+        }
+        XCTAssertTrue(arrived, "Screen read entered")
         XCTAssertFalse(model.canRecoverKeptDraft)
         model.recoverKeptDraft()
         XCTAssertEqual(model.form.fields.title, "Current title")
@@ -190,7 +195,7 @@ final class EditorDraftRecoveryTests: XCTestCase {
         for copy in EditorDraftStore.recoveryCopies(id) ?? [] { EditorDraftStore.removeRecovery(copy) }
     }
 
-    private func stubScreen(_ id: String, title: String, savedTitle: String? = nil, beforeScreen: (() -> Void)? = nil) {
+    private func stubScreen(_ id: String, title: String, savedTitle: String? = nil, beforeScreen: (@Sendable () -> Void)? = nil) {
         StubProtocol.answer([{ request in
             if request.httpMethod == "PUT", let savedTitle {
                 return .init(status: 200, body: """

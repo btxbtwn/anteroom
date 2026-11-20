@@ -87,6 +87,43 @@ chmod +x "$1/xcodegen/bin/xcodegen"
         self.assertEqual(self.run_hook().returncode, 7)
         self.assertFalse((self.ios / "generated-project").exists())
 
+    def test_after_xcodegen_writes_debug_only_local_networking_plist(self):
+        (self.root / "anteroom").mkdir()
+        (self.root / "anteroom/VERSION").write_text("1.2.3\n")
+        (self.ios / "Config/Package.resolved").write_text('{"pins":[]}\n')
+        release_plist = self.ios / "Sources/Info.plist"
+        release_plist.write_bytes(plistlib.dumps({
+            "CFBundleDisplayName": "Anteroom",
+            "ITSAppUsesNonExemptEncryption": False,
+        }, fmt=plistlib.FMT_XML))
+        shutil.copy(IOS / "tools/after-xcodegen.sh", self.ios / "tools/after-xcodegen.sh")
+
+        result = subprocess.run(
+            ["bash", str(self.ios / "tools/after-xcodegen.sh")],
+            check=False, cwd=str(self.ios), capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        release_info = plistlib.loads(release_plist.read_bytes())
+        debug_info = plistlib.loads((self.ios / "Sources/Info-Debug.plist").read_bytes())
+        self.assertNotIn("NSAppTransportSecurity", release_info)
+        self.assertEqual(debug_info.get("NSAppTransportSecurity"), {"NSAllowsLocalNetworking": True})
+        self.assertEqual(debug_info["CFBundleDisplayName"], "Anteroom")
+        self.assertIn("MARKETING_VERSION = 1.2.3", (self.ios / "Config/Version.xcconfig").read_text())
+
+    def test_project_spec_keeps_ats_debug_only_and_unit_tests_on_swift_6(self):
+        lines = [
+            line for line in (IOS / "project.yml").read_text().splitlines()
+            if not line.lstrip().startswith("#")
+        ]
+        spec = "\n".join(lines)
+        self.assertNotIn("NSAppTransportSecurity", spec)
+        self.assertNotIn("NSAllowsLocalNetworking", spec)
+        self.assertIn("INFOPLIST_FILE: Sources/Info-Debug.plist", spec)
+        self.assertIn("INFOPLIST_FILE: Sources/Info.plist", spec)
+        self.assertIn("- Info-Debug.plist", spec)
+        self.assertNotIn('SWIFT_VERSION: "5.0"', spec)
+
 
 if __name__ == "__main__":
     unittest.main()

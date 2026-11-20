@@ -10,10 +10,17 @@ from anteroom.routes import jobs
 from anteroom.services import extension_connection
 from anteroom.services.device_routes import claim, lookup, replay_instance
 from anteroom.services.hosted_browser_relay import WAIT_S, relay_for
+from anteroom.services.hosted_limits import bounded_route_class
 from anteroom.services.service_context import current
 from anteroom.services.request_timing import note, reply_step
 
-router = APIRouter(prefix='/api/browser-relay')
+# Chrome replies carry marketplace page data or sales history, never unbounded blobs.
+MAX_RELAY_BODY_BYTES = 16 * 1024 * 1024
+
+router = APIRouter(
+    prefix='/api/browser-relay',
+    route_class=bounded_route_class(lambda: MAX_RELAY_BODY_BYTES, too_large_detail='Relay payload is too large'),
+)
 # Settings → Connections: which marketplaces the seller's Chrome is signed in to, as on the Mac.
 sessions_router = APIRouter()
 sessions_router.add_api_route('/api/marketplaces/sessions', extension_connection.marketplace_sessions, methods=['GET'])

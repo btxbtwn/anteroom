@@ -93,3 +93,40 @@ def test_a_scheduled_run_or_a_pause_does_not_make_the_card_stale(db, client):  #
     saved = next(row for row in client.get("/api/automations").json() if row["id"] == task["id"])
     assert saved["schedule"]["time"] == "10:00"
     assert saved["status"] == "paused"
+
+
+def test_confirmation_refresh_failure_rolls_back_automation_and_receipt(db, monkeypatch):  # noqa: F811
+    from anteroom.models.assistant import AssistantMessage, AssistantThread
+    from anteroom.models.automation import Automation
+    from anteroom.routes.assistant import confirm_automation_message
+
+    thread = AssistantThread(title='Atomic confirmation')
+    db.add(thread)
+    db.flush()
+    message = AssistantMessage(thread_id=thread.id, role='assistant', text='Schedule', automation={
+        'status': 'proposed', 'proposal': {
+            'name': 'Drop prices', 'timezone': 'UTC',
+            'schedule': {'kind': 'daily', 'time': '09:00'},
+            'actions': [{'type': 'price', 'mode': 'percent', 'value': 10, 'floor': 15}],
+            'filters': {}, 'marketplaces': ['ebay'],
+        },
+    })
+    db.add(message)
+    db.commit()
+    message_id = message.id
+    original_refresh = db.refresh
+
+    def fail_refresh(row, *args, **kwargs):
+        if isinstance(row, Automation):
+            raise RuntimeError('refresh failed after insertion')
+        return original_refresh(row, *args, **kwargs)
+
+    monkeypatch.setattr(db, 'refresh', fail_refresh)
+    with pytest.raises(RuntimeError, match='refresh failed'):
+        confirm_automation_message(message_id, db)
+    assert db.query(Automation).count() == 0
+    assert db.get(AssistantMessage, message_id).automation['status'] == 'proposed'
+    monkeypatch.setattr(db, 'refresh', original_refresh)
+    saved = confirm_automation_message(message_id, db)
+    assert saved['automation']['status'] == 'confirmed'
+    assert db.query(Automation).one().id == saved['automation']['automation_id']

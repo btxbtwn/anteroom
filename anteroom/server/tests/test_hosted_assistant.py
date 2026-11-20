@@ -487,3 +487,37 @@ def test_a_queued_answer_runs_without_holding_a_database_connection(migration_en
         event.remove(migration_engine, 'checkout', checkout)
         event.remove(migration_engine, 'checkin', checkin)
     assert seen == [(('What sold?', thread), 0)], 'The answer must not run with a database connection checked out'
+
+
+def test_proposal_row_lock_rejects_another_process(migration_engine, monkeypatch):  # noqa: F811
+    """The database guard must work independently of the Mac's process lock."""
+    from fastapi import HTTPException
+    from sqlalchemy.orm import Session
+    from anteroom.models.assistant import AssistantMessage, AssistantThread
+    from anteroom.services import schema_migrations
+
+    engine = migration_engine
+    if engine.dialect.name != 'postgresql':
+        pytest.skip('Cross-process row locks require Postgres')
+    schema_migrations.ensure_schema(engine)
+    with Session(engine) as db:
+        thread = AssistantThread(title='Concurrent proposal')
+        db.add(thread)
+        db.flush()
+        message = AssistantMessage(thread_id=thread.id, role='assistant', text='Change',
+                                   changes={'status': 'proposed', 'items': [{'listing_id': 'item'}]})
+        db.add(message)
+        db.commit()
+        message_id = message.id
+
+    def apply(item, db):
+        with Session(engine) as other:
+            with pytest.raises(HTTPException) as refused:
+                assistant_route._proposal(message_id, other)
+            assert refused.value.status_code == 409
+        return None
+
+    monkeypatch.setattr(assistant_route, '_apply_to_listing', apply)
+    with Session(engine) as db:
+        result = assistant_route.apply_changes(message_id, db)
+        assert result['changes']['status'] == 'applied'

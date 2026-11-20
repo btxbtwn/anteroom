@@ -142,3 +142,25 @@ def test_timing_handler_preserves_assistant_stderr_fallback(monkeypatch):
         error_log.install_assistant_timings()
         assistant_logger.error('controlled preparation failure')
     assert captured == ['controlled preparation failure']
+
+
+def test_dsn_redacted_before_message_or_detail_truncation(monkeypatch):
+    from anteroom.services import error_log
+    import logging
+
+    monkeypatch.setattr(error_log, 'MAX_MESSAGE_CHARS', 32)
+    monkeypatch.setattr(error_log, 'MAX_DETAIL_CHARS', 32)
+    entries = []
+    monkeypatch.setattr(error_log, '_append_disk', entries.append)
+    message = 'postgres://alice:' + 'sensitive' * 10 + '@db/app'
+    record = logging.LogRecord('anteroom.test', logging.ERROR, __file__, 1, message, (), None)
+    error_log.AppLogHandler().emit(record)
+    assert 'sensitive' not in entries[-1]['message']
+    try:
+        raise ValueError(message)
+    except ValueError:
+        import sys
+        record.exc_info = sys.exc_info()
+    handler = error_log.ErrorLogHandler()
+    handler.emit(record)
+    assert 'sensitive' not in str(error_log.list_entries())
