@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1059 — 2026-11-20
+
+- Finish renaming a Vendoo database file only when an update was clearly in progress, and leave mixed leftover files alone so listing data is not attached by mistake.
+- Refuse to start that rename when an Anteroom database sidecar is already present, and check the whole rename plan before moving any file.
+
 ## 0.1.1058 — 2026-11-20
 
 - Import all your active listings from a marketplace in one step. Listings that look like items already in Anteroom wait for you to link them or import them as new, so nothing is duplicated, and nothing on the marketplace is changed.
