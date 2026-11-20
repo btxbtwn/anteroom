@@ -20,7 +20,12 @@ Publishing and delisting happen only when the seller asks for them: the
 routes require the marketplaces to be named explicitly and the call to carry
 `confirm`. eBay actions require explicit seller confirmation too. Nothing in
 Anteroom calls publishing or delisting on its own. No code path may publish everywhere by default, on a queue, on
-a retry, or as a side effect of any other action.
+a retry, or as a side effect of any other action. Delist after a sale is the one seller-enabled exception (approved by the seller
+2026-11-20): when the seller has turned on **Delist the other marketplaces** (Settings →
+Connections, off by default), a detected sale delists that item on the seller's other
+marketplaces where it is live, without a per-sale confirmation. It never delists the
+marketplace that sold, cancelled or refunded orders, or items with stock left, and the
+public privacy policy describes it. No other automatic delist is allowed.
 
 ## Source of Truth
 
@@ -296,7 +301,7 @@ backend tests that inspect frontend, extension and skill sources.
 - Never commit API keys, OAuth credentials, listing photos, generated diagnostics, or private exports.
 - API keys and sign-in tokens never enter the database in plain text, logs, frontend responses, or extension messages. On the Mac they live in macOS Keychain. For hosted accounts they live in Supabase Vault, encrypted at rest and referenced per seller, and are never returned to any client.
 - On the Mac, bind Anteroom only to `127.0.0.1`. The hosted API on Fly.io is the only part that accepts connections from outside. It requires a Supabase session on every request except health and readiness checks, `GET /api/auth-config`, the web app's static files and marketplace webhooks. Machine-to-machine `/internal/` routes skip the seller session and authenticate with the shared process token (`ANTEROOM_PROCESS_TOKEN`); they must not be reachable from the public edge. The Mac worker connects to it outbound and binds nothing. Optional private Tailscale Serve (Settings → Connections) may proxy Tailnet HTTPS to that loopback port; never Funnel and never bind to `0.0.0.0`.
-- Publishing and delisting require the seller to name the marketplaces explicitly and provide `confirm`. Automation stops at a saved draft.
+- Publishing and delisting require the seller to name the marketplaces explicitly and provide `confirm`. Automation stops at a saved draft. The only exception is the seller-enabled delist after a sale described under **Invariant** above.
 - Direct marketplace List, Update and Save draft actions may run side by side, one per marketplace, but never alongside a delist.
 - Do not introduce Redis, MongoDB, Celery, or provider substitutions unless explicitly requested.
 - Approved cloud services (2026-10-26, see `docs/cloud-architecture.md`):
