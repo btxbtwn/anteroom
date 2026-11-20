@@ -14,6 +14,7 @@ so the chat and the Regenerate dialog can show progress.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
@@ -23,6 +24,7 @@ from vendoo_studio.config import skills_dir
 from vendoo_studio.services import live_trace, model_slots
 from vendoo_studio.services.provider_deadlines import provider_label
 from vendoo_studio.services.brave_search import (
+    MARKETPLACE_SITES,
     brave_active_queries,
     brave_sold_queries,
     comp_identities,
@@ -71,8 +73,15 @@ COMPS_FAILED_NOTE = (
 BRAVE_SOLD_QUERIES = 3
 BRAVE_ACTIVE_QUERIES = 1
 
+# Split search caps for providers whose web_search supports a per-call budget:
+# sold comps are sparser and need explicit sale proof, while active listings
+# only provide an asking-price ceiling.
+MODEL_SOLD_MAX_CALLS = 4
+MODEL_ACTIVE_MAX_CALLS = 2
+
 SOLD = "sold"
 ACTIVE = "active"
+_MAX_CALLS = {SOLD: MODEL_SOLD_MAX_CALLS, ACTIVE: MODEL_ACTIVE_MAX_CALLS}
 # Each side reads the shared rules, its own section and the answer shape from
 # the comp-research reference. Sending a side the other side's instructions
 # made the active search hunt sold comps that are then discarded, and the sold
@@ -119,7 +128,7 @@ def comps_search_messages(query: str, side: str) -> list[dict]:
     ]
 
 
-Searcher = Callable[[list[dict]], Awaitable[dict]]
+Searcher = Callable[..., Awaitable[dict]]
 
 
 @dataclass(frozen=True)
@@ -177,13 +186,32 @@ def _active_query(query: str) -> str:
     return query.removesuffix(" sold comps").strip() or query
 
 
+def _search_kwargs(search: Searcher, *, max_calls: int, allowed_domains: tuple[str, ...]) -> dict:
+    """Forward search constraints only to providers whose ``web_search`` accepts them."""
+    try:
+        params = inspect.signature(search).parameters
+    except (TypeError, ValueError):
+        return {}
+    kwargs: dict = {}
+    if "max_calls" in params:
+        kwargs["max_calls"] = max_calls
+    if "allowed_domains" in params:
+        kwargs["allowed_domains"] = allowed_domains
+    return kwargs
+
+
 async def _run_model_search(
     search: ModelSearch, query: str, expected_names: tuple[str, ...], side: str
 ) -> SoldCompsReport:
     asked = query if side == SOLD else _active_query(query)
+    kwargs = _search_kwargs(
+        search.search,
+        max_calls=_MAX_CALLS[side],
+        allowed_domains=MARKETPLACE_SITES,
+    )
     async with model_slots.slot():
         result = await asyncio.wait_for(
-            search.search(comps_search_messages(asked, side)),
+            search.search(comps_search_messages(asked, side), **kwargs),
             timeout=MODEL_SEARCH_TIMEOUT_SEC,
         )
     answer = str(result.get("answer") or "")

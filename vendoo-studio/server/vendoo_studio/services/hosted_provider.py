@@ -70,7 +70,7 @@ class HostedProvider:
     def __getattr__(self, name: Literal['test_connection']) -> Callable[..., Awaitable[bool]]: ...
 
     @overload
-    def __getattr__(self, name: Literal['web_search']) -> Callable[[list[dict]], Awaitable[dict]]: ...
+    def __getattr__(self, name: Literal['web_search']) -> Callable[..., Awaitable[dict]]: ...
 
     @overload
     def __getattr__(self, name: str) -> Callable[..., Any]: ...
@@ -79,6 +79,12 @@ class HostedProvider:
         if name not in self._operations:
             raise AttributeError(name)
         operation = getattr(self._provider, name)
+        # Copy only __signature__ (never functools.wraps) so callers can inspect
+        # optional kwargs without exposing self._provider via __wrapped__.__self__.
+        try:
+            sig = inspect.signature(operation)
+        except (TypeError, ValueError):
+            sig = None
         if inspect.isasyncgenfunction(operation):
             async def stream(*args, **kwargs):
                 try:
@@ -86,6 +92,8 @@ class HostedProvider:
                         yield item
                 except Exception:
                     raise ProviderUnavailable() from None
+            if sig is not None:
+                stream.__signature__ = sig  # type: ignore[attr-defined]
             return stream
 
         async def call(*args, **kwargs):
@@ -93,6 +101,8 @@ class HostedProvider:
                 return await operation(*args, **kwargs)
             except Exception:
                 raise ProviderUnavailable() from None
+        if sig is not None:
+            call.__signature__ = sig  # type: ignore[attr-defined]
         return call
 
 

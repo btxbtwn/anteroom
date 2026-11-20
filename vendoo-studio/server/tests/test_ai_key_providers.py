@@ -242,14 +242,54 @@ def test_openrouter_web_search_allows_repeated_searches_and_reads_citations(fake
     body = json.loads(calls[0].content)
     assert body["model"] == "deepseek/deepseek-v3.2"
     assert "plugins" not in body
-    assert body["tools"] == [{"type": "openrouter:web_search"}]
+    assert body["tools"] == [{
+        "type": "openrouter:web_search",
+        "parameters": {"engine": "perplexity", "max_uses": 8},
+    }]
     # The server tool allows 30 searches per request unless capped; each is
-    # billed. The cap matches the research prompt's budget.
+    # billed. The default cap matches the research prompt's budget.
     assert body["max_tool_calls"] == 8
     assert body["input"] == [{"role": "user", "content": "comps"}]
     assert "messages" not in body
     assert calls[0].url.path == "/api/v1/responses"
     assert calls[0].headers["x-title"] == "Anteroom"
+
+
+def test_openrouter_web_search_forwards_call_cap_and_allowed_domains(fake_http):
+    payload = {"output": [{"type": "message", "content": [{"type": "output_text", "text": "Sold $40."}]}]}
+    calls = fake_http(lambda request: httpx.Response(200, json=payload))
+    provider = OpenRouterProvider(KEY_PROVIDERS["openrouter"], "sk-or", "vision-m", "google/gemini-3.1-flash-lite")
+    run(provider.web_search(
+        [{"role": "user", "content": "comps"}],
+        max_calls=4,
+        allowed_domains=("ebay.com", "  poshmark.com  ", " "),
+    ))
+    body = json.loads(calls[0].content)
+    assert body["tools"] == [{
+        "type": "openrouter:web_search",
+        "parameters": {
+            "engine": "perplexity",
+            "max_uses": 4,
+            "allowed_domains": ["ebay.com", "poshmark.com"],
+        },
+    }]
+    assert body["max_tool_calls"] == 4
+
+
+def test_openrouter_web_search_validates_cap_and_omits_blank_domains(fake_http):
+    payload = {"output": [{"type": "message", "content": [{"type": "output_text", "text": "Sold $40."}]}]}
+    calls = fake_http(lambda request: httpx.Response(200, json=payload))
+    provider = OpenRouterProvider(KEY_PROVIDERS["openrouter"], "sk-or", "vision-m", "google/gemini-3.1-flash-lite")
+    with pytest.raises(ValueError, match="max_calls must be at least 1"):
+        run(provider.web_search([{"role": "user", "content": "comps"}], max_calls=0))
+    assert calls == []
+    run(provider.web_search([{"role": "user", "content": "comps"}], max_calls=99, allowed_domains=("", "   ")))
+    body = json.loads(calls[0].content)
+    assert body["tools"] == [{
+        "type": "openrouter:web_search",
+        "parameters": {"engine": "perplexity", "max_uses": 30},
+    }]
+    assert body["max_tool_calls"] == 30
 
 
 @pytest.mark.parametrize("payload", [{"output": []}, {"output": [{"type": "reasoning", "summary": []}]}])

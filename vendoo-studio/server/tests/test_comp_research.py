@@ -403,6 +403,65 @@ class ResearchTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn(COMPS_SETUP_NOTE, text)
         self.assertFalse(comps_usable(text))
 
+    async def test_passes_split_caps_and_marketplace_domains_through_wrapper_stacks(self):
+        from vendoo_studio.services.brave_search import MARKETPLACE_SITES
+        from vendoo_studio.services.hosted_provider import HostedProvider
+        from vendoo_studio.services.provider_deadlines import with_deadlines
+
+        class CappedProvider:
+            name, vision_model, listing_model = "openrouter", "v", "l"
+
+            def __init__(self) -> None:
+                self.recorded: list[tuple[str, int | None, tuple[str, ...] | list[str] | None]] = []
+
+            async def web_search(
+                self,
+                messages: list[dict],
+                *,
+                max_calls: int | None = None,
+                allowed_domains: tuple[str, ...] | list[str] | None = None,
+            ) -> dict:
+                side = SOLD if "Find recently sold comps" in messages[1]["content"] else ACTIVE
+                self.recorded.append((side, max_calls, allowed_domains))
+                return {"answer": THREE_SOLD, "sources": []}
+
+        for hosted_mode in (False, True):
+            raw = CappedProvider()
+            wrapped = with_deadlines(HostedProvider(raw) if hosted_mode else raw)
+            with (
+                patch("vendoo_studio.services.comp_research.get_listing_provider", return_value=wrapped),
+                patch("vendoo_studio.services.comp_research.get_brave_api_key", return_value=None),
+            ):
+                await research_sold_comps(ANALYSIS)
+            by_side = {side: (cap, domains) for side, cap, domains in raw.recorded}
+            with self.subTest(hosted=hosted_mode):
+                self.assertEqual(by_side, {
+                    SOLD: (4, MARKETPLACE_SITES),
+                    ACTIVE: (2, MARKETPLACE_SITES),
+                })
+
+    async def test_omits_extra_search_kwargs_for_plain_providers_through_wrappers(self):
+        from vendoo_studio.services.hosted_provider import HostedProvider
+        from vendoo_studio.services.provider_deadlines import with_deadlines
+
+        seen: list[list[dict]] = []
+
+        class PlainProvider:
+            name, vision_model, listing_model = "anthropic", "v", "l"
+
+            async def web_search(self, messages: list[dict]) -> dict:
+                seen.append(messages)
+                return {"answer": THREE_SOLD, "sources": []}
+
+        wrapped = with_deadlines(HostedProvider(PlainProvider()))
+        with (
+            patch("vendoo_studio.services.comp_research.get_listing_provider", return_value=wrapped),
+            patch("vendoo_studio.services.comp_research.get_brave_api_key", return_value=None),
+        ):
+            text = await research_sold_comps(ANALYSIS)
+        self.assertEqual(len(seen), 2)
+        self.assertTrue(comps_usable(text))
+
 
 if __name__ == "__main__":
     unittest.main()

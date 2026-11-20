@@ -118,6 +118,7 @@ class DeadlineProvider:
                         raise
                     yield item
 
+        _copy_signature(stream, operation)
         return stream
 
     def _call(self, operation, step: str):
@@ -134,7 +135,16 @@ class DeadlineProvider:
                     raise _stalled(provider, step, limit) from None
                 raise
 
+        _copy_signature(call, operation)
         return call
+
+
+def _copy_signature(wrapper: Any, operation: Any) -> None:
+    """Keep the wrapped operation's signature visible without setting ``__wrapped__``."""
+    try:
+        wrapper.__signature__ = inspect.signature(operation)
+    except (TypeError, ValueError):
+        pass
 
 
 def with_deadlines(provider: Any) -> Any:
