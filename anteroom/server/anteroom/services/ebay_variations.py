@@ -19,6 +19,7 @@ blank row price uses the listing price.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 from collections.abc import Callable
@@ -317,7 +318,7 @@ async def execute(action: str, client: EbayClient, snapshot: dict, form: dict, f
     main = image_urls[:single.MAX_PHOTOS]
     shared = common_aspects(aspects, chosen)
     record({"ebay_sku": base, "ebay_group_key": group_key, "ebay_inventory_written": True})
-    template = single._inventory_body({**fields, "quantity": 0}, {}, [], snapshot, form)
+    template = await asyncio.to_thread(single._inventory_body, {**fields, "quantity": 0}, {}, [], snapshot, form)
     for row in chosen["rows"]:
         if not active():
             raise ValueError("The eBay listing stopped before it finished. Try again to continue.")
@@ -392,7 +393,7 @@ async def update_live(client: EbayClient, snapshot: dict, form: dict, fields: di
     image_urls = await single._image_urls(client, photos, binding, record, active)
     by_photo = dict(zip([photo.id for photo in photos], image_urls, strict=True))
     shared = common_aspects(aspects, chosen)
-    template = single._inventory_body({**fields, "quantity": 0}, {}, [], snapshot, form)
+    template = await asyncio.to_thread(single._inventory_body, {**fields, "quantity": 0}, {}, [], snapshot, form)
     for row in chosen["rows"]:
         if not active():
             raise ValueError("The eBay update stopped. Check its result before trying again.")

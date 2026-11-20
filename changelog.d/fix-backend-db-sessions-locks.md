@@ -1,0 +1,1 @@
+- Improve backend reliability and responsiveness during eBay/Etsy listing, photo editing, background draft generation, and multi-seller automations by releasing database transactions before external I/O, replacing global photo/automation locks with scoped locks, and capping concurrent background worker jobs.

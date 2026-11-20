@@ -497,7 +497,7 @@ def _ship_from_postal_code() -> str | None:
 
 async def _create_ship_from_location(client: EbayClient) -> dict:
     """Make the eBay inventory location from the ships-from ZIP in Settings → Listings."""
-    postal = _ship_from_postal_code()
+    postal = await asyncio.to_thread(_ship_from_postal_code)
     if not postal:
         raise missing(
             "eBay has no inventory location. Enter your ships-from ZIP under Settings → Listings.",
@@ -566,7 +566,7 @@ def own_listing_choices(snapshot: dict | None) -> dict[str, str]:
 
 async def listing_choices(client: EbayClient, snapshot: dict | None = None) -> dict[str, str]:
     profiles = await listing_profiles(client)
-    defaults = {**get_ebay_listing_defaults(),
+    defaults = {**(await asyncio.to_thread(get_ebay_listing_defaults)),
                 **{LISTING_CHOICE_KEYS[key]: value for key, value in own_listing_choices(snapshot).items()}}
     chosen = {
         "fulfillmentPolicyId": _pick(profiles["fulfillment"], defaults.get("fulfillment_policy_id")),
@@ -574,7 +574,7 @@ async def listing_choices(client: EbayClient, snapshot: dict | None = None) -> d
         "returnPolicyId": _pick(profiles["return"], defaults.get("return_policy_id")),
     }
     locations = profiles["locations"]
-    if not locations and _ship_from_postal_code():
+    if not locations and await asyncio.to_thread(_ship_from_postal_code):
         locations = [await _create_ship_from_location(client)]
     chosen["merchantLocationKey"] = _pick(locations, defaults.get("merchant_location_key"))
     return chosen
@@ -774,7 +774,8 @@ def ebay_picture_url(url: str) -> str:
 
 
 async def _image_url(client: EbayClient, photo) -> str:
-    uploaded = await client.request("POST", "/commerce/media/v1_beta/image/create_image_from_file", upload=_photo_upload(photo))
+    upload = await asyncio.to_thread(_photo_upload, photo)
+    uploaded = await client.request("POST", "/commerce/media/v1_beta/image/create_image_from_file", upload=upload)
     url = str(uploaded.get("imageUrl") or "")
     image_id = str(uploaded.get("imageId") or uploaded.get("fileId") or "")
     if not url and image_id:
@@ -796,7 +797,7 @@ async def _image_urls(client: EbayClient, photos: list, binding: dict, record: C
                 for entry in binding.get("ebay_images") or [] if isinstance(entry, dict) and entry.get("url")}
     images: list[dict] = []
     for photo in photos:
-        checksum = _photo_checksum(photo)
+        checksum = await asyncio.to_thread(_photo_checksum, photo)
         url = ebay_picture_url(uploaded.get((photo.id, checksum)) or "")
         if not url:
             if not active():
@@ -1234,8 +1235,9 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Call
         image_urls = await _image_urls(client, photos, binding, record, active)
         video_ids = await _video_ids(client, snapshot, binding, record, active)
         await _wait_for_video(client, video_ids, active)
+        inventory_body = await asyncio.to_thread(_inventory_body, fields, aspects, image_urls, snapshot, form, video_ids)
         await client.request("PUT", f"/sell/inventory/v1/inventory_item/{segment(sku)}",
-                             body=_inventory_body(fields, aspects, image_urls, snapshot, form, video_ids))
+                             body=inventory_body)
         await _confirm_video(client, sku, snapshot, video_ids)
         policies = offer.get("listingPolicies")
         if not isinstance(policies, dict):
@@ -1307,8 +1309,9 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
         await _wait_for_video(client, video_ids, active)
         # From here eBay may hold an inventory item under this SKU, and it is this item's.
         record({"ebay_sku": sku, "ebay_inventory_written": True})
+        inventory_body = await asyncio.to_thread(_inventory_body, fields, aspects, image_urls, snapshot, form, video_ids)
         await client.request("PUT", f"/sell/inventory/v1/inventory_item/{segment(sku)}",
-                             body=_inventory_body(fields, aspects, image_urls, snapshot, form, video_ids))
+                             body=inventory_body)
         await _confirm_video(client, sku, snapshot, video_ids)
         body = _offer_body(sku, fields, choices["merchantLocationKey"], {
             "fulfillmentPolicyId": choices["fulfillmentPolicyId"], "paymentPolicyId": choices["paymentPolicyId"],

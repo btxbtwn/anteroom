@@ -11,10 +11,13 @@ behind the cut-out item, then the frame is turned, straightened and cropped.
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import sys
 import threading
 import uuid
+from collections.abc import Callable
+from contextlib import contextmanager
 from io import BytesIO
 from pathlib import Path
 from typing import Literal
@@ -23,14 +26,58 @@ import numpy as np
 from PIL import Image, ImageOps
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from anteroom.models.conversation import Photo
 from anteroom.services import photos
 from anteroom.services.photo_store import photo_store
 
+log = logging.getLogger(__name__)
+
 SAVE_FORMATS = {"image/jpeg": "JPEG", "image/png": "PNG", "image/webp": "WEBP"}
 PREVIEW_MAX_SIDE = 1600
-# Saves render from the source and swap files; one at a time keeps two quick
-# saves of the same photo from each deleting the other's file.
-_write_lock = threading.Lock()
+
+
+class _PhotoLockEntry:
+    __slots__ = ("lock", "waiters")
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.waiters = 0
+
+
+# Serialize concurrent edits to the same photo without blocking edits to other
+# photos or holding a Postgres transaction open across Storage/Pillow I/O.
+_photo_locks_guard = threading.Lock()
+_photo_locks: dict[tuple[str, str, str], _PhotoLockEntry] = {}
+
+
+@contextmanager
+def _photo_lock(conv_id: str, photo_id: str):
+    from anteroom.services.service_context import current
+
+    context = current()
+    key = (context.seller_id if context is not None else "", conv_id, photo_id)
+    with _photo_locks_guard:
+        entry = _photo_locks.get(key)
+        if entry is None:
+            entry = _PhotoLockEntry()
+            _photo_locks[key] = entry
+        entry.waiters += 1
+    try:
+        with entry.lock:
+            yield
+    finally:
+        with _photo_locks_guard:
+            entry.waiters -= 1
+            if entry.waiters == 0 and _photo_locks.get(key) is entry:
+                del _photo_locks[key]
+
+
+class PhotoNotFoundError(LookupError):
+    pass
+
+
+class PhotoConflictError(RuntimeError):
+    pass
 
 
 class CropBox(BaseModel):
@@ -288,32 +335,120 @@ def current_edits(photo) -> PhotoEdits:
     return PhotoEdits.model_validate(photo.edits) if photo.edits else PhotoEdits()
 
 
+def _cleanup_uploaded(stored_filename: str) -> None:
+    try:
+        photo_store().delete(stored_filename)
+    except Exception:
+        log.warning("Failed to clean up uncommitted edited photo %s", stored_filename, exc_info=True)
+
+
+def _cleanup_previous(previous: str) -> None:
+    try:
+        photo_store().delete(previous)
+    except Exception:
+        log.warning("Failed to delete superseded edited photo %s after commit", previous, exc_info=True)
+    try:
+        photos.delete_thumbnails(previous)
+    except Exception:
+        log.warning("Failed to delete thumbnails for superseded edited photo %s after commit", previous, exc_info=True)
+
+
+def read_preview_source(db, conv_id: str, photo_id: str) -> str:
+    """Read the source filename for previewing, then release the DB transaction before rendering."""
+    from anteroom.services import background_tasks
+    from anteroom.services.service_context import current
+
+    try:
+        if current() is not None:
+            background_tasks.check_idle(db, conv_id)
+        photo = db.query(Photo).filter(Photo.id == photo_id, Photo.conversation_id == conv_id).first()
+        if photo is None:
+            raise PhotoNotFoundError("Photo not found")
+        return photo.source_filename or photo.stored_filename
+    finally:
+        db.rollback()
+
+
+def apply_photo_edit(
+    repo,
+    conv_id: str,
+    photo_id: str,
+    resolve_edits: Callable[[PhotoEdits], PhotoEdits | None],
+):
+    """Apply or reset photo edits with per-photo locking and no DB transaction open during Storage/Pillow I/O."""
+    from anteroom.services import background_tasks
+    from anteroom.services.service_context import current
+
+    db = repo.db
+    with _photo_lock(conv_id, photo_id):
+        # Phase 1: short unlocked read of current metadata, then release the DB transaction.
+        try:
+            if current() is not None:
+                background_tasks.check_idle(db, conv_id)
+            photo = db.query(Photo).filter(Photo.id == photo_id, Photo.conversation_id == conv_id).first()
+            if photo is None:
+                raise PhotoNotFoundError("Photo not found")
+            target = resolve_edits(current_edits(photo))
+            current_stored = photo.stored_filename
+            current_source = photo.source_filename
+            mime_type = photo.mime_type
+        finally:
+            db.rollback()
+
+        if target is None and not current_source:
+            return photo
+
+        # Phase 2: Storage download + Pillow render + Storage upload outside any DB transaction.
+        if target is None:
+            assert current_source is not None
+            meta = source_meta(current_source)
+            uploaded_key: str | None = None
+            new_source: str | None = None
+            new_edits: dict | None = None
+            previous: str | None = current_stored
+        else:
+            source = current_source or current_stored
+            meta = write_edit(source, mime_type, target)
+            uploaded_key = meta["stored_filename"]
+            new_source = source
+            new_edits = target.model_dump()
+            previous = current_stored if current_source else None
+
+        # Phase 3: short locked transaction to verify state and commit the new metadata.
+        committed = False
+        try:
+            if current() is not None:
+                background_tasks.require_idle(db, conv_id)
+            fresh = (
+                db.query(Photo)
+                .filter(Photo.id == photo_id, Photo.conversation_id == conv_id)
+                .populate_existing()
+                .with_for_update()
+                .first()
+            )
+            if fresh is None:
+                raise PhotoNotFoundError("Photo not found")
+            if fresh.stored_filename != current_stored or fresh.source_filename != current_source:
+                raise PhotoConflictError("Photo changed while editing; try again.")
+            photo = repo.replace_photo_file(fresh, meta, source_filename=new_source, edits=new_edits)
+            committed = True
+            # End the post-commit refresh read transaction before post-commit Storage cleanup.
+            db.rollback()
+        except BaseException:
+            if not committed:
+                db.rollback()
+                if uploaded_key:
+                    _cleanup_uploaded(uploaded_key)
+            raise
+
+        # Phase 4: best-effort post-commit cleanup outside any DB transaction.
+        if previous:
+            _cleanup_previous(previous)
+
+    return photo
+
+
 def save_edits(repo, photo, edits: PhotoEdits):
     """Render ``edits`` from the photo's upload and serve the result; the upload is kept."""
-    if edits.is_original():
-        return reset_edits(repo, photo)
-    with _write_lock:
-        source = photo.source_filename or photo.stored_filename
-        meta = write_edit(source, photo.mime_type, edits)
-        previous = photo.stored_filename if photo.source_filename else None
-        try:
-            photo = repo.replace_photo_file(photo, meta, source_filename=source, edits=edits.model_dump())
-        except Exception:
-            photo_store().delete(meta["stored_filename"])
-            raise
-        if previous:
-            photo_store().delete(previous)
-            photos.delete_thumbnails(previous)
-    return photo
-
-
-def reset_edits(repo, photo):
-    """Serve the untouched upload again."""
-    with _write_lock:
-        if not photo.source_filename:
-            return photo
-        previous = photo.stored_filename
-        photo = repo.replace_photo_file(photo, source_meta(photo.source_filename), source_filename=None, edits=None)
-        photo_store().delete(previous)
-        photos.delete_thumbnails(previous)
-    return photo
+    target = None if edits.is_original() else edits
+    return apply_photo_edit(repo, photo.conversation_id, photo.id, lambda _cur: target)
