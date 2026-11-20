@@ -155,15 +155,18 @@ async function walk(key: string, id: number, importer: Importer) {
     update(key, id, { page });
     let data: MarketplaceImportPage;
     try {
-      // Pages come from whichever account is connected now, so a run stops if that is no longer the one it began with.
-      // Within a page, the server's ownership check refuses listings that belong to another account.
-      if (importer.account) {
-        const now = await importer.account();
+      // Pages come from whichever account is connected now, so the account is checked before and after each read:
+      // a page read across a change is dropped, and the run stops. Listings of a page read before a change belong
+      // to the earlier account, and the server's ownership check refuses them once another one is connected.
+      const changed = async () => {
+        const now = await importer.account!();
         if (account === undefined) account = now;
-        if (!now || now !== account) return update(key, id, { status: "failed", error: ACCOUNT_CHANGED[marketplace] ?? "" });
-        if (!live()) return;
-      }
+        return !now || now !== account;
+      };
+      if (importer.account && await changed()) return update(key, id, { status: "failed", error: ACCOUNT_CHANGED[marketplace] ?? "" });
+      if (!live()) return;
       data = await importer.candidates(page, cursor);
+      if (importer.account && await changed()) return update(key, id, { status: "failed", error: ACCOUNT_CHANGED[marketplace] ?? "" });
     } catch (error) {
       // Stopped while the page was loading: that is a stop, not a failure.
       return update(key, id, stopping() ? { status: "stopped" } : { status: "failed", error: message(error) });
