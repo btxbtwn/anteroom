@@ -196,3 +196,32 @@ existing serialization. Environment approval alone is not the durable one-use
 proof: approve and independently test the exact run-bound claim or durable claim
 mechanism as well. Until those controls and native/migration/operational receipts
 exist, the runtime route must stay disabled even when evidence validation passes.
+
+
+## Hosted deploy gate recovery checkpoint
+
+For single-owner recovery on `btxbtwn/anteroom` (whose active protections are
+ruleset `main: passing CI required` and `production`/`release` branch policies
+restricted to `main`, with no two-person review requirement),
+`.github/scripts/wait-for-tested-code.py` live-verifies the pinned
+`Descendant verification` receipt (`b28ba4b361071373731b93bc49c12b4bf78326e9`,
+run `44662061597`, attempt `1`, artifact `14596571781`) via
+`recovery_evidence.verify` only when all of the following hold inside
+`Deploy hosted`'s serialized `deploy-hosted` concurrency group:
+
+- Recorded `production_commit` equals `b73c534707b9ef9bd70e4dc589b9c4b10863a852`
+  and live HTTPS `HEALTH_URL` corroborates version `0.1.1011`.
+- The only non-green historical commit is `fa824f9a` (`conclusion == failure`),
+  preceding correcting merge `#1653` (`5cc7fea1`) and exact checkpoint `b28ba4b3`
+  on `origin/main` first-parent history at or before the target `HEAD`.
+- Every other non-release commit in `production..HEAD` — including every commit
+  merged after `b28ba4b3` — passes its own push `CI` first; the receipt is never
+  applied to any other SHA.
+- Live verification runs immediately before build, migration, and rollout, using
+  only the existing read-only workflow permissions (`contents: read`,
+  `actions: read`, `checks: read`).
+
+Once a single deploy succeeds and records a newer `Deployed commit` notice (or
+live `/api/health` moves off `0.1.1011`), the pinned checkpoint never matches
+again and ordinary gating applies unchanged. The offline gate-recovery tests
+live in `.github/scripts/test_wait_for_tested_code.py` and run in `Repo checks`.
