@@ -1,0 +1,1 @@
+- Show the item's title instead of "Untitled item" in the Marketplace activity tray on hosted accounts.
