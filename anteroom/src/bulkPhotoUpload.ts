@@ -45,7 +45,8 @@ interface BulkUploadApi {
 }
 
 export interface BulkListingUploadResult {
-  convId: string;
+  /** Null when the folder's draft could not be created; its error says so. */
+  convId: string | null;
   folder: string | null;
   count: number;
   errors: string[];
@@ -79,11 +80,27 @@ export async function createBulkPhotoListings(
 
   for (const item of items) {
     const notes = bulkListingNotes(defaults, item);
-    const conv = await conversations.create({
-      title: listingTitleForFolder(item.folder),
-      ...(notes ? { notes } : {}),
-      ...(defaults.boxId ? { box_id: defaults.boxId } : {}),
-    });
+    let conv: { id: string };
+    try {
+      conv = await conversations.create({
+        title: listingTitleForFolder(item.folder),
+        ...(notes ? { notes } : {}),
+        ...(defaults.boxId ? { box_id: defaults.boxId } : {}),
+      });
+    } catch (err) {
+      // Like a refused upload below, one failed create must not abandon the
+      // drafts already started or the folders after it.
+      // The draft may exist anyway when only the reply was lost, so ask the
+      // seller to check before adding the folder again.
+      const message = (err instanceof Error ? err.message : "Create failed").replace(/\.+$/, "");
+      listings.push({
+        convId: null,
+        folder: item.folder,
+        count: 0,
+        errors: [`${item.folder || "New Listing"}: ${message}. Its draft may not have been started; check your drafts before adding that folder again.`],
+      });
+      continue;
+    }
     let result: PhotoUploadResult;
     try {
       result = await conversations.uploadPhotos(conv.id, item.files);

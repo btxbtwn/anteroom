@@ -571,9 +571,11 @@ export function App() {
   // Bulk-uploaded drafts already carry their SKUs and measurements, so they generate straight away.
   const generateBatch = async (uploaded: BulkListingUploadResult[]) => {
     if (!runtime.features.has("generation")) return;
-    const listings = uploaded
-      .filter((listing) => listing.count > 0)
-      .map((listing) => ({ convId: listing.convId, title: listingTitleForFolder(listing.folder) }));
+    const listings = uploaded.flatMap((listing) => (
+      listing.convId && listing.count > 0
+        ? [{ convId: listing.convId, title: listingTitleForFolder(listing.folder) }]
+        : []
+    ));
     if (!listings.length) return;
     const ids = listings.map((listing) => listing.convId);
     const titles = new Map(listings.map((listing) => [listing.convId, listing.title]));
@@ -617,19 +619,20 @@ export function App() {
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ["conversations"] });
       if (result.mode === "bulk") {
-        for (const listing of result.listings) {
-          queryClient.invalidateQueries({ queryKey: ["photos", listing.convId] });
+        const createdIds = result.listings.flatMap((row) => (row.convId ? [row.convId] : []));
+        for (const id of createdIds) {
+          queryClient.invalidateQueries({ queryKey: ["photos", id] });
         }
-        const first = result.listings[0];
+        const first = createdIds[0];
         if (first) {
-          setSelectedConvId(first.convId);
+          setSelectedConvId(first);
           setMobileSidebarOpen(false);
           goListings();
           setMobilePane(runtime.hosted ? "editor" : "workspace");
         }
         const totalPhotos = result.listings.reduce((sum, row) => sum + row.count, 0);
         const errors = result.listings.flatMap((row) => row.errors);
-        const title = `Started ${result.listings.length} listings`;
+        const title = `Started ${createdIds.length} listings`;
         const description = `Added ${totalPhotos} photo${totalPhotos === 1 ? "" : "s"} from separate folders.`;
         if (result.generate) void generateBatch(result.listings);
         if (errors.length) {
@@ -699,7 +702,7 @@ export function App() {
       editInventoryLocation: openShipsFromZip,
       bulkCreated: (listings, generate) => {
         if (generate) void generateBatch(listings);
-        const first = listings[0]?.convId;
+        const first = listings.find((listing) => listing.convId)?.convId;
         if (!first) return;
         setSelectedConvId(first);
         goListings();
