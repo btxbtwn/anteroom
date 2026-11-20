@@ -249,7 +249,7 @@ Depop: No title field → use Universal Description only
     "age": "Modern",
     "style": ["Streetwear", "Sportswear", "Graphic"],
     "material": "Cotton",
-    "occasion": ["Casual", "Sportswear", "Vacation"],
+    "occasion": ["Casual", "Workout", "Vacation"],
     "condition": "Used - Fair",
     "location": "New York, NY",
     "shippingMethod": "Depop USPS",
