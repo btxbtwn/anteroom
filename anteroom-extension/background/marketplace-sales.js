@@ -58,6 +58,8 @@ async function saleJson(url, options = {}) {
   return response ? response.json() : null;
 }
 
+const SALE_ERROR_CODES = new Set(['signed_out', 'challenge', 'rate_limited', 'network', 'schema_drift', 'rejected']);
+
 // The first of the seller's listings that names its account.
 async function sellerFrom(ids, read) {
   let lastError = null;
@@ -66,6 +68,7 @@ async function sellerFrom(ids, read) {
       const seller = await read(id);
       if (seller) return seller;
     } catch (error) {
+      if (error?.code === 'signed_out' || error?.code === 'rate_limited') throw error;
       lastError = error;
     }
   }
@@ -78,7 +81,11 @@ async function soldAmongMissing(ids, live, isSold) {
   const sales = [];
   for (const id of ids.filter(id => !live.has(id)).slice(0, SALE_MAX_CONFIRM)) {
     await salePause(false);
-    if (await isSold(id).catch(() => false)) sales.push({ listing_id: id });
+    try {
+      if (await isSold(id)) sales.push({ listing_id: id });
+    } catch (error) {
+      if (SALE_ERROR_CODES.has(error?.code)) throw error;
+    }
   }
   return sales;
 }
@@ -182,8 +189,7 @@ async function readMarketplaceSales(marketplace, listingIds) {
   try {
     return { ok: true, sales: await read(ids) };
   } catch (error) {
-    const code = ['signed_out', 'challenge', 'rate_limited', 'network', 'schema_drift', 'rejected'].includes(error?.code)
-      ? error.code : null;
+    const code = SALE_ERROR_CODES.has(error?.code) ? error.code : null;
     return { ok: false, error: 'Could not check sales.', ...(code ? { error_code: code } : {}) };
   }
 }

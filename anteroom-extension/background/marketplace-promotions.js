@@ -38,6 +38,17 @@ async function prunePromotionJournal(keepKey) {
   });
 }
 
+async function savePromotionJournal(key, entry) {
+  try {
+    await chrome.storage.local.set({ [key]: entry });
+  } catch (error) {
+    if (error?.name !== 'QuotaExceededError' && !/quota/i.test(String(error?.message || error))) throw error;
+    await prunePromotionJournal(key);
+    await chrome.storage.local.set({ [key]: entry });
+  }
+  await prunePromotionJournal(key);
+}
+
 // Result checks and the original polling call can finish concurrently. Keep a
 // confirmed completion monotonic even if the older call later times out.
 async function settlePromotionJournal(key, result) {
@@ -46,8 +57,7 @@ async function settlePromotionJournal(key, result) {
     const stored = (await chrome.storage.local.get(key))[key];
     if (stored?.finished && stored.result?.ok === true && stored.result.state === 'done') return stored;
     const settled = { ...stored, finished: true, at: Date.now(), result };
-    await chrome.storage.local.set({ [key]: settled });
-    await prunePromotionJournal(key);
+    await savePromotionJournal(key, settled);
     return settled;
   });
   promotionSettlements.set(key, pending);
@@ -531,8 +541,7 @@ async function handleMarketplacePromotion(msg, respond = result => sendBrowserRe
         marketplaceError('This action was interrupted. Check the listing on the marketplace before doing it again.'), false));
       return;
     }
-    await chrome.storage.local.set({ [key]: { finished: false, at: Date.now(), marketplace: payload.marketplace, action: payload.action } });
-    await prunePromotionJournal(key);
+    await savePromotionJournal(key, { finished: false, at: Date.now(), marketplace: payload.marketplace, action: payload.action });
     const result = await runMarketplacePromotion(payload);
     const settled = await settlePromotionJournal(key, result);
     respond(settled.result);

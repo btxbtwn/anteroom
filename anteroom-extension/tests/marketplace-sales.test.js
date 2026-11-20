@@ -147,3 +147,37 @@ test('Poshmark sales classifies HTTP and network failures and prepares request c
   assert.equal(netResult.ok, false);
   assert.equal(netResult.error_code, 'network');
 });
+
+test('Poshmark sales propagates signed_out during sale confirmation and avoids redundant sellerFrom retries', async () => {
+  const live = 'bbbbbbbbbbbbbbbbbbbbbbbb';
+  const missing = 'aaaaaaaaaaaaaaaaaaaaaaaa';
+  const seller = 'cccccccccccccccccccccccc';
+  // Seller lookup and closet loading succeed; per-item confirmation returns 401.
+  const confirm401 = worker({
+    [`/vm-rest/posts/${live}`]: [200, { data: { id: live, creator_id: seller, inventory: { status: 'available' } } }],
+    '/posts/filtered': [200, { data: [{ id: live }], more: { next_max_id: null } }],
+    [`/vm-rest/posts/${missing}`]: [401, {}],
+  });
+  const confirmResult = await read(confirm401.c, 'poshmark', [live, missing]);
+  assert.equal(confirmResult.ok, false);
+  assert.equal(confirmResult.error_code, 'signed_out');
+
+  // 404 during confirmation stays a non-sale rather than failing the whole check.
+  const confirm404 = worker({
+    [`/vm-rest/posts/${live}`]: [200, { data: { id: live, creator_id: seller, inventory: { status: 'available' } } }],
+    '/posts/filtered': [200, { data: [{ id: live }], more: { next_max_id: null } }],
+    [`/vm-rest/posts/${missing}`]: [404, null],
+  });
+  assert.deepEqual(await read(confirm404.c, 'poshmark', [live, missing]), { ok: true, sales: [] });
+
+  // sellerFrom stops immediately on signed_out instead of retrying additional IDs.
+  const ids = [missing, live, 'dddddddddddddddddddddddd'];
+  const fastFail = worker({
+    [`/vm-rest/posts/${missing}`]: [401, {}],
+    [`/vm-rest/posts/${live}`]: [200, { data: { id: live, creator_id: seller, inventory: { status: 'available' } } }],
+  });
+  const fastResult = await read(fastFail.c, 'poshmark', ids);
+  assert.equal(fastResult.ok, false);
+  assert.equal(fastResult.error_code, 'signed_out');
+  assert.equal(fastFail.calls.length, 1);
+});

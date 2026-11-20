@@ -305,7 +305,11 @@ function vendooPhotoUploadUrl(raw) {
   if (destination.protocol !== 'https:' || destination.username || destination.password || destination.port) return null;
   const host = destination.hostname.toLowerCase();
   const allowed = VENDOO_PHOTO_EXACT_HOSTS.has(host)
-    || VENDOO_PHOTO_HOST_SUFFIXES.some(suffix => host.endsWith(suffix) && host.length > suffix.length);
+    || VENDOO_PHOTO_HOST_SUFFIXES.some(suffix => {
+      if (!host.endsWith(suffix) || host.length <= suffix.length) return false;
+      const prefix = host.slice(0, -suffix.length);
+      return /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(prefix) && !prefix.includes('..');
+    });
   return allowed ? destination.href : null;
 }
 
