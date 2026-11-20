@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib.util
 import os
 import sqlite3
+import subprocess
+import sys
 import tempfile
 import unittest
 from multiprocessing import Process
@@ -202,18 +204,12 @@ class ConfigPathTest(unittest.TestCase):
                 self.assertFalse((data / f"vendoo_studio.db{suffix}").exists())
 
     def test_fresh_refusal_with_target_sidecar_blocks_empty_default_db(self):
-        """Legacy primary + both WALs, no target primary: startup must not open a DB.
+        """Legacy primary + both WALs, no target primary: real startup must not open a DB.
 
-        Mirrors ``database.py`` (``adopt_legacy_database`` then ``make_engine``). The
-        raise must happen first so SQLite never creates ``anteroom.db`` or rewrites
-        the foreign target WAL.
+        Spawns a fresh process that imports ``anteroom.database`` (the app path that
+        calls ``adopt_legacy_database`` then ``make_engine``). The raise must happen
+        first so SQLite never creates ``anteroom.db`` or rewrites the foreign WAL.
         """
-        from anteroom.database import make_engine
-
-        def studio_sqlite_startup(root: Path) -> None:
-            config.adopt_legacy_database(root)
-            make_engine(f"sqlite:///{root / config.DATABASE_NAME}")
-
         with tempfile.TemporaryDirectory() as tmp:
             data = Path(tmp)
             legacy = data / "vendoo_studio.db"
@@ -224,9 +220,21 @@ class ConfigPathTest(unittest.TestCase):
             legacy_wal_before = legacy_wal.read_bytes()
             target_wal = data / "anteroom.db-wal"
             target_wal.write_bytes(b"foreign-wal")
-            os.environ.pop("ANTEROOM_DATABASE_URL", None)
-            with self.assertRaises(config.LegacyDatabaseAdoptionError):
-                studio_sqlite_startup(data)
+            env = {
+                key: value
+                for key, value in os.environ.items()
+                if key not in {"ANTEROOM_DATABASE_URL", "ANTEROOM_TEST_DATABASE_URL"}
+            }
+            env["ANTEROOM_DATA_DIR"] = str(data)
+            started = subprocess.run(
+                [sys.executable, "-c", "import anteroom.database"],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertNotEqual(started.returncode, 0, started.stderr)
+            self.assertIn("LegacyDatabaseAdoptionError", started.stderr)
             self.assertTrue(legacy.is_file())
             self.assertFalse((data / "anteroom.db").exists())
             self.assertEqual(legacy_wal.read_bytes(), legacy_wal_before)
