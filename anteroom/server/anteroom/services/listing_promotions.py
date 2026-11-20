@@ -509,6 +509,9 @@ def _start_send(db: Session, promotion_id: str, shipping_discount_id: str | None
             if row.action == "offer":
                 approval = approval.where(
                     PromotionAutomation.discount_percent == row.discount_percent,
+                    or_(PromotionAutomation.min_likes.is_(None),
+                        PromotionAutomation.min_likes <= (row.like_count or 0)),
+                    PromotionAutomation.shipping_label == (row.shipping_discount_label if row.shipping_discount_id else None),
                     or_(PromotionAutomation.minimum_price_cents.is_(None),
                         PromotionAutomation.minimum_price_cents <= row.offer_price_cents),
                 )

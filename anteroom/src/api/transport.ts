@@ -20,9 +20,13 @@ export function hasHostedApiSession() { return hostedSession !== null; }
 /** The signed-in session, so per-account caches can tell when it changes. */
 export function currentHostedSession(): HostedApiSession | null { return hostedSession; }
 
-async function executeStudioFetch(input: string, options: RequestInit): Promise<Response> {
-  const session = hostedSession;
-  if (!session) return fetch(input, options);
+async function executeStudioFetch(input: string, options: RequestInit, session: HostedApiSession | null): Promise<Response> {
+  if (hostedSession !== session) throw new Error("Your account changed. Open the request again.");
+  if (!session) {
+    const response = await fetch(input, options);
+    if (hostedSession !== session) throw new Error("Your account changed. Open the request again.");
+    return response;
+  }
   const url = new URL(input, session.origin);
   if (url.origin !== session.origin || !url.pathname.startsWith("/api/")) {
     throw new Error("Anteroom API requests must stay on this app's origin.");
@@ -38,7 +42,18 @@ async function executeStudioFetch(input: string, options: RequestInit): Promise<
 }
 
 export function studioFetch(input: string, options: RequestInit = {}): Promise<Response> {
-  return scheduleRequest(input, options, () => executeStudioFetch(input, options));
+  const session = hostedSession;
+  return scheduleRequest(input, options, () => executeStudioFetch(input, options, session));
+}
+
+/** Hold a single scheduler slot through the image body download. */
+export function studioImage(input: string, signal: AbortSignal, session: HostedApiSession | null) {
+  return scheduleRequest(input, { signal }, async () => {
+    const response = await executeStudioFetch(input, { signal }, session);
+    const blob = response.ok ? await response.blob() : null;
+    if (hostedSession !== session) throw new Error("Your account changed.");
+    return { status: response.status, blob };
+  });
 }
 
 /** Read an authenticated export without putting a session in its URL. */

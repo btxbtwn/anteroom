@@ -186,3 +186,17 @@ it("reports a server failure only after trying again, with its status", async ()
     fetchMock.mockImplementation(async () => new Response(new Blob(["jpeg"]), { status: 200 }));
   }
 });
+
+it("holds background slots until thumbnail bodies finish downloading", async () => {
+  const { registerBackgroundSignal } = await import("./requestScheduler");
+  let release!: () => void;
+  const body = new Promise<void>(resolve => { release = resolve; });
+  const fetch = vi.fn(async () => ({ ok: true, blob: async () => { await body; return new Blob(["jpeg"]); } }));
+  vi.stubGlobal("fetch", fetch);
+  const signal = registerBackgroundSignal(new AbortController().signal);
+  const photos = Promise.all([1, 2, 3, 4].map(i => loadPrivateImage("/api/photos/slow-" + i, signal)));
+  try {
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+  } finally { release(); await photos; }
+  expect(fetch).toHaveBeenCalledTimes(4);
+});

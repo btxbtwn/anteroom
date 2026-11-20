@@ -76,7 +76,7 @@ class HostedSettingsStore:
             # both an eager settings query on routes that never read settings
             # and a nested pooled-connection checkout that deadlocks under load.
             active = self._reusable_session()
-            if active is not None:
+            if active is not None and active.in_transaction():
                 with active.no_autoflush:
                     snapshot = self.load(active)
             else:

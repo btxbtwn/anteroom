@@ -40,7 +40,6 @@ _draining = threading.Event()
 def begin_draining() -> None:
     """Called from the shutdown signal: hand work over before requests drain."""
     _draining.set()
-    clear_route_cache()
 
 
 def draining() -> bool:
@@ -72,6 +71,8 @@ def release(engine) -> None:
     except SQLAlchemyError:
         # The lease and routes still expire on their own.
         log.warning('Could not release this Machine before stopping')
+    finally:
+        clear_route_cache()  # Fence claims concurrent with the release transaction.
 
 
 async def lead(engine, starts: dict[str, Callable[[], Callable[[], None]]],
@@ -103,6 +104,7 @@ async def lead(engine, starts: dict[str, Callable[[], Callable[[], None]]],
                     await asyncio.to_thread(stops.pop(name))
             await asyncio.to_thread(_draining.wait, RENEW_S)
     finally:
+        clear_route_cache()
         on_drain()
         for stop in stops.values():
             await asyncio.to_thread(stop)

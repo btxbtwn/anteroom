@@ -61,3 +61,21 @@ describe("shared desktop and cloud API transport", () => {
     await expect(pending).rejects.toThrow("account changed");
   });
 });
+
+it.each([true, false])("binds queued requests to their submission session (signed in: %s)", async signedIn => {
+  const { registerBackgroundSignal, scheduleRequest } = await import("./requestScheduler");
+  const session = { seller: "first", origin: ORIGIN, accessToken: vi.fn(async () => "test"), unauthorized: vi.fn() };
+  if (signedIn) dispose = installHostedApiSession(session);
+  let release!: () => void;
+  const blocker = scheduleRequest("/api/status", {}, () => new Promise<void>(resolve => { release = resolve; }));
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  const queued = studioFetch("/api/listings", { signal: registerBackgroundSignal(new AbortController().signal) });
+  dispose?.();
+  dispose = installHostedApiSession({ ...session, seller: "second" });
+  release();
+  await blocker;
+  await expect(queued).rejects.toThrow("account changed");
+  expect(session.accessToken).not.toHaveBeenCalled();
+  expect(fetch).not.toHaveBeenCalled();
+});
