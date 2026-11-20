@@ -1,2 +1,0 @@
-- A Depop listing that went live no longer shows "Depop refused the request (HTTP 404)". When Depop's publish status can't be read, Anteroom finds the new listing in your shop, or asks you to add its link.
-- A link you add with Mark as listed stays put, even if an earlier result check answers afterwards.

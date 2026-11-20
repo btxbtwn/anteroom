@@ -6,6 +6,15 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1043 — 2026-11-20
+
+- A Depop listing that went live no longer shows "Depop refused the request (HTTP 404)". When Depop's publish status can't be read, Anteroom finds the new listing in your shop, or asks you to add its link.
+- A link you add with Mark as listed stays put, even if an earlier result check answers afterwards.
+
+## 0.1.1042 — 2026-11-20
+
+- When an assistant answer is slow, Anteroom now records how long each step took (waiting its turn, reading your shop, each model reply, each lookup and saving), so a slow answer can be traced to the step that held it up.
+
 ## 0.1.1041 — 2026-11-20
 
 - Inventory now has three tabs, Active, Sold and Draft, and opens on Active. The Open and Failed tabs are gone.
