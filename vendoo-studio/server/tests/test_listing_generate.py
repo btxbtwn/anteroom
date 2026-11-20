@@ -458,7 +458,7 @@ class PersistListingTest(unittest.TestCase):
         }, source="user_form")
         ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M"}))
         parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
-            **LISTING_JSON, "size": "L", "poshmark_specifics": {"size": "L"},
+            **LISTING_JSON, "size": "S", "poshmark_specifics": {"size": "S"},
         })
         self.assertEqual(parsed["size"], "L")
         self.assertEqual(parsed["poshmark_specifics"]["size"], "L")

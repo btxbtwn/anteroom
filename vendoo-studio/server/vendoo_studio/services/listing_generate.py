@@ -1190,8 +1190,7 @@ async def fill_validation_gaps(provider, listing: dict, *, analysis: str = "", n
             continue
         if any(field == path or field.startswith(path + ".") or path.startswith(field + ".") for path in locked):
             continue
-        if (tag_size and field.split(".")[-1].casefold() == "size") or (
-                size_locked and field.split(".")[-1].casefold() in {"size", "nativesizeid"}):
+        if (tag_size or size_locked) and field.split(".")[-1].casefold() in {"size", "nativesizeid"}:
             continue
         # A container error does not authorize replacement of all its fields.
         value = listing
@@ -1652,6 +1651,9 @@ def persist_generated_listing(
             size = ""
         model_size = None if listing.get("size") is None else str(listing.get("size"))
         if size and size != (model_size or "").strip():
+            _replace_title_size(listing, raw_generated_size, size)
+            if model_size and model_size != raw_generated_size:
+                _replace_title_size(listing, model_size, size)
             listing["size"] = size
             align_size_fields(listing, previous_size=model_size)
         if size:
@@ -1708,6 +1710,9 @@ def persist_generated_listing(
         # General Size as aligned (men's bottoms: a 36x30 tag is a 36 waist), not the raw tag text.
         aligned = str(listing.get("size") or "").strip() or pinned_size[0]
         _follow_ebay_native_size(listing, aligned, [s for s in (pinned_size[1], generated_size) if s])
+    if pinned_size:
+        _follow_native_size_rows(listing, seed, sanitize_size_value(listing.get("size")) or pinned_size[0])
+        _drop_unformed_size_ids(listing, seed)
     constrain_generated(listing, seed)
     cap_listing_description(listing)
     if revisions:
