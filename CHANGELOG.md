@@ -6,6 +6,16 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1045 — 2026-11-20
+
+- Keep your saved Depop package size when preparing a listing, even when its saved weight suggests a different package.
+- Let choosing Depop's clothing Size replace an old blank size, and identify a cleared required clothing size before listing.
+
+## 0.1.1044 — 2026-11-20
+
+- Poshmark's Condition now shows the listing's condition instead of staying empty and counting as a missing field.
+- Mercari's Brand now explains when a brand isn't in Anteroom's copy of Mercari's brand list: listing checks Mercari's current list and uses No brand only if Mercari doesn't have it.
+
 ## 0.1.1043 — 2026-11-20
 
 - A Depop listing that went live no longer shows "Depop refused the request (HTTP 404)". When Depop's publish status can't be read, Anteroom finds the new listing in your shop, or asks you to add its link.
