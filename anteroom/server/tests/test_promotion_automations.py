@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import unittest
 from datetime import UTC, datetime, timedelta
+from threading import Event
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock, patch
 
@@ -817,6 +818,42 @@ class PromotionAutomationsTest(unittest.TestCase):
         automation = self.db.get(PromotionAutomation, saved["id"])
         self.assertFalse(automation.enabled)
         self.assertIn("sign in", automation.paused_reason)
+
+    def test_cancellation_during_share_claim_closes_the_run_and_restores_its_slot(self):
+        automation_id = self.create(SHARE)["id"]
+        self.enable(automation_id)
+        self.due(automation_id)
+        due = self.db.get(PromotionAutomation, automation_id).next_run_at
+        begin = promotion_automations._begin_round
+
+        async def cancel_during_claim():
+            entered = asyncio.Event()
+            resume = Event()
+            loop = asyncio.get_running_loop()
+
+            def delayed_begin(db, *args):
+                loop.call_soon_threadsafe(entered.set)
+                assert resume.wait(5)
+                return begin(db, *args)
+
+            with patch.object(promotion_automations, "_begin_round", delayed_begin):
+                task = asyncio.create_task(promotion_automations.run_round(automation_id, expected_next_run_at=due))
+                try:
+                    await asyncio.wait_for(entered.wait(), 5)
+                    task.cancel()
+                    await asyncio.sleep(0)
+                finally:
+                    resume.set()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+
+        asyncio.run(cancel_during_claim())
+        self.db.expire_all()
+        run = self.db.query(PromotionRun).filter_by(automation_id=automation_id).one()
+        self.assertIsNotNone(run.finished_at)
+        self.assertIn("Stopped", run.note)
+        self.assertEqual(self.db.get(PromotionAutomation, automation_id).next_run_at, due)
+        self.bridge.assert_not_called()
 
     def test_a_share_round_follows_order_exclusions_cap_and_speed(self):
         newest, _middle, oldest = self.items[1], self.items[0], self.items[2]

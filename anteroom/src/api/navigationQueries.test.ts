@@ -2,6 +2,7 @@ import { QueryObserver } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createStudioQueryClient } from "./queryClient";
 import { api } from "./client";
+import { installHostedApiSession, studioFetch } from "./transport";
 import { prefetchAssistantThread, prefetchListingReads } from "./navigationQueries";
 import { photoThumbUrl } from "../photoThumb";
 import type { ListingPhoto } from "./types";
@@ -163,6 +164,48 @@ it.each(["opening", "mounted"] as const)("keeps the in-flight listing read when 
   } finally {
     unsubscribe?.();
     client.clear();
+  }
+});
+
+it.each(["desktop", "hosted"])("admits queued %s listing reads as soon as the listing opens", async (mode) => {
+  const client = createStudioQueryClient();
+  const hover = new AbortController();
+  const uninstall = mode === "hosted" ? installHostedApiSession({
+    origin: "https://studio.example", seller: "seller", accessToken: async () => "token", unauthorized: () => {},
+  }) : undefined;
+  let release!: () => void;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const fetch = vi.fn(async (input: string) => {
+    if (input.endsWith("/blocker")) await blocked;
+    if (input.endsWith("/screen")) return Response.json({
+      jobs: [], activity: {}, marketplace_listings: {}, native_marketplaces: {}, marketplace_sales: {},
+      conversation: {}, photos: [], messages: [],
+    });
+    return Response.json([]);
+  });
+  vi.stubGlobal("fetch", fetch);
+  const blocker = studioFetch("/api/blocker");
+  const hovered = prefetchListingReads(client, "queued", { signal: hover.signal, background: true });
+  let opened: ReturnType<typeof prefetchListingReads> | undefined;
+  const started = () => fetch.mock.calls.map(([url]) => new URL(url, "https://studio.example").pathname);
+  try {
+    await Promise.resolve(); // Let a hosted batch queue its transport request.
+    expect(started()).not.toContain("/api/conversations/queued/vendoo-api/fields");
+    opened = prefetchListingReads(client, "queued");
+    await vi.waitFor(() => {
+      expect(started()).toContain("/api/conversations/queued/vendoo-api/fields");
+      expect(started()).toContain(mode === "hosted" ? "/api/conversations/queued/screen" : "/api/jobs");
+    }, { timeout: 500 });
+    hover.abort();
+    await opened;
+    expect(started().filter(path => path.endsWith("/fields"))).toHaveLength(1);
+  } finally {
+    hover.abort();
+    release();
+    await Promise.all([blocker, hovered, opened]);
+    client.clear();
+    uninstall?.();
+    vi.unstubAllGlobals();
   }
 });
 

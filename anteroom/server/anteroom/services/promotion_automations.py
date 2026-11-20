@@ -18,6 +18,7 @@ import asyncio
 import logging
 import random
 from collections import Counter
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import cast
@@ -25,7 +26,7 @@ from typing import cast
 from sqlalchemy import CursorResult, func, or_, update
 from sqlalchemy.orm import Session
 
-from anteroom.database import SessionLocal, in_worker_session
+from anteroom.database import SessionLocal, claim_in_worker_session, in_worker_session
 from anteroom.models.conversation import Conversation, new_id
 from anteroom.models.listing_promotion import (
     ListingPromotion,
@@ -384,22 +385,32 @@ def _skip_note(reasons: Counter) -> str:
     return "; ".join(f"{text[:120]} ({count})" for text, count in reasons.most_common(3))
 
 
+@dataclass
+class _StartedRound:
+    rule: dict
+    run_id: str
+    previous_slot: datetime | None
+    claimed_slot: datetime | None
+
+
 def _begin_round(
     db: Session,
     automation_id: str,
     now: datetime,
     expected_next_run_at: datetime | None,
     like_events: dict[str, datetime] | None,
-) -> tuple[dict, str] | None:
+) -> _StartedRound | None:
     row = db.get(PromotionAutomation, automation_id)
     if row is None:
         return None
+    target_next_run = claimed_slot = None
     if like_events is None:
         target_next_run = expected_next_run_at if expected_next_run_at is not None else row.next_run_at
         # Claim the due round: when two Machines read the same due rule, one runs it.
+        claimed_slot = next_share_slot(row, now) if row.action == "share" else now + OFFER_INTERVAL
         claimed = db.execute(update(PromotionAutomation).execution_options(synchronize_session=False).where(
             PromotionAutomation.id == row.id, PromotionAutomation.next_run_at == target_next_run,
-        ).values(next_run_at=next_share_slot(row, now) if row.action == "share" else now + OFFER_INTERVAL))
+        ).values(next_run_at=claimed_slot))
         if cast(CursorResult, claimed).rowcount != 1:
             db.rollback()
             return None
@@ -407,7 +418,7 @@ def _begin_round(
     run = PromotionRun(automation_id=row.id, started_at=now)
     db.add(run)
     row.last_run_at = now
-    db.commit()
+    db.flush()
     rule = {
         "id": row.id,
         "marketplace": row.marketplace,
@@ -419,7 +430,9 @@ def _begin_round(
         "shipping_label": row.shipping_label,
         "discount_percent": row.discount_percent,
     }
-    return rule, run.id
+    started = _StartedRound(rule, run.id, target_next_run, claimed_slot)
+    db.commit()
+    return started
 
 
 def _prepare_round(
@@ -523,14 +536,31 @@ def _finish_round(
     return run
 
 
+def _abandon_round(db: Session, started: _StartedRound, now: datetime) -> None:
+    # No marketplace work started. Restore the slot only if this run still
+    # owns it, so a newer round or a seller's schedule edit wins.
+    if started.claimed_slot is not None:
+        db.execute(update(PromotionAutomation).where(
+            PromotionAutomation.id == started.rule["id"],
+            PromotionAutomation.next_run_at == started.claimed_slot,
+            PromotionAutomation.last_run_at == now,
+        ).values(next_run_at=started.previous_slot))
+    if _finish_round(db, started.run_id, Counter(), "Stopped before the round started.", Counter()) is None:
+        db.rollback()
+
+
 async def run_round(automation_id: str, *, expected_next_run_at: datetime | None = None,
                     sleep=asyncio.sleep, like_events: dict[str, datetime] | None = None) -> PromotionRun | None:
     """One round: share the next listings, or offer on listings with new likers. Stops at the first limit."""
     now = _now()
-    started = await in_worker_session(_begin_round, automation_id, now, expected_next_run_at, like_events)
+    async def abandon(started: _StartedRound | None) -> None:
+        if started is not None:
+            await in_worker_session(_abandon_round, started, now)
+
+    started = await claim_in_worker_session(_begin_round, abandon, automation_id, now, expected_next_run_at, like_events)
     if started is None:
         return None
-    rule, run_id = started
+    rule, run_id = started.rule, started.run_id
     marketplace, action = rule["marketplace"], rule["action"]
     reasons: Counter = Counter()
     counts: Counter = Counter()

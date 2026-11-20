@@ -1,6 +1,7 @@
 import { hasHostedApiSession } from "./transport";
 import { loadPrivateImage } from "./privateImages";
-import { registerBackgroundSignal } from "./requestScheduler";
+import { promoteListingScreenRead } from "./listingScreen";
+import { promoteBackgroundSignal, registerBackgroundSignal } from "./requestScheduler";
 import type { Query, QueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import { photoThumbUrl } from "../photoThumb";
@@ -10,6 +11,7 @@ const warmingPhotos = new Map<string, HTMLImageElement>();
 const warmedPhotos = new Set<string>();
 
 const releaseHover = new WeakMap<Query, () => void>();
+const backgroundReads = new WeakMap<Query, AbortSignal>();
 
 function warmPhotoThumbnails(photos: ListingPhoto[], signal?: AbortSignal) {
   if (signal?.aborted) return;
@@ -55,30 +57,42 @@ export function prefetchListingReads(client: QueryClient, id: string, options?: 
     const findQuery = () => client.getQueryCache().find({ queryKey, exact: true });
     // Opening can join the existing fetch before the editor has subscribed.
     const existing = findQuery();
-    if (!background && !callerSignal && existing) releaseHover.get(existing)?.();
+    if (!background && existing) {
+      releaseHover.get(existing)?.();
+      const signal = backgroundReads.get(existing);
+      if (signal) {
+        promoteBackgroundSignal(signal);
+        promoteListingScreenRead(signal);
+      }
+    }
     return client.prefetchQuery({
       queryKey,
       retry: false,
       queryFn: async ({ signal }) => {
-        if (background) registerBackgroundSignal(signal);
-        const query = callerSignal && findQuery();
-        if (!callerSignal || !query) return fetch(signal);
+        const query = findQuery();
+        if (background) {
+          registerBackgroundSignal(signal);
+          if (query) backgroundReads.set(query, signal);
+        }
 
         // The query owns the transport. Leaving the row cancels only work
         // started here that has no active destination using it.
         const cancel = () => {
-          if (!signal.aborted && !query.isActive()) void query.cancel({ revert: true });
+          if (!signal.aborted && query && !query.isActive()) void query.cancel({ revert: true });
         };
         const release = () => {
-          callerSignal.removeEventListener("abort", cancel);
-          if (releaseHover.get(query) === release) releaseHover.delete(query);
+          callerSignal?.removeEventListener("abort", cancel);
+          if (query && releaseHover.get(query) === release) releaseHover.delete(query);
         };
-        releaseHover.set(query, release);
-        callerSignal.addEventListener("abort", cancel, { once: true });
+        if (callerSignal && query) {
+          releaseHover.set(query, release);
+          callerSignal.addEventListener("abort", cancel, { once: true });
+        }
         try {
           return await fetch(signal);
         } finally {
           release();
+          if (query && backgroundReads.get(query) === signal) backgroundReads.delete(query);
         }
       },
     });

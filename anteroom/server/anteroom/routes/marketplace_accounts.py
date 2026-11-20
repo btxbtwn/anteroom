@@ -146,54 +146,16 @@ def _sale_out(sale: MarketplaceSale, conv: Conversation | None, listings: dict, 
     }
 
 
-def conversation_new_sales(db: Session, conv: Conversation, listings: dict) -> dict:
-    """New marketplace sales for one already-loaded conversation, matching GET /api/marketplace-sales."""
-    sales = (
-        db.query(MarketplaceSale)
-        .filter(MarketplaceSale.state == "new", MarketplaceSale.conversation_id == conv.id)
-        .order_by(MarketplaceSale.received_at.desc())
-        .limit(200)
-        .all()
-    )
-    if not sales:
-        return {"sales": []}
-    from anteroom.services.sale_inventory import stock_after_sale
-
-    stocks = {}
-    for sale in sales:
-        key = (sale.conversation_id, sale.marketplace, sale.listing_id)
-        if key not in stocks:
-            stocks[key] = stock_after_sale(db, conv.id, sale.marketplace, sale.listing_id)
-    return {
-        "sales": [
-            _sale_out(
-                sale,
-                conv,
-                listings,
-                stocks.get((sale.conversation_id, sale.marketplace, sale.listing_id),
-                           {"status": "unknown", "remaining": None}),
-            )
-            for sale in sales
-        ]
-    }
-
-
-@router.get("/api/marketplace-sales")
-def list_sales(background_tasks: BackgroundTasks, state: str | None = "new", conversation_id: str | None = None, db: Session = Depends(get_db, scope="function")):
-    from anteroom.services import recent_orders
-
-    background_tasks.add_task(recent_orders.refresh)
+def _sale_rows(db: Session, state: str | None, conversation_id: str | None) -> list[MarketplaceSale]:
     query = db.query(MarketplaceSale)
     if state:
         query = query.filter(MarketplaceSale.state == state)
     if conversation_id:
         query = query.filter(MarketplaceSale.conversation_id == conversation_id)
-    sales = query.order_by(MarketplaceSale.received_at.desc()).limit(200).all()
-    ids = {s.conversation_id for s in sales if s.conversation_id}
-    convs = {c.id: c for c in db.query(Conversation).filter(Conversation.id.in_(ids)).all()} if ids else {}
-    # An order can have several lines for one item. Read its current listings
-    # once, rather than re-querying inventory for every line in the response.
-    listings = {conv_id: marketplace_delist.listings(db, conv_id) for conv_id in convs}
+    return query.order_by(MarketplaceSale.received_at.desc()).limit(200).all()
+
+
+def _sales_response(db: Session, sales: list[MarketplaceSale], convs: dict[str, Conversation], listings: dict) -> dict:
     from anteroom.services.sale_inventory import stock_after_sale
 
     stocks = {}
@@ -204,6 +166,25 @@ def list_sales(background_tasks: BackgroundTasks, state: str | None = "new", con
     return {"sales": [_sale_out(s, convs.get(cast(str, s.conversation_id)), listings.get(cast(str, s.conversation_id), {}),
                                stocks.get((s.conversation_id, s.marketplace, s.listing_id), {"status": "unknown", "remaining": None}))
                       for s in sales]}
+
+
+def conversation_new_sales(db: Session, conv: Conversation, listings: dict) -> dict:
+    """New marketplace sales for one already-loaded conversation, matching GET /api/marketplace-sales."""
+    return _sales_response(db, _sale_rows(db, "new", conv.id), {conv.id: conv}, {conv.id: listings})
+
+
+@router.get("/api/marketplace-sales")
+def list_sales(background_tasks: BackgroundTasks, state: str | None = "new", conversation_id: str | None = None, db: Session = Depends(get_db, scope="function")):
+    from anteroom.services import recent_orders
+
+    background_tasks.add_task(recent_orders.refresh)
+    sales = _sale_rows(db, state, conversation_id)
+    ids = {s.conversation_id for s in sales if s.conversation_id}
+    convs = {c.id: c for c in db.query(Conversation).filter(Conversation.id.in_(ids)).all()} if ids else {}
+    # An order can have several lines for one item. Read its current listings
+    # once, rather than re-querying inventory for every line in the response.
+    listings = {conv_id: marketplace_delist.listings(db, conv_id) for conv_id in convs}
+    return _sales_response(db, sales, convs, listings)
 
 
 class RecoverRequest(BaseModel):
