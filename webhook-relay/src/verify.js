@@ -93,7 +93,12 @@ const CURVES = [
 // bytes first, then that re-serialisation, so either form passes.
 export async function verifyEbaySignature({ rawBody, signature, publicKeyPem }) {
   const spki = pemToSpki(publicKeyPem);
-  const der = base64ToBytes(signature);
+  let der;
+  try {
+    der = base64ToBytes(signature);
+  } catch {
+    return false;
+  }
   const candidates = [rawBody];
   try {
     const compact = JSON.stringify(JSON.parse(rawBody));
@@ -156,7 +161,8 @@ export async function verifyEtsySignature({ id, timestamp, signatureHeader, rawB
   const expected = bytesToBase64(mac);
   return signatureHeader
     .split(" ")
-    .map((entry) => (entry.includes(",") ? entry.slice(entry.indexOf(",") + 1) : entry))
+    .filter((entry) => entry.startsWith("v1,"))
+    .map((entry) => entry.slice(3))
     .some((candidate) => timingSafeEqual(candidate, expected));
 }
 

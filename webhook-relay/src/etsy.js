@@ -101,6 +101,7 @@ export async function etsyForward(env, request, path, etsyToken) {
   try {
     upstream = await fetchWithDeadline("Etsy API call", target, {
       method: request.method,
+      redirect: "manual",
       headers,
       body: hasBody ? request.body : undefined,
     }, FORWARD_TIMEOUT_MS);
@@ -108,6 +109,13 @@ export async function etsyForward(env, request, path, etsyToken) {
     if (!isTimeout(error)) throw error;
     console.error("[ETSY]", error.message);
     return timeoutResponse("Etsy");
+  }
+  if (upstream.status >= 300 && upstream.status < 400) {
+    await upstream.body?.cancel?.().catch(() => {});
+    return new Response(JSON.stringify({ error: "Etsy API unavailable" }), {
+      status: 502,
+      headers: { "content-type": "application/json", "cache-control": "no-store" },
+    });
   }
   const responseHeaders = new Headers();
   for (const name of FORWARDED_RESPONSE_HEADERS) {

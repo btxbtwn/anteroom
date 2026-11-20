@@ -66,3 +66,66 @@ it("arms expiry for sessions stored before alarms were introduced", async () => 
   expect(await directory.deviceForToken("unused")).toBe(null);
   expect(await alarm()).toBe(now + TTL);
 });
+
+it("atomically removes etsy-user only when the last shop for (device, user) is unlinked", async () => {
+  await directory.link("etsy", "101", "dev-a", "Shop101", "user-1");
+  await directory.link("etsy", "102", "dev-a", "Shop102", "user-1");
+  await directory.link("etsy-user", "user-1", "dev-a", "Shop102");
+  await directory.link("etsy", "201", "dev-a", "Shop201", "user-2");
+  await directory.link("etsy-user", "user-2", "dev-a", "Shop201");
+
+  // Another device cannot unlink dev-a's shop or etsy-user.
+  await directory.unlink("etsy", "101", "dev-b");
+  expect(await directory.deviceForAccount("etsy", "101")).toBe("dev-a");
+  expect(await directory.deviceForAccount("etsy-user", "user-1")).toBe("dev-a");
+
+  // Unlinking the first of two shops for user-1 keeps user-1 linked.
+  await directory.unlink("etsy", "101", "dev-a");
+  expect(await directory.deviceForAccount("etsy", "101")).toBe(null);
+  expect(await directory.deviceForAccount("etsy-user", "user-1")).toBe("dev-a");
+  expect(await directory.deviceForAccount("etsy-user", "user-2")).toBe("dev-a");
+
+  // Unlinking the last shop for user-1 removes user-1 but keeps user-2.
+  await directory.unlink("etsy", "102", "dev-a");
+  expect(await directory.deviceForAccount("etsy", "102")).toBe(null);
+  expect(await directory.deviceForAccount("etsy-user", "user-1")).toBe(null);
+  expect(await directory.deviceForAccount("etsy-user", "user-2")).toBe("dev-a");
+});
+
+it("migrates pre-existing accounts tables and cleans up legacy etsy-user links on unlink", async () => {
+  // Simulate a Durable Object created before the etsy_user_id column existed.
+  await runInDurableObject(directory, (instance) => {
+    instance.sql.exec("DROP TABLE accounts");
+    instance.sql.exec(`
+      CREATE TABLE accounts (
+        marketplace TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        device_id TEXT NOT NULL,
+        label TEXT,
+        linked_at INTEGER NOT NULL,
+        PRIMARY KEY (marketplace, account_id)
+      );
+      CREATE INDEX accounts_by_device ON accounts (device_id);
+      INSERT INTO accounts (marketplace, account_id, device_id, label, linked_at)
+      VALUES
+        ('etsy', 'legacy-shop', 'dev-a', 'LegacyShop', 1000),
+        ('etsy-user', 'legacy-user', 'dev-a', 'LegacyShop', 1000);
+    `);
+  });
+  await evictDurableObject(directory);
+
+  // Active legacy shop and user continue working after migration.
+  expect(await directory.deviceForAccount("etsy", "legacy-shop")).toBe("dev-a");
+  expect(await directory.deviceForAccount("etsy-user", "legacy-user")).toBe("dev-a");
+
+  // A new tracked shop on the same device is preserved when the legacy shop is unlinked.
+  await directory.link("etsy", "new-shop", "dev-a", "NewShop", "new-user");
+  await directory.link("etsy-user", "new-user", "dev-a", "NewShop");
+
+  await directory.unlink("etsy", "legacy-shop", "dev-a");
+  expect(await directory.deviceForAccount("etsy", "legacy-shop")).toBe(null);
+  expect(await directory.deviceForAccount("etsy-user", "legacy-user")).toBe(null);
+  expect(await directory.deviceForAccount("etsy", "new-shop")).toBe("dev-a");
+  expect(await directory.deviceForAccount("etsy-user", "new-user")).toBe("dev-a");
+});
+
