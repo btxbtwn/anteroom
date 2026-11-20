@@ -262,3 +262,40 @@ def test_heartbeat_stops_task_when_db_errors_outlast_lease(monkeypatch):
         assert len(finished) == 1 and 'error' in finished[0][1]
 
     asyncio.run(exercise())
+
+
+def test_heartbeat_stops_task_when_renew_blocks_past_lease(monkeypatch):
+    from anteroom.services.background_loop import BackgroundLoop
+    from anteroom.services.service_context import ServiceContext
+
+    async def exercise():
+        release_renew = Event()
+        renew_started = Event()
+        finished = []
+        context = ServiceContext('seller', lambda: None, None, None, None)
+        monkeypatch.setattr(background_worker, 'for_seller', lambda *_, **kwargs: context)
+        monkeypatch.setattr(background_worker, 'HEARTBEAT_INTERVAL_S', 0.01)
+        monkeypatch.setattr(background_worker, 'LEASE_DURATION_S', 0.05)
+
+        def renew(_task_id, _token):
+            renew_started.set()
+            release_renew.wait(timeout=5)
+
+        async def execute(*_):
+            await asyncio.Future()
+
+        monkeypatch.setattr(background_worker.queue, 'renew', renew)
+        monkeypatch.setattr(background_worker.queue, 'finish', lambda *args, **kwargs: finished.append((args, kwargs)))
+        monkeypatch.setattr(background_worker, '_execute', execute)
+        heartbeats = BackgroundLoop('test-heartbeat-blocked')
+        try:
+            await asyncio.wait_for(
+                background_worker.run_claimed('task', 'seller', 'token', heartbeat_loop=heartbeats), 2)
+        finally:
+            release_renew.set()
+            await asyncio.to_thread(heartbeats.stop)
+        assert renew_started.is_set()
+        assert context.task_outcome == {'stop': 'lease_lost'}
+        assert finished == []
+
+    asyncio.run(exercise())

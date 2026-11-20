@@ -111,13 +111,21 @@ async def run_claimed(task_id, owner, token, *, heartbeat_loop: BackgroundLoop):
         async def heartbeat():
             last_renewed = time.monotonic()
             delay = HEARTBEAT_INTERVAL_S
+            last_error: SQLAlchemyError | None = None
             while not completed.is_set():
                 await asyncio.sleep(delay)
                 if completed.is_set():
                     break
+                attempt_started = time.monotonic()
+                remaining = LEASE_DURATION_S - (attempt_started - last_renewed)
+                if remaining <= 0:
+                    raise last_error or queue.TaskLeaseExpired()
                 try:
-                    await asyncio.to_thread(queue.renew, task_id, token)
+                    await asyncio.wait_for(asyncio.to_thread(queue.renew, task_id, token), timeout=remaining)
+                except TimeoutError:
+                    raise queue.TaskLeaseExpired() from None
                 except SQLAlchemyError as exc:
+                    last_error = exc
                     elapsed = time.monotonic() - last_renewed
                     if elapsed >= LEASE_DURATION_S:
                         raise
@@ -129,7 +137,10 @@ async def run_claimed(task_id, owner, token, *, heartbeat_loop: BackgroundLoop):
                     )
                     delay = min(HEARTBEAT_RETRY_S, max(0.0, LEASE_DURATION_S - elapsed))
                 else:
-                    last_renewed = time.monotonic()
+                    # PostgreSQL now() reflects transaction start, so anchor the
+                    # next retry budget conservatively before queue.renew began.
+                    last_renewed = attempt_started
+                    last_error = None
                     delay = HEARTBEAT_INTERVAL_S
 
         # Canonical generation still makes synchronous database calls. Its
