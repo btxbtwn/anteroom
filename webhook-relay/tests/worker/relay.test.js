@@ -440,6 +440,28 @@ describe("Etsy", () => {
     const upstream = calls.find((c) => c.url.includes("/shops/56/receipts"));
     expect(upstream.redirect).toBe("manual");
   });
+
+  it("passes through 304 Not Modified with ETag on conditional Etsy API requests", async () => {
+    const a = await register();
+    await connectEtsy(a.token, { userId: "787", shopId: "57" });
+    route("GET", /api\.etsy\.com\/v3\/application\/shops\/57\/receipts/, () =>
+      new Response(null, { status: 304, headers: { etag: '"v1-etag"' } }),
+    );
+    const response = await relay(
+      "/studio/etsy/v3/application/shops/57/receipts",
+      authed(a.token, {
+        headers: {
+          "x-etsy-authorization": "Bearer 787.access",
+          "if-none-match": '"v1-etag"',
+        },
+      }),
+    );
+    expect(response.status).toBe(304);
+    expect(response.headers.get("etag")).toBe('"v1-etag"');
+    expect(await response.text()).toBe("");
+    const upstream = calls.find((c) => c.url.includes("/shops/57/receipts"));
+    expect(upstream.redirect).toBe("manual");
+  });
 });
 
 describe("eBay", () => {

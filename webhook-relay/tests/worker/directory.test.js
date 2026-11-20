@@ -129,3 +129,21 @@ it("migrates pre-existing accounts tables and cleans up legacy etsy-user links o
   expect(await directory.deviceForAccount("etsy-user", "new-user")).toBe("dev-a");
 });
 
+it("preserves etsy-user when a tracked shop is unlinked while a legacy shop for the same user remains", async () => {
+  await directory.link("etsy", "legacy-shop", "dev-a", "LegacyShop");
+  await directory.link("etsy", "tracked-shop", "dev-a", "TrackedShop", "shared-user");
+  await directory.link("etsy-user", "shared-user", "dev-a", "TrackedShop");
+
+  // Unlinking the tracked shop must keep shared-user while legacy-shop is still linked.
+  await directory.unlink("etsy", "tracked-shop", "dev-a");
+  expect(await directory.deviceForAccount("etsy", "tracked-shop")).toBe(null);
+  expect(await directory.deviceForAccount("etsy", "legacy-shop")).toBe("dev-a");
+  expect(await directory.deviceForAccount("etsy-user", "shared-user")).toBe("dev-a");
+
+  // Once the legacy shop is unlinked too, shared-user is cleaned up.
+  await directory.unlink("etsy", "legacy-shop", "dev-a");
+  expect(await directory.deviceForAccount("etsy", "legacy-shop")).toBe(null);
+  expect(await directory.deviceForAccount("etsy-user", "shared-user")).toBe(null);
+});
+
+

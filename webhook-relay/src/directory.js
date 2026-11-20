@@ -135,7 +135,7 @@ export class Directory extends DurableObject {
       if (etsyUserId !== null) {
         const remaining = this.sql
           .exec(
-            "SELECT 1 FROM accounts WHERE marketplace = 'etsy' AND device_id = ? AND etsy_user_id = ? LIMIT 1",
+            "SELECT 1 FROM accounts WHERE marketplace = 'etsy' AND device_id = ? AND (etsy_user_id = ? OR etsy_user_id IS NULL) LIMIT 1",
             ownerDeviceId,
             etsyUserId,
           )
