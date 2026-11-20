@@ -62,6 +62,14 @@ test("eBay signature from another key is rejected", async () => {
   assert.equal(await verifyEbaySignature({ rawBody, signature, publicKeyPem: pem }), false);
 });
 
+test("eBay signature with malformed base64 returns false instead of throwing", async () => {
+  const { publicKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const pem = publicKey.export({ type: "spki", format: "pem" });
+  const rawBody = JSON.stringify(orderNotice);
+  assert.equal(await verifyEbaySignature({ rawBody, signature: "not valid base64!!!", publicKeyPem: pem }), false);
+  assert.equal(await verifyEbaySignature({ rawBody, signature: "abc", publicKeyPem: pem }), false);
+});
+
 test("bad eBay signature headers parse to null", () => {
   assert.equal(parseEbaySignatureHeader(null), null);
   assert.equal(parseEbaySignatureHeader("not base64!"), null);
@@ -84,9 +92,13 @@ test("Etsy signature verifies and rejects tampering, wrong keys and stale timest
 
   assert.equal(await verifyEtsySignature({ ...base, signatureHeader: `v1,${sig}` }), true);
   assert.equal(await verifyEtsySignature({ ...base, signatureHeader: `v1,bogus v1,${sig}` }), true, "rotated keys");
-  assert.equal(await verifyEtsySignature({ ...base, signatureHeader: sig }), true, "unprefixed");
+  assert.equal(await verifyEtsySignature({ ...base, signatureHeader: `v2,other v1,${sig}` }), true, "mixed versions");
+  assert.equal(await verifyEtsySignature({ ...base, signatureHeader: sig }), false, "unprefixed rejected");
+  assert.equal(await verifyEtsySignature({ ...base, signatureHeader: `v2,${sig}` }), false, "wrong version rejected");
+  assert.equal(await verifyEtsySignature({ ...base, signatureHeader: `v1a,${sig}` }), false, "malformed prefix rejected");
   assert.equal(await verifyEtsySignature({ ...base, rawBody: body.replace("42", "43"), signatureHeader: `v1,${sig}` }), false);
   assert.equal(await verifyEtsySignature({ ...base, now: now + 301_000, signatureHeader: `v1,${sig}` }), false);
+  assert.equal(await verifyEtsySignature({ ...base, now: now - 301_000, signatureHeader: `v1,${sig}` }), false);
   const otherSecret = `whsec_${Buffer.from("ffffffffffffffffffffffffffffffff").toString("base64")}`;
   assert.equal(await verifyEtsySignature({ ...base, secret: otherSecret, signatureHeader: `v1,${sig}` }), false);
   assert.equal(await verifyEtsySignature({ ...base, signatureHeader: null }), false);

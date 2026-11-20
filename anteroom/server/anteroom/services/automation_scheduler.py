@@ -1,0 +1,434 @@
+"""The durable automation clock.
+
+Same shape as T3 Code's server scheduler (a loop with a manual tick tests
+can call): due tasks are read from the database, a slot is claimed once,
+and a crash resumes that claim instead of inserting another. Missed times
+coalesce into one run. Only one automation runs at a time, and it will not
+start while a marketplace job already holds the Bridge.
+"""
+from __future__ import annotations
+
+import asyncio
+import copy
+import logging
+from datetime import UTC, datetime
+from typing import cast
+
+from sqlalchemy import CursorResult, update
+from sqlalchemy.orm import Session
+
+from anteroom.database import SessionLocal, in_worker_session
+from anteroom.models.automation import Automation, AutomationRun
+from anteroom.repositories.queries import JobRepo
+from anteroom.services.automation_schedule import as_utc
+from anteroom.services.automations import (
+    STALE_RUN,
+    WAITING_APPROVAL,
+    DOWN_STATE,
+    AutomationBusy,
+    actions_for_run,
+    apply_local,
+    claim_scheduled_run,
+    enqueue_approval,
+    finish_run,
+    log_item_job,
+    mark_retry,
+    mark_waiting,
+    record_application,
+    select_items,
+)
+
+log = logging.getLogger("anteroom.automations")
+
+TICK_SECONDS = 30.0
+_task: asyncio.Task | None = None
+# Runs this process is inside. A restart starts empty, so a leftover "running" row is picked up again.
+_inflight: set[str] = set()
+
+
+async def tick(db: Session, *, now: datetime | None = None, executor=None) -> int:
+    """Run every due automation that can start. Returns how many runs finished or stepped aside."""
+    moment = as_utc(now or datetime.now(UTC))
+    handled = 0
+    _recover_stale(db, moment)
+    while True:
+        if _bridge_busy(db):
+            return handled
+        run = _resume_waiting(db, moment)
+        if run is None:
+            run = _claim_next(db, moment)
+        if run is None:
+            return handled
+        automation = db.get(Automation, run.automation_id)
+        if automation is None or automation.status not in {"active", "paused"}:
+            run.status = "failed"
+            run.error = "The automation is no longer active."
+            run.finished_at = _naive(moment)
+            db.commit()
+            handled += 1
+            continue
+        # A paused task still finishes a run that was already claimed. It does not start a new slot.
+        if automation.status == "paused" and run.origin == "schedule" and run.attempt_count <= 1 and run.status == "running":
+            # Claimed this tick, before a pause could land. Run it: the seller confirmed the slot.
+            pass
+        run_id, automation_id = run.id, automation.id
+        # End this read: the run's steps open their own short sessions and wait on the model without one.
+        db.commit()
+        try:
+            await _execute(run_id, automation_id, moment, executor)
+        except AutomationBusy:
+            db.expire_all()
+            mark_waiting(db, run, moment)
+            return handled + 1
+        except Exception as exc:  # noqa: BLE001 - one bad run must not kill the clock
+            db.expire_all()
+            log.exception("automation run %s failed", run_id)
+            mark_retry(db, run, moment, str(exc) or "The run failed.")
+            if run.origin == "schedule":
+                finish_schedule = run.status == "failed"
+                if finish_schedule:
+                    finish_run(db, run, automation, moment, status="failed", error=run.error)
+            return handled + 1
+        db.expire_all()
+        handled += 1
+        moment = as_utc(now or datetime.now(UTC))
+
+
+def start_automation_scheduler() -> asyncio.Task:
+    """Sweep now, then on an interval. Call from the running event loop."""
+    global _task
+    if _task is None or _task.done():
+        _task = asyncio.get_running_loop().create_task(_loop())
+    return _task
+
+
+def stop_automation_scheduler() -> None:
+    global _task
+    if _task is not None and not _task.done():
+        _task.cancel()
+    _task = None
+
+
+async def _loop() -> None:
+    from anteroom.services.mac_workspace import account_shown
+
+    while True:
+        db = SessionLocal()
+        try:
+            # The account runs them while this Mac's window shows it.
+            if not account_shown():
+                await tick(db)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("automation tick failed")
+        finally:
+            db.close()
+        try:
+            await asyncio.sleep(TICK_SECONDS)
+        except asyncio.CancelledError:
+            raise
+
+
+def _recover_stale(db: Session, now: datetime) -> None:
+    cutoff = _naive(now - STALE_RUN)
+    stale = (
+        db.query(AutomationRun)
+        .filter(AutomationRun.status == "running", AutomationRun.started_at < cutoff)
+        .all()
+    )
+    changed = False
+    for run in stale:
+        if run.id in _inflight or _bridge_busy(db):
+            continue
+        run.status = "waiting"
+        run.next_attempt_at = _naive(now)
+        run.error = "This run was still marked running after a restart. It will try again."
+        log.info("requeued stale automation run %s", run.id)
+        changed = True
+    if changed:
+        db.commit()
+
+
+def _resume_waiting(db: Session, now: datetime) -> AutomationRun | None:
+    waiting = (
+        db.query(AutomationRun)
+        .filter(AutomationRun.status == "waiting")
+        .order_by(AutomationRun.next_attempt_at.asc())
+        .all()
+    )
+    for run in waiting:
+        due = as_utc(run.next_attempt_at)
+        if due is not None and due > now:
+            continue
+        if run.id in _inflight:
+            continue
+        # Claimed once: another Machine reading the same waiting run moves on.
+        claimed = db.execute(update(AutomationRun).execution_options(synchronize_session=False).where(
+            AutomationRun.id == run.id, AutomationRun.status == "waiting").values(status="running"))
+        if cast(CursorResult, claimed).rowcount != 1:
+            db.rollback()
+            continue
+        db.commit()
+        db.refresh(run)
+        return run
+    return None
+
+
+def _claim_next(db: Session, now: datetime) -> AutomationRun | None:
+    if db.query(AutomationRun).filter(AutomationRun.status.in_(("running", "waiting"))).first():
+        return None
+    due = [
+        (when, row) for row in db.query(Automation).filter(Automation.status == "active").all()
+        if (when := as_utc(row.next_run_at)) is not None and when <= now
+    ]
+    due.sort(key=lambda item: item[0])
+    for _when, row in due:
+        run = claim_scheduled_run(db, row, now)
+        if run is not None:
+            return run
+        _skip_claimed_slot(db, row, now)
+    return None
+
+
+def _skip_claimed_slot(db: Session, row: Automation, now: datetime) -> None:
+    """A slot that already has a finished run should not stay due forever."""
+    from anteroom.services.automation_schedule import advance_after_run
+
+    slot = as_utc(row.next_run_at)
+    if slot is None:
+        return
+    existing = (
+        db.query(AutomationRun)
+        .filter(AutomationRun.automation_id == row.id, AutomationRun.scheduled_for == _naive(slot))
+        .one_or_none()
+    )
+    if existing is None or existing.status not in {"completed", "failed"}:
+        return
+    next_run = advance_after_run(row.schedule, row.timezone, existing.scheduled_for, now)
+    row.next_run_at = _naive(next_run) if next_run is not None else None
+    if row.schedule.get("kind") == "once":
+        row.status = "completed" if existing.status == "completed" else "paused"
+    db.commit()
+
+
+async def _execute(run_id: str, automation_id: str, now: datetime, executor) -> None:
+    """Run one claimed run.
+
+    Each database step opens its own short session on a worker thread
+    (``in_worker_session``), so no connection is held while a regenerate
+    waits on the model.
+    """
+    if executor is None:
+        from anteroom.services.automation_actions import perform
+        executor = perform
+    _inflight.add(run_id)
+    try:
+        await _execute_items(run_id, automation_id, now, executor)
+    finally:
+        _inflight.discard(run_id)
+
+
+async def _execute_items(run_id: str, automation_id: str, now: datetime, executor) -> None:
+    items = await in_worker_session(_pending_items, run_id, automation_id, now)
+    for item in items:
+        step = await in_worker_session(_start_item, run_id, automation_id, item, now)
+        if "outcome" not in step:
+            action = step["remote"]
+            # Scheduled marketplace writes become approval proposals; only a regenerate runs here.
+            if action["type"] != "regenerate":
+                raise ValueError("Scheduled marketplace writes must become approval proposals.")
+            result = await executor(item, action, step["markets"], None)
+            error = None if result.get("ok") else (result.get("error") or f"{action['type']} failed.")
+            stepped = {"remote": {"type": action["type"], **result}, "error": error}
+            step = await in_worker_session(_settle_after_remote, run_id, automation_id, item, now, stepped)
+        await in_worker_session(_record_outcome, run_id, step["outcome"])
+    await in_worker_session(_finish_completed, run_id, automation_id, now)
+
+
+def _loaded(db: Session, run_id: str, automation_id: str) -> tuple[AutomationRun, Automation]:
+    run, automation = db.get(AutomationRun, run_id), db.get(Automation, automation_id)
+    if run is None or automation is None:
+        raise RuntimeError("The automation run is gone.")
+    return run, automation
+
+
+def _summary(run: AutomationRun) -> dict:
+    summary = copy.deepcopy(run.summary or {"items": [], "job_ids": []})
+    summary.setdefault("items", [])
+    summary.setdefault("job_ids", [])
+    return summary
+
+
+def _pending_items(db: Session, run_id: str, automation_id: str, now: datetime) -> list[dict]:
+    run, automation = _loaded(db, run_id, automation_id)
+    spec = {
+        "filters": automation.filters or {},
+        "actions": actions_for_run(automation),
+        "marketplaces": automation.marketplaces or [],
+    }
+    items = select_items(db, spec, now, automation_id=automation.id, persist_price=False)
+    done = {item.get("conversation_id") for item in _summary(run)["items"] if item.get("acted")}
+    return [item for item in items if item["include"] and item["conversation_id"] not in done]
+
+
+def _start_item(db: Session, run_id: str, automation_id: str, item: dict, now: datetime) -> dict:
+    """Settle the item here, or name the regenerate it waits on (``remote``)."""
+    run, automation = _loaded(db, run_id, automation_id)
+    if not run.dry_run and JobRepo(db).get_active():
+        run.summary = _summary(run)
+        db.commit()
+        raise AutomationBusy()
+    actions = actions_for_run(automation)
+    regenerate = next((action for action in actions if action["type"] == "regenerate"), None)
+    if run.dry_run or regenerate is None:
+        return {"outcome": _settle_item(db, run, automation, item, actions, now, None)}
+    return {"remote": regenerate, "markets": list(automation.marketplaces or [])}
+
+
+def _settle_after_remote(db: Session, run_id: str, automation_id: str, item: dict, now: datetime, stepped: dict) -> dict:
+    run, automation = _loaded(db, run_id, automation_id)
+    return {"outcome": _settle_item(db, run, automation, item, actions_for_run(automation), now, stepped)}
+
+
+def _record_outcome(db: Session, run_id: str, outcome: dict) -> None:
+    run = db.get(AutomationRun, run_id)
+    if run is None:
+        raise RuntimeError("The automation run is gone.")
+    summary = _summary(run)
+    summary["items"].append(outcome)
+    if outcome.get("job_id"):
+        summary["job_ids"].append(outcome["job_id"])
+    run.summary = summary
+    db.commit()
+
+
+def _finish_completed(db: Session, run_id: str, automation_id: str, now: datetime) -> None:
+    run, automation = _loaded(db, run_id, automation_id)
+    finish_run(db, run, automation, now, status="completed")
+
+
+def _settle_item(
+    db: Session, run: AutomationRun, automation: Automation, item: dict, actions: list[dict], now: datetime,
+    stepped: dict | None,
+) -> dict:
+    """The item's local changes and approval proposals. ``stepped`` is the regenerate that already ran."""
+    local_actions = [action for action in actions if action["type"] in {"price", "update_fields"}]
+    regenerate = next((action for action in actions if action["type"] == "regenerate"), None)
+    publish_actions = [action for action in actions if action["type"] in {"delist", "relist"}]
+    markets = list(automation.marketplaces or [])
+    hold = bool(publish_actions) or (regenerate is not None and bool(markets))
+    remote: list[dict] = []
+    error = None
+    state = None
+    down = None
+    local = {"ok": True, "revision_id": None, "notes": []}
+
+    if run.dry_run:
+        if local_actions:
+            local = apply_local(db, item["conversation_id"], local_actions, dry_run=True)
+        if local.get("ok") and not local.get("revision_id"):
+            local["revision_id"] = _revision_id(db, item["conversation_id"])
+        kinds = []
+        if regenerate:
+            kinds.append("regenerate")
+        kinds.extend(action["type"] for action in publish_actions)
+        remote = [{"type": kind, "ok": True, "dry_run": True} for kind in kinds]
+        if hold:
+            state = WAITING_APPROVAL
+        error = None if local.get("ok") else local.get("error")
+        return _finish_item(db, run, automation, item, local, remote, error=error, state=state, down=down, now=now)
+
+    if stepped is not None:
+        remote.append(stepped["remote"])
+        error = stepped.get("error")
+
+    if error is None and local_actions:
+        local = apply_local(db, item["conversation_id"], local_actions, dry_run=False)
+        if not local.get("ok"):
+            error = local.get("error")
+    if error is None and not local.get("revision_id"):
+        local["revision_id"] = _revision_id(db, item["conversation_id"])
+
+    if error is None and hold:
+        if not markets:
+            error = "Name the marketplaces. An automation does not publish a regenerated listing everywhere by default."
+        elif not local.get("revision_id") and (not publish_actions or publish_actions[0]["type"] != "delist"):
+            error = "Save a listing before proposing a publish or relist."
+        else:
+            approval = enqueue_approval(db, automation, run.id, item, local["revision_id"], markets,
+                                        publish_actions[0]["type"] if publish_actions else "publish")
+            state = WAITING_APPROVAL
+            remote.append({"type": "approval", "ok": True, "approval_id": approval.id, "state": state})
+
+    return _finish_item(db, run, automation, item, local, remote, error=error, state=state, down=down, now=now)
+
+
+def _finish_item(db, run, automation, item, local, remote, *, error, state, down, now) -> dict:
+    ok = error is None
+    payload = {
+        "automation_id": automation.id,
+        "run_id": run.id,
+        "dry_run": bool(run.dry_run),
+        "title": item.get("title"),
+        "actions": [action["type"] for action in (automation.actions or [])],
+        "marketplaces": item.get("marketplaces"),
+        "price": item.get("price"),
+        "next_price": local.get("price", item.get("next_price")),
+        "original_price": item.get("original_price"),
+        "notes": local.get("notes") or [],
+        "remote": remote,
+        "state": state,
+        "down": down or [],
+    }
+    job_id = log_item_job(db, item["conversation_id"], local.get("revision_id"), payload, ok=ok, error=error)
+    if (ok and not run.dry_run and state != DOWN_STATE and (automation.filters or {}).get("min_age_days")
+            and (state != WAITING_APPROVAL or any(action["type"] in {"price", "update_fields", "regenerate"} for action in automation.actions or []))):
+        listed = _parse_time(item.get("listed_at"))
+        # The run's own time, so the cooldown counts from when this run happened.
+        record_application(db, automation.id, item["conversation_id"], listed, now)
+    return _outcome(item, local, remote, error=error, job_id=job_id, dry_run=bool(run.dry_run), state=state, down=down)
+
+
+def _revision_id(db: Session, conv_id: str) -> str | None:
+    from anteroom.services.automations import _current
+
+    revision, _listing = _current(db, conv_id)
+    return revision.id if revision is not None else None
+
+
+def _outcome(item, local, remote, *, error, job_id=None, dry_run=False, state=None, down=None) -> dict:
+    return {
+        "conversation_id": item["conversation_id"],
+        "title": item.get("title"),
+        "ok": error is None,
+        "error": error,
+        "state": state,
+        "down": list(down or []),
+        "acted": True,
+        "job_id": job_id,
+        "price": item.get("price"),
+        "next_price": local.get("price", item.get("next_price")) if isinstance(local, dict) else item.get("next_price"),
+        "original_price": item.get("original_price"),
+        "notes": local.get("notes") if isinstance(local, dict) else [],
+        "remote": remote,
+        "dry_run": bool(dry_run),
+    }
+
+
+def _bridge_busy(db: Session) -> bool:
+    return bool(JobRepo(db).get_active())
+
+
+def _parse_time(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed
+
+
+def _naive(value: datetime) -> datetime:
+    return as_utc(value).replace(tzinfo=None)

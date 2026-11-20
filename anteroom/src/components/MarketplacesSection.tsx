@@ -1,0 +1,1049 @@
+import { useWorkspaceRuntime } from "../app/runtime";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangleIcon, BadgeDollarSignIcon, CheckCircle2Icon, CheckIcon, ChevronDownIcon, ChevronRightIcon, CircleIcon, ClockIcon, EllipsisIcon, ExternalLinkIcon, MinusCircleIcon, ReceiptIcon, SendIcon, SquarePenIcon, Trash2Icon, XCircleIcon } from "lucide-react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { api } from "../api/client";
+import { ApiRequestError } from "../api/transport";
+import { pollMs } from "../api/polling";
+import type { DelistMarketplace, MarketplaceListing, MarketplaceListings, MarketplaceMark, SaleMarketplace, SellerSale } from "../api/marketplaceListings";
+import type { NativeDraft, NativeDrafts, NativeMarketplace, PreflightCheck, PreflightGap } from "../api/nativeMarketplaces";
+import { EXTENSION_SESSION_MARKETS, type ExtensionSessionConnect, type ExtensionSessionMarket } from "../api/marketplaceSessions";
+import { isBusyRefusal, useWaitlist, type WaitingAction } from "../lib/marketplaceWaitlist";
+import { cn } from "../lib/utils";
+import { usePhoneLayout } from "../lib/usePhoneLayout";
+import { confirmDialog } from "../ui/confirmDialog";
+import { ListEverywhereDialog, type ListChoice } from "./ListEverywhereDialog";
+import { waitlist } from "./MarketplaceActivity";
+import { MarketplaceLogo } from "./MarketplaceLogo";
+import { MarkSoldForm } from "./MarkSoldForm";
+import { marketplaceName } from "./marketplaceNames";
+import { missingDetail, needsText } from "./readiness";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
+import { Spinner } from "./ui/spinner";
+import { MarketplaceMessagesContext, uniqueMarketplaceMessages } from "./marketplaceMessages";
+
+type Marketplace = DelistMarketplace;
+const ORDER: Marketplace[] = ["ebay", "etsy", "poshmark", "mercari", "depop"];
+const REMOTE_DRAFT = new Set<Marketplace>(["ebay", "mercari", "depop", "etsy", "poshmark"]);
+// What Delist does on each marketplace in the confirm dialog: eBay has no delete.
+// The rail itself always says "Delisted" once the listing is gone.
+const REMOVED: Record<Marketplace, string> = {
+  ebay: "Ended", etsy: "Deleted", poshmark: "Deleted", mercari: "Deleted", depop: "Deleted",
+};
+
+type Tone = "live" | "sold" | "neutral" | "busy" | "waiting" | "attention" | "failed" | "idle";
+type Status = { tone: Tone; label: string; href?: string; hrefLabel?: string; detail?: string | null; said?: string | null };
+
+const BUSY = new Set(["saving", "publishing", "updating"]);
+type ActionKind = "check" | "list" | "save_draft" | "update" | "cancel" | "reset" | "reconnect";
+
+/** A record whose job is running now. A busy state with no job running is unconfirmed until checked. */
+export function isRunning(draft: NativeDraft | undefined): boolean {
+  return Boolean(draft?.running) || (BUSY.has(draft?.state ?? "") && draft?.running === undefined);
+}
+
+/** What a reconnect found, so a success is not hidden behind the last refusal. */
+export function reconnectText(name: string, session: ExtensionSessionConnect | undefined): string | null {
+  if (!session) return null;
+  if (session.signed_in) return `${name} is connected${session.label ? ` as ${session.label}` : ""}. Press List… again to list this item.`;
+  return `${name} still needs a sign-in. Finish signing in in the Chrome tab, then choose Reconnect ${name} again.`;
+}
+
+// Errors are durable: drafts written by an older Bridge still carry Depop's
+// wire names after Chrome and the web app update. Normalize at the recovery UI,
+// without rewriting the saved refusal or claiming shipping is now valid.
+const DEPOP_SHIPPING_FIELDS = new Set(["national_shipping", "national_shipping_cost", "shipping", "shipping_methods", "parcel_size"]);
+function recoveryFields(marketplace: Marketplace, draft: NativeDraft) {
+  const fields = (draft.error_fields ?? []).map(item => marketplace === "depop" && DEPOP_SHIPPING_FIELDS.has(item.field)
+    ? { ...item, field: "depop_specifics.parcelSize" } : item);
+  return fields.filter((item, index) => marketplace !== "depop" || item.field !== "depop_specifics.parcelSize"
+    || fields.findIndex(other => other.field === item.field) === index);
+}
+
+function shippingRecovery(marketplace: Marketplace, draft: NativeDraft): string | null {
+  return marketplace === "depop" && draft.error_code === "missing_fields"
+    && recoveryFields(marketplace, draft).some(item => item.field === "depop_specifics.parcelSize")
+    ? "Check Package size here. Manage your default shipping address in Depop."
+    : null;
+}
+
+/** The words chat gets for a refused List: which marketplace, both explanations, and the fields to fix. */
+export function askChatPrompt(marketplace: Marketplace, draft: NativeDraft): string {
+  const name = marketplaceName(marketplace);
+  const lines = [`Listing this item on ${name} failed. Anteroom said: ${draft.error || "the listing was refused."}`];
+  if (draft.marketplace_message) lines.push(`${name} said: ${draft.marketplace_message}`);
+  if (/could not find draft/i.test(`${draft.error || ""} ${draft.marketplace_message || ""}`)) {
+    lines.push(`The saved ${name} draft was deleted. Leave the listing fields as they are. I will press List again so Anteroom starts a new draft.`);
+    return lines.join("\n");
+  }
+  const fields = recoveryFields(marketplace, draft);
+  if (fields.length) lines.push(`Fields: ${fields.map((item) => `${item.field} (${item.message})`).join("; ")}`);
+  const shipping = shippingRecovery(marketplace, draft);
+  if (shipping) lines.push(`${shipping} Anteroom cannot edit that account address.`);
+  lines.push(`Fill or fix those fields in this listing so ${name} accepts it. Do not list it; I will press List again.`);
+  lines.push("Then tell me in plain words what you changed, naming fields as the form labels them. No codes or field keys.");
+  return lines.join("\n");
+}
+
+// Problems outside the listing: chat cannot sign in, wait out a limit, fix an outage or check a result.
+const NOT_FOR_CHAT = new Set(["signed_out", "challenge", "rate_limited", "network", "uncertain"]);
+
+/** Whether chat can fix this refusal by changing the listing. */
+export function chatCanFix(draft: NativeDraft, marketplace: Marketplace): boolean {
+  const accountAddress = marketplace === "depop" && draft.error_code === "rejected"
+    && draft.error?.startsWith("Depop has no ship-from address Anteroom can use.");
+  return !accountAddress && !NOT_FOR_CHAT.has(draft.error_code ?? "");
+}
+
+function fieldLabel(field: string): string {
+  if (field === "settings.ebay.merchant_location_key") return "Inventory location";
+  if (field === "depop_specifics.parcelSize") return "Package size";
+  if (field === "poshmark_specifics.smartSell.minimumPrice") return "Lowest Price";
+  const last = field.split(".").pop() || field;
+  return last.replace(/_/g, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
+}
+
+function secondsUntil(iso: string | null | undefined, now: number): number {
+  const at = iso ? Date.parse(iso) : NaN;
+  return Number.isFinite(at) ? Math.max(0, Math.ceil((at - now) / 1000)) : 0;
+}
+
+const TONE_ICON: Record<Tone, ReactNode> = {
+  live: <CheckCircle2Icon aria-hidden className="size-3.5 text-success" />,
+  sold: <BadgeDollarSignIcon aria-hidden className="size-3.5 text-info" />,
+  neutral: <MinusCircleIcon aria-hidden className="size-3.5 text-muted-foreground" />,
+  busy: <Spinner size="sm" tone="muted" />,
+  waiting: <ClockIcon aria-hidden className="size-3.5 text-muted-foreground" />,
+  attention: <AlertTriangleIcon aria-hidden className="size-3.5 text-warning" />,
+  failed: <XCircleIcon aria-hidden className="size-3.5 text-destructive" />,
+  idle: <CircleIcon aria-hidden className="size-3.5 text-muted-foreground/60" />,
+};
+
+/**
+ * What Mark as listed offers to correct: the seller's own link, while it still
+ * names a listing. Never a link Anteroom deleted, and nothing while the last
+ * action is unconfirmed: the seller is about to paste the listing that is
+ * really there, and an old link would be one click from replacing it.
+ */
+export function markListedPrefill(entry: MarketplaceListing | undefined, unconfirmed: boolean): string {
+  if (unconfirmed || entry?.source !== "seller" || entry.state === "deleted") return "";
+  return entry.url ?? "";
+}
+
+interface MarkRequest { marketplace: Marketplace; state: MarketplaceMark; url?: string; relinkDeleted?: boolean }
+
+/**
+ * After the server refuses a link because Anteroom delisted that listing, the
+ * one way to link it anyway: the seller says they just saw it live. Returns the
+ * request to resend, or null. A request that already carried that answer, or
+ * any other refusal, is never asked about again.
+ */
+export async function relinkAfterDeletedRefusal(error: unknown, request: MarkRequest,
+  confirm: (message: string, options: { confirmLabel: string }) => Promise<boolean>): Promise<MarkRequest | null> {
+  if (!(error instanceof ApiRequestError) || error.reason !== "deleted_listing" || request.relinkDeleted) return null;
+  const name = marketplaceName(request.marketplace);
+  const approved = await confirm(`${error.message}\nLink it anyway only if you just saw it live on ${name}.`, { confirmLabel: "It's still live" });
+  return approved ? { ...request, relinkDeleted: true } : null;
+}
+
+/**
+ * Keeps a slot's last height while its content is re-checked for a new
+ * revision. The old answer is hidden (it may be stale), but the space stays,
+ * so the form below does not jump up and back while a tap is on its way.
+ */
+function HeldWhileChecking({ checking, holdKey, children }: { checking: boolean; holdKey: string; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [last, setLast] = useState<{ key: string; height: number } | null>(null);
+  useLayoutEffect(() => {
+    if (checking) return;
+    // Measured after each settled answer; an equal value leaves state as it is.
+    const height = ref.current?.offsetHeight ?? 0;
+    setLast((previous) => previous?.key === holdKey && previous.height === height ? previous
+      : height ? { key: holdKey, height } : null);
+  }, [checking, holdKey, children]);
+  const held = checking && last?.key === holdKey ? last.height : 0;
+  if (!children && !held) return null;
+  return (
+    <div ref={ref} aria-busy={checking || undefined} style={held ? { minHeight: held } : undefined}>
+      {children}
+    </div>
+  );
+}
+
+export function deletable(entry: MarketplaceListing | undefined): boolean {
+  return Boolean(entry?.listing_id && !entry.sold_here && entry.state !== "deleted" && entry.state !== "deleting");
+}
+
+/** One status per marketplace. A live listing wins. Anything else is not listed; Anteroom holds the listing. */
+export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | undefined, draft: NativeDraft | undefined,
+  _revisionId: string | null, etsyEligible: boolean): Status {
+  if (live?.sold_here) return { tone: "sold", label: "Sold here", href: live.url ?? undefined, hrefLabel: "View" };
+  const said = draft?.marketplace_message ? `${marketplaceName(marketplace)} said: ${draft.marketplace_message}` : null;
+  if (draft && isRunning(draft)) {
+    return { tone: "busy", label: draft.state === "updating" ? "Updating…" : draft.action === "save_draft" ? "Saving draft…" : "Listing…", detail: draft.progress ? `${draft.progress.label}…` : null };
+  }
+  if (draft && (draft.state === "unknown" || BUSY.has(draft.state))) {
+    return { tone: "attention", label: "Unconfirmed", detail: draft.error || "Check the result before trying again.", said };
+  }
+  if (live?.state === "deleting") return { tone: "busy", label: "Delisting…" };
+  if (live?.state === "deleted") return draft?.error
+    ? { tone: "failed", label: "Not listed", detail: draft.error, said }
+    : { tone: "neutral", label: "Delisted" };
+  if (live?.state === "failed") {
+    return { tone: "failed", label: "Not delisted", href: live.url ?? undefined, hrefLabel: "View", detail: live.error,
+      said: live.marketplace_message ? `${marketplaceName(marketplace)} said: ${live.marketplace_message}` : null };
+  }
+  // Anteroom records the revision it last sent, so it knows when the listing has
+  // moved on. Without that record (listed elsewhere, or marked by hand) it can't tell.
+  const behind = draft?.state === "published" && Boolean(draft.revision_id) && draft.revision_id !== _revisionId
+    ? `Your latest edits aren't on ${marketplaceName(marketplace)} yet.` : null;
+  if (live?.listing_id) {
+    return { tone: "live", label: "Listed", href: live.url ?? undefined, hrefLabel: "View listing", detail: draft?.state === "published" ? draft.error || behind : null, said };
+  }
+  if (draft && draft.state !== "draft") {
+    if (draft.state === "published") return { tone: "live", label: "Listed", href: draft.listing_url, hrefLabel: "View listing", detail: draft.error || behind };
+    if (draft.state === "pending_review") return { tone: "attention", label: "In review", href: draft.listing_url, hrefLabel: "View" };
+    if (draft.error) return { tone: "failed", label: "Not listed", detail: draft.error, said };
+  }
+  if (draft?.state === "draft" && draft.error) return { tone: "failed", label: "Not listed", detail: draft.error, said };
+  if (draft?.state === "draft" && draft.draft_url) return { tone: "neutral", label: "Draft", href: draft.draft_url, hrefLabel: "View draft",
+    detail: draft.revision_id !== _revisionId ? "Changes in Anteroom have not been saved to this draft." : null };
+  // eBay keeps a saved draft as an unpublished offer, which has no page to open.
+  if (draft?.state === "draft" && marketplace === "ebay") return { tone: "neutral", label: "Saved on eBay",
+    detail: draft.revision_id !== _revisionId ? "Changes in Anteroom have not been saved to eBay." : "Not listed. Buyers cannot see it until you List." };
+  // The listing check says why and how to fix it, under the header.
+  if (marketplace === "etsy" && !etsyEligible) return { tone: "attention", label: "May not qualify" };
+  return { tone: "idle", label: "Not listed" };
+}
+
+
+/**
+ * The answers this pane still says: every gap the open form does not read under a
+ * row of its own. One the form shows is read there, where the seller fixes it.
+ */
+export function saidBesideList(gaps: readonly PreflightGap[], shownOnForm: readonly string[]): PreflightGap[] {
+  const onForm = new Set(shownOnForm);
+  return gaps.filter((gap) => !onForm.has(gap.field));
+}
+
+
+/** A marketplace's card in List everywhere's picker. */
+export function listChoice(marketplace: NativeMarketplace, { status, canAct, listable, retryIn, soldSomewhere, check }: {
+  status: Status; canAct: boolean; listable: boolean; retryIn: number; soldSomewhere: boolean;
+  /** The saved listing's field check, or null while it is unknown. */
+  check: PreflightCheck | null;
+}): ListChoice {
+  const choice = (label: string, tone: ListChoice["tone"], selectable = false, missing?: ListChoice["missing"]): ListChoice =>
+    ({ marketplace, label, tone, selectable, ...(missing?.length ? { missing } : {}) });
+  if (status.tone === "sold") return choice("Sold", "sold");
+  if (status.tone === "live" && status.label === "Listed") return choice("Listed", "listed");
+  if (!canAct) return choice("Not available here", "muted");
+  if (soldSomewhere) return choice("Not listed", "muted");
+  if (!listable || status.tone === "busy" || status.tone === "waiting") return choice(status.label, "muted");
+  if (retryIn > 0) return choice(`Retry in ${retryIn}s`, "muted");
+  // Missing fields are advice, as on List…: the seller may still try.
+  const missing = check?.missing ?? [];
+  if (missing.length) return choice(needsText(missing.length), "needs", true, missing);
+  if (marketplace === "etsy" && status.tone === "attention") return choice(status.label, "needs", true);
+  return check?.ready ? choice("Ready", "ready", true) : choice("Not checked", "muted", true);
+}
+
+/** A confirmed action that waits for its marketplace, or one that stopped when its turn came. */
+function waitingStatus(action: WaitingAction, ahead: number): Status {
+  const name = marketplaceName(action.marketplace);
+  if (action.error) return { tone: "failed", label: "Didn't start", detail: action.error };
+  if (action.starting) return { tone: "busy", label: "Starting…" };
+  const verb = action.kind === "delist" ? "Delist" : action.kind === "update" ? "Update" : action.kind === "save_draft" ? "Save draft" : "List";
+  return { tone: "waiting", label: `Waiting for ${name}`,
+    detail: `${verb} starts when ${name} finishes its current action${ahead > 1 ? ` (${ahead} ahead)` : ""}. Keep Anteroom open.` };
+}
+
+function railLabel(id: string): string {
+  if (id === "general") return "General";
+  return marketplaceName(id);
+}
+
+const MANAGED = new Set<string>(ORDER);
+
+type MarketplaceProps = {
+  convId: string; revisionId: string | null; title: string; disabled: boolean; etsyEligible: boolean;
+  /** Send a prompt to the listing's chat; absent while chat is busy. */
+  onAskChat?: (text: string) => void;
+  /**
+   * Open the editor at a listing field, e.g. "price" or "ebay_specifics.category_specifics.Color".
+   * A marketplace's own answer names the field its way, so the marketplace
+   * comes along: that form holds the field the answer is about.
+   */
+  onEditField?: (field: string, marketplace?: string) => void;
+};
+
+/** Where the open form tells this pane which fields it draws a row for. */
+const FieldsShownContext = createContext<((marketplace: string, fields: ReadonlySet<string>) => void) | undefined>(undefined);
+
+/**
+ * Tell the marketplace pane which fields this form draws a row for, so an answer
+ * about one of them is read under that row rather than a second time beside List.
+ * Fields are compared by name, so the editor reports them unchanged across saves.
+ */
+export function useReportFieldsShown(marketplace: string, fields: readonly string[]): void {
+  const report = useContext(FieldsShownContext);
+  // Sorted and joined, so the same answers on the next render report once.
+  const signature = [...fields].sort().join("\n");
+  useEffect(() => { report?.(marketplace, new Set(signature ? signature.split("\n") : [])); }, [report, marketplace, signature]);
+}
+
+export function MarketplacesLayout({
+  convId, revisionId, title, disabled, etsyEligible, onAskChat, onEditField,
+  ids, selected, onSelect, onPrepare, railActions, railMenu, railStatus, children,
+}: MarketplaceProps & {
+  ids: readonly string[];
+  /** Listing-wide actions pinned above the rail's own, e.g. Regenerate. */
+  railActions?: ReactNode;
+  /** The listing's overflow menu, on the right of the first action row. */
+  railMenu?: ReactNode;
+  /** The listing's sync state, floated above the actions so it never moves them. */
+  railStatus?: ReactNode;
+  selected: string;
+  onSelect: (id: string) => void;
+  onPrepare?: (id: string) => void;
+  children?: ReactNode;
+}) {
+  const runtime = useWorkspaceRuntime();
+  const phone = usePhoneLayout();
+  // Which marketplaces this app can act on: all of them on the Mac, eBay on the web.
+  const canAct = (marketplace: string) => runtime.actionMarketplaces.has(marketplace);
+  disabled = disabled || runtime.actionMarketplaces.size === 0;
+  const queryClient = useQueryClient();
+  const paneRef = useRef<HTMLDivElement>(null);
+  const scrollPositions = useRef(new Map<string, number>());
+  useLayoutEffect(() => {
+    if (paneRef.current) paneRef.current.scrollTop = scrollPositions.current.get(selected) ?? 0;
+  }, [selected]);
+  // Which fields the open form draws a row for, so an answer about one of them is
+  // read there and not twice.
+  const [fieldsShown, setFieldsShown] = useState<Partial<Record<string, ReadonlySet<string>>>>({});
+  const reportFields = useCallback((marketplace: string, fields: ReadonlySet<string>) => {
+    setFieldsShown((current) => {
+      const before = current[marketplace];
+      // The editor reports on every save; only a different set of rows redraws the pane.
+      if (before && before.size === fields.size && [...fields].every((field) => before.has(field))) return current;
+      return { ...current, [marketplace]: fields };
+    });
+  }, []);
+  const nativeKey = ["native-marketplaces", convId];
+  const liveKey = ["marketplace-listings", convId];
+  // List runs in the background: poll while any marketplace action is running.
+  const native = useQuery({ queryKey: nativeKey, queryFn: () => api.nativeMarketplaces.status(convId),
+    refetchInterval: (query) => Object.values(query.state.data ?? {}).some((draft) => isRunning(draft)) ? pollMs(1500) : false });
+  const live = useQuery({ queryKey: liveKey, queryFn: () => api.marketplaceListings.get(convId) });
+  // A save can fix the fields a failed List asked for, which clears that error on the server.
+  const seenRevision = useRef({ convId, revisionId });
+  useEffect(() => {
+    if (seenRevision.current.convId !== convId) {
+      seenRevision.current = { convId, revisionId };
+      return;
+    }
+    if (seenRevision.current.revisionId === revisionId) return;
+    seenRevision.current = { convId, revisionId };
+    void queryClient.invalidateQueries({ queryKey: ["native-marketplaces", convId] });
+  }, [convId, revisionId, queryClient]);
+  // Opening an item reads its own live listings once, so a sale shows while the
+  // seller looks at it instead of waiting for that shop's next turn. Each shop
+  // keeps its own gap between reads, so browsing items stays light.
+  const salesCheck = useMutation({
+    mutationFn: () => api.marketplaceListings.checkSales(convId),
+    onSuccess: (result) => {
+      if (!result.recorded.length) return;
+      queryClient.setQueryData(liveKey, result.listings);
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      void queryClient.invalidateQueries({ queryKey: ["sales-ledger"] });
+      void queryClient.invalidateQueries({ queryKey: ["analytics"] });
+    },
+    retry: false,
+  });
+  const checkedSalesFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!runtime.features.has("marketplace_actions") || checkedSalesFor.current === convId) return;
+    checkedSalesFor.current = convId;
+    salesCheck.mutate();
+    // Only the item decides when this runs; the check itself is a read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [convId]);
+  const drafts: NativeDrafts = native.data ?? {};
+  const runningKey = Object.entries(drafts).filter(([, draft]) => isRunning(draft)).map(([name]) => name).join(",");
+  const wasRunning = useRef({ convId, runningKey });
+  useEffect(() => {
+    if (wasRunning.current.convId !== convId) {
+      wasRunning.current = { convId, runningKey };
+      return;
+    }
+    // An action just ended: what is live, and the job list, changed with it.
+    if (wasRunning.current.runningKey && wasRunning.current.runningKey !== runningKey) {
+      void queryClient.invalidateQueries({ queryKey: ["marketplace-listings", convId] });
+      void queryClient.invalidateQueries({ queryKey: ["jobs", convId] });
+    }
+    wasRunning.current = { convId, runningKey };
+  }, [convId, runningKey, queryClient]);
+  const [now, setNow] = useState(() => Date.now());
+  const waiting = Object.values(drafts).some((draft) => secondsUntil(draft?.retry_after, now) > 0);
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [waiting]);
+  const listings: MarketplaceListings = live.data ?? {};
+  const [draftLinks, setDraftLinks] = useState<Partial<Record<NativeMarketplace, string>>>({});
+  // What the last reconnect found, so the stale refusal does not read as the answer.
+  const [reconnected, setReconnected] = useState<Partial<Record<Marketplace, ExtensionSessionConnect>>>({});
+  const [linking, setLinking] = useState<{ marketplace: Marketplace; url: string } | null>(null);
+  // Mark as sold opens a sale form; the number remounts it with a fresh request id.
+  const [selling, setSelling] = useState<{ marketplace: SaleMarketplace; key: number } | null>(null);
+
+  const etsyCreating = !listings.etsy?.listing_id && !drafts.etsy?.draft_url;
+  const etsyDefaults = useQuery({ queryKey: ["etsy-listing-defaults"], queryFn: () => api.etsy.listingDefaults(),
+    enabled: canAct("etsy") && etsyCreating, staleTime: 60_000, retry: false });
+  const etsyReady = Boolean(etsyDefaults.data?.shipping_profile_id && etsyDefaults.data?.readiness_state_id && etsyDefaults.data?.return_policy_id);
+  const preflight = useQuery({
+    queryKey: ["native-preflight", convId, revisionId],
+    queryFn: () => api.nativeMarketplaces.preflight(convId),
+    enabled: runtime.actionMarketplaces.size > 0 && Boolean(revisionId),
+    staleTime: 15_000,
+    // Every save is a new revision. Keep the last answer on screen until the new one
+    // arrives, so the pane above the form does not collapse and shift the form.
+    placeholderData: (previous) => previous,
+  });
+  // A re-check is running. The previous answer also stays as a placeholder while
+  // the query is off (no revision, no marketplace can act): nothing is checked then.
+  const rechecking = preflight.isPlaceholderData && preflight.isFetching;
+
+  // Each marketplace tracks its own request, so starting one never locks the others.
+  const [starting, setStarting] = useState<Partial<Record<NativeMarketplace, ActionKind>>>({});
+  const [actionErrors, setActionErrors] = useState<Partial<Record<NativeMarketplace, string>>>({});
+  // Confirmed actions on this item that wait for a busy marketplace (see MarketplaceActivity).
+  const waitingHere = useWaitlist(waitlist).filter((item) => item.convId === convId);
+  const waitingOn = (marketplace: Marketplace) => waitingHere.find((item) => item.marketplace === marketplace);
+  const queuedOn = (marketplace: Marketplace) => { const item = waitingOn(marketplace); return item && !item.error ? item : undefined; };
+  const action = useMutation({
+    mutationFn: async ({ marketplace, kind, draftUrl }: { marketplace: NativeMarketplace; kind: ActionKind; draftUrl?: string }) => {
+      if (kind === "check") return api.nativeMarketplaces.check(convId, marketplace, draftUrl);
+      if (kind === "cancel") return api.nativeMarketplaces.cancel(convId, marketplace);
+      if (kind === "reset") return api.nativeMarketplaces.reset(convId, marketplace);
+      if (kind === "reconnect") {
+        if (marketplace === "ebay" || marketplace === "etsy") return await api.directConnections.connect(marketplace);
+        if ((EXTENSION_SESSION_MARKETS as readonly string[]).includes(marketplace)) {
+          return await api.marketplaceSessions.connect(marketplace as ExtensionSessionMarket);
+        }
+        return undefined;
+      }
+      if (!revisionId) throw new Error("Fill in the listing first.");
+      if (kind === "save_draft") return api.nativeMarketplaces.saveDraft(convId, marketplace, revisionId);
+      if (kind === "update") return api.nativeMarketplaces.update(convId, marketplace, revisionId);
+      return api.nativeMarketplaces.list(convId, marketplace, revisionId);
+    },
+    retry: false,
+    onMutate: ({ marketplace, kind }) => {
+      waitlist.clearStopped(convId, marketplace);
+      setStarting((current) => ({ ...current, [marketplace]: kind }));
+      setActionErrors((current) => ({ ...current, [marketplace]: undefined }));
+      setReconnected((current) => ({ ...current, [marketplace]: undefined }));
+      // The revision the seller confirmed, so a wait never sends a later one.
+      return { revision: revisionId };
+    },
+    onError: (error, { marketplace, kind }, context) => {
+      // The marketplace is busy with another action: this one waits its turn.
+      if (isBusyRefusal(error) && context?.revision && (kind === "list" || kind === "update" || kind === "save_draft")) {
+        waitlist.add({ convId, title, marketplace, kind, revisionId: context.revision });
+        return;
+      }
+      setActionErrors((current) => ({ ...current, [marketplace]: error.message }));
+    },
+    onSuccess: (data, { marketplace, kind }) => {
+      if (kind !== "reconnect") return;
+      const session = data as ExtensionSessionConnect | undefined;
+      if (typeof session?.signed_in !== "boolean") return;
+      void queryClient.invalidateQueries({ queryKey: ["marketplace-sessions"] });
+      setReconnected((current) => ({ ...current, [marketplace]: session }));
+    },
+    onSettled: (_data, _error, { marketplace }) => {
+      setStarting((current) => ({ ...current, [marketplace]: undefined }));
+      void queryClient.invalidateQueries({ queryKey: nativeKey });
+      void queryClient.invalidateQueries({ queryKey: ["native-editor-form", convId] });
+      void queryClient.invalidateQueries({ queryKey: liveKey });
+      void queryClient.invalidateQueries({ queryKey: ["jobs", convId] });
+    },
+  });
+  const delist = useMutation({
+    mutationFn: async (marketplaces: Marketplace[]) => {
+      for (const marketplace of marketplaces) {
+        waitlist.add({ convId, title, marketplace, kind: "delist", revisionId: "" });
+      }
+      void queryClient.invalidateQueries({ queryKey: ["queue"] });
+    },
+    retry: false,
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: liveKey });
+      // The sidebar row drops the delisted marketplaces and may read Draft.
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+  const mark = useMutation({
+    mutationFn: ({ marketplace, state, url, relinkDeleted }: MarkRequest) =>
+      api.marketplaceListings.mark(convId, marketplace, state, url, relinkDeleted),
+    retry: false,
+    onSuccess: (data) => { queryClient.setQueryData(liveKey, data); setLinking(null); },
+    onError: async (error, request) => {
+      // The pasted link is the listing Anteroom deleted. Link it only if the seller just saw it live.
+      const resend = await relinkAfterDeletedRefusal(error, request, confirmDialog);
+      if (resend) mark.mutate(resend);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: liveKey });
+      void queryClient.invalidateQueries({ queryKey: nativeKey });
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+    },
+  });
+
+  const recordSale = useMutation({
+    mutationFn: (sale: SellerSale) => api.marketplaceListings.recordSale(convId, sale),
+    retry: false,
+    onSuccess: (data) => {
+      queryClient.setQueryData(liveKey, data.listings);
+      setSelling(null);
+      // Offered, never done here: the seller confirms the delist in its own dialog.
+      if (data.delist_offer.length) void runDelist(data.delist_offer, "Sale recorded. Delist it from the other marketplaces too?");
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: liveKey });
+      void queryClient.invalidateQueries({ queryKey: nativeKey });
+      void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      void queryClient.invalidateQueries({ queryKey: ["sales-ledger"] });
+      void queryClient.invalidateQueries({ queryKey: ["analytics"] });
+    },
+  });
+  function startSale(marketplace: SaleMarketplace) {
+    recordSale.reset();
+    setSelling((current) => ({ marketplace, key: (current?.key ?? 0) + 1 }));
+  }
+
+  async function updateNow(marketplace: NativeMarketplace) {
+    const name = marketplaceName(marketplace);
+    if (await confirmDialog(`Update the live ${name} listing for “${title}” with what's saved in Anteroom?\nThis changes the listing that is already up.`,
+      { confirmLabel: `Update on ${name}` })) action.mutate({ marketplace, kind: "update" });
+  }
+  async function listNow(marketplace: NativeMarketplace) {
+    const name = marketplaceName(marketplace);
+    if (await confirmDialog(`List “${title}” on ${name}?\nThis creates a live ${name} listing from the listing saved in Anteroom.`,
+      { confirmLabel: `List on ${name}` })) action.mutate({ marketplace, kind: "list" });
+  }
+  // List everywhere's picker; List starts only on the marketplaces the seller picks there.
+  const [picking, setPicking] = useState(false);
+  async function runDelist(marketplaces: Marketplace[], lead?: string) {
+    const names = marketplaces.map(marketplaceName);
+    const lines = marketplaces.map((marketplace) => `• ${marketplaceName(marketplace)}: ${REMOVED[marketplace].toLowerCase()}`).join("\n");
+    const question = `Delist “${title}” from ${names.length === 1 ? names[0] : `${names.length} marketplaces`}?`;
+    const approved = await confirmDialog(`${lead ? `${lead}\n` : ""}${question}\n${lines}\nA deleted listing can't be restored; listing again creates a new one.`,
+      { variant: "destructive", confirmLabel: names.length === 1 ? `Delist from ${names[0]}` : `Delist from ${names.length}` });
+    if (approved) delist.mutate(marketplaces);
+  }
+
+  async function resetNow(marketplace: NativeMarketplace) {
+    const name = marketplaceName(marketplace);
+    if (await confirmDialog(`Did you check ${name} yourself?\nAnteroom will treat “${title}” as not listed on ${name}, so you can List again. Nothing on ${name} changes. If the listing is there, use Mark as listed instead.`,
+      { confirmLabel: "I checked it myself" })) action.mutate({ marketplace, kind: "reset" });
+  }
+
+  const busy = disabled || delist.isPending || mark.isPending || recordSale.isPending || native.isPending || native.isError;
+  const statuses = ORDER.map((marketplace) => {
+    const item = waitingOn(marketplace);
+    return item ? waitingStatus(item, waitlist.ahead(item))
+      : rowStatus(marketplace, listings[marketplace], drafts[marketplace], revisionId, etsyEligible);
+  });
+  const removable = ORDER.filter((marketplace) => canAct(marketplace) && deletable(listings[marketplace]));
+  const soldSomewhere = ORDER.some((marketplace) => listings[marketplace]?.sold_here);
+
+  const running = (marketplace: Marketplace) => isRunning(drafts[marketplace as NativeMarketplace]);
+  const startingOn = (marketplace: Marketplace) => Boolean(starting[marketplace as NativeMarketplace]);
+  const actionError = Object.values(actionErrors).filter(Boolean).join(" ");
+  const unconfirmed = (marketplace: Marketplace) =>
+    ["saving", "publishing", "updating", "unknown"].includes(drafts[marketplace as NativeMarketplace]?.state ?? "");
+  const retryIn = (marketplace: Marketplace) => {
+    const draft = drafts[marketplace as NativeMarketplace];
+    return draft?.error_code === "rate_limited" ? secondsUntil(draft.retry_after, now) : 0;
+  };
+  function listable(marketplace: Marketplace, status: Status): boolean {
+    if (!canAct(marketplace) || unconfirmed(marketplace) || queuedOn(marketplace)) return false;
+    // A delisted listing keeps its ID, but nothing is live there: it can be listed again.
+    const entry = listings[marketplace];
+    if (status.tone === "live" || status.label === "Sold here" || status.label === "In review" || (entry?.listing_id && entry.state !== "deleted")) return false;
+    // A sold item is not listed anywhere else.
+    return !soldSomewhere;
+  }
+  /** This revision's field check for a marketplace, or null while it is unknown. */
+  function preflightCheck(marketplace: Marketplace): PreflightCheck | null {
+    if (preflight.isPlaceholderData || preflight.isError) return null;
+    return preflight.data?.marketplaces?.[marketplace as NativeMarketplace] ?? null;
+  }
+  function preflightGaps(marketplace: Marketplace): PreflightGap[] {
+    return preflightCheck(marketplace)?.gaps ?? [];
+  }
+  function listBlocked(marketplace: Marketplace): boolean {
+    return retryIn(marketplace) > 0;
+  }
+
+  /** The marketplace holds an older revision than the one being edited. */
+  function outdated(marketplace: Marketplace): boolean {
+    const draft = drafts[marketplace];
+    return draft?.state === "published" && Boolean(draft.revision_id) && draft.revision_id !== revisionId;
+  }
+
+  function updatable(marketplace: Marketplace, status: Status): boolean {
+    return status.tone === "live" && status.label === "Listed" && !unconfirmed(marketplace);
+  }
+
+  function actions(marketplace: Marketplace, status: Status): ReactNode {
+    if (!canAct(marketplace)) return <span className="text-xs text-muted-foreground">Preview</span>;
+    const m = marketplace as NativeMarketplace;
+    if (running(marketplace)) {
+      return <Button size="xs" variant="outline" disabled={startingOn(m)} onClick={() => action.mutate({ marketplace: m, kind: "cancel" })}>Cancel</Button>;
+    }
+    const queued = queuedOn(marketplace);
+    if (queued) return <Button size="xs" variant="outline" disabled={queued.starting} onClick={() => waitlist.remove(queued.id)}>Cancel</Button>;
+    if (unconfirmed(marketplace)) {
+      return (
+        <>
+          <Button size="xs" variant="ghost" disabled={startingOn(m)} onClick={() => void resetNow(m)}>I checked it myself…</Button>
+          <Button size="xs" variant="outline" disabled={startingOn(m)} onClick={() => action.mutate({ marketplace: m, kind: "check" })}>Check result</Button>
+        </>
+      );
+    }
+    if (updatable(marketplace, status)) {
+      // Nothing to send until the listing changes; Update stays in the row's menu.
+      if (!outdated(marketplace)) return null;
+      const pending = starting[m] === "update";
+      return <Button size="xs" variant="outline" disabled={busy || startingOn(m)} onClick={() => void updateNow(m)}>{pending ? "Updating…" : "Update…"}</Button>;
+    }
+    if (!listable(marketplace, status)) return null;
+    const pending = startingOn(m);
+    const wait = retryIn(marketplace);
+    return <>
+      {REMOTE_DRAFT.has(marketplace) && <Button size="xs" variant="ghost" disabled={busy || pending || listBlocked(marketplace)}
+        onClick={() => action.mutate({ marketplace: m, kind: "save_draft" })}>Save draft</Button>}
+      <Button size="xs" variant="outline" disabled={busy || pending || listBlocked(marketplace)} onClick={() => void listNow(m)}>
+        {pending ? "Working…" : wait > 0 ? `Retry in ${wait}s` : "List…"}</Button>
+    </>;
+  }
+
+  function rowMenu(marketplace: Marketplace, status: Status): ReactNode {
+    if (!canAct(marketplace)) return null;
+    const name = marketplaceName(marketplace);
+    const m = marketplace as NativeMarketplace;
+    const entry = listings[marketplace];
+    const canList = listable(marketplace, status);
+    const canUpdate = updatable(marketplace, status);
+    const canDelist = deletable(entry);
+    return (
+      <Menu>
+        <MenuTrigger render={<Button variant="ghost" size="icon-xs" className="shrink-0" aria-label={`${name} actions`} disabled={busy || startingOn(m)} />}>
+          <EllipsisIcon />
+        </MenuTrigger>
+        <MenuPopup align="end" width="content">
+          {canList && <MenuItem disabled={listBlocked(marketplace)} onClick={() => void listNow(m)}>List…</MenuItem>}
+          {canList && REMOTE_DRAFT.has(marketplace) && <MenuItem disabled={listBlocked(marketplace)}
+            onClick={() => action.mutate({ marketplace: m, kind: "save_draft" })}>Save draft</MenuItem>}
+          {canUpdate && <MenuItem onClick={() => void updateNow(m)}>Update…</MenuItem>}
+          {canDelist && <MenuItem variant="destructive" onClick={() => void runDelist([marketplace])}>Delist…</MenuItem>}
+          {(canList || canUpdate || canDelist) && <MenuSeparator />}
+          <MenuItem disabled={running(marketplace)}
+            onClick={() => setLinking({ marketplace, url: markListedPrefill(entry, unconfirmed(marketplace)) })}>Mark as listed…</MenuItem>
+          {!entry?.sold_here && <MenuItem disabled={running(marketplace)} onClick={() => startSale(marketplace)}>Mark as sold…</MenuItem>}
+          {(entry || status.tone === "live" || unconfirmed(marketplace)) && (
+            <MenuItem disabled={running(marketplace)} onClick={() => mark.mutate({ marketplace, state: "not_listed" })}>Mark as not listed</MenuItem>
+          )}
+        </MenuPopup>
+      </Menu>
+    );
+  }
+
+  function preflightNotice(marketplace: Marketplace): ReactNode {
+    const draft = drafts[marketplace];
+    if (draft?.error || isRunning(draft) || unconfirmed(marketplace)) return null;
+    const all = preflightGaps(marketplace);
+    if (!all.length) return null;
+    const name = marketplaceName(marketplace);
+    // A gap is said once. One the editor draws a row for is said under that row,
+    // where the seller fixes it; the rest are said here, beside List.
+    const gaps = saidBesideList(all, [...(fieldsShown[marketplace] ?? [])]);
+    const blocking = all.some((gap) => gap.blocking);
+    const fields = [...new Set(gaps.map((gap) => gap.field))];
+    const prompt = [
+      blocking
+        ? `Anteroom suggests reviewing these fields. You can still try listing on ${name}.`
+        : `Anteroom may leave these fields empty. You can still try listing on ${name}.`,
+      ...all.map((gap) => `${gap.field}: ${gap.message}`),
+      blocking
+        ? "Fill those fields in this listing. Do not list it; I will press List again."
+        : `Set each one to the closest of ${name}'s choices in this listing. Do not list it; I will press List again.`,
+    ].join("\n");
+    return (
+      <>
+        {uniqueMarketplaceMessages(gaps.map((gap) => gap.message), headerMessages).map((message) => <p key={message} className="text-muted-foreground">{message}</p>)}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {onEditField && fields.map((field) => (
+            <Button key={field} size="xs" variant="ghost" onClick={() => onEditField(field, marketplace)}>
+              Edit {fieldLabel(field)}
+            </Button>
+          ))}
+          {onAskChat && (
+            <Button size="xs" variant="outline" title="Chat fills these fields. It does not list the item."
+              onClick={() => onAskChat(prompt)}>Ask chat</Button>
+          )}
+        </div>
+      </>
+    );
+  }
+
+  /** The one thing that fixes this refusal, per error code. */
+  function errorActions(marketplace: Marketplace): ReactNode {
+    const m = marketplace as NativeMarketplace;
+    const draft = drafts[m];
+    if (!draft?.error || isRunning(draft) || draft.state === "unknown") return null;
+    const name = marketplaceName(marketplace);
+    const code = draft.error_code;
+    const buttons: ReactNode[] = [];
+    if (code === "signed_out") {
+      buttons.push(<Button key="reconnect" size="xs" variant="outline" disabled={startingOn(m)}
+        onClick={() => action.mutate({ marketplace: m, kind: "reconnect" })}>Reconnect {name}</Button>);
+    }
+    if (code === "challenge") {
+      buttons.push(<Button key="open" size="xs" variant="outline" disabled={startingOn(m)}
+        onClick={() => action.mutate({ marketplace: m, kind: "reconnect" })}>Open {name}</Button>);
+    }
+    if (code === "missing_fields" && onEditField) {
+      for (const item of recoveryFields(marketplace, draft)) {
+        buttons.push(<Button key={`edit-${item.field}`} size="xs" variant="ghost" title={item.message}
+          onClick={() => onEditField(item.field, marketplace)}>Edit {fieldLabel(item.field)}</Button>);
+      }
+    }
+    if (chatCanFix(draft, marketplace) && onAskChat) {
+      buttons.push(<Button key="ask" size="xs" variant="outline"
+        title="Chat fixes the fields in this listing. It does not list it; press List again after."
+        onClick={() => onAskChat(askChatPrompt(marketplace, draft))}>Ask chat</Button>);
+    }
+    const shipping = shippingRecovery(marketplace, draft);
+    return buttons.length || shipping ? <div className="space-y-2">
+      {shipping && <p className="text-xs text-muted-foreground">{shipping}</p>}
+      {buttons.length > 0 && <div className="flex flex-wrap items-center gap-1.5">{buttons}</div>}
+    </div> : null;
+  }
+
+  function reconnectNotice(marketplace: Marketplace): ReactNode {
+    const session = reconnected[marketplace];
+    const text = reconnectText(marketplaceName(marketplace), session);
+    if (!text) return null;
+    return <p role="status" className={session?.signed_in ? "text-success-foreground" : "text-warning-foreground"}>{text}</p>;
+  }
+
+  function linkForm(marketplace: Marketplace): ReactNode {
+    if (linking?.marketplace !== marketplace) return null;
+    const name = marketplaceName(marketplace);
+    const url = linking.url.trim();
+    return (
+      <form className="flex items-center gap-2" onSubmit={(event) => {
+        event.preventDefault();
+        if (url) mark.mutate({ marketplace, state: "listed", url });
+      }}>
+        <Input size="compact" autoFocus aria-label={`${name} listing link`} placeholder={`Paste the ${name} listing link`}
+          value={linking.url} onChange={(event) => setLinking({ marketplace, url: event.target.value })} />
+        <Button type="submit" size="xs" variant="outline" disabled={busy || !url}>{mark.isPending ? "Saving…" : "Save link"}</Button>
+        <Button type="button" size="xs" variant="ghost" onClick={() => { setLinking(null); mark.reset(); }}>Cancel</Button>
+      </form>
+    );
+  }
+
+  function settings(marketplace: Marketplace): ReactNode {
+    if (marketplace === "etsy" && etsyCreating && etsyDefaults.isSuccess && !etsyReady) {
+      return <p className="text-muted-foreground">Choose Etsy's default shipping, processing, and return profiles in Settings → Connections.</p>;
+    }
+    return null;
+  }
+
+  const statusById = new Map(ORDER.map((marketplace, index) => [marketplace, statuses[index]]));
+  // List everywhere covers the marketplaces on the rail that are ready now; the rest wait for the seller.
+  const unlisted = ORDER.filter((marketplace) => ids.includes(marketplace) && !running(marketplace) && !startingOn(marketplace)
+    && listable(marketplace, statusById.get(marketplace)!));
+  const readyToList = unlisted.filter((marketplace) => !listBlocked(marketplace)) as NativeMarketplace[];
+  const choices = ORDER.filter((marketplace) => ids.includes(marketplace)).map((marketplace) => listChoice(marketplace, {
+    status: statusById.get(marketplace)!, canAct: canAct(marketplace), retryIn: retryIn(marketplace), soldSomewhere,
+    listable: listable(marketplace, statusById.get(marketplace)!) && !running(marketplace) && !startingOn(marketplace),
+    check: preflightCheck(marketplace),
+  }));
+  const selectedMarketplace = MANAGED.has(selected) ? selected as Marketplace : null;
+  const selectedStatus = selectedMarketplace ? statusById.get(selectedMarketplace) : undefined;
+  const paneError = mark.error?.message || actionError || (delist.error || native.error || live.error)?.message;
+  const [detail] = uniqueMarketplaceMessages([selectedStatus?.detail], paneError ? [paneError] : []);
+  const [said] = uniqueMarketplaceMessages([selectedStatus?.said], [paneError, detail].filter((message): message is string => Boolean(message)));
+  const headerMessages = uniqueMarketplaceMessages([paneError, detail, said]);
+  function visiblePreflightGaps(marketplace: Marketplace): PreflightGap[] {
+    const draft = drafts[marketplace];
+    return draft?.error || isRunning(draft) || unconfirmed(marketplace) ? [] : saidBesideList(preflightGaps(marketplace), [...(fieldsShown[marketplace] ?? [])]);
+  }
+  const shownMessages = uniqueMarketplaceMessages([
+    ...headerMessages,
+    ...(selectedMarketplace ? visiblePreflightGaps(selectedMarketplace).map((gap) => gap.message) : []),
+  ]);
+
+  // A form's one-line state, under its name on the rail and in the phone's picker.
+  function formState(id: string): { status?: Status; check: PreflightCheck | null; line: ReactNode } {
+    const marketplace = MANAGED.has(id) ? id as Marketplace : null;
+    const status = marketplace ? statusById.get(marketplace) : undefined;
+    // "Not listed" is the ordinary state. Saying it on every row hides
+    // the few that actually need a look (unconfirmed, ineligible, live);
+    // a row not listed yet says whether its required fields are filled.
+    const quiet = status?.tone === "idle";
+    const check = marketplace && quiet ? preflightCheck(marketplace) : null;
+    const missing = check?.missing.length ?? 0;
+    const line = <>
+      {status && !quiet && (
+        // A narrow rail wraps a status instead of cutting it off; the row's tooltip names it too.
+        <span className={cn("flex items-start gap-1 text-xs text-muted-foreground",
+          status.tone === "failed" && "text-destructive-foreground", status.tone === "attention" && "text-warning-foreground",
+          status.tone === "sold" && "text-info-foreground")}>
+          {TONE_ICON[status.tone]}
+          <span className="min-w-0 text-pretty">{status.label}</span>
+        </span>
+      )}
+      {status && quiet && !check && (rechecking
+        // The previous revision's answer is not this one's; keep the line, not the answer.
+        ? <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
+            <span className="sr-only">{status.label}. </span><span className="truncate">Checking…</span>
+          </span>
+        : <span className="sr-only">{status.label}</span>)}
+      {check && (
+        <span className={cn("flex items-center gap-1 truncate text-xs text-muted-foreground tabular-nums",
+          missing > 0 && "text-warning-foreground")}>
+          {missing > 0
+            ? <AlertTriangleIcon aria-hidden className="size-3.5 text-warning" />
+            : <CheckIcon aria-hidden className="size-3.5 text-success" />}
+          <span className="truncate">{missing > 0 ? `${missing} to fill` : "Ready"}</span>
+        </span>
+      )}
+    </>;
+    return { status, check, line };
+  }
+  const formIcon = (id: string) => MANAGED.has(id)
+    ? <MarketplaceLogo id={id as Marketplace} label={railLabel(id)} size={16} />
+    : <SquarePenIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />;
+  const showListEverywhere = readyToList.length > 1;
+  const showDelistEverywhere = removable.length > 1;
+
+  const pane = <>
+    {picking && <ListEverywhereDialog title={title} choices={choices} onClose={() => setPicking(false)}
+      onConfirm={(marketplaces) => { for (const marketplace of marketplaces) action.mutate({ marketplace, kind: "list" }); }}
+      onEditField={onEditField} />}
+    {/* Content stops at a readable line length; the pane still scrolls edge to edge. */}
+    <div ref={paneRef} onScroll={event => scrollPositions.current.set(selected, event.currentTarget.scrollTop)}
+      className="marketplace-pane flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 py-3 *:w-full *:max-w-3xl">
+      {paneError && (
+        <p role="alert" className="text-destructive-foreground text-xs">{paneError}</p>
+      )}
+      {selling && <MarkSoldForm key={selling.key} initial={selling.marketplace} pending={recordSale.isPending}
+        error={recordSale.error?.message} onSubmit={(sale) => recordSale.mutate(sale)} onCancel={() => setSelling(null)} />}
+      {selectedMarketplace && selectedStatus && (
+        <section data-marketplace-pane={selectedMarketplace} data-tone={selectedStatus.tone}
+          className={cn("flex flex-col gap-2 rounded-lg bg-muted/40 px-2.5 py-2 text-xs",
+            // The marketplace where the item sold stands apart from the ones still listed.
+            selectedStatus.tone === "sold" && "border border-info/32 bg-info/4")}>
+          {/* Name on the left, every action on the right. A listed item's state is
+              already on its rail row, so the bar only spells out the others. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="flex min-w-0 items-center gap-1.5">
+              <MarketplaceLogo id={selectedMarketplace} label={railLabel(selectedMarketplace)} size={16} />
+              <span className="truncate font-medium text-foreground text-sm">{railLabel(selectedMarketplace)}</span>
+              {selectedStatus.tone !== "live" && (
+                <span className={cn("flex min-w-0 items-center gap-1 text-muted-foreground", selectedStatus.tone === "failed" && "text-destructive-foreground", selectedStatus.tone === "attention" && "text-warning-foreground", selectedStatus.tone === "sold" && "font-medium text-info-foreground")}>
+                  {selectedStatus.tone !== "idle" && TONE_ICON[selectedStatus.tone]}
+                  <span className="truncate">{selectedStatus.label}</span>
+                </span>
+              )}
+            </span>
+            <span className="ms-auto flex shrink-0 items-center gap-1.5">
+              {selectedStatus.href && (
+                <Button size="xs" variant="ghost" aria-label={`${selectedStatus.hrefLabel} on ${railLabel(selectedMarketplace)}`}
+                  render={<a href={selectedStatus.href} target="_blank" rel="noopener noreferrer" />}>
+                  {selectedStatus.hrefLabel}<ExternalLinkIcon aria-hidden />
+                </Button>
+              )}
+              {actions(selectedMarketplace, selectedStatus)}
+              {/* The phone has no rail, so the marketplace's own menu sits here. */}
+              {phone && rowMenu(selectedMarketplace, selectedStatus)}
+            </span>
+          </div>
+          {detail && <p className={cn(selectedStatus.tone === "failed" ? "text-destructive-foreground" : "text-muted-foreground")}
+            role={selectedStatus.tone === "failed" ? "alert" : undefined}>{detail}</p>}
+          {/* Anteroom's own words lead; the marketplace's raw reply is there for whoever wants it. */}
+          {said && (
+            <details open className="group/said text-muted-foreground">
+              <summary className="flex w-fit cursor-pointer list-none items-center gap-1 rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-[900px]:min-h-11 [&::-webkit-details-marker]:hidden">
+                <ChevronRightIcon aria-hidden className="size-3.5 transition-transform group-open/said:rotate-90" />
+                Details
+              </summary>
+              <p className="mt-1 whitespace-pre-wrap break-words" data-marketplace-message>{said}</p>
+            </details>
+          )}
+          {reconnectNotice(selectedMarketplace)}
+          {errorActions(selectedMarketplace)}
+          <HeldWhileChecking checking={rechecking} holdKey={selectedMarketplace}>
+            {preflightNotice(selectedMarketplace)}
+          </HeldWhileChecking>
+          {settings(selectedMarketplace)}
+          {linkForm(selectedMarketplace)}
+          {(() => {
+            const draft = drafts[selectedMarketplace];
+            const name = railLabel(selectedMarketplace);
+            if (draft?.state !== "unknown" || draft.draft_url || selectedMarketplace === "poshmark" || selectedMarketplace === "ebay") return null;
+            return (
+              <div className="flex items-center gap-2">
+                <Input size="compact" aria-label={`Saved ${name} link`} placeholder="Paste the link if one was created"
+                  value={draftLinks[selectedMarketplace as NativeMarketplace] || ""}
+                  onChange={(event) => setDraftLinks({ ...draftLinks, [selectedMarketplace]: event.target.value })} />
+                <Button size="xs" variant="outline" disabled={startingOn(selectedMarketplace) || !draftLinks[selectedMarketplace as NativeMarketplace]?.trim()}
+                  onClick={() => action.mutate({ marketplace: selectedMarketplace as NativeMarketplace, kind: "check", draftUrl: draftLinks[selectedMarketplace as NativeMarketplace]?.trim() })}>Check link</Button>
+              </div>
+            );
+          })()}
+        </section>
+      )}
+      <FieldsShownContext.Provider value={reportFields}>
+        <MarketplaceMessagesContext value={shownMessages}>{children}</MarketplaceMessagesContext>
+      </FieldsShownContext.Provider>
+    </div>
+  </>;
+
+  if (phone) {
+    // Like the iPhone app: one full-width form, chosen from a picker at the top,
+    // with the listing-wide actions in that picker and the overflow menu.
+    const current = formState(selected);
+    return (
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <nav aria-label="Marketplaces" className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
+          <Menu>
+            <MenuTrigger render={<Button variant="outline" className="h-auto min-h-11 min-w-0 max-w-[65%] justify-start gap-2 px-3 py-1.5 text-start" aria-label={`Form, ${railLabel(selected)}`} />}>
+              {formIcon(selected)}
+              <span className="min-w-0">
+                <span className="block truncate font-medium text-foreground text-sm">{railLabel(selected)}</span>
+                {current.line}
+              </span>
+              <ChevronDownIcon aria-hidden className="ms-auto size-4 shrink-0 text-muted-foreground" />
+            </MenuTrigger>
+            <MenuPopup align="start" width="content">
+              {ids.map((id) => {
+                const state = formState(id);
+                return (
+                  <MenuItem key={id} aria-current={selected === id ? "true" : undefined} onClick={() => onSelect(id)}
+                    onFocus={() => onPrepare?.(id)} onPointerEnter={() => onPrepare?.(id)} onPointerDown={() => onPrepare?.(id)}
+                    className={cn("min-h-11 gap-2", selected === id && "bg-accent")}>
+                    {formIcon(id)}
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium text-foreground">{railLabel(id)}</span>
+                      {state.line}
+                    </span>
+                    {selected === id && <CheckIcon aria-hidden className="ms-auto size-4 shrink-0" />}
+                  </MenuItem>
+                );
+              })}
+              <MenuSeparator />
+              {showListEverywhere && <MenuItem disabled={busy} onClick={() => setPicking(true)}><SendIcon />List everywhere…</MenuItem>}
+              {!soldSomewhere && <MenuItem disabled={busy} onClick={() => startSale("other")}><ReceiptIcon />Record a sale…</MenuItem>}
+              {showDelistEverywhere && <MenuSeparator />}
+              {showDelistEverywhere && <MenuItem variant="destructive" disabled={busy} onClick={() => void runDelist(removable)}>
+                <Trash2Icon />{delist.isPending ? "Delisting…" : "Delist everywhere…"}
+              </MenuItem>}
+            </MenuPopup>
+          </Menu>
+          <span className="ms-auto flex shrink-0 items-center gap-1">
+            {railStatus}
+            {railActions}
+            {railMenu}
+          </span>
+        </nav>
+        {pane}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
+      <nav aria-label="Marketplaces" className="flex w-40 shrink-0 flex-col gap-0.5 overflow-y-auto overflow-x-hidden overscroll-none border-e py-1.5 ps-1.5 pe-1">
+        <ul className="flex flex-col gap-0.5 text-xs">
+          {ids.map((id) => {
+            const marketplace = MANAGED.has(id) ? id as Marketplace : null;
+            const name = railLabel(id);
+            const current = selected === id;
+            const { status, check, line } = formState(id);
+            return (
+              <li key={id} aria-label={name} className="group relative flex items-start">
+                <button type="button" aria-current={current ? "true" : undefined} title={check ? missingDetail(check.missing) : status?.label} onClick={() => onSelect(id)}
+                  onPointerEnter={() => onPrepare?.(id)} onFocus={() => onPrepare?.(id)} onPointerDown={() => onPrepare?.(id)}
+                  className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 py-1.5 pe-6 text-left hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    current && "bg-accent text-foreground")}>
+                  {marketplace ? <MarketplaceLogo id={marketplace} label={name} size={16} /> : <span aria-hidden className="size-4 shrink-0" />}
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-foreground">{name}</span>
+                    {line}
+                  </span>
+                </button>
+                {marketplace && status ? (
+                  <span className={cn(
+                    "absolute end-0.5 top-0.5 opacity-0 pointer-events-none group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100",
+                    current && "pointer-events-auto opacity-100",
+                  )}>
+                    {rowMenu(marketplace, status)}
+                  </span>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+        {/* Listing-wide actions sit apart from the marketplaces, pinned to the
+            rail's foot. List everywhere is the one primary action. Quiet rows
+            follow, with the overflow menu on the first. Delist, the destructive
+            one, stands last behind its own divider, away from List. */}
+        <div className="relative mt-auto flex flex-col gap-0.5 border-t pt-1.5 [&_[data-slot=button]]:justify-start">
+          {railStatus && <div className="pointer-events-none absolute bottom-full end-1 mb-1 flex items-center gap-1.5">{railStatus}</div>}
+          {showListEverywhere && (
+            <Button size="xs" variant="default" disabled={busy} className="mb-1 w-full" title={`List on ${readyToList.map(marketplaceName).join(", ")}`}
+              onClick={() => setPicking(true)}><SendIcon />List everywhere…</Button>
+          )}
+          {(railActions || railMenu) && (
+            <div className="flex min-w-0 items-center gap-0.5 [&>[data-slot=button]:not([aria-haspopup])]:min-w-0 [&>[data-slot=button]:not([aria-haspopup])]:flex-1">
+              {railActions}
+              {railMenu && <span className="ms-auto shrink-0">{railMenu}</span>}
+            </div>
+          )}
+          {/* A sold item's sale is already recorded; change its amounts in Sales records. */}
+          {!soldSomewhere && <Button size="xs" variant="ghost-muted" className="w-full" disabled={busy} title="A sale in person or anywhere off these marketplaces"
+            onClick={() => startSale("other")}><ReceiptIcon />Record a sale…</Button>}
+          {showDelistEverywhere && (
+            <div className="mt-1 border-t pt-1.5">
+              <Button size="xs" variant="ghost-destructive" className="w-full text-destructive-foreground" disabled={busy} onClick={() => void runDelist(removable)}>
+                <Trash2Icon />{delist.isPending ? "Delisting…" : "Delist everywhere…"}
+              </Button>
+            </div>
+          )}
+        </div>
+      </nav>
+      {pane}
+    </div>
+  );
+}
+
+/** The marketplace rail and the selected marketplace's actions, used on its own in tests. */
+export function MarketplacesSection(props: MarketplaceProps & { selected?: string }) {
+  return (
+    <MarketplacesLayout {...props} ids={ORDER} selected={props.selected ?? ""} onSelect={() => {}}>
+      {null}
+    </MarketplacesLayout>
+  );
+}

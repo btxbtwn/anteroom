@@ -31,6 +31,7 @@ export class Directory extends DurableObject {
         device_id TEXT NOT NULL,
         label TEXT,
         linked_at INTEGER NOT NULL,
+        etsy_user_id TEXT,
         PRIMARY KEY (marketplace, account_id)
       );
       CREATE INDEX IF NOT EXISTS accounts_by_device ON accounts (device_id);
@@ -46,6 +47,10 @@ export class Directory extends DurableObject {
         created_at INTEGER NOT NULL
       );
     `);
+    const accountColumns = this.sql.exec("PRAGMA table_info(accounts)").toArray();
+    if (!accountColumns.some((col) => col.name === "etsy_user_id")) {
+      this.sql.exec("ALTER TABLE accounts ADD COLUMN etsy_user_id TEXT");
+    }
     ctx.blockConcurrencyWhile(async () => {
       this.#expireSessions();
       await this.#scheduleExpiry();
@@ -75,31 +80,98 @@ export class Directory extends DurableObject {
 
   // A sign-in proves the account is the seller's, so linking moves the account
   // to the device that completed it (a reinstall, or a new Mac).
-  link(marketplace, accountId, deviceId, label = null) {
+  link(marketplace, accountId, deviceId, label = null, etsyUserId = null) {
     this.sql.exec(
-      `INSERT INTO accounts (marketplace, account_id, device_id, label, linked_at)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO accounts (marketplace, account_id, device_id, label, linked_at, etsy_user_id)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT (marketplace, account_id)
-       DO UPDATE SET device_id = excluded.device_id, label = excluded.label, linked_at = excluded.linked_at`,
+       DO UPDATE SET
+         device_id = excluded.device_id,
+         label = excluded.label,
+         linked_at = excluded.linked_at,
+         etsy_user_id = excluded.etsy_user_id`,
       marketplace,
       String(accountId),
       deviceId,
       label,
       Date.now(),
+      etsyUserId === null || etsyUserId === undefined ? null : String(etsyUserId),
     );
   }
 
   unlink(marketplace, accountId, deviceId = null) {
-    if (deviceId) {
-      this.sql.exec(
-        "DELETE FROM accounts WHERE marketplace = ? AND account_id = ? AND device_id = ?",
-        marketplace,
-        String(accountId),
-        deviceId,
-      );
-    } else {
-      this.sql.exec("DELETE FROM accounts WHERE marketplace = ? AND account_id = ?", marketplace, String(accountId));
-    }
+    const id = String(accountId);
+    this.ctx.storage.transactionSync(() => {
+      const rows = deviceId
+        ? this.sql
+            .exec(
+              "SELECT device_id, etsy_user_id FROM accounts WHERE marketplace = ? AND account_id = ? AND device_id = ?",
+              marketplace,
+              id,
+              deviceId,
+            )
+            .toArray()
+        : this.sql
+            .exec("SELECT device_id, etsy_user_id FROM accounts WHERE marketplace = ? AND account_id = ?", marketplace, id)
+            .toArray();
+      if (rows.length === 0) return;
+
+      const ownerDeviceId = rows[0].device_id;
+      const etsyUserId = rows[0].etsy_user_id;
+
+      if (deviceId) {
+        this.sql.exec(
+          "DELETE FROM accounts WHERE marketplace = ? AND account_id = ? AND device_id = ?",
+          marketplace,
+          id,
+          deviceId,
+        );
+      } else {
+        this.sql.exec("DELETE FROM accounts WHERE marketplace = ? AND account_id = ?", marketplace, id);
+      }
+
+      if (marketplace !== "etsy") return;
+
+      if (etsyUserId !== null) {
+        const remaining = this.sql
+          .exec(
+            "SELECT 1 FROM accounts WHERE marketplace = 'etsy' AND device_id = ? AND (etsy_user_id = ? OR etsy_user_id IS NULL) LIMIT 1",
+            ownerDeviceId,
+            etsyUserId,
+          )
+          .toArray();
+        if (remaining.length === 0) {
+          this.sql.exec(
+            "DELETE FROM accounts WHERE marketplace = 'etsy-user' AND account_id = ? AND device_id = ?",
+            etsyUserId,
+            ownerDeviceId,
+          );
+        }
+      } else {
+        // Legacy pre-migration row with no recorded etsy_user_id: once no
+        // unassociated Etsy shops remain on this device, remove any etsy-user
+        // links not backed by another linked Etsy shop on this device.
+        const remainingLegacy = this.sql
+          .exec(
+            "SELECT 1 FROM accounts WHERE marketplace = 'etsy' AND device_id = ? AND etsy_user_id IS NULL LIMIT 1",
+            ownerDeviceId,
+          )
+          .toArray();
+        if (remainingLegacy.length === 0) {
+          this.sql.exec(
+            `DELETE FROM accounts
+             WHERE marketplace = 'etsy-user'
+               AND device_id = ?
+               AND account_id NOT IN (
+                 SELECT etsy_user_id FROM accounts
+                 WHERE marketplace = 'etsy' AND device_id = ? AND etsy_user_id IS NOT NULL
+               )`,
+            ownerDeviceId,
+            ownerDeviceId,
+          );
+        }
+      }
+    });
   }
 
   deviceForAccount(marketplace, accountId) {
@@ -199,9 +271,22 @@ export class Directory extends DurableObject {
     if (!outcome.error) {
       if (claimHash === null) return { status: "pending" };
       if (!timingSafeEqual(claimHash, row.claim_hash ?? "")) return { status: "refused" };
-      for (const account of outcome.link) this.link(account.marketplace, account.accountId, deviceId, account.label);
     }
-    this.sql.exec("DELETE FROM sign_ins WHERE state = ?", state);
+    this.ctx.storage.transactionSync(() => {
+      if (!outcome.error) {
+        const etsyUserId = outcome.link.find((a) => a.marketplace === "etsy-user")?.accountId ?? null;
+        for (const account of outcome.link) {
+          this.link(
+            account.marketplace,
+            account.accountId,
+            deviceId,
+            account.label,
+            account.marketplace === "etsy" ? (account.etsyUserId ?? etsyUserId) : null,
+          );
+        }
+      }
+      this.sql.exec("DELETE FROM sign_ins WHERE state = ?", state);
+    });
     await this.#scheduleExpiry();
     return { status: "done", result: outcome.error ? { marketplace: outcome.marketplace, error: outcome.error } : outcome.result };
   }

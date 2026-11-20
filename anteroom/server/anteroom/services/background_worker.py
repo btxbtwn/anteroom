@@ -1,0 +1,233 @@
+"""Run claimed draft tasks and assistant answers using the canonical services."""
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import threading
+import time
+import traceback
+from sqlalchemy.exc import SQLAlchemyError
+
+from anteroom.models.background_task import BackgroundTask
+from anteroom.repositories.queries import ConversationRepo
+from anteroom.services import background_tasks as queue
+from anteroom.services.hosted_context import for_seller
+from anteroom.services.background_loop import BackgroundLoop
+from anteroom.services.service_context import current, use
+
+DEFAULT_WORKER_CONCURRENCY = 4
+
+# Handlers for queued work that is not a draft task, by kind. The assistant's
+# route registers its answer here, so this service never imports a route.
+_handlers = {}
+
+
+def _worker_concurrency(override: int | None = None) -> int:
+    if override is not None:
+        return max(1, int(override))
+    raw = os.environ.get("ANTEROOM_WORKER_CONCURRENCY")
+    if raw is None or not raw.strip():
+        return DEFAULT_WORKER_CONCURRENCY
+    try:
+        return max(1, int(raw.strip()))
+    except ValueError:
+        logging.getLogger(__name__).warning(
+            "Invalid ANTEROOM_WORKER_CONCURRENCY=%r; using default %d", raw, DEFAULT_WORKER_CONCURRENCY,
+        )
+        return DEFAULT_WORKER_CONCURRENCY
+
+
+def register(kind, handler):
+    """``handler(task_id, token, task)`` runs one claimed task and completes or fails it itself."""
+    _handlers[kind] = handler
+
+
+def _claimed_task(db, task_id, token):
+    """The claimed task's listing, kind, payload and handler, checked against its lease and draft."""
+    from anteroom.services.listing_generate import photo_fingerprint
+
+    task = db.get(BackgroundTask, task_id)
+    queue.check_write_lease(db, task_id, token)
+    if task is None:
+        raise queue.TaskLeaseExpired()
+    conversation_id, kind, payload = task.conversation_id, task.kind, task.payload
+    if (handler := _handlers.get(kind)) is not None:
+        # The handler runs after this session closes, with the row detached:
+        # reading an attribute a rollback expired would check a connection
+        # out again and hold it for the whole model answer.
+        db.expunge(task)
+    else:
+        if conversation_id is None:
+            raise ValueError('A draft task needs its listing')
+        repo = ConversationRepo(db)
+        conversation = repo.get(conversation_id)
+        if (conversation is None
+                or (repo.current_revision_id(conversation_id) or '') != payload['revision_id']
+                or photo_fingerprint(repo.get_photos(conversation_id)) != payload['photos']
+                or (conversation.notes or '') != payload['notes']):
+            raise RuntimeError('The draft changed before this task started. Review it and retry.')
+    # Release the lease lock before waiting for a provider. Every save
+    # obtains it again through SellerDatabaseSession.before_flush.
+    db.rollback()
+    return conversation_id, kind, payload, handler, task
+
+
+async def _execute(task_id, token):
+    """Run one claimed task. Returns True when the handler already completed it."""
+    from anteroom.database import in_worker_session
+    from anteroom.routes.chat import ChatMessage, generate_listing, run_message
+
+    context = current()
+    if context is None:
+        raise RuntimeError("Hosted draft work requires a seller context")
+    await asyncio.to_thread(context.settings.read)
+    conversation_id, kind, payload, handler, task = await in_worker_session(_claimed_task, task_id, token)
+    if handler is not None:
+        return await handler(task_id, token, task)
+    assert conversation_id is not None  # a draft task without one was refused above
+    if kind == 'generate':
+        response = await generate_listing(conversation_id)
+    elif kind == 'chat':
+        response = await run_message(conversation_id, ChatMessage(text=payload['text']),
+                                     stored_attachments=payload.get('attachments', []))
+    else:
+        raise ValueError('Unsupported draft task')
+    frames, flushed_at, failed = [], time.monotonic(), False
+    async for frame in response.body_iterator:
+        if isinstance(frame, (bytes, memoryview)):
+            frame = bytes(frame).decode('utf-8')
+        # The durable stream closes only after all draft preparation finishes.
+        if frame == 'data: [DONE]\n\n':
+            continue
+        if frame.startswith('event: error\n') or frame.startswith('data: Error:'):
+            failed = True
+        if frame.strip() and not frame.startswith(':'):
+            frames.append(frame)
+        if frames and time.monotonic() - flushed_at >= queue.EVENT_INTERVAL:
+            await asyncio.to_thread(queue.append_events, task_id, token, frames)
+            frames, flushed_at = [], time.monotonic()
+    await asyncio.to_thread(queue.append_events, task_id, token, frames)
+    while context.spawned_tasks:
+        await asyncio.gather(*list(context.spawned_tasks), return_exceptions=False)
+        await asyncio.sleep(0)
+    if failed:
+        raise RuntimeError('The draft task failed. Review the conversation before retrying.')
+    return False
+
+
+async def run_claimed(task_id, owner, token, *, heartbeat_loop: BackgroundLoop):
+    with use(for_seller(owner, task_lease=(task_id, token))) as context:
+        work = asyncio.create_task(_execute(task_id, token))
+        completed = threading.Event()
+
+        async def heartbeat():
+            while not completed.is_set():
+                await asyncio.sleep(20)
+                if not completed.is_set():
+                    await asyncio.to_thread(queue.renew, task_id, token)
+
+        # Canonical generation still makes synchronous database calls. Its
+        # event loop may block, but lease renewal must keep running for every
+        # draft, in that draft's captured seller context.
+        pulse = asyncio.wrap_future(heartbeat_loop.run(heartbeat()))
+        try:
+            done, _pending = await asyncio.wait({work, pulse}, return_when=asyncio.FIRST_COMPLETED)
+            if pulse in done:
+                pulse.result()
+            if not await work:
+                await asyncio.to_thread(queue.finish, task_id, token)
+        except asyncio.CancelledError:
+            # On shutdown the durable lease expires; never mark an incomplete
+            # draft complete or silently replay it after a process restart.
+            raise
+        except queue.TaskStopped:
+            context.task_outcome['stop'] = 'cancelled'
+            # Stop already settled the task and freed the draft; just end the work.
+            logging.getLogger(__name__).info('Draft task stopped by the seller')
+        except queue.TaskLeaseExpired:
+            context.task_outcome['stop'] = 'lease_lost'
+            # Terminal saves revoke the lease too. This worker no longer owns
+            # the row and must not try to mark it failed. Actual expiry is
+            # settled by the queue's claim sweep, without replaying work.
+            logging.getLogger(__name__).warning('Draft task lease lost; stopping worker')
+        except Exception as exc:
+            context.task_outcome['stop'] = 'error'
+            # Exception messages and formatted tracebacks can include private
+            # SQL parameters. Record only the type and source locations.
+            locations = ' > '.join(f'{frame.filename.rsplit("/", 1)[-1]}:{frame.lineno}:{frame.name}'
+                                   for frame in traceback.extract_tb(exc.__traceback__))
+            logging.getLogger(__name__).error('Draft task failed (%s at %s)', type(exc).__name__, locations)
+            try:
+                await asyncio.to_thread(queue.finish, task_id, token,
+                                        error='The draft task stopped. Review the saved draft and try again.')
+            except queue.TaskLeaseExpired:
+                pass
+        finally:
+            completed.set()
+            pending = {work, pulse, *context.spawned_tasks}
+            for task in pending:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+
+
+async def serve(engine, stopping, *, max_concurrency: int | None = None):
+    limit = _worker_concurrency(max_concurrency)
+    slots = asyncio.Semaphore(limit)
+    active: set[asyncio.Task] = set()
+    heartbeats = BackgroundLoop('anteroom-draft-leases')
+
+    def settled(task):
+        active.discard(task)
+        slots.release()
+        if not task.cancelled() and task.exception() is not None:
+            # Exception text can contain private database parameters.
+            logging.getLogger(__name__).error('Draft task worker stopped unexpectedly')
+
+    try:
+        while not stopping.is_set():
+            # Acquire a concurrency slot before claiming so queued tasks stay
+            # unclaimed instead of sitting claimed and expiring their lease.
+            if slots.locked():
+                if active:
+                    if any(task.done() for task in active):
+                        await asyncio.sleep(0)
+                    else:
+                        await asyncio.wait(active, timeout=0.25, return_when=asyncio.FIRST_COMPLETED)
+                else:
+                    await asyncio.sleep(0)
+                continue
+            await slots.acquire()
+            handed_off = False
+            sleep_s = 0.0
+            try:
+                if stopping.is_set():
+                    break
+                try:
+                    claimed = await asyncio.to_thread(queue.claim, engine)
+                except SQLAlchemyError:
+                    # Retry queue availability, never a claimed task or marketplace action.
+                    logging.getLogger(__name__).warning('Draft queue database is temporarily unavailable')
+                    sleep_s = 5.0
+                    claimed = None
+                if claimed is None:
+                    sleep_s = sleep_s or 1.0
+                else:
+                    task = asyncio.create_task(run_claimed(*claimed, heartbeat_loop=heartbeats))
+                    active.add(task)
+                    task.add_done_callback(settled)
+                    handed_off = True
+            finally:
+                if not handed_off:
+                    slots.release()
+            if sleep_s:
+                await asyncio.sleep(sleep_s)
+        # Stop claiming on shutdown, but let every claimed draft save first.
+        await asyncio.gather(*active, return_exceptions=True)
+    finally:
+        remaining = list(active)
+        for task in remaining:
+            task.cancel()
+        await asyncio.gather(*remaining, return_exceptions=True)
+        await asyncio.to_thread(heartbeats.stop)

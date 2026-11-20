@@ -46,8 +46,10 @@ print('PASS Python3.12, nonroot10001, native dependencies, photo codec and packa
 PY
 docker network create --internal "$network" >/dev/null
 # Synthetic password and empty database, confined to this disposable network.
+# Pinned by digest matching .github/workflows/ci.yml.
 docker run -d --name anteroom-image-smoke-pg --network "$network" \
-  -e POSTGRES_PASSWORD=synthetic-smoke-password -e POSTGRES_DB=smoke postgres:16 >/dev/null
+  -e POSTGRES_PASSWORD=synthetic-smoke-password -e POSTGRES_DB=smoke \
+  postgres:16@sha256:f9a7b9ebf6f56201f949db745e47bc423c0f0f8294bafe991cc10bf74b029657 >/dev/null
 # The official entrypoint's temporary initialization server is socket-only.
 # Wait for the final TCP listener instead of accepting that temporary server.
 for attempt in $(seq 1 60); do
@@ -61,7 +63,7 @@ fi
 database=postgresql://postgres:synthetic-smoke-password@anteroom-image-smoke-pg:5432/smoke
 docker run --name anteroom-image-smoke-init --network "$network" \
   -e ANTEROOM_DATABASE_URL="$database" "$image" \
-  python -c 'from vendoo_studio.database import init_db; init_db(); print("PASS disposable database migrations")'
+  python -c 'from anteroom.database import init_db; init_db(); print("PASS disposable database migrations")'
 docker run -d --name anteroom-image-smoke-app --network "$network" \
   -e ANTEROOM_DATABASE_URL="$database" \
   -e SUPABASE_URL=https://image-smoke.invalid \
@@ -86,7 +88,7 @@ with httpx.Client(base_url='http://127.0.0.1:8080', timeout=3, trust_env=False) 
     assert response.json()['status'] == 'ok'
     health = client.get('/api/health').raise_for_status().json()
     assert health['service'] == 'anteroom-hosted'
-    assert health['version'] == Path('/app/vendoo-studio/VERSION').read_text().strip()
+    assert health['version'] == Path('/app/anteroom/VERSION').read_text().strip()
     assert client.get('/api/account').status_code == 401
     assert client.get('/api/auth-config').json()['supabase_url'] == 'https://image-smoke.invalid'
     assert 'text/html' in client.get('/').raise_for_status().headers['content-type']

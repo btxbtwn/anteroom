@@ -48,7 +48,7 @@ Returns one of the following:
 ### Sample Output Structure
 
 **For the COMPLETE JSON template with all 100+ fields, see:**
-`references/vendoo_listing_template.md` → Section "2. Listing JSON Structure"
+`references/anteroom_listing_template.md` → Section "2. Listing JSON Structure"
 
 **Etsy digital download output:**
 ```markdown
@@ -68,7 +68,7 @@ What is it: {what_is}
 When made: {when_made}
 ```
 
-**Note:** The listing JSON carries 100+ fields across all marketplaces. Always reference the complete template in `references/vendoo_listing_template.md` for the full field list and allowed values.
+**Note:** The listing JSON carries 100+ fields across all marketplaces. Always reference the complete template in `references/anteroom_listing_template.md` for the full field list and allowed values.
 
 **Etsy digital download exception:** Do not return JSON for Etsy digital products. Return a copy-pasteable text block using the Etsy Digital Download Output Format.
 
@@ -90,20 +90,6 @@ When made: {when_made}
 | Missing required photos | No tag/label photo | Infer from the photos provided — never ask for more photos |
 | Invalid local path | Provided path does not resolve to an item photo folder | Tell user the path could not be used and return JSON or copy-paste text in chat only |
 | Unwritable local folder | Folder exists but the output file cannot be written | Surface the write failure explicitly and do not claim the save succeeded |
-| Vision tool returns "no image attached" | vision_analyze fails on local file paths | Switch immediately to mcp_minimax_token_plan_understand_image as fallback — do not retry the failing tool |
-
-## Image Analysis Tools (Critical)
-
-When analyzing product photos, `vision_analyze` (built-in) may fail on local file paths with "I don't have access to the image / no image attached." If this occurs, use `mcp_minimax_token_plan_understand_image` as the reliable fallback:
-
-```
-mcp_minimax_token_plan_understand_image(
-  image_source: "<local_absolute_path>",
-  prompt: "Describe this garment in detail for resale listing: brand, size tag text, color, style, material, neckline, any holes/damage, and other visible details."
-)
-```
-
-This pattern has been verified across macOS session image caches. Use it immediately on first vision failure — do not retry the failing tool.
 
 ## Workflow (MANDATORY)
 
@@ -133,13 +119,13 @@ If no readable size tag exists in the photos, skip strict size-tag agreement and
 Measurement fallback rules:
 - prefer the clearest waist-based sizing signal for bottoms and the clearest pit-to-pit or chest-based sizing signal for tops
 - use the nearest standard marketplace size only when the measurements support a reasonable estimate
-- if a standard size estimate would be too speculative, use the measurement size itself in the listing copy, such as `30 in waist` or `30x29`
-- `size` and marketplace size fields must be a clean dropdown value only (`10`, `M`, `30x29`) — never prefix with `approx`, `approximately`, `about`, `around`, `est`, or `~`
+- if a standard size estimate would be too speculative, use the clean measurement size (for men's bottoms, always use the waist alone, such as `30` — never waist x inseam like `30x29`; keep verified inseam in Measurements and eBay Inseam)
+- `size` and marketplace size fields must be a clean dropdown value only (`10`, `M`, `30`) — never waist x inseam (`30x29`), and never prefix with `approx`, `approximately`, `about`, `around`, `est`, or `~`
 
 ### Step 4: Comp Checker
 Follow [Comp research](references/comp-research.md) for sold and active listing searches.
 Use `web_search` with query pattern: `"{brand} {item type} sold comps"`, and search active listings separately.
-Apply pricing formula from MEMORY.md.
+Apply the PRICING Formula below.
 
 ### Step 5: Synthesis (You)
 - Enforce title formula EXACTLY
@@ -174,14 +160,14 @@ Apply pricing formula from MEMORY.md.
 **Measurement-Derived Size Fallback (MANDATORY when no size tag is visible):**
 - When no readable size tag exists in the photos, derive size from measurements instead of blocking the listing.
 - Use the most defensible size expression for the item type. For men's pants, use the waist alone (`34`). Do not write waist x inseam in `size`.
-- Put that clean value in `size` / marketplace size fields — never `approx 10` or similar; approximate language belongs only in the description.
+- Put that clean value in `size` / marketplace size fields — never `approx 10` or similar; note any measurement-derived estimate only in your reply to the seller, never in the buyer-facing description.
 - Use `sizeType = Regular` unless the measurements or garment styling clearly indicate Petite, Tall, Plus, or Maternity.
-- Record the fallback clearly in the description measurements line when helpful.
-- If later browser automation requires a forced dropdown choice that does not support the exact measurement expression, choose the closest reasonable marketplace value and preserve the measurement truth in the description and notes.
+- Include the verified flat measurements on the `Measurements:` line (without hedging or mentioning a missing tag).
+- If later browser automation requires a forced dropdown choice that does not support the exact measurement expression, choose the closest reasonable marketplace value and preserve the measurement truth in the `Measurements:` line and seller reply.
 
 **Valid Depop Values (MUST use only these):**
 - **Style:** Casual, Streetwear, Vintage, Y2K, Minimalist, Sporty, Bohemian, Grunge, Preppy, Athleisure, Retro
-- **Occasion:** Casual, Streetwear, Formal, Sporty, Vintage, Y2K, Bohemian, Minimalist, Retro, Summer, Workwear
+- **Occasion:** Choose exactly 3 from the Occasion list in the **Depop Tags + Style + Parcel Sizes** section of the [listing template](references/anteroom_listing_template.md).
 - **Material:** Cotton, Cotton - Organic, Cotton - Recycled, Polyester, Denim, Leather, Wool, Silk, Linen, Fleece, Velvet, Satin
 - **Fit:** Skinny, Slim, Straight, Bootcut, Relaxed, Oversized, Loose, Regular, High Rise, Mid Rise, Low Rise
 - **Source:** Preloved, Deadstock, Vintage, New with tags, New without tags
@@ -209,7 +195,7 @@ Every eBay listing MUST populate these fields. Leaving them blank causes downgra
 | **Size** | Match tag or measurement-derived |
 | **Fit** | Slim, Regular, Relaxed, etc. |
 | **Material** | Cotton, Polyester, etc. |
-| **Outer Shell Material** | Required for jackets/coats; follow the best-guess rule in Formula Reference when shell composition is unverified. |
+| **Outer Shell Material** | Required for jackets/coats; follow the Outer Shell Material rule in Formula Reference. |
 | **Pattern** | Solid, Striped, Floral, Tie-Dye, etc. |
 | **Style** | Casual, Graphic Tee, etc. |
 | **Accents** | Visible features: Graphic Print, Logo, Embroidered, Distressed, etc. |
@@ -241,7 +227,7 @@ Every eBay listing MUST populate these fields. Leaving them blank causes downgra
 
 **Pitfall: eBay Season has no "All Seasons" option.** Choose exactly one of Spring, Summer, Fall, or Winter from the garment (fabric, sleeve, type, title cues). For year-round items, put `"All Seasons"` under **Features** and still set Season to the primary wear season.
 
-**Pitfall: JSON key names must exactly match the listing contract's keys** (e.g., `unitQuantity` not `unit_quantity` or `qty`). See the JSON Field Reference in `references/vendoo_listing_template.md`.
+**Pitfall: JSON key names must exactly match the listing contract's keys** (e.g., `unitQuantity` not `unit_quantity` or `qty`). See the JSON Field Reference in `references/anteroom_listing_template.md`.
 
 ## Formula Reference (NON-NEGOTIABLE)
 
@@ -347,7 +333,7 @@ Anteroom fills Auto-accept and Minimum into eBay's Best Offer (auto-accept / dec
 6. **📌 DESCRIPTION MUST MATCH THE APPLICABLE FORMULA EXACTLY** — use the physical-item template by default, or the Etsy Digital Download Description Formula for Etsy digital products
 7. **Pricing MUST follow formula** (comp × 1.35, whole dollars only)
 8. **NEVER put uncertainties in the description** — the description is buyer-facing. No hedges about what you couldn't verify or read, no "approximate", "estimated", "photo estimates", "uncertain" or "unclear" notes, no missing-tag or color doubts. Leave unsupported fields empty and mention open questions only in your reply to the seller
-9. **Reference vendoo_listing_template.md BEFORE generating** — structure/order priority
+9. **Reference anteroom_listing_template.md BEFORE generating** — structure/order priority
 10. **For Etsy digital downloads, use the Etsy Digital Download Description Formula** — do not use the physical-item description template
 11. **For Etsy digital downloads, return the Etsy Digital Download Output Format** — do not output JSON
 12. **Infer packaged shipping weight on every listing; do not ask the seller for it** — always populate both `weight_lb` and `weight_oz` with a reasonable packaged-shipping estimate supported by the item type, size, material, photos, seller notes, and research evidence (include typical packaging). Pounds may be `0`, but the combined weight must be greater than zero. Examples: light tee/tank ~6–10 oz; heavy graphic tee ~10–14 oz; hoodie/sweatshirt ~1 lb 0–8 oz; jeans/pants ~1–1.5 lb; light jacket ~1–2 lb. Prefer seller-provided scale weight when given. Anteroom supplies `package_dimensions_in` from the seller's saved package-dimensions default (initially `13x10x3`); do not ask the seller to confirm routine apparel shipping weight or package size. Infer unread tag size/material, department, when-made era, and other product facts from photos and initial seller notes when supportable; leave unsupported facts empty — never ask.
@@ -357,14 +343,14 @@ Anteroom fills Auto-accept and Minimum into eBay's Best Offer (auto-accept / dec
 
 Before outputting ANY listing, verify:
 
-- [ ] **Reference:** `references/vendoo_listing_template.md` consulted
+- [ ] **Reference:** `references/anteroom_listing_template.md` consulted
 - [ ] **Brand confirmed:** From visible tag/label
 - [ ] **Size confirmed:** From visible tag/label or defensibly derived from measurements when no readable size tag exists
 - [ ] **Cross-check passed:** Extractor and verifier agree, or measurement fallback applied and documented
 - [ ] **Comps checked:** web_search used or baseline estimated
 - [ ] **Title formula:** `{BRAND} {SIZE} {VIBE} {ITEM} {COLOR} {FIT}` followed EXACTLY
 - [ ] **Title size matches the size field:** the same value, character for character (men's bottoms: `34`, not `34x34`)
-- [ ] **Condition is a general value and is not blank** (`Pre-Owned - Good`, `New With Tags/Box`, and the other values in `references/vendoo-dropdown-options.md`)
+- [ ] **Condition is a general value and is not blank** (`Pre-Owned - Good`, `New With Tags/Box`, and the other values in `references/anteroom-dropdown-options.md`)
 - [ ] **Title length:** 80 characters or less
 - [ ] **Physical-item description lines:** if the item is physical, use the standard description formula and preserve its required line structure
 - [ ] **Etsy digital description override:** if the item is a digital Etsy product, use the Etsy Digital Download Description Formula instead of the physical-item template
@@ -381,14 +367,13 @@ Before outputting ANY listing, verify:
 - [ ] **Category chosen on every enabled marketplace form:** choose and save the most specific category from each marketplace's own catalog before filling its dependent fields. A General category alone does not complete the marketplace forms. Never leave category selection to the seller. If a catalog cannot be read or a category cannot be verified, keep the draft incomplete and report the blocker; never list without a category. Etsy applies only when the item is eligible.
 - [ ] **Native form is authoritative:** when Anteroom supplies a native marketplace form, generate only its provided paths and exact choices, respecting its types and limits. Its live fields replace generic marketplace templates and general aliases for that marketplace. Re-read dependent choices after a controlling selection changes. An available option is not evidence: support item facts with the photos or seller notes, omit unsupported optional facts, and keep unsupported required facts as blockers. Never fill a field just because its name appears in a generic template.
 - [ ] **eBay specifics populated (ALL required):** type, department, sizeType, size, brand, fit, material, pattern, style, accents, features, neckline, closure, countryOfOrigin, fabricType, garmentCare, handmade, personalize, vintage, occasion, season, theme, unitQuantity, unitType
-- [ ] **eBay jackets/coats:** Outer Shell Material populated separately from material/fabricType, with the best estimate when unverified; shell uncertainty documented in the description
+- [ ] **eBay jackets/coats:** Outer Shell Material populated separately from material/fabricType when evidence establishes the shell (otherwise left as a blocker); no guessed composition or uncertainty commentary in the description
 - [ ] **eBay specifics key names match the listing contract:** JSON keys like `features`, `neckline`, `season`, `unitQuantity`, `unitType` must use exactly these names (not aliases like `feature` or `qty`) so Anteroom can map them to the corresponding eBay item specifics
 - [ ] **Petite size normalized:** petite codes such as `PS` are mapped using exact platform-supported values instead of being flattened to plain small
-- [ ] **Depop specifics populated:** source, age, style, type, fit, material, occasion, and size_grouping when supportable
+- [ ] **Depop specifics populated:** source, age, style (3 items), type, fit, material, occasion, and size_grouping when supportable
 - [ ] **Etsy specifics populated:** who_made, what_is, when_made, materials, tags
 - [ ] **Poshmark fields:** originalPrice is 0, and primaryColor/secondaryColor are colors on Poshmark's list (up to two)
-- [ ] **Depop specifics populated:** source, age, style (3 items)
-- [ ] **All marketplace fields:** Reference `vendoo_listing_template.md` for complete field list
+- [ ] **All marketplace fields:** Reference `anteroom_listing_template.md` for complete field list
 
 **⚠️ IF ANY BOX IS NOT CHECKED, DO NOT OUTPUT THE LISTING. FIX IT FIRST.**
 
@@ -401,7 +386,7 @@ Before outputting ANY listing, verify:
 
 **Etsy (Required for listing):**
 - who_made, what_is, when_made are MANDATORY
-- `when_made` must be an exact current Etsy dropdown value from `vendoo-dropdown-options.json` (for example `2010 - 2019 (Recently)`), not `2010s` or `2010-2019`
+- `when_made` must be an exact current Etsy dropdown value from `anteroom-dropdown-options.json` (for example `2010 - 2019 (Recently)`), not `2010s` or `2010-2019`
 - primaryColor must be present; secondaryColor when a second color is visible
 - sku only when the seller gives one; never make one up
 - Up to 13 tags, up to 10 materials
@@ -428,7 +413,7 @@ Before outputting ANY listing, verify:
 - Parcel size must match the packaged weight you estimated: under 4oz Extra extra small, under 8oz Extra small, under 12oz Small, under 1lb Medium, under 2lb Large, otherwise Extra large
 
 **Mercari:**
-- Condition is required and uses Mercari labels (see `vendoo-dropdown-options.md`)
+- Condition is required and uses Mercari labels (see `anteroom-dropdown-options.md`)
 - shippingLabel must be `USPS Ground Advantage`
 
 
@@ -439,8 +424,8 @@ Before outputting ANY listing, verify:
 **User sends:** Photos of Levi's shorts (front, tag, detail)
 
 **Process:**
-1. Extractor identifies: Levi's brand, 33x32 size, black denim, slim fit
-2. Verifier confirms: Tag reads "Levi's 33W 32L"
+1. Extractor identifies: Levi's brand, waist 33 (tag `33W`), black denim, slim fit
+2. Verifier confirms: Tag reads "Levi's 33W" → `size` is `33`
 3. Cross-check: Both agree ✓
 4. Comp checker finds: Similar Levi's shorts sold $18-25
 5. Pricing: $22 × 1.35 = $29.70 → $30 listing, $28 auto, $26 min
@@ -451,13 +436,13 @@ Before outputting ANY listing, verify:
 ### Example 2: Unclear brand
 **User sends:** Photos but tag is blurry
 
-**Action:** Infer from any readable logo, hardware, or seller notes. If still unsupported, leave brand empty, keep other fields, and note the unclear brand in the description. Do not ask.
+**Action:** Infer from any readable logo, hardware, or seller notes. If still unsupported, leave brand empty, keep other fields, and note the unclear brand only in your reply to the seller (never in the buyer-facing description). Do not ask.
 
 ### Example 3: Size conflict
 **Extractor says:** "Size 32"
 **Verifier says:** "Tag shows 33"
 
-**Action:** Prefer the clearer tag reading (33), flag the conflict briefly in the description if helpful, and finish the listing. Do not ask.
+**Action:** Prefer the clearer tag reading (33), flag the conflict briefly in your reply to the seller if helpful (never in the buyer-facing description), and finish the listing. Do not ask.
 
 ## Etsy When Made Estimation
 
@@ -468,8 +453,8 @@ Before outputting ANY listing, verify:
 
 ## Resources
 
-- **Mandatory reference:** `references/vendoo_listing_template.md`
-- **Marketplace dropdowns (live scrape):** `references/vendoo-dropdown-options.md` — use exact condition/color/source strings per marketplace
+- **Mandatory reference:** `references/anteroom_listing_template.md`
+- **Marketplace dropdowns (live scrape):** `references/anteroom-dropdown-options.md` — use exact condition/color/source strings per marketplace
 - **Script:** `scripts/` (if any helper scripts exist)
 
 ## Notes

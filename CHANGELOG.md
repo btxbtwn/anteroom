@@ -6,6 +6,41 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1060 — 2026-11-20
+
+- Improve backend reliability and responsiveness during photo editing, background draft generation, and multi-seller automations by releasing database transactions before external photo I/O, replacing global photo and automation locks with scoped locks, and capping concurrent background worker jobs.
+
+## 0.1.1059 — 2026-11-20
+
+- Finish renaming a Vendoo database file only when an update was clearly in progress, and leave mixed leftover files alone so listing data is not attached by mistake.
+- Refuse to start that rename when an Anteroom database sidecar is already present, and check the whole rename plan before moving any file.
+
+## 0.1.1058 — 2026-11-20
+
+- Import all your active listings from a marketplace in one step. Listings that look like items already in Anteroom wait for you to link them or import them as new, so nothing is duplicated, and nothing on the marketplace is changed.
+
+## 0.1.1057 — 2026-11-20
+
+- Keep unsent chat and assistant drafts when switching between listings or conversations, clearing them only when sent.
+- Make checked checkboxes visible in dark mode and keep sign-in, password reset, and connector screens scrollable on short or landscape mobile screens.
+- Keep mobile confirmation dialog buttons at a full 44px touch target, improve keyboard focus rings and error contrast, and show clear error notices when creating, renaming, or deleting a listing fails.
+
+## 0.1.1056 — 2026-11-20
+
+- Choose Automatic or Manual in the Etsy Renewal options dropdown, save a default for new listings, and send your selection to Etsy on create and update.
+
+## 0.1.1055 — 2026-11-20
+
+- Harden macOS release packaging, Chrome Bridge extension packaging, and hosted build checks.
+
+## 0.1.1054 — 2026-11-20
+
+- Rename remaining internal Vendoo Studio and Vendoo extension identifiers, files, and local storage paths to Anteroom while preserving existing local databases, Keychain secrets, browser settings, and Chrome extension installs.
+
+## 0.1.1053 — 2026-11-20
+
+- Show the item's title instead of "Untitled item" in the Marketplace activity tray on hosted accounts.
+
 ## 0.1.1052 — 2026-11-20
 
 - Choose which sections a generated description includes. The current formula stays on, and you can add or remove sections such as fit, material, trend, and care.

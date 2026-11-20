@@ -23,6 +23,6 @@ Additional official references used by other features:
 - Negotiation: https://developer.ebay.com/api-docs/sell/negotiation/overview.html
 - Finances: https://developer.ebay.com/api-docs/sell/finances/overview.html
 
-Implementation: [client](../../vendoo-studio/server/vendoo_studio/services/ebay_client.py),
-[listing lifecycle](../../vendoo-studio/server/vendoo_studio/services/ebay_listings.py),
-[variations](../../vendoo-studio/server/vendoo_studio/services/ebay_variations.py).
+Implementation: [client](../../anteroom/server/anteroom/services/ebay_client.py),
+[listing lifecycle](../../anteroom/server/anteroom/services/ebay_listings.py),
+[variations](../../anteroom/server/anteroom/services/ebay_variations.py).

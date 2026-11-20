@@ -44,7 +44,7 @@ Split rows into concrete controls and scenarios as exercised. PASS applies only 
 
 ## Validation record
 
-- PASS: dependency install `npm ci --prefix vendoo-studio`.
+- PASS: dependency install `npm ci --prefix anteroom`.
 - NOT RUN: check.sh, pytest, Vitest, browser suites, hosted load test, native suites. This audit will not count existing tests alone as hands-on feature coverage.
 
 ## Checkpoint 05:10 UTC — observed, not aggregate-suite coverage

@@ -1,0 +1,163 @@
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { PlusIcon, SearchIcon, Trash2Icon, XIcon } from "lucide-react";
+import { api } from "../../api/client";
+import { ApiRequestError } from "../../api/transport";
+import { PageError } from "../WorkspacePage";
+import type { AssistantThread } from "../../api/assistant";
+import { confirmDialog } from "../../ui/confirmDialog";
+import { cn } from "../../lib/utils";
+import { SIDEBAR_ROW } from "./sidebarStyles";
+import { prefetchAssistantThread } from "../../api/navigationQueries";
+import { useNavigationIntent } from "../../lib/useNavigationIntent";
+import { groupChats } from "../chat/chatHistory";
+import { clearComposerDraft } from "../chat/composerDrafts";
+
+function ThreadButton({ thread, selected, onPick }: {
+  thread: AssistantThread; selected: boolean; onPick: (id: string) => void;
+}) {
+  const client = useQueryClient();
+  const intent = useNavigationIntent(() => { void prefetchAssistantThread(client, thread.id); });
+  return (
+    <button type="button" className={cn(SIDEBAR_ROW, "min-w-0 flex-1")}
+      data-active={selected} aria-current={selected ? "true" : undefined}
+      {...intent} onClick={() => { void prefetchAssistantThread(client, thread.id); onPick(thread.id); }}>
+      <span className="min-w-0 flex-1 truncate" title={thread.title}>{thread.title}</span>
+    </button>
+  );
+}
+
+const SEARCH_CLASS =
+  "flex h-8 min-w-0 flex-1 cursor-text items-center gap-2 rounded-[var(--control-radius)] px-2 text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover focus-within:bg-sidebar-row-hover";
+const SEARCH_INPUT_CLASS =
+  "min-w-0 flex-1 bg-transparent text-sm font-medium text-sidebar-foreground outline-none placeholder:text-sidebar-muted-foreground max-[900px]:text-base";
+
+/**
+ * The assistant's conversations, in a right-hand panel on T3 Code's sidebar
+ * surface, grouped by day like ChatGPT's and Claude's history. It opens from
+ * the History button and starts closed. Listing chats are not in this list;
+ * the listings stay on the left. On mobile it is a sheet that slides in from the right.
+ */
+export function AssistantThreadPanel({
+  selectedId,
+  onSelect,
+  mobileOpen,
+  onCloseMobile,
+}: {
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+  /** `undefined` on desktop, where the History button shows and hides it. */
+  mobileOpen?: boolean;
+  onCloseMobile: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [query, setQuery] = useState("");
+  const threads = useQuery({ queryKey: ["assistant", "threads"], queryFn: ({ signal }) => api.assistant.threads({ signal }) });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.assistant.deleteThread(id),
+    onSuccess: (_result, id) => {
+      clearComposerDraft(`assistant:${id}`);
+      queryClient.setQueryData<AssistantThread[]>(["assistant", "threads"], (saved) => saved?.filter((thread) => thread.id !== id));
+      queryClient.removeQueries({ queryKey: ["assistant", "messages", id] });
+      if (selectedId === id) onSelect(null);
+    },
+  });
+  const needle = query.trim().toLowerCase();
+  const shown = (threads.data ?? []).filter((thread) => !needle || thread.title.toLowerCase().includes(needle));
+
+  const deleteThread = async (thread: AssistantThread) => {
+    const confirmed = await confirmDialog(`Delete “${thread.title}”? The messages in it are removed. Listings are not.`, {
+      variant: "destructive",
+      confirmLabel: "Delete thread",
+    });
+    if (!confirmed) return;
+    remove.mutate(thread.id);
+  };
+
+  const pick = (id: string | null) => {
+    onSelect(id);
+    onCloseMobile();
+  };
+
+  return (
+    <aside
+      id="assistant-threads"
+      data-app-sidebar
+      className={cn("panel thread-sidebar", mobileOpen && "is-mobile-open")}
+      aria-label="Assistant chats"
+      aria-hidden={mobileOpen === false ? true : undefined}
+    >
+      <div className="hidden h-14 shrink-0 items-center justify-between px-4 pt-2 max-[900px]:flex">
+        <span className="text-lg font-semibold text-sidebar-foreground">Chats</span>
+        <button
+          type="button"
+          className="inline-flex size-9 max-[900px]:size-11 cursor-pointer items-center justify-center rounded-full text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+          aria-label="Hide chats"
+          onClick={onCloseMobile}
+        >
+          <XIcon className="size-4" />
+        </button>
+      </div>
+      <div className="flex shrink-0 items-center gap-1 px-(--sidebar-content-inset) py-2">
+        <label className={SEARCH_CLASS}>
+          <SearchIcon className="size-4 shrink-0 text-(--sidebar-icon-color)" />
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            className={SEARCH_INPUT_CLASS}
+            placeholder="Search"
+            aria-label="Search chats"
+          />
+        </label>
+        <button
+          type="button"
+          // On desktop the titlebar has New chat; the phone sheet keeps its own.
+          className={cn(SIDEBAR_ROW, "hidden w-auto shrink-0 px-2 text-xs font-semibold max-[900px]:flex")}
+          aria-pressed={selectedId === null}
+          onClick={() => pick(null)}
+        >
+          <PlusIcon />
+          New chat
+        </button>
+      </div>
+      <div
+        className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-(--sidebar-content-inset) pb-2 max-[900px]:touch-pan-y max-[900px]:pb-[calc(16px+env(safe-area-inset-bottom,0px))]"
+        aria-label="Assistant threads"
+      >
+        {remove.error ? <PageError message={remove.error instanceof ApiRequestError && remove.error.status === 409
+          ? `${remove.error.message} Stop answering or wait for the answer to finish, then try deleting again.`
+          : remove.error.message} /> : null}
+        {threads.isPending ? (
+          <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">Loading chats</p>
+        ) : threads.isError ? (
+          <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">Could not load chats</p>
+        ) : shown.length === 0 ? (
+          <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">
+            {threads.data?.length ? "No matching chats" : "No chats yet"}
+          </p>
+        ) : (
+          groupChats(shown).map(({ group, chats }) => (
+            <section key={group} aria-label={group} className="pb-2">
+              <h3 className="px-2.5 pt-2 pb-1 text-xs font-medium text-sidebar-muted-foreground">{group}</h3>
+              {chats.map((thread) => (
+                <div key={thread.id} className="group flex items-center gap-0.5">
+                  <ThreadButton thread={thread} selected={selectedId === thread.id} onPick={pick} />
+                  <button
+                    type="button"
+                    className="inline-flex size-7 max-[900px]:size-11 shrink-0 cursor-pointer items-center justify-center rounded-[var(--control-radius)] text-sidebar-muted-foreground opacity-0 transition-opacity hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:opacity-100 group-hover:opacity-100 max-[900px]:opacity-100"
+                    aria-label={`Delete ${thread.title}`}
+                    disabled={remove.isPending}
+                    onClick={() => { void deleteThread(thread); }}
+                  >
+                    <Trash2Icon className="size-3.5" />
+                  </button>
+                </div>
+              ))}
+            </section>
+          ))
+        )}
+      </div>
+    </aside>
+  );
+}

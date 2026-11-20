@@ -106,7 +106,10 @@ def main() -> int:
         if target != git("rev-parse", "HEAD"):
             git("checkout", "--quiet", "--detach", target)
         root = Path(git("rev-parse", "--show-toplevel"))
-        lines.append(f"version={(root / 'vendoo-studio' / 'VERSION').read_text().strip()}")
+        version_file = root / "anteroom" / "VERSION"
+        if not version_file.is_file():
+            version_file = root / "vendoo-studio" / "VERSION"
+        lines.append(f"version={version_file.read_text().strip()}")
         print(f"Deploying {target[:8]}, the newest tested commit on main from {trigger[:8]} on.")
     else:
         print(f"::notice::Nothing to deploy from {trigger[:8]} on; a newer commit's own run ships it.")

@@ -45,14 +45,6 @@ that sample. A confirmed save retains its answer outcome
 despite a concurrent lease revocation. `total_ms` ends with the answer's cleanup
 wait, not the later journal settlement or log emission.
 
-<!-- coderabbit-ai-generated:v1 -->
-
-<!-- coderabbit-ai-generated-section:v1:c16ae77c1fa266df95938d44689e61b2522ff68f559affd05d4c47994dd17247 -->
-
-<!-- coderabbit-ai-generated:v1 -->
-
-<!-- coderabbit-ai-generated-section:v1:a7bf8ddaba1ad12e7f8db7edee06b4c705d6b50d207af17c02a51d566f3f7868 -->
-
 Answers under 30 s log at INFO, which hosted logging drops; slower ones log at
 WARNING and, when operator alerts are enabled, enter the hourly batched operator alert email (grouped by call site,
 as `Slow response` lines are). The digest retains only the latest sample in each
@@ -64,13 +56,10 @@ are capped at 4,000 characters. Operators can read this worker-local file; it is
 not shared across Machines and can be lost with the filesystem. Disk logging is
 best effort and does not change alert delivery. No stderr handler is added.
 
-<!-- /coderabbit-ai-generated:v1 -->
 `queue_wait_ms` compares the worker clock with the database's `created_at`;
 skew is clamped at zero, not corrected. Time between `total_ms` and the
 follower seeing `[DONE]` (journal polling) is not included. This line measures;
 it changes no answer behavior and proves no cause by itself.
-
-<!-- /coderabbit-ai-generated:v1 -->
 
 
 ## Assistant shop read: shared range inputs, 2026-11-18
@@ -234,7 +223,7 @@ transactions during model or remote-storage waits. Record the tested load,
 device/build, p50/p95 latency, errors and any missed target. Separate queue wait,
 model work and interface response time.
 
-The regression in `vendoo-studio/e2e/concurrentGeneration.e2e.ts` holds two
+The regression in `anteroom/e2e/concurrentGeneration.e2e.ts` holds two
 independent generation responses open, starts a second batch, selects another
 draft and types into its editor. It attaches event timing samples and a
 screenshot on desktop and phone; CI retains the browser report on success as
@@ -254,8 +243,8 @@ test alone does not verify SwiftUI behavior.
 
 ## Hosted load test, 2026-11-12
 
-`vendoo-studio/scripts/hosted-load-test.py` (how to run it: "Hosted load
-test" in `vendoo-studio/README.md`) drives the local hosted sandbox at main
+`anteroom/scripts/hosted-load-test.py` (how to run it: "Hosted load
+test" in `anteroom/README.md`) drives the local hosted sandbox at main
 `cd9a9176` (0.1.951). Conditions:
 
 - Web and worker in separate processes (`ANTEROOM_SANDBOX_WORKER_PROCESS=1`),
@@ -363,7 +352,7 @@ Both runs used fresh local hosted sandboxes, in sequence on the same shared
 waits, 24-ms simulated DB RTT, five sellers, three generating drafts each,
 two browsing tabs each, 40 extra inventory drafts each, 0.5-second think time,
 5-second fake model calls and 150 seconds per idle/load phase. The command and
-environment are the "Hosted load test" example in `vendoo-studio/README.md`,
+environment are the "Hosted load test" example in `anteroom/README.md`,
 using API port 4340. No live services, real AI, seller data or credentials were
 used. Heavy suites ran only after both loads. The narrow regression finished
 before baseline idle; code-health checks overlapped its first 29 seconds.
@@ -893,7 +882,7 @@ restocks, invalid/missing quantities, no sales and undated revisions. It also
 checks 1,001-item status/sold-unit scopes, partial-sale quantities and cross-seller
 RLS. Reproduce the SQLite volume observation with
 `.venv/bin/python -m pytest -q -s server/tests/test_inventory_egress.py` from
-`vendoo-studio`; use `ANTEROOM_TEST_DATABASE_URL` pointing only to a disposable
+`anteroom`; use `ANTEROOM_TEST_DATABASE_URL` pointing only to a disposable
 local Postgres server for that dialect (the suite creates its test databases).
 
 No production load test or configuration/schema change was performed. Actual
@@ -957,7 +946,7 @@ throwaway Postgres, separate web/worker processes, unchanged production pools
 was the Vite development build, Chromium 1254, desktop 1440x900 and iPhone 15
 browser emulation; it was not a physical phone or native latency measurement.
 
-The existing `vendoo-studio/scripts/hosted-load-test.py` supplied authentication,
+The existing `anteroom/scripts/hosted-load-test.py` supplied authentication,
 independent draft setup, normal reads/writes, generation/follower streams,
 cancellation and system sampling. A local adapter added one real
 `GET /api/analytics/offers` per browsing cycle: seven inclusive UTC days,

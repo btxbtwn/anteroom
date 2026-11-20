@@ -36,7 +36,7 @@ changed() {
   [[ "$ALL" == "1" ]] || grep -qE "$1" <<<"$CHANGED"
 }
 
-PY="$ROOT/vendoo-studio/.venv/bin/python"
+PY="$ROOT/anteroom/.venv/bin/python"
 [[ -x "$PY" ]] || PY="$(command -v python3)"
 BIN="$(dirname "$PY")"
 
@@ -73,24 +73,24 @@ else
   skip "Secrets" "gitleaks is not installed: https://github.com/gitleaks/gitleaks#installing"
 fi
 
-run "Anteroom version and changelog" bash -c "'$PY' vendoo-studio/scripts/check-version-sync.py && '$PY' vendoo-studio/scripts/check-changelog.py"
+run "Anteroom version and changelog" bash -c "'$PY' anteroom/scripts/check-version-sync.py && '$PY' anteroom/scripts/check-changelog.py"
 
 if component frontend; then
-  run "Anteroom frontend" bash -c "cd vendoo-studio && npm run lint && npm run knip && npm test && npm run build"
-  run "Anteroom hosted build" bash -c "cd vendoo-studio && ANTEROOM_HOSTED_BUILD=1 VITE_SUPABASE_URL=https://build-validation.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=public-build-validation npm run build"
+  run "Anteroom frontend" bash -c "cd anteroom && npm run lint && npm run knip && npm test && npm run build"
+  run "Anteroom hosted build" bash -c "cd anteroom && ANTEROOM_HOSTED_BUILD=1 VITE_SUPABASE_URL=https://build-validation.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=public-build-validation npm run build"
 fi
 
 # Backend tests also inspect frontend, extension and skill sources. The shared
 # selector retains those dependencies without rebuilding an unchanged frontend.
 if component backend; then
-  run "Anteroom backend" bash -c "cd vendoo-studio && VENDOO_STUDIO_DATA_DIR=\$(mktemp -d) '$PY' -m pytest -q -n auto"
+  run "Anteroom backend" bash -c "cd anteroom && ANTEROOM_DATA_DIR=\$(mktemp -d) '$PY' -m pytest -q -n auto"
   if [[ "$FAST" == "1" ]]; then
     skip "Anteroom backend on Postgres" "--fast"
   elif [[ -n "${ANTEROOM_TEST_DATABASE_URL:-}" ]]; then
-    run "Anteroom backend on Postgres" bash -c "cd vendoo-studio && VENDOO_STUDIO_DATA_DIR=\$(mktemp -d) '$PY' -m pytest -q -n auto"
+    run "Anteroom backend on Postgres" bash -c "cd anteroom && ANTEROOM_DATA_DIR=\$(mktemp -d) '$PY' -m pytest -q -n auto"
   else
     # pgserver (a dev dependency) runs a private Postgres 16 for the run.
-    run "Anteroom backend on Postgres" bash -c "cd vendoo-studio && '$PY' - <<'PY'
+    run "Anteroom backend on Postgres" bash -c "cd anteroom && '$PY' - <<'PY'
 import os, signal, subprocess, sys, tempfile
 from pathlib import Path
 from pgserver.postgres_server import get_server
@@ -100,7 +100,7 @@ signal.signal(signal.SIGTERM, terminate)
 with tempfile.TemporaryDirectory(prefix='anteroom-check-postgres-') as root:
     server = get_server(Path(root) / 'postgres', cleanup_mode='delete')
     try:
-        env = {**os.environ, 'ANTEROOM_TEST_DATABASE_URL': server.get_uri(), 'VENDOO_STUDIO_DATA_DIR': str(Path(root) / 'data')}
+        env = {**os.environ, 'ANTEROOM_TEST_DATABASE_URL': server.get_uri(), 'ANTEROOM_DATA_DIR': str(Path(root) / 'data')}
         sys.exit(subprocess.call([sys.executable, '-m', 'pytest', '-q', '-n', 'auto'], env=env))
     finally:
         # pgserver's atexit hook runs too late: stop/wait before removing root.
@@ -110,14 +110,14 @@ PY"
 fi
 
 if component health; then
-  run "Anteroom code health" bash -c "cd vendoo-studio && '$PY' -m ruff check server && '$BIN/lint-imports' && '$PY' scripts/check-dead-code.py && '$PY' scripts/check-design.py"
-  run "Anteroom types" bash -c "cd vendoo-studio && CI=true '$PY' -m basedpyright"
+  run "Anteroom code health" bash -c "cd anteroom && '$PY' -m ruff check server && '$BIN/lint-imports' && '$PY' scripts/check-dead-code.py && '$PY' scripts/check-design.py"
+  run "Anteroom types" bash -c "cd anteroom && CI=true '$PY' -m basedpyright"
 fi
 
 if component audit; then
   if command -v uv >/dev/null 2>&1; then
     run "Anteroom Python lock and audit" bash -c "
-      cd vendoo-studio && uv lock --check
+      cd anteroom && uv lock --check
       locked=\$(mktemp)
       uv export --frozen --no-emit-project --all-extras --all-groups --format requirements-txt --hashes --quiet --output-file \"\$locked\"
       '$PY' -m pip_audit --disable-pip --require-hashes -r \"\$locked\"
@@ -129,7 +129,7 @@ fi
 
 if component browser; then
   if [[ "$FAST" == "0" ]]; then
-    run "Anteroom browser tests (sandbox)" bash -c "cd vendoo-studio && node scripts/check-bridge-network.mjs && node scripts/check-bridge-connection.mjs && npm run e2e && npm run e2e:hosted"
+    run "Anteroom browser tests (sandbox)" bash -c "cd anteroom && node scripts/check-bridge-network.mjs && node scripts/check-bridge-connection.mjs && npm run e2e && npm run e2e:hosted"
   else
     skip "Anteroom browser tests" "--fast"
   fi
@@ -145,11 +145,11 @@ fi
 
 if component extension; then
   run "Extension" bash -c "
-    vendoo-studio/node_modules/.bin/oxlint -c vendoo-extension/.oxlintrc.json --deny-warnings vendoo-extension
-    git ls-files 'vendoo-extension/*.js' | grep -F -x -f <(printf '%s\n' \"\$CHANGED\") | xargs -r -n1 node --check
-    node --test 'vendoo-extension/tests/*.test.js'
-    '$PY' -m json.tool vendoo-extension/manifest.json >/dev/null
-    node vendoo-extension/tools/version-bump/check.js '$BASE'
+    anteroom/node_modules/.bin/oxlint -c anteroom-extension/.oxlintrc.json --deny-warnings anteroom-extension
+    git ls-files 'anteroom-extension/*.js' | grep -F -x -f <(printf '%s\n' \"\$CHANGED\") | xargs -r -n1 node --check
+    node --test 'anteroom-extension/tests/*.test.js'
+    '$PY' -m json.tool anteroom-extension/manifest.json >/dev/null
+    node anteroom-extension/tools/version-bump/check.js '$BASE'
   "
 fi
 
@@ -158,7 +158,7 @@ if component relay; then
 fi
 
 if changed '^skills/'; then
-  run "Skills" bash -c "test -f skills/list-this/SKILL.md && '$PY' -m json.tool skills/list-this/references/vendoo-dropdown-options.json >/dev/null"
+  run "Skills" bash -c "test -f skills/list-this/SKILL.md && '$PY' -m json.tool skills/list-this/references/anteroom-dropdown-options.json >/dev/null"
 fi
 
 echo

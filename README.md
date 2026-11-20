@@ -4,13 +4,11 @@ Anteroom is a cross-listing app for resellers. Photograph an item once; Anteroom
 
 ## Components
 
-Directories still carry the product's old `vendoo-*` names; a rename is planned separately.
-
 | Directory | What it is |
 |---|---|
-| `vendoo-studio/` | Anteroom itself: FastAPI backend (`server/`) and React web UI (`src/`). Runs as the hosted web app (Fly.io + Supabase) and as the Mac desktop app. |
+| `anteroom/` | Anteroom itself: FastAPI backend (`server/`) and React web UI (`src/`). Runs as the hosted web app (Fly.io + Supabase) and as the Mac desktop app. |
 | `anteroom-ios/` | Native SwiftUI iPhone app on the hosted API. Builds only on macOS. |
-| `vendoo-extension/` | Bridge, the Chrome extension that fills marketplace forms and runs the marketplace actions the seller confirms. |
+| `anteroom-extension/` | Bridge, the Chrome extension that fills marketplace forms and runs the marketplace actions the seller confirms. |
 | `webhook-relay/` | Cloudflare Worker that receives eBay and Etsy webhooks and brokers their sign-in. |
 | `skills/` | Listing rules, templates and research loops used for generation. |
 | `deploy/` | Fly.io configuration for the hosted API. |
@@ -30,6 +28,6 @@ Directories still carry the product's old `vendoo-*` names; a rename is planned 
 - [`AGENTS.md`](AGENTS.md): rules, invariants and the working loop for every change.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md): pull request steps and checks.
 - [`SECURITY.md`](SECURITY.md): reporting vulnerabilities.
-- [`VENDOO_STUDIO_SPEC.md`](VENDOO_STUDIO_SPEC.md) and [`DESIGN.md`](DESIGN.md): product spec and web UI design rules.
+- [`ANTEROOM_SPEC.md`](ANTEROOM_SPEC.md) and [`DESIGN.md`](DESIGN.md): product spec and web UI design rules.
 - [`docs/performance.md`](docs/performance.md): speed and responsiveness goals for every change across web, Mac and iPhone; measured results live in [`docs/responsiveness.md`](docs/responsiveness.md).
 - [`docs/`](docs/): cloud architecture, JSON listing contract, hosted production guide.

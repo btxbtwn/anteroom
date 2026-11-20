@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#000000" />
+    <meta name="color-scheme" content="dark" />
+    <title>Anteroom</title>
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <!-- Sets the theme before the first paint. A file, not inline: the hosted policy blocks inline scripts. -->
+    <script src="/assets/theme-boot.js"></script>
+    <link rel="stylesheet" href="/src/styles/app.css" />
+    <link rel="stylesheet" href="/src/styles/startup.css" />
+  </head>
+  <body>
+    <div id="root">
+      <!-- Visible while the application bundle downloads; React takes over this shell. -->
+      <main class="startup-screen" aria-label="Opening Anteroom">
+        <div class="startup-content">
+          <img class="startup-logo" src="/desktop/AppIcon.png" width="48" height="48" alt="" />
+          <h1 class="startup-title">Anteroom</h1>
+          <div class="startup-status" role="status" aria-atomic="true">
+            <span class="startup-spinner" aria-hidden="true"></span>
+            <p>Getting things ready…</p>
+          </div>
+          <div class="startup-recovery"></div>
+          <noscript>Enable JavaScript to open Anteroom.</noscript>
+        </div>
+      </main>
+    </div>
+    <script type="module" src="/src/cloud/main.tsx"></script>
+  </body>
+</html>

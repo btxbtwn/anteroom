@@ -221,13 +221,14 @@
       "path": "etsy_specifics.renewalOption",
       "label": "Renewal options",
       "section": "Settings",
-      "locked": true,
+      "selection_only": true,
+      "save_as_default": true,
       "options": [
         "Automatic",
         "Manual"
       ],
       "value": "Manual",
-      "help": "Anteroom saves Etsy drafts with manual renewal. Change it in Etsy before publishing if you want it renewed."
+      "help": "Automatic renews this listing every 4 months ($0.20 per renewal). Manual lets it expire until you renew it."
     }
   ],
   "not_offered": [

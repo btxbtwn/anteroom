@@ -1,0 +1,317 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { createApprovalVerifier, canonical, BRIDGE_APPROVAL_PUBLIC_KEY } = require('../background/cloud-approvals');
+const { approvalSigner } = require('./approval-signer');
+
+const ALICE = '11111111-1111-4111-8111-111111111111';
+const BOB = '22222222-2222-4222-8222-222222222222';
+const MESSAGE = 'a'.repeat(32);
+const NOW = 1_800_000_000;
+const update = (extra = {}) => ({ type: 'marketplace.execute', job_id: 'job-1', message_id: MESSAGE,
+  payload: { marketplace: 'poshmark', action: 'update', listing_id: 'b'.repeat(24), confirm: true, price: 25,
+    operation_id: 'job-1', request_id: MESSAGE, ...extra } });
+
+function storage() {
+  let data = {};
+  return { local: { get: async key => ({ [key]: structuredClone(data[key]) }), set: async value => { data = { ...data, ...structuredClone(value) }; } } };
+}
+
+async function setup({ publicKey, seconds = NOW } = {}) {
+  const signer = await approvalSigner();
+  let time = seconds * 1000;
+  const verifier = createApprovalVerifier({ storage: storage() }, { publicKey: publicKey ?? signer.publicKey, now: () => time });
+  return { signer, verify: verifier.verify, advance: s => { time += s * 1000; } };
+}
+
+test('a signed write for this account and command runs once', async () => {
+  const s = await setup();
+  const command = await s.signer.sign(update(), ALICE, { seconds: NOW });
+  assert.equal(await s.verify(command, ALICE), null);
+  const again = await s.verify(command, ALICE);
+  assert.equal(again.approval, 'replayed');
+  assert.equal(again.ok, false);
+  assert.equal(again.safe_to_retry, true);
+});
+
+test('the account id compares without case, as Supabase and the page may differ', async () => {
+  const s = await setup();
+  assert.equal(await s.verify(await s.signer.sign(update(), ALICE.toUpperCase(), { seconds: NOW }), ALICE), null);
+});
+
+test('an expired approval, or one from the future, is refused', async () => {
+  const s = await setup();
+  const old = await s.signer.sign(update(), ALICE, { seconds: NOW - 300 - 61 });
+  assert.equal((await s.verify(old, ALICE)).approval, 'expired');
+  const early = await s.signer.sign(update(), ALICE, { seconds: NOW + 120 });
+  assert.equal((await s.verify(early, ALICE)).approval, 'expired');
+  const late = await s.signer.sign(update(), ALICE, { seconds: NOW });
+  s.advance(300 + 61);
+  assert.equal((await s.verify(late, ALICE)).approval, 'expired');
+});
+
+test('an approval for another account, command, marketplace, action, listing or job is refused', async () => {
+  const s = await setup();
+  for (const changes of [{ sub: BOB }, { cmd: 'marketplace.delete' }, { mkt: 'depop' }, { act: 'list' },
+    { lid: 'c'.repeat(24) }, { job: 'job-2' }, { mid: 'b'.repeat(32) }]) {
+    const command = await s.signer.sign(update(), ALICE, { seconds: NOW, changes });
+    assert.equal((await s.verify(command, ALICE)).approval, 'mismatch', JSON.stringify(changes));
+  }
+  const signed = await s.signer.sign(update(), ALICE, { seconds: NOW });
+  assert.equal((await s.verify(signed, BOB)).approval, 'mismatch');
+});
+
+test('a page that edits a signed command is refused', async () => {
+  const s = await setup();
+  const signed = await s.signer.sign(update(), ALICE, { seconds: NOW });
+  for (const changed of [
+    { ...signed, payload: { ...signed.payload, price: 1 } },
+    { ...signed, payload: { ...signed.payload, listing_id: 'c'.repeat(24) } },
+    { ...signed, payload: { ...signed.payload, marketplace: 'depop' } },
+    { ...signed, type: 'marketplace.delete' },
+  ]) assert.match((await s.verify(changed, ALICE)).approval, /mismatch/);
+});
+
+test('an unsigned write, a forged signature or a malformed token is refused', async () => {
+  const s = await setup();
+  assert.equal((await s.verify(update(), ALICE)).approval, 'unsigned');
+  const other = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+  const forged = await s.signer.sign(update(), ALICE, { seconds: NOW, privateKey: other.privateKey });
+  assert.equal((await s.verify(forged, ALICE)).approval, 'invalid');
+  for (const approval of ['x', 'a.b.c', 'eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.' + 'A'.repeat(86)]) {
+    assert.equal((await s.verify(update({ approval }), ALICE)).approval, 'invalid', approval);
+  }
+  const long = await s.signer.sign(update(), ALICE, { seconds: NOW, changes: { exp: NOW + 3600 } });
+  assert.equal((await s.verify(long, ALICE)).approval, 'invalid');
+});
+
+test('without a configured key every command is refused, reads included', async () => {
+  const s = await setup({ publicKey: '' });
+  const signed = await s.signer.sign(update(), ALICE, { seconds: NOW });
+  const refusal = await s.verify(signed, ALICE);
+  assert.equal(refusal.approval, 'no_key');
+  assert.match(refusal.error, /no approval key/);
+  const read = await s.signer.sign({ type: 'marketplace.sessions', job_id: null, message_id: MESSAGE, payload: { request_id: MESSAGE } }, ALICE, { seconds: NOW });
+  assert.equal((await s.verify(read, ALICE)).approval, 'no_key');
+  assert.equal(typeof BRIDGE_APPROVAL_PUBLIC_KEY, 'string');
+});
+
+test('every command the hosted API relays needs an approval, reads and cancel included', async () => {
+  const s = await setup();
+  const types = ['job.vendoo_api', 'marketplace.execute', 'marketplace.result', 'marketplace.delete', 'marketplace.promote',
+    'job.cancel', 'marketplace.promotion_check', 'marketplace.promotion_result', 'marketplace.like_events',
+    'marketplace.sessions', 'marketplace.connect', 'marketplace.import.page', 'marketplace.import.listing', 'marketplace.sales_history'];
+  for (const type of types) {
+    const command = { type, job_id: null, message_id: MESSAGE, payload: { request_id: MESSAGE } };
+    assert.equal((await s.verify(command, ALICE)).approval, 'unsigned', type);
+    assert.equal(await s.verify(await s.signer.sign(command, ALICE, { seconds: NOW }), ALICE), null, type);
+  }
+});
+
+test('only the photos the approval names, with exactly their bytes, go with a command', async () => {
+  const s = await setup();
+  const front = { id: 'p1', mime_type: 'image/jpeg', base64: Buffer.from('approved front').toString('base64') };
+  const back = { id: 'p2', mime_type: 'image/jpeg', base64: Buffer.from('approved back').toString('base64') };
+  const signed = await s.signer.sign(update(), ALICE, { seconds: NOW, photos: [front, back] });
+  // A page script swaps the bytes of an approved photo, or adds one the approval does not name.
+  assert.equal((await s.verify(signed, ALICE, [front, { ...back, base64: Buffer.from('swapped').toString('base64') }])).approval, 'photos');
+  assert.equal((await s.verify(signed, ALICE, [front, { ...front, id: 'p3' }])).approval, 'photos');
+  const refusal = await s.verify(signed, ALICE, [{ ...front, base64: back.base64 }]);
+  assert.match(refusal.error, /photos/);
+  assert.equal(refusal.ok, false);
+  // A refusal over photos does not use the approval up: the same command with the approved bytes runs.
+  assert.equal(await s.verify(signed, ALICE, [front, back]), null);
+  // Without a photo claim, no photo may come with the command.
+  const unnamed = await s.signer.sign(update(), ALICE, { seconds: NOW, changes: { pho: undefined } });
+  assert.equal((await s.verify(unnamed, ALICE, [front])).approval, 'photos');
+  assert.equal(await s.verify(await s.signer.sign(update(), ALICE, { seconds: NOW }), ALICE, []), null);
+});
+
+test('used approvals are forgotten once they expire', async () => {
+  const s = await setup();
+  const store = storage();
+  let time = NOW * 1000;
+  const verifier = createApprovalVerifier({ storage: store }, { publicKey: s.signer.publicKey, now: () => time });
+  assert.equal(await verifier.verify(await s.signer.sign(update(), ALICE, { seconds: NOW }), ALICE), null);
+  time += 400 * 1000;
+  assert.equal(await verifier.verify(await s.signer.sign(update(), ALICE, { seconds: NOW + 400 }), ALICE), null);
+  const used = (await store.local.get('anteroom_used_approvals')).anteroom_used_approvals;
+  assert.equal(Object.keys(used).length, 1);
+});
+
+test('two copies of one approval racing each other run once', async () => {
+  const s = await setup();
+  const command = await s.signer.sign(update(), ALICE, { seconds: NOW });
+  const results = await Promise.all([s.verify(command, ALICE), s.verify(command, ALICE), s.verify(command, ALICE)]);
+  assert.equal(results.filter(result => result === null).length, 1);
+});
+
+test('the canonical form matches the server for the values a command carries', () => {
+  // The same strings services/bridge_approvals.py writes (test_bridge_approvals.py checks the Python side).
+  assert.equal(canonical({ b: [1, 2.5, null, true], a: 'é"\n', c: { z: 0.1, y: 1e21, x: 1e-7, w: -0 } }),
+    '{"a":"é\\"\\n","b":[1,2.5,null,true],"c":{"w":0,"x":1e-7,"y":1e+21,"z":0.1}}');
+});
+
+test('used approvals cap entry count per account and keep unrelated accounts and cancel working', async () => {
+  const s = await setup();
+  const store = storage();
+  let seconds = NOW;
+  const verifier = createApprovalVerifier({ storage: store }, { publicKey: s.signer.publicKey, now: () => seconds * 1000, maxUsed: 3 });
+  const first = await s.signer.sign(update(), ALICE, { seconds: NOW, changes: { exp: NOW + 100 } });
+  const second = await s.signer.sign(update(), ALICE, { seconds: NOW, changes: { exp: NOW + 200 } });
+  const third = await s.signer.sign(update(), ALICE, { seconds: NOW, changes: { exp: NOW + 300 } });
+  const fourth = await s.signer.sign(update(), ALICE, { seconds: NOW, changes: { exp: NOW + 400 } });
+  assert.equal(await verifier.verify(first, ALICE), null);
+  assert.equal(await verifier.verify(second, ALICE), null);
+  assert.equal(await verifier.verify(third, ALICE), null);
+  assert.equal((await verifier.verify(fourth, ALICE)).approval, 'capacity');
+  const used = (await store.local.get('anteroom_used_approvals')).anteroom_used_approvals;
+  assert.equal(Object.keys(used).length, 3);
+  // Every accepted approval remains protected when Alice reaches capacity.
+  assert.equal((await verifier.verify(first, ALICE)).approval, 'replayed');
+  assert.equal((await verifier.verify(second, ALICE)).approval, 'replayed');
+
+  // Unrelated accounts and Cancel remain unblocked even while Alice's bucket is full.
+  const bobCmd = await s.signer.sign(update(), BOB, { seconds: NOW });
+  assert.equal(await verifier.verify(bobCmd, BOB), null);
+  assert.equal((await verifier.verify(bobCmd, BOB)).approval, 'replayed');
+  const cancelCmd = await s.signer.sign({
+    type: 'job.cancel',
+    message_id: 'msg-cancel',
+    job_id: 'job-1',
+    payload: {},
+  }, ALICE, { seconds: NOW });
+  assert.equal(await verifier.verify(cancelCmd, ALICE), null);
+  assert.equal((await verifier.verify(cancelCmd, ALICE)).approval, 'replayed');
+
+  seconds = NOW + 161;
+  assert.equal(await verifier.verify(fourth, ALICE), null);
+  assert.equal((await verifier.verify(second, ALICE)).approval, 'replayed');
+  assert.equal((await verifier.verify(fourth, ALICE)).approval, 'replayed');
+
+  // Pre-existing live nonces in legacy anteroom_used_approvals remain protected from replay.
+  const bulk = storage();
+  const seeded = await s.signer.sign(update(), ALICE, { seconds: NOW });
+  const seededClaims = JSON.parse(Buffer.from(seeded.payload.approval.split('.')[1], 'base64url').toString('utf8'));
+  const oversized = { [seededClaims.jti]: seededClaims.exp };
+  for (let i = 0; i < 2050; i += 1) oversized[i.toString(16).padStart(32, '0')] = NOW + 100 + i;
+  await bulk.local.set({ anteroom_used_approvals: oversized });
+  const defaultVerifier = createApprovalVerifier({ storage: bulk }, { publicKey: s.signer.publicKey, now: () => NOW * 1000 });
+  assert.equal((await defaultVerifier.verify(seeded, ALICE)).approval, 'replayed');
+  const retained = (await bulk.local.get('anteroom_used_approvals')).anteroom_used_approvals;
+  assert.deepEqual(retained, oversized);
+});
+
+
+test('consumed approvals survive the previous numeric replay reader and a verifier restart', async () => {
+  const s = await setup();
+  const store = storage();
+  const options = { publicKey: s.signer.publicKey, now: () => NOW * 1000, maxUsed: 1 };
+  const command = await s.signer.sign(update(), ALICE, { seconds: NOW });
+  assert.equal(await createApprovalVerifier({ storage: store }, options).verify(command, ALICE), null);
+  const used = (await store.local.get('anteroom_used_approvals')).anteroom_used_approvals;
+  // The pre-bucket verifier prunes using precisely this predicate.
+  for (const [nonce, until] of Object.entries(used)) {
+    if (!Number.isFinite(until) || until + 60 < NOW) delete used[nonce];
+  }
+  assert.equal(Object.keys(used).length, 1);
+  await store.local.set({ anteroom_used_approvals: used });
+  const restarted = createApprovalVerifier({ storage: store }, options);
+  assert.equal((await restarted.verify(command, ALICE)).approval, 'replayed');
+  const next = await s.signer.sign(update(), ALICE, { seconds: NOW });
+  assert.equal((await restarted.verify(next, ALICE)).approval, 'capacity');
+});
+
+
+test('object replay records migrate before a replay refusal and preserve bucket capacity', async () => {
+  const s = await setup();
+  const store = storage();
+  const command = await s.signer.sign(update(), ALICE, { seconds: NOW });
+  const claims = JSON.parse(Buffer.from(command.payload.approval.split('.')[1], 'base64url'));
+  await store.local.set({ anteroom_used_approvals: { [claims.jti]: { exp: claims.exp, b: `acct:${ALICE}` } } });
+  const verifier = createApprovalVerifier({ storage: store }, {
+    publicKey: s.signer.publicKey, now: () => NOW * 1000, maxUsed: 1,
+  });
+  assert.equal((await verifier.verify(command, ALICE)).approval, 'replayed');
+  const used = (await store.local.get('anteroom_used_approvals')).anteroom_used_approvals;
+  assert.deepEqual(used, { [claims.jti]: claims.exp });
+  assert.equal((await verifier.verify(await s.signer.sign(update(), ALICE, { seconds: NOW }), ALICE)).approval, 'capacity');
+});
+
+test('cancel buckets are isolated per account and expired legacy numeric entries are pruned', async () => {
+  const s = await setup();
+  const store = storage();
+  await store.local.set({ anteroom_used_approvals: { expired0000000000000000000000001: NOW - 120 } });
+  const verifier = createApprovalVerifier({ storage: store }, {
+    publicKey: s.signer.publicKey, now: () => NOW * 1000, maxUsed: 1,
+  });
+  const aliceCancel = await s.signer.sign({
+    type: 'job.cancel',
+    message_id: 'msg-cancel-alice-1',
+    job_id: 'job-alice-1',
+    payload: { job_id: 'job-alice-1' },
+  }, ALICE, { seconds: NOW });
+  assert.equal(await verifier.verify(aliceCancel, ALICE), null);
+  const used = (await store.local.get('anteroom_used_approvals')).anteroom_used_approvals;
+  assert.equal(Object.hasOwn(used, 'expired0000000000000000000000001'), false);
+
+  const aliceCancelSecond = await s.signer.sign({
+    type: 'job.cancel',
+    message_id: 'msg-cancel-alice-2',
+    job_id: 'job-alice-2',
+    payload: { job_id: 'job-alice-2' },
+  }, ALICE, { seconds: NOW });
+  assert.equal((await verifier.verify(aliceCancelSecond, ALICE)).approval, 'capacity');
+
+  const bobCancel = await s.signer.sign({
+    type: 'job.cancel',
+    message_id: 'msg-cancel-bob-1',
+    job_id: 'job-bob-1',
+    payload: { job_id: 'job-bob-1' },
+  }, BOB, { seconds: NOW });
+  assert.equal(await verifier.verify(bobCancel, BOB), null);
+});
+
+test('aggregate replay bytes reserve cancellation space without evicting live nonces', async () => {
+  const s = await setup();
+  const store = storage();
+  const maxStorageBytes = 2048;
+  let seconds = NOW;
+  const options = { publicKey: s.signer.publicKey, now: () => seconds * 1000, maxStorageBytes };
+  let verifier = createApprovalVerifier({ storage: store }, options);
+  const accepted = [];
+  let refused;
+  for (let i = 0; i < 40; i += 1) {
+    const account = `account-${i}`;
+    const command = await s.signer.sign(update(), account, { seconds: NOW });
+    const result = await verifier.verify(command, account);
+    if (result) { refused = result; break; }
+    accepted.push([command, account]);
+  }
+  assert.equal(refused?.approval, 'capacity');
+  assert.ok(accepted.length > 1);
+  const snapshot = async () => ({
+    ...(await store.local.get('anteroom_used_approvals')),
+    ...(await store.local.get('anteroom_approval_buckets')),
+  });
+  const size = data => Object.entries(data).reduce((sum, [key, value]) =>
+    sum + Buffer.byteLength(key) + Buffer.byteLength(JSON.stringify(value)), 0);
+  assert.ok(size(await snapshot()) <= maxStorageBytes * 7 / 8);
+  let cancels = 0;
+  for (let i = 0; i < 40; i += 1) {
+    const account = `cancel-account-${i}`;
+    const command = await s.signer.sign({ type: 'job.cancel', message_id: MESSAGE, job_id: 'job-1', payload: {} }, account, { seconds: NOW });
+    const result = await verifier.verify(command, account);
+    if (result) { assert.equal(result.approval, 'capacity'); break; }
+    accepted.push([command, account]);
+    cancels += 1;
+  }
+  assert.ok(cancels > 0 && cancels < 40);
+  const full = await snapshot();
+  assert.ok(size(full) <= maxStorageBytes);
+  verifier = createApprovalVerifier({ storage: store }, options);
+  for (const [command, account] of accepted) assert.equal((await verifier.verify(command, account)).approval, 'replayed');
+  assert.deepEqual(await snapshot(), full);
+  seconds += 400;
+  assert.equal(await verifier.verify(await s.signer.sign(update(), ALICE, { seconds }), ALICE), null);
+  assert.equal(Object.keys((await snapshot()).anteroom_used_approvals).length, 1);
+});

@@ -1,0 +1,2202 @@
+from __future__ import annotations
+
+import asyncio
+import json
+import tempfile
+import unittest
+from unittest.mock import AsyncMock, patch
+
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from worker_sessions import file_engine, worker_sessions
+from sqlalchemy.pool import StaticPool
+
+from anteroom.services import listing_persistence
+from anteroom.database import Base, get_db
+from anteroom.main import app
+from anteroom.providers.xiaomi_mimo import StreamChunk, chunk_text, chunk_thinking
+from anteroom.repositories.queries import ConversationRepo, ListingRepo
+from anteroom.routes import chat as chat_routes
+from anteroom.services import chat_listing, listing_generation, streaming
+from anteroom.services.listing_generate import (
+    DESCRIPTION_MAX,
+    PhotoAnalysisError,
+    analysis_with_photo_count,
+    cap_listing_description,
+    extract_listing_json,
+    format_photo_analysis,
+    latest_photo_analysis,
+    looks_like_listing_attempt,
+    persist_generated_listing,
+    persist_generated_listing_with_repair,
+    photo_analysis_usable,
+    repair_listing_json,
+    seller_item_details,
+)
+from anteroom.services.registry import MEN_TSHIRT_PATH
+
+
+LISTING_JSON = {
+    "title": "M&O GOLD S Graphic T-Shirt Green Tie-Dye Regular",
+    "description": "Graphic tee.",
+    "price": 18,
+}
+
+
+class FakeProvider:
+    def __init__(self, chunks=None, analysis=None, analyze_delay=0.0, chat_delay=0.0, analyze_gate=None):
+        self.chunks = chunks or [
+            "```json\n",
+            json.dumps(LISTING_JSON),
+            "\n```",
+        ]
+        self.analysis = analysis or {
+            "evidence": {
+                "brand": {"value": "M&O Gold"},
+                "size": {"value": "S", "source": "tag"},
+            }
+        }
+        self.analyze_delay = analyze_delay
+        self.chat_delay = chat_delay
+        self.analyze_gate = analyze_gate
+        self.analyze_calls = 0
+        self.chat_calls = 0
+        self.chat_messages = None
+        self.chat_history: list = []
+
+    async def analyze_photos(self, *args, **kwargs):
+        self.analyze_calls += 1
+        if self.analyze_gate is not None:
+            await self.analyze_gate.wait()
+        if self.analyze_delay:
+            await asyncio.sleep(self.analyze_delay)
+        return self.analysis
+
+    async def chat(self, messages, stream=True):
+        self.chat_calls += 1
+        self.chat_messages = messages
+        self.chat_history.append(messages)
+        if self.chat_delay:
+            await asyncio.sleep(self.chat_delay)
+        for chunk in self.chunks:
+            yield chunk
+
+
+def _first_generate_prompt(provider) -> str:
+    """Prompt from the initial generate call (before repair/finalize passes)."""
+    for messages in getattr(provider, "chat_history", []) or []:
+        content = str((messages[0] or {}).get("content") or "")
+        if ("Finish this Anteroom listing" in content or "malformed" in content.lower()
+                or "You fill a resale listing's marketplace form fields." in content):
+            continue
+        return content
+    messages = provider.chat_messages or []
+    return str((messages[0] or {}).get("content") or "") if messages else ""
+
+
+class ListingGenerateHelpersTest(unittest.TestCase):
+    def test_extracts_fenced_json(self):
+        text = "Here you go\n```json\n" + json.dumps(LISTING_JSON) + "\n```\n"
+        parsed = extract_listing_json(text)
+        self.assertEqual(parsed["title"], LISTING_JSON["title"])
+
+    def test_extracts_raw_json(self):
+        parsed = extract_listing_json(json.dumps(LISTING_JSON))
+        self.assertEqual(parsed["price"], 18)
+
+    def test_seller_item_details_for_a_skirt(self):
+        notes = json.dumps({
+            "garment": "skirt",
+            "measurements": {"skirt": {"waist": "14", "hip": "19", "length": "22"}},
+        })
+        self.assertIn('Measurements (skirt): Waist: 14"; Hip: 19"; Length: 22"', seller_item_details(notes))
+
+    def test_rejects_error_text(self):
+        self.assertIsNone(extract_listing_json("Error: timeout"))
+
+    def test_extract_softens_trailing_commas(self):
+        parsed = extract_listing_json('```json\n{"title": "Tee", "price": 12,}\n```')
+        self.assertEqual(parsed["title"], "Tee")
+        self.assertEqual(parsed["price"], 12)
+
+    def test_looks_like_listing_attempt(self):
+        self.assertTrue(looks_like_listing_attempt('{"title": "Tee", "price":'))
+        self.assertTrue(looks_like_listing_attempt("```json\n{broken\n```"))
+        self.assertFalse(looks_like_listing_attempt("Sure, I can help with that."))
+        self.assertFalse(looks_like_listing_attempt("Error: boom"))
+
+    def test_seller_item_details_from_notes(self):
+        notes = json.dumps({
+            "sellerNotes": "Small stain near hem",
+            "cog": "1.72",
+            "garment": "top",
+            "measurements": {
+                "top": {"pitToPit": "16.5", "length": "26.5", "sleeve": "8"},
+                "pants": {"waist": "15", "inseam": "5"},
+            },
+        })
+        details = seller_item_details(notes)
+        self.assertIn("Notes: Small stain near hem", details)
+        self.assertIn('Measurements (top): Pit to pit: 16.5"; Length: 26.5"; Sleeve: 8"', details)
+        self.assertNotIn("Inseam", details)
+
+    def test_seller_item_details_states_the_carried_price(self):
+        details = seller_item_details(json.dumps({"askingPrice": "34.00"}))
+        self.assertIn("List price: $34 (the seller set this — use it exactly)", details)
+        self.assertNotIn("List price", seller_item_details(json.dumps({"askingPrice": "0"})))
+
+    def test_seller_item_details_uses_pants_for_bottoms(self):
+        measurements = {"pants": {"waist": "16", "rise": "11", "inseam": "30", "legOpening": "8"}}
+        pants = seller_item_details(json.dumps({"garment": "pants", "measurements": measurements}))
+        self.assertIn('Measurements (pants): Waist: 16"; Rise: 11"; Inseam: 30"; Leg opening: 8"', pants)
+
+    def test_seller_item_details_reads_legacy_shorts_as_pants(self):
+        notes = json.dumps({"garment": "shorts", "measurements": {"shorts": {"waist": "15", "inseam": "5"}}})
+        self.assertIn('Measurements (pants): Waist: 15"; Inseam: 5"', seller_item_details(notes))
+
+    def test_seller_item_details_includes_carried_flaws_and_measurements(self):
+        notes = json.dumps({
+            "knownFlaws": "small stain near the hem",
+            "descriptionMeasurements": 'Pit to pit 20"; Length 27"',
+        })
+        details = seller_item_details(notes)
+        self.assertIn("Known flaws: small stain near the hem", details)
+        self.assertIn('Measurements: Pit to pit 20"; Length 27"', details)
+
+    def test_seller_measurement_fields_win_over_carried_text(self):
+        notes = json.dumps({
+            "garment": "top",
+            "measurements": {"top": {"pitToPit": "16.5"}},
+            "descriptionMeasurements": 'Pit to pit 20"',
+        })
+        details = seller_item_details(notes)
+        self.assertIn('Measurements (top): Pit to pit: 16.5"', details)
+        self.assertNotIn('20"', details)
+
+    def test_latest_photo_analysis(self):
+        class Msg:
+            def __init__(self, role, text):
+                self.role = role
+                self.text = text
+
+        messages = [
+            Msg("system", "Photo analysis:\n- brand: M&O Gold"),
+            Msg("assistant", "working"),
+        ]
+        self.assertTrue(latest_photo_analysis(messages).startswith("Photo analysis:"))
+
+    def test_latest_photo_analysis_skips_empty_header(self):
+        class Msg:
+            def __init__(self, role, text):
+                self.role = role
+                self.text = text
+
+        messages = [
+            Msg("system", "Photo analysis:\n"),
+            Msg("assistant", "I need the photos"),
+        ]
+        self.assertIsNone(latest_photo_analysis(messages))
+        self.assertFalse(photo_analysis_usable("Photo analysis:\n"))
+
+    def test_format_photo_analysis(self):
+        text = format_photo_analysis({
+            "brand": {"value": "M&O Gold"},
+            "size": {"value": "S", "source": "tag"},
+            "graphic": {"value": "Snoopy and Woodstock"},
+        })
+        self.assertIn("brand: M&O Gold", text)
+        self.assertIn("graphic: Snoopy and Woodstock", text)
+        self.assertIn("source: tag", text)
+
+    def test_format_photo_analysis_accepts_string_fields(self):
+        text = format_photo_analysis({"brand": "Fruit of the Loom", "size": "M"})
+        self.assertIn("brand: Fruit of the Loom", text)
+        self.assertIn("size: M", text)
+        self.assertTrue(photo_analysis_usable(text))
+
+    def test_photo_evidence_keeps_sources_confidence_and_uncertainty_details(self):
+        from anteroom.services.brave_search import fields_from_analysis
+
+        text = format_photo_analysis({
+            "brand": {"value": "Nike", "source": "tag", "confidence": 0.9,
+                      "evidence": "Nike label readable", "evidencePhotoIds": ["photo-2"]},
+            "size": {"value": "M", "source": "measurement-derived", "confidence": 0.4},
+            "measurements": [{"label": "Length", "value": "27 inches", "source": "photo ruler"}],
+            "uncertainties": [{"field": "material", "issue": "care tag not legible"}],
+        })
+        self.assertIn("Nike label readable", text)
+        self.assertIn("photo-2", text)
+        self.assertIn("model confidence (not verified): 0.4", text)
+        self.assertIn("Length: 27 inches (source: photo ruler)", text)
+        self.assertIn("material: care tag not legible", text)
+        # Richer evidence must not leak into the brand used for comp queries.
+        self.assertEqual(fields_from_analysis(text)["brand"], "Nike")
+
+    def test_analysis_with_photo_count_never_asks_for_uploads(self):
+        text = analysis_with_photo_count(7, "Photo analysis:\n- brand: M&O Gold")
+        self.assertIn("already uploaded 7 product photo", text)
+        self.assertIn("Do not ask", text)
+
+    def test_analysis_with_photo_count_rejects_missing_evidence(self):
+        with self.assertRaisesRegex(PhotoAnalysisError, "Retry to analyze"):
+            analysis_with_photo_count(7, "Photo analysis:\n")
+
+    def test_seller_item_details_includes_category_and_labels(self):
+        notes = json.dumps({
+            "condition": "Good",
+            "categoryOverride": "Clothing > Women > Tops",
+            "sku": "SAG-HARBOR-L",
+            "vendooLabels": "A19, DomStaleInventory",
+            "cog": "1.72",
+        })
+        details = seller_item_details(notes)
+        self.assertIn("Category: Clothing > Women > Tops", details)
+        self.assertIn("SKU: SAG-HARBOR-L", details)
+        self.assertIn("Labels: A19, DomStaleInventory", details)
+
+    def test_listing_formula_rules_come_from_skill(self):
+        from anteroom.services.skill_formulas import listing_formula_rules, with_pinned_formulas
+
+        formulas = listing_formula_rules()
+        self.assertIn("TITLE Formula", formulas)
+        self.assertIn("{BRAND} {SIZE} {VIBE} {ITEM} {COLOR} {FIT}", formulas)
+        self.assertIn("DESCRIPTION Formula", formulas)
+        self.assertIn("- {one flaw per line}", formulas)
+        pinned = with_pinned_formulas("### Some other rule\nNever invent brands.")
+        self.assertTrue(pinned.startswith("## Formula Reference"))
+        self.assertIn("Never invent brands", pinned)
+        self.assertIn("## Etsy When Made Estimation", pinned)
+        self.assertIn("make an educated estimate", pinned)
+        self.assertIn("most plausible modern range", pinned)
+        # The policy must survive both semantic chunks and full-file loading.
+        full_rules = with_pinned_formulas(formulas + "\n" + "other rules\n" * 1500)
+        self.assertIn("## Etsy When Made Estimation", full_rules)
+
+
+    def test_chunk_text_reads_delta_content(self):
+        self.assertEqual(chunk_text({"choices": [{"delta": {"content": "Hello"}}]}), "Hello")
+
+    def test_chunk_text_raises_on_error_payload(self):
+        with self.assertRaises(RuntimeError):
+            chunk_text({"error": {"message": "context length exceeded"}})
+
+    def test_chunk_text_ignores_reasoning_only_delta(self):
+        self.assertEqual(
+            chunk_text({"choices": [{"delta": {"reasoning_content": "thinking"}}]}),
+            "",
+        )
+
+    def test_chunk_thinking_reads_reasoning_content(self):
+        self.assertEqual(
+            chunk_thinking({"choices": [{"delta": {"reasoning_content": "looking at the photos"}}]}),
+            "looking at the photos",
+        )
+        self.assertEqual(chunk_thinking({"choices": [{"delta": {"content": "Hello"}}]}), "")
+
+
+class PersistListingTest(unittest.TestCase):
+    def setUp(self):
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        Base.metadata.create_all(engine)
+        self.Session = sessionmaker(bind=engine)
+        self.enterContext(worker_sessions(engine))
+        self.db = self.Session()
+        repo = ConversationRepo(self.db)
+        self.conv = repo.create(title="New Listing")
+
+    def tearDown(self):
+        self.db.close()
+
+    def test_generated_description_fits_the_shortest_marketplace(self):
+        # Depop posts only the description, so a long title takes no room from it.
+        self.assertEqual(DESCRIPTION_MAX, 1000)
+        title = "L" * 80
+        measurements = 'Measurements: Pit to pit: 22"; Length: 27"'
+        lead = "Y2K " + ("soft cotton " * 200)
+        listing = {
+            "title": title,
+            "description": f"{lead}\n\nFlaws: small stain near the hem.\n\n{measurements}",
+        }
+        self.assertTrue(cap_listing_description(listing))
+        self.assertLessEqual(len(listing["description"]), DESCRIPTION_MAX)
+        self.assertGreater(len(listing["description"]), 918)
+        self.assertIn(measurements, listing["description"])
+        self.assertFalse(cap_listing_description(listing))
+        short = {"title": "Tee", "description": "Graphic tee."}
+        self.assertFalse(cap_listing_description(short))
+        self.assertEqual(short["description"], "Graphic tee.")
+
+    def test_persist_caps_an_overlong_description(self):
+        description = "Soft cotton. " * 200 + "\n\nMeasurements: Length: 27\""
+        parsed = persist_generated_listing(
+            self.db, self.conv.id, "",
+            parsed={**LISTING_JSON, "description": description},
+        )
+        self.assertLessEqual(len(parsed["description"]), DESCRIPTION_MAX)
+        self.assertIn('Measurements: Length: 27"', parsed["description"])
+
+    def test_persist_saves_revision_from_fenced_json(self):
+        text = "```json\n" + json.dumps(LISTING_JSON) + "\n```"
+        parsed = persist_generated_listing(self.db, self.conv.id, text)
+        self.assertEqual(parsed["title"], LISTING_JSON["title"])
+        revisions = ListingRepo(self.db).get_revisions(self.conv.id)
+        self.assertEqual(len(revisions), 1)
+        messages = ConversationRepo(self.db).get_messages(self.conv.id)
+        self.assertTrue(any(m.role == "assistant" for m in messages))
+        self.assertTrue(any("Listing extracted" in m.text for m in messages))
+
+    def test_persist_ready_even_when_model_prose_has_question_mark(self):
+        text = (
+            "Estimated shipping weight for a tee — does this look right?\n"
+            "```json\n" + json.dumps(LISTING_JSON) + "\n```"
+        )
+        persist_generated_listing(self.db, self.conv.id, text)
+        messages = ConversationRepo(self.db).get_messages(self.conv.id)
+        notes = [m.text for m in messages if m.role == "system"]
+        self.assertTrue(any("ready for review" in note for note in notes))
+        self.assertFalse(any("Answer the questions above" in note for note in notes))
+
+    def test_generated_listing_preserves_categories_after_field_discovery(self):
+        listing_persistence.save_revision(self.db, self.conv.id, {
+            "category_path": "Clothing > Women's Tops",
+            "marketplace_categories": {"ebay": "Fashion > Shirts"},
+        }, source="fill_learned_fields")
+        parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
+            **LISTING_JSON, "category_path": "Wrong > Category", "marketplace_categories": {},
+        })
+        self.assertEqual(parsed["category_path"], "Clothing > Women's Tops")
+        self.assertEqual(parsed["marketplace_categories"], {"ebay": "Fashion > Shirts"})
+
+    def test_carried_price_wins_over_a_reinvented_one(self):
+        """Regenerate rewrites the copy, not the price the seller confirmed."""
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"askingPrice": "34.00"}))
+        parsed = persist_generated_listing(
+            self.db, self.conv.id, "", parsed={**LISTING_JSON, "price": 99},
+        )
+        self.assertEqual(parsed["price"], 34.0)
+
+    def test_seller_sku_wins_over_a_made_up_one(self):
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"sku": "BIN4-001"}))
+        parsed = persist_generated_listing(
+            self.db, self.conv.id, "", parsed={**LISTING_JSON, "sku": "NIKE-M"},
+        )
+        self.assertEqual(parsed["sku"], "BIN4-001")
+
+    def test_tag_size_from_bulk_upload_wins_and_marketplaces_follow(self):
+        """The bulk upload read Size from the tag; the model's guess does not replace it."""
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M", "packageDimensions": "13x10x3"}))
+        parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
+            **LISTING_JSON, "size": "S", "poshmark_specifics": {"size": "S"}, "mercari_specifics": {"size": "S"},
+        })
+        self.assertEqual(parsed["size"], "M")
+        self.assertEqual(parsed["poshmark_specifics"]["size"], "M")
+        self.assertEqual(parsed["mercari_specifics"]["size"], "M")
+        # Clothing size and the shipping package are separate facts.
+        self.assertEqual(parsed["package_dimensions_in"], "13x10x3")
+
+    def test_tag_size_reaches_direct_tabs_on_regenerate(self):
+        """A draft with built marketplace forms keeps the model's blocks; their size still follows the tag."""
+        listing_persistence.save_revision(self.db, self.conv.id, {
+            **LISTING_JSON, "size": "M", "mercari_specifics": {"size": "M"},
+            "_native_forms": {"mercari": {"fields": [
+                {"path": "mercari_specifics.size", "label": "Size", "options": ["S", "M", "L"]},
+            ]}},
+        }, source="generate")
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M"}))
+        parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
+            **LISTING_JSON, "size": "S", "mercari_specifics": {"size": "S"},
+        })
+        self.assertEqual(parsed["size"], "M")
+        self.assertEqual(parsed["mercari_specifics"]["size"], "M")
+
+    def test_tag_size_reaches_ebays_direct_size_row(self):
+        listing_persistence.save_revision(self.db, self.conv.id, {
+            **LISTING_JSON, "size": "M", "ebay_specifics": {"Size": "M"},
+            "_native_forms": {"ebay": {"fields": [
+                {"path": "ebay_specifics.Size", "label": "Size", "options": ["S", "M", "L"]},
+            ]}},
+        }, source="generate")
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M"}))
+        parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
+            **LISTING_JSON, "size": "S", "ebay_specifics": {"Size": "S"},
+        })
+        self.assertEqual(parsed["ebay_specifics"]["Size"], "M")
+
+    def test_a_blank_ebay_size_row_takes_the_tag_size_when_the_model_agreed(self):
+        listing_persistence.save_revision(self.db, self.conv.id, {
+            **LISTING_JSON, "size": "M", "ebay_specifics": {"Size": ""},
+            "_native_forms": {"ebay": {"fields": [
+                {"path": "ebay_specifics.Size", "label": "Size", "options": ["S", "M", "L"]},
+            ]}},
+        }, source="generate")
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M"}))
+        parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
+            **LISTING_JSON, "size": "M", "ebay_specifics": {"Size": ""},
+        })
+        self.assertEqual(parsed["ebay_specifics"]["Size"], "M")
+
+    def test_ebays_row_follows_the_tag_from_the_models_unnormalized_size(self):
+        """Readiness writes men's bottoms as a waist (34x32 to 34); the copied eBay row still says 34x32."""
+        from anteroom.services import listing_generate as generate
+
+        listing = {"size": "36", "ebay_specifics": {"Size": "34x32"}}
+        generate._follow_ebay_native_size(listing, "36", ["34", "34x32"])
+        self.assertEqual(listing["ebay_specifics"]["Size"], "36")
+        kept = {"size": "36", "ebay_specifics": {"Size": "L"}}
+        generate._follow_ebay_native_size(kept, "36", ["34", "34x32"])
+        self.assertEqual(kept["ebay_specifics"]["Size"], "L")
+
+    def test_a_size_the_seller_set_wins_over_the_tag_everywhere(self):
+        listing_persistence.save_revision(self.db, self.conv.id, {
+            **LISTING_JSON, "size": "L", "poshmark_specifics": {"size": "L"}, "seller_fields": ["size"],
+        }, source="user_form")
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M"}))
+        parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
+            **LISTING_JSON, "size": "S", "poshmark_specifics": {"size": "S"},
+        })
+        self.assertEqual(parsed["size"], "L")
+        self.assertEqual(parsed["poshmark_specifics"]["size"], "L")
+
+    def test_tag_size_zero_is_a_size(self):
+        for stored in ("0", 0):
+            with self.subTest(stored=stored):
+                ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": stored}))
+                parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={
+                    **LISTING_JSON, "size": "2", "poshmark_specifics": {"size": "2"},
+                })
+                self.assertEqual(parsed["size"], "0")
+                self.assertEqual(parsed["poshmark_specifics"]["size"], "0")
+                self.assertIn("- Size: 0 (", seller_item_details(json.dumps({"size": stored})))
+
+    def test_without_a_tag_size_the_generated_size_stays(self):
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": " "}))
+        parsed = persist_generated_listing(self.db, self.conv.id, "", parsed={**LISTING_JSON, "size": "S"})
+        self.assertEqual(parsed["size"], "S")
+        self.assertNotIn("Size:", seller_item_details(json.dumps({"size": " ", "sku": "A1"})))
+
+    def test_model_sku_is_dropped_without_a_seller_sku(self):
+        parsed = persist_generated_listing(
+            self.db, self.conv.id, "", parsed={**LISTING_JSON, "sku": "NIKE-M"},
+        )
+        self.assertNotIn("sku", parsed)
+
+    def test_model_depop_sku_is_dropped_without_a_seller_sku(self):
+        parsed = persist_generated_listing(
+            self.db, self.conv.id, "", parsed={**LISTING_JSON,
+                "depop_specifics": {"sku": "undefined", "material": ["Cotton"]}},
+        )
+        self.assertNotIn("sku", parsed["depop_specifics"])
+        self.assertEqual(parsed["depop_specifics"]["material"], ["Cotton"])
+
+    def test_seller_sku_wins_over_model_depop_sku(self):
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"sku": "BIN4-001"}))
+        parsed = persist_generated_listing(
+            self.db, self.conv.id, "", parsed={**LISTING_JSON,
+                "depop_specifics": {"sku": "INVENTED"}},
+        )
+        self.assertEqual(parsed["sku"], "BIN4-001")
+        self.assertNotIn("sku", parsed["depop_specifics"])
+
+    def test_chat_cannot_invent_or_replace_seller_skus(self):
+        for seller_sku in (None, "BIN4-001"):
+            with self.subTest(seller_sku=seller_sku):
+                original = {**LISTING_JSON, "depop_specifics": {}}
+                if seller_sku:
+                    original["sku"] = seller_sku
+                    original["depop_specifics"]["sku"] = "DEPOP-001"
+                listing_persistence.save_revision(self.db, self.conv.id, original, source="user_form")
+                updated = chat_listing.save_listing_revision(self.db, self.conv.id,
+                    {**LISTING_JSON, "sku": "INVENTED", "depop_specifics": {"sku": "undefined"}})
+                self.assertEqual(updated.get("sku"), seller_sku)
+                self.assertEqual(updated["depop_specifics"].get("sku"), "DEPOP-001" if seller_sku else None)
+
+    def test_chat_saves_a_sku_the_seller_asks_for(self):
+        """Chat sets a SKU named by the field it changes; it still cannot invent one elsewhere."""
+        replies = {
+            "patch": ('Set the SKU.\n```json\n[{"op":"replace","path":"/sku","value":"BIN4-001"},'
+                      '{"op":"add","path":"/depop_specifics/sku","value":"DEPOP-002"}]\n```'),
+            "missing_fields": json.dumps({"missing_fields": [
+                {"marketplace": "general", "field": "SKU", "value": "BIN4-001"},
+                {"marketplace": "depop", "field": "SKU", "value": "DEPOP-002"},
+            ]}),
+            "fields": json.dumps({"fields": [
+                {"path": "sku", "value": "BIN4-001"}, {"path": "depop_specifics.sku", "value": "DEPOP-002"},
+            ]}),
+        }
+        for shape, reply in replies.items():
+            for seller_sku in (None, "OLD-001"):
+                with self.subTest(shape=shape, seller_sku=seller_sku):
+                    conv = ConversationRepo(self.db).create(title="SKU")
+                    original = {**LISTING_JSON, "depop_specifics": {"material": ["Cotton"]}}
+                    if seller_sku:
+                        original["sku"] = seller_sku
+                        original["depop_specifics"]["sku"] = seller_sku
+                    listing_persistence.save_revision(self.db, conv.id, original, source="user_form")
+                    _, saved = chat_listing.apply_listing_payload(self.db, conv.id, reply,
+                        user_message="Set the SKU to BIN4-001 and the Depop SKU to DEPOP-002")
+                    self.assertTrue(saved)
+                    listing = ListingRepo(self.db).get_revisions(conv.id)[0].listing_json
+                    self.assertEqual(listing.get("sku"), "BIN4-001")
+                    self.assertEqual(listing["depop_specifics"].get("sku"), "DEPOP-002")
+
+    def test_chat_keeps_skus_the_seller_did_not_ask_for(self):
+        from anteroom.services.fill_log import is_missing_fields_request
+
+        ask_chat_fill = ('Fill these listing fields for "Tee". Reply with JSON in this exact shape:\n'
+                         '{"missing_fields":[{"marketplace":"general","field":"SKU","value":"..."}]}\n'
+                         "Fields:\n- Marketplace: general\n  Field: SKU")
+        self.assertTrue(is_missing_fields_request(ask_chat_fill))
+        replies = [
+            ("Make the title shorter", 'Done.\n```json\n[{"op":"replace","path":"/title","value":"Tee"},'
+             '{"op":"replace","path":"/sku","value":"INVENTED"},'
+             '{"op":"add","path":"/depop_specifics/sku","value":"INVENTED"}]\n```'),
+            ("make the title shorter", json.dumps({"fields": [
+                {"path": "title", "value": "Tee"}, {"path": "sku", "value": "INVENTED"},
+                {"path": "depop_specifics.sku", "value": "INVENTED"}]})),
+            ("Fill in the missing fields", json.dumps({"missing_fields": [
+                {"marketplace": "general", "field": "SKU", "value": "INVENTED"},
+                {"marketplace": "depop", "field": "SKU", "value": "INVENTED"}]})),
+            (ask_chat_fill, json.dumps({"missing_fields": [
+                {"marketplace": "general", "field": "SKU", "value": "INVENTED"},
+                {"marketplace": "depop", "field": "SKU", "value": "INVENTED"}]})),
+        ]
+        for user_message, reply in replies:
+            for seller_sku in (None, "OLD-001"):
+                with self.subTest(user_message=user_message[:30], seller_sku=seller_sku):
+                    conv = ConversationRepo(self.db).create(title="SKU")
+                    original = {**LISTING_JSON, "depop_specifics": {"material": ["Cotton"]}}
+                    if seller_sku:
+                        original["sku"] = seller_sku
+                        original["depop_specifics"]["sku"] = seller_sku
+                    listing_persistence.save_revision(self.db, conv.id, original, source="user_form")
+                    _, saved = chat_listing.apply_listing_payload(self.db, conv.id, reply, user_message=user_message)
+                    self.assertTrue(saved)
+                    listing = ListingRepo(self.db).get_revisions(conv.id)[0].listing_json
+                    self.assertEqual(listing.get("sku"), seller_sku)
+                    self.assertEqual(listing["depop_specifics"].get("sku"), seller_sku)
+                    if user_message[0].islower():  # the fields reply still saves its other field
+                        self.assertEqual(listing["title"], "Tee")
+
+    def test_chat_fields_reply_with_only_an_unrequested_sku_saves_nothing(self):
+        listing_persistence.save_revision(self.db, self.conv.id, {**LISTING_JSON, "sku": "OLD-001"}, source="user_form")
+        _, saved = chat_listing.apply_listing_payload(self.db, self.conv.id,
+            json.dumps({"fields": [{"path": "sku", "value": "INVENTED"}]}), user_message="make the title shorter")
+        self.assertTrue(saved)
+        revisions = ListingRepo(self.db).get_revisions(self.conv.id)
+        self.assertEqual(len(revisions), 1)
+        self.assertEqual(revisions[0].listing_json["sku"], "OLD-001")
+        messages = [m.text for m in ConversationRepo(self.db).get_messages(self.conv.id)]
+        self.assertIn("No proposed field changes were accepted.", messages)
+        self.assertNotIn("Saved those field changes to the listing.", messages)
+
+    def test_chat_patch_cannot_invent_a_sku_inside_another_change(self):
+        listing_persistence.save_revision(self.db, self.conv.id,
+            {**LISTING_JSON, "depop_specifics": {"material": ["Cotton"]}}, source="user_form")
+        chat_listing.apply_listing_payload(self.db, self.conv.id, (
+            '```json\n[{"op":"replace","path":"/depop_specifics",'
+            '"value":{"material":["Wool"],"sku":"INVENTED"}}]\n```'
+        ))
+        listing = ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json
+        self.assertEqual(listing["depop_specifics"]["material"], ["Wool"])
+        self.assertNotIn("sku", listing["depop_specifics"])
+        self.assertNotIn("sku", listing)
+
+    def test_regenerate_writes_carried_measurements_and_flaws_into_description(self):
+        """The model writing "See photos" / "none noted" cannot drop the seller's facts."""
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({
+            "knownFlaws": "small stain near the hem",
+            "descriptionMeasurements": 'Pit to pit: 22"; Length: 27"; Sleeve: 25"',
+        }))
+        description = (
+            "Grunge oversized flannel.\n\n"
+            "Flaws: none noted. See photos for details.\n\n"
+            "Measurements: See photos"
+        )
+        parsed = persist_generated_listing(
+            self.db, self.conv.id, "", parsed={**LISTING_JSON, "description": description},
+        )
+        self.assertEqual(parsed["description"], (
+            "Grunge oversized flannel.\n\n"
+            "Flaws:\n"
+            "- small stain near the hem\n"
+            "See photos for details.\n\n"
+            'Measurements: Pit to pit: 22"; Length: 27"; Sleeve: 25"'
+        ))
+        saved = ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json
+        self.assertEqual(saved["description"], parsed["description"])
+
+    def test_typed_measurements_replace_model_numbers(self):
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({
+            "garment": "pants",
+            "measurements": {"pants": {"waist": "16", "inseam": "30"}},
+        }))
+        description = (
+            "Baggy y2k carpenter jeans.\n\n"
+            "Flaws: none noted. See photos for details.\n\n"
+            'Measurements: Waist: 15"; Inseam: 32"'
+        )
+        parsed = persist_generated_listing(
+            self.db, self.conv.id, "", parsed={**LISTING_JSON, "description": description},
+        )
+        self.assertTrue(parsed["description"].endswith('Measurements: Waist: 16"; Inseam: 30"'))
+        self.assertNotIn("Flaws:", parsed["description"])
+
+    def test_model_flaws_that_name_the_seller_flaw_are_kept(self):
+        ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"knownFlaws": "Small stain near hem"}))
+        description = (
+            "Grunge oversized flannel.\n\n"
+            "Flaws: small stain near hem; light pilling on the sleeves. See photos for details.\n\n"
+            "Measurements: See photos"
+        )
+        parsed = persist_generated_listing(
+            self.db, self.conv.id, "", parsed={**LISTING_JSON, "description": description},
+        )
+        self.assertEqual(parsed["description"], (
+            "Grunge oversized flannel.\n\n"
+            "Flaws:\n"
+            "- small stain near hem\n"
+            "- light pilling on the sleeves\n"
+            "See photos for details.\n\n"
+            "Measurements: See photos"
+        ))
+
+    def test_saved_dimension_default_wins_over_model_estimate(self):
+        with patch(
+            "anteroom.services.user_settings.package_dimensions_string",
+            return_value="14x11x4",
+        ):
+            parsed = persist_generated_listing(
+                self.db,
+                self.conv.id,
+                "",
+                parsed={**LISTING_JSON, "package_dimensions_in": "9x6x1"},
+            )
+        self.assertEqual(parsed["package_dimensions_in"], "14x11x4")
+
+    def test_persist_with_repair_saves_repaired_listing(self):
+        broken = 'Here is the listing:\n```json\n{"title": "Broken Tee", "price": 12,\n```'
+
+        class RepairProvider:
+            def __init__(self):
+                self.chat_calls = 0
+
+            async def chat(self, messages, stream=True):
+                self.chat_calls += 1
+                yield "```json\n" + json.dumps(LISTING_JSON) + "\n```"
+
+        provider = RepairProvider()
+
+        async def run():
+            return await persist_generated_listing_with_repair(
+                self.conv.id, broken, provider
+            )
+
+        parsed = asyncio.run(run())
+        self.assertEqual(parsed["title"], LISTING_JSON["title"])
+        self.assertGreaterEqual(provider.chat_calls, 1)
+        messages = ConversationRepo(self.db).get_messages(self.conv.id)
+        self.assertTrue(any("repaired" in (m.text or "").lower() for m in messages))
+        revisions = ListingRepo(self.db).get_revisions(self.conv.id)
+        self.assertGreaterEqual(len(revisions), 1)
+
+    def test_send_readiness_fixes_description_weight_and_dropdowns(self):
+        from anteroom.services.listing_generate import apply_send_readiness_fixes
+
+        listing = {
+            "title": "Notations XL Floral Tunic Top Black Relaxed",
+            "description": (
+                "Notations brand women's tunic. Measurements: Pit to pit: 21 inches, Length: 24 inches."
+            ),
+            "price": 25,
+            "brand": "Notations",
+            "size": "XL",
+            "sku": "notations-XL",
+            "condition": "Pre-Owned - Good",
+            "ebay_specifics": {
+                "season": "All Season",
+                "type": "Blouse",
+                "department": "Women",
+                "sizeType": "Regular",
+                "size": "XL",
+                "brand": "Notations",
+                "fit": "Regular",
+                "material": "Cotton",
+                "pattern": "Floral",
+                "style": "Tunic",
+                "accents": "None",
+                "features": "None",
+                "neckline": "Collar",
+                "closure": "Button",
+                "countryOfOrigin": "Unknown",
+                "fabricType": "Woven",
+                "garmentCare": "Unknown",
+                "handmade": "No",
+                "personalize": "No",
+                "vintage": "No",
+                "occasion": "Casual",
+                "theme": "Floral",
+                "unitQuantity": "1",
+                "unitType": "Unit",
+                "pounds": 0,
+                "ounces": 8,
+            },
+            "depop_specifics": {"source": "Preloved", "age": "Modern", "style": "Tunic"},
+            "etsy_specifics": {
+                "whoMadeIt": "Another company or person",
+                "whatIsIt": "A finished product",
+                "whenWasItMade": "2010 - 2019 (Recently)",
+            },
+        }
+        self.assertTrue(apply_send_readiness_fixes(listing))
+        self.assertNotIn("Flaws:", listing["description"])
+        self.assertIn("Measurements:", listing["description"])
+        self.assertEqual(listing.get("weight_oz"), 8)
+        self.assertEqual(listing["ebay_specifics"]["season"], "Spring")
+        self.assertEqual(listing["depop_specifics"]["style"], ["Casual", "Boho", "Minimalist"])
+        self.assertEqual(listing["etsy_specifics"]["who_made"], "Another company or person")
+
+    def test_send_readiness_uses_dimension_setting_without_inventing_weight(self):
+        from unittest.mock import patch
+
+        from anteroom.services.listing_generate import apply_send_readiness_fixes
+
+        listing = {
+            "title": "Unbranded L Graphic Tee Navy Regular",
+            "description": "Graphic tee.\n\nFlaws: none noted.\n\nMeasurements: See photos",
+        }
+        with patch(
+            "anteroom.services.user_settings.package_dimensions_string",
+            return_value="14x11x4",
+        ):
+            self.assertTrue(apply_send_readiness_fixes(listing))
+        self.assertEqual(listing["package_dimensions_in"], "14x11x4")
+        self.assertNotIn("weight_lb", listing)
+        self.assertNotIn("weight_oz", listing)
+
+        with_ounces = {**listing, "weight_oz": 8}
+        self.assertTrue(apply_send_readiness_fixes(with_ounces))
+        self.assertEqual(with_ounces["weight_lb"], 0)
+        self.assertEqual(with_ounces["weight_oz"], 8)
+
+    def test_send_readiness_fixes_strip_pricing_from_description(self):
+        from anteroom.services.listing_generate import strip_pricing_from_description
+
+        listing = {
+            "title": "Spectra S Casual Graphic Tee Black Soft",
+            "description": (
+                "Casual streetwear graphic cotton tee with soft short-sleeve fit; limited sold comps so "
+                "price is approximate.\n\n"
+                "Flaws: none noted. See photos for details.\n\n"
+                "Measurements: Pit to pit: 19\""
+            ),
+        }
+        self.assertTrue(strip_pricing_from_description(listing))
+        self.assertNotIn("comps", listing["description"].lower())
+        self.assertNotIn("price", listing["description"].lower())
+        self.assertIn("Flaws: none noted.", listing["description"])
+        self.assertIn('Measurements: Pit to pit: 19"', listing["description"])
+        self.assertFalse(strip_pricing_from_description(listing))
+
+    def test_strip_pricing_keeps_opening_line_when_only_sentence_is_pricing(self):
+        from anteroom.services.listing_generate import strip_pricing_from_description
+
+        listing = {
+            "title": "Spectra S Casual Graphic Tee Black Soft",
+            "description": (
+                "Priced to move, offers welcome.\n\n"
+                "Flaws: none noted. See photos for details.\n\n"
+                "Measurements: See photos"
+            ),
+        }
+        self.assertTrue(strip_pricing_from_description(listing))
+        self.assertTrue(
+            listing["description"].startswith("Spectra S Casual Graphic Tee Black Soft.")
+        )
+        self.assertIn("Flaws:", listing["description"])
+
+    def test_send_readiness_fixes_strip_uncertainty_from_description(self):
+        from anteroom.services.listing_generate import apply_send_readiness_fixes
+
+        listing = {
+            "title": "BCNU M mesh striped crop top tee y2k grunge M",
+            "description": (
+                "Y2K grunge mesh striped crop tee with a cropped boxy fit. "
+                "Brand could not be verified from the tag.\n\n"
+                "Flaws: none noted. See photos for details.\n\n"
+                "Measurements: pit to pit 17.5 in, length 16 in (photo estimates; silver "
+                "versus gray color is uncertain)."
+            ),
+        }
+        apply_send_readiness_fixes(listing)
+        self.assertEqual(
+            listing["description"],
+            "Y2K grunge mesh striped crop tee with a cropped boxy fit.\n\n"
+            "Measurements: pit to pit 17.5 in, length 16 in.",
+        )
+
+    def test_send_readiness_fixes_drop_a_flaws_line_that_says_none(self):
+        from anteroom.services.listing_generate import apply_send_readiness_fixes
+
+        for filler in ("none noted. See photos for details.", "None.", "No visible flaws."):
+            listing = {
+                "title": "Levi's 32 Y2K Jeans Blue Straight",
+                "description": (
+                    "Y2K straight leg jeans in a classic blue wash.\n\n"
+                    f"Flaws: {filler}\n\n"
+                    'Measurements: Waist: 16"; Inseam: 30"'
+                ),
+            }
+            apply_send_readiness_fixes(listing)
+            self.assertEqual(
+                listing["description"],
+                'Y2K straight leg jeans in a classic blue wash.\n\nMeasurements: Waist: 16"; Inseam: 30"',
+            )
+
+        flawed = (
+            "Y2K straight leg jeans in a classic blue wash.\n\n"
+            "Flaws: small mark on hem. See photos for details.\n\n"
+            'Measurements: Waist: 16"; Inseam: 30"'
+        )
+        listing = {"title": "Levi's 32 Y2K Jeans Blue Straight", "description": flawed}
+        apply_send_readiness_fixes(listing)
+        self.assertEqual(
+            listing["description"],
+            "Y2K straight leg jeans in a classic blue wash.\n\n"
+            "Flaws:\n"
+            "- small mark on hem\n"
+            "See photos for details.\n\n"
+            'Measurements: Waist: 16"; Inseam: 30"',
+        )
+
+    def test_custom_one_line_formula_keeps_flaws_on_one_line(self):
+        from unittest.mock import patch
+
+        from anteroom.services.listing_generate import apply_send_readiness_fixes
+
+        listing = {
+            "title": "Levi's 32 Y2K Jeans Blue Straight",
+            "description": (
+                "Y2K straight leg jeans in a classic blue wash.\n\n"
+                "Flaws: small mark on hem; faded knee. See photos for details.\n\n"
+                'Measurements: Waist: 16"; Inseam: 30"'
+            ),
+        }
+        custom = "Flaws: {specific flaws}. See photos for details.\n\nMeasurements: {See photos}"
+        with patch(
+            "anteroom.services.skill_formulas.get_listing_formulas",
+            return_value={"description": custom},
+        ):
+            apply_send_readiness_fixes(listing)
+        self.assertIn("Flaws: small mark on hem; faded knee. See photos for details.", listing["description"])
+        self.assertNotIn("\n- ", listing["description"])
+
+    def test_pricing_strip_keeps_each_flaw_on_its_line(self):
+        from anteroom.services.listing_generate import strip_pricing_from_description
+
+        listing = {
+            "title": "Levi's 32 Y2K Jeans Blue Straight",
+            "description": (
+                "Y2K straight jeans. Offers welcome.\n\n"
+                "Flaws:\n"
+                "- Small mark on the hem\n"
+                "- Priced as-is, best offer considered\n"
+                "See photos for details.\n\n"
+                'Measurements: Waist: 16"'
+            ),
+        }
+        self.assertTrue(strip_pricing_from_description(listing))
+        self.assertEqual(
+            listing["description"],
+            "Y2K straight jeans.\n\n"
+            "Flaws:\n"
+            "- Small mark on the hem\n"
+            "See photos for details.\n\n"
+            'Measurements: Waist: 16"',
+        )
+
+    def test_clear_not_applicable_values_empties_the_phrase(self):
+        from anteroom.services.fill_log import field_intentionally_empty
+        from anteroom.services.listing_generate import clear_not_applicable_values
+
+        listing = {
+            "title": "Tee",
+            "ebay_specifics": {"mpn": "Does Not Apply", "type": "T-Shirt",
+                               "category_specifics": {"Theme": "N/A"}},
+            "etsy_specifics": {"holiday": "does not apply", "graphic": ["Does Not Apply"]},
+        }
+        self.assertTrue(clear_not_applicable_values(listing))
+        self.assertEqual(listing["ebay_specifics"], {"type": "T-Shirt", "category_specifics": {}})
+        self.assertEqual(listing["etsy_specifics"], {})
+        for marketplace, field in (("ebay", "MPN"), ("ebay", "Theme"), ("etsy", "Holiday"), ("etsy", "Graphic")):
+            self.assertTrue(field_intentionally_empty(listing, marketplace, field), field)
+        self.assertFalse(clear_not_applicable_values(listing))
+
+    def test_strip_uncertainty_keeps_descriptions_without_hedges(self):
+        from anteroom.services.listing_generate import strip_uncertainty_from_description
+
+        listing = {
+            "title": "Levi's 32 Y2K Jeans Blue Straight",
+            "description": (
+                "Y2K straight leg jeans (button fly) in a classic blue wash.\n\n"
+                "Flaws: small mark on hem. See photos for details.\n\n"
+                'Measurements: Waist: 16"; Inseam: 30"'
+            ),
+        }
+        self.assertFalse(strip_uncertainty_from_description(listing))
+
+    def test_sanitize_listing_sizes_strips_approx_prefix(self):
+        from anteroom.services.listing_generate import (
+            apply_send_readiness_fixes,
+            propagate_general_size,
+            sanitize_listing_sizes,
+            sanitize_size_value,
+        )
+
+        self.assertEqual(sanitize_size_value("approx 10"), "10")
+        self.assertEqual(sanitize_size_value("Approximately: M"), "M")
+        self.assertEqual(sanitize_size_value("~ 30x29"), "30x29")
+        self.assertEqual(sanitize_size_value("10"), "10")
+
+        listing = {
+            "title": "Test",
+            "description": "x",
+            "price": 10,
+            "size": "approx 10",
+            "ebay_specifics": {"size": "approx 10", "type": "Jeans"},
+            "depop_specifics": {"size": "about 10", "source": "Preloved"},
+        }
+        self.assertTrue(sanitize_listing_sizes(listing))
+        self.assertEqual(listing["size"], "10")
+        self.assertEqual(listing["ebay_specifics"]["size"], "10")
+        self.assertEqual(listing["depop_specifics"]["size"], "10")
+
+        listing["size"] = "12"
+        # Depop already says 10, which is not the new general size. Without the
+        # previous general size that difference is a marketplace override.
+        # eBay still follows the general size.
+        self.assertTrue(propagate_general_size(listing))
+        self.assertEqual(listing["ebay_specifics"]["size"], "12")
+        self.assertEqual(listing["depop_specifics"]["size"], "10")
+        self.assertTrue(propagate_general_size(listing, previous_size="10"))
+        self.assertEqual(listing["depop_specifics"]["size"], "12")
+
+        # "Other" is never a seller's Depop choice over a known tag, and a kids'
+        # category takes the tag as Depop's age.
+        kids = {
+            "size": "XL (18/20)",
+            "title": "Columbia XL (18/20) Outdoors Hooded Windbreaker",
+            "direct_category_ids": {"depop": "kidswear_jackets"},
+            "depop_specifics": {"size": "Other"},
+            "ebay_specifics": {"size": "XL (18/20)"},
+        }
+        self.assertTrue(propagate_general_size(kids))
+        self.assertEqual(kids["depop_specifics"]["size"], "16 years")
+        self.assertEqual(kids["size"], "XL (18/20)")
+        self.assertEqual(kids["ebay_specifics"]["size"], "XL (18/20)")
+        # A kids' age the seller chose on the Depop form stays.
+        kids["depop_specifics"]["size"] = "14 years"
+        self.assertFalse(propagate_general_size(kids))
+        # Depop's own spelling of the previous size followed it: XL (18/20) was 16 years, M is 10.
+        kids["depop_specifics"]["size"] = "16 years"
+        kids["size"] = "M"
+        self.assertTrue(propagate_general_size(kids, previous_size="XL (18/20)"))
+        self.assertEqual(kids["depop_specifics"]["size"], "10 years")
+        # A Depop size that wasn't following still stays.
+        kids["depop_specifics"]["size"] = "14 years"
+        self.assertFalse(propagate_general_size(kids, previous_size="XL (18/20)"))
+        self.assertEqual(kids["depop_specifics"]["size"], "14 years")
+        # Without a Depop size yet, the kids' age is still written.
+        missing = {"size": "M", "marketplace_categories": {"depop": "Kids > Coats and jackets > Jackets"},
+                   "depop_specifics": {"source": "Preloved"}}
+        self.assertTrue(propagate_general_size(missing))
+        self.assertEqual(missing["depop_specifics"]["size"], "10 years")
+        adult = {"size": "XL", "depop_specifics": {"size": "Other"}, "marketplace_category_ids": {"depop": "menswear_jackets"}}
+        self.assertTrue(propagate_general_size(adult))
+        self.assertEqual(adult["depop_specifics"]["size"], "XL")
+
+        dirty = {
+            "title": "Test Tee",
+            "description": "Short description without formula markers here.",
+            "price": 12,
+            "size": "approx M",
+            "condition": "Pre-Owned - Good",
+            "ebay_specifics": {"size": "approx M"},
+        }
+        self.assertTrue(apply_send_readiness_fixes(dirty))
+        self.assertEqual(dirty["size"], "M")
+        self.assertEqual(dirty["ebay_specifics"]["size"], "M")
+
+    def test_mens_bottoms_size_is_the_waist_alone(self):
+        from anteroom.services.listing_generate import (
+            normalize_mens_bottoms_size,
+            sync_title_size,
+        )
+
+        # A repeated waist is an invented inseam. The dropdown value is 34.
+        duplicated = {
+            "title": "Levi's 34x34 Y2K 501 Straight Jeans Blue Denim",
+            "brand": "Levi's",
+            "size": "34x34",
+            "department": "Men",
+            "description": "Y2K straight jeans.",
+            "ebay_specifics": {"type": "Jeans", "size": "34x34"},
+        }
+        self.assertTrue(normalize_mens_bottoms_size(duplicated))
+        self.assertEqual(duplicated["size"], "34")
+        self.assertEqual(duplicated["ebay_specifics"]["size"], "34")
+        self.assertNotIn("inseam", duplicated["ebay_specifics"])
+        self.assertTrue(sync_title_size(duplicated))
+        self.assertEqual(duplicated["title"], "Levi's 34 Y2K 501 Straight Jeans Blue Denim")
+
+        # A real inseam stays on the eBay field. Size stays the waist.
+        measured = {
+            "title": "Levi's 30 Y2K 501 Straight Jeans Blue Denim",
+            "brand": "Levi's",
+            "size": "30",
+            "department": "Men",
+            "description": "Y2K straight jeans.\n\nFlaws: none noted.\n\nMeasurements: Waist: 15\"; Inseam: 32\"",
+            "ebay_specifics": {"type": "Jeans", "size": "30"},
+        }
+        self.assertTrue(normalize_mens_bottoms_size(measured))
+        self.assertEqual(measured["size"], "30")
+        self.assertEqual(measured["ebay_specifics"]["size"], "30")
+        self.assertEqual(measured["ebay_specifics"]["inseam"], "32")
+        self.assertFalse(sync_title_size(measured))
+
+        from_title = {
+            "title": "Dickies 34x30 Workwear Carpenter Pants Tan Relaxed",
+            "brand": "Dickies",
+            "size": "34x30",
+            "department": "Men",
+            "description": "Workwear pants.",
+            "ebay_specifics": {"type": "Pants", "size": "34x30"},
+        }
+        self.assertTrue(normalize_mens_bottoms_size(from_title))
+        self.assertEqual(from_title["size"], "34")
+        self.assertEqual(from_title["ebay_specifics"]["inseam"], "30")
+        self.assertTrue(sync_title_size(from_title))
+        self.assertEqual(from_title["title"], "Dickies 34 Workwear Carpenter Pants Tan Relaxed")
+
+        spaced = {
+            "title": "Wrangler 32 x 34 Vintage Cowboy Jeans Blue Straight",
+            "brand": "Wrangler",
+            "size": "32 x 34",
+            "department": "Men",
+            "ebay_specifics": {"type": "Jeans", "inseam": "34"},
+        }
+        self.assertTrue(normalize_mens_bottoms_size(spaced))
+        self.assertEqual(spaced["size"], "32")
+        self.assertEqual(spaced["ebay_specifics"]["inseam"], "34")
+
+    def test_missing_condition_becomes_vendoo_general_value(self):
+        from anteroom.services.validation import normalize_listing_dropdowns
+
+        blank = {"title": "Levi's 34 Jeans", "department": "Men"}
+        self.assertTrue(normalize_listing_dropdowns(blank))
+        self.assertEqual(blank["condition"], "Pre-Owned - Good")
+
+        used = {"title": "Levi's 34 Jeans", "condition": "Used"}
+        self.assertTrue(normalize_listing_dropdowns(used))
+        self.assertEqual(used["condition"], "Pre-Owned - Good")
+
+        good = {"title": "Levi's 34 Jeans", "condition": "Good"}
+        self.assertTrue(normalize_listing_dropdowns(good))
+        self.assertEqual(good["condition"], "Pre-Owned - Good")
+
+        digital = {
+            "title": "Printable art",
+            "etsy_specifics": {"listingType": "Digital"},
+        }
+        normalize_listing_dropdowns(digital)
+        self.assertNotIn("condition", digital)
+
+    def test_mens_bottoms_size_left_alone_without_an_inseam(self):
+        from anteroom.services.listing_generate import normalize_mens_bottoms_size
+
+        no_inseam = {
+            "title": "Levi's 30 Y2K 501 Straight Jeans Blue Denim",
+            "size": "30",
+            "department": "Men",
+            "description": "Y2K straight jeans.\n\nMeasurements: Waist: 15\"",
+            "ebay_specifics": {"type": "Jeans"},
+        }
+        self.assertFalse(normalize_mens_bottoms_size(no_inseam))
+        self.assertEqual(no_inseam["size"], "30")
+
+        womens = {
+            "title": "Levi's 30 Y2K 501 Straight Jeans Blue Denim",
+            "size": "30",
+            "department": "Women",
+            "description": "Measurements: Waist: 15\"; Inseam: 30\"",
+            "ebay_specifics": {"type": "Jeans"},
+        }
+        self.assertFalse(normalize_mens_bottoms_size(womens))
+        self.assertEqual(womens["size"], "30")
+
+        mens_top = {
+            "title": "Nike L Vintage Swoosh Tee Black Relaxed",
+            "size": "L",
+            "department": "Men",
+            "description": "Measurements: Inseam: 30\"",
+            "ebay_specifics": {"type": "T-Shirt"},
+        }
+        self.assertFalse(normalize_mens_bottoms_size(mens_top))
+        self.assertEqual(mens_top["size"], "L")
+
+    def test_sync_title_size_matches_the_size_field(self):
+        from anteroom.services.listing_generate import sync_title_size
+
+        missing = {
+            "title": "Nike Y2K Swoosh Tee Black Relaxed",
+            "brand": "Nike",
+            "size": "L",
+        }
+        self.assertTrue(sync_title_size(missing))
+        self.assertEqual(missing["title"], "Nike L Y2K Swoosh Tee Black Relaxed")
+
+        already = {
+            "title": "Nike L Y2K Swoosh Tee Black Relaxed",
+            "brand": "Nike",
+            "size": "L",
+        }
+        self.assertFalse(sync_title_size(already))
+
+        # A full 80-character title keeps its own wording rather than being truncated.
+        packed = {
+            "title": "Patagonia " + "Vintage Outdoor Fleece Snap Pullover Jacket Brown Relaxed Cozy Warm Fit",
+            "brand": "Patagonia",
+            "size": "XL",
+        }
+        self.assertFalse(sync_title_size(packed))
+
+        petite = {
+            "title": "Studio Works PM Shirt",
+            "brand": "Studio Works",
+            "size": "M",
+            "sizeType": "Petites",
+        }
+        self.assertFalse(sync_title_size(petite))
+        self.assertEqual(petite["title"], "Studio Works PM Shirt")
+
+    def test_sync_title_size_is_idempotent_for_multiword_sizes(self):
+        from anteroom.services.listing_generate import sync_title_size
+
+        for brand, size in (("Maliparmi", "IT 42"), ("Free People", "One Size")):
+            expected = f"{brand} {size} Bohemian Camisole Red Regular"
+            for count in (0, 1, 3):
+                with self.subTest(brand=brand, count=count):
+                    listing = {
+                        "title": f"{brand} " + f"{size} " * count + "Bohemian Camisole Red Regular",
+                        "brand": brand,
+                        "size": size,
+                    }
+                    self.assertEqual(sync_title_size(listing), count != 1)
+                    self.assertEqual(listing["title"], expected)
+                    for _ in range(3):
+                        self.assertFalse(sync_title_size(listing))
+                        self.assertEqual(listing["title"], expected)
+
+    def test_send_readiness_fixes_align_mens_bottoms_size_and_title(self):
+        from anteroom.services.listing_generate import apply_send_readiness_fixes
+
+        listing = {
+            "title": "Levi's 30 Y2K 501 Straight Jeans Blue Denim",
+            "brand": "Levi's",
+            "size": "approx 30",
+            "department": "Men",
+            "price": 48,
+            "condition": "Pre-Owned - Good",
+            "description": "Y2K straight jeans.\n\nFlaws: none noted. See photos for details.\n\nMeasurements: Waist: 15\"; Inseam: 32\"",
+            "ebay_specifics": {"type": "Jeans", "size": "30"},
+            "depop_specifics": {"size": "30", "source": "Preloved"},
+        }
+        self.assertTrue(apply_send_readiness_fixes(listing))
+        self.assertEqual(listing["size"], "30")
+        self.assertEqual(listing["ebay_specifics"]["size"], "30")
+        self.assertEqual(listing["ebay_specifics"]["inseam"], "32")
+        self.assertEqual(listing["depop_specifics"]["size"], "30")
+        self.assertEqual(listing["title"], "Levi's 30 Y2K 501 Straight Jeans Blue Denim")
+        self.assertEqual(listing["condition"], "Pre-Owned - Good")
+
+    def test_finalize_calls_model_when_send_blockers_remain(self):
+        incomplete = {
+            "title": "Notations XL Floral Tunic Top Black Relaxed",
+            "description": "Missing formula text without line breaks.",
+            "price": 25,
+            "ebay_specifics": {"season": "All Season"},
+            "depop_specifics": {"source": "Preloved", "age": "Modern", "style": "Tunic"},
+            "etsy_specifics": {
+                "whoMadeIt": "Another company or person",
+                "whatIsIt": "A finished product",
+                "whenWasItMade": "2010 - 2019 (Recently)",
+            },
+        }
+        class Provider:
+            def __init__(self):
+                self.chat_calls = 0
+
+            async def chat(self, messages, stream=True):
+                self.chat_calls += 1
+                yield json.dumps([
+                    {"op": "add", "path": "/brand", "value": "Notations"},
+                    {"op": "add", "path": "/size", "value": "XL"},
+                ])
+
+        provider = Provider()
+
+        async def run():
+            with patch(
+                "anteroom.services.marketplaces.get_selected_marketplaces",
+                return_value=["ebay", "depop", "etsy"],
+            ):
+                return await persist_generated_listing_with_repair(
+                    self.conv.id,
+                    "```json\n" + json.dumps(incomplete) + "\n```",
+                    provider,
+                )
+
+        parsed = asyncio.run(run())
+        self.assertEqual(parsed.get("brand"), "Notations")
+        self.assertIn("Measurements:", parsed["description"])
+        self.assertGreaterEqual(provider.chat_calls, 1)
+        notes = [m.text for m in ConversationRepo(self.db).get_messages(self.conv.id) if m.role == "system"]
+        self.assertTrue(any("ready for review" in (note or "").lower() for note in notes))
+
+    def test_repair_listing_json_skips_plain_chat(self):
+        class BoomProvider:
+            async def chat(self, messages, stream=True):
+                raise AssertionError("should not call provider")
+
+        async def run():
+            return await repair_listing_json(BoomProvider(), "Looks good to me.")
+
+        self.assertIsNone(asyncio.run(run()))
+
+    def test_apply_payload_saves_mixed_json_patch_with_list_indexes(self):
+        listing_repo = ListingRepo(self.db)
+        self.conv.notes = json.dumps({
+            "categoryOverride": "Clothing, Shoes & Accessories > Women > Women's Clothing > Tops",
+        })
+        self.db.commit()
+        listing_persistence.save_revision(listing_repo.db, self.conv.id, {
+            "title": "Casa San Bord M Graphic T-Shirt",
+            "department": "Women",
+            "category_path": "Clothing, Shoes & Accessories > Women > Women's Clothing > Tops",
+            "ebay_specifics": {"department": "Women", "Primary Store Category": "Women's Clothing"},
+            "poshmark_specifics": {"styleTags": ["Graphic Tee", "Casual", "Cotton"]},
+        }, source="model")
+        chat_listing.apply_listing_payload(self.db, self.conv.id, (
+            "This is a men's t-shirt, not women's.\n"
+            "```json\n"
+            '[{"op":"replace","path":"/department","value":"Men"},'
+            '{"op":"replace","path":"/ebay_specifics/primaryStoreCategory","value":"Men\'s Clothing"},'
+            '{"op":"replace","path":"/poshmark_specifics/styleTags/0","value":"Casual"},'
+            '{"op":"replace","path":"/poshmark_specifics/styleTags/1","value":"Streetwear"},'
+            '{"op":"replace","path":"/poshmark_specifics/styleTags/2","value":"Embroidered"}]\n'
+            "```"
+        ))
+        saved = listing_repo.get_revisions(self.conv.id)[0].listing_json
+        self.assertEqual(saved["department"], "Men")
+        self.assertEqual(saved["category_path"], MEN_TSHIRT_PATH)
+        self.assertEqual(saved["ebay_specifics"]["department"], "Men")
+        self.assertEqual(saved["ebay_specifics"]["primaryStoreCategory"], "Men's Clothing")
+        self.assertEqual(saved["poshmark_specifics"]["styleTags"], ["Casual", "Streetwear", "Embroidered"])
+        notes = json.loads(ConversationRepo(self.db).get(self.conv.id).notes)
+        self.assertEqual(notes["categoryOverride"], MEN_TSHIRT_PATH)
+        messages = ConversationRepo(self.db).get_messages(self.conv.id)
+        self.assertTrue(any("Saved those changes to the listing." in (m.text or "") for m in messages))
+
+    def test_apply_payload_keeps_sweatshirt_category(self):
+        listing_repo = ListingRepo(self.db)
+        sweatshirt_path = "Clothing, Shoes & Accessories > Men > Men's Clothing > Sweaters"
+        listing_persistence.save_revision(listing_repo.db, self.conv.id, {
+            "title": "Fruit of the Loom M Retro Graphic Sweatshirt Blue",
+            "department": "Men",
+            "category_path": MEN_TSHIRT_PATH,
+            "ebay_specifics": {"department": "Men", "type": "T-Shirt"},
+        }, source="model")
+        chat_listing.apply_listing_payload(self.db, self.conv.id, (
+            "I changed this to a men's sweatshirt.\n"
+            "```json\n"
+            '[{"op":"replace","path":"/category_path","value":"' + sweatshirt_path + '"},'
+            '{"op":"replace","path":"/ebay_specifics/type","value":"Sweatshirt"}]\n'
+            "```"
+        ))
+        saved = listing_repo.get_revisions(self.conv.id)[0].listing_json
+        self.assertEqual(saved["category_path"], sweatshirt_path)
+        self.assertEqual(saved["ebay_specifics"]["type"], "Sweatshirt")
+
+    def test_apply_payload_saves_missing_fields_into_listing_json(self):
+        listing_repo = ListingRepo(self.db)
+        listing_persistence.save_revision(listing_repo.db, self.conv.id, {
+            "title": "Chaos Ink Graphic Tee",
+            "etsy_specifics": {"Occasion": ""},
+        }, source="model")
+        ops, saved = chat_listing.apply_listing_payload(self.db, self.conv.id, (
+            "Filled the empty Etsy fields.\n"
+            "```json\n"
+            '{"missing_fields":['
+            '{"marketplace":"etsy","field":"Holiday","value":"Does Not Apply"},'
+            '{"marketplace":"etsy","field":"Occasion","value":"Does Not Apply"},'
+            '{"marketplace":"etsy","field":"Pattern","value":"Solid"}'
+            "]}\n"
+            "```"
+        ))
+        self.assertIsNone(ops)
+        self.assertTrue(saved)
+        saved_listing = listing_repo.get_revisions(self.conv.id)[0].listing_json
+        etsy = saved_listing["etsy_specifics"]
+        from anteroom.services.fill_log import field_intentionally_empty
+
+        # "Does Not Apply" is saved as an empty field the seller does not get asked about again.
+        self.assertFalse(etsy.get("Holiday") or etsy.get("holiday"))
+        self.assertFalse(etsy.get("Occasion") or etsy.get("occasion"))
+        self.assertTrue(field_intentionally_empty(saved_listing, "etsy", "Holiday"))
+        self.assertTrue(field_intentionally_empty(saved_listing, "etsy", "Occasion"))
+        self.assertEqual(etsy.get("Pattern") or etsy.get("pattern"), "Solid")
+        messages = ConversationRepo(self.db).get_messages(self.conv.id)
+        self.assertTrue(any("Saved to the listing JSON" in (m.text or "") for m in messages))
+
+    def test_repeated_blank_repairs_preserve_required_values_and_unknown_price(self):
+        from anteroom.services.validation import validate_listing
+        from anteroom.repositories.queries import RegistryRepo
+
+        RegistryRepo(self.db).upsert_schema_fields("poshmark", None, [{"label": "Original Price", "selector": "#originalPrice"}])
+
+        repo = ListingRepo(self.db)
+        listing_persistence.save_revision(repo.db, self.conv.id, {
+            "title": "XS Streetwear Graphic T-Shirt Black Slim Fit",
+            "brand": "Unbranded", "size": "XS", "department": "Women",
+            "description": "Graphic jersey tee.\nFlaws: Light lint.\nMeasurements: Pit to pit 14 inches; length 24.5 inches.",
+            "price": 12, "condition": "Pre-Owned - Good",
+            "category_path": "Clothing, Shoes & Accessories > Women > Women's Clothing > Tops",
+            "ebay_specifics": {"brand": "", "department": "", "size": "XS", "sizeType": "Regular", "type": "T-Shirt"},
+            "poshmark_specifics": {"originalPrice": ""},
+        }, "test")
+        reply = json.dumps({"missing_fields": [
+            {"marketplace": "general", "field": "brand", "value": ""},
+            {"marketplace": "general", "field": "title", "value": "XS Streetwear Graphic T-Shirt Black Slim Fit"},
+            {"marketplace": "ebay", "field": "brand", "value": ""},
+            {"marketplace": "ebay", "field": "department", "value": ""},
+            {"marketplace": "poshmark", "field": "originalPrice", "value": None},
+        ]})
+        for _ in range(2):
+            _, saved = chat_listing.apply_listing_payload(self.db, self.conv.id, reply)
+            self.assertTrue(saved)
+            listing = repo.get_revisions(self.conv.id)[0].listing_json
+            self.assertEqual(listing["brand"], "Unbranded")
+            self.assertEqual(listing["department"], "Women")
+            self.assertEqual(listing["ebay_specifics"]["department"], "Women")
+            self.assertEqual(listing["ebay_specifics"]["brand"], "Unbranded")
+            self.assertEqual(listing["title"], "Unbranded XS Streetwear Graphic T-Shirt Black Slim Fit")
+            self.assertEqual(listing["poshmark_specifics"]["originalPrice"], 0)
+            validation = validate_listing(listing, require_photos=False, selected_marketplaces=["ebay", "poshmark"])
+            blocked = {error["field"] for error in validation.errors}
+            self.assertFalse(blocked & {"title", "brand", "ebay_specifics.department", "ebay_specifics.brand", "poshmark_specifics.originalPrice"})
+        messages = ConversationRepo(self.db).get_messages(self.conv.id)
+        self.assertTrue(any("Kept existing values" in message.text for message in messages))
+        self.assertTrue(any("eBay / brand: Unbranded" in message.text for message in messages))
+
+        async def read_saved_listing():
+            def override_db():
+                yield self.db
+
+            app.dependency_overrides[get_db] = override_db
+            try:
+                async with AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:4318") as client:
+                    response = await client.get(f"/api/conversations/{self.conv.id}/listing")
+                    self.assertEqual(response.status_code, 200)
+                    payload = response.json()
+                    self.assertEqual(payload["listing"]["poshmark_specifics"]["originalPrice"], 0)
+                    self.assertEqual(payload["listing"]["ebay_specifics"]["department"], "Women")
+            finally:
+                app.dependency_overrides.clear()
+
+        asyncio.run(read_saved_listing())
+
+    def test_poshmark_original_price_is_always_zero(self):
+        from anteroom.services.validation import validate_listing
+
+        for value in (None, "", "   ", "unknown", 40, "90"):
+            data = {"poshmark_specifics": {"originalPrice": value}}
+            validation = validate_listing(data, require_photos=False, selected_marketplaces=[])
+            self.assertEqual(data["poshmark_specifics"]["originalPrice"], 0)
+            self.assertFalse(any(error["field"] == "poshmark_specifics.originalPrice" for error in validation.errors))
+
+    def test_apply_missing_fields_repairs_and_saves_when_ask_chat_format_breaks(self):
+        listing_repo = ListingRepo(self.db)
+        listing_persistence.save_revision(listing_repo.db, self.conv.id, {
+            "title": "Chaos Ink Graphic Tee",
+            "etsy_specifics": {},
+        }, source="model")
+        user_request = (
+            'These listing fields are still empty on listing "Chaos Ink Graphic Tee". '
+            "Generate values for ONLY these fields.\n\n"
+            "Reply with JSON in this exact shape so Studio can save the values into the listing JSON:\n\n"
+            '```json\n{"missing_fields":[{"marketplace":"etsy","field":"Pattern","value":"..."}]}\n```\n\n'
+            "Empty fields:\n- Marketplace: etsy\n  Field: Pattern"
+        )
+
+        class RepairProvider:
+            async def chat(self, messages, stream=True):
+                yield (
+                    "```json\n"
+                    '{"missing_fields":[{"marketplace":"etsy","field":"Pattern","value":"Solid"}]}\n'
+                    "```"
+                )
+
+        async def run():
+            return await chat_listing.apply_listing_payload_with_repair(
+                self.conv.id,
+                "Pattern should be Solid for this tee.",
+                RepairProvider(),
+                user_message=user_request,
+            )
+
+        ops, saved = asyncio.run(run())
+        self.assertIsNone(ops)
+        self.assertTrue(saved)
+        saved_listing = listing_repo.get_revisions(self.conv.id)[0].listing_json
+        etsy = saved_listing["etsy_specifics"]
+        self.assertEqual(etsy.get("Pattern") or etsy.get("pattern"), "Solid")
+        messages = ConversationRepo(self.db).get_messages(self.conv.id)
+        self.assertTrue(any("Saved to the listing JSON" in (m.text or "") for m in messages))
+
+
+class GenerateStreamTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        # A stream's worker threads and another request's query run at the
+        # same time here, so each session needs its own connection.
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        engine = file_engine(directory.name)
+        self.addCleanup(engine.dispose)
+        Base.metadata.create_all(engine)
+        self.Session = sessionmaker(bind=engine)
+        self.provider = FakeProvider(analyze_delay=0.25)
+
+        def override_get_db():
+            db = self.Session()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        app.dependency_overrides[get_db] = override_get_db
+        db = self.Session()
+        repo = ConversationRepo(db)
+        conv = repo.create(title="New Listing")
+        listing_persistence.add_photo(repo.db, conv.id, "a.jpg", "a.jpg", "image/jpeg", 10)
+        self.conv_id = conv.id
+        db.close()
+
+        from anteroom import database
+
+        self.app_sessions = database.SessionLocal
+        self.patches = [
+            patch("anteroom.routes.chat.get_listing_provider", return_value=self.provider),
+            patch("anteroom.routes.chat.get_photo_provider", return_value=self.provider),
+            patch("anteroom.services.listing_generation.load_skill_rules", return_value="rules"),
+            patch("anteroom.services.listing_generation.research_sold_comps", new=AsyncMock(return_value="")),
+            patch("anteroom.services.listing_generation.comps_search_available", return_value=False),
+            patch("anteroom.services.listing_generation.prepare_generation_schema", new=AsyncMock(return_value={})),
+            patch("anteroom.database.SessionLocal", self.Session),
+        ]
+        for p in self.patches:
+            p.start()
+
+    async def asyncTearDown(self):
+        await streaming.reset_generations()
+        for p in self.patches:
+            p.stop()
+        app.dependency_overrides.pop(get_db, None)
+
+    async def test_skill_retrieval_keeps_the_api_responsive(self):
+        import threading
+
+        entered = threading.Event()
+        release = threading.Event()
+        blocked_loop = []
+
+        def held_rules(*_args, **_kwargs):
+            entered.set()
+            if not release.wait(5):
+                blocked_loop.append(True)
+            return "rules"
+
+        with patch("anteroom.services.listing_generation.load_skill_rules", side_effect=held_rules):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:4329") as client:
+                generating = asyncio.create_task(client.post(f"/api/conversations/{self.conv_id}/generate"))
+                try:
+                    self.assertTrue(await asyncio.to_thread(entered.wait, 5), "Generation never requested skill rules")
+                    health = await client.get("/api/health")
+                    self.assertEqual(health.status_code, 200)
+                finally:
+                    release.set()
+                    await generating
+        self.assertFalse(blocked_loop, "Skill retrieval blocked the event loop before health could respond")
+
+    async def test_generate_stream_includes_keepalive_and_listing(self):
+        finishing = []
+        def spawn_finish(coro):
+            task = streaming.spawn(coro)
+            finishing.append(task)
+            return task
+
+        transport = ASGITransport(app=app)
+        body = ""
+        with patch("anteroom.services.listing_generation.spawn", side_effect=spawn_finish):
+            async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+                async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                    self.assertEqual(resp.status_code, 200)
+                    body = "".join([chunk async for chunk in resp.aiter_text()])
+        self.assertIn(": keepalive", body)
+        self.assertIn("event: status", body)
+        self.assertIn("Analyzing photos", body)
+        self.assertIn(LISTING_JSON["title"], body)
+        # Category selection runs as an agent and its events reach the stream.
+        agents = [
+            json.loads(line[len("data: "):])
+            for block in body.split("\n\n") if block.startswith("event: agent\n")
+            for line in block.splitlines() if line.startswith("data: ")
+        ]
+        self.assertEqual({agent["label"] for agent in agents}, {"Categories"})
+        self.assertEqual(agents[-1]["status"], "done")
+        # The stream ends while native fields are still preparing. Only the
+        # completed finish task has recorded the final timing outcome.
+        self.assertEqual(len(finishing), 1)
+        await asyncio.wait_for(asyncio.gather(*finishing), timeout=30)
+        # Every run's stage timings are saved.
+        AppSession = self.app_sessions  # timings are saved in the app database
+        from anteroom.services.generation_timing import for_conversation
+
+        db = AppSession()
+        try:
+            [timing] = for_conversation(db, self.conv_id)
+        finally:
+            db.close()
+        self.assertEqual(timing["outcome"], "incomplete")
+        self.assertTrue({"photo_analysis", "categories", "listing_stream"} <= set(timing["stages"]))
+
+    async def test_a_failure_after_the_run_finished_records_one_timing(self):
+        AppSession = self.app_sessions  # timings are saved in the app database
+        from anteroom.services import listing_generation
+        from anteroom.services.generation_timing import for_conversation
+
+        def broken_spawn(coro):
+            coro.close()
+            raise RuntimeError("could not start the field fill")
+
+        with patch.object(listing_generation, "spawn", new=broken_spawn):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+                async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                    async for _ in resp.aiter_text():
+                        pass
+        db = AppSession()
+        try:
+            timings = for_conversation(db, self.conv_id)
+        finally:
+            db.close()
+        self.assertEqual([timing["outcome"] for timing in timings], ["failed"])
+
+    async def test_quick_identity_starts_comps_before_the_photo_analysis_ends(self):
+        from anteroom.services import listing_generation
+
+        # Photo analysis is held until comps start, so comps can only run
+        # while it is still in progress. If comps waited for it, the fallback
+        # releases it and the assertion below fails instead of hanging.
+        analysis_held = asyncio.Event()
+        self.provider.analyze_gate = analysis_held
+        comps_saw_analysis_held: list[bool] = []
+
+        async def early_comps(fields):
+            comps_saw_analysis_held.append(not analysis_held.is_set())
+            analysis_held.set()
+            return "Sold comps:\nQuery: M&O Gold tee sold comps\n- Similar tees sold $12-$18"
+
+        self.patches[4].stop()
+        self.patches[4] = patch("anteroom.services.listing_generation.comps_search_available", return_value=True)
+        self.patches[4].start()
+        identity = {"brand": "M&O Gold", "category": "T-Shirt"}
+        fallback = asyncio.get_running_loop().call_later(5, analysis_held.set)
+        try:
+            with patch.object(listing_generation, "quick_identity_read", new=AsyncMock(return_value=identity)), \
+                    patch.object(listing_generation, "research_comps_for_fields", new=early_comps):
+                transport = ASGITransport(app=app)
+                async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+                    async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                        body = "".join([chunk async for chunk in resp.aiter_text()])
+        finally:
+            fallback.cancel()
+        self.assertEqual(comps_saw_analysis_held, [True])
+        listing_generation.research_sold_comps.assert_not_awaited()
+        self.assertIn('"label": "Identify item"', body)
+        self.assertIn("Similar tees sold $12-$18", _first_generate_prompt(self.provider))
+
+    async def test_generation_pulse_repeats_status_without_bloating_history(self):
+        run = streaming.GenerationRun()
+        run.publish(streaming.sse_event("status", "Identifying category…"))
+        queue = run.subscribe()
+        while not queue.empty():
+            queue.get_nowait()
+        run.pulse()
+        self.assertEqual(queue.get_nowait(), streaming.KEEPALIVE)
+        pulsed = queue.get_nowait()
+        self.assertIn("event: status", pulsed)
+        self.assertIn("Identifying category", pulsed)
+        self.assertEqual(
+            run.history,
+            [streaming.sse_event("status", "Identifying category…")],
+        )
+
+    async def test_generation_persists_reported_model_usage(self):
+        from anteroom.services import model_usage
+        from anteroom.services.generation_timing import for_conversation
+        AppSession = self.app_sessions  # timings are saved in the app database
+
+        original = self.provider.chat
+        async def measured(messages, stream=True):
+            with model_usage.observe("fixture", "fixture") as call:
+                call.usage({"input_tokens": 100, "output_tokens": 10})
+                async for chunk in original(messages, stream=stream):
+                    yield chunk
+        self.provider.chat = measured
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:4318") as client:
+            response = await client.post(f"/api/conversations/{self.conv_id}/generate")
+        self.assertEqual(response.status_code, 200)
+        db = AppSession()
+        try:
+            [timing] = for_conversation(db, self.conv_id)
+            self.assertTrue(timing["calls"])
+            self.assertEqual(timing["calls"][0]["input_tokens"], 100)
+            self.assertEqual(timing["calls"][0]["output_tokens"], 10)
+            self.assertIsNone(timing["calls"][0]["cost_usd"])
+        finally:
+            db.close()
+
+    async def test_generate_stream_forwards_thinking_without_persisting(self):
+        self.provider.chunks = [
+            StreamChunk("looking at the photos", "thinking"),
+            "```json\n",
+            json.dumps(LISTING_JSON),
+            "\n```",
+        ]
+        transport = ASGITransport(app=app)
+        body = ""
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+            async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                self.assertEqual(resp.status_code, 200)
+                body = "".join([chunk async for chunk in resp.aiter_text()])
+        self.assertIn("event: thinking", body)
+        self.assertIn("looking at the photos", body)
+        db = self.Session()
+        messages = ConversationRepo(db).get_messages(self.conv_id)
+        assistant = [m for m in messages if m.role == "assistant"]
+        db.close()
+        self.assertTrue(assistant)
+        self.assertNotIn("looking at the photos", assistant[0].text)
+        self.assertIn(LISTING_JSON["title"], assistant[0].text)
+
+    async def test_generate_persists_listing_and_skips_repeat_analysis(self):
+        transport = ASGITransport(app=app)
+        finishing = []
+        def spawn_finish(coro):
+            task = streaming.spawn(coro)
+            finishing.append(task)
+            return task
+
+        with patch("anteroom.services.listing_generation.spawn", side_effect=spawn_finish):
+            async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+                async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                    async for _ in resp.aiter_text():
+                        pass
+                # The shared in-memory connection cannot overlap the background finish.
+                await asyncio.wait_for(asyncio.gather(*finishing), timeout=30)
+                self.assertEqual(self.provider.analyze_calls, 1)
+                async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                    async for _ in resp.aiter_text():
+                        pass
+                # The shared in-memory connection cannot overlap the background finish.
+                await asyncio.wait_for(asyncio.gather(*finishing), timeout=30)
+        self.assertEqual(self.provider.analyze_calls, 1)
+        # Two generation streams; schema, category and repair calls may also run.
+        initial = [messages for messages in self.provider.chat_history
+                   if "Generate a complete listing" in str(messages[-1].get("content") or "")]
+        self.assertEqual(len(initial), 2)
+        prompt = _first_generate_prompt(self.provider)
+        self.assertIn("already uploaded 1 product photo", prompt)
+        self.assertIn("Never ask them to attach", prompt)
+        db = self.Session()
+        revisions = ListingRepo(db).get_revisions(self.conv_id)
+        conv = ConversationRepo(db).get(self.conv_id)
+        self.assertGreaterEqual(len(revisions), 2)
+        self.assertEqual(revisions[0].listing_json["title"], LISTING_JSON["title"])
+        self.assertEqual(conv.status, "draft")
+        db.close()
+
+    async def test_generate_repairs_malformed_listing_json(self):
+        class RepairingProvider(FakeProvider):
+            async def chat(self, messages, stream=True):
+                self.chat_calls += 1
+                self.chat_messages = messages
+                self.chat_history.append(messages)
+                contents = " ".join(str(m.get("content") or "") for m in messages).lower()
+                if "malformed" in contents or "finish this anteroom listing" in contents:
+                    yield "```json\n" + json.dumps(LISTING_JSON) + "\n```"
+                    return
+                yield '```json\n{"title": "Broken Tee", "price": 12,\n```'
+
+        self.provider = RepairingProvider()
+        for index, name in enumerate(("get_listing_provider", "get_photo_provider")):
+            self.patches[index].stop()
+            provider_patch = patch(f"anteroom.routes.chat.{name}", return_value=self.provider)
+            provider_patch.start()
+            self.patches[index] = provider_patch
+
+        finishing = []
+        def spawn_finish(coro):
+            task = streaming.spawn(coro)
+            finishing.append(task)
+            return task
+
+        transport = ASGITransport(app=app)
+        body = ""
+        with patch("anteroom.services.listing_generation.spawn", side_effect=spawn_finish):
+            async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+                async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                    self.assertEqual(resp.status_code, 200)
+                    body = "".join([chunk async for chunk in resp.aiter_text()])
+        self.assertIn("Repairing listing JSON", body)
+        self.assertIn("Filling required fields", body)
+        self.assertGreaterEqual(self.provider.chat_calls, 2)
+        # The stream ends before the native-field finish posts its saved
+        # summary. Await that work instead of racing the database read in CI.
+        self.assertEqual(len(finishing), 1)
+        await asyncio.wait_for(asyncio.gather(*finishing), timeout=30)
+        db = self.Session()
+        revisions = ListingRepo(db).get_revisions(self.conv_id)
+        messages = ConversationRepo(db).get_messages(self.conv_id)
+        db.close()
+        self.assertGreaterEqual(len(revisions), 1)
+        self.assertEqual(revisions[0].listing_json["title"], LISTING_JSON["title"])
+        self.assertTrue(any("repaired" in (m.text or "").lower() for m in messages))
+
+    async def test_generate_reads_photos_added_after_the_previous_analysis(self):
+        transport = ASGITransport(app=app)
+        finishing = []
+        def spawn_finish(coro):
+            task = streaming.spawn(coro)
+            finishing.append(task)
+            return task
+
+        with patch("anteroom.services.listing_generation.spawn", side_effect=spawn_finish):
+            async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+                first = await client.post(f"/api/conversations/{self.conv_id}/generate")
+                self.assertNotIn("Error:", first.text)
+                # Finish native fields before mutating photos or tearing down this DB.
+                await asyncio.wait_for(asyncio.gather(*finishing), timeout=30)
+                db = self.Session()
+                listing_persistence.add_photo(db, self.conv_id, "b.jpg", "b.jpg", "image/jpeg", 10)
+                db.close()
+                second = await client.post(f"/api/conversations/{self.conv_id}/generate")
+                self.assertNotIn("Error:", second.text)
+                # Finish native fields before mutating photos or tearing down this DB.
+                await asyncio.wait_for(asyncio.gather(*finishing), timeout=30)
+        self.assertEqual(self.provider.analyze_calls, 2)
+
+    async def test_generate_does_not_save_if_photos_change_during_the_model_reply(self):
+        provider = self.provider
+        original_chat = provider.chat
+
+        async def changing_reply(messages, stream=True):
+            if "Generate a complete listing" in str(messages[-1].get("content") or ""):
+                db = self.Session()
+                listing_persistence.add_photo(db, self.conv_id, "new.jpg", "new.jpg", "image/jpeg", 10)
+                db.close()
+            async for chunk in original_chat(messages, stream=stream):
+                yield chunk
+
+        provider.chat = changing_reply
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+            response = await client.post(f"/api/conversations/{self.conv_id}/generate")
+        self.assertIn("Photos changed during generation", response.text)
+        db = self.Session()
+        self.assertFalse(any(revision.source == "model" for revision in ListingRepo(db).get_revisions(self.conv_id)))
+        db.close()
+
+    async def test_generate_reanalyzes_when_prior_analysis_was_empty(self):
+        db = self.Session()
+        ConversationRepo(db).add_message(self.conv_id, "system", "Photo analysis:\n")
+        db.close()
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+            async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                async for _ in resp.aiter_text():
+                    pass
+        self.assertEqual(self.provider.analyze_calls, 1)
+        prompt = _first_generate_prompt(self.provider)
+        self.assertIn("already uploaded 1 product photo", prompt)
+        self.assertIn("brand: M&O Gold", prompt)
+
+    async def test_generate_injects_sold_comps_into_prompt(self):
+        comps = (
+            "Sold comps:\n"
+            "Query: M&O Gold Graphic T-Shirt sold comps\n"
+            "- Similar tees sold $12-$18\n"
+            "Use these live results to set market price, then listing price = market × 1.35 (whole dollars)."
+        )
+        self.patches[2].stop()
+        self.patches[3].stop()
+        comps_patch = patch("anteroom.services.listing_generation.research_sold_comps", new=AsyncMock(return_value=comps))
+        key_patch = patch("anteroom.services.listing_generation.comps_search_available", return_value=True)
+        comps_patch.start()
+        key_patch.start()
+        self.patches[2] = comps_patch
+        self.patches[3] = key_patch
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+            async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                body = "".join([chunk async for chunk in resp.aiter_text()])
+        self.assertIn("Identifying category and looking up comps", body)
+        prompt = _first_generate_prompt(self.provider)
+        self.assertIn("Similar tees sold $12-$18", prompt)
+        db = self.Session()
+        messages = ConversationRepo(db).get_messages(self.conv_id)
+        db.close()
+        self.assertTrue(any((m.text or "").startswith("Sold comps:") for m in messages))
+
+    async def test_generate_surfaces_comps_setup_when_search_unavailable(self):
+        """Cursor/MiMo generate without ChatGPT must still show a SOLD COMPS card."""
+        from anteroom.services.comp_research import COMPS_SETUP_NOTE
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+            async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                async for _ in resp.aiter_text():
+                    pass
+        db = self.Session()
+        messages = ConversationRepo(db).get_messages(self.conv_id)
+        db.close()
+        comps = [m for m in messages if (m.text or "").startswith("Sold comps:")]
+        self.assertEqual(len(comps), 1)
+        self.assertIn(COMPS_SETUP_NOTE, comps[0].text)
+        prompt = _first_generate_prompt(self.provider)
+        self.assertIn(COMPS_SETUP_NOTE, prompt)
+
+    async def test_generate_uses_recorded_seller_history_without_a_separate_advice_message(self):
+        from datetime import UTC, datetime, timedelta
+
+        with self.Session() as db:
+            listing_persistence.save_revision(db, self.conv_id, {
+                "category_path": MEN_TSHIRT_PATH, "quantity": 1,
+            }, source="category_analysis")
+            now = datetime.now(UTC)
+            for price in (20, 22, 24, 26, 28):
+                prior = ConversationRepo(db).create(title="M&O Gold Tee")
+                prior.notes = json.dumps({
+                    "vendooStatus": "sold",
+                    "vendooSale": {"price": price, "marketplace": "ebay"},
+                    "vendooDates": {
+                        "listed": (now - timedelta(days=30)).isoformat(),
+                        "sold": (now - timedelta(days=2)).isoformat(),
+                    },
+                })
+                db.commit()
+                listing_persistence.save_revision(db, prior.id, {
+                    "title": prior.title, "brand": "M&O Gold", "quantity": 1,
+                    "category_path": MEN_TSHIRT_PATH, "price": 100,
+                }, source="vendoo_import")
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:4318") as client:
+            response = await client.post(f"/api/conversations/{self.conv_id}/generate")
+        self.assertEqual(response.status_code, 200)
+        prompt = _first_generate_prompt(self.provider)
+        self.assertIn("--- Seller history for this item ---", prompt)
+        self.assertIn('"median_sold_price": 24', prompt)
+        with self.Session() as db:
+            messages = ConversationRepo(db).get_messages(self.conv_id)
+            self.assertFalse(any("--- Seller history for this item ---" in message.text for message in messages))
+
+    async def test_keepalives_emit_while_waiting_for_model(self):
+        async def slow():
+            await asyncio.sleep(0.2)
+            yield "hello"
+
+        items = []
+        async for item in streaming.iter_with_keepalives(slow(), timeout=0.05):
+            items.append(item)
+        self.assertIn(None, items)
+        self.assertEqual(items[-1], "hello")
+
+    async def test_wait_task_keepalives_default_interval_is_mobile_safe(self):
+        import inspect
+        params = inspect.signature(streaming.wait_task_keepalives).parameters
+        self.assertEqual(params["timeout"].default, 3.0)
+        params = inspect.signature(streaming.iter_with_keepalives).parameters
+        self.assertEqual(params["timeout"].default, 3.0)
+
+    async def test_generate_reports_error_when_model_returns_nothing(self):
+        self.provider.chunks = []
+        transport = ASGITransport(app=app)
+        body = ""
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+            async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                body = "".join([chunk async for chunk in resp.aiter_text()])
+        self.assertIn("Error:", body)
+        db = self.Session()
+        conv = ConversationRepo(db).get(self.conv_id)
+        self.assertEqual(conv.status, "draft")
+        self.assertEqual(ListingRepo(db).get_revisions(self.conv_id), [])
+        db.close()
+
+    async def test_generate_stops_and_offers_retry_when_photo_analysis_fails(self):
+        self.provider.analysis = {"error": "TLS connection failed", "evidence": {}}
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+            async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                body = "".join([chunk async for chunk in resp.aiter_text()])
+        self.assertIn("Error: Photo analysis failed: TLS connection failed. Retry to analyze the photos again.", body)
+        self.assertEqual(self.provider.chat_calls, 0)
+        db = self.Session()
+        conv = ConversationRepo(db).get(self.conv_id)
+        messages = ConversationRepo(db).get_messages(self.conv_id)
+        revisions = ListingRepo(db).get_revisions(self.conv_id)
+        db.close()
+        self.assertEqual(conv.status, "draft")
+        self.assertEqual(revisions, [])
+        self.assertFalse(any("contextual knowledge" in message.text for message in messages))
+
+    async def test_message_stops_and_offers_retry_when_photo_analysis_fails(self):
+        self.provider.analysis = {"error": "TLS connection failed", "evidence": {}}
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+            resp = await client.post(
+                f"/api/conversations/{self.conv_id}/messages",
+                json={"text": "Make the listing"},
+            )
+        # Initial photo chat uses the streaming discovery/generation pipeline.
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn(
+            "Error: Photo analysis failed: TLS connection failed. Retry to analyze the photos again.",
+            resp.text,
+        )
+        self.assertEqual(self.provider.chat_calls, 0)
+        db = self.Session()
+        conv = ConversationRepo(db).get(self.conv_id)
+        self.assertEqual(ListingRepo(db).get_revisions(self.conv_id), [])
+        db.close()
+        self.assertEqual(conv.status, "draft")
+
+    async def test_analyze_photos_endpoint_offers_retry_on_failure(self):
+        self.provider.analysis = {"error": "TLS connection failed", "evidence": {}}
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+            resp = await client.post(f"/api/conversations/{self.conv_id}/analyze-photos")
+        self.assertEqual(resp.status_code, 502)
+        self.assertEqual(
+            resp.json()["detail"],
+            "Photo analysis failed: TLS connection failed. Retry to analyze the photos again.",
+        )
+
+    async def test_analyze_photos_endpoint_quotes_a_reply_without_details(self):
+        self.provider.analysis = {"evidence": {}, "raw": "I can't view images in this conversation."}
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+            with self.assertLogs("anteroom.listing_generate", "WARNING") as logs:
+                resp = await client.post(f"/api/conversations/{self.conv_id}/analyze-photos")
+        self.assertEqual(resp.status_code, 502)
+        self.assertEqual(
+            resp.json()["detail"],
+            'Photo analysis failed: the AI did not describe the photos. It replied: '
+            '"I can\'t view images in this conversation." Retry to analyze the photos again.',
+        )
+        self.assertTrue(any("I can't view images" in line for line in logs.output))
+
+    async def test_analyze_photos_endpoint_names_a_raised_provider_error(self):
+        async def fail(*_args, **_kwargs):
+            raise RuntimeError("Invalid User API Key")
+
+        self.provider.analyze_photos = fail
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+            resp = await client.post(f"/api/conversations/{self.conv_id}/analyze-photos")
+        self.assertEqual(resp.status_code, 502)
+        self.assertEqual(
+            resp.json()["detail"],
+            "Photo analysis failed: Invalid User API Key. Retry to analyze the photos again.",
+        )
+
+    async def _wait_until_generating(self, timeout: float = 5.0):
+        deadline = asyncio.get_running_loop().time() + timeout
+        while asyncio.get_running_loop().time() < deadline:
+            if streaming.active_generation(self.conv_id) is not None:
+                return
+            await asyncio.sleep(0.05)
+        self.fail("listing generation did not start")
+
+    async def test_generate_finishes_after_client_disconnect(self):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+            async def read_stream():
+                async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                    self.assertEqual(resp.status_code, 200)
+                    async for _ in resp.aiter_text():
+                        pass
+
+            reader = asyncio.create_task(read_stream())
+            await self._wait_until_generating()
+            reader.cancel()
+            try:
+                await reader
+            except asyncio.CancelledError:
+                pass
+            self.assertIsNotNone(streaming.active_generation(self.conv_id))
+        await streaming.wait_generation(self.conv_id)
+        db = self.Session()
+        revisions = ListingRepo(db).get_revisions(self.conv_id)
+        conv = ConversationRepo(db).get(self.conv_id)
+        db.close()
+        self.assertGreaterEqual(len(revisions), 1)
+        self.assertEqual(revisions[0].listing_json["title"], LISTING_JSON["title"])
+        self.assertEqual(conv.status, "draft")
+
+    async def test_generate_reattach_reuses_in_flight_run(self):
+        gate = asyncio.Event()
+        self.provider.analyze_gate = gate
+        body = ""
+        first_body = ""
+        async with (
+            AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:4318") as client1,
+            AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:4318") as client2,
+        ):
+            async def first_stream():
+                async with client1.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                    return "".join([chunk async for chunk in resp.aiter_text()])
+
+            first = asyncio.create_task(first_stream())
+            await self._wait_until_generating()
+            gate.set()
+            async with client2.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                self.assertEqual(resp.status_code, 200)
+                body = "".join([chunk async for chunk in resp.aiter_text()])
+            first_body = await first
+        self.assertEqual(self.provider.analyze_calls, 1)
+        initial = [messages for messages in self.provider.chat_history
+                   if "Generate a complete listing" in str(messages[-1].get("content") or "")]
+        self.assertEqual(len(initial), 1)
+        self.assertIn(LISTING_JSON["title"], body)
+        self.assertIn(LISTING_JSON["title"], first_body)
+
+    async def test_generate_cancel_stops_run(self):
+        gate = asyncio.Event()
+        self.provider.analyze_gate = gate
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+            async def read_stream():
+                async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                    async for _ in resp.aiter_text():
+                        pass
+
+            reader = asyncio.create_task(read_stream())
+            await self._wait_until_generating()
+            cancel = await client.post(f"/api/conversations/{self.conv_id}/generate/cancel")
+            self.assertEqual(cancel.status_code, 200)
+            await streaming.wait_generation(self.conv_id)
+            reader.cancel()
+            try:
+                await reader
+            except asyncio.CancelledError:
+                pass
+        gate.set()
+        db = self.Session()
+        conv = ConversationRepo(db).get(self.conv_id)
+        revisions = ListingRepo(db).get_revisions(self.conv_id)
+        db.close()
+        self.assertEqual(conv.status, "draft")
+        self.assertEqual(revisions, [])
+        self.assertIsNone(streaming.active_generation(self.conv_id))
+
+    async def test_cancelled_partial_save_stays_fenced_without_a_crash_alert(self):
+        from anteroom.services.background_tasks import TaskLeaseExpired
+
+        persist = AsyncMock(side_effect=[asyncio.CancelledError(), TaskLeaseExpired()])
+        with (
+            patch.object(listing_generation, "persist_generated_listing_with_repair", persist),
+            patch.object(listing_generation.ConversationRepo, "update_status") as update_status,
+            self.assertLogs("anteroom.chat", level="WARNING") as captured,
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://127.0.0.1:4318") as client:
+                await client.post(f"/api/conversations/{self.conv_id}/generate")
+            await streaming.wait_generation(self.conv_id)
+        self.assertEqual(persist.await_count, 2)
+        self.assertFalse(any(record.levelname == "ERROR" for record in captured.records))
+        # Once the partial save loses the lease, don't try another fenced write.
+        self.assertNotIn(unittest.mock.call(self.conv_id, "draft"), update_status.call_args_list)
+
+    async def test_resume_after_run_finished_does_not_start_a_second_run(self):
+        """A dropped connection reconnects; it must not generate the listing twice."""
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+            async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                async for _ in resp.aiter_text():
+                    pass
+            analyze_calls = self.provider.analyze_calls
+            # Native-field preparation may still call the model after the stream
+            # closes. Only starting a fresh generation would duplicate this run.
+            with patch.object(chat_routes, "start_generation", side_effect=AssertionError("Resume started another generation")):
+                async with client.stream(
+                    "POST", f"/api/conversations/{self.conv_id}/generate?resume=1"
+                ) as resp:
+                    self.assertEqual(resp.status_code, 200)
+                    body = "".join([chunk async for chunk in resp.aiter_text()])
+        self.assertIn("[DONE]", body)
+        self.assertEqual(self.provider.analyze_calls, analyze_calls)
+        initial = [messages for messages in self.provider.chat_history
+                   if "Generate a complete listing" in str(messages[-1].get("content") or "")]
+        self.assertEqual(len(initial), 1)
+
+    async def test_discarded_run_stops_writing_into_the_wiped_chat(self):
+        """Regenerate wipes the chat; the old run must not post cards into it."""
+        gate = asyncio.Event()
+        self.provider.analyze_gate = gate
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:4318") as client:
+            async def read_stream():
+                async with client.stream("POST", f"/api/conversations/{self.conv_id}/generate") as resp:
+                    async for _ in resp.aiter_text():
+                        pass
+
+            reader = asyncio.create_task(read_stream())
+            await self._wait_until_generating()
+            run = streaming.active_generation(self.conv_id)
+            # The run is let go of while it is mid-step, so its cancellation
+            # lands only after the analysis it is waiting on comes back.
+            streaming._generations.pop(self.conv_id, None)
+            gate.set()
+            if run and run.task:
+                try:
+                    await run.task
+                except asyncio.CancelledError:
+                    pass
+            reader.cancel()
+            try:
+                await reader
+            except asyncio.CancelledError:
+                pass
+        db = self.Session()
+        messages = ConversationRepo(db).get_messages(self.conv_id)
+        revisions = ListingRepo(db).get_revisions(self.conv_id)
+        db.close()
+        self.assertEqual([m.text for m in messages], [])
+        self.assertEqual(revisions, [])
+
+
+if __name__ == "__main__":
+    unittest.main()
