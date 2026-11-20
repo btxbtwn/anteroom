@@ -9,12 +9,18 @@ export interface Importer {
   importListing: (listing: string, linkConversationId?: string) => Promise<MarketplaceImportResult>;
   /** Import a listing unless it now looks like an item already in Anteroom; the server checks as it saves. */
   importNew: (listing: string) => Promise<MarketplaceImportResult | MarketplaceImportHeld>;
+  /** eBay and Etsy: the connected account, or null when none is. A run stays on the account it started with. */
+  account?: () => Promise<string | null>;
 }
 
 export function importerFor(marketplace: ImportMarketplace): Importer {
   if (marketplace === "ebay" || marketplace === "etsy") {
     const direct = api[marketplace];
     return {
+      account: async () => {
+        const account = (await api.directConnections.status()).accounts[marketplace];
+        return account.connected ? `${account.label ?? ""}:${account.connectedAt ?? ""}` : null;
+      },
       candidates: (page) => direct.importCandidates(page),
       importListing: (listing, linkConversationId) => linkConversationId ? direct.importListing(listing, linkConversationId) : direct.importListing(listing),
       importNew: (listing) => direct.importNew(listing),
@@ -73,6 +79,10 @@ export function useImportAll(key: string) {
 
 // This many listings failing in a row means the connection is gone (Chrome closed, signed out), not the listings.
 const FAILURE_STREAK = 5;
+const ACCOUNT_CHANGED: Partial<Record<ImportMarketplace, string>> = {
+  ebay: "The connected eBay account changed, so this import stopped. Open Import from eBay to import from the account connected now.",
+  etsy: "The connected Etsy shop changed, so this import stopped. Open Import from Etsy to import from the shop connected now.",
+};
 const busy = (run: ImportAllRun | undefined) => run?.status === "running" || run?.status === "stopping";
 const message = (error: unknown) => error instanceof Error ? error.message : "This listing could not be imported.";
 
@@ -135,6 +145,7 @@ async function walk(key: string, id: number, importer: Importer) {
   const direct = marketplace === "ebay" || marketplace === "etsy";
   const seen = new Set<string>();
   const cursors = new Set<string>();
+  let account: string | null | undefined;
   let streak = 0;
   let page = 1;
   let cursor: string | null = null;
@@ -144,6 +155,14 @@ async function walk(key: string, id: number, importer: Importer) {
     update(key, id, { page });
     let data: MarketplaceImportPage;
     try {
+      // Pages come from whichever account is connected now, so a run stops if that is no longer the one it began with.
+      // Within a page, the server's ownership check refuses listings that belong to another account.
+      if (importer.account) {
+        const now = await importer.account();
+        if (account === undefined) account = now;
+        if (!now || now !== account) return update(key, id, { status: "failed", error: ACCOUNT_CHANGED[marketplace] ?? "" });
+        if (!live()) return;
+      }
       data = await importer.candidates(page, cursor);
     } catch (error) {
       // Stopped while the page was loading: that is a stop, not a failure.

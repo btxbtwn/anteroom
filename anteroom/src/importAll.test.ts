@@ -172,6 +172,38 @@ describe("import all active listings", () => {
     expect(candidates).toHaveBeenCalledTimes(3);
   });
 
+  it("stops before reading another page once a different eBay account is connected", async () => {
+    const { importer, candidates } = fakeImporter([
+      { total: 50, has_more: true, rows: [row("a")] },
+      { total: 50, has_more: false, rows: [row("b")] },
+    ]);
+    const account = vi.fn().mockResolvedValueOnce("seller-one:100").mockResolvedValueOnce("seller-two:200");
+    startImportAll("ebay:seller-one:100", "ebay", { ...importer, account }, vi.fn());
+    const run = await finished("ebay:seller-one:100");
+    expect(run).toMatchObject({ status: "failed", imported: 1, page: 2 });
+    expect(run.error).toContain("The connected eBay account changed");
+    expect(candidates).toHaveBeenCalledOnce();
+  });
+
+  it("stops when the Etsy shop is disconnected mid-run", async () => {
+    const { importer, candidates } = fakeImporter([{ total: 50, has_more: true, rows: [row("a")] }]);
+    const account = vi.fn().mockResolvedValueOnce("shop:1").mockResolvedValueOnce(null);
+    startImportAll("etsy:shop:1", "etsy", { ...importer, account }, vi.fn());
+    expect(await finished("etsy:shop:1")).toMatchObject({ status: "failed", imported: 1 });
+    expect(candidates).toHaveBeenCalledOnce();
+  });
+
+  it("keeps going while the same account stays connected", async () => {
+    const { importer } = fakeImporter([
+      { total: 2, has_more: true, rows: [row("a")] },
+      { total: 2, has_more: false, rows: [row("b")] },
+    ]);
+    const account = vi.fn().mockResolvedValue("seller-one:100");
+    startImportAll("ebay:seller-one:100", "ebay", { ...importer, account }, vi.fn());
+    expect(await finished("ebay:seller-one:100")).toMatchObject({ status: "done", imported: 2 });
+    expect(account).toHaveBeenCalledTimes(2);
+  });
+
   it("stops at the last page when a marketplace gives no new cursor", async () => {
     const { importer, candidates } = fakeImporter([
       { total: null, has_more: true, next_cursor: "c2", rows: [row("a")] },
