@@ -23,7 +23,7 @@
 <body>
 <main>
   <h1>Anteroom Privacy Policy</h1>
-  <p class="muted">Last updated November 10, 2026</p>
+  <p class="muted">Last updated November 20, 2026</p>
 
   <p>Anteroom helps resellers write listings and cross-list them to eBay, Poshmark,
   Mercari, Depop and Etsy. This policy covers the Anteroom app, the website at
@@ -31,33 +31,66 @@
 
   <h2>What we collect</h2>
   <ul>
-    <li><strong>Your account:</strong> your email address and sign-in details.</li>
-    <li><strong>Your listings:</strong> the photos, titles, descriptions, prices and
-      other listing details you create or import.</li>
-    <li><strong>Marketplace connections:</strong> sign-in tokens for the marketplaces
-      you connect, so Anteroom can create and update listings on your behalf. These
-      are stored encrypted and are never shown back to any app or page.</li>
+    <li><strong>Your Anteroom account:</strong> your email address and sign-in details.</li>
+    <li><strong>Your listings:</strong> the photos, titles, descriptions, prices and other
+      listing details you create, or import from your marketplace and Vendoo accounts.</li>
+    <li><strong>Your marketplace accounts:</strong> whether you are signed in to each
+      marketplace and the account name it shows (your username or display name, or the
+      email address on the account when the marketplace gives no name). For eBay and
+      Etsy, which Anteroom connects to directly, the sign-in tokens you approve, stored
+      encrypted and never shown back to any app or page.</li>
+    <li><strong>Your sales:</strong> for each order on your marketplace accounts, the order
+      number, status and date, and the amounts: item price, shipping, refunds, marketplace
+      fees and your shipping cost. Anteroom does not collect buyers' names, addresses or
+      messages, and never sees card or bank details.</li>
+    <li><strong>Interest in your listings:</strong> which of your listings were liked and
+      when, the like count, and how many people an offer would reach. Not who liked them.</li>
+    <li><strong>Vendoo:</strong> if you use Vendoo, your Vendoo account ID and email address,
+      and the Vendoo drafts Anteroom creates or reads for you.</li>
+    <li><strong>Sold prices for sourcing</strong> (Mac app): prices of sold items from
+      eBay's public sold-search results, to price items you are considering buying.</li>
   </ul>
 
   <h2>What the Chrome extension does</h2>
-  <p>Anteroom Bridge acts only on marketplace sites you are signed in to (eBay,
-  Poshmark, Mercari, Depop, Etsy and Vendoo), and only when you ask Anteroom to
-  import, save, list, update or delist something. To do that it:</p>
+  <p>Anteroom Bridge works on the marketplace sites you are signed in to in Chrome
+  (Poshmark, Mercari, Depop and eBay), Vendoo, and Anteroom itself. It uses your existing
+  sign-in on those sites so requests run as you. Your marketplace cookies and sign-in
+  tokens stay in Chrome: the extension uses them there and does not send them to
+  Anteroom.</p>
+  <p><strong>When you ask</strong>, it:</p>
   <ul>
-    <li>reads your sign-in session on those sites, so requests run as you;</li>
-    <li>opens and fills those sites' listing forms and reads the results;</li>
-    <li>sends listing details and results back to your own Anteroom, either the app
-      on your Mac or your myanteroom.com account.</li>
+    <li>fills a marketplace's listing form to save a draft, list, or update a listing,
+      and delists a listing, only after you confirm that action in Anteroom;</li>
+    <li>imports your existing listings and your sales history;</li>
+    <li>creates and reads drafts in your Vendoo account;</li>
+    <li>checks which marketplaces you are signed in to, and opens a sign-in page.</li>
   </ul>
-  <p>The extension does not read other websites, track your browsing, or show ads.
-  Nothing is published or delisted unless you confirm it in Anteroom.</p>
+  <p><strong>Automatically</strong>, while Chrome is connected to Anteroom (the Mac app is
+  running, or you have myanteroom.com open):</p>
+  <ul>
+    <li><strong>Sale detection</strong> (on unless you turn it off): every few minutes it
+      reads your recent orders on Poshmark, Mercari and Depop, so Anteroom can mark sold
+      items. Turn it off for each marketplace in Settings &rarr; Connections.</li>
+    <li><strong>Delist after a sale</strong> (off unless you turn it on): when an item
+      sells, it delists that item on your other marketplaces. Turn it on or off with
+      Delist the other marketplaces in Settings &rarr; Connections.</li>
+    <li><strong>Shares and offers</strong> (off unless you turn them on): shares your
+      Poshmark closet at the times you choose, and sends offers to people who liked your
+      listings on Poshmark, Mercari and Depop, never below the minimum price you set. To
+      know when to offer, it checks your listings for new likes every minute. You turn
+      each rule on, and off again, in Automations.</li>
+    <li><strong>Sold prices</strong> (Mac app): when Sourcing refreshes, it opens eBay's
+      public sold-search results in a background tab and reads the prices.</li>
+  </ul>
+  <p>The extension never creates or publishes a listing on its own. It does not read
+  other websites, record your browsing history, collect analytics, or show ads.</p>
 
   <h2>How we use it</h2>
-  <p>Only to run Anteroom for you: generating listing text, keeping your inventory
-  in sync, and carrying out the marketplace actions you request. We do not sell your
-  data, use it for advertising, or share it with anyone except the services that run
-  Anteroom (hosting, database and storage providers, and the AI provider that writes
-  listing text from your photos).</p>
+  <p>Only to run Anteroom for you: writing listing text, keeping your inventory and sales
+  in sync, and carrying out the marketplace actions you request or turn on. We do not
+  sell your data, use it for advertising or credit decisions, or share it with anyone
+  except the services that run Anteroom (hosting, database and storage providers, and the
+  AI provider that writes listing text from your photos).</p>
 
   <h2>Where it is stored</h2>
   <p>On the Mac app, your data stays on your Mac, and secrets stay in the macOS
@@ -66,7 +99,8 @@
   seller's.</p>
 
   <h2>Your choices</h2>
-  <p>You can delete listings at any time, disconnect a marketplace, or uninstall the
+  <p>You can turn off sale detection, delisting after a sale, and every share or offer
+  rule at any time. You can delete listings, disconnect a marketplace, or uninstall the
   extension. To delete your account and its data, email us and we will remove it
   within 30 days.</p>
 
