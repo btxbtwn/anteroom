@@ -1,13 +1,13 @@
 # Shared API contract
 
-The request and response shapes the web app (`vendoo-studio/src/`) and the
+The request and response shapes the web app (`anteroom/src/`) and the
 iPhone app (`anteroom-ios/`) both use, generated from the FastAPI backend so
 neither client can drift from the server or from each other.
 
 ## Source of truth
 
 The Pydantic models in
-[`vendoo-studio/server/vendoo_studio/routes/api_contract.py`](../vendoo-studio/server/vendoo_studio/routes/api_contract.py).
+[`anteroom/server/anteroom/routes/api_contract.py`](../anteroom/server/anteroom/routes/api_contract.py).
 Both servers declare them on their routes:
 
 - the hosted API (`routes/hosted_workspace.py`), which the iPhone app and the
@@ -23,14 +23,14 @@ returns something the contract does not describe fails instead of sending it.
 | File | What it is |
 |---|---|
 | `contracts/anteroom-api.json` | OpenAPI 3.1 for the contract's operations, exported from the hosted app |
-| `vendoo-studio/src/api/contract.gen.ts` | One TypeScript interface per schema, re-exported from `src/api/types.ts` |
+| `anteroom/src/api/contract.gen.ts` | One TypeScript interface per schema, re-exported from `src/api/types.ts` |
 | `anteroom-ios/Sources/API/Generated/APIContract.swift` | One `Codable` struct per schema, in the app's own naming (`coverPhotoURL`, `revisionID`) |
 
 Regenerate after changing a contract model, and commit the result with the
 change:
 
 ```sh
-cd vendoo-studio && .venv/bin/python scripts/api-contract.py
+cd anteroom && .venv/bin/python scripts/api-contract.py
 ```
 
 `--check` only reports stale files. One small script writes both clients so
@@ -74,7 +74,7 @@ Rules both generators follow:
 
 ## Checks
 
-- `vendoo-studio/server/tests/test_api_contract.py` (backend suite, every CI
+- `anteroom/server/tests/test_api_contract.py` (backend suite, every CI
   run that touches Studio, `contracts/` or the generated Swift) fails when a
   generated file is stale, or when the desktop routes declare a response or
   body different from the hosted ones. `POST` and `PATCH /api/conversations`
@@ -82,7 +82,7 @@ Rules both generators follow:
   limits lengths and refuses unknown keys).
 - A contract change that breaks a client fails its build: `tsc` in the
   frontend job, the Swift compile and unit tests in the iPhone app workflow,
-  which also runs for changes under `contracts/` and `vendoo-studio/server/`.
+  which also runs for changes under `contracts/` and `anteroom/server/`.
 
 ## Not in the contract yet
 
@@ -109,5 +109,5 @@ the same shape, in its own change.
 ## Versions
 
 The contract has no version of its own. Each product keeps its own release
-cadence; the iPhone app's version continues to come from `vendoo-studio/VERSION`
+cadence; the iPhone app's version continues to come from `anteroom/VERSION`
 as before (`anteroom-ios/tools/after-xcodegen.sh`).

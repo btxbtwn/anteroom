@@ -105,7 +105,7 @@ jobs:
 
       - name: Install the hosted server
         if: steps.gate.outputs.skip != 'true'
-        working-directory: vendoo-studio
+        working-directory: anteroom
         run: ./scripts/install-locked.sh python hosted
 
       # When the historical recovery checkpoint was used, verify BEFORE any
@@ -133,7 +133,7 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --reconcile-live-base \
             --fly-app "$FLY_APP" \
-            --alembic-cwd vendoo-studio
+            --alembic-cwd anteroom
 
       - name: Build the image
         id: image
@@ -152,7 +152,7 @@ jobs:
 
       - name: Apply pending migrations
         if: steps.gate.outputs.skip != 'true'
-        working-directory: vendoo-studio
+        working-directory: anteroom
         env:
           # Session pooler (port 5432) URI for the migration login. Never the
           # runtime login, and never given to Fly.
@@ -173,7 +173,7 @@ jobs:
 
       - name: Refresh category trees when the seed changed
         if: steps.gate.outputs.skip != 'true'
-        working-directory: vendoo-studio
+        working-directory: anteroom
         env:
           ANTEROOM_MIGRATION_DATABASE_URL: ${{ secrets.ANTEROOM_MIGRATION_DATABASE_URL }}
           PGSSLMODE: verify-full

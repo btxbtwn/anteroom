@@ -1,6 +1,6 @@
 # Pending changelog notes
 
-Pull requests do not edit `CHANGELOG.md` or bump `vendoo-studio/VERSION`. Add one
+Pull requests do not edit `CHANGELOG.md` or bump `anteroom/VERSION`. Add one
 note file here instead:
 
 ```text
@@ -18,7 +18,7 @@ the seller's words:
 ```
 
 After the pull request merges, the **Version** workflow
-(`.github/workflows/version.yml`) runs `vendoo-studio/scripts/release-changelog.py`:
+(`.github/workflows/version.yml`) runs `anteroom/scripts/release-changelog.py`:
 each merged pull request's notes become one version, written as the top
 `## <version> — <YYYY-MM-DD>` section of `CHANGELOG.md`, and the note files are
 deleted. It then starts the macOS release build for that version.

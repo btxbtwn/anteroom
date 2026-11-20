@@ -69,7 +69,7 @@ not resolve all six findings and must not be described as full UI parity.
 
 ## Desktop component map
 
-Paths below are relative to `vendoo-studio/`.
+Paths below are relative to `anteroom/`.
 
 | Concern | Primary source | What must carry into iPhone |
 | --- | --- | --- |

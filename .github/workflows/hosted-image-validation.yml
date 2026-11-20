@@ -8,13 +8,13 @@ on:
       - '.github/workflows/hosted-image-validation.yml'
       - '.github/hosted-image-smoke.sh'
       - '.github/scripts/test-hosted-image-smoke.py'
-      - 'vendoo-studio/pyproject.toml'
-      - 'vendoo-studio/uv.lock'
-      - 'vendoo-studio/package*.json'
-      - 'vendoo-studio/src/**'
-      - 'vendoo-studio/server/vendoo_studio/**'
+      - 'anteroom/pyproject.toml'
+      - 'anteroom/uv.lock'
+      - 'anteroom/package*.json'
+      - 'anteroom/src/**'
+      - 'anteroom/server/anteroom/**'
       - 'skills/**'
-      - 'vendoo-extension/manifest.json'
+      - 'anteroom-extension/manifest.json'
   workflow_dispatch:
 
 permissions:

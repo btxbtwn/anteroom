@@ -1,0 +1,147 @@
+[project]
+name = "anteroom"
+version = "0.1.1053"
+description = "Cross-listing app for generating and automating marketplace listings"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.121.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.9.0",
+    "sqlalchemy>=2.0.0",
+    "alembic>=1.13.0",
+    "httpx>=0.27.0",
+    "jsonschema>=4.26.0",
+    "protobuf>=6.33,<8",
+    "pyjwt[crypto]>=2.15.1",
+    "websockets>=13.0",
+    "truststore>=0.10.0",
+    "python-multipart>=0.0.9",
+    "pillow>=13.0.0",
+    # Security floors for the HTTP trust bundle and shared cache locks.
+    "certifi>=2026.10.19",
+    "filelock>=4.2.1",
+    "pillow-heif>=0.18",
+    "hachoir>=3.4,<4",
+    "numpy>=2.0",
+    "rapidfuzz>=3.14,<4",
+    "aiofiles>=24.0.0",
+    "semble>=0.5.0",
+]
+
+[project.optional-dependencies]
+# The hosted API runs on Postgres; the Mac app keeps SQLite and does not need this.
+hosted = [
+    "psycopg[binary]>=3.2",
+]
+dev = [
+    # Pinned: a new release can find new errors and break the recorded baseline.
+    "basedpyright==1.40.2",
+    "import-linter>=2.15",
+    "pip-audit>=2.9",
+    "psycopg[binary]>=3.2",
+    "pgserver==0.1.4",
+    "pytest>=8.3",
+    "pytest-xdist>=3.6",
+    # CI divides the backend suite between shards with it.
+    "pytest-split==0.11.0",
+    "ruff>=0.15",
+    "vulture>=2.16",
+    "anteroom[desktop]",
+]
+# The Mac app only: the hosted API keeps secrets in Vault and never starts a
+# Cursor or Claude sign-in, so its image leaves these out.
+desktop = [
+    "pywebview>=5,<7",
+    "keyring>=25.0.0",
+    "pyobjc-framework-Security>=10.0; sys_platform == 'darwin'",
+    "pyobjc-framework-Vision>=10.0; sys_platform == 'darwin'",
+    "cursor-sdk>=1.0.31",
+    "claude-agent-sdk>=0.2.165",
+]
+package = [
+    "anteroom[desktop]",
+    "pyinstaller>=6.3",
+]
+
+[project.scripts]
+anteroom-server = "anteroom.main:main"
+anteroom-category-trees = "anteroom.category_trees_cli:main"
+anteroom = "anteroom.cli.main:main"
+
+# uv.lock pins every package with its hashes. CI, the hosted image and the Mac
+# app install from it (scripts/locked-requirements.sh); `uv lock` refreshes it.
+[tool.uv]
+environments = ["sys_platform == 'darwin'", "sys_platform == 'linux'"]
+
+# The build backend, locked with its hash like everything else.
+# scripts/install-locked.sh installs it from the lock and builds the app
+# without build isolation, so nothing unpinned is fetched from PyPI.
+[dependency-groups]
+build = ["setuptools>=75.0"]
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["server"]
+
+[tool.pytest.ini_options]
+testpaths = ["server/tests"]
+pythonpath = ["server", "server/tests"]
+
+[tool.ruff]
+target-version = "py312"
+src = ["server"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B", "UP"]
+# (str, Enum) and StrEnum format differently; keep the explicit mixins.
+ignore = ["UP042"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Form", "fastapi.Query", "fastapi.Body", "fastapi.Header"]
+
+# Type checking. .basedpyright/baseline.json holds the errors that existed when
+# the check was added; only new ones fail. The baseline may only shrink.
+[tool.basedpyright]
+include = ["server/anteroom"]
+extraPaths = ["server"]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+stubPath = "typings"
+
+# Lower layers must not import higher ones: routes stay thin, services hold the
+# behavior, repositories hold queries, models hold tables. ignore_imports lists
+# the imports that broke this rule when the check was added; remove a line when
+# you fix it, and never add one.
+[tool.importlinter]
+root_package = "anteroom"
+
+[[tool.importlinter.contracts]]
+name = "Routes, then services, then repositories, then models"
+type = "layers"
+layers = [
+  "anteroom.routes",
+  "anteroom.services",
+  "anteroom.repositories",
+  "anteroom.models",
+]
+ignore_imports = [
+  "anteroom.database -> anteroom.services.schema_migrations",
+  "anteroom.database -> anteroom.services.service_context",
+  "anteroom.repositories.hosted_drafts -> anteroom.services.background_tasks",
+  "anteroom.repositories.hosted_drafts -> anteroom.services.hosted_fields",
+  "anteroom.repositories.inventory_imports -> anteroom.services.marketplace_identity",
+  "anteroom.repositories.queries -> anteroom.services.activity",
+  "anteroom.repositories.queries -> anteroom.services.draft_cache",
+  "anteroom.repositories.queries -> anteroom.services.item_status",
+  "anteroom.repositories.queries -> anteroom.services.streaming",
+  "anteroom.repositories.queries -> anteroom.services.vendoo_import",
+  "anteroom.services.automation_actions -> anteroom.routes.chat",
+  "anteroom.services.background_worker -> anteroom.routes.chat",
+  "anteroom.services.box_scout -> anteroom.desktop",
+  "anteroom.services.marketplace_accounts -> anteroom.desktop",
+]

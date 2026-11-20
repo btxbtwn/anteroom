@@ -33,9 +33,9 @@ updates:
       hosted-image:
         patterns: ["*"]
 
-  # vendoo-studio/uv.lock: the Mac app, the hosted API, CI tools and the build backend.
+  # anteroom/uv.lock: the Mac app, the hosted API, CI tools and the build backend.
   - package-ecosystem: uv
-    directory: /vendoo-studio
+    directory: /anteroom
     schedule:
       interval: weekly
     cooldown:
@@ -50,7 +50,7 @@ updates:
       - dependency-name: basedpyright
 
   - package-ecosystem: npm
-    directory: /vendoo-studio
+    directory: /anteroom
     schedule:
       interval: weekly
     cooldown:

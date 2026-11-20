@@ -42,12 +42,12 @@ NOT_STUDIO = (
 STUDIO_GENERATED = ("anteroom-ios/Sources/API/Generated/",)
 
 # Files the Version workflow rewrites with nothing but the new version.
-VERSION_ONLY = {"CHANGELOG.md", "vendoo-studio/VERSION"}
+VERSION_ONLY = {"CHANGELOG.md", "anteroom/VERSION"}
 VERSIONED = {
-    "vendoo-studio/package.json",
-    "vendoo-studio/package-lock.json",
-    "vendoo-studio/pyproject.toml",
-    "vendoo-studio/uv.lock",
+    "anteroom/package.json",
+    "anteroom/package-lock.json",
+    "anteroom/pyproject.toml",
+    "anteroom/uv.lock",
 }
 
 
@@ -69,7 +69,7 @@ def without_version(path: str, text: str) -> object:
             root.pop("version", None)
         return data
     if path.endswith("uv.lock"):
-        return re.sub(r'(?m)^(name = "vendoo-studio"\nversion = )"[^"]*"', r"\1", text)
+        return re.sub(r'(?m)^(name = "anteroom"\nversion = )"[^"]*"', r"\1", text)
     return re.sub(r'(?m)^version\s*=\s*"[^"]*"', "", text, count=1)
 
 
@@ -95,26 +95,26 @@ def components(files: list[str]) -> dict[str, bool]:
             selected.update(("backend", "health"))
         elif path.startswith(NOT_STUDIO) or ("/" not in path and path.endswith(".md")):
             continue
-        elif path in {"vendoo-studio/pyproject.toml", "vendoo-studio/uv.lock", "vendoo-studio/scripts/install-locked.sh"}:
+        elif path in {"anteroom/pyproject.toml", "anteroom/uv.lock", "anteroom/scripts/install-locked.sh"}:
             selected.update(("backend", "browser", "health", "audit"))
-        elif path in {"vendoo-studio/package.json", "vendoo-studio/package-lock.json"}:
+        elif path in {"anteroom/package.json", "anteroom/package-lock.json"}:
             # The extension linter comes from Studio's npm dependencies.
             selected.update(("frontend", "backend", "browser", "health", "extension"))
-        elif path.startswith("vendoo-studio/server/tests/"):
+        elif path.startswith("anteroom/server/tests/"):
             selected.update(("backend", "health"))
-        elif path.startswith("vendoo-studio/server/"):
+        elif path.startswith("anteroom/server/"):
             selected.update(("backend", "browser", "health"))
-        elif path.startswith(("vendoo-studio/src/", "vendoo-studio/public/")):
+        elif path.startswith(("anteroom/src/", "anteroom/public/")):
             # Backend tests inspect frontend source; retain both suites.
             selected.update(("frontend", "backend", "health"))
             if not path.endswith((".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")):
                 selected.add("browser")
-        elif path.startswith(("vendoo-studio/e2e/", "vendoo-studio/hosted-e2e/", "vendoo-studio/playwright")):
+        elif path.startswith(("anteroom/e2e/", "anteroom/hosted-e2e/", "anteroom/playwright")):
             # knip also scans e2e imports as part of the frontend job.
             selected.update(("frontend", "backend", "browser", "health"))
-        elif path.startswith("vendoo-extension/"):
+        elif path.startswith("anteroom-extension/"):
             selected.update(("extension", "backend", "browser", "health"))
-            if path == "vendoo-extension/manifest.json":
+            if path == "anteroom-extension/manifest.json":
                 # The web app shows the extension's version from it.
                 selected.add("frontend")
         elif path.startswith("skills/"):

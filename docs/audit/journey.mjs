@@ -2,7 +2,7 @@
 // New draft, three photos, generate, edit the title, reload, check the edit was kept,
 // then check that publishing is refused and that another seller can't read the draft.
 //
-// Run against a sandbox only, after `cd vendoo-studio && npm ci`:
+// Run against a sandbox only, after `cd anteroom && npm ci`:
 //   node docs/audit/journey.mjs local desktop <out-dir>     # ./sandbox.sh (UI 5174, API 4319)
 //   node docs/audit/journey.mjs hosted phone <out-dir>      # ./sandbox.sh --hosted (UI 5175, API 4320)
 // It prints one JSON line with the result, timings and any page errors, and
@@ -11,7 +11,7 @@
 import { createRequire } from "node:module";
 import { mkdirSync } from "node:fs";
 
-const require = createRequire(new URL("../../vendoo-studio/package.json", import.meta.url));
+const require = createRequire(new URL("../../anteroom/package.json", import.meta.url));
 const { chromium, devices } = require("@playwright/test");
 
 const [surface = "local", size = "desktop", out = "audit-shots"] = process.argv.slice(2);

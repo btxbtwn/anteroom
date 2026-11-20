@@ -234,7 +234,7 @@ transactions during model or remote-storage waits. Record the tested load,
 device/build, p50/p95 latency, errors and any missed target. Separate queue wait,
 model work and interface response time.
 
-The regression in `vendoo-studio/e2e/concurrentGeneration.e2e.ts` holds two
+The regression in `anteroom/e2e/concurrentGeneration.e2e.ts` holds two
 independent generation responses open, starts a second batch, selects another
 draft and types into its editor. It attaches event timing samples and a
 screenshot on desktop and phone; CI retains the browser report on success as
@@ -254,8 +254,8 @@ test alone does not verify SwiftUI behavior.
 
 ## Hosted load test, 2026-11-12
 
-`vendoo-studio/scripts/hosted-load-test.py` (how to run it: "Hosted load
-test" in `vendoo-studio/README.md`) drives the local hosted sandbox at main
+`anteroom/scripts/hosted-load-test.py` (how to run it: "Hosted load
+test" in `anteroom/README.md`) drives the local hosted sandbox at main
 `cd9a9176` (0.1.951). Conditions:
 
 - Web and worker in separate processes (`ANTEROOM_SANDBOX_WORKER_PROCESS=1`),
@@ -363,7 +363,7 @@ Both runs used fresh local hosted sandboxes, in sequence on the same shared
 waits, 24-ms simulated DB RTT, five sellers, three generating drafts each,
 two browsing tabs each, 40 extra inventory drafts each, 0.5-second think time,
 5-second fake model calls and 150 seconds per idle/load phase. The command and
-environment are the "Hosted load test" example in `vendoo-studio/README.md`,
+environment are the "Hosted load test" example in `anteroom/README.md`,
 using API port 4340. No live services, real AI, seller data or credentials were
 used. Heavy suites ran only after both loads. The narrow regression finished
 before baseline idle; code-health checks overlapped its first 29 seconds.
@@ -893,7 +893,7 @@ restocks, invalid/missing quantities, no sales and undated revisions. It also
 checks 1,001-item status/sold-unit scopes, partial-sale quantities and cross-seller
 RLS. Reproduce the SQLite volume observation with
 `.venv/bin/python -m pytest -q -s server/tests/test_inventory_egress.py` from
-`vendoo-studio`; use `ANTEROOM_TEST_DATABASE_URL` pointing only to a disposable
+`anteroom`; use `ANTEROOM_TEST_DATABASE_URL` pointing only to a disposable
 local Postgres server for that dialect (the suite creates its test databases).
 
 No production load test or configuration/schema change was performed. Actual
@@ -957,7 +957,7 @@ throwaway Postgres, separate web/worker processes, unchanged production pools
 was the Vite development build, Chromium 1254, desktop 1440x900 and iPhone 15
 browser emulation; it was not a physical phone or native latency measurement.
 
-The existing `vendoo-studio/scripts/hosted-load-test.py` supplied authentication,
+The existing `anteroom/scripts/hosted-load-test.py` supplied authentication,
 independent draft setup, normal reads/writes, generation/follower streams,
 cancellation and system sampling. A local adapter added one real
 `GET /api/analytics/offers` per browsing cycle: seven inclusive UTC days,

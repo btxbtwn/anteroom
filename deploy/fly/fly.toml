@@ -25,8 +25,8 @@ kill_timeout = 300
   # wait behind generation. `worker` runs drafts, assistant answers and the
   # schedulers; it takes no public traffic. Keep the `app` name: renaming the
   # group would destroy the serving Machine on deploy. See docs/hosted-production.md.
-  app = 'env ANTEROOM_PROCESS_ROLE=web python -m vendoo_studio.hosted_server'
-  worker = 'env ANTEROOM_PROCESS_ROLE=worker python -m vendoo_studio.hosted_server'
+  app = 'env ANTEROOM_PROCESS_ROLE=web python -m anteroom.hosted_server'
+  worker = 'env ANTEROOM_PROCESS_ROLE=worker python -m anteroom.hosted_server'
 
 [env]
   ANTEROOM_BACKGROUND_WORKER = '1'

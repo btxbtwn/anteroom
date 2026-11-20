@@ -10,7 +10,7 @@ Use Python 3.12 for the sandbox developer environment, matching CI.
 
 Run `./sandbox.sh`. The desktop API is on 4319 and UI on 5174. The existing
 Playwright suite exercises inventory, editing, generation and publish refusal
-at desktop and phone sizes: `cd vendoo-studio && npm run e2e`.
+at desktop and phone sizes: `cd anteroom && npm run e2e`.
 
 The packaged Mac app is also exercised after packaging in
 `.github/workflows/studio-macos.yml`: the bundle starts with
@@ -41,7 +41,7 @@ trees. It blocks outbound networking and uses the deterministic fake provider.
 Only the hosted draft worker runs; it cannot publish. Ctrl+C stops the servers
 and discards their data. No Docker, cloud account, email or credentials are needed.
 
-Run `cd vendoo-studio && npm run e2e:hosted` for desktop/phone hosted tests.
+Run `cd anteroom && npm run e2e:hosted` for desktop/phone hosted tests.
 The tests cover signed-in inventory, photo ownership across two sellers,
 publish refusal and generation through the real durable draft worker.
 
