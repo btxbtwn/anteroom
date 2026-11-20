@@ -15,9 +15,12 @@ import json
 import logging
 import threading
 import time
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+
+from sqlalchemy.orm import Session
 
 from vendoo_studio.config import user_data_root
 
@@ -27,10 +30,26 @@ REFRESH_AFTER_S = 5 * 60
 _lock = threading.Lock()
 _refreshing: set[tuple[str, str, str]] = set()
 _tasks: set[asyncio.Task[None]] = set()
+_preloaded: contextvars.ContextVar[dict[str, dict | None] | None] = contextvars.ContextVar(
+    "saved_choices_preloaded", default=None,
+)
 
 Read = Callable[[], Awaitable[Any]]
 Refresh = Callable[[], Coroutine[Any, Any, None]]
 Background = Callable[[Refresh], None]
+
+
+@contextmanager
+def preload_entries(entries: dict[str, dict | None] | None) -> Iterator[None]:
+    """Reuse entries already read inside the request's database session."""
+    if entries is None:
+        yield
+        return
+    token = _preloaded.set(entries)
+    try:
+        yield
+    finally:
+        _preloaded.reset(token)
 
 
 def _seller() -> str:
@@ -48,7 +67,7 @@ def _key(name: str) -> str:
     return f"choices:{name}"
 
 
-def _entry(name: str) -> dict | None:
+def _entry(name: str, *, db: Session | None = None) -> dict | None:
     if not _seller():
         with _lock:
             try:
@@ -62,9 +81,17 @@ def _entry(name: str) -> dict | None:
     from vendoo_studio.database import SessionLocal
     from vendoo_studio.models.user_preference import UserPreference
 
-    with SessionLocal() as db:
+    if db is not None:
         entry = db.scalar(select(UserPreference.value).where(UserPreference.key == _key(name)))
+    else:
+        with SessionLocal() as session:
+            entry = session.scalar(select(UserPreference.value).where(UserPreference.key == _key(name)))
     return entry if isinstance(entry, dict) else None
+
+
+def read_entry(name: str, *, db: Session | None = None) -> dict | None:
+    """Read one saved-choices entry, reusing an open session when given."""
+    return _entry(name, db=db)
 
 
 def _save(name: str, account: str, value: Any) -> None:
@@ -173,7 +200,11 @@ async def kept(name: str, account: str, read: Read, *, usable: Callable[[Any], b
     With no saved copy for this account, read now. ``usable`` keeps a partial or
     signed-out answer from being saved, so the seller's reload still reads again.
     """
-    entry = await asyncio.to_thread(_entry, name)
+    preloaded = _preloaded.get()
+    if preloaded is not None and name in preloaded:
+        entry = preloaded[name]
+    else:
+        entry = await asyncio.to_thread(_entry, name)
     if entry and entry.get("account") == account:
         if time.time() - float(entry.get("at") or 0) >= REFRESH_AFTER_S:
             _refresh_later(name, account, read, usable, background)

@@ -274,6 +274,72 @@ async function readPhotos<T>(path: string, form: FormData, button: string): Prom
   }
 }
 
+function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) return new Promise((resolve) => setTimeout(resolve, ms));
+  if (signal.aborted) return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
+ * Rebuild and fence one marketplace's saved form definition. This write is
+ * idempotent and revision-fenced, so a dropped mobile connection (`TypeError:
+ * Load failed`) or unexplained 502/503/504 from a proxy is retried once.
+ * Explained refusals (409 revision conflict, 404, or marketplace 502) fail fast.
+ */
+async function refreshMarketplaceForm(
+  convId: string,
+  marketplace: string,
+  revisionId: string,
+  options?: ReadOptions,
+): Promise<{ revision_id: string }> {
+  const path = `/conversations/${convId}/native-marketplaces/${marketplace}/form/refresh`;
+  for (let attempt = 1; ; attempt++) {
+    let response: Response;
+    try {
+      response = await studioFetch(`${BASE}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision_id: revisionId }),
+        signal: options?.signal,
+      });
+    } catch (error) {
+      if (options?.signal?.aborted) throw error;
+      if (error instanceof TypeError) {
+        if (attempt === 1) {
+          await sleepAbortable(400, options?.signal);
+          continue;
+        }
+        throw new Error("Could not reach the server to reload fields. Check your connection and try again.");
+      }
+      throw error;
+    }
+    if (response.ok) return response.json();
+    const body = await response.json().catch(() => null);
+    const explained = typeof body?.detail === "string" && body.detail.trim();
+    if (!explained && UNAVAILABLE_STATUSES.has(response.status) && attempt === 1) {
+      await sleepAbortable(400, options?.signal);
+      continue;
+    }
+    throw new ApiRequestError(
+      errorMessage(body ?? { detail: response.statusText }, `Request failed: ${response.status}`),
+      response.status,
+      false,
+      retryAfterMs(response.headers.get("Retry-After")),
+      response.headers.get("X-Anteroom-Reason"),
+    );
+  }
+}
+
 export const api = {
   vendooDraft: {
     check: (id: string) => request<VendooDraft>(`/conversations/${id}/vendoo-draft/check`, { method: "POST" }),
@@ -306,8 +372,8 @@ export const api = {
       }),
   },
   catalog: {
-    choiceList: (name: string, version: string) =>
-      request<ChoiceList>(`/catalog/choice-lists/${encodeURIComponent(name)}?v=${encodeURIComponent(version)}`),
+    choiceList: (name: string, version: string, options?: ReadOptions) =>
+      read<ChoiceList>(`/catalog/choice-lists/${encodeURIComponent(name)}?v=${encodeURIComponent(version)}`, options),
     dropdownOptions: () =>
       request<{ forms: Record<string, Record<string, string[]>> }>("/catalog/dropdown-options"),
     searchCategories: (q: string, marketplace: string) =>
@@ -616,12 +682,13 @@ export const api = {
       request<SalesCheck>(`/conversations/${convId}/marketplace-listings/check-sales`, { method: "POST" }),
   },
   nativeMarketplaces: {
-    refreshForm: (convId: string, marketplace: string, revisionId: string) =>
-      request<{ revision_id: string }>(`/conversations/${convId}/native-marketplaces/${marketplace}/form/refresh`, {
-        method: "POST", body: JSON.stringify({ revision_id: revisionId }),
-      }),
-    form: (convId: string, marketplace: string, revisionId?: string | null) =>
-      request<MarketplaceForm>(`/conversations/${convId}/native-marketplaces/${marketplace}/form${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`),
+    refreshForm: (convId: string, marketplace: string, revisionId: string, options?: ReadOptions) =>
+      refreshMarketplaceForm(convId, marketplace, revisionId, options),
+    form: (convId: string, marketplace: string, revisionId?: string | null, options?: ReadOptions) =>
+      read<MarketplaceForm>(
+        `/conversations/${convId}/native-marketplaces/${marketplace}/form${revisionId ? `?revision_id=${encodeURIComponent(revisionId)}` : ""}`,
+        options,
+      ),
     status: (convId: string) => request<NativeDrafts>(`/conversations/${convId}/native-marketplaces`),
     preflight: (convId: string) =>
       request<NativePreflight>(`/conversations/${convId}/native-marketplaces/preflight`),

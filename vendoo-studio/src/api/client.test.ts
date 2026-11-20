@@ -221,3 +221,48 @@ describe("Requests while the server restarts", () => {
     expect(retryAfterMs(null)).toBeNull();
   });
 });
+
+describe("Reloading marketplace fields", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("retries once when Safari drops the connection with TypeError: Load failed", async () => {
+    const fetch = vi.fn()
+      .mockRejectedValueOnce(new TypeError("Load failed"))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: "r2" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    await expect(api.nativeMarketplaces.refreshForm("item", "mercari", "r1")).resolves.toEqual({ revision_id: "r2" });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("retries once on an unexplained proxy 503 and fails fast on explained 409 or 502", async () => {
+    const proxyFetch = vi.fn()
+      .mockResolvedValueOnce(new Response("<html>503</html>", { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ revision_id: "r2" }), { status: 200 }));
+    vi.stubGlobal("fetch", proxyFetch);
+    await expect(api.nativeMarketplaces.refreshForm("item", "ebay", "r1")).resolves.toEqual({ revision_id: "r2" });
+    expect(proxyFetch).toHaveBeenCalledTimes(2);
+
+    const conflictFetch = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ detail: "The listing changed while fields loaded. Reload its fields again." }),
+      { status: 409 },
+    ));
+    vi.stubGlobal("fetch", conflictFetch);
+    await expect(api.nativeMarketplaces.refreshForm("item", "ebay", "r1")).rejects.toMatchObject({ status: 409 });
+    expect(conflictFetch).toHaveBeenCalledTimes(1);
+
+    const explained502 = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ detail: "eBay's category fields could not be loaded." }),
+      { status: 502 },
+    ));
+    vi.stubGlobal("fetch", explained502);
+    await expect(api.nativeMarketplaces.refreshForm("item", "ebay", "r1")).rejects.toMatchObject({ status: 502 });
+    expect(explained502).toHaveBeenCalledTimes(1);
+  });
+
+  it("replaces Safari's Load failed with a clear connection message if the retry also drops", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Load failed")));
+    await expect(api.nativeMarketplaces.refreshForm("item", "mercari", "r1")).rejects.toThrow(
+      "Could not reach the server to reload fields. Check your connection and try again.",
+    );
+  });
+});

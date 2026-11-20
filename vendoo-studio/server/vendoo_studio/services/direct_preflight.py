@@ -101,7 +101,7 @@ def prepare(db: Session, conv, listing_json: dict, marketplace: str) -> dict:
     from vendoo_studio.services.seller_overrides import apply_marketplace_overrides
 
     apply_marketplace_overrides(snapshot, marketplace)
-    snapshot = attach_form(snapshot, marketplace)
+    snapshot = attach_form(snapshot, marketplace, db=db)
     return snapshot
 
 

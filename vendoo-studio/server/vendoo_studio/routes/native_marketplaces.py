@@ -83,15 +83,15 @@ async def cancel(conv_id: str, marketplace: Marketplace):
 
 
 @router.get("/{marketplace}/form")
-def editor_form(conv_id: str, marketplace: Literal["ebay", "poshmark", "mercari", "depop", "etsy"],
-                revision_id: str | None = None, db: Session = Depends(get_db, scope="function")):
+async def editor_form(conv_id: str, marketplace: Literal["ebay", "poshmark", "mercari", "depop", "etsy"],
+                      revision_id: str | None = None):
     from vendoo_studio.services import native_editor
     from vendoo_studio.services.choice_lists import share
 
-    # The form reads the database and may wait on eBay or Chrome. A plain function runs in
-    # FastAPI's threadpool, which keeps those waits from holding up every other request.
+    # Read the DB snapshot in a worker session and release it before awaiting
+    # eBay, Etsy or Mercari on the server loop (reusing shared_http).
     try:
-        return share(native_editor.read_form(db, conv_id, marketplace, revision_id))
+        return share(await native_editor.editor_form(conv_id, marketplace, revision_id))
     except native.NativeMarketplaceError as exc:
         raise _http(exc) from exc
 
@@ -102,11 +102,11 @@ async def check_result(conv_id: str, marketplace: Marketplace, body: CheckReques
 
 
 @router.post("/{marketplace}/form/refresh")
-def refresh_form(conv_id: str, marketplace: Literal["ebay", "poshmark", "mercari", "depop", "etsy"],
-                 body: SaveDraftRequest, db: Session = Depends(get_db, scope="function")):
+async def refresh_form(conv_id: str, marketplace: Literal["ebay", "poshmark", "mercari", "depop", "etsy"],
+                       body: SaveDraftRequest):
     from vendoo_studio.services import native_editor
 
-    return _sync(native_editor.refresh_form, db, conv_id, marketplace, body.revision_id)
+    return await _reply(native_editor.refresh_editor_form(conv_id, marketplace, body.revision_id))
 
 
 @router.post("/{marketplace}/reset")

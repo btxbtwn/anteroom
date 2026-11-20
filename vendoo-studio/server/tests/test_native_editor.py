@@ -27,13 +27,14 @@ class NativeEditorTest(unittest.TestCase):
         import httpx
 
         from fastapi import FastAPI
-        from vendoo_studio.routes.hosted_workspace import router
+        from vendoo_studio.routes import hosted_workspace
         from vendoo_studio.services import error_alerts, error_log
-        from vendoo_studio.services.hosted_database import get_seller_db
+
+        async def fake_in_seller_session(_request, work, *args):
+            return work(self.db, *args)
 
         hosted = FastAPI()
-        hosted.include_router(router)
-        hosted.dependency_overrides[get_seller_db] = lambda: self.db
+        hosted.include_router(hosted_workspace.router)
         clients = (self.client, TestClient(hosted))
         secret = "PRIVATE-SENTINEL unlabelled-credential seller@example.test listing text"
         request = httpx.Request("GET", "https://example.test/schema?private=" + secret,
@@ -43,7 +44,8 @@ class NativeEditorTest(unittest.TestCase):
         failure.__cause__ = cause
         cause.__context__ = failure  # A cycle must not make diagnostics unbounded.
         for client in clients:
-            with patch.object(marketplace_schemas, "fields", new=AsyncMock(side_effect=failure)), \
+            with patch.object(hosted_workspace, "in_seller_session", new=fake_in_seller_session), \
+                    patch.object(marketplace_schemas, "fields", new=AsyncMock(side_effect=failure)), \
                     patch.object(native_editor, "_ebay_format_fields", new=AsyncMock(return_value=[])), \
                     patch.object(native_editor, "_ebay_choices", new=AsyncMock(return_value=[{}, {}, {}, {}])), \
                     self.assertLogs(native_editor.__name__, level="ERROR") as logs:
@@ -180,8 +182,16 @@ class NativeEditorTest(unittest.TestCase):
         self.bridge.assert_not_called()
 
     def test_reload_does_not_replace_an_edit_made_while_fields_load(self):
+        import asyncio
+
         async def build(*args, **kwargs):
-            listing_persistence.save_revision(self.db, self.conv.id, {**self.listing, "title": "New seller edit"}, "user_form")
+            await asyncio.to_thread(
+                listing_persistence.save_revision,
+                self.db,
+                self.conv.id,
+                {**self.listing, "title": "New seller edit"},
+                "user_form",
+            )
             return {"known": True, "fields": [{"path": "title", "label": "Title"}]}
 
         with patch.object(native_editor, "build_form", side_effect=build):
@@ -482,12 +492,12 @@ class NativeEditorTest(unittest.TestCase):
         import httpx
 
         started = threading.Event()
-        build = native_editor.read_form
+        snapshot = native_editor.form_snapshot
 
         def slow(*args, **kwargs):
             started.set()
             time.sleep(1.5)  # a database or Chrome wait that does not yield
-            return build(*args, **kwargs)
+            return snapshot(*args, **kwargs)
 
         async def run():
             transport = httpx.ASGITransport(app=app)
@@ -500,7 +510,7 @@ class NativeEditorTest(unittest.TestCase):
                 health = await client.get("/api/health")
                 return health, time.monotonic() - began, await form
 
-        with patch.object(native_editor, "read_form", new=slow):
+        with patch.object(native_editor, "form_snapshot", new=slow):
             health, waited, form = asyncio.run(run())
         self.assertEqual(health.status_code, 200)
         self.assertLess(waited, 0.75)

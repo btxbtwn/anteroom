@@ -270,3 +270,13 @@ def _keychain_memory_is_pristine():
     reset()
     yield
     reset()
+
+
+@pytest.fixture(autouse=True)
+def _fresh_mercari_quote_cache():
+    """Never bleed cached Mercari shipping quotes between tests."""
+    from vendoo_studio.services import mercari_form
+
+    mercari_form.clear_quote_cache()
+    yield
+    mercari_form.clear_quote_cache()

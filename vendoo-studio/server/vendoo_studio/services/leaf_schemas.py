@@ -20,6 +20,7 @@ LOOKUP_TIMEOUT_SEC = 10.0
 # Condition and colour encodings learned from the seller's own items. Direct
 # listing reads it to encode a marketplace form; nothing writes it any more.
 SCHEMA_FILE = "vendoo-item-schema.json"
+_schema_cache: tuple[Path, int, int, dict[str, Any]] | None = None
 
 
 def schema_path() -> Path:
@@ -27,17 +28,26 @@ def schema_path() -> Path:
 
 
 def load_schema() -> dict[str, Any] | None:
+    global _schema_cache
     path = schema_path()
-    if not path.exists():
+    try:
+        stat = path.stat()
+    except OSError:
         return None
+    cached = _schema_cache
+    if cached is not None and cached[0] == path and cached[1] == stat.st_mtime_ns and cached[2] == stat.st_size:
+        return cached[3]
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    return data if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        return None
+    _schema_cache = (path, stat.st_mtime_ns, stat.st_size, data)
+    return data
 
 
-def tree_leaf(marketplace: str, path: str) -> dict[str, Any] | None:
+def tree_leaf(marketplace: str, path: str, *, db=None) -> dict[str, Any] | None:
     """Exact leaf from the seeded ``category_tree_nodes`` table, when present.
 
     Vendoo's Mercari tree marks some parents as leaves ("Kids > Boys coats &
@@ -54,22 +64,33 @@ def tree_leaf(marketplace: str, path: str) -> dict[str, Any] | None:
     wanted = " > ".join(parts)
     if not wanted:
         return None
+
+    def read(session):
+        query = session.query(CategoryTreeNode).filter(
+            CategoryTreeNode.marketplace == marketplace,
+            CategoryTreeNode.path == wanted,
+            CategoryTreeNode.is_leaf.is_(True),
+        )
+        if marketplace == "mercari":
+            query = query.filter(CategoryTreeNode.has_children.is_(False))
+        node = query.first()
+        if node is None:
+            return None
+        cat_id, node_path, label, has_children = node.category_id, node.path, node.label, node.has_children
+        ancestors = _tree_ancestors(session, marketplace, str(cat_id))
+        return cat_id, node_path, label, has_children, ancestors
+
     try:
-        with SessionLocal() as db:
-            query = db.query(CategoryTreeNode).filter(
-                CategoryTreeNode.marketplace == marketplace,
-                CategoryTreeNode.path == wanted,
-                CategoryTreeNode.is_leaf.is_(True),
-            )
-            if marketplace == "mercari":
-                query = query.filter(CategoryTreeNode.has_children.is_(False))
-            node = query.first()
-            if node is None:
-                return None
-            cat_id, node_path, label, has_children = node.category_id, node.path, node.label, node.has_children
-            ancestors = _tree_ancestors(db, marketplace, str(cat_id))
+        if db is not None:
+            found = read(db)
+        else:
+            with SessionLocal() as session:
+                found = read(session)
     except SQLAlchemyError:
         return None
+    if found is None:
+        return None
+    cat_id, node_path, label, has_children, ancestors = found
     # Shaped like a ``category_search`` hit so one mapper handles both. The
     # tree has no ``payload_text``, so ``extras`` only comes from a live hit.
     return {

@@ -18,7 +18,7 @@ from vendoo_studio.services.vendoo_item_build import _general_details, _listing_
 log = logging.getLogger("vendoo_studio.native_form")
 
 
-def resolve_category(listing: dict[str, Any], marketplace: str) -> None:
+def resolve_category(listing: dict[str, Any], marketplace: str, *, db=None) -> None:
     """Point the listing's ids for ``marketplace`` at the leaf its breadcrumb names now.
 
     A stored category object is kept only while it still names the same path:
@@ -41,7 +41,7 @@ def resolve_category(listing: dict[str, Any], marketplace: str) -> None:
         return
     from vendoo_studio.services.leaf_schemas import tree_leaf
 
-    leaf = category_from_hit(tree_leaf(marketplace, " > ".join(path)), " > ".join(path))
+    leaf = category_from_hit(tree_leaf(marketplace, " > ".join(path), db=db), " > ".join(path))
     specifics = listing.get(f"{marketplace}_specifics")
     if isinstance(specifics, dict):
         specifics.pop("categoryId", None)
@@ -53,18 +53,18 @@ def resolve_category(listing: dict[str, Any], marketplace: str) -> None:
         objects.pop(marketplace, None)
 
 
-def _leaf_specs(marketplace: str, leaf_id: str):
+def _leaf_specs(marketplace: str, leaf_id: str, *, db=None):
     """Vendoo's cached field schema for the leaf, when one has been read."""
     from vendoo_studio.services.category_fields import load_fields
 
     try:
-        return load_fields(marketplace, leaf_id) if leaf_id else None
+        return load_fields(marketplace, leaf_id, db=db) if leaf_id else None
     except Exception:  # noqa: BLE001 - a missing cache only means fewer coded fields
         log.info("No cached %s schema for %s", marketplace, leaf_id)
         return None
 
 
-def vendoo_form(listing: dict[str, Any], marketplace: str) -> dict[str, Any]:
+def vendoo_form(listing: dict[str, Any], marketplace: str, *, db=None) -> dict[str, Any]:
     """Overrides, marketplace specifics, and category aspects for one marketplace.
 
     Built even when Vendoo would leave the form empty (modern resale on Etsy).
@@ -75,7 +75,7 @@ def vendoo_form(listing: dict[str, Any], marketplace: str) -> dict[str, Any]:
     general = _general_details(listing, schema, [], unresolved)
     ids = listing.get("marketplace_category_ids")
     leaf_id = str(ids.get(marketplace) or "") if isinstance(ids, dict) else ""
-    section = _listing_section(marketplace, listing, general, schema, unresolved, _leaf_specs(marketplace, leaf_id))
+    section = _listing_section(marketplace, listing, general, schema, unresolved, _leaf_specs(marketplace, leaf_id, db=db))
     return {
         "overrides": section.get("overrides") or {},
         "specifics": section.get("marketplaceSpecifics") or {},
@@ -85,16 +85,17 @@ def vendoo_form(listing: dict[str, Any], marketplace: str) -> dict[str, Any]:
     }
 
 
-def attach_form(snapshot: dict[str, Any], marketplace: str) -> dict[str, Any]:
+def attach_form(snapshot: dict[str, Any], marketplace: str, *, db=None) -> dict[str, Any]:
     from vendoo_studio.services.user_settings import (
         apply_mercari_shoebox_default,
         get_mercari_shipping_label,
         get_ships_from_zip,
     )
 
-    resolve_category(snapshot, marketplace)
+    resolve_category(snapshot, marketplace, db=db)
     form = ({"overrides": {"categoryV2": (snapshot.get("marketplace_category_objects") or {}).get("mercari") or {}},
-             "specifics": {}, "aspects": {}, "unresolved": []} if marketplace == "mercari" else vendoo_form(snapshot, marketplace))
+             "specifics": {}, "aspects": {}, "unresolved": []} if marketplace == "mercari"
+            else vendoo_form(snapshot, marketplace, db=db))
     zip_code = get_ships_from_zip()
     if zip_code:
         form["ships_from_zip"] = zip_code

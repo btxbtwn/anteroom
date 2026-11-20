@@ -25,7 +25,7 @@ from vendoo_studio.routes.api_contract import CONFLICT, NOT_FOUND, REFUSED
 from vendoo_studio.routes.hosted_direct_listing import ACTION_MARKETPLACES
 from vendoo_studio.routes.suggestions import SuggestionsResponse
 from vendoo_studio.services import user_settings
-from vendoo_studio.services.hosted_database import get_seller_db
+from vendoo_studio.services.hosted_database import get_seller_db, in_seller_session
 from vendoo_studio.services.hosted_listing_contract import editable_listing, stored_listing_fields
 from vendoo_studio.version import app_version
 
@@ -623,34 +623,51 @@ class FormRefreshInput(BaseModel):
     revision_id: str = Field(min_length=1, max_length=100)
 
 
+def _hosted_form_snapshot(db, identity: str, marketplace: str, revision_id: str | None):
+    from vendoo_studio.services.native_editor import form_snapshot
+
+    current = db.get(Listing, identity)
+    if current and current.current_revision_id and hosted_drafts.current_fields_revision(db, identity) is None:
+        raise HTTPException(409, 'This listing needs its revision link repaired before editing.')
+    return form_snapshot(db, identity, marketplace, revision_id)
+
+
 @router.post('/conversations/{identity}/native-marketplaces/{marketplace}/form/refresh')
-def refresh_native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
-                                body: FormRefreshInput, db=Depends(get_seller_db, scope="function")):
-    from vendoo_studio.services.native_editor import refresh_form
+async def refresh_native_catalog_form(
+    identity: str,
+    marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
+    body: FormRefreshInput,
+    request: Request,
+):
+    from vendoo_studio.services.native_editor import build_form, form_snapshot, save_refreshed_form
     from vendoo_studio.services.native_marketplaces import NativeMarketplaceError
 
     try:
-        return refresh_form(db, identity, marketplace, body.revision_id)
+        inputs = await in_seller_session(request, form_snapshot, identity, marketplace, body.revision_id)
+        with inputs.cached_context():
+            form = await build_form(inputs.snapshot, inputs.listing_json, marketplace, refresh=True)
+        return await in_seller_session(request, save_refreshed_form, identity, marketplace, body.revision_id, form)
     except NativeMarketplaceError as error:
         raise HTTPException(error.status_code, str(error)) from None
 
 
 @router.get('/conversations/{identity}/native-marketplaces/{marketplace}/form')
-def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
-                        revision_id: str | None = None, db=Depends(get_seller_db, scope="function")):
+async def native_catalog_form(
+    identity: str,
+    marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
+    request: Request,
+    revision_id: str | None = None,
+):
     from vendoo_studio.services.choice_lists import share
-    from vendoo_studio.services.native_editor import read_form
+    from vendoo_studio.services.native_editor import build_form
     from vendoo_studio.services.native_marketplaces import NativeMarketplaceError
 
-    # These canonical builders read verified catalogs and the owned snapshot.
-    # Mercari also reads anonymous public shipping quotes, and eBay reads its
-    # category schema and the seller's own policies with their connected
-    # account. No marketplace write runs. A plain function runs in FastAPI's
-    # threadpool, so none of it waits on the request loop.
+    # Finish the DB snapshot and release the pooled Postgres connection before
+    # awaiting Mercari, eBay or Etsy on the server loop (reusing shared_http).
     try:
-        current = db.get(Listing, identity)
-        if current and current.current_revision_id and hosted_drafts.current_fields_revision(db, identity) is None:
-            raise HTTPException(409, 'This listing needs its revision link repaired before editing.')
-        return share(read_form(db, identity, marketplace, revision_id))
+        inputs = await in_seller_session(request, _hosted_form_snapshot, identity, marketplace, revision_id)
+        with inputs.cached_context():
+            form = await build_form(inputs.snapshot, inputs.listing_json, marketplace)
+        return share(form)
     except NativeMarketplaceError as error:
         raise HTTPException(error.status_code, str(error)) from None

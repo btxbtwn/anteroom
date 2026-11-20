@@ -1,8 +1,12 @@
 """Read Mercari US public shipping quotes with an ephemeral guest session."""
 from __future__ import annotations
 
+import contextlib
+
 import httpx
 from google.protobuf import descriptor_pb2, descriptor_pool, json_format, message_factory
+
+from vendoo_studio.services import shared_http
 
 BASE_URL = "https://api-double.us.mercari.com"
 
@@ -48,8 +52,20 @@ async def shipping_quotes(category: int, ounces: int, dimensions: tuple[float, f
     headers = {"Accept": "application/protobuf", "Content-Type": "application/protobuf",
                "User-Agent": "Mercari_d/328532 (iOS 26.0; en-US; iPhone17,3)",
                "X-Platform": "ios", "X-App-Release": "9.37.0", "X-App-Version": "328532"}
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=20, headers=headers) as client:
-        guest = await client.get("/v1/token")
+    shared = shared_http.current_client()
+    client_ctx = (
+        contextlib.nullcontext(shared)
+        if shared is not None
+        else httpx.AsyncClient(base_url=BASE_URL, timeout=20, headers=headers)
+    )
+    token_url = BASE_URL + "/v1/token" if shared is not None else "/v1/token"
+    quotes_url = (
+        BASE_URL + "/v1/shipping/available_shipping_classes"
+        if shared is not None
+        else "/v1/shipping/available_shipping_classes"
+    )
+    async with client_ctx as client:
+        guest = await client.get(token_url, headers=headers, timeout=20)
         guest.raise_for_status()
         token = MESSAGES["Guest"].FromString(guest.content).token.accessToken
         if not token:
@@ -59,8 +75,12 @@ async def shipping_quotes(category: int, ounces: int, dimensions: tuple[float, f
             selectedPackageDimension=dict(zip(("length", "width", "height"), dimensions, strict=True)) | {"unit": 1},
         )
         # The guest token stays in memory and is never stored or returned.
-        response = await client.post("/v1/shipping/available_shipping_classes", content=request.SerializeToString(),
-                                     headers={"Authorization": "Bearer " + token})
+        response = await client.post(
+            quotes_url,
+            content=request.SerializeToString(),
+            headers={**headers, "Authorization": "Bearer " + token},
+            timeout=20,
+        )
         response.raise_for_status()
     data = json_format.MessageToDict(MESSAGES["Response"].FromString(response.content),
                                     always_print_fields_with_no_presence=True)

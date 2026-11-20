@@ -35,20 +35,26 @@ def choice_list(name: str) -> tuple[bytes, str] | None:
     return body, hashlib.sha256(body).hexdigest()[:16]
 
 
+@cache
+def _named() -> dict[tuple[str, str], tuple[str, Callable[[], dict]]]:
+    return {(marketplace, path): (name, load) for name, (marketplace, path, load) in _sources().items()}
+
+
 def share(form: dict) -> dict:
     """The form with each shared list replaced by its name and version.
 
     A row whose choices differ from the shared list (a builder narrowed them for
     this listing) keeps its own."""
-    named = {(marketplace, path): (name, load) for name, (marketplace, path, load) in _sources().items()}
+    named = _named()
+    marketplace = str(form.get("marketplace") or "")
     rows = []
     for row in form.get("fields") or []:
-        found = named.get((str(form.get("marketplace") or ""), str(row.get("path") or "")))
+        found = named.get((marketplace, str(row.get("path") or "")))
         if found:
             name, load = found
             payload = load()
             listed = choice_list(name)
-            if listed and all(row.get(key) == value for key, value in payload.items()):
+            if listed and all((row.get(key) is value or row.get(key) == value) for key, value in payload.items()):
                 row = {key: value for key, value in row.items() if key not in payload}
                 row["choice_list"] = {"name": name, "version": listed[1]}
         rows.append(row)
