@@ -26,4 +26,8 @@ The hosted API runs on Fly.io behind `https://myanteroom.com` and stores data in
 
 ## Chrome extension
 
-The extension's only page-facing content script runs on `https://myanteroom.com`, top frame only, and accepts messages only from that origin. Connecting Chrome to a hosted account requires the seller to approve it in the extension's own `cloud-connect.html` window. With the Mac app, it talks to `http://127.0.0.1:4318` using the pairing token above.
+The extension's only page-facing content script runs on `https://myanteroom.com`, top frame only, and accepts messages only from that origin. Connecting Chrome to a hosted account requires the seller to approve it in the extension's own `cloud-connect.html` window, and every relayed hosted command carries a short-lived ES256 approval JWS signed by the hosted API and verified by the extension worker (see [`docs/cloud-extension.md`](docs/cloud-extension.md)). With the Mac app, it talks to `http://127.0.0.1:4318` using the pairing token above.
+
+## Webhook relay
+
+`webhook-relay/` runs on Cloudflare Workers. It receives eBay and Etsy webhooks, verifies their signatures, brokers eBay and Etsy OAuth sign-in, and forwards Etsy API calls so marketplace client secrets never ship in the Mac or iPhone apps. It never connects inbound to a seller's Mac (Anteroom pulls events outbound) and stores only device IDs, token hashes, linked account IDs, event IDs, and short-lived sign-in tokens (up to 15 minutes) — never buyer names, addresses, prices, or listing text. See [`webhook-relay/README.md`](webhook-relay/README.md).

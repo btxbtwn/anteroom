@@ -204,17 +204,19 @@ Mobile and narrow screens use Photos, Chat, Listing, and Automation tabs.
 
 ### Visual Direction
 
+> **Visual source of truth:** [`DESIGN.md`](DESIGN.md) owns Anteroom's active visual styling, color tokens, typography, spacing, and shared component primitives. When anything in this specification disagrees with `DESIGN.md`, `DESIGN.md` wins.
+
 - Purpose-built local listing workbench for one operator. Photos in, marketplace listing out, seller confirmation before anything is published.
 - Dense enough for daily operational use.
 - T3 Code-inspired information hierarchy, not an IDE clone.
-- T3 Code stock dark shell from `pingdotgg/t3code` `themePalette.ts`: `#000000` sidebar, `#0a0a0a` workspace, `#111111` surfaces, `#191919` borders, and `#346bf1` accent. Settings → Appearance also offers a neutral light shell (inverted surfaces, same cobalt accent) and System (follow the OS). Preference is stored in `settings.json` under `ui.theme` (`dark` | `light` | `system`, default `dark`).
+- Neutral monochrome shell defined in [`DESIGN.md`](DESIGN.md) and `styles/t3-theme.css`: `#000000` sidebar, `#0a0a0a` workspace, `#111111` surfaces, subtle borders, and neutral ink primary accents in dark mode. Settings → Appearance also offers a neutral zinc light shell (dark ink primary accents) and System (follow the OS). Preference is stored in `settings.json` under `ui.theme` (`dark` | `light` | `system`, default `dark`).
 - The main workspace is inset by 8px inside a 12px rounded frame; navigation remains 244px wide.
 - Sidebar, workspace, and inspector share the same 8px inset and aligned top/bottom frame.
 - Column footers stay independent: sidebar keeps Settings and updates; inspector keeps the marketplace actions; only the chat column gets a T3-style composer.
-- Chat chrome follows T3 Code: user right, assistant left, no bubble cards. Assistant and user text render as T3-style markdown (GFM tables, headings, lists, inline code). The composer is always visible as a rounded `#111111` pill on `#0a0a0a` with a circular `#346bf1` send control. Empty state keeps Generate Listing when photos exist.
+- Chat chrome follows T3 Code: user right, assistant left, no bubble cards. Assistant and user text render as T3-style markdown (GFM tables, headings, lists, inline code). The composer is always visible as a rounded `#111111` pill on `#0a0a0a` with a neutral ink (`bg-primary`) circular send control per [`DESIGN.md`](DESIGN.md). Empty state keeps Generate Listing when photos exist.
 - Browser preview is a bottom pane in the center column only when the seller opens **Browse draft**. **List** and **Update** run in the background with progress in the editor; they do not open the preview or switch the mobile pane. Collapse the preview when the seller closes it. Do not keep a permanent ~42% split.
 - Browse draft makes the preview interactive, following T3 Code's in-app browser. **Use** forwards pointer, wheel, keyboard, and paste to the draft tab. **Pick**, **Box**, and **Pen** point Anteroom at fields, and **Missed fields** outlines empty listing fields. Picked fields show as chips in the chat composer. While the draft is open, chat messages go to the fix agent with those fields: it reads the live form, takes one action at a time (Anteroom's filler first, then clicks and typing), re-reads the form to verify, saves, and replies with the changed values and its steps. It changes only what the seller asked for, skips account settings, pauses when the seller presses, scrolls, or types in the pane, and stops after 24 steps. Input waits while Anteroom is filling. In the phone layout the pane sends its size and Chrome lays the draft out at that size with touch emulation, a finger on the pane is forwarded as touch (tap, drag to scroll), and **Keyboard** focuses a hidden text box so the phone's keyboard opens and its edits replay on the draft. Fills always run on the desktop layout; the phone layout returns when they finish.
-- T3 Code blue marks primary actions, selection, and focus; marketplace colors remain sparing.
+- Primary actions use neutral ink (`bg-primary`) and gray focus rings per [`DESIGN.md`](DESIGN.md) — never brand blue; color is reserved for status indicators and marketplace logos.
 - System UI sans handles navigation, controls, and content while the T3 Code mono stack handles measurements, JSON, and technical status.
 - Avoid generic dashboard cards and excessive rounded containers.
 - Persistent status bar for extension and validation state.
@@ -906,6 +908,13 @@ Direct listing smoke test (a private draft on a disposable item):
 - `anteroom-extension/README.md`: setup and workflow documentation.
 
 ## 20. Non-Goals for Version 1
+
+> **Historical scope note:** This list records the original Version 1 scope only. Several items below have since shipped in subsequent milestones:
+> - **Multi-user accounts, cloud hosting, and hosted background workers** (`docs/cloud-architecture.md`, Fly.io + Supabase)
+> - **Native iPhone/iPad app** (`anteroom-ios/`, SwiftUI)
+> - **Multiple AI providers** beyond Xiaomi MiMo (e.g. ChatGPT/Codex, Claude/Cursor)
+>
+> **Automatic publication** (without explicit seller confirmation) and **LibreChat or T3 Code integration** remain enduring non-goals.
 
 - Automatic publication.
 - Multi-user accounts.
