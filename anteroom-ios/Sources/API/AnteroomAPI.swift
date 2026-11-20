@@ -75,7 +75,6 @@ final class AnteroomAPI: Sendable {
         await optionsCache.clear()
         await choiceLists.clear()
         await immutable.clear()
-        try? FileManager.default.removeItem(at: Self.exportsDirectory)
     }
 
     // MARK: Listings (the shared workspace contract the desktop and web use)
@@ -737,11 +736,15 @@ final class AnteroomAPI: Sendable {
     /// A CSV export as a file to share. Delete it when the share sheet closes;
     /// sign-out empties the folder too.
     func exportCSV(_ path: String, query: [URLQueryItem] = [], filename: String) async throws -> URL {
-        let data = try await send(request("GET", path, query: query))
-        try FileManager.default.createDirectory(at: Self.exportsDirectory, withIntermediateDirectories: true)
-        let url = Self.exportsDirectory.appending(path: filename)
-        try data.write(to: url, options: [.atomic, .completeFileProtection])
-        return url
+        let session = sessions.current
+        let data = try await send(request("GET", path, query: query), session: session)
+        return try sessions.withCurrent(session) {
+            try Task.checkCancellation()
+            try FileManager.default.createDirectory(at: Self.exportsDirectory, withIntermediateDirectories: true)
+            let url = Self.exportsDirectory.appending(path: filename)
+            try data.write(to: url, options: [.atomic, .completeFileProtection])
+            return url
+        }
     }
 
     // MARK: Bulk actions (reviewed first, as on the desktop)
@@ -1178,15 +1181,16 @@ final class AnteroomAPI: Sendable {
         try JSONDecoder().decode(T.self, from: try await send(request))
     }
 
-    private func send(_ request: URLRequest) async throws -> Data {
-        let (data, status) = try await perform(request)
+    private func send(_ request: URLRequest, session: URLSession? = nil) async throws -> Data {
+        let session = session ?? sessions.current
+        let (data, status) = try await perform(request, session: session)
         if status == 401 {
             let refusal = try await renewAfterRefusal(data)
             // Only a read is safe to send again; anything else may already have run.
             guard let token = refusal.token, request.httpMethod == "GET" else { throw refusal.error }
             var retry = request
             retry.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            let (again, againStatus) = try await perform(retry)
+            let (again, againStatus) = try await perform(retry, session: session)
             if againStatus == 401, Self.isSessionRefusal(again) {
                 // A token issued moments ago was refused too: the account can't be used.
                 await auth.signedOut()
@@ -1203,9 +1207,11 @@ final class AnteroomAPI: Sendable {
         return data
     }
 
-    private func perform(_ request: URLRequest) async throws -> (Data, Int) {
+    private func perform(_ request: URLRequest, session: URLSession) async throws -> (Data, Int) {
         let (data, response) = try await readRetry.run(request) { request in
-            let (data, response) = try await urlSession.data(for: request)
+            try sessions.withCurrent(session) {}
+            let (data, response) = try await session.data(for: request)
+            try sessions.withCurrent(session) {}
             guard let http = response as? HTTPURLResponse else {
                 throw APIError(status: 0, message: "Anteroom didn't answer. Try again.")
             }
@@ -1330,10 +1336,20 @@ private final class SessionBox: @unchecked Sendable {
         lock.withLock { session }
     }
 
+    /// Uses the same lock as retirement so a late export cannot recreate a
+    /// file after sign-out has removed the seller's exports.
+    func withCurrent<T>(_ expected: URLSession, _ operation: () throws -> T) throws -> T {
+        try lock.withLock {
+            guard session === expected else { throw CancellationError() }
+            return try operation()
+        }
+    }
+
     func reset() {
         let previous: URLSession = lock.withLock {
             let old = session
             session = URLSession(configuration: configuration)
+            try? FileManager.default.removeItem(at: AnteroomAPI.exportsDirectory)
             return old
         }
         previous.invalidateAndCancel()

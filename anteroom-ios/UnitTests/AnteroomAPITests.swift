@@ -319,6 +319,35 @@ final class AnteroomAPITests: XCTestCase {
         XCTAssertEqual(StubProtocol.requests.count, 1)
     }
 
+    func testSignOutStopsSleepingExportAndAllowsNextSellerExport() async throws {
+        let pause = ExportRetryPause()
+        var retry = TestClock().retry
+        retry.sleep = { _ in await pause.sleep() }
+        let client = signIn.api(readRetry: retry)
+        let filename = "export-\(UUID().uuidString).csv"
+        let file = AnteroomAPI.exportsDirectory.appending(path: filename)
+        defer { try? FileManager.default.removeItem(at: file) }
+        StubProtocol.answer(.init(status: 503, body: ""), .init(status: 200, body: "sku\nold-seller"))
+        let export = Task { try await client.exportCSV("api/inventory/export", filename: filename) }
+        await pause.waitUntilSleeping()
+        await client.forgetSeller()
+        await pause.resume()
+        do {
+            _ = try await export.value
+            XCTFail("A retired seller's export must be cancelled")
+        } catch is CancellationError {
+            // Expected even though the caller's Task itself was not cancelled.
+        }
+        XCTAssertEqual(StubProtocol.requests.count, 1, "The captured bearer token must not be retried")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+
+        StubProtocol.answer(.init(status: 200, body: "sku\nnew-seller"))
+        let next = try await client.exportCSV("api/inventory/export", filename: filename)
+        XCTAssertEqual(try String(contentsOf: next, encoding: .utf8), "sku\nnew-seller")
+        await client.forgetSeller()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: next.path))
+    }
+
     func testServerDateParsesStandardAndFractionalISO8601() throws {
         let whole = try XCTUnwrap(ServerDate.parse("2026-11-01T10:00:00Z"))
         let bare = try XCTUnwrap(ServerDate.parse("2026-11-01T10:00:00"))
@@ -359,5 +388,31 @@ final class AnteroomAPITests: XCTestCase {
         } catch {
             XCTFail("Unexpected \(error)", file: file, line: line)
         }
+    }
+}
+
+/// Holds retry backoff across sign-out without wall-clock timing assumptions.
+private actor ExportRetryPause {
+    private var sleeping = false
+    private var observer: CheckedContinuation<Void, Never>?
+    private var sleeper: CheckedContinuation<Void, Never>?
+
+    func sleep() async {
+        await withCheckedContinuation { continuation in
+            sleeper = continuation
+            sleeping = true
+            observer?.resume()
+            observer = nil
+        }
+    }
+
+    func waitUntilSleeping() async {
+        if sleeping { return }
+        await withCheckedContinuation { observer = $0 }
+    }
+
+    func resume() {
+        sleeper?.resume()
+        sleeper = nil
     }
 }
