@@ -1,1 +1,2 @@
 - Read clothing size tags from photos when making bulk listings on iPhone, with editable sizes and checks for unclear tags.
+- See and edit a saved tag size in the iPhone listing editor before generating a draft.

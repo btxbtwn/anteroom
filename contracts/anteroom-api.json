@@ -1,6 +1,23 @@
 {
   "components": {
     "schemas": {
+      "Body_read_size_tags_api_size_tags_read_post": {
+        "properties": {
+          "files": {
+            "items": {
+              "contentMediaType": "application/octet-stream",
+              "type": "string"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "Body_read_size_tags_api_size_tags_read_post",
+        "type": "object"
+      },
       "Conversation": {
         "description": "One listing with the seller's notes.",
         "properties": {
@@ -1290,6 +1307,53 @@
         "title": "PhotoEdits",
         "type": "object"
       },
+      "SizeTagReadResult": {
+        "description": "Clothing size from unsaved tag photos, never the shipping package size.",
+        "properties": {
+          "photos_read": {
+            "title": "Photos Read",
+            "type": "integer"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Set only when two independent reads agree; otherwise check the tag. \"0\" is a size.",
+            "title": "Size"
+          },
+          "sizes": {
+            "description": "Every distinct size the reads saw, for reviewing a conflict.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Sizes",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "accepted",
+              "not_found",
+              "unreadable",
+              "conflict"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "photos_read",
+          "status",
+          "size",
+          "sizes"
+        ],
+        "title": "SizeTagReadResult",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -1922,6 +1986,84 @@
           }
         },
         "summary": "Runtime"
+      }
+    },
+    "/api/size-tags/read": {
+      "post": {
+        "description": "Suggest an item's clothing size from its size tag in photos not saved yet (bulk upload). Saves nothing.",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_read_size_tags_api_size_tags_read_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SizeTagReadResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "Too many photos or a photo exceeds the size limit."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The size reading failed; the detail explains what failed."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The photo provider failed or stalled."
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "No photo model is connected."
+          }
+        },
+        "summary": "Read Size Tags"
       }
     }
   }

@@ -14,6 +14,7 @@ struct GeneralListingFields: View {
     var focusPath: String? = nil
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var showsMoreDetails = false
+    @FocusState private var tagSizeFocused: Bool
 
     var body: some View {
         ListingInspectorSection("Item") {
@@ -26,6 +27,17 @@ struct GeneralListingFields: View {
         ListingInspectorSection("Condition & details") {
             OptionField("Condition", value: $form.fields.condition, options: options.condition).fieldAnchor("condition")
             OptionField("Size", value: $form.fields.size, options: options.size).fieldAnchor("size")
+            if !form.sellerInputs.size.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || tagSizeFocused {
+                VStack(alignment: .leading, spacing: 8) {
+                    WorkspaceField("Tag size") {
+                        TextField("Size on the tag", text: $form.sellerInputs.size)
+                            .focused($tagSizeFocused)
+                            .accessibilityIdentifier("seller-tag-size")
+                    }
+                    Text("From the size tag. Generating uses it as the listing's Size.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
             TextRow("Brand", text: $form.fields.brand, placeholder: "e.g. Levi's").fieldAnchor("brand")
         }
         ListingInspectorSection("Pricing") {

@@ -119,7 +119,7 @@ final class BulkReadReviewRegressionTests: XCTestCase {
                 let captured = try XCTUnwrap(plan.makeItem(from: Set(photos)))
                 if makeCover { plan.makeCover(photos[2], in: captured.id) }
                 else { plan.movePhotos(in: captured.id, from: IndexSet(integer: 0), to: 3) }
-                let result: Result<SizeTagReading, Error> = failed ? .failure(ReadFailure())
+                let result: Result<SizeTagReadResult, Error> = failed ? .failure(ReadFailure())
                     : .success(.init(photosRead: 3, status: "accepted", size: "0", sizes: ["0"]))
                 plan.completeSizeRead(result, from: captured)
                 XCTAssertEqual(plan.items[0].sizeTag, failed ? "" : "0")
@@ -136,7 +136,7 @@ final class BulkReadReviewRegressionTests: XCTestCase {
             plan.add(photos)
             let captured = try XCTUnwrap(plan.makeItem(from: Set(photos)))
             plan.remove(photos[0], readingSizes: [captured.id])
-            let result: Result<SizeTagReading, Error> = failed ? .failure(ReadFailure())
+            let result: Result<SizeTagReadResult, Error> = failed ? .failure(ReadFailure())
                 : .success(.init(photosRead: 2, status: "accepted", size: "0", sizes: ["0"]))
             plan.completeSizeRead(result, from: captured)
             XCTAssertEqual(plan.items[0].sizeTag, "")

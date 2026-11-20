@@ -162,7 +162,7 @@ struct BulkListingPlan: Equatable {
     }
 
     /// Both network completion paths use the same evidence check and current manual input.
-    mutating func completeSizeRead(_ result: Result<SizeTagReading, Error>, from captured: Item) {
+    mutating func completeSizeRead(_ result: Result<SizeTagReadResult, Error>, from captured: Item) {
         guard matchesSizeRead(captured) else { return }
         switch result {
         case .success(let reading): applySizeTag(reading, to: captured.id)
@@ -170,7 +170,7 @@ struct BulkListingPlan: Equatable {
         }
     }
 
-    mutating func applySizeTag(_ result: SizeTagReading, to id: Item.ID) {
+    mutating func applySizeTag(_ result: SizeTagReadResult, to id: Item.ID) {
         update(id) { item in
             let typed = item.sizeSuggested ? "" : item.sizeTag.trimmingCharacters(in: .whitespacesAndNewlines)
             let size = result.size?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

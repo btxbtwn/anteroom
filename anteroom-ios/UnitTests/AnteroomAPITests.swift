@@ -15,7 +15,7 @@ final class AnteroomAPITests: XCTestCase {
 
     func testSizeTagReadUsesOrderedPhotosAndDecodesZero() async throws {
         StubProtocol.answer(.init(status: 200, body: #"{"photos_read":2,"status":"accepted","size":"0","sizes":["0"]}"#))
-        let result = try await api.readSizeTags(jpegs: [Data("FIRST".utf8), Data("SECOND".utf8)])
+        let result: SizeTagReadResult = try await api.readSizeTags(jpegs: [Data("FIRST".utf8), Data("SECOND".utf8)])
         XCTAssertEqual(result.size, "0")
         let sent = try XCTUnwrap(StubProtocol.requests.first)
         XCTAssertEqual(sent.url?.path, "/api/size-tags/read")

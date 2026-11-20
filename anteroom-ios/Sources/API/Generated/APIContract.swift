@@ -503,6 +503,22 @@ extension PhotoEdits {
     }
 }
 
+/// Clothing size from unsaved tag photos, never the shipping package size.
+struct SizeTagReadResult: Codable, Hashable, Sendable {
+    var photosRead: Int
+    /// One of: accepted, not_found, unreadable, conflict.
+    var status: String
+    /// Set only when two independent reads agree; otherwise check the tag. "0" is a size.
+    var size: String?
+    /// Every distinct size the reads saw, for reviewing a conflict.
+    var sizes: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case status, size, sizes
+        case photosRead = "photos_read"
+    }
+}
+
 struct ValidationError: Codable, Hashable, Sendable {
     var loc: [JSONValue]
     var msg: String

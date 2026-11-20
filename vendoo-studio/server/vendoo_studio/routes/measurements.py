@@ -15,6 +15,7 @@ from vendoo_studio.config import MAX_PHOTO_SIZE_MB
 from vendoo_studio.database import in_worker_session
 from vendoo_studio.models.conversation import Conversation, Photo
 from vendoo_studio.repositories.queries import ConversationRepo
+from vendoo_studio.routes.api_contract import SIZE_TAG_READ_ERRORS, SizeTagReadResult
 from vendoo_studio.services import hosted_photos, measure_read, size_tag_read
 from vendoo_studio.services.hosted_database import SellerDatabaseSession, in_seller_session
 from vendoo_studio.services.listing_provider import get_photo_provider
@@ -93,7 +94,7 @@ async def read_measurements(files: list[UploadFile] = File(...), garment: str = 
         return await _read(provider, await _write_uploads(files, workdir), garment)
 
 
-@router.post("/api/size-tags/read")
+@router.post("/api/size-tags/read", response_model=SizeTagReadResult, responses=SIZE_TAG_READ_ERRORS)
 async def read_size_tags(files: list[UploadFile] = File(...)):
     """Suggest an item's clothing size from its size tag in photos not saved yet (bulk upload). Saves nothing."""
     provider = _photo_provider("size tags")

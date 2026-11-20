@@ -29,6 +29,7 @@ from vendoo_studio.services.photo_edits import PhotoEdits
 # ``/api/runtime``, which only the hosted app has) with the same models.
 CONTRACT_OPERATIONS: tuple[tuple[str, str], ...] = (
     ("get", "/api/runtime"),
+    ("post", "/api/size-tags/read"),
     ("get", "/api/analytics/offers"),
     ("get", "/api/conversations"),
     ("post", "/api/conversations"),
@@ -59,6 +60,28 @@ Responses = dict[int | str, dict[str, Any]]
 NOT_FOUND: Responses = {404: {"model": ErrorDetail, "description": "The listing does not exist for this seller."}}
 CONFLICT: Responses = {409: {"model": ErrorDetail, "description": "The listing changed elsewhere or is busy."}}
 REFUSED: Responses = {400: {"model": ErrorDetail, "description": "The change was refused, such as an empty title or a busy listing."}}
+
+
+class SizeTagReadResult(ContractModel):
+    """Clothing size from unsaved tag photos, never the shipping package size."""
+
+    photos_read: int
+    status: Literal["accepted", "not_found", "unreadable", "conflict"]
+    size: str | None
+    """Set only when two independent reads agree; otherwise check the tag. "0" is a size."""
+    sizes: list[str]
+    """Every distinct size the reads saw, for reviewing a conflict."""
+
+
+SIZE_TAG_READ_ERRORS: Responses = {
+    status: {"model": ErrorDetail, "description": description}
+    for status, description in (
+        (400, "Too many photos or a photo exceeds the size limit."),
+        (500, "The size reading failed; the detail explains what failed."),
+        (502, "The photo provider failed or stalled."),
+        (503, "No photo model is connected."),
+    )
+}
 
 
 WorkspaceFeature = Literal[

@@ -111,7 +111,7 @@ final class AnteroomAPI: Sendable {
     }
 
     /// Reads clothing tags from unsaved photos; no generation or marketplace writes.
-    func readSizeTags(jpegs: [Data]) async throws -> SizeTagReading {
+    func readSizeTags(jpegs: [Data]) async throws -> SizeTagReadResult {
         let boundary = "anteroom-\(UUID().uuidString)"
         var body = Data()
         for (index, jpeg) in jpegs.prefix(20).enumerated() {

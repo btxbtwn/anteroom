@@ -97,6 +97,12 @@ class ReadSizeTagsRouteTest(unittest.TestCase):
         self.assertIn("brand tab", system["content"])
         self.assertEqual(sum(1 for part in user["content"] if part["type"] == "image_url"), 2)
 
+    def test_size_zero_keeps_its_string_in_the_shared_response(self):
+        provider = FakeProvider([{"tag": "found", "sizes": [0]}, {"tag": "found", "sizes": ["0"]}])
+        response = self.post(provider, [_photo()])
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {"photos_read": 1, "status": "accepted", "size": "0", "sizes": ["0"]})
+
     def test_a_conflict_comes_back_without_a_size(self):
         provider = FakeProvider([{"tag": "found", "sizes": ["8"]}, {"tag": "found", "sizes": ["6"]}])
         body = self.post(provider, [_photo()]).json()

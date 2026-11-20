@@ -247,16 +247,3 @@ struct MeasurementReading: Decodable, Sendable {
         case measurements
     }
 }
-
-/// Unsaved clothing-tag photos. This never represents shipping package size.
-struct SizeTagReading: Decodable, Sendable {
-    let photosRead: Int
-    let status: String
-    let size: String?
-    let sizes: [String]
-
-    enum CodingKeys: String, CodingKey {
-        case photosRead = "photos_read"
-        case status, size, sizes
-    }
-}

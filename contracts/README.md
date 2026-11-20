@@ -43,6 +43,7 @@ client, and openapi-typescript's extra exports fail `knip`.
 | Operation | Response | Request |
 |---|---|---|
 | `GET /api/runtime` (hosted only) | `WorkspaceRuntime` | |
+| `POST /api/size-tags/read` | `SizeTagReadResult` | multipart photos |
 | `GET /api/conversations` | `ConversationSummary[]` | |
 | `POST /api/conversations` | `Conversation` | `ConversationInput` (hosted) |
 | `GET /api/conversations/{id}` | `Conversation` | |
@@ -95,8 +96,9 @@ the same shape, in its own change.
 - Streaming routes (`POST .../generate`, `.../messages`): server-sent frames,
   parsed by `src/api/sse.ts` and `Sources/API/StreamFrame.swift`. OpenAPI
   cannot describe a stream's frames usefully.
-- Multipart uploads (`POST /api/drafts/{id}/photos`, measurement reads):
-  their bodies are files, not JSON.
+- Other multipart uploads (`POST /api/drafts/{id}/photos`, measurement reads):
+  their bodies are files, not JSON. Size-tag reads already share their response
+  above; upload bodies remain assembled as files by both clients.
 - Photo bytes and thumbnails: images, not JSON.
 - Marketplace actions, native forms, settings, automations, analytics,
   revisions, templates, bulk edits and the rest: still typed separately on each
