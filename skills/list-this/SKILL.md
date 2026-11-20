@@ -167,7 +167,7 @@ Apply the PRICING Formula below.
 
 **Valid Depop Values (MUST use only these):**
 - **Style:** Casual, Streetwear, Vintage, Y2K, Minimalist, Sporty, Bohemian, Grunge, Preppy, Athleisure, Retro
-- **Occasion:** Casual, Streetwear, Formal, Sporty, Vintage, Y2K, Bohemian, Minimalist, Retro, Summer, Workwear
+- **Occasion:** Choose exactly 3 from the Occasion list in the **Depop Tags + Style + Parcel Sizes** section of the [listing template](references/anteroom_listing_template.md).
 - **Material:** Cotton, Cotton - Organic, Cotton - Recycled, Polyester, Denim, Leather, Wool, Silk, Linen, Fleece, Velvet, Satin
 - **Fit:** Skinny, Slim, Straight, Bootcut, Relaxed, Oversized, Loose, Regular, High Rise, Mid Rise, Low Rise
 - **Source:** Preloved, Deadstock, Vintage, New with tags, New without tags
