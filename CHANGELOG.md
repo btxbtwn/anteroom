@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1074 — 2026-11-20
+
+- Store normalized listing hashes on saved revisions so inventory loading compares drafts without reading full marketplace forms from the database.
+- Reduce redundant queries when loading inventory analytics and suggestions.
+
 ## 0.1.1073 — 2026-11-20
 
 - Keep eBay and Etsy listing-mode checks off the request event loop so marketplace calls stay responsive.
