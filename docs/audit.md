@@ -101,7 +101,12 @@ Every run, in this order:
    allocation if needed, the native build/runtime floor, dependency installation
    headroom and a reserve for further swap growth. Record the measured free
    space, swap usage and each allocation; if they do not fit with that reserve,
+   <!-- coderabbit-ai-generated:v1 -->
+   <!-- coderabbit-ai-generated-section:v1:b04ba3d532f5e34d425ff1ae137e80de83c8a58d2f12f67794ea7fc24fcacff8 -->
    record the affected suites, sandboxes and builds as **not run (disk)**.
+   Record the missing full iPhone run in the daily issue too, so the next
+   audit can identify the gap in its UI-test baseline.
+   <!-- /coderabbit-ai-generated:v1 -->
    On 2026-11-18, 12 GiB free with 11 GiB swap was insufficient for a 5.8 GB
    fresh snapshot plus a 5.25 GiB native build floor and swap reserve. The Mac
    native hold at `495c9b61` remains until resources are cleared separately.
@@ -172,7 +177,19 @@ Every run, in this order:
 4. `./anteroom-ios/test-sandbox.sh` (iPhone XCUITests in the Simulator). Run
    it while nothing else heavy runs: under load its 5 to 30 second waits time
    out on different tests each run. Before reporting a failure, rerun it alone
-   and compare with the latest iPhone job on `main` (`gh run list --workflow ios.yml --branch main`).
+   <!-- coderabbit-ai-generated:v1 -->
+   <!-- coderabbit-ai-generated-section:v1:a5fa7de14472f6751a674b304a01d87bd69212105040e487029358b0be32c8a3 -->
+   and compare with the last full local run in the previous `audit` issue.
+   If that issue has no full run, look for the last full run in earlier
+   `audit` issues. If none exists, report the isolated rerun's observed result
+   in the daily issue with **baseline unavailable**; a failure is **failed**,
+   with regression status unknown. Do not claim a pass or a regression from
+   missing evidence. If disk space prevents the current run, report
+   **not run (disk)** instead.
+   <!-- /coderabbit-ai-generated:v1 -->
+   `ios.yml` was removed by #1488; Xcode Cloud's **iOS Verify** runs only the
+   Swift checks and unit tests, not these UI tests (`docs/xcode-cloud.md`), so
+   GitHub has no iPhone UI baseline.
    If several tests fail at their first step and the UI hierarchy shows the
    app still on the Assistant tab, the launch helper's tab tap was dropped
    (fixed by #1417); check that fix is on `main` before reporting them.
@@ -185,7 +202,10 @@ Every run, in this order:
    or updated (sandbox must keep logs under `VENDOO_STUDIO_DATA_DIR`). The
    seller's own app may be running and writing that log, so compare its size
    and time with `stat` and look for sandbox paths in any new lines. Also
-   read that log's `ERROR` lines since the last audit, read only: they show
+   read the `ERROR` lines since the last audit in that log and in
+   `logs/anteroom.jsonl` beside it (`"level": "error"`), read only. On
+   2026-11-19 the text log had been silent for a day while the app kept
+   writing the JSON log, so reading only `Anteroom.log` misses errors. They show
    live marketplace failures no sandbox can reproduce (on 2026-11-15 a
    Mercari HTTP 400 on every delist, #1539). Quote only the error, never
    buyer or listing details. `ebay eligible_items failed: Reconnect eBay`
