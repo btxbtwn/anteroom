@@ -394,6 +394,33 @@ def test_remember_direct_categories_refreshes_normalized_hash_and_clears_match_c
         chrome_catalog.remember_direct_categories(db, rev1, {"depop": "dep-9"})
         assert unsent_module.unsent_edits(db, convs, {"item": rev2.id}) == {"item"}
 
+        # Numerically equal values (42 vs 42.0, including nested numbers) hash identically.
+        assert unsent_module.normalized_listing_hash({"title": "Coat", "price": 42, "nested": {"weight": 1.0}}) == (
+            unsent_module.normalized_listing_hash({"title": "Coat", "price": 42.0, "nested": {"weight": 1}})
+        )
+        assert unsent_module.normalized_listing_hash({"title": "Coat", "price": 42}) != (
+            unsent_module.normalized_listing_hash({"title": "Coat", "price": 55})
+        )
+
+        # If invalidate_revision_matches runs while unsent_edits is mid-read,
+        # the call must neither KeyError nor write a stale pre-commit entry back.
+        from anteroom.repositories.queries import ListingRepo
+
+        rev3 = listing_persistence.save_revision(db, "item", dict(rev1.listing_json), "user_form")
+        db.commit()
+        unsent_module._REVISIONS_MATCH.clear()
+        orig_hashes = ListingRepo.revision_hashes
+
+        def racing_hashes(self, revision_ids):
+            result = orig_hashes(self, revision_ids)
+            unsent_module.invalidate_revision_matches(rev1.id)
+            return result
+
+        from unittest.mock import patch
+        with patch.object(ListingRepo, "revision_hashes", racing_hashes):
+            assert unsent_module.unsent_edits(db, convs, {"item": rev3.id}) == set()
+        assert (rev3.id, rev1.id) not in unsent_module._REVISIONS_MATCH
+
 
 def test_legacy_hash_backfill_batches_updates_into_one_statement(migration_engine):  # noqa: F811
     from anteroom.models.marketplace_listing import MarketplaceListing

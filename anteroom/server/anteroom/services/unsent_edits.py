@@ -4,25 +4,41 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
+import threading
 
 from sqlalchemy.orm import Session
 
 from anteroom.repositories.queries import ListingRepo
 
-# Revisions are never rewritten, so whether two of them hold the same listing
-# is settled the first time it is asked. Normalizing both sides costs about a
-# millisecond per listing, and the sidebar polls the whole inventory: answered
-# fresh every time, it held the GIL for over a second per poll and stalled
-# every other request behind it.
+# Most revisions are immutable; the one in-place rewrite (chrome_catalog
+# direct-category resolution) invalidates this cache after commit and bumps
+# _REVISIONS_GENERATION so in-flight readers never store a pre-commit match.
+_REVISIONS_LOCK = threading.Lock()
 _REVISIONS_MATCH: dict[tuple[str, str], bool] = {}
+_REVISIONS_GENERATION = 0
 _REVISIONS_MATCH_MAX = 20_000
 
 
 def invalidate_revision_matches(revision_id: str) -> None:
     """Drop cached match pairs for a revision whose JSON was rewritten in place."""
-    stale = [pair for pair in _REVISIONS_MATCH if revision_id in pair]
-    for pair in stale:
-        _REVISIONS_MATCH.pop(pair, None)
+    global _REVISIONS_GENERATION
+    with _REVISIONS_LOCK:
+        _REVISIONS_GENERATION += 1
+        stale = [pair for pair in _REVISIONS_MATCH if revision_id in pair]
+        for pair in stale:
+            _REVISIONS_MATCH.pop(pair, None)
+
+
+def _canonicalize_numbers(value):
+    """Canonicalize whole-number floats so 42 and 42.0 hash identically, matching Python ==."""
+    if isinstance(value, dict):
+        return {k: _canonicalize_numbers(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_canonicalize_numbers(v) for v in value]
+    if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+        return int(value)
+    return value
 
 
 def normalized_listing_hash(listing: dict | None) -> str | None:
@@ -35,7 +51,8 @@ def normalized_listing_hash(listing: dict | None) -> str | None:
     shaped = copy.deepcopy(listing)
     align_size_fields(shaped)
     normalize_listing_dropdowns(shaped)
-    raw = json.dumps(shaped, sort_keys=True, default=str, separators=(",", ":"))
+    canonical = _canonicalize_numbers(shaped)
+    raw = json.dumps(canonical, sort_keys=True, default=str, separators=(",", ":"))
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -66,10 +83,14 @@ def unsent_edits(
         if differing:
             pairs[conv.id] = differing
     wanted = {pair for group in pairs.values() for pair in group}
-    unknown = wanted - _REVISIONS_MATCH.keys()
-    if len(_REVISIONS_MATCH) + len(unknown) > _REVISIONS_MATCH_MAX:
-        _REVISIONS_MATCH.clear()
-        unknown = wanted
+    with _REVISIONS_LOCK:
+        generation = _REVISIONS_GENERATION
+        results = {pair: _REVISIONS_MATCH[pair] for pair in wanted if pair in _REVISIONS_MATCH}
+        unknown = wanted - results.keys()
+        if len(_REVISIONS_MATCH) + len(unknown) > _REVISIONS_MATCH_MAX:
+            _REVISIONS_MATCH.clear()
+            results.clear()
+            unknown = wanted
     if unknown:
         needed = {rev for pair in unknown for rev in pair}
         repo = ListingRepo(db)
@@ -98,7 +119,17 @@ def unsent_edits(
                         db.info.pop("quiet_changes", None)
                     else:
                         db.info["quiet_changes"] = was_quiet
+        resolved: dict[tuple[str, str], bool] = {}
         for current, sent in unknown:
             left = hashes.get(current)
-            _REVISIONS_MATCH[(current, sent)] = left is not None and left == hashes.get(sent)
-    return {conv_id for conv_id, group in pairs.items() if not all(_REVISIONS_MATCH[pair] for pair in group)}
+            match = left is not None and left == hashes.get(sent)
+            resolved[(current, sent)] = match
+            results[(current, sent)] = match
+        with _REVISIONS_LOCK:
+            # Skip caching if an in-place revision rewrite committed while our
+            # DB read was in flight so pre-commit hashes cannot poison the cache.
+            if _REVISIONS_GENERATION == generation:
+                if len(_REVISIONS_MATCH) + len(resolved) > _REVISIONS_MATCH_MAX:
+                    _REVISIONS_MATCH.clear()
+                _REVISIONS_MATCH.update(resolved)
+    return {conv_id for conv_id, group in pairs.items() if not all(results[pair] for pair in group)}
