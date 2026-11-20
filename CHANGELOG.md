@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1075 — 2026-11-20
+
+- Keep clicking between pages and drafts responsive under load by prioritizing active navigation and saves ahead of background prefetches and thumbnails, canceling stale prefetches when you switch pages, and collapsing the listing editor's opening reads into a single request.
+- Eliminate database pool exhaustion and unexpected 500 errors during busy cloud sessions by reusing open database sessions for seller settings, releasing route connections as soon as handlers finish, caching active device routes briefly, moving hosted promotion scheduling off the request loop, committing listing edits in a single transaction, and returning retryable 503 responses (with SSE retry) on transient cloud database hiccups.
+
 ## 0.1.1074 — 2026-11-20
 
 - Store normalized listing hashes on saved revisions so inventory loading compares drafts without reading full marketplace forms from the database.
