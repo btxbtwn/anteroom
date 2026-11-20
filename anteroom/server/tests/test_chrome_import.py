@@ -1,4 +1,5 @@
 """Import from Poshmark, Mercari, and Depop through a fake Chrome bridge."""
+import asyncio
 import copy
 from io import BytesIO
 from types import SimpleNamespace
@@ -202,3 +203,114 @@ def test_linking_a_reviewed_match_keeps_the_item_and_records_the_listing(chrome)
     chrome.remote.reply = {"ok": False, "error": "This Mercari listing is not on sale.", "error_code": "rejected"}
     assert post(chrome, "mercari", "m12345678901", link_conversation_id=other.id).status_code == 409
     assert "mercari" not in listings(chrome.db, other.id)
+
+
+def test_import_all_leaves_a_listing_that_now_matches_an_item_for_review(chrome):
+    """Import all checks for a match again as it saves, so two marketplaces importing at once never duplicate an item."""
+    # Another marketplace's import brought this item in after the page was read.
+    similar = ConversationRepo(chrome.db).create(title="Levi's Denim Jacket")
+    listing_persistence.save_revision(chrome.db, similar.id, {"title": "Levi's Denim Jacket", "price": 45}, "user")
+    chrome.db.commit()
+    response = post(chrome, "poshmark", POST, unless_matched=True)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["conversation_id"] is None and body["match"]["conversation_id"] == similar.id
+    assert chrome.db.query(Conversation).count() == 1 and chrome.db.query(Photo).count() == 0
+    assert "poshmark" not in listings(chrome.db, similar.id)
+    # Importing it as new on purpose still works.
+    assert post(chrome, "poshmark", POST).json()["conversation_id"] not in (None, similar.id)
+
+
+def test_import_all_drops_photos_when_a_match_appears_while_they_download(chrome, monkeypatch):
+    real = inventory_import.download_photos
+
+    async def download_then_match(urls, collection_id):
+        downloaded = await real(urls, collection_id)
+
+        def add():
+            conv = ConversationRepo(chrome.db).create(title="Levi's denim jacket")
+            listing_persistence.save_revision(chrome.db, conv.id, {"title": "Levi's denim jacket", "price": 45}, "user")
+            chrome.db.commit()
+
+        await asyncio.to_thread(add)
+        return downloaded
+
+    monkeypatch.setattr(inventory_import, "download_photos", download_then_match)
+    body = post(chrome, "poshmark", POST, unless_matched=True).json()
+    assert body["conversation_id"] is None and body["match"]
+    assert chrome.db.query(Conversation).count() == 1 and chrome.db.query(Photo).count() == 0
+
+
+def test_import_all_holds_a_listing_when_an_item_is_retitled_to_match_while_photos_download(chrome, monkeypatch):
+    other = ConversationRepo(chrome.db).create(title="Other")
+    chrome.db.commit()
+    real = inventory_import.download_photos
+
+    async def download_then_retitle(urls, collection_id):
+        downloaded = await real(urls, collection_id)
+
+        def retitle():
+            chrome.db.get(Conversation, other.id).title = "Levi's denim jacket"
+            chrome.db.commit()
+
+        await asyncio.to_thread(retitle)
+        return downloaded
+
+    monkeypatch.setattr(inventory_import, "download_photos", download_then_retitle)
+    body = post(chrome, "poshmark", POST, unless_matched=True).json()
+    assert body["conversation_id"] is None and body["match"]["conversation_id"] == other.id
+    assert chrome.db.query(Conversation).count() == 1 and chrome.db.query(Photo).count() == 0
+
+
+def test_a_match_is_found_behind_more_than_five_items_already_on_that_marketplace(chrome):
+    for index in range(5):
+        linked = ConversationRepo(chrome.db).create(title="Levi's denim jacket")
+        chrome.db.add(MarketplaceListing(conversation_id=linked.id, marketplace="poshmark", state="published",
+                                         listing_url=f"https://poshmark.com/listing/{str(index) * 24}"))
+    # A little less alike than the five linked ones, so it ranks after all of them.
+    eligible = ConversationRepo(chrome.db).create(title="Levi's denim jacket blue")
+    chrome.db.commit()
+    body = post(chrome, "poshmark", POST, unless_matched=True).json()
+    assert body["conversation_id"] is None and body["match"]["conversation_id"] == eligible.id
+
+
+def test_import_all_holds_a_listing_when_a_look_alike_leaves_that_marketplace_while_photos_download(chrome, monkeypatch):
+    other = "e" * 24
+    item = ConversationRepo(chrome.db).create(title="Levi's denim jacket")
+    chrome.db.add(MarketplaceListing(conversation_id=item.id, marketplace="poshmark", state="published",
+                                     listing_url=f"https://poshmark.com/listing/{other}"))
+    chrome.db.commit()
+    real = inventory_import.download_photos
+
+    async def download_then_unlink(urls, collection_id):
+        downloaded = await real(urls, collection_id)
+
+        def unlink():
+            chrome.db.query(MarketplaceListing).filter_by(conversation_id=item.id).delete()
+            chrome.db.commit()
+
+        await asyncio.to_thread(unlink)
+        return downloaded
+
+    monkeypatch.setattr(inventory_import, "download_photos", download_then_unlink)
+    body = post(chrome, "poshmark", POST, unless_matched=True).json()
+    assert body["conversation_id"] is None and body["match"]["conversation_id"] == item.id
+    assert chrome.db.query(Conversation).count() == 1 and chrome.db.query(Photo).count() == 0
+
+
+def test_preview_names_the_account_chrome_read_and_import_all_refuses_another(chrome):
+    chrome.remote.page = {"ok": True, "next_cursor": None, "account": "seller-one", "rows": [{"id": POST, "title": "Denim jacket", "price": 45}]}
+    assert chrome.client.get("/api/chrome-import/poshmark/active").json()["account"] == "seller-one"
+    # Chrome is now signed in to another Poshmark account.
+    chrome.remote.listings["poshmark"]["account"] = "seller-two"
+    refused = post(chrome, "poshmark", POST, unless_matched=True, account="seller-one")
+    assert refused.status_code == 409 and "different Poshmark account" in refused.json()["detail"]
+    assert chrome.db.query(Conversation).count() == 0 and chrome.remote.downloads == []
+    # The same account imports.
+    chrome.remote.listings["poshmark"]["account"] = "seller-one"
+    assert post(chrome, "poshmark", POST, unless_matched=True, account="seller-one").json()["conversation_id"]
+    # A Bridge that does not say which account it read cannot serve import all; one listing at a time still works.
+    assert "account" not in chrome.remote.listings["mercari"]
+    stale = post(chrome, "mercari", "m12345678901", account="seller-one")
+    assert stale.status_code == 409 and "Update Anteroom Bridge" in stale.json()["detail"]
+    assert post(chrome, "mercari", "m12345678901").json()["conversation_id"]
