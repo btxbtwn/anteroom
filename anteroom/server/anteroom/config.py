@@ -197,12 +197,14 @@ def _fsync_directory(directory: Path) -> None:
 
 
 def _write_legacy_database_adoption_marker(marker: Path, plan: list[_LegacyDbMove]) -> None:
-    """Persist the move plan before any rename (file + directory fsync)."""
+    """Persist the move plan before any rename (atomic publish + directory fsync)."""
     data = _serialize_legacy_database_move_plan(plan)
-    with marker.open("wb") as handle:
+    temporary = marker.with_name(f"{marker.name}.tmp")
+    with temporary.open("wb") as handle:
         handle.write(data)
         handle.flush()
         os.fsync(handle.fileno())
+    os.replace(temporary, marker)
     _fsync_directory(marker.parent)
 
 

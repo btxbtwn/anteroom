@@ -87,6 +87,19 @@ def _crash_after_primary_rename(root: str) -> None:
     os._exit(0)
 
 
+def _leave_legacy_wal_and_tmp_marker(root: str) -> None:
+    """Legacy primary + WAL with only a partial .tmp marker (no published marker)."""
+    data = Path(root)
+    legacy = data / "vendoo_studio.db"
+    conn = _open_sqlite_with_uncheckpointed_wal(legacy, "from-wal")
+    assert (data / "vendoo_studio.db-wal").is_file()
+    (data / f"{config.LEGACY_DATABASE_ADOPTION_MARKER}.tmp").write_bytes(
+        b"anteroom-legacy-db-adoption/2\nmove:vendoo_studio.db>anteroom.db:1:1\n"
+    )
+    del conn
+    os._exit(0)
+
+
 class ConfigPathTest(unittest.TestCase):
     def setUp(self) -> None:
         self.keys = (
@@ -164,6 +177,29 @@ class ConfigPathTest(unittest.TestCase):
             self.assertFalse(legacy.exists())
             self.assertFalse((data / config.LEGACY_DATABASE_ADOPTION_MARKER).exists())
             self.assertEqual(_read_sqlite_names(target), ["row-one"])
+
+    def test_leftover_tmp_marker_does_not_block_fresh_adoption_with_wal(self):
+        """A partial .tmp marker with no published marker must not stop full adoption."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            child = Process(target=_leave_legacy_wal_and_tmp_marker, args=(tmp,))
+            child.start()
+            child.join(timeout=30)
+            self.assertEqual(child.exitcode, 0)
+            legacy = data / "vendoo_studio.db"
+            self.assertTrue((data / "vendoo_studio.db-wal").is_file())
+            self.assertTrue((data / f"{config.LEGACY_DATABASE_ADOPTION_MARKER}.tmp").is_file())
+            self.assertFalse((data / config.LEGACY_DATABASE_ADOPTION_MARKER).exists())
+            os.environ.pop("ANTEROOM_DATABASE_URL", None)
+            config.adopt_legacy_database(data)
+            target = data / "anteroom.db"
+            self.assertTrue(target.is_file())
+            self.assertFalse(legacy.exists())
+            self.assertFalse((data / config.LEGACY_DATABASE_ADOPTION_MARKER).exists())
+            self.assertFalse((data / f"{config.LEGACY_DATABASE_ADOPTION_MARKER}.tmp").exists())
+            self.assertEqual(_read_sqlite_names(target), ["from-wal"])
+            for suffix in ("-wal", "-shm", "-journal"):
+                self.assertFalse((data / f"vendoo_studio.db{suffix}").exists())
 
     def test_fresh_refusal_with_target_sidecar_blocks_empty_default_db(self):
         """Legacy primary + both WALs, no target primary: startup must not open a DB.
