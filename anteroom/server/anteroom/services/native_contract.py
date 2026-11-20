@@ -140,13 +140,17 @@ def _normalize_mercari_package(pkg: Any) -> Any:
     if not isinstance(pkg, dict):
         return pkg
     normalized: dict[str, Any] = {}
-    pounds = _zero_empty_number(pkg.get("pounds"), keep_zero=True)
-    ounces = _zero_empty_number(pkg.get("ounces"), keep_zero=True)
+    for key in ("pounds", "ounces"):
+        value = pkg.get(key)
+        # package() treats boolean native weights as numeric 0/1 answers.
+        clean = _zero_empty_number(int(value) if isinstance(value, bool) else value, keep_zero=True)
+        if clean is not None:
+            normalized[key] = clean
     # mercari_form.package() uses native pounds/ounces once either is answered
     # (including explicit 0), defaulting an unset companion to 0.
-    if pounds is not None or ounces is not None:
-        normalized["pounds"] = Decimal(0) if pounds is None else pounds
-        normalized["ounces"] = Decimal(0) if ounces is None else ounces
+    if normalized:
+        normalized.setdefault("pounds", Decimal(0))
+        normalized.setdefault("ounces", Decimal(0))
     for key in ("length", "width", "height"):
         clean = _zero_empty_number(pkg.get(key), keep_zero=True)
         if clean is not None:

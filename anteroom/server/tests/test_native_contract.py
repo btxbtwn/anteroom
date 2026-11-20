@@ -514,6 +514,23 @@ class NativeContractTest(unittest.TestCase):
         self.assertIn("Cotton", text)
         self.assertNotIn("inventedField", text)
 
+    def test_mercari_boolean_package_weights_match_shipping_calculation(self):
+        from anteroom.services import mercari_form
+
+        for key in ("pounds", "ounces"):
+            for value in (True, False):
+                with self.subTest(key=key, value=value):
+                    saved = {"weight_oz": 12, "mercari_specifics": {"package": {key: value}}}
+                    numeric = copy.deepcopy(saved)
+                    numeric["mercari_specifics"]["package"] = {"pounds": 0, "ounces": 0, key: int(value)}
+                    removed = {"weight_oz": 12, "mercari_specifics": {"package": {}}}
+                    self.assertEqual(mercari_form.package(saved)[0], mercari_form.package(numeric)[0])
+                    self.assertNotEqual(mercari_form.package(saved)[0], mercari_form.package(removed)[0])
+                    for left, right in ((saved, numeric), (numeric, saved)):
+                        self.assertTrue(contract.inputs_match(right, "mercari", [], contract.inputs(left, "mercari", [])))
+                    for left, right in ((saved, removed), (removed, saved)):
+                        self.assertFalse(contract.inputs_match(right, "mercari", [], contract.inputs(left, "mercari", [])))
+
     def test_mercari_zero_weight_and_package_casing_stay_fresh_across_preparation(self):
         from anteroom.services import job_snapshot, mercari_form
 
