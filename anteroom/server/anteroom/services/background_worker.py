@@ -98,16 +98,39 @@ async def _execute(task_id, token):
     return False
 
 
+HEARTBEAT_INTERVAL_S = 20.0
+HEARTBEAT_RETRY_S = 5.0
+LEASE_DURATION_S = 120.0
+
+
 async def run_claimed(task_id, owner, token, *, heartbeat_loop: BackgroundLoop):
     with use(for_seller(owner, task_lease=(task_id, token))) as context:
         work = asyncio.create_task(_execute(task_id, token))
         completed = threading.Event()
 
         async def heartbeat():
+            last_renewed = time.monotonic()
+            delay = HEARTBEAT_INTERVAL_S
             while not completed.is_set():
-                await asyncio.sleep(20)
-                if not completed.is_set():
+                await asyncio.sleep(delay)
+                if completed.is_set():
+                    break
+                try:
                     await asyncio.to_thread(queue.renew, task_id, token)
+                except SQLAlchemyError as exc:
+                    elapsed = time.monotonic() - last_renewed
+                    if elapsed >= LEASE_DURATION_S:
+                        raise
+                    # Transient DB contention (statement/pool timeout) should not abort
+                    # an in-flight draft while its 2-minute lease is still valid.
+                    logging.getLogger(__name__).warning(
+                        'Draft task lease renewal failed temporarily (%s); retrying',
+                        type(exc).__name__,
+                    )
+                    delay = min(HEARTBEAT_RETRY_S, max(0.0, LEASE_DURATION_S - elapsed))
+                else:
+                    last_renewed = time.monotonic()
+                    delay = HEARTBEAT_INTERVAL_S
 
         # Canonical generation still makes synchronous database calls. Its
         # event loop may block, but lease renewal must keep running for every

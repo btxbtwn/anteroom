@@ -185,3 +185,80 @@ def test_heartbeat_reason_reaches_answer_before_cancellation(monkeypatch, caplog
     asyncio.run(exercise())
     lines = [record.getMessage() for record in caplog.records if 'assistant answer timing:' in record.getMessage()]
     assert len(lines) == 1 and 'outcome=lease_lost ' in lines[0]
+
+
+def test_heartbeat_retries_transient_db_error_and_completes_task(monkeypatch):
+    from sqlalchemy.exc import OperationalError
+    from anteroom.services.background_loop import BackgroundLoop
+    from anteroom.services.service_context import ServiceContext
+
+    async def exercise():
+        recovered = asyncio.Event()
+        renew_calls = 0
+        finished = []
+        context = ServiceContext('seller', lambda: None, None, None, None)
+        monkeypatch.setattr(background_worker, 'for_seller', lambda *_, **kwargs: context)
+        monkeypatch.setattr(background_worker, 'HEARTBEAT_INTERVAL_S', 0.01)
+        monkeypatch.setattr(background_worker, 'HEARTBEAT_RETRY_S', 0.01)
+        monkeypatch.setattr(background_worker, 'LEASE_DURATION_S', 1.0)
+
+        def renew(_task_id, _token):
+            nonlocal renew_calls
+            renew_calls += 1
+            if renew_calls == 1:
+                raise OperationalError('UPDATE background_tasks', {}, Exception('statement timeout'))
+            loop.call_soon_threadsafe(recovered.set)
+
+        async def execute(*_):
+            await asyncio.wait_for(recovered.wait(), 2)
+            return False
+
+        loop = asyncio.get_running_loop()
+        monkeypatch.setattr(background_worker.queue, 'renew', renew)
+        monkeypatch.setattr(background_worker.queue, 'finish', lambda *args, **kwargs: finished.append((args, kwargs)))
+        monkeypatch.setattr(background_worker, '_execute', execute)
+        heartbeats = BackgroundLoop('test-heartbeat-retry')
+        try:
+            await asyncio.wait_for(
+                background_worker.run_claimed('task', 'seller', 'token', heartbeat_loop=heartbeats), 2)
+        finally:
+            await asyncio.to_thread(heartbeats.stop)
+        assert renew_calls >= 2
+        assert finished == [(('task', 'token'), {})]
+        assert context.task_outcome == {}
+
+    asyncio.run(exercise())
+
+
+def test_heartbeat_stops_task_when_db_errors_outlast_lease(monkeypatch):
+    from sqlalchemy.exc import OperationalError
+    from anteroom.services.background_loop import BackgroundLoop
+    from anteroom.services.service_context import ServiceContext
+
+    async def exercise():
+        finished = []
+        context = ServiceContext('seller', lambda: None, None, None, None)
+        monkeypatch.setattr(background_worker, 'for_seller', lambda *_, **kwargs: context)
+        monkeypatch.setattr(background_worker, 'HEARTBEAT_INTERVAL_S', 0.01)
+        monkeypatch.setattr(background_worker, 'HEARTBEAT_RETRY_S', 0.01)
+        monkeypatch.setattr(background_worker, 'LEASE_DURATION_S', 0.04)
+
+        def renew(_task_id, _token):
+            raise OperationalError('UPDATE background_tasks', {}, Exception('connection refused'))
+
+        async def execute(*_):
+            await asyncio.Future()
+
+        monkeypatch.setattr(background_worker.queue, 'renew', renew)
+        monkeypatch.setattr(background_worker.queue, 'finish', lambda *args, **kwargs: finished.append((args, kwargs)))
+        monkeypatch.setattr(background_worker, '_execute', execute)
+        heartbeats = BackgroundLoop('test-heartbeat-expiry')
+        try:
+            await asyncio.wait_for(
+                background_worker.run_claimed('task', 'seller', 'token', heartbeat_loop=heartbeats), 2)
+        finally:
+            await asyncio.to_thread(heartbeats.stop)
+        assert context.task_outcome == {'stop': 'error'}
+        assert len(finished) == 1 and 'error' in finished[0][1]
+
+    asyncio.run(exercise())

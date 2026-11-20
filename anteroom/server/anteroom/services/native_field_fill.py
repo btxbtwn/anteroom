@@ -269,6 +269,21 @@ def _current_listing(db: Session, conv_id: str) -> dict | None:
     return revision.listing_json if revision is not None else None
 
 
+def _stale_markets(listing: dict | None, markets: set[str], *, include_unavailable: bool = True) -> set[str]:
+    """Markets whose saved contract is missing, unavailable, or no longer matches current inputs."""
+    if listing is None:
+        return set(markets)
+    contracts = listing.get(native_contract.KEY) or {}
+    stale = set()
+    for market in markets:
+        contract = contracts.get(market)
+        if not include_unavailable and isinstance(contract, dict) and contract.get("unavailable"):
+            continue
+        if native_contract.editor_form(listing, market) is None:
+            stale.add(market)
+    return stale
+
+
 async def fill_native_fields(conv_id: str, provider, *, evidence: str,
                              markets: Iterable[str] = MARKETS) -> dict | None:
     """Choose required categories first, then read their forms again to fill item fields."""
@@ -281,7 +296,10 @@ async def fill_native_fields(conv_id: str, provider, *, evidence: str,
         markets &= set(listing[native_contract.KEY])
     categories = await _fill_native_fields(conv_id, provider, evidence=evidence, markets=markets, categories=True)
     if strict:
-        await record_forms(conv_id, markets)
+        current = categories if categories is not None else listing
+        stale = _stale_markets(current, markets, include_unavailable=True)
+        if stale:
+            await record_forms(conv_id, stale)
     fields = None
     required_only = False
     for _round in range(3 if strict else 1):
@@ -306,10 +324,16 @@ async def fill_native_fields(conv_id: str, provider, *, evidence: str,
         if required_only and not dependencies_changed:
             break
         required_only = not dependencies_changed
-        await record_forms(conv_id, markets)
+        stale = _stale_markets(fields, markets, include_unavailable=False)
+        if stale:
+            await record_forms(conv_id, stale)
     if strict:
-        await record_forms(conv_id, markets)
-        return await in_worker_session(_current_listing, conv_id)
+        current = await in_worker_session(_current_listing, conv_id)
+        stale = _stale_markets(current, markets, include_unavailable=False)
+        if stale:
+            await record_forms(conv_id, stale)
+            current = await in_worker_session(_current_listing, conv_id)
+        return current
     return fields if fields is not None else categories
 
 
@@ -386,12 +410,13 @@ async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
     if inputs is None:
         return None
     fingerprint, revision_id, listing = inputs
-    strict = native_contract.KEY in listing and not categories
+    has_contract = native_contract.KEY in listing
+    strict = has_contract and not categories
     # Finishing just captured these definitions. Reuse them while their
     # controlling inputs match; parent/category edits still need fresh forms.
     requested = set(markets)
     forms = {market: form for market in MARKETS
-             if strict and market in requested and (form := native_contract.editor_form(listing, market)) is not None}
+             if has_contract and market in requested and (form := native_contract.editor_form(listing, market)) is not None}
     missing = requested - forms.keys()
     if missing:
         forms.update(await load_forms(conv_id, missing))
@@ -471,11 +496,12 @@ async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
     if not accepted and not strict:
         return None
     return await in_worker_session(_save_fill, conv_id, revision_id, fingerprint, listing, forms, rows, reply,
-                                   accepted, strict, categories)
+                                   accepted, strict, categories, strict and not missing)
 
 
 def _save_fill(db: Session, conv_id: str, revision_id: str, fingerprint: str, listing: dict, forms: dict[str, dict],
-               rows: dict[str, dict], reply: dict, accepted: dict, strict: bool, categories: bool) -> dict | None:
+               rows: dict[str, dict], reply: dict, accepted: dict, strict: bool, categories: bool,
+               constrain: bool = False) -> dict | None:
     from anteroom.services.listing_generate import photo_fingerprint
 
     latest = ListingRepo(db).get_current(conv_id)
@@ -484,7 +510,7 @@ def _save_fill(db: Session, conv_id: str, revision_id: str, fingerprint: str, li
     if not latest or latest.current_revision_id != revision_id:
         # The seller edited, cleared or regenerated while the forms were read.
         return None
-    updated = copy.deepcopy(listing)
+    updated = native_contract.copy_listing(listing)
     changed_parents = {path for path, (value, _labels) in accepted.items() if get_path(listing, path) != value}
     changed_labels = {rows[path].get("label") for path in changed_parents}
     dependent_paths = {dependent for path in changed_parents for dependent in rows[path].get("clears") or []}
@@ -508,6 +534,8 @@ def _save_fill(db: Session, conv_id: str, revision_id: str, fingerprint: str, li
             updated.setdefault(native_contract.EVIDENCE_KEY, {})[path] = {
                 "value": copy.deepcopy(value), "quote": reply["fields"][path]["evidence"]}
     _keep_depop_age(updated, rows.get(DEPOP_AGE))
+    if constrain:
+        native_contract.constrain_generated(updated, updated, freeze_categories=False, keep_evidence=True)
     if updated == listing:
         return updated if strict else None
     listing_persistence.save_revision(db, conv_id, updated, source="native_categories" if categories else "native_fields", parent_revision_id=revision_id, expected_revision_id=revision_id)
