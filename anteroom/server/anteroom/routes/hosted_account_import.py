@@ -26,14 +26,21 @@ _storage_executor = ThreadPoolExecutor(max_workers=STORAGE_UPLOAD_SLOTS, thread_
 _storage_semaphores: WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = WeakKeyDictionary()
 
 
-async def _run_storage_call(method: str, key: str, token: str, body: bytes | None = None):
+async def _run_storage_call(
+    method: str,
+    key: str,
+    token: str,
+    body: bytes | None = None,
+    *,
+    timeout: float | None = UPLOAD_WAIT_SECONDS,
+):
     loop = asyncio.get_running_loop()
     sem = _storage_semaphores.get(loop)
     if sem is None:
         sem = asyncio.Semaphore(STORAGE_UPLOAD_SLOTS)
         _storage_semaphores[loop] = sem
     try:
-        async with asyncio.timeout(UPLOAD_WAIT_SECONDS):
+        async with asyncio.timeout(timeout):
             await sem.acquire()
     except TimeoutError:
         raise HTTPException(
@@ -134,7 +141,7 @@ async def photo(photo_id: str, field: str, request: Request):
 async def _forget(key, token):
     """Delete an uploaded object no row points at."""
     try:
-        await _run_storage_call('DELETE', key, token)
+        await _run_storage_call('DELETE', key, token, timeout=None)
     except HTTPException:
         pass
 

@@ -580,6 +580,10 @@ def test_redaction_masks_postgres_dsns_and_sensitive_headers():
     assert "first,second" not in redacted_comma
     assert redacted_comma == "postgres://alice:…(masked)@db.example/app"
     assert redaction.redact("(postgres://alice:pa)ss@db.example/app)") == "(postgres://alice:…(masked)@db.example/app)"
+    adjacent = "postgres://alice:first@db1,postgres://bob:second@db2"
+    redacted_adjacent = redaction.redact(adjacent)
+    assert "first" not in redacted_adjacent and "second" not in redacted_adjacent
+    assert redacted_adjacent == "postgres://alice:…(masked)@db1,postgres://bob:…(masked)@db2"
 
     raw_headers = (
         "Authorization: Basic dXNlcjpzZWNyZXQ=\n"
