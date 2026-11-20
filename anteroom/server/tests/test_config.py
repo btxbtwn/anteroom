@@ -246,12 +246,28 @@ class ConfigPathTest(unittest.TestCase):
             _write_sqlite_with_committed_row(data / "anteroom.db", "new-primary")
             orphan = data / "vendoo_studio.db-wal"
             orphan.write_bytes(b"orphan-wal")
-            (data / config.LEGACY_DATABASE_ADOPTION_MARKER).write_bytes(b"\xff")
+            marker = data / config.LEGACY_DATABASE_ADOPTION_MARKER
+            marker.write_bytes(b"\xff")
             os.environ.pop("ANTEROOM_DATABASE_URL", None)
             config.adopt_legacy_database(data)
+            self.assertFalse(marker.exists())
             self.assertEqual(_read_sqlite_names(data / "anteroom.db"), ["new-primary"])
             self.assertTrue(orphan.is_file())
             self.assertEqual(orphan.read_bytes(), b"orphan-wal")
+
+    def test_prev2_constant_text_marker_is_not_a_recovery_claim(self):
+        """Pre-v2 markers have no identities: drop them; fresh adopt only when eligible."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            legacy = data / "vendoo_studio.db"
+            _write_sqlite_with_committed_row(legacy, "legacy-row")
+            marker = data / config.LEGACY_DATABASE_ADOPTION_MARKER
+            marker.write_text("adopting-from-vendoo_studio\n", encoding="utf-8")
+            os.environ.pop("ANTEROOM_DATABASE_URL", None)
+            config.adopt_legacy_database(data)
+            self.assertFalse(marker.exists())
+            self.assertFalse(legacy.exists())
+            self.assertEqual(_read_sqlite_names(data / "anteroom.db"), ["legacy-row"])
 
     def test_competing_wals_abandon_marker_so_later_start_cannot_attach(self):
         """After a WAL conflict, dropping the new WAL must not adopt the legacy one."""

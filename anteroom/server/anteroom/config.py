@@ -308,9 +308,14 @@ def adopt_legacy_database(data_dir: Path | None = None) -> None:
     sidecar rejects the transfer so a renamed primary is never paired with a foreign
     WAL/journal. A durable move plan (source identities + destinations) is fsynced
     before any rename; resume re-validates the whole plan and fails closed without
-    further moves on ambiguity. Malformed markers are ignored. Historical unmarked
-    interruptions cannot be identified safely and are not guessed. Never opens the
-    database; it only renames files.
+    further moves on ambiguity.
+
+    Only a parseable ``anteroom-legacy-db-adoption/2`` plan is a recovery claim.
+    Pre-v2 constant-text markers and other unparseable marker bytes are not: they
+    carry no source identities, so they are dropped and adoption continues with the
+    fresh-plan path when that path is still eligible. Refusal never blocks opening
+    the database; this function only renames files. Historical unmarked interruptions
+    cannot be identified safely and are not guessed.
     """
     if os.environ.get("ANTEROOM_DATABASE_URL"):
         return
@@ -319,10 +324,11 @@ def adopt_legacy_database(data_dir: Path | None = None) -> None:
 
     if marker.is_file():
         plan = _read_legacy_database_move_plan(marker)
-        if plan is None:
+        if plan is not None:
+            _execute_legacy_database_move_plan(root, plan, marker)
             return
-        _execute_legacy_database_move_plan(root, plan, marker)
-        return
+        # Not a v2 plan: clear and fall through (startup is never blocked).
+        _abandon_legacy_database_adoption(marker)
 
     plan = _build_fresh_legacy_database_move_plan(root, legacy, target)
     if plan is None:
