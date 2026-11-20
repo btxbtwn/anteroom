@@ -1,1 +1,2 @@
 - Finish renaming a Vendoo database file only when an update was clearly in progress, and leave mixed leftover files alone so listing data is not attached by mistake.
+- Refuse to start that rename when an Anteroom database sidecar is already present, and check the whole rename plan before moving any file.

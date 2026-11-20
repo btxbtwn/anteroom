@@ -83,10 +83,10 @@ FILL_LOGS_DIR = str(user_data_root() / "fill-logs")
 LOGS_DIR = str(user_data_root() / "logs")
 DATABASE_NAME = "anteroom.db"
 LEGACY_DATABASE_NAME = "vendoo_studio.db"
-# Written before any rename; only a marker with this body proves an in-progress
-# transfer. Presence of anteroom.db alone is not provenance.
+# Durable move-plan marker written before any rename. Presence of anteroom.db alone
+# is not provenance; only a parseable plan proves an in-progress transfer.
 LEGACY_DATABASE_ADOPTION_MARKER = "anteroom.db.adopting-from-vendoo_studio"
-LEGACY_DATABASE_ADOPTION_MARKER_BODY = "anteroom-legacy-db-adoption/1\n"
+LEGACY_DATABASE_ADOPTION_MARKER_VERSION = "anteroom-legacy-db-adoption/2"
 _LEGACY_DATABASE_SIDECARS = ("-wal", "-shm", "-journal")
 DATABASE_PATH = str(user_data_root() / DATABASE_NAME)
 # The Mac app keeps its SQLite file. The hosted API points this at Postgres.
@@ -112,6 +112,16 @@ def adopt_legacy_data_dir() -> None:
     legacy.symlink_to(APP_NAME, target_is_directory=True)
 
 
+class _LegacyDbMove:
+    __slots__ = ("source_name", "dest_name", "size", "mtime_ns")
+
+    def __init__(self, source_name: str, dest_name: str, size: int, mtime_ns: int) -> None:
+        self.source_name = source_name
+        self.dest_name = dest_name
+        self.size = size
+        self.mtime_ns = mtime_ns
+
+
 def _legacy_database_paths(root: Path) -> tuple[Path, Path, Path]:
     return (
         root / DATABASE_NAME,
@@ -120,16 +130,59 @@ def _legacy_database_paths(root: Path) -> tuple[Path, Path, Path]:
     )
 
 
-def _is_legacy_database_adoption_marker(marker: Path) -> bool:
+def _legacy_database_file_identity(path: Path) -> tuple[int, int]:
+    stat = path.stat()
+    return stat.st_size, stat.st_mtime_ns
+
+
+def _serialize_legacy_database_move_plan(plan: list[_LegacyDbMove]) -> bytes:
+    lines = [LEGACY_DATABASE_ADOPTION_MARKER_VERSION]
+    for step in plan:
+        lines.append(
+            f"move:{step.source_name}>{step.dest_name}:{step.size}:{step.mtime_ns}"
+        )
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def _parse_legacy_database_move_plan(data: bytes) -> list[_LegacyDbMove] | None:
     try:
-        return marker.read_bytes() == LEGACY_DATABASE_ADOPTION_MARKER_BODY.encode("utf-8")
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    lines = text.splitlines()
+    if not lines or lines[0] != LEGACY_DATABASE_ADOPTION_MARKER_VERSION:
+        return None
+    plan: list[_LegacyDbMove] = []
+    for line in lines[1:]:
+        if not line.startswith("move:"):
+            return None
+        rest = line[len("move:") :]
+        try:
+            path_part, size_text, mtime_text = rest.rsplit(":", 2)
+            source_name, dest_name = path_part.split(">", 1)
+        except ValueError:
+            return None
+        if not source_name or not dest_name or "/" in source_name or "/" in dest_name:
+            return None
+        try:
+            plan.append(
+                _LegacyDbMove(source_name, dest_name, int(size_text), int(mtime_text))
+            )
+        except ValueError:
+            return None
+    return plan or None
+
+
+def _read_legacy_database_move_plan(marker: Path) -> list[_LegacyDbMove] | None:
+    try:
+        return _parse_legacy_database_move_plan(marker.read_bytes())
     except OSError:
-        return False
+        return None
 
 
-def _write_legacy_database_adoption_marker(marker: Path) -> None:
-    """Persist the adoption marker before any rename (file + directory fsync)."""
-    data = LEGACY_DATABASE_ADOPTION_MARKER_BODY.encode("utf-8")
+def _write_legacy_database_adoption_marker(marker: Path, plan: list[_LegacyDbMove]) -> None:
+    """Persist the move plan before any rename (file + directory fsync)."""
+    data = _serialize_legacy_database_move_plan(plan)
     with marker.open("wb") as handle:
         handle.write(data)
         handle.flush()
@@ -152,29 +205,87 @@ def _abandon_legacy_database_adoption(marker: Path) -> None:
     marker.unlink(missing_ok=True)
 
 
-def _finish_legacy_database_adoption(root: Path, target: Path, legacy: Path, marker: Path) -> None:
-    """Continue a marker-proven transfer. Never deletes DB files; stops on ambiguity."""
-    if legacy.is_file() and target.exists():
-        # Both primaries present: do not choose. Leave every DB file; drop the marker
-        # so a later start cannot resume into sidecar renames.
+def _build_fresh_legacy_database_move_plan(
+    root: Path, legacy: Path, target: Path
+) -> list[_LegacyDbMove] | None:
+    """Plan a fresh adoption, or None when any target sidecar/primary already exists."""
+    if target.exists() or not legacy.is_file():
+        return None
+    for suffix in _LEGACY_DATABASE_SIDECARS:
+        if (root / f"{DATABASE_NAME}{suffix}").exists():
+            # Preexisting new-name sidecar must not be paired with a renamed primary.
+            return None
+        source = root / f"{LEGACY_DATABASE_NAME}{suffix}"
+        destination = root / f"{DATABASE_NAME}{suffix}"
+        if source.exists() and destination.exists():
+            return None
+    plan = [
+        _LegacyDbMove(
+            LEGACY_DATABASE_NAME,
+            DATABASE_NAME,
+            *_legacy_database_file_identity(legacy),
+        )
+    ]
+    for suffix in _LEGACY_DATABASE_SIDECARS:
+        source = root / f"{LEGACY_DATABASE_NAME}{suffix}"
+        if source.is_file():
+            plan.append(
+                _LegacyDbMove(
+                    f"{LEGACY_DATABASE_NAME}{suffix}",
+                    f"{DATABASE_NAME}{suffix}",
+                    *_legacy_database_file_identity(source),
+                )
+            )
+    return plan
+
+
+def _preflight_legacy_database_move_plan(root: Path, plan: list[_LegacyDbMove]) -> bool:
+    """True only when every planned step is already done or still a safe rename."""
+    for step in plan:
+        source = root / step.source_name
+        destination = root / step.dest_name
+        source_exists = source.exists()
+        destination_exists = destination.exists()
+        if source_exists and destination_exists:
+            return False
+        if source_exists:
+            try:
+                size, mtime_ns = _legacy_database_file_identity(source)
+            except OSError:
+                return False
+            if size != step.size or mtime_ns != step.mtime_ns:
+                return False
+            continue
+        if not destination_exists:
+            # Source gone and destination missing: incomplete or tampered.
+            return False
+    return True
+
+
+def _execute_legacy_database_move_plan(
+    root: Path, plan: list[_LegacyDbMove], marker: Path
+) -> None:
+    """Run only after a full-plan preflight. Fail closed without further renames."""
+    if not _preflight_legacy_database_move_plan(root, plan):
         _abandon_legacy_database_adoption(marker)
         return
-    if legacy.is_file() and not target.exists():
-        legacy.rename(target)
-    if not target.exists():
-        if not _legacy_database_names_present(root):
-            _abandon_legacy_database_adoption(marker)
-        return
-    for suffix in _LEGACY_DATABASE_SIDECARS:
-        sidecar = root / f"{LEGACY_DATABASE_NAME}{suffix}"
-        target_sidecar = root / f"{DATABASE_NAME}{suffix}"
-        if sidecar.exists() and target_sidecar.exists():
-            # Competing sidecars: leave both. Drop the marker so a later start cannot
-            # attach the legacy WAL after SQLite checkpoints away the new one.
+    for step in plan:
+        source = root / step.source_name
+        destination = root / step.dest_name
+        if not source.exists():
+            continue
+        if destination.exists():
             _abandon_legacy_database_adoption(marker)
             return
-        if sidecar.exists() and not target_sidecar.exists():
-            sidecar.rename(target_sidecar)
+        try:
+            size, mtime_ns = _legacy_database_file_identity(source)
+        except OSError:
+            _abandon_legacy_database_adoption(marker)
+            return
+        if size != step.size or mtime_ns != step.mtime_ns:
+            _abandon_legacy_database_adoption(marker)
+            return
+        source.rename(destination)
     if not _legacy_database_names_present(root):
         _abandon_legacy_database_adoption(marker)
 
@@ -182,33 +293,32 @@ def _finish_legacy_database_adoption(root: Path, target: Path, legacy: Path, mar
 def adopt_legacy_database(data_dir: Path | None = None) -> None:
     """Rename a pre-rename SQLite file (and its WAL/SHM siblings) to anteroom.db, once.
 
-    A transfer starts only when the legacy primary is alone. Before any rename the
-    marker is written and fsynced (file and directory); only that exact marker
-    proves an in-progress adoption, so a later start can finish sidecars after a
-    crash. Malformed marker bytes are ignored so startup continues. ``anteroom.db``
-    existing is not provenance: if both primaries exist, or a preexisting new
-    primary sits beside old-name sidecars without a valid marker, every file is
-    left alone. A marked transfer that hits competing primaries or sidecars
-    abandons the marker and leaves both file sets so a later start cannot attach
-    an unresolved legacy WAL after SQLite removes the new one. Historical
-    interruptions from builds that never wrote the marker cannot be identified
-    safely and are not guessed. Never opens the database; it only renames files.
+    Fresh adoption preflights the whole set first: any preexisting ``anteroom.db``
+    sidecar rejects the transfer so a renamed primary is never paired with a foreign
+    WAL/journal. A durable move plan (source identities + destinations) is fsynced
+    before any rename; resume re-validates the whole plan and fails closed without
+    further moves on ambiguity. Malformed markers are ignored. Historical unmarked
+    interruptions cannot be identified safely and are not guessed. Never opens the
+    database; it only renames files.
     """
     if os.environ.get("ANTEROOM_DATABASE_URL"):
         return
     root = data_dir or user_data_root()
     target, legacy, marker = _legacy_database_paths(root)
 
-    if marker.is_file() and _is_legacy_database_adoption_marker(marker):
-        _finish_legacy_database_adoption(root, target, legacy, marker)
+    if marker.is_file():
+        plan = _read_legacy_database_move_plan(marker)
+        if plan is None:
+            return
+        _execute_legacy_database_move_plan(root, plan, marker)
         return
 
-    # No proven in-progress transfer. Start only when the legacy primary stands alone.
-    if target.exists() or not legacy.is_file():
+    plan = _build_fresh_legacy_database_move_plan(root, legacy, target)
+    if plan is None:
         return
 
-    _write_legacy_database_adoption_marker(marker)
-    _finish_legacy_database_adoption(root, target, legacy, marker)
+    _write_legacy_database_adoption_marker(marker, plan)
+    _execute_legacy_database_move_plan(root, plan, marker)
 
 
 def ensure_user_data_dirs() -> None:
