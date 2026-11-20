@@ -306,8 +306,11 @@ def test_preview_names_the_account_chrome_read_and_import_all_refuses_another(ch
     refused = post(chrome, "poshmark", POST, unless_matched=True, account="seller-one")
     assert refused.status_code == 409 and "different Poshmark account" in refused.json()["detail"]
     assert chrome.db.query(Conversation).count() == 0 and chrome.remote.downloads == []
-    # The same account, or an extension that does not say which account it read, still imports.
+    # The same account imports.
     chrome.remote.listings["poshmark"]["account"] = "seller-one"
     assert post(chrome, "poshmark", POST, unless_matched=True, account="seller-one").json()["conversation_id"]
+    # A Bridge that does not say which account it read cannot serve import all; one listing at a time still works.
     assert "account" not in chrome.remote.listings["mercari"]
-    assert post(chrome, "mercari", "m12345678901", account="seller-one").json()["conversation_id"]
+    stale = post(chrome, "mercari", "m12345678901", account="seller-one")
+    assert stale.status_code == 409 and "Update Anteroom Bridge" in stale.json()["detail"]
+    assert post(chrome, "mercari", "m12345678901").json()["conversation_id"]

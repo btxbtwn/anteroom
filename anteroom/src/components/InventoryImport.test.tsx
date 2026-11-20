@@ -161,7 +161,7 @@ describe("import all active listings", () => {
   it("lists suggested matches for the seller to link, import as new, or compare", async () => {
     const match = { conversation_id: "local-coat", title: "Wool coat", score: 0.9, price: 40, price_differs: true };
     startImportAll("mercari:me", "mercari", {
-      candidates: async () => ({ total: 1, has_more: false, rows: [{ id: "m1", title: "Grey wool coat", price: "45.00", quantity: 1,
+      candidates: async () => ({ total: 1, has_more: false, account: "me", rows: [{ id: "m1", title: "Grey wool coat", price: "45.00", quantity: 1,
         reason: null, conversation_id: null, match }] }),
       importListing: vi.fn(), importNew: vi.fn(),
     }, vi.fn());

@@ -280,8 +280,12 @@ async def import_listing(marketplace: str, listing: str, *, unless_matched: bool
     if existing := await in_worker_session(_already_imported, marketplace, listing_id):
         return existing
     read = await _read(marketplace, listing_id)
-    if account is not None and (signed_in := _account(read.get("account"))) is not None and signed_in != account:
-        raise ChromeImportError(409, f"Chrome is signed in to a different {_name(marketplace)} account now. Nothing was imported.")
+    if account is not None:
+        signed_in = _account(read.get("account"))
+        if signed_in is None:
+            raise ChromeImportError(409, f"Update Anteroom Bridge in Chrome to import all your {_name(marketplace)} listings at once.")
+        if signed_in != account:
+            raise ChromeImportError(409, f"Chrome is signed in to a different {_name(marketplace)} account now. Nothing was imported.")
     data, photos = snapshot(marketplace, read)
     try:
         result = await inventory_import.save_owned_listing(marketplace, listing_id, data, photos, lambda: None,

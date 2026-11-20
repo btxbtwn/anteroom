@@ -10,7 +10,8 @@ const result = (id: string, extra: Partial<MarketplaceImportResult> = {}): Marke
 const match = { conversation_id: "local-coat", title: "Wool coat", score: 0.9, price: 40, price_differs: false };
 
 function fakeImporter(pages: MarketplaceImportPage[]) {
-  const candidates = vi.fn(async (page: number, _cursor: string | null) => pages[page - 1]);
+  // Chrome pages name the account Chrome read them from, as Bridge does; a test that wants none passes account: null.
+  const candidates = vi.fn(async (page: number, _cursor: string | null) => ({ account: "me", ...pages[page - 1] }));
   const importNew = vi.fn(async (id: string): Promise<MarketplaceImportResult | MarketplaceImportHeld> => result(id));
   const importListing = vi.fn();
   return { importer: { candidates, importNew, importListing } satisfies Importer, candidates, importNew, importListing };
@@ -41,7 +42,7 @@ describe("import all active listings", () => {
 
     expect(candidates.mock.calls).toEqual([[1, null], [2, "c2"]]);
     // Only listings with no local item and no suggested match are imported; nothing is linked on its own.
-    expect(importNew.mock.calls).toEqual([["a", undefined], ["e", undefined]]);
+    expect(importNew.mock.calls).toEqual([["a", "me"], ["e", "me"]]);
     expect(importListing).not.toHaveBeenCalled();
     expect(run).toMatchObject({ status: "done", page: 2, imported: 2, alreadyIn: 1, skipped: 1, failures: [] });
     expect(run.review).toEqual([{ id: "c", title: "Item c", price: "10.00", match }]);
@@ -107,7 +108,7 @@ describe("import all active listings", () => {
 
   it("stops with the marketplace's message when a page cannot be read, keeping what was imported", async () => {
     const { importer, candidates } = fakeImporter([{ total: null, has_more: true, next_cursor: "c2", rows: [row("a")] }]);
-    candidates.mockResolvedValueOnce({ total: null, has_more: true, next_cursor: "c2", rows: [row("a")] })
+    candidates.mockResolvedValueOnce({ total: null, has_more: true, next_cursor: "c2", account: "me", rows: [row("a")] })
       .mockRejectedValueOnce(new Error("Open Chrome and sign in to Mercari."));
     startImportAll("mercari:me", "mercari", importer, vi.fn());
     expect(await finished("mercari:me")).toMatchObject({ status: "failed", page: 2, imported: 1, error: "Open Chrome and sign in to Mercari." });
@@ -174,11 +175,12 @@ describe("import all active listings", () => {
     expect(importNew.mock.calls).toEqual([["a", "closet-one"]]);
   });
 
-  it("imports as before when the extension does not say which account it read", async () => {
-    const { importer, importNew } = fakeImporter([{ total: null, has_more: false, next_cursor: null, rows: [row("a")] }]);
+  it("asks for a newer Bridge instead of importing everything when it does not say which account it read", async () => {
+    const { importer, importNew } = fakeImporter([{ total: null, has_more: false, next_cursor: null, account: null, rows: [row("a")] }]);
     startImportAll("depop:depop", "depop", importer, vi.fn());
-    expect(await finished("depop:depop")).toMatchObject({ status: "done", imported: 1 });
-    expect(importNew.mock.calls).toEqual([["a", undefined]]);
+    expect(await finished("depop:depop")).toMatchObject({ status: "failed", imported: 0,
+      error: "Update Anteroom Bridge in Chrome to import all your Depop listings at once. You can still import them one at a time below." });
+    expect(importNew).not.toHaveBeenCalled();
   });
 
   it("reports a marketplace whose cursors go round in a circle, keeping what was imported", async () => {
