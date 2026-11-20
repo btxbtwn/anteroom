@@ -307,4 +307,225 @@ describe("AssistantPage concurrency and background failure recovery", () => {
       container.remove();
     }
   });
+
+  it("preserves a failed background submission without overwriting a newer draft in the target thread", async () => {
+    const prepareDeferred = deferred<{ ok: true; name: string; dataUrl: string }>();
+    const backgroundAskDeferred = deferred<{ error?: string }>();
+    const retryAskDeferred = deferred<{ error?: string }>();
+
+    mocks.prepareComposerImage.mockReturnValue(prepareDeferred.promise);
+    mocks.ask
+      .mockReturnValueOnce(backgroundAskDeferred.promise)
+      .mockReturnValueOnce(retryAskDeferred.promise);
+
+    const photo = new File(["img-bytes"], "sleeve-flaw.png", { type: "image/png" });
+    const attachment = { id: "img-newer-1", file: photo };
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      setComposerDraftText("assistant:thread-newer-a", "Check sleeve flaw pricing");
+      setComposerDraftImages("assistant:thread-newer-a", [attachment]);
+
+      await act(async () => {
+        root.render(
+          <AssistantPage
+            threadId="thread-newer-a"
+            onOpenProviders={vi.fn()}
+            onOpenListing={vi.fn()}
+          />,
+        );
+      });
+
+      const sendButton = () => container.querySelector<HTMLButtonElement>('[data-testid="send-button"]')!;
+      await act(async () => {
+        sendButton().click();
+        await flushMicrotasks();
+      });
+
+      // Switch to thread-newer-b before preparation finishes, then resolve preparation.
+      await act(async () => {
+        root.render(
+          <AssistantPage
+            threadId="thread-newer-b"
+            onOpenProviders={vi.fn()}
+            onOpenListing={vi.fn()}
+          />,
+        );
+        await flushMicrotasks();
+      });
+
+      await act(async () => {
+        prepareDeferred.resolve({ ok: true, name: "sleeve-flaw.png", dataUrl: "data:image/png;base64,BB==" });
+        await flushMicrotasks();
+      });
+
+      // Seller types a brand-new draft into thread-newer-a before the background send fails.
+      await act(async () => {
+        setComposerDraftText("assistant:thread-newer-a", "Newer unsent follow-up");
+      });
+
+      await act(async () => {
+        backgroundAskDeferred.resolve({ error: "Upstream timeout." });
+        await flushMicrotasks();
+      });
+
+      // Newer draft is untouched; toast reports the background failure immediately.
+      expect(getComposerDraft("assistant:thread-newer-a").text).toBe("Newer unsent follow-up");
+      expect(mocks.addToast).toHaveBeenCalledWith({ type: "error", title: "Upstream timeout." });
+
+      // Returning to thread-newer-a shows the preserved failed text and attachment with Retry.
+      await act(async () => {
+        root.render(
+          <AssistantPage
+            threadId="thread-newer-a"
+            onOpenProviders={vi.fn()}
+            onOpenListing={vi.fn()}
+          />,
+        );
+        await flushMicrotasks();
+      });
+
+      expect(container.textContent).toContain("Upstream timeout.");
+      expect(container.textContent).toContain("Check sleeve flaw pricing");
+      expect(container.textContent).toContain("sleeve-flaw.png");
+      expect(getComposerDraft("assistant:thread-newer-a").text).toBe("Newer unsent follow-up");
+
+      // Retrying resends the complete original submission without touching the newer draft.
+      const retryButton = Array.from(container.querySelectorAll("button")).find((btn) => btn.textContent === "Retry");
+      expect(retryButton).toBeTruthy();
+      await act(async () => {
+        retryButton!.click();
+        await flushMicrotasks();
+      });
+
+      expect(mocks.ask).toHaveBeenNthCalledWith(
+        2,
+        "Check sleeve flaw pricing",
+        expect.anything(),
+        expect.anything(),
+        [{ name: "sleeve-flaw.png", data_url: "data:image/png;base64,BB==" }],
+        "thread-newer-a",
+      );
+      expect(getComposerDraft("assistant:thread-newer-a").text).toBe("Newer unsent follow-up");
+
+      await act(async () => {
+        retryAskDeferred.resolve({});
+        await flushMicrotasks();
+      });
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
+
+  it("preserves an image-only new-chat submission when createThread() fails after navigating away", async () => {
+    const createDeferred = deferred<{ id: string }>();
+    const retryCreateDeferred = deferred<{ id: string }>();
+    const retryAskDeferred = deferred<{ error?: string }>();
+
+    mocks.prepareComposerImage.mockResolvedValue({
+      ok: true,
+      name: "receipt-photo.png",
+      dataUrl: "data:image/png;base64,CC==",
+    });
+    mocks.createThread
+      .mockReturnValueOnce(createDeferred.promise)
+      .mockReturnValueOnce(retryCreateDeferred.promise);
+    mocks.ask.mockReturnValueOnce(retryAskDeferred.promise);
+
+    const photo = new File(["img-bytes"], "receipt-photo.png", { type: "image/png" });
+    const attachment = { id: "img-create-fail-1", file: photo };
+
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      setComposerDraftImages("assistant:__new__", [attachment]);
+
+      await act(async () => {
+        root.render(
+          <AssistantPage
+            threadId={null}
+            onOpenProviders={vi.fn()}
+            onOpenListing={vi.fn()}
+          />,
+        );
+      });
+
+      const sendButton = () => container.querySelector<HTMLButtonElement>('[data-testid="send-button"]')!;
+      await act(async () => {
+        sendButton().click();
+        await flushMicrotasks();
+      });
+      expect(getComposerDraft("assistant:__new__").images).toEqual([]);
+
+      // Navigate away to an existing thread while createThread() is still pending.
+      await act(async () => {
+        root.render(
+          <AssistantPage
+            threadId="thread-other-nav"
+            onOpenProviders={vi.fn()}
+            onOpenListing={vi.fn()}
+          />,
+        );
+        await flushMicrotasks();
+      });
+
+      // Fail thread creation after leaving the new-chat session.
+      await act(async () => {
+        createDeferred.reject(new Error("Database offline"));
+        await flushMicrotasks();
+      });
+
+      expect(mocks.addToast).toHaveBeenCalledWith({ type: "error", title: "Database offline" });
+      expect(getComposerDraft("assistant:__new__").images).toEqual([]);
+
+      // Returning to New chat shows the preserved image-only submission with Retry.
+      await act(async () => {
+        root.render(
+          <AssistantPage
+            threadId={null}
+            onOpenProviders={vi.fn()}
+            onOpenListing={vi.fn()}
+          />,
+        );
+        await flushMicrotasks();
+      });
+
+      expect(container.textContent).toContain("Database offline");
+      expect(container.textContent).toContain("receipt-photo.png");
+
+      const retryButton = Array.from(container.querySelectorAll("button")).find((btn) => btn.textContent === "Retry");
+      expect(retryButton).toBeTruthy();
+      await act(async () => {
+        retryButton!.click();
+        retryCreateDeferred.resolve({ id: "thread-recovered-new" });
+        await flushMicrotasks();
+      });
+
+      expect(mocks.ask).toHaveBeenCalledWith(
+        "",
+        expect.anything(),
+        expect.anything(),
+        [{ name: "receipt-photo.png", data_url: "data:image/png;base64,CC==" }],
+        "thread-recovered-new",
+      );
+
+      await act(async () => {
+        retryAskDeferred.resolve({});
+        await flushMicrotasks();
+      });
+    } finally {
+      await act(async () => {
+        root.unmount();
+      });
+      container.remove();
+    }
+  });
 });
