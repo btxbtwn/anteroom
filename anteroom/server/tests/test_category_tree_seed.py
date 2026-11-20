@@ -36,7 +36,8 @@ class CategoryTreeSeedTest(unittest.TestCase):
                 status VARCHAR NOT NULL,
                 error VARCHAR,
                 source VARCHAR,
-                updated_at DATETIME
+                updated_at DATETIME,
+                content_hash VARCHAR
             );
             CREATE TABLE category_tree_nodes (
                 marketplace VARCHAR NOT NULL,
@@ -53,7 +54,7 @@ class CategoryTreeSeedTest(unittest.TestCase):
         )
         for marketplace in MARKETPLACES:
             con.execute(
-                "INSERT INTO category_trees VALUES (?, 1, 'complete', NULL, 'seed-test', '2026-01-01')",
+                "INSERT INTO category_trees VALUES (?, 1, 'complete', NULL, 'seed-test', '2026-01-01', NULL)",
                 (marketplace,),
             )
             con.execute(
@@ -89,7 +90,7 @@ class CategoryTreeSeedTest(unittest.TestCase):
         con = sqlite3.connect(self.target)
         con.execute(
             "CREATE TABLE category_trees (marketplace VARCHAR PRIMARY KEY, roots_loaded BOOLEAN, "
-            "status VARCHAR, error VARCHAR, source VARCHAR, updated_at DATETIME)"
+            "status VARCHAR, error VARCHAR, source VARCHAR, updated_at DATETIME, content_hash VARCHAR)"
         )
         con.execute(
             "CREATE TABLE category_tree_nodes (marketplace VARCHAR, category_id VARCHAR, "
@@ -97,7 +98,7 @@ class CategoryTreeSeedTest(unittest.TestCase):
             "has_children BOOLEAN, children_loaded BOOLEAN, PRIMARY KEY (marketplace, category_id))"
         )
         con.execute(
-            "INSERT INTO category_trees VALUES ('ebay', 0, 'pending', 'old', NULL, NULL)"
+            "INSERT INTO category_trees VALUES ('ebay', 0, 'pending', 'old', NULL, NULL, NULL)"
         )
         con.execute(
             "INSERT INTO category_tree_nodes VALUES ('ebay', 'stale', '__root', 'Stale', 'Stale', 1, 0, 1)"
@@ -119,6 +120,43 @@ class CategoryTreeSeedTest(unittest.TestCase):
             len(MARKETPLACES),
         )
         con.close()
+
+    def test_changed_nodes_invalidate_response_with_unchanged_seed_metadata(self):
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import Session
+
+        from anteroom.routes.catalog import categories, _serialize_tree_nodes
+
+        export_seed(self.source, self.seed)
+        import_seed(self.target, self.seed)
+        engine = create_engine(f"sqlite:///{self.target}")
+
+        def response(etag=None):
+            with Session(engine) as db:
+                return categories("ebay", etag, db)
+
+        try:
+            with patch("anteroom.routes.catalog._serialize_tree_nodes", wraps=_serialize_tree_nodes) as serialize:
+                first = response()
+                etag = first.headers["etag"]
+                import_seed(self.target, self.seed)
+                self.assertEqual(response(etag).status_code, 304)
+                self.assertEqual(serialize.call_count, 1)
+
+                payload = json.loads(gzip.decompress(self.seed.read_bytes()))
+                for node in payload["category_tree_nodes"]:
+                    if node["marketplace"] == "ebay":
+                        node["label"] = "Changed label"
+                self.seed.write_bytes(gzip.compress(json.dumps(payload).encode()))
+                import_seed(self.target, self.seed)
+                refreshed = response(etag)
+                self.assertEqual(refreshed.status_code, 200)
+                self.assertNotEqual(refreshed.headers["etag"], etag)
+                self.assertEqual(json.loads(refreshed.body)["nodes"][0]["label"], "Changed label")
+                self.assertEqual(serialize.call_count, 2)
+                self.assertTrue(seed_matches(self.target, self.seed))
+        finally:
+            engine.dispose()
 
     def test_ensure_imports_when_incomplete_and_skips_when_complete(self):
         export_seed(self.source, self.seed)

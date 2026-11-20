@@ -63,6 +63,7 @@ class CategoryTree(Base):
     error: Mapped[str | None] = mapped_column(String, nullable=True)
     source: Mapped[str | None] = mapped_column(String, nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class CategoryTreeNode(Base):

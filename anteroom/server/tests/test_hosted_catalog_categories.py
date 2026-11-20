@@ -29,7 +29,8 @@ def seed(tmp_path):
         ]
     path = tmp_path / 'seed.json'
     path.write_text(json.dumps({'version': SEED_VERSION, 'category_tree_nodes': nodes,
-                                'category_trees': [{'marketplace': name} for name in MARKETPLACES]}))
+                                'category_trees': [{'marketplace': name, 'updated_at': '2026-01-01 00:00:00',
+                                                    'source': 'test'} for name in MARKETPLACES]}))
     return path
 
 
@@ -135,11 +136,15 @@ def test_complete_category_trees_are_cached_per_version_and_invalidated_on_reimp
         assert not_modified.status_code == 304
         assert len(node_queries) == 1
 
-        # Re-importing a seed with a newer timestamp invalidates the cache.
+        # An identical import keeps the response cached, even across CLI engines.
+        assert category_trees_cli.main(['import', '--database-url-env', 'ANTEROOM_TEST_MIGRATION_URL', '--seed', str(seed_path)]) == 0
+        unchanged = client.get('/api/catalog/categories?marketplace=ebay',
+                               headers={**alice, 'If-None-Match': etag})
+        assert unchanged.status_code == 304
+        assert len(node_queries) == 1
+
+        # Changed nodes invalidate the cache even with identical seed metadata.
         updated = json.loads(seed_path.read_text())
-        updated['category_trees'] = [
-            {**row, 'updated_at': '2099-01-01 00:00:00'} for row in updated['category_trees']
-        ]
         updated['category_tree_nodes'].append({
             'marketplace': 'ebay',
             'category_id': '999999',

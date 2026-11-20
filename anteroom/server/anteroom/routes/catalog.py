@@ -19,11 +19,11 @@ from anteroom.models.catalog import (
 router = APIRouter(prefix="/api/catalog", tags=["catalog"])
 
 # Complete category trees (eBay alone has ~20.5k rows) only change when an
-# operator imports a new seed, which updates CategoryTree.updated_at. Cache the
+# operator imports a new seed, which versions the node content as well as its metadata. Cache the
 # encoded JSON per engine and marketplace so repeated picker loads do not scan
 # and serialize 20k ORM rows on every request.
 _TREE_CACHE_LOCK = threading.Lock()
-_TREE_CACHE: WeakKeyDictionary[Any, dict[str, tuple[tuple[datetime, str | None], bytes, str]]] = WeakKeyDictionary()
+_TREE_CACHE: WeakKeyDictionary[Any, dict[str, tuple[tuple[datetime, str | None, str | None], bytes, str]]] = WeakKeyDictionary()
 
 
 def _etag_matches(header: str | None, etag: str) -> bool:
@@ -84,7 +84,7 @@ def categories(
     if tree:
         bind = db.get_bind()
         engine = getattr(bind, "engine", bind)
-        version = (tree.updated_at, tree.source) if tree.status == "complete" and tree.updated_at is not None else None
+        version = (tree.updated_at, tree.source, tree.content_hash) if tree.status == "complete" and tree.updated_at is not None else None
         if version is not None:
             with _TREE_CACHE_LOCK:
                 cached = _TREE_CACHE.get(engine, {}).get(marketplace)
