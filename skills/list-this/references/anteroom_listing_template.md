@@ -159,10 +159,6 @@ Depop: No title field → use Universal Description only
 
 ## **2. Listing JSON Structure**
 
-<!-- coderabbit-ai-generated:v1 -->
-
-<!-- coderabbit-ai-generated-section:v1:89b4262af2d02f30f7af12f039eb991615271f1e386604a715d67b813999a648 -->
-
 ```json
 {
   "title": "Fruit of the Loom XL 2012 NHRA Auto Club Finals T-Shirt White Drag Racing Pomona",
@@ -261,8 +257,6 @@ Depop: No title field → use Universal Description only
   }
 }
 ```
-
-<!-- /coderabbit-ai-generated:v1 -->
 
 ### **JSON Field Reference**
 
