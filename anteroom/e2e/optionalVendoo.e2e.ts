@@ -3,8 +3,9 @@ import { createListing, expect, openListing, test, titleBox } from "./fixtures";
 test.beforeEach(async ({ page }) => {
   // The offline sandbox blocks the Mac updater; keep its unrelated polls out of these settings checks.
   await page.route(/\/api\/updates(?:\/progress)?$/, route => route.fulfill({ json: { available: false, status: "idle" } }));
-  // Chrome pairing is not exercised here. A real status poll crossing the
-  // reload can make WebKit report an access-control error for the old document.
+  // Chrome pairing is not exercised here. Keep polls off the real bridge; the
+  // shared fixture also ignores WebKit's access-control noise when a status
+  // poll is cancelled by reload (see e2e/fixtures.ts).
   await page.route("**/api/extension/status", route => route.fulfill({ json: { connected: false, paired: false } }));
 });
 
