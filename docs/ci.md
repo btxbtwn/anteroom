@@ -107,3 +107,92 @@ Normal PR CI also exercises the optional collector against tiny standalone
 pytest fixtures with real xdist/split, skips, expected failures and subtests.
 Failed tests, failed subtests, collection errors and worker loss must not
 publish successful inventories. These fixtures do not access app or seller data.
+
+
+## Executable recovery-evidence inspection (runtime disabled)
+
+`.github/scripts/recovery_evidence.py` is a read-only consumer precursor. It
+fetches GitHub metadata and artifact archives through bounded GET-only `gh api`
+calls and reads local Git objects; it never fetches/checks out a different
+application revision, reads production secrets, authenticates to Fly/Supabase,
+claims approval, creates a Deployment object, dispatches workflows or deploys.
+A failed read has no alternate transport or retry. Run from a complete repo
+with an already refreshed `origin/main`; the inspector does not change refs.
+
+Every binding is mandatory: repository name/ID, trusted verification workflow
+ID, original target/tree, production base, workflow/CI blobs, verification
+run/attempt, unique receipt artifact ID and archive SHA-256 digest. The checker
+requires both the latest run and pinned attempt to be finally successful,
+reconstructs source coverage from the original target's Git objects, validates
+all exact-attempt jobs, downloads all six evidence artifacts, checks each
+archive's provenance/digest and bounded single-file structure, recomputes both
+database shard unions and requires the historical Postgres regression to pass.
+It compares the receipt with those independent observations and rechecks the
+latest run after downloads. Missing/expired artifacts, unknown extra evidence
+artifacts, incomplete pagination, later reruns, wrong IDs/blobs/trees or altered
+receipt/archives fail closed. Unrelated screenshot/report artifacts are ignored.
+
+The exact green receipt observed November 20 is run `44662061597`, attempt 1,
+artifact `14596571781`, digest
+`sha256:4d0f38c8b8125c78810c0eecfb9301e74bd73a8e3f2df148cb38879c328ed791`.
+It covers only target `b28ba4b361071373731b93bc49c12b4bf78326e9`, tree
+`07ff8975695a4182c00c2605b5679d56e493c67b`, base
+`b73c534707b9ef9bd70e4dc589b9c4b10863a852`. The docs-only #1659 merge
+`644fa65095840f5662fa606baa68bf19ac1eceba` is a different SHA/tree and cannot
+use that receipt as its own verification. No later main is selected implicitly.
+Pins for a read-only inspection of that evidence are:
+
+```bash
+python3 .github/scripts/recovery_evidence.py \
+  --repository btxbtwn/anteroom --repository-id 1183824317 \
+  --workflow-id 422931456 \
+  --target b28ba4b361071373731b93bc49c12b4bf78326e9 \
+  --tree 07ff8975695a4182c00c2605b5679d56e493c67b \
+  --production-base b73c534707b9ef9bd70e4dc589b9c4b10863a852 \
+  --workflow-blob a0a097906554252a26f35c957169ec6d0e3c93db \
+  --ci-blob 3ee3a2df9cda1261e08aa55a2ee639ab9075c380 \
+  --run-id 44662061597 --attempt 1 --receipt-artifact-id 14596571781 \
+  --receipt-digest sha256:4d0f38c8b8125c78810c0eecfb9301e74bd73a8e3f2df148cb38879c328ed791
+```
+
+A successful inspection explicitly returns `deployment_authorized: false`,
+`runtime_authority: disabled` and `live_reconciliation: not performed`. It does
+not consume a single-use authorization, validate live schema/Machines or prove
+native, backup, migration-upgrade or operational readiness. Neither its JSON
+output nor its Python return value is a production permit. There is no deploy
+command, workflow wiring, activation flag, mutable approval pointer or persistent
+exception. `require_runtime_authority` rejects every input unconditionally,
+including comments, booleans, dispatch actors and a valid evidence report.
+
+The offline negative suite is `.github/scripts/test_recovery_evidence.py`; the
+existing stdlib evidence-contract CI entry point also collects these tests.
+It uses synthetic API/Git/ZIP fixtures and makes no network or application calls.
+The CLI transport bounds output, memory-sized archives and wall time per command.
+No successful test of mocks establishes a one-use platform claim.
+
+Before executable deployment integration, approve and independently review an
+actual operator-authentication mechanism plus durable single-use consumption,
+then test crash/retry/partial-job semantics and fresh live base/schema/image
+reconciliation inside release serialization. The production branch restriction,
+dispatch access and a comment string are insufficient; no operator IDs or
+approval records are installed here. If using required reviewers, explicitly
+approve that configuration and its human-approval/replay semantics first;
+if using a run-bound authorization, prove both authenticated record provenance
+and exact-run/first-attempt enforcement before wiring any production effect.
+Keep ordinary gates, all historical failed statuses and marketplace safeguards.
+Merging this precursor and activating any runtime path are separate decisions.
+
+
+A concrete control to evaluate for the missing approval boundary is a dedicated
+GitHub environment used only by the recovery approval job, with an explicitly
+approved required reviewer, administrator bypass disabled, and a reviewed
+self-review/initiator policy. Its creation/configuration needs separate approval;
+changing the existing production environment could otherwise alter ordinary
+release behavior. No credentials need to be copied into the approval job.
+The eventual side-effect job must validate that specific approval job/run and
+immutable input record, run only on the authorized first attempt, reject reused
+upstream outputs after partial reruns, and reconcile live state again inside
+existing serialization. Environment approval alone is not the durable one-use
+proof: approve and independently test the exact run-bound claim or durable claim
+mechanism as well. Until those controls and native/migration/operational receipts
+exist, the runtime route must stay disabled even when evidence validation passes.
