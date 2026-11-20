@@ -119,7 +119,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     void (async () => {
       const uploads = attached.length ? await images.prepare(attached) : [];
       if (uploads === null) return;
-      images.clear();
+      images.clear(attached.map((image) => image.id));
       void sendMessage(text, uploads.length ? { attachments: uploads } : undefined);
     })();
   }, [busy, input, setInput, sendMessage, pinChatToBottom, enqueue, images]);

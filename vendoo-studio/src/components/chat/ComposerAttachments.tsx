@@ -29,7 +29,7 @@ export function useComposerImages(draftKey: string) {
   const [errorState, setErrorState] = useState({ key: draftKey, message: "" });
   const error = errorState.key === draftKey ? errorState.message : "";
   const setError = useCallback((message: string) => {
-    setErrorState({ key: draftKey, message });
+    setErrorState((prev) => (message ? { key: draftKey, message } : prev.key === draftKey ? { key: draftKey, message: "" } : prev));
   }, [draftKey]);
 
   const addFiles = useCallback((files: readonly File[]): boolean => {
@@ -56,10 +56,19 @@ export function useComposerImages(draftKey: string) {
     setError("");
   }, [draftKey, setImages, setError]);
 
-  const clear = useCallback(() => {
-    setImages([]);
+  const clear = useCallback((ids?: readonly string[]) => {
+    if (ids) {
+      if (ids.length) {
+        const sent = new Set(ids);
+        const current = getComposerDraft(draftKey).images;
+        const remaining = current.filter((image) => !sent.has(image.id));
+        if (remaining.length !== current.length) setImages(remaining);
+      }
+    } else {
+      setImages([]);
+    }
     setError("");
-  }, [setImages, setError]);
+  }, [draftKey, setImages, setError]);
 
   /** Encode every image for the request; a file that cannot be read stops the send. */
   const prepare = useCallback(async (list: readonly ComposerImage[]): Promise<ChatAttachmentUpload[] | null> => {

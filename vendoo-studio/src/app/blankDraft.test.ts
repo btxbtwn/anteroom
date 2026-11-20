@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetComposerDrafts, setComposerDraftImages, setComposerDraftText } from "../components/chat/composerDrafts";
 import { notifyUnsavedWork, registerUnsavedWork } from "../lib/unsavedWork";
 import { trackPhotoUpload } from "../photoUploads";
 import { discardBlankDraft, discardBlankDraftOnExit } from "./blankDraft";
@@ -6,6 +7,7 @@ import { discardBlankDraft, discardBlankDraftOnExit } from "./blankDraft";
 const cleanups: Array<() => void> = [];
 afterEach(() => {
   cleanups.splice(0).forEach((cleanup) => cleanup());
+  resetComposerDrafts();
 });
 
 describe("discardBlankDraft", () => {
@@ -58,6 +60,18 @@ describe("discardBlankDraft", () => {
     const discard = vi.fn(async () => { throw new Error("offline"); });
     await expect(discardBlankDraft("new", discard, { pollMs: 1 })).resolves.toBe(false);
   });
+
+  it("keeps the draft when the seller left unsent composer text or images", async () => {
+    setComposerDraftText("listing:new", "Draft prompt for this coat");
+    const discard = vi.fn(async () => ({ discarded: true }));
+    await expect(discardBlankDraft("new", discard, { pollMs: 1 })).resolves.toBe(false);
+    expect(discard).not.toHaveBeenCalled();
+
+    resetComposerDrafts();
+    setComposerDraftImages("listing:new", [{ id: "img-1", file: new File(["img"], "coat.png", { type: "image/png" }) }]);
+    await expect(discardBlankDraft("new", discard, { pollMs: 1 })).resolves.toBe(false);
+    expect(discard).not.toHaveBeenCalled();
+  });
 });
 
 describe("discardBlankDraftOnExit", () => {
@@ -69,6 +83,13 @@ describe("discardBlankDraftOnExit", () => {
 
   it("leaves the draft alone while a save is pending", () => {
     cleanups.push(registerUnsavedWork({ pending: () => true }));
+    const discard = vi.fn(async () => ({ discarded: true }));
+    expect(discardBlankDraftOnExit("new", discard)).toBe(false);
+    expect(discard).not.toHaveBeenCalled();
+  });
+
+  it("leaves the draft alone when an unsent composer draft exists", () => {
+    setComposerDraftText("listing:new", "Keep this draft");
     const discard = vi.fn(async () => ({ discarded: true }));
     expect(discardBlankDraftOnExit("new", discard)).toBe(false);
     expect(discard).not.toHaveBeenCalled();

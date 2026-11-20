@@ -23,6 +23,11 @@ export function getComposerDraft(key: string): ComposerDraft {
   return drafts.get(key) ?? EMPTY_DRAFT;
 }
 
+export function hasComposerDraft(key: string): boolean {
+  const current = drafts.get(key);
+  return Boolean(current && (current.text.trim().length > 0 || current.images.length > 0));
+}
+
 export function setComposerDraftText(key: string, text: string): void {
   const current = drafts.get(key) ?? EMPTY_DRAFT;
   if (current.text === text) return;

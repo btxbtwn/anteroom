@@ -4,6 +4,7 @@
  * discarded, the way Apple Notes drops an empty note. The server makes the
  * final call in one transaction: a draft that holds anything is kept.
  */
+import { clearComposerDraft, hasComposerDraft } from "../components/chat/composerDrafts";
 import { commitUnsavedWork, hasUnsavedWork } from "../lib/unsavedWork";
 import { photosUploading } from "../photoUploads";
 
@@ -33,8 +34,11 @@ export async function discardBlankDraft(
     if (Date.now() >= until) return false;
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
+  if (hasComposerDraft(`listing:${id}`)) return false;
   try {
-    return (await discard(id)).discarded;
+    const discarded = (await discard(id)).discarded;
+    if (discarded) clearComposerDraft(`listing:${id}`);
+    return discarded;
   } catch {
     return false;
   }
@@ -45,7 +49,7 @@ export async function discardBlankDraft(
  * pending. The page's own guard has already started saving any typed field.
  */
 export function discardBlankDraftOnExit(id: string, discard: Discard): boolean {
-  if (busy(id)) return false;
+  if (busy(id) || hasComposerDraft(`listing:${id}`)) return false;
   void discard(id).catch(() => {});
   return true;
 }

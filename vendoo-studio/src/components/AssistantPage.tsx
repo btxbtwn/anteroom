@@ -16,7 +16,7 @@ import { coalesceSseEvents, emptySseParts, type SseParts } from "./sseCoalesce";
 import { streamingDisplayText } from "./streamingText";
 import { settleAgents } from "./liveTrace";
 import { useComposerImages } from "./chat/ComposerAttachments";
-import { useComposerDraftText } from "./chat/composerDrafts";
+import { getComposerDraft, setComposerDraftText, useComposerDraftText } from "./chat/composerDrafts";
 import { ChatComposer } from "./chat/ChatComposer";
 import { chatTime } from "./chat/chatHistory";
 import { foldSseEvent } from "./chat/chatStream";
@@ -192,6 +192,11 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   ) => {
     if (controller.current) return;
     let id = inThread;
+    const originDraftKey = `assistant:${inThread ?? "__new__"}`;
+    const restoreQuestion = (targetId: string | null, text: string) => {
+      const targetKey = `assistant:${targetId ?? "__new__"}`;
+      if (!getComposerDraft(targetKey).text) setComposerDraftText(targetKey, text);
+    };
     if (question !== null && !id) {
       try {
         const created = await api.assistant.createThread();
@@ -202,7 +207,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         void queryClient.invalidateQueries({ queryKey: THREADS_KEY });
       } catch (failure) {
         setError(failure instanceof Error ? failure.message : "Could not start a conversation.");
-        setInput((current) => current || question);
+        restoreQuestion(inThread, question);
         return;
       }
     }
@@ -225,7 +230,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     if (question !== null || retry) {
       scroll.pinChatToBottom();
       setError("");
-      if (clearDraft) setInput("");
+      if (clearDraft) setComposerDraftText(originDraftKey, "");
       parts.status = "Reading your shop…";
       show();
     }
@@ -258,7 +263,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
           }
           if (failure instanceof AssistantRefused) {
             setError(failure.message);
-            if (asking && question !== null) setInput((current) => current || question);
+            if (asking && question !== null) restoreQuestion(id, question);
             break;
           }
           asking = false;
@@ -302,7 +307,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         const saved = queryClient.getQueryData<AssistantMessage[]>(threadKey);
         if (saved && !saved.some((turn) => turn.role === "user" && turn.text === question)) {
           setError("Could not reach Anteroom. Check the connection and ask again.");
-          setInput((current) => current || question);
+          restoreQuestion(id, question);
         }
       }
       // A newer follow may own the page by now; leave its turn alone.
@@ -372,7 +377,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     if (uploads === null) return;
     // The live bubble shows the images by name until the saved turn brings them back.
     const shown = attached.map((image, index) => ({ id: "", name: uploads[index]?.name ?? image.file.name, mime_type: image.file.type }));
-    images.clear();
+    images.clear(attached.map((image) => image.id));
     if (askNow(Boolean(live || controller.current), queued) === "queue") {
       setInput("");
       scroll.pinChatToBottom();

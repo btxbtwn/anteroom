@@ -103,4 +103,38 @@ describe("composer draft persistence", () => {
       container.remove();
     }
   });
+
+  it("clears only sent attachment IDs so files added during async prepare are preserved", async () => {
+    let latestImages: ReturnType<typeof useComposerImages> | null = null;
+    function Harness({ draftKey }: { draftKey: string }) {
+      latestImages = useComposerImages(draftKey);
+      return <output>{latestImages.images.map((item) => item.file.name).join(",")}</output>;
+    }
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(() => root.render(<Harness draftKey="listing:race" />));
+      await act(() => {
+        latestImages!.addFiles([makeImageFile("first.png")]);
+      });
+      const capturedIds = latestImages!.images.map((item) => item.id);
+      const staleClear = latestImages!.clear;
+
+      // User adds a second image while the first send is still preparing.
+      await act(() => {
+        latestImages!.addFiles([makeImageFile("second.png")]);
+      });
+      expect(latestImages!.images.map((item) => item.file.name)).toEqual(["first.png", "second.png"]);
+
+      // Resolving the first send removes only first.png, preserving second.png.
+      await act(() => {
+        staleClear(capturedIds);
+      });
+      expect(latestImages!.images.map((item) => item.file.name)).toEqual(["second.png"]);
+    } finally {
+      await act(() => root.unmount());
+      container.remove();
+    }
+  });
 });

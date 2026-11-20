@@ -11,10 +11,11 @@ async function readCss(relativePath: string): Promise<string> {
 }
 
 describe("UI audit CSS regressions", () => {
-  it("renders checked native checkbox checkmarks with var(--primary-foreground) instead of hardcoded white", async () => {
+  it("renders checked native checkbox checkmarks with var(--primary-foreground) and forced-colors system contrast", async () => {
     const controlsCss = await readCss("./controls.css");
     expect(controlsCss).not.toContain("stroke='white'");
     expect(controlsCss).toMatch(/input\[type="checkbox"\]:not\(\[data-slot\]\):checked::after[\s\S]*background-color:\s*var\(--primary-foreground\)/);
+    expect(controlsCss).toMatch(/@media\s*\(forced-colors:\s*active\)[\s\S]*input\[type="checkbox"\]:not\(\[data-slot\]\):checked::after[\s\S]*background-color:\s*HighlightText/);
   });
 
   it("keeps mobile confirm dialog footer buttons at a 44px minimum touch target", async () => {
