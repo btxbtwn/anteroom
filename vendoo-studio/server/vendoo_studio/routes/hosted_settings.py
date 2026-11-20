@@ -11,20 +11,28 @@ from vendoo_studio.routes import ai_keys, settings
 
 router = APIRouter(prefix='/api/settings', tags=['settings'])
 
+def require_seller_providers():
+    from vendoo_studio.services.hosted_provider import managed_ai_enabled
+    if managed_ai_enabled():
+        raise HTTPException(403, 'AI is managed automatically for hosted accounts.')
+
+
+_seller_provider_route = [Depends(require_seller_providers)]
+
 router.add_api_route('/provider', settings.get_provider, methods=['GET'])
 router.add_api_route('/usage-limits', settings.usage_limits, methods=['GET'])
-router.add_api_route('/provider', settings.set_provider, methods=['PUT'])
-router.add_api_route('/provider/preferred', settings.set_preferred_provider, methods=['PUT'])
-router.add_api_route('/provider/photos', settings.set_photo_provider, methods=['PUT'])
-router.add_api_route('/provider/key', settings.delete_key, methods=['DELETE'])
-router.add_api_route('/provider/test', settings.test_connection, methods=['POST'])
-router.add_api_route('/provider/mimo/test', settings.test_mimo, methods=['POST'])
+router.add_api_route('/provider', settings.set_provider, methods=['PUT'], dependencies=_seller_provider_route)
+router.add_api_route('/provider/preferred', settings.set_preferred_provider, methods=['PUT'], dependencies=_seller_provider_route)
+router.add_api_route('/provider/photos', settings.set_photo_provider, methods=['PUT'], dependencies=_seller_provider_route)
+router.add_api_route('/provider/key', settings.delete_key, methods=['DELETE'], dependencies=_seller_provider_route)
+router.add_api_route('/provider/test', settings.test_connection, methods=['POST'], dependencies=_seller_provider_route)
+router.add_api_route('/provider/mimo/test', settings.test_mimo, methods=['POST'], dependencies=_seller_provider_route)
 
 # The API-key router contains no local OAuth callbacks or browser launches.
 keys_router = ai_keys.key_router
 
 
-@router.get('/{provider}/models')
+@router.get('/{provider}/models', dependencies=_seller_provider_route)
 def subscription_models(provider: str):
     from vendoo_studio.routes.mac_inference import _pinned, relay
     if provider not in ('chatgpt', 'claude'):

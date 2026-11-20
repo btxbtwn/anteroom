@@ -141,6 +141,23 @@ def _chatgpt_status() -> ChatGPTStatus:
 def get_provider():
     from vendoo_studio.services.service_context import current
     if current() is not None:
+        from vendoo_studio.services.hosted_provider import managed_ai_enabled, managed_model
+        if managed_ai_enabled():
+            model = managed_model()
+            return ProviderStatus(
+                provider="openrouter",
+                primary="openrouter",
+                fallback="none",
+                photo_provider="same",
+                configured=True,
+                masked_key=None,
+                masked_cursor_key=None,
+                vision_model=model,
+                listing_model=model,
+                base_url=KEY_PROVIDERS["openrouter"].base_url,
+                chatgpt=ChatGPTStatus(signed_in=False),
+                claude=ClaudeStatus(installed=False, signed_in=False, install_command=""),
+            )
         from vendoo_studio.routes.mac_inference import _pinned
         if pinned := _pinned('mac', claim_route=False):
             return pinned
@@ -512,6 +529,11 @@ async def set_cursor_models(config: CursorModelsConfig):
 @router.get("/usage-limits")
 async def usage_limits(refresh: bool = False):
     """Each provider's subscription usage, as percentages and reset times."""
+    from vendoo_studio.services.service_context import current
+    if current() is not None:
+        from vendoo_studio.services.hosted_provider import managed_ai_enabled
+        if managed_ai_enabled():
+            return {"ok": True, "providers": []}
     from vendoo_studio.services.usage_limits import all_usage_limits
 
     return {"ok": True, "providers": await all_usage_limits(force=refresh)}

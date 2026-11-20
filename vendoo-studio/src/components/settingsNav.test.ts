@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { HOSTED_SETTINGS_SECTIONS, isSettingsSectionId, searchSettings, settingsSectionFor, SETTINGS_NAV_ITEMS, SETTINGS_SEARCH_ITEMS } from "./settingsNav";
+import {
+  HOSTED_SETTINGS_SECTIONS,
+  hostedSettingsSections,
+  isSettingsSectionId,
+  searchSettings,
+  settingsSearchItemsFor,
+  settingsSectionFor,
+  SETTINGS_NAV_ITEMS,
+  SETTINGS_SEARCH_ITEMS,
+} from "./settingsNav";
 
 describe("searchSettings", () => {
   it("returns nothing for a blank query", () => {
@@ -67,5 +76,18 @@ describe("settings on the web", () => {
   it("sends desktop-only sections to Providers on the web, and changes nothing on the Mac", () => {
     expect(settingsSectionFor("logs", true)).toBe("providers");
     expect(settingsSectionFor("logs", false)).toBe("logs");
+  });
+
+  it("hides Providers and provider search items when hosted managed AI is active", () => {
+    expect(hostedSettingsSections(false)).toContain("providers");
+    expect(hostedSettingsSections(true)).not.toContain("providers");
+    expect(settingsSectionFor("providers", true, true)).toBe("general");
+    expect(settingsSectionFor("logs", true, true)).toBe("general");
+    expect(settingsSectionFor("providers", false, true)).toBe("providers");
+
+    expect(searchSettings("listing ai", settingsSearchItemsFor(true, false)).map((item) => item.id)).toContain("listing-ai");
+    expect(searchSettings("listing ai", settingsSearchItemsFor(true, true))).toEqual([]);
+    expect(searchSettings("mimo", settingsSearchItemsFor(true, true))).toEqual([]);
+    expect(searchSettings("theme", settingsSearchItemsFor(true, true)).map((item) => item.id)).toEqual(["appearance"]);
   });
 });

@@ -5,6 +5,7 @@ import SwiftUI
 /// the business as a whole, apart from any listing's chat.
 struct BusinessAssistantView: View {
     let attachmentsAvailable: Bool
+    let managedAI: Bool
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var model: BusinessAssistantModel
@@ -13,8 +14,9 @@ struct BusinessAssistantView: View {
     @State private var picked: [PhotosPickerItem] = []
     @State private var following = true
 
-    init(api: AnteroomAPI, attachmentsAvailable: Bool) {
+    init(api: AnteroomAPI, attachmentsAvailable: Bool, managedAI: Bool = false) {
         self.attachmentsAvailable = attachmentsAvailable
+        self.managedAI = managedAI
         _model = State(initialValue: BusinessAssistantModel(api: api))
     }
 
@@ -224,7 +226,7 @@ struct BusinessAssistantView: View {
         if let error = model.error {
             VStack(alignment: .leading, spacing: 8) {
                 Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive)
-                if model.needsProvider {
+                if !managedAI && model.needsProvider {
                     NavigationLink("Open provider settings", value: ProvidersDestination())
                 }
             }

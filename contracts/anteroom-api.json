@@ -1428,7 +1428,8 @@
                 "bulk_markdowns",
                 "catalog_categories",
                 "ebay_offers",
-                "account_deletion"
+                "account_deletion",
+                "managed_ai"
               ],
               "type": "string"
             },

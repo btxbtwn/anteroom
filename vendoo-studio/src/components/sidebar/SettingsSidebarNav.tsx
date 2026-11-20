@@ -2,7 +2,7 @@ import { useWorkspaceRuntime } from "../../app/runtime";
 import type { ComponentType } from "react";
 import { BotIcon, CircleHelpIcon, DatabaseIcon, FlaskConicalIcon, Link2Icon, MessageSquareTextIcon, ScrollTextIcon, Settings2Icon, TagIcon, TerminalIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
-import { HOSTED_SETTINGS_SECTIONS, SETTINGS_NAV_ITEMS, SETTINGS_SECTION_LABELS, type SettingsSectionId } from "../settingsNav";
+import { hostedSettingsSections, SETTINGS_NAV_ITEMS, SETTINGS_SECTION_LABELS, settingsSectionFor, type SettingsSectionId } from "../settingsNav";
 import { SIDEBAR_ROW } from "./sidebarStyles";
 import type { SettingsSearch } from "./useSettingsSearch";
 
@@ -34,7 +34,10 @@ export function SettingsSidebarNav({
   settingsSection: SettingsSectionId;
   onSettingsSectionChange: (section: SettingsSectionId) => void;
 }) {
-  const { hosted } = useWorkspaceRuntime();
+  const { hosted, features } = useWorkspaceRuntime();
+  const managedAI = features.has("managed_ai");
+  const visibleSections = hostedSettingsSections(managedAI);
+  const activeSection = settingsSectionFor(settingsSection, hosted, managedAI);
   const { activeResultIndex, setActiveResultIndex, settingsResults, isSettingsSearching, handleSettingsResult } = search;
 
   return (
@@ -78,14 +81,14 @@ export function SettingsSidebarNav({
         </div>
       ) : (
         <nav aria-label="Settings sections" className="flex flex-col gap-1">
-          {SETTINGS_NAV_ITEMS.filter((item) => !hosted || HOSTED_SETTINGS_SECTIONS.includes(item.id)).map((item) => {
+          {SETTINGS_NAV_ITEMS.filter((item) => !hosted || visibleSections.includes(item.id)).map((item) => {
             const Icon = SECTION_ICONS[item.id];
             return (
               <button
                 key={item.id}
                 type="button"
-                data-active={settingsSection === item.id}
-                aria-current={settingsSection === item.id ? "page" : undefined}
+                data-active={activeSection === item.id}
+                aria-current={activeSection === item.id ? "page" : undefined}
                 className={SIDEBAR_ROW}
                 onClick={() => onSettingsSectionChange(item.id)}
               >

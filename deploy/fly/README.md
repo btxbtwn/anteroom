@@ -301,3 +301,27 @@ The hosted header offers Connect Chrome for Bridge 0.2.38 or later. This is a
 browser-local consent flow, not a server credential or a marketplace job. Users
 must load/reload the updated extension and refresh the page before connecting.
 See [the protocol and manual test](../../docs/cloud-extension.md).
+
+
+## Managed AI (hosted Gemini Flash via OpenRouter)
+
+Setting `ANTEROOM_MANAGED_OPENROUTER_KEY` via Fly secrets switches the hosted
+web and iOS workspace to a single platform-managed OpenRouter provider with zero
+per-account provider setup:
+
+```sh
+fly secrets set --config deploy/fly/fly.toml \
+  ANTEROOM_MANAGED_OPENROUTER_KEY="<openrouter-api-key>"
+```
+
+Optional overrides:
+
+- `ANTEROOM_MANAGED_MODEL`: OpenRouter model slug (defaults to `google/gemini-3.8-flash`).
+- `ANTEROOM_MANAGED_REASONING`: Optional reasoning effort (`minimal`, `low`, `medium`, `high`, `xhigh`, or `max`).
+
+When `ANTEROOM_MANAGED_OPENROUTER_KEY` is set, `/api/runtime` advertises the
+`managed_ai` feature, hosted clients hide Settings → Providers and the composer
+model picker, provider/key mutation endpoints reject writes with `403`, and all
+hosted photo reading, drafting, comp search, and assistant requests use the
+managed OpenRouter provider without exposing the key. The local desktop app is
+unaffected and continues to support local provider sign-ins and API keys.

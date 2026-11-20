@@ -48,9 +48,29 @@ export const DEFAULT_SETTINGS_SECTION: SettingsSectionId = "general";
 /** Sections the web app has; the others need the Mac. */
 export const HOSTED_SETTINGS_SECTIONS: readonly SettingsSectionId[] = ["general", "listings", "providers", "connections", "experimental"];
 
-/** The section to show: on the web, one only the Mac has opens Providers instead. */
-export function settingsSectionFor(section: SettingsSectionId, hosted: boolean): SettingsSectionId {
-  return hosted && !HOSTED_SETTINGS_SECTIONS.includes(section) ? "providers" : section;
+/** Sections the hosted web app offers; managed AI handles the model automatically so Providers is hidden. */
+export function hostedSettingsSections(managedAI = false): readonly SettingsSectionId[] {
+  return managedAI ? HOSTED_SETTINGS_SECTIONS.filter((id) => id !== "providers") : HOSTED_SETTINGS_SECTIONS;
+}
+
+/** The section to show: on the web, unavailable sections open General (managed AI) or Providers. */
+export function settingsSectionFor(section: SettingsSectionId, hosted: boolean, managedAI = false): SettingsSectionId {
+  if (!hosted) return section;
+  if (hostedSettingsSections(managedAI).includes(section)) return section;
+  return managedAI ? DEFAULT_SETTINGS_SECTION : "providers";
+}
+
+/** Settings search entries available in the current runtime. */
+export function settingsSearchItemsFor(hosted: boolean, managedAI = false): readonly SettingsSearchItem[] {
+  if (!hosted) return SETTINGS_SEARCH_ITEMS;
+  return SETTINGS_SEARCH_ITEMS.filter(
+    (item) =>
+      (item.section === "general" && item.id !== "setup-guide") ||
+      item.section === "listings" ||
+      item.section === "experimental" ||
+      (!managedAI && item.section === "providers" && !["chatgpt", "claude", "cursor", "brave"].includes(item.id)) ||
+      (item.section === "connections" && ["accounts", "direct-ebay", "ebay-inventory-location", "direct-etsy"].includes(item.id)),
+  );
 }
 
 export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [

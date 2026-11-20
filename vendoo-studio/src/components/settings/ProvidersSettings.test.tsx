@@ -61,3 +61,25 @@ it("lets the Mac app's account window sign this Mac into ChatGPT", () => {
   expect(html).toContain("the sign-in stays on this computer");
   expect(html).not.toContain("Open Anteroom on your computer");
 });
+
+it("hides Providers on hosted workspaces with managed AI and renders General instead", () => {
+  const client = new QueryClient();
+  const html = renderToStaticMarkup(
+    <WorkspaceRuntimeProvider
+      value={{
+        hosted: true,
+        features: new Set(["managed_ai"]),
+        views: new Set(["settings"]),
+        marketplaceForms: new Set(),
+        actionMarketplaces: new Set(),
+      }}
+    >
+      <QueryClientProvider client={client}>
+        <SettingsPage section="providers" onOpenListing={() => {}} />
+      </QueryClientProvider>
+    </WorkspaceRuntimeProvider>,
+  );
+  expect(html).toContain("Theme");
+  expect(html).not.toContain("Listing AI");
+  expect(html).not.toContain("private vault");
+});

@@ -293,7 +293,7 @@ export interface ValidationError {
 /** What this hosted server offers the signed-in seller. */
 export interface WorkspaceRuntime {
   mode: "hosted";
-  features: ("inventory" | "listing_fields" | "photos" | "preferences" | "generation" | "assistant" | "suggestions" | "marketplace_actions" | "marketplace_sessions" | "photo_edits" | "photo_background" | "chat_attachments" | "bulk_actions" | "bulk_edit" | "bulk_copy" | "bulk_delete" | "bulk_regenerate" | "bulk_markdowns" | "catalog_categories" | "ebay_offers" | "account_deletion")[];
+  features: ("inventory" | "listing_fields" | "photos" | "preferences" | "generation" | "assistant" | "suggestions" | "marketplace_actions" | "marketplace_sessions" | "photo_edits" | "photo_background" | "chat_attachments" | "bulk_actions" | "bulk_edit" | "bulk_copy" | "bulk_delete" | "bulk_regenerate" | "bulk_markdowns" | "catalog_categories" | "ebay_offers" | "account_deletion" | "managed_ai")[];
   views: string[];
   /** Marketplaces whose native form the editor can show. */
   marketplace_forms: string[];
