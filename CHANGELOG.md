@@ -6,6 +6,16 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1057 — 2026-11-20
+
+- Keep unsent chat and assistant drafts when switching between listings or conversations, clearing them only when sent.
+- Make checked checkboxes visible in dark mode and keep sign-in, password reset, and connector screens scrollable on short or landscape mobile screens.
+- Keep mobile confirmation dialog buttons at a full 44px touch target, improve keyboard focus rings and error contrast, and show clear error notices when creating, renaming, or deleting a listing fails.
+
+## 0.1.1056 — 2026-11-20
+
+- Choose Automatic or Manual in the Etsy Renewal options dropdown, save a default for new listings, and send your selection to Etsy on create and update.
+
 ## 0.1.1055 — 2026-11-20
 
 - Harden macOS release packaging, Chrome Bridge extension packaging, and hosted build checks.

@@ -1,3 +1,0 @@
-- Keep unsent chat and assistant drafts when switching between listings or conversations, clearing them only when sent.
-- Make checked checkboxes visible in dark mode and keep sign-in, password reset, and connector screens scrollable on short or landscape mobile screens.
-- Keep mobile confirmation dialog buttons at a full 44px touch target, improve keyboard focus rings and error contrast, and show clear error notices when creating, renaming, or deleting a listing fails.
