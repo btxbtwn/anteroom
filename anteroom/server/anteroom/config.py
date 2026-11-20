@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import NoReturn
 
 APP_NAME = "Anteroom"
 # The app's name before it became Anteroom, and so the name of the data folder
@@ -87,9 +88,6 @@ LEGACY_DATABASE_NAME = "vendoo_studio.db"
 # is not provenance; only a parseable plan proves an in-progress transfer.
 LEGACY_DATABASE_ADOPTION_MARKER = "anteroom.db.adopting-from-vendoo_studio"
 LEGACY_DATABASE_ADOPTION_MARKER_VERSION = "anteroom-legacy-db-adoption/2"
-# Written over a move plan when recovery is ambiguous. Later starts refuse to open
-# and never resume renames (including after SQLite removes a competing WAL).
-LEGACY_DATABASE_ADOPTION_REFUSED = "refused"
 _LEGACY_DATABASE_SIDECARS = ("-wal", "-shm", "-journal")
 DATABASE_PATH = str(user_data_root() / DATABASE_NAME)
 # The Mac app keeps its SQLite file. The hosted API points this at Postgres.
@@ -307,7 +305,7 @@ def _preflight_legacy_database_move_plan(root: Path, plan: list[_LegacyDbMove]) 
     return True
 
 
-def _refuse_ambiguous_legacy_database_adoption() -> None:
+def _refuse_ambiguous_legacy_database_adoption() -> NoReturn:
     raise LegacyDatabaseAdoptionError(
         "An interrupted rename of the listing database is in an ambiguous state. "
         "Anteroom will not open it until the data folder is repaired."
