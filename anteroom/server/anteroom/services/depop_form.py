@@ -130,10 +130,9 @@ def form(listing: dict) -> dict:
     """Keep native rows and order; resolve labels to posting IDs only at publication."""
     from anteroom.services.native_editor import field
 
-    categories = catalog()["categories"]
     specifics = listing.get("depop_specifics") or {}
     category_id = str((listing.get("direct_category_ids") or {}).get("depop") or "")
-    category = next((row for row in categories if row["id"] == category_id), None)
+    category = _by_id().get(category_id)
     fixed = fixed_options()
 
     def value(path: str, default: Any = "") -> Any:
@@ -143,10 +142,12 @@ def form(listing: dict) -> dict:
     def text(name):
         return marketplace_text(listing, "depop", name)
 
-    def choice(path, label, options, section="Info", **extra):
+    def choice(path, label, options, section="Info", *, shared_options: bool = False, **extra):
         return field(path, label, value(path, [] if extra.get("multi") else ""), selection_only=True,
-                     options=list(options), options_source="marketplace", section=section, **extra)
+                     options=options if shared_options else list(options), options_source="marketplace",
+                     section=section, **extra)
 
+    category_picker = category_choices()
     rows = [
         field("marketplace_photos.depop", "", [], input_type="photos", section="Photos",
               help="Add up to 8 photos in JPEG or PNG format.", accept="image/jpeg,image/png,.jpg,.jpeg,.png",
@@ -154,7 +155,7 @@ def form(listing: dict) -> dict:
         field("depop_specifics.description", "Description", text("description"), required=True, max_length=1000,
               section="Description", placeholder="eg. small grey Nike t-shirt, only worn a few times", counter=True, hashtag_max=5),
         field("direct_category_ids.depop", "Category", category_id, required=True, selection_only=True,
-              options=list(category_choices()["options"]), option_values=dict(category_choices()["option_values"]),
+              options=category_picker["options"], option_values=category_picker["option_values"],
               options_source="marketplace", section="Info",
               clears=["depop_specifics.size", "depop_specifics.nativeSizeId", "depop_specifics.type", "depop_specifics.attributes"]),
     ]
@@ -167,7 +168,7 @@ def form(listing: dict) -> dict:
             rows.append(choice(path, label, captured["options"], multi=True, max_values=maximum,
                                category_specific=True, help=f"Select up to {maximum}"))
         elif key == "brand":
-            row = choice("depop_specifics.brand", label, brand_choices()["options"])
+            row = choice("depop_specifics.brand", label, brand_choices()["options"], shared_options=True)
             row["value"] = listed_brand(text("brand"))
             rows.append(row)
         elif key in fixed_keys:

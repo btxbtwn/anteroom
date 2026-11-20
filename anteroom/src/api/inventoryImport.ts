@@ -16,6 +16,8 @@ export interface MarketplaceImportPage {
   has_more: boolean;
   /** Chrome marketplaces page with the marketplace's own cursor. */
   next_cursor?: string | null;
+  /** Chrome marketplaces: the account Chrome was signed in to for this page, when the extension says. */
+  account?: string | null;
   rows: {
     id: string;
     title: string;
@@ -36,4 +38,11 @@ export interface MarketplaceImportResult {
   linked?: boolean;
   photo_count: number;
   warnings: string[];
+}
+
+/** Import all left this listing for the seller: it looks like an item already in Anteroom. */
+export interface MarketplaceImportHeld {
+  conversation_id: null;
+  listing_id: string;
+  match: MarketplaceImportMatch;
 }

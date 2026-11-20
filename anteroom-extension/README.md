@@ -13,7 +13,7 @@ The extension runs in the background and connects Chrome to Anteroom. It lets An
 
 **Local-app users:** keep the Bridge installed by the local app’s Connect Chrome. Update the app and its bundled Bridge together. A standalone web-test ZIP has no matching app build stamp, so local marketplace actions reject it. To restore the local app, disable the standalone copy and reload `~/Library/Application Support/Anteroom/anteroom-extension`.
 
-Bridge 0.2.38 adds **Connect Chrome** at the hosted Anteroom site. Reload the updated extension and web page, sign in, choose Connect Chrome, and approve the extension window. No sign-in tokens are passed to the extension. Bridge 0.2.39 also reads Poshmark’s native form for the hosted draft preview. Hosted listing mutations are not enabled yet. See [the connection protocol and live test](../docs/cloud-extension.md).
+Bridge connects to the hosted Anteroom site (`https://myanteroom.com`) via **Connect Chrome** with explicit approval in the extension's `cloud-connect.html` window. No Supabase sign-in tokens are passed to the extension. While an Anteroom tab is open, the hosted API relays ES256-signed marketplace reads, confirmed listing mutations/delists, imports, and promotions for Poshmark, Mercari, and Depop through the Bridge. See [the connection protocol and signed approvals](../docs/cloud-extension.md) and [relayed commands](../docs/json-contract.md).
 
 ## Usage
 
@@ -43,17 +43,18 @@ Every permission in `manifest.json` has a caller. Remove a permission when its l
 | `tabs` | Finds and opens marketplace tabs. |
 | `system.display` | Places a new Chrome window inside a real display work area. |
 
-Host permissions cover eBay, Poshmark, Mercari, Depop, Etsy, Facebook, the Amazon S3 buckets their presigned photo uploads go to (`*.s3.amazonaws.com`, `*.s3-accelerate.amazonaws.com`), and Anteroom on `127.0.0.1:4318`. Direct marketplace requests go through `background/marketplace-fetch.js`, which bounds each request by the operation's deadline, retries only reads and photo uploads, and logs one `[POSHMARK]`/`[MERCARI]`/`[DEPOP]` line per step (status, error code, latency; never cookies, tokens or listing text). eBay and Etsy listings go through their APIs from Anteroom, not through the extension. The Chrome sign-in check for Depop, Poshmark, Mercari reports only whether the session is present. Cookie values and tokens stay in Chrome.
+Host permissions cover eBay, Poshmark, Mercari, Depop (`www.depop.com` and `webapi.depop.com`), Etsy, Vendoo (and its Firebase/Cloud Functions endpoints used for one-way Vendoo import), the Amazon S3 buckets presigned photo uploads go to (`*.s3.amazonaws.com`, `*.s3-accelerate.amazonaws.com`), and Anteroom loopback (`http://127.0.0.1:4318/*`, `ws://127.0.0.1:4318/*`). Direct marketplace requests go through `background/marketplace-fetch.js`, which bounds each request by the operation's deadline, retries only reads and photo uploads, and logs one `[POSHMARK]`/`[MERCARI]`/`[DEPOP]` line per step (status, error code, latency; never cookies, tokens or listing text). eBay and Etsy listings go through their APIs from Anteroom, not through the extension. The Chrome sign-in check for Depop, Poshmark, and Mercari reports only whether the session is present. Cookie values and tokens stay in Chrome.
 
 ## Development
 
-Run the worker unit tests from the repo root:
+Run the lint and worker unit tests from the repo root:
 
 ```bash
+anteroom/node_modules/.bin/oxlint -c anteroom-extension/.oxlintrc.json --deny-warnings anteroom-extension
 node --test 'anteroom-extension/tests/*.test.js'
 ```
 
-They load `background.js` and its `background/` modules into one Node VM with a stubbed `chrome` API.
+The unit tests load `background.js` and its `background/` modules into one Node VM with a stubbed `chrome` API.
 
 For live pages:
 1. Reload the extension in `chrome://extensions/`.

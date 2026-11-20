@@ -6,6 +6,42 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1063 — 2026-11-20
+
+- Speed up marketplace form loading by running eBay schema reads in parallel, releasing database connections before marketplace waits, and caching public Mercari shipping quotes and marketplace choice lists across reloads.
+- Automatically reload stale or unavailable marketplace fields when you open a marketplace tab or change its category or dependent choices, and recover cleanly from transient network drops ("Load failed") when reloading fields.
+
+## 0.1.1062 — 2026-11-20
+
+- Harden hosted upload limits, account deletion ordering, assistant proposal locking, and network/log security safeguards.
+
+## 0.1.1061 — 2026-11-20
+
+- Fix hosted deploys that get stuck waiting for CI after a rebase merge.
+
+## 0.1.1060 — 2026-11-20
+
+- Improve backend reliability and responsiveness during photo editing, background draft generation, and multi-seller automations by releasing database transactions before external photo I/O, replacing global photo and automation locks with scoped locks, and capping concurrent background worker jobs.
+
+## 0.1.1059 — 2026-11-20
+
+- Finish renaming a Vendoo database file only when an update was clearly in progress, and leave mixed leftover files alone so listing data is not attached by mistake.
+- Refuse to start that rename when an Anteroom database sidecar is already present, and check the whole rename plan before moving any file.
+
+## 0.1.1058 — 2026-11-20
+
+- Import all your active listings from a marketplace in one step. Listings that look like items already in Anteroom wait for you to link them or import them as new, so nothing is duplicated, and nothing on the marketplace is changed.
+
+## 0.1.1057 — 2026-11-20
+
+- Keep unsent chat and assistant drafts when switching between listings or conversations, clearing them only when sent.
+- Make checked checkboxes visible in dark mode and keep sign-in, password reset, and connector screens scrollable on short or landscape mobile screens.
+- Keep mobile confirmation dialog buttons at a full 44px touch target, improve keyboard focus rings and error contrast, and show clear error notices when creating, renaming, or deleting a listing fails.
+
+## 0.1.1056 — 2026-11-20
+
+- Choose Automatic or Manual in the Etsy Renewal options dropdown, save a default for new listings, and send your selection to Etsy on create and update.
+
 ## 0.1.1055 — 2026-11-20
 
 - Harden macOS release packaging, Chrome Bridge extension packaging, and hosted build checks.

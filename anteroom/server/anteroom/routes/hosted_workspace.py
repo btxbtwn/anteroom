@@ -5,7 +5,7 @@ or started, and no request accepts an owner, file path or operational identity.
 """
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -25,11 +25,18 @@ from anteroom.routes.api_contract import CONFLICT, NOT_FOUND, REFUSED
 from anteroom.routes.hosted_direct_listing import ACTION_MARKETPLACES
 from anteroom.routes.suggestions import SuggestionsResponse
 from anteroom.services import user_settings
-from anteroom.services.hosted_database import get_seller_db
+from anteroom.services.hosted_database import get_seller_db, in_seller_session
+from anteroom.services.hosted_limits import bounded_route_class
 from anteroom.services.hosted_listing_contract import editable_listing, stored_listing_fields
 from anteroom.version import app_version
 
-router = APIRouter(prefix='/api')
+# Listing saves, UI prefs, and metadata writes; photos upload through dedicated photo routes.
+MAX_WORKSPACE_BODY_BYTES = 2 * 1024 * 1024
+
+router = APIRouter(
+    prefix='/api',
+    route_class=bounded_route_class(lambda: MAX_WORKSPACE_BODY_BYTES, too_large_detail='Request body is too large'),
+)
 
 
 def conversation(db, identity, *, lock=False):
@@ -360,10 +367,10 @@ class UiInput(BaseModel):
     settled_shelf_expanded: bool | None = None
     stale_listing_days: int | None = Field(None, ge=15, le=120)
     recent_vendoo_labels: list[str] | None = Field(None, max_length=12)
-    remember_labels: str | list[str] | None = None
-    restore_labels: list[str] | None = None
-    forget_label: str | None = None
-    model_favorites: list[dict] | None = None
+    remember_labels: Annotated[str, Field(max_length=2000)] | Annotated[list[str], Field(max_length=200)] | None = None
+    restore_labels: list[str] | None = Field(None, max_length=500)
+    forget_label: str | None = Field(None, max_length=200)
+    model_favorites: list[dict] | None = Field(None, max_length=500)
     label_colors: dict[str, Literal["gray", "red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"]] | None = Field(None, max_length=200)
 
 
@@ -632,34 +639,51 @@ class FormRefreshInput(BaseModel):
     revision_id: str = Field(min_length=1, max_length=100)
 
 
+def _hosted_form_snapshot(db, identity: str, marketplace: str, revision_id: str | None):
+    from anteroom.services.native_editor import form_snapshot
+
+    current = db.get(Listing, identity)
+    if current and current.current_revision_id and hosted_drafts.current_fields_revision(db, identity) is None:
+        raise HTTPException(409, 'This listing needs its revision link repaired before editing.')
+    return form_snapshot(db, identity, marketplace, revision_id)
+
+
 @router.post('/conversations/{identity}/native-marketplaces/{marketplace}/form/refresh')
-def refresh_native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
-                                body: FormRefreshInput, db=Depends(get_seller_db, scope="function")):
-    from anteroom.services.native_editor import refresh_form
+async def refresh_native_catalog_form(
+    identity: str,
+    marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
+    body: FormRefreshInput,
+    request: Request,
+):
+    from anteroom.services.native_editor import build_form, form_snapshot, save_refreshed_form
     from anteroom.services.native_marketplaces import NativeMarketplaceError
 
     try:
-        return refresh_form(db, identity, marketplace, body.revision_id)
+        inputs = await in_seller_session(request, form_snapshot, identity, marketplace, body.revision_id)
+        with inputs.cached_context():
+            form = await build_form(inputs.snapshot, inputs.listing_json, marketplace, refresh=True)
+        return await in_seller_session(request, save_refreshed_form, identity, marketplace, body.revision_id, form)
     except NativeMarketplaceError as error:
         raise HTTPException(error.status_code, str(error)) from None
 
 
 @router.get('/conversations/{identity}/native-marketplaces/{marketplace}/form')
-def native_catalog_form(identity: str, marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
-                        revision_id: str | None = None, db=Depends(get_seller_db, scope="function")):
+async def native_catalog_form(
+    identity: str,
+    marketplace: Literal['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
+    request: Request,
+    revision_id: str | None = None,
+):
     from anteroom.services.choice_lists import share
-    from anteroom.services.native_editor import read_form
+    from anteroom.services.native_editor import build_form
     from anteroom.services.native_marketplaces import NativeMarketplaceError
 
-    # These canonical builders read verified catalogs and the owned snapshot.
-    # Mercari also reads anonymous public shipping quotes, and eBay reads its
-    # category schema and the seller's own policies with their connected
-    # account. No marketplace write runs. A plain function runs in FastAPI's
-    # threadpool, so none of it waits on the request loop.
+    # Finish the DB snapshot and release the pooled Postgres connection before
+    # awaiting Mercari, eBay or Etsy on the server loop (reusing shared_http).
     try:
-        current = db.get(Listing, identity)
-        if current and current.current_revision_id and hosted_drafts.current_fields_revision(db, identity) is None:
-            raise HTTPException(409, 'This listing needs its revision link repaired before editing.')
-        return share(read_form(db, identity, marketplace, revision_id))
+        inputs = await in_seller_session(request, _hosted_form_snapshot, identity, marketplace, revision_id)
+        with inputs.cached_context():
+            form = await build_form(inputs.snapshot, inputs.listing_json, marketplace)
+        return share(form)
     except NativeMarketplaceError as error:
         raise HTTPException(error.status_code, str(error)) from None

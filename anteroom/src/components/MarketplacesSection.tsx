@@ -942,7 +942,7 @@ export function MarketplacesLayout({
                 const state = formState(id);
                 return (
                   <MenuItem key={id} aria-current={selected === id ? "true" : undefined} onClick={() => onSelect(id)}
-                    onFocus={() => onPrepare?.(id)} onPointerEnter={() => onPrepare?.(id)}
+                    onFocus={() => onPrepare?.(id)} onPointerEnter={() => onPrepare?.(id)} onPointerDown={() => onPrepare?.(id)}
                     className={cn("min-h-11 gap-2", selected === id && "bg-accent")}>
                     {formIcon(id)}
                     <span className="min-w-0">

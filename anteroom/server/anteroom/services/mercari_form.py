@@ -1,10 +1,11 @@
 """Mercari's native sell form, using local taxonomy and anonymous shipping quotes."""
 from __future__ import annotations
 
-import copy
+import asyncio
 import json
 import math
 import re
+import time
 from collections import Counter
 from functools import lru_cache
 
@@ -12,6 +13,20 @@ from anteroom.config import skills_dir
 from anteroom.services.seller_overrides import get_path, marketplace_text, price_for
 
 NO_BRAND = "No Brand/Not sure"
+_QUOTE_TTL_S = 15 * 60
+_QUOTE_MAX_ENTRIES = 512
+_QuoteKey = tuple[int, int, tuple[float, float, float]]
+_quote_cache: dict[_QuoteKey, tuple[float, list[dict]]] = {}
+_quote_inflight: dict[_QuoteKey, asyncio.Task[list[dict]]] = {}
+_quote_generation: dict[_QuoteKey, int] = {}
+_quote_seq = 0
+
+
+def clear_quote_cache() -> None:
+    """Drop cached public Mercari shipping quotes (for tests)."""
+    _quote_cache.clear()
+    _quote_inflight.clear()
+    _quote_generation.clear()
 
 
 @lru_cache(maxsize=1)
@@ -55,6 +70,31 @@ def brand_choices() -> dict:
     brands = [row["name"] for row in catalog()["itemBrands"]]
     return {"options": [*brands, "No brand / Not sure"],
             "option_values": {**{name: name for name in brands}, "No brand / Not sure": NO_BRAND}}
+
+
+@lru_cache(maxsize=1)
+def _categories_by_id() -> dict[str, dict]:
+    return {str(row["id"]): row for row in catalog()["itemCategories"]}
+
+
+@lru_cache(maxsize=1)
+def _brands_by_fold() -> dict[str, str]:
+    # Reversed so the first catalog entry wins on case-insensitive collisions.
+    return {row["name"].casefold(): row["name"] for row in reversed(catalog()["itemBrands"])}
+
+
+@lru_cache(maxsize=1)
+def _shipping_labels_by_id() -> dict[int, dict]:
+    return {row["id"]: row for row in catalog()["shippingLabels"]}
+
+
+@lru_cache(maxsize=1)
+def _size_tables() -> tuple[dict[int, dict], dict[int, dict], dict[int, str]]:
+    data = catalog()
+    groups = {row["id"]: row for row in data["itemSizeGroups"]}
+    sizes = {row["id"]: row for row in data["itemSizes"]}
+    subgroups = {row["id"]: row["title"] for row in data["itemSizeSubGroups"]}
+    return groups, sizes, subgroups
 
 
 def _number(value) -> float:
@@ -116,10 +156,8 @@ def general_condition(listing: dict) -> str:
 def _sizes(category: dict | None) -> list[dict]:
     if not category or not category["itemSizeGroupId"]:
         return []
-    data = catalog()
-    group = next(row for row in data["itemSizeGroups"] if row["id"] == category["itemSizeGroupId"])
-    sizes = {row["id"]: row for row in data["itemSizes"]}
-    subgroups = {row["id"]: row["title"] for row in data["itemSizeSubGroups"]}
+    groups, sizes, subgroups = _size_tables()
+    group = groups[category["itemSizeGroupId"]]
     rows = [sizes[size_id] for size_id in group["sizeIds"]]
     labels = [" ".join(part for part in (row["title"], row["subtitle"]) if part) for row in rows]
     counts = Counter(labels)
@@ -148,7 +186,7 @@ def match_size_id(listing: dict, category_or_sizes: str | dict | list[dict] | No
     elif isinstance(category_or_sizes, dict):
         sizes = _sizes(category_or_sizes)
     elif category_or_sizes:
-        category = next((row for row in catalog()["itemCategories"] if str(row["id"]) == str(category_or_sizes)), None)
+        category = _categories_by_id().get(str(category_or_sizes))
         sizes = _sizes(category)
     else:
         sizes = []
@@ -196,32 +234,32 @@ def form(listing: dict, shipping_classes: list[dict] | None = None, *, notes: li
 
     specifics = listing.get("mercari_specifics") or {}
     category_id = str((listing.get("direct_category_ids") or {}).get("mercari") or "")
-    category = next((row for row in catalog()["itemCategories"] if str(row["id"]) == category_id), None)
-    rows = copy.deepcopy(catalog()["fields"])
+    category = _categories_by_id().get(category_id)
+    rows = [dict(row) for row in catalog()["fields"]]
     fields = {row["path"]: row for row in rows}
     for path, row in fields.items():
-        row["value"] = get_path(listing, path) if get_path(listing, path) is not None else ""
+        found = get_path(listing, path)
+        row["value"] = found if found is not None else ""
     for name in ("title", "description"):
         fields[f"mercari_specifics.{name}"]["value"] = marketplace_text(listing, "mercari", name)
     fields["marketplace_photos.mercari"]["value"] = []
     price = price_for(listing, "mercari")
     fields["price"]["value"] = price if price is not None else ""
     picker = category_choices()
-    fields["direct_category_ids.mercari"].update(value=category_id, options=list(picker["options"]),
-                                               option_values=dict(picker["option_values"]))
-    brands = [row["name"] for row in catalog()["itemBrands"]]
+    fields["direct_category_ids.mercari"].update(value=category_id, options=picker["options"],
+                                               option_values=picker["option_values"])
     brand = marketplace_text(listing, "mercari", "brand")
     blank = re.sub(r"[^a-z0-9]+", " ", brand.casefold()).strip() in {
         "", "unbranded", "no brand", "not sure", "no brand not sure", "none", "n a", "na", "unknown"}
-    known = next((name for name in brands if name.casefold() == brand.casefold()), None)
+    known = _brands_by_fold().get(brand.casefold())
     unconfirmed = not blank and specifics.get("noBrand") is not True and known is None
     brand = NO_BRAND if blank or specifics.get("noBrand") is True else known or brand
     picker = brand_choices()
     # The bundled catalog is a dated reference copy, not a live exhaustive list:
     # List checks Mercari's current brand list, so the editor should not flag
     # unconfirmed brands as unavailable above the explanatory help note.
-    fields["mercari_specifics.brand"].update(value=brand, options=list(picker["options"]),
-                                            option_values=dict(picker["option_values"]),
+    fields["mercari_specifics.brand"].update(value=brand, options=picker["options"],
+                                            option_values=picker["option_values"],
                                             options_source="reference")
     if unconfirmed:
         # This catalog is a dated copy, so a missing name is not proof Mercari
@@ -291,16 +329,78 @@ def form(listing: dict, shipping_classes: list[dict] | None = None, *, notes: li
             "page_labels": True, "category_id": category_id if category else "", "fields": rows, "notes": notes}
 
 
-async def editor_form(listing: dict) -> dict:
+async def _cached_shipping_quotes(
+    category: int,
+    ounces: int,
+    dimensions: tuple[float, float, float],
+    *,
+    refresh: bool = False,
+) -> list[dict]:
+    """Cache anonymous public shipping quotes by ``(category, ounces, dimensions)`` and coalesce concurrent reads."""
+    global _quote_seq
     from anteroom.services.mercari_api import shipping_quotes
 
+    key: _QuoteKey = (category, ounces, (float(dimensions[0]), float(dimensions[1]), float(dimensions[2])))
+    now = time.monotonic()
+    if not refresh:
+        cached = _quote_cache.get(key)
+        if cached is not None and now - cached[0] < _QUOTE_TTL_S:
+            _quote_cache.pop(key, None)
+            _quote_cache[key] = cached
+            return cached[1]
+        inflight = _quote_inflight.get(key)
+        if inflight is not None and not inflight.done() and inflight.get_loop() is asyncio.get_running_loop():
+            return await asyncio.shield(inflight)
+
+    _quote_seq += 1
+    generation = _quote_seq
+    _quote_generation[key] = generation
+    if refresh:
+        _quote_inflight.pop(key, None)
+
+    async def fetch_and_store() -> list[dict]:
+        try:
+            quotes = await shipping_quotes(category, ounces, dimensions)
+        except BaseException:
+            if _quote_generation.get(key) == generation:
+                _quote_generation.pop(key, None)
+            raise
+        if _quote_generation.get(key) == generation:
+            _quote_cache.pop(key, None)
+            _quote_cache[key] = (time.monotonic(), quotes)
+            while len(_quote_cache) > _QUOTE_MAX_ENTRIES:
+                evicted = next(iter(_quote_cache))
+                _quote_cache.pop(evicted, None)
+                if evicted not in _quote_inflight:
+                    _quote_generation.pop(evicted, None)
+        return quotes
+
+    if refresh:
+        return await fetch_and_store()
+
+    task = asyncio.create_task(fetch_and_store())
+    _quote_inflight[key] = task
+
+    def _finish(done: asyncio.Task[list[dict]]) -> None:
+        if _quote_inflight.get(key) is done:
+            _quote_inflight.pop(key, None)
+        if not done.cancelled():
+            done.exception()  # Retrieve any error if every caller cancelled early.
+
+    task.add_done_callback(_finish)
+    # Shield the initiator too so aborting a background warm-up never cancels
+    # another caller waiting on the same shared public shipping quote.
+    return await asyncio.shield(task)
+
+
+async def editor_form(listing: dict, *, refresh: bool = False) -> dict:
     ounces, dimensions, _ = package(listing)
     category_id = str((listing.get("direct_category_ids") or {}).get("mercari") or "")
     classes, notes = [], []
     if (listing.get("mercari_specifics") or {}).get("shippingMethod") != "SOYO" and category_id.isdigit() and ounces and dimensions is not None:
         try:
-            quotes = await shipping_quotes(int(category_id), ounces, dimensions)
-            labels = {row["id"]: row for row in catalog()["shippingLabels"]}
+            quotes = await _cached_shipping_quotes(int(category_id), ounces, dimensions, refresh=refresh)
+            labels = _shipping_labels_by_id()
             for quote in quotes:
                 if quote["id"] not in labels:
                     raise ValueError("Unknown Mercari shipping label")

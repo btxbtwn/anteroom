@@ -182,6 +182,7 @@ class ConversationRepo:
         notes: str,
         *,
         bump_updated_at: bool = True,
+        commit: bool = True,
     ) -> Conversation | None:
         """Store notes, optionally leaving ``updated_at`` where it was.
 
@@ -202,7 +203,10 @@ class ConversationRepo:
         self.db.query(Conversation).filter(Conversation.id == conv_id).update(
             type_cast(dict, values), synchronize_session=False
         )
-        self.db.commit()
+        if commit:
+            self.db.commit()
+        else:
+            self.db.flush()
         self.db.refresh(conv)
         return conv
 
@@ -368,7 +372,6 @@ class ConversationRepo:
         photo.width = meta["width"]
         photo.height = meta["height"]
         self.db.commit()
-        self.db.refresh(photo)
         return photo
 
     def reorder_photos(self, conv_id: str, ordered_ids: list[str]) -> list[Photo]:

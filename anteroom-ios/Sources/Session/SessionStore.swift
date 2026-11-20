@@ -100,6 +100,9 @@ final class SessionStore {
                 // A reset link signs in too; keep asking for the new password.
                 if let session, !isChoosingNewPassword { state = .signedIn(email: session.user.email) }
             case .signedOut:
+                if !signingOut, case .signedIn = state {
+                    await forgetSeller()
+                }
                 state = .signedOut
             default:
                 break
@@ -240,7 +243,9 @@ final class SessionStore {
     /// Nothing of this seller's stays on the phone after sign-out.
     private func forgetSeller() async {
         await api?.forgetSeller()
+        URLCache.shared.removeAllCachedResponses()
         PhotoCache.images.removeAllObjects()
+        CategoryTreeCache.shared.clear()
         EditorDraftStore.removeAll()
     }
 
@@ -248,9 +253,10 @@ final class SessionStore {
     /// everything it kept of the seller's data. The account is gone, so only
     /// the local session is cleared.
     func finishAccountDeletion() async {
+        signingOut = true
+        defer { signingOut = false }
         try? await client?.auth.signOut(scope: .local)
         UserDefaults.standard.removeObject(forKey: Self.pendingResetKey)
-        URLCache.shared.removeAllCachedResponses()
         await forgetSeller()
         state = .signedOut
     }

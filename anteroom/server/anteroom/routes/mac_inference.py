@@ -7,10 +7,17 @@ from typing import Literal
 from sqlalchemy.exc import SQLAlchemyError
 
 from anteroom.services.device_routes import claim, lookup, replay_instance
+from anteroom.services.hosted_limits import bounded_route_class
 from anteroom.services.mac_inference import ErrorKind, MacUnavailable, relay_for
 from anteroom.services.service_context import current
 
-router = APIRouter(prefix='/api/mac-ai')
+# Mac vision/listing inference replies are structured JSON; cap raw body size against OOM.
+MAX_INFERENCE_BODY_BYTES = 16 * 1024 * 1024
+
+router = APIRouter(
+    prefix='/api/mac-ai',
+    route_class=bounded_route_class(lambda: MAX_INFERENCE_BODY_BYTES, too_large_detail='Inference payload is too large'),
+)
 
 
 def relay():

@@ -25,6 +25,7 @@ import { linkOpenedElsewhere } from "./authMessages";
 import { followSellerChanges } from "./liveUpdates";
 import { StartupScreen } from "./StartupScreen";
 import { ConnectorPage } from "./ConnectorPage";
+import { clearImportAll } from "../importAll";
 import { DEVICE_BUSTER, DEVICE_MAX_AGE_MS, devicePersister, forgetDeviceWorkspace, keepReadsForDevice, keepsOnDevice, saveRuntime, savedRuntime } from "./deviceCache";
 import "./workspace.css";
 
@@ -118,6 +119,8 @@ function HostedWorkspace({ session }: { session: Session }) {
   }));
   const [runtime, setRuntime] = useState<HostedRuntime | null>(null);
   const [error, setError] = useState("");
+  // Import-all runs belong to this seller: none carries over to the next one signed in on this tab.
+  useEffect(() => () => clearImportAll(), []);
   useEffect(() => {
     const refresh = { active: true, fresh: false, shown: false };
     // Open on the workspace saved from the last visit while the server confirms it.

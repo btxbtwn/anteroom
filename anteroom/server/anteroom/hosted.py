@@ -16,6 +16,7 @@ from pathlib import Path
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.gzip import GZipMiddleware
@@ -115,6 +116,27 @@ class AccessLogMiddleware:
                             round((time.perf_counter() - started) * 1000))
 
 
+def _build_csp(supabase_url: str) -> str:
+    """Build the hosted CSP, pinning connect-src/img-src to the configured Supabase origin."""
+    parsed = urlparse((supabase_url or "").strip())
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        http_origin = f"{parsed.scheme}://{parsed.netloc}"
+        ws_scheme = "wss" if parsed.scheme == "https" else "ws"
+        ws_origin = f"{ws_scheme}://{parsed.netloc}"
+        img_src = f"'self' data: blob: {http_origin}"
+        connect_src = f"'self' {http_origin} {ws_origin}"
+    else:
+        img_src = "'self' data: blob:"
+        connect_src = "'self' https://*.supabase.co wss://*.supabase.co"
+    # pywebview builds its native API methods with Function(). WebKit
+    # applies this policy to that bootstrap as well as to page scripts.
+    return (
+        "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; "
+        f"img-src {img_src}; connect-src {connect_src}; "
+        "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+    )
+
+
 class ResponseHeadersMiddleware:
     """Security and caching headers on every response.
 
@@ -122,8 +144,13 @@ class ResponseHeadersMiddleware:
     a response starts, nothing is sent, and that is not a server error.
     """
 
-    def __init__(self, app):
+    def __init__(self, app, supabase_url: str | None = None):
         self.app = app
+        self._explicit_supabase_url = supabase_url
+
+    def _csp(self) -> str:
+        url = self._explicit_supabase_url if self._explicit_supabase_url is not None else os.environ.get("SUPABASE_URL", "")
+        return _build_csp(url)
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -139,13 +166,7 @@ class ResponseHeadersMiddleware:
                 headers["X-Content-Type-Options"] = "nosniff"
                 # Browsers honor this only over HTTPS, so local HTTP sandboxes are unaffected.
                 headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-                # pywebview builds its native API methods with Function(). WebKit
-                # applies this policy to that bootstrap as well as to page scripts.
-                headers["Content-Security-Policy"] = (
-                    "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; "
-                    "img-src 'self' data: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; "
-                    "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
-                )
+                headers["Content-Security-Policy"] = self._csp()
             await send(message)
 
         await self.app(scope, receive, with_headers)
@@ -387,7 +408,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     # times over a phone connection. Event streams and images are left alone.
     app.add_middleware(GZipMiddleware, minimum_size=1024)
 
-    app.add_middleware(ResponseHeadersMiddleware)
+    app.add_middleware(ResponseHeadersMiddleware, supabase_url=supabase_url)
 
     # Outermost, so a refused session or an error still gets its line.
     app.add_middleware(RequestTimingMiddleware)
@@ -435,12 +456,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(edit_router)
     # Bulk listing reads photos not uploaded yet; a saved listing reads its photos from private storage.
     from anteroom.routes import measurements
-    from anteroom.routes.api_contract import SIZE_TAG_READ_ERRORS, SizeTagReadResult
-    app.add_api_route('/api/measurements/read', measurements.read_measurements, methods=['POST'], tags=['measurements'])
-    app.add_api_route('/api/size-tags/read', measurements.read_size_tags, methods=['POST'], tags=['measurements'],
-                      response_model=SizeTagReadResult, responses=SIZE_TAG_READ_ERRORS)
-    app.add_api_route('/api/conversations/{conv_id}/measurements/read', measurements.read_hosted_saved_measurements,
-                      methods=['POST'], tags=['measurements'])
+    app.include_router(measurements.hosted_router)
     from anteroom.routes import listing_templates, listing_copies, similar_items, changelog
     app.include_router(listing_templates.router)
     app.include_router(listing_copies.router)

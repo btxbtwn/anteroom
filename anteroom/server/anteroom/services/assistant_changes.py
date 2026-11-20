@@ -176,6 +176,12 @@ def history_note(changes: dict[str, Any] | None) -> str:
         "dismissed": "The seller dismissed them, so nothing changed.",
         "applied": f"The seller applied them; {len(items) - skipped} listings changed and {skipped} were skipped.",
     }.get(str(changes.get("status")), "")
+    completed = min(max(int(changes.get("completed", 0)), 0), len(items))
+    if completed and changes.get("status") in {"proposed", "dismissed"}:
+        skipped_prefix = sum(bool(item.get("skipped")) for item in items[:completed])
+        remainder = "dismissed" if changes["status"] == "dismissed" else "still awaiting application"
+        state = (f"The first {completed} items were processed: {completed - skipped_prefix} listings changed "
+                 f"and {skipped_prefix} were skipped. The remaining {len(items) - completed} items are {remainder}.")
     proposed = json.dumps(
         [
             {"listing": item["listing_id"], "set": item["set"]}

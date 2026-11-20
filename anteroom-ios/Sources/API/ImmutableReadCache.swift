@@ -33,7 +33,7 @@ actor ImmutableReadCache {
     func store(_ data: Data, for key: String, generation: Int) {
         guard generation == self.generation, !data.isEmpty else { return }
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try? data.write(to: file(for: key), options: .atomic)
+        try? data.write(to: file(for: key), options: [.atomic, .completeFileProtection])
         writes += 1
         if writes % 50 == 1 { trim() }
     }

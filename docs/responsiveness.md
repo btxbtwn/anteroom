@@ -45,14 +45,6 @@ that sample. A confirmed save retains its answer outcome
 despite a concurrent lease revocation. `total_ms` ends with the answer's cleanup
 wait, not the later journal settlement or log emission.
 
-<!-- coderabbit-ai-generated:v1 -->
-
-<!-- coderabbit-ai-generated-section:v1:c16ae77c1fa266df95938d44689e61b2522ff68f559affd05d4c47994dd17247 -->
-
-<!-- coderabbit-ai-generated:v1 -->
-
-<!-- coderabbit-ai-generated-section:v1:a7bf8ddaba1ad12e7f8db7edee06b4c705d6b50d207af17c02a51d566f3f7868 -->
-
 Answers under 30 s log at INFO, which hosted logging drops; slower ones log at
 WARNING and, when operator alerts are enabled, enter the hourly batched operator alert email (grouped by call site,
 as `Slow response` lines are). The digest retains only the latest sample in each
@@ -64,13 +56,10 @@ are capped at 4,000 characters. Operators can read this worker-local file; it is
 not shared across Machines and can be lost with the filesystem. Disk logging is
 best effort and does not change alert delivery. No stderr handler is added.
 
-<!-- /coderabbit-ai-generated:v1 -->
 `queue_wait_ms` compares the worker clock with the database's `created_at`;
 skew is clamped at zero, not corrected. Time between `total_ms` and the
 follower seeing `[DONE]` (journal polling) is not included. This line measures;
 it changes no answer behavior and proves no cause by itself.
-
-<!-- /coderabbit-ai-generated:v1 -->
 
 
 ## Assistant shop read: shared range inputs, 2026-11-18
@@ -1161,3 +1150,84 @@ error propagation and actual awaiting-task
 cancellation while its original worker finishes. Full selected local checks,
 Postgres/hosted/browser coverage and timing-overhead/load measurements remain
 unverified until separately coordinated; no production replay was used.
+
+### Direct marketplace form loading — 2026-11-20
+
+Observed bottlenecks when opening marketplace tabs (eBay, Mercari, Poshmark,
+Depop, Etsy), especially on hosted (`myanteroom.com`) and touch devices:
+
+- Hosted `GET /conversations/{id}/native-marketplaces/{market}/form` and
+  `POST .../form/refresh` were sync `def` handlers taking `get_seller_db` and
+  running `asyncio.run(build_form(...))`, holding a pooled Postgres connection
+  across external marketplace waits and bypassing `shared_http`'s keep-alive
+  client on the server loop.
+- `ebay_form` ran aspects → conditions → variations sequentially, called
+  `EbayClient.connect()` up to three times before checking cache, and opened
+  four to five nested `SessionLocal()` checkouts on warm reads.
+- `mercari_form.editor_form` ran two uncached HTTP calls per open with a fresh
+  `httpx.AsyncClient` even for identical `(category, ounces, dimensions)`
+  packages.
+- Local form builders deep-copied static catalogs (`poshmark-native-form.json`,
+  28,853 Mercari brands) and `choice_lists.share` deep-compared them just to
+  strip them out.
+- `studioFetch` (`cache: "no-store"`) prevented browser HTTP caching of
+  versioned public choice lists (>1.5 MB) across page reloads, `nativeFormOptions`
+  embedded the raw `_native_forms.<tab>` object in TanStack Query's key, and
+  mobile tab menu items lacked `onPointerDown` intent prefetching.
+
+Changes:
+
+- Converted hosted and desktop form read/refresh routes to `async def`,
+  finishing the DB snapshot (`form_snapshot`, including batched
+  `category_fields.load_rows_many`, `saved_choices.read_entry`, and passing
+  `db` through `native_form`/`leaf_schemas`) and releasing the connection
+  before awaiting external marketplaces on the server loop.
+- Parallelized all five independent eBay reads (`aspects`, `conditions`,
+  `variations`, `listing_types`, `policies`) behind a single lazy
+  `EbayClient` used only on schema cache misses, with all cache DB reads/writes
+  off the event loop.
+- Added bounded 15-minute TTL + singleflight caching for anonymous Mercari
+  shipping quotes (bypassed on explicit refresh) and reused
+  `shared_http.current_client()` in `mercari_api`.
+- Indexed static catalogs (`@lru_cache` maps), avoided deep copies of shared
+  choice lists, and added pointer-identity fast paths in `choice_lists.share`.
+- Persisted versioned public choice lists in Cache Storage with stale-version
+  pruning, hashed `_native_forms.<tab>` via `WeakMap` for compact query keys,
+  added `onPointerDown` tab-intent prefetching on mobile marketplace menus
+  (preserving `docs/hosted-production.md`'s rule against preloading unused
+  tabs on open),   added automatic reloading of stale/unavailable marketplace contracts on the
+  active marketplace tab driven by preflight so sellers never have to press
+  "Reload fields" (while never refreshing unused or disconnected tabs in the
+  background), avoided deep-copying untouched `_native_forms` contracts in
+  `save_refreshed_form`, passed `db` through `preflight`'s `attach_form`, and
+  added single-retry recovery + friendly error messaging for transient network
+  drops (`TypeError: Load failed`) on form reads and refreshes.
+
+Measured results (local Apple Silicon M-series, Python 3.12, local Postgres 16
+via `pgserver`, fake 150 ms Mercari latency):
+
+- Local form build + `choice_lists.share` CPU avg (50 warm calls):
+  - Poshmark: 17.35 ms → 0.095 ms (p50 0.106 ms, p95 0.179 ms)
+  - Mercari: 11.23 ms → 0.147 ms (p50 0.113 ms, p95 0.378 ms)
+  - Depop: 1.05 ms → 0.034 ms (p50 0.024 ms, p95 0.120 ms)
+- Warm eBay `read_form`: 0 nested `SessionLocal()` checkouts, 0
+  `EbayClient.connect()` calls, ≤9 SQL queries.
+- Single-connection Postgres pool (`pool_size=1, max_overflow=0`): concurrent
+  `GET /api/conversations/{id}` succeeds (200) while a Mercari form request is
+  waiting on upstream quotes, and upstream runs on the server loop.
+- Concurrent multi-seller Postgres burst (2 sellers × 4 drafts, 24 form reads +
+  16 listing reads = 40 simultaneous requests on `pool_size=4`, 150 ms simulated
+  Mercari upstream): 0 errors, 8 concurrent identical Mercari requests
+  coalesced to 1 upstream call; Poshmark p50 206.1 ms / p95 275.8 ms, Depop
+  p50 234.5 ms / p95 360.9 ms, Mercari p50 300.8 ms / p95 375.5 ms, listing
+  reads p50 339.0 ms / p95 383.1 ms (wall 399.7 ms warm; 2687.4 ms cold with
+  first-request catalog JSON load).
+
+Remaining gaps:
+
+- Cold first-process catalog JSON parsing (~3 MB across marketplaces) still
+  runs lazily on the first request after a server restart.
+- Live production Fly.io / Supabase / eBay / Mercari / iPad Safari timings are
+  not measured in this offline test environment; cold uncached eBay categories
+  remain bounded by eBay's slowest single API call (now 1 RTT in parallel
+  instead of 3 sequential RTTs + 3 connects).
