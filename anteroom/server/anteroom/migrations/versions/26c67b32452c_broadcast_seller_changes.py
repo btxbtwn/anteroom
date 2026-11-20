@@ -1,7 +1,7 @@
 """Announce the change feed through Realtime Broadcast instead of Postgres Changes
 
 Revision ID: 26c67b32452c
-Revises: c728ae43d901
+Revises: b3f8d1c6a2e7
 Create Date: 2026-11-20 15:00:00.000000
 
 Postgres Changes made Supabase Realtime poll the database about twice a second
@@ -22,7 +22,7 @@ import sqlalchemy as sa
 
 
 revision = '26c67b32452c'
-down_revision = 'c728ae43d901'
+down_revision = 'b3f8d1c6a2e7'
 branch_labels = None
 depends_on = None
 
