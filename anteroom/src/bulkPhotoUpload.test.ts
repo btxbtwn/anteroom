@@ -91,6 +91,29 @@ describe("createBulkPhotoListings", () => {
     ]);
   });
 
+  it("keeps going when one folder's draft cannot be created, and keeps the drafts already started", async () => {
+    const create = vi.fn()
+      .mockResolvedValueOnce({ id: "coat" })
+      .mockRejectedValueOnce(new Error("Failed to fetch"))
+      .mockResolvedValueOnce({ id: "boots" });
+    const uploadPhotos = vi.fn()
+      .mockResolvedValueOnce({ count: 1, photos: [] })
+      .mockResolvedValueOnce({ count: 2, photos: [] });
+
+    const result = await createBulkPhotoListings([
+      { folder: "batch/A/Coat", files: [photo("a.jpg")] },
+      { folder: "batch/B/Jeans", files: [photo("b.jpg")] },
+      { folder: "batch/C/Boots", files: [photo("c.jpg"), photo("d.jpg")] },
+    ], { cog: "", labels: "" }, { create, uploadPhotos, rotatePhoto: vi.fn(), photos: noPhotos });
+
+    expect(uploadPhotos).toHaveBeenCalledTimes(2);
+    expect(result).toEqual([
+      { convId: "coat", folder: "batch/A/Coat", count: 1, errors: [] },
+      { convId: null, folder: "batch/B/Jeans", count: 0, errors: ["batch/B/Jeans: Failed to fetch. Anteroom couldn't start its draft; add that folder again."] },
+      { convId: "boots", folder: "batch/C/Boots", count: 2, errors: [] },
+    ]);
+  });
+
   it("counts the photos a refused upload already saved, so the draft still generates", async () => {
     const photos = vi.fn().mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
     const result = await createBulkPhotoListings([

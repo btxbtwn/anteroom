@@ -1,0 +1,1 @@
+- Bulk upload keeps going when one folder's draft can't be started: the drafts already made still generate, the folders after it are still added, and the message names the folder to add again.

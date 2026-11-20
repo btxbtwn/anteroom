@@ -145,7 +145,7 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
     setUploadError(null);
     try {
       const listings = await createBulkPhotoListings(items, bulkDefaults, api.conversations);
-      const createdIds = listings.map((listing) => listing.convId);
+      const createdIds = listings.flatMap((listing) => (listing.convId ? [listing.convId] : []));
       const errors = listings.flatMap((listing) => listing.errors);
       const totalPhotos = listings.reduce((sum, listing) => sum + listing.count, 0);
       await Promise.all(createdIds.map((id) => (
