@@ -94,7 +94,7 @@ describe("createBulkPhotoListings", () => {
   it("keeps going when one folder's draft cannot be created, and keeps the drafts already started", async () => {
     const create = vi.fn()
       .mockResolvedValueOnce({ id: "coat" })
-      .mockRejectedValueOnce(new Error("Failed to fetch"))
+      .mockRejectedValueOnce(new Error("Failed to fetch."))
       .mockResolvedValueOnce({ id: "boots" });
     const uploadPhotos = vi.fn()
       .mockResolvedValueOnce({ count: 1, photos: [] })
@@ -109,7 +109,7 @@ describe("createBulkPhotoListings", () => {
     expect(uploadPhotos).toHaveBeenCalledTimes(2);
     expect(result).toEqual([
       { convId: "coat", folder: "batch/A/Coat", count: 1, errors: [] },
-      { convId: null, folder: "batch/B/Jeans", count: 0, errors: ["batch/B/Jeans: Failed to fetch. Anteroom couldn't start its draft; add that folder again."] },
+      { convId: null, folder: "batch/B/Jeans", count: 0, errors: ["batch/B/Jeans: Failed to fetch. Its draft may not have been started; check your drafts before adding that folder again."] },
       { convId: "boots", folder: "batch/C/Boots", count: 2, errors: [] },
     ]);
   });

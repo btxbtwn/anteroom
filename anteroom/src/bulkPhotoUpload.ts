@@ -90,12 +90,14 @@ export async function createBulkPhotoListings(
     } catch (err) {
       // Like a refused upload below, one failed create must not abandon the
       // drafts already started or the folders after it.
-      const message = err instanceof Error ? err.message : "Create failed";
+      // The draft may exist anyway when only the reply was lost, so ask the
+      // seller to check before adding the folder again.
+      const message = (err instanceof Error ? err.message : "Create failed").replace(/\.+$/, "");
       listings.push({
         convId: null,
         folder: item.folder,
         count: 0,
-        errors: [`${item.folder || "New Listing"}: ${message}. Anteroom couldn't start its draft; add that folder again.`],
+        errors: [`${item.folder || "New Listing"}: ${message}. Its draft may not have been started; check your drafts before adding that folder again.`],
       });
       continue;
     }
