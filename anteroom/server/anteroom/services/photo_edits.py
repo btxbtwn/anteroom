@@ -25,7 +25,9 @@ from typing import Literal
 import numpy as np
 from PIL import Image, ImageOps
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sqlalchemy import inspect
 
+from anteroom.database import end_read
 from anteroom.models.conversation import Photo
 from anteroom.services import photos
 from anteroom.services.photo_store import photo_store
@@ -432,8 +434,10 @@ def apply_photo_edit(
                 raise PhotoConflictError("Photo changed while editing; try again.")
             photo = repo.replace_photo_file(fresh, meta, source_filename=new_source, edits=new_edits)
             committed = True
-            # End the post-commit refresh read transaction before post-commit Storage cleanup.
-            db.rollback()
+            db.refresh(photo)
+            # Keep the saved response snapshot while releasing the refresh transaction.
+            photo = Photo(**{attr.key: getattr(photo, attr.key) for attr in inspect(Photo).column_attrs})
+            end_read(db)
         except BaseException:
             if not committed:
                 db.rollback()

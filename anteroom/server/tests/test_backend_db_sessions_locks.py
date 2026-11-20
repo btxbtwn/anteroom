@@ -685,3 +685,90 @@ def test_turns_work_across_distinct_event_loops(monkeypatch):
 
     assert not errors
     assert automation_actions._turns == {}
+
+
+@pytest.mark.parametrize("cancel_during_lookup", [False, True])
+def test_etsy_publish_rechecks_activity_after_shop_lookup(monkeypatch, cancel_during_lookup):
+    active = True
+    lookups = 0
+    records = []
+
+    def shop():
+        nonlocal active, lookups
+        lookups += 1
+        if lookups == 2 and cancel_during_lookup:
+            active = False
+        return "123"
+
+    monkeypatch.setattr(etsy_listings, "connected_shop_id", shop)
+    monkeypatch.setattr(etsy_listings, "_read", AsyncMock(return_value={"state": "draft"}))
+    monkeypatch.setattr(etsy_listings, "_matches", lambda *_: True)
+    monkeypatch.setattr(etsy_listings, "_video_kept", AsyncMock(return_value=True))
+    api = AsyncMock(return_value={"listing_id": "123456", "shop_id": "123", "state": "active"})
+    monkeypatch.setattr(etsy_listings.marketplace_accounts, "etsy_api", api)
+    result = asyncio.run(etsy_listings.execute(
+        "publish", {}, [], {"draft_url": etsy_listings.edit_url("123456")},
+        records.append, lambda: active, confirm=True,
+    ))
+    assert lookups == 2
+    assert result["ok"] is not cancel_during_lookup
+    if cancel_during_lookup:
+        api.assert_not_awaited()
+        assert {"etsy_pending_write": "publish"} not in records
+    else:
+        api.assert_awaited_once()
+
+
+@pytest.mark.parametrize("failure_stage", ["commit", "refresh", None])
+def test_photo_edit_commit_cleanup_and_response_snapshot(tmp_path, monkeypatch, failure_stage):
+    sessions = _make_sqlite_sessions(tmp_path)
+    monkeypatch.setattr("anteroom.services.photo_store._store", LocalPhotoStore(str(tmp_path)))
+    with sessions() as db:
+        conv = ConversationRepo(db).create(title="Hat")
+        data = _sample_jpeg()
+        (tmp_path / "original.jpg").write_bytes(data)
+        photo = listing_persistence.add_photo(
+            db, conv.id, "original.jpg", "original.jpg", "image/jpeg", len(data),
+            checksum="e" * 64, width=240, height=160,
+        )
+        conv_id, photo_id = conv.id, photo.id
+        uploaded = []
+        original_write = photo_edits.write_edit
+
+        def write(*args):
+            meta = original_write(*args)
+            uploaded.append(meta["stored_filename"])
+            return meta
+
+        monkeypatch.setattr(photo_edits, "write_edit", write)
+
+        def fail(*_args, **_kwargs):
+            raise RuntimeError("database unavailable")
+
+        if failure_stage:
+            monkeypatch.setattr(db, failure_stage, fail)
+            with pytest.raises(RuntimeError, match="database unavailable"):
+                photo_edits.apply_photo_edit(
+                    ConversationRepo(db), conv_id, photo_id, lambda _: photo_edits.PhotoEdits(exposure=.5),
+                )
+            db.rollback()
+            with sessions() as verify:
+                saved = verify.get(Photo, photo_id)
+                assert saved is not None
+                assert saved.stored_filename == (uploaded[0] if failure_stage == "refresh" else "original.jpg")
+            assert (tmp_path / uploaded[0]).exists() is (failure_stage == "refresh")
+        else:
+            saved = photo_edits.apply_photo_edit(
+                ConversationRepo(db), conv_id, photo_id, lambda _: photo_edits.PhotoEdits(exposure=.5),
+            )
+            assert not db.in_transaction()
+            with sessions() as other:
+                row = other.get(Photo, photo_id)
+                assert row is not None
+                other.delete(row)
+                other.commit()
+            from anteroom.routes.conversations import _photo_response
+            response = _photo_response(saved)
+            assert response.edits == photo_edits.PhotoEdits(exposure=.5)
+            assert saved.stored_filename == uploaded[0]
+            assert not db.in_transaction()

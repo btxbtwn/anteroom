@@ -733,7 +733,8 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
 
         async def write(method: str, path: str, kind: str, **kwargs):
             nonlocal attempted, rejected
-            if not active() or await asyncio.to_thread(connected_shop_id) != shop_id:
+            current_shop_id = await asyncio.to_thread(connected_shop_id)
+            if not active() or current_shop_id != shop_id:
                 raise ValueError("The Etsy action stopped or the connected shop changed. Check its result.")
             record({"etsy_pending_write": kind})
             attempted = True
