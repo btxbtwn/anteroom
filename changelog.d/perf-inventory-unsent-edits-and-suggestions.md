@@ -1,0 +1,2 @@
+- Store normalized listing hashes on saved revisions so inventory loading compares drafts without reading full marketplace forms from the database.
+- Reduce redundant queries when loading inventory analytics and suggestions.

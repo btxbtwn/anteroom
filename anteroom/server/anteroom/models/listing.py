@@ -72,6 +72,9 @@ class ListingRevision(SellerOwned, Base):
                                                 Computed(InventoryProjection(), persisted=True), nullable=False)
     # Status reads scan quantity history, never the large marketplace form JSON.
     inventory_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True, default=revision_quantity)
+    # SHA-256 of the normalized listing JSON, so inventory reads compare revisions
+    # without loading or decompressing full marketplace forms.
+    normalized_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     source: Mapped[str] = mapped_column(String, nullable=False)
     parent_revision_id: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)

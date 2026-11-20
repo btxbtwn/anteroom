@@ -143,13 +143,19 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
         if compacted is not listing_json[native_contract.KEY]:
             listing_json = native_contract.copy_listing(listing_json)
             listing_json[native_contract.KEY] = compacted
-    revision = repo.insert_revision(conv_id, listing_json, source, parent_revision_id)
+    from anteroom.services.unsent_edits import normalized_listing_hash
+
+    revision = repo.insert_revision(
+        conv_id, listing_json, source, parent_revision_id,
+        normalized_hash=normalized_listing_hash(listing_json),
+    )
 
     if source == "model_refinement":
         from anteroom.services.chat_listing import recover_saved_chat_clears
 
         revision.listing_json = recover_saved_chat_clears(db, conv_id, revision)
         listing_json = revision.listing_json
+        revision.normalized_hash = normalized_listing_hash(listing_json)
 
     repo.set_current_revision(conv_id, revision.id, expected_revision_id=expected_revision_id)
     _recheck_error_flag(db, conv_id)

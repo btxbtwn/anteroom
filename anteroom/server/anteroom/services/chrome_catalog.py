@@ -77,7 +77,16 @@ def remember_direct_categories(db, revision, categories: dict | None) -> None:
     if not apply_direct_ids(updated, categories):
         return
     revision.listing_json = updated
+    rev_id = getattr(revision, "id", None) if hasattr(revision, "normalized_hash") else None
+    if hasattr(revision, "normalized_hash"):
+        from anteroom.services.unsent_edits import normalized_listing_hash
+
+        revision.normalized_hash = normalized_listing_hash(updated)
     db.commit()
+    if rev_id:
+        from anteroom.services.unsent_edits import invalidate_revision_matches
+
+        invalidate_revision_matches(rev_id)
 
 
 def apply_preview(found: list[dict], preview: dict | None, marketplace: str) -> list[dict]:

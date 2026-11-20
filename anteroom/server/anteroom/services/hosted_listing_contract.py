@@ -148,8 +148,13 @@ def remove_photo_selections(db, conversation_id, photo_id):
             picks[market] = [value for value in identifiers if value != photo_id]
             changed = True
     if changed:
-        updated = ListingRevision(conversation_id=conversation_id, listing_json=payload,
-                                  source='photo_removed', parent_revision_id=revision.id)
+        from anteroom.services.unsent_edits import normalized_listing_hash
+
+        updated = ListingRevision(
+            conversation_id=conversation_id, listing_json=payload,
+            normalized_hash=normalized_listing_hash(payload),
+            source='photo_removed', parent_revision_id=revision.id,
+        )
         db.add(updated)
         db.flush()
         listing.current_revision_id = updated.id

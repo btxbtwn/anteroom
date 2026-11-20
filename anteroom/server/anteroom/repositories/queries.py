@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import logging
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -395,10 +395,19 @@ class ListingRepo:
     def get_current(self, conv_id: str) -> Listing | None:
         return self.db.query(Listing).filter(Listing.conversation_id == conv_id).first()
 
-    def insert_revision(self, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None) -> ListingRevision:
+    def insert_revision(
+        self,
+        conv_id: str,
+        listing_json: dict,
+        source: str,
+        parent_revision_id: str | None = None,
+        *,
+        normalized_hash: str | None = None,
+    ) -> ListingRevision:
         revision = ListingRevision(
             conversation_id=conv_id,
             listing_json=listing_json,
+            normalized_hash=normalized_hash,
             source=source,
             parent_revision_id=parent_revision_id,
         )
@@ -441,16 +450,58 @@ class ListingRepo:
             self.db.add(listing)
 
 
-    def revision_bodies(self, revision_ids: set[str]) -> dict[str, dict]:
-        """Listing JSON for several revisions in one query."""
+    def revision_hashes(self, revision_ids: set[str]) -> dict[str, str | None]:
+        """Stored normalized hashes for several revisions without touching listing_json."""
         if not revision_ids:
             return {}
-        rows = (
-            self.db.query(ListingRevision.id, ListingRevision.listing_json)
-            .filter(ListingRevision.id.in_(revision_ids))
-            .all()
-        )
-        return {rev_id: body for rev_id, body in rows if isinstance(body, dict)}
+        ordered = sorted(revision_ids)
+        result: dict[str, str | None] = {}
+        for start in range(0, len(ordered), 500):
+            chunk = ordered[start:start + 500]
+            rows = (
+                self.db.query(ListingRevision.id, ListingRevision.normalized_hash)
+                .filter(ListingRevision.id.in_(chunk))
+                .all()
+            )
+            for rev_id, digest in rows:
+                result[rev_id] = digest
+        return result
+
+    def store_revision_hashes(self, hashes: dict[str, str]) -> None:
+        """Persist computed normalized hashes for legacy revisions in batched UPDATEs."""
+        if not hashes:
+            return
+        items = sorted(hashes.items())
+        for start in range(0, len(items), 200):
+            chunk = items[start:start + 200]
+            mapping = dict(chunk)
+            self.db.execute(
+                update(ListingRevision)
+                .where(
+                    ListingRevision.id.in_(list(mapping)),
+                    ListingRevision.normalized_hash.is_(None),
+                )
+                .values(normalized_hash=case(mapping, value=ListingRevision.id))
+                .execution_options(synchronize_session=False)
+            )
+
+    def revision_bodies(self, revision_ids: set[str]) -> dict[str, dict]:
+        """Listing JSON for several revisions in batched queries."""
+        if not revision_ids:
+            return {}
+        ordered = sorted(revision_ids)
+        result: dict[str, dict] = {}
+        for start in range(0, len(ordered), 500):
+            chunk = ordered[start:start + 500]
+            rows = (
+                self.db.query(ListingRevision.id, ListingRevision.listing_json)
+                .filter(ListingRevision.id.in_(chunk))
+                .all()
+            )
+            for rev_id, body in rows:
+                if isinstance(body, dict):
+                    result[rev_id] = body
+        return result
 
     def get_revision(self, revision_id: str | None) -> ListingRevision | None:
         return self.db.query(ListingRevision).filter(ListingRevision.id == revision_id).first()

@@ -211,7 +211,12 @@ def paid_lines(db: Session, conv_ids: set[str] | None = None) -> dict[str, list[
     return grouped
 
 
-def statuses(db: Session, conversations: list[tuple[str, dict]]) -> dict[str, ItemStatus]:
+def statuses(
+    db: Session,
+    conversations: list[tuple[str, dict]],
+    *,
+    preloaded_lines: dict[str, list[MarketplaceSale]] | None = None,
+) -> dict[str, ItemStatus]:
     """Status for each ``(conversation_id, parsed notes)``, with a few bulk reads."""
     if not conversations:
         return {}
@@ -224,9 +229,9 @@ def statuses(db: Session, conversations: list[tuple[str, dict]]) -> dict[str, It
     if len(ids) > 500:
         result = {}
         for start in range(0, len(conversations), 500):
-            result.update(statuses(db, conversations[start:start + 500]))
+            result.update(statuses(db, conversations[start:start + 500], preloaded_lines=preloaded_lines))
         return result
-    lines = paid_lines(db, ids)
+    lines = preloaded_lines if preloaded_lines is not None else paid_lines(db, ids)
     first_sales = {}
     for conv_id, notes in conversations:
         own_lines = lines.get(conv_id, [])
@@ -247,8 +252,9 @@ def statuses(db: Session, conversations: list[tuple[str, dict]]) -> dict[str, It
     live_query = live_query.filter(MarketplaceListing.conversation_id.in_(ids))
     direct: dict[str, dict[str, str]] = {}
     observations: dict[str, dict[str, dict]] = {}
+    observed_ids = set(lines) & ids
     observed = db.query(MarketplaceListing.conversation_id, MarketplaceListing.marketplace, MarketplaceListing.inventory_observation).filter(
-        MarketplaceListing.inventory_observation.isnot(None), MarketplaceListing.conversation_id.in_(set(lines)))
+        MarketplaceListing.inventory_observation.isnot(None), MarketplaceListing.conversation_id.in_(observed_ids))
     for conv_id, marketplace, observation in observed.all():
         if isinstance(observation, dict):
             observations.setdefault(conv_id, {})[marketplace] = observation

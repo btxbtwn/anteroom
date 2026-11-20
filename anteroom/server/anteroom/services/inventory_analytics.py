@@ -20,8 +20,6 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import inspect as sa_inspect, text
 
-from anteroom.database import json_value
-
 if TYPE_CHECKING:
     from anteroom.services.sale_events import EventWindow
 
@@ -314,21 +312,20 @@ def _read_analytics_inputs(db, conversation_id: str | None) -> AnalyticsInputs:
     from anteroom.services.item_status import paid_lines, statuses
     from anteroom.services.vendoo_import import parse_notes
 
-    facets = {
-        conv_id: (price, cost, brand, category)
-        for conv_id, price, cost, brand, category in (
-            db.query(
-                Listing.conversation_id,
-                json_value(ListingRevision.inventory_fields, "price"),
-                json_value(ListingRevision.inventory_fields, "cost"),
-                json_value(ListingRevision.inventory_fields, "brand"),
-                json_value(ListingRevision.inventory_fields, "category_path"),
-            )
-            .join(ListingRevision, ListingRevision.id == Listing.current_revision_id)
-            .filter(Listing.conversation_id == conversation_id if conversation_id else True)
-            .all()
+    facets = {}
+    for conv_id, fields in (
+        db.query(Listing.conversation_id, ListingRevision.inventory_fields)
+        .join(
+            ListingRevision,
+            (ListingRevision.id == Listing.current_revision_id)
+            & (ListingRevision.conversation_id == Listing.conversation_id)
+            & (ListingRevision.user_id == Listing.user_id),
         )
-    }
+        .filter(Listing.conversation_id == conversation_id if conversation_id else True)
+        .all()
+    ):
+        doc = fields if isinstance(fields, dict) else {}
+        facets[conv_id] = (doc.get("price"), doc.get("cost"), doc.get("brand"), doc.get("category_path"))
     # An item with no cost of its own carries its share of the box it came from.
     # Pieces that were not worth listing add their cost to the ones that were.
     box_share = {box.id: _money(box.landed / box.sellable) for box in db.query(SourceBox).all() if box.sellable}
@@ -342,8 +339,9 @@ def _read_analytics_inputs(db, conversation_id: str | None) -> AnalyticsInputs:
             Conversation.box_id,
         ).filter(Conversation.id == conversation_id if conversation_id else True).all()
     ]
-    own = statuses(db, [(conv_id, notes) for conv_id, _title, _status, notes, _box in conversations])
     lines = paid_lines(db, {conversation_id} if conversation_id else None)
+    own = statuses(db, [(conv_id, notes) for conv_id, _title, _status, notes, _box in conversations],
+                   preloaded_lines=lines)
     return AnalyticsInputs(facets, box_share, conversations, own, lines)
 
 

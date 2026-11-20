@@ -17,10 +17,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
-from anteroom.database import json_value
-from anteroom.models.conversation import Photo
+from anteroom.models.conversation import Conversation, Photo
 from anteroom.services.ebay_fields import (
     DEFAULT_EBAY_SEASONS,
     EBAY_SEASON_CUES,
@@ -120,7 +119,13 @@ def list_suggestions(
     with snapshot_step(db, 'direct'):
         direct = MarketplaceListingRepo(db).summaries()
     with snapshot_step(db, 'conversations'):
-        conversations = repo.list_all()
+        conversations = list(db.scalars(select(Conversation).options(load_only(
+            Conversation.id,
+            Conversation.title,
+            Conversation.status,
+            Conversation.settled_at,
+            Conversation.notes,
+        ))).all())
     from anteroom.models.background_task import BackgroundTask
 
     with snapshot_step(db, 'busy'):
@@ -175,22 +180,36 @@ def _photo_counts(db: Session) -> dict[str, int]:
 
 def _listing_rows(db: Session):
     """Read the current revision facets without ranking them in the transaction."""
-    doc = ListingRevision.inventory_fields
-    return (
+    rows = (
         db.query(
             Listing.conversation_id,
             Listing.current_revision_id,
             Listing.validation_status,
-            json_value(doc, "brand"),
-            json_value(doc, "category_path"),
-            json_value(doc, "season"),
-            json_value(doc, "title"),
-            json_value(doc, "type"),
-            json_value(doc, "material"),
+            ListingRevision.inventory_fields,
         )
-        .outerjoin(ListingRevision, ListingRevision.id == Listing.current_revision_id)
+        .outerjoin(
+            ListingRevision,
+            (ListingRevision.id == Listing.current_revision_id)
+            & (ListingRevision.conversation_id == Listing.conversation_id)
+            & (ListingRevision.user_id == Listing.user_id),
+        )
         .all()
     )
+    result = []
+    for conv_id, revision_id, validation_status, fields in rows:
+        doc = fields if isinstance(fields, dict) else {}
+        result.append((
+            conv_id,
+            revision_id,
+            validation_status,
+            doc.get("brand"),
+            doc.get("category_path"),
+            doc.get("season"),
+            doc.get("title"),
+            doc.get("type"),
+            doc.get("material"),
+        ))
+    return result
 
 
 def _listing_state(rows) -> dict[str, dict[str, Any]]:
