@@ -33,6 +33,8 @@ final class SandboxTests: XCTestCase {
         waitForExpectations(timeout: 30)
         app.terminate()
         launchSandbox(app)
+        // Inventory reopens on Active; the saved draft is under Draft.
+        showDrafts(app)
         XCTAssertTrue(app.staticTexts[name].waitForExistence(timeout: 30))
     }
 }
@@ -73,6 +75,7 @@ final class SellerInputSandboxTests: XCTestCase {
 
         app.terminate()
         launchSandbox(app)
+        showDrafts(app)
         let row = app.staticTexts[name]
         XCTAssertTrue(row.waitForExistence(timeout: 30))
         row.tap()
@@ -659,7 +662,7 @@ fileprivate extension XCTestCase {
         XCTAssertTrue(button.isSelected, "The \(tab) tab opens")
     }
 
-    /// Inventory opens on Active; the sample listings are drafts.
+    /// Inventory opens on Active; the sample drafts and any new draft are under Draft.
     @MainActor
     func showDrafts(_ app: XCUIApplication) {
         let drafts = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Draft,'")).firstMatch
