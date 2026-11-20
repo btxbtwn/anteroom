@@ -6,6 +6,10 @@ struct MoreView: View {
     let api: AnteroomAPI
     let views: [String]
     let features: [String]
+    var runtimeUnavailable = false
+    var retryingRuntime = false
+    var runtimeError: String?
+    var onRetryRuntime: (@MainActor () async -> Void)?
     @State private var path: [Destination] = []
 
     enum Destination: Hashable {
@@ -16,6 +20,32 @@ struct MoreView: View {
         // Value-based links keep the open page when a theme change redraws the window.
         NavigationStack(path: $path) {
             List {
+                if runtimeUnavailable {
+                    Section {
+                        Text("Some tabs couldn't load while offline or while the server was starting.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        if let runtimeError {
+                            Label(runtimeError, systemImage: "exclamationmark.triangle")
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                        }
+                        if let onRetryRuntime {
+                            Button {
+                                Task { await onRetryRuntime() }
+                            } label: {
+                                HStack {
+                                    Label("Reload workspace", systemImage: "arrow.clockwise")
+                                    if retryingRuntime {
+                                        Spacer()
+                                        ProgressView()
+                                    }
+                                }
+                            }
+                            .disabled(retryingRuntime)
+                        }
+                    }
+                }
                 if views.contains("automations") {
                     NavigationLink(value: Destination.automations) {
                         Label("Automations", systemImage: "calendar.badge.clock")

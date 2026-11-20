@@ -2,9 +2,14 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterator
+from contextlib import contextmanager
+import threading
+from typing import NamedTuple
+from weakref import WeakValueDictionary
 
 import httpx
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from anteroom.config import MAX_PHOTO_COUNT
@@ -16,6 +21,7 @@ from anteroom.services.photo_store import photo_store
 from anteroom.services.api_job_lock import start_gate
 from anteroom.services.relay_sales import matching_listings, reconcile_unmatched
 from anteroom.services.safe_fetch import DOWNLOAD_TIMEOUT_SEC, fetch_public, is_image_type
+from anteroom.services.service_context import current
 
 
 class ImportConflict(ValueError):
@@ -58,13 +64,88 @@ def _result(db: Session, conv_id: str, listing_id: str, *, reused: bool, warning
 _REUSED = "Already in Anteroom. Existing edits and photos were kept."
 
 
+class _Compared(NamedTuple):
+    """What the first match check saw: each item's title, and the items whose titles read like the listing."""
+    titles: dict[str, str | None]
+    close: frozenset[str]
+
+
+def _match(db: Session, marketplace: str, snapshot: dict, compared: _Compared | None = None) -> tuple[dict | None, _Compared]:
+    """An item that looks like this listing, which import all leaves for the seller instead of duplicating it.
+
+    The full comparison runs before the seller's import lock. Given what it saw, the one inside the lock scores only
+    items added or retitled since, and checks the close ones again, since one may have left this marketplace.
+    """
+    from anteroom.models.conversation import Conversation
+    from anteroom.services.chrome_import import close_titles, suggested_match, title_tokens
+
+    titles: dict[str, str | None] = dict(db.query(Conversation.id, Conversation.title).all())
+    title = str(snapshot.get("title") or "")
+    changed = titles.items() if compared is None else [
+        (conv_id, local) for conv_id, local in titles.items()
+        if conv_id not in compared.titles or compared.titles[conv_id] != local or conv_id in compared.close]
+    items = [(conv_id, local, title_tokens(local)) for conv_id, local in changed if local and local.strip()]
+    value = snapshot.get("price")
+    price = float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    match = suggested_match(db, marketplace, title, price, items) if items else None
+    close = frozenset(conv_id for _, conv_id, _ in close_titles(title, items)) if compared is None else compared.close
+    return match, _Compared(titles, close)
+
+
+def _held(listing_id: str, match: dict) -> dict:
+    return {"conversation_id": None, "listing_id": listing_id, "reused": False, "photo_count": 0, "warnings": [], "match": match}
+
+
 def _reused(db: Session, marketplace: str, listing_id: str) -> dict | None:
     existing = owner(db, marketplace, listing_id)
     return _result(db, existing.id, listing_id, reused=True, warnings=[_REUSED]) if existing else None
 
 
+# Live SQLite guards only, one per seller; PostgreSQL coordinates through its transaction.
+_import_locks: WeakValueDictionary[str, threading.Lock] = WeakValueDictionary()
+_import_locks_gate = threading.Lock()
+
+
+@contextmanager
+def _import_guard(db: Session) -> Iterator[None]:
+    """One import-all save at a time per seller, from the match check through the commit.
+
+    Two marketplaces importing at once then never both create the same item. Other sellers do not
+    wait: on Postgres the lock is the seller's own transaction advisory lock, released at commit.
+    """
+    context = current()
+    seller = context.seller_id if context else "local"
+    if db.get_bind().dialect.name == "postgresql":
+        # create_import commits while this transaction lock is held. A waiting
+        # connection's following reads see the committed item (READ COMMITTED).
+        db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:identity, 0))"),
+                   {"identity": f"anteroom-inventory-import:{seller}"})
+        yield
+    else:
+        with _import_locks_gate:
+            lock = _import_locks.get(seller)
+            if lock is None:
+                lock = threading.Lock()
+                _import_locks[seller] = lock
+        with lock:
+            yield
+
+
 def _create(db: Session, marketplace: str, listing_id: str, snapshot: dict, urls: list[str], downloaded: list[dict],
-            binding: dict | None, target_id: str, kept: dict) -> dict:
+            binding: dict | None, target_id: str, kept: dict, compared: _Compared | None) -> dict:
+    if compared is None:
+        return _save(db, marketplace, listing_id, snapshot, urls, downloaded, binding, target_id, kept)
+    with _import_guard(db):
+        if reused := _reused(db, marketplace, listing_id):
+            return reused
+        # Checked again: another import may have saved a matching item, or one may have left this marketplace.
+        if match := _match(db, marketplace, snapshot, compared)[0]:
+            return _held(listing_id, match)
+        return _save(db, marketplace, listing_id, snapshot, urls, downloaded, binding, target_id, kept)
+
+
+def _save(db: Session, marketplace: str, listing_id: str, snapshot: dict, urls: list[str], downloaded: list[dict],
+          binding: dict | None, target_id: str, kept: dict) -> dict:
     with start_gate():
         if reused := _reused(db, marketplace, listing_id):
             return reused
@@ -80,14 +161,22 @@ def _create(db: Session, marketplace: str, listing_id: str, snapshot: dict, urls
 
 
 async def save_owned_listing(marketplace: str, listing_id: str, snapshot: dict, urls: list[str],
-                             verify_connection: Callable[[], None], *, binding: dict | None = None) -> dict:
+                             verify_connection: Callable[[], None], *, binding: dict | None = None,
+                             unless_matched: bool = False) -> dict:
     """Save an already verified listing; reuse an existing local identity without overwriting it.
 
+    With ``unless_matched`` (import all), a listing that looks like an existing
+    item is not saved: the result names the match for the seller to review.
     Database steps run on worker threads with their own sessions, none open while photos download.
     """
     verify_connection()
     if reused := await in_worker_session(_reused, marketplace, listing_id):
         return reused
+    compared = None
+    if unless_matched:
+        match, compared = await in_worker_session(_match, marketplace, snapshot)
+        if match:
+            return _held(listing_id, match)
     urls = list(dict.fromkeys(url for url in urls if isinstance(url, str) and url))
     from anteroom.models.conversation import new_id
     target_id = new_id()
@@ -97,7 +186,7 @@ async def save_owned_listing(marketplace: str, listing_id: str, snapshot: dict, 
         verify_connection()
         # Finish the save even if the request goes away, so its photos are either kept or deleted.
         return await asyncio.shield(in_worker_session(
-            _create, marketplace, listing_id, snapshot, urls, downloaded, binding, target_id, kept))
+            _create, marketplace, listing_id, snapshot, urls, downloaded, binding, target_id, kept, compared))
     finally:
         if not kept["photos"]:
             for meta in downloaded:

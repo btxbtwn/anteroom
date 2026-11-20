@@ -117,6 +117,10 @@ def test_etsy_tab_is_etsys_page_with_this_categorys_attributes(studio):
     assert rows["etsy_specifics.itemSize"]["value"] == "10 × 8 × 2 in"
     assert rows["etsy_specifics.listingType"]["value"] == "Physical item"
     assert rows["etsy_specifics.renewalOption"]["value"] == "Manual"
+    assert not rows["etsy_specifics.renewalOption"].get("locked")
+    assert rows["etsy_specifics.renewalOption"]["selection_only"] is True
+    assert rows["etsy_specifics.renewalOption"]["save_as_default"] is True
+    assert rows["etsy_specifics.renewalOption"]["options"] == ["Automatic", "Manual"]
     assert rows["etsy_specifics.shipping_profile_id"]["value"] == "Not chosen yet"
     assert rows["etsy_specifics.shipping_profile_id"]["locked"]
     studio.properties.assert_awaited_with(TEE)
@@ -155,7 +159,7 @@ def test_an_etsy_tab_edit_stays_on_etsy_and_the_picked_category_is_kept(studio):
 
     edited = json.loads(json.dumps(studio.listing))
     edited["direct_category_ids"] = {"etsy": "482", "etsy_path": "Clothing > Gender-Neutral Adult Clothing > Tops & Tees > T-shirts"}
-    edited["etsy_specifics"].update(title="Etsy only title", price=31,
+    edited["etsy_specifics"].update(title="Etsy only title", price=31, renewalOption="Automatic",
                                     category_specifics={"sleeveLength": "Long sleeve", "Primary color": "Black"})
     saved = studio.client.put(f"/api/conversations/{studio.conv.id}/listing",
                               json={"listing": edited, "expected_revision_id": studio.revision.id})
@@ -164,7 +168,7 @@ def test_an_etsy_tab_edit_stays_on_etsy_and_the_picked_category_is_kept(studio):
     stored = current.listing_json
     assert stored["title"] == "Blue Nike Tee" and stored["primaryColor"] == "Blue" and stored["price"] == 25
     locks = set(stored["seller_fields"])
-    assert {"direct_category_ids.etsy", "etsy_specifics.title"} <= locks
+    assert {"direct_category_ids.etsy", "etsy_specifics.title", "etsy_specifics.renewalOption"} <= locks
     # A category fill never replaces the seller's pick.
     with patch("anteroom.services.direct_categories._etsy_leaf", AsyncMock(return_value={"id": TEE, "path": "x"})):
         assert asyncio.run(_fill_etsy(json.loads(json.dumps(stored)), "Men > Shirts")) is False
@@ -172,6 +176,7 @@ def test_an_etsy_tab_edit_stays_on_etsy_and_the_picked_category_is_kept(studio):
     rows = {row["path"]: row["value"] for row in form["fields"]}
     assert rows["direct_category_ids.etsy"] == "482"
     assert rows["etsy_specifics.title"] == "Etsy only title"
+    assert rows["etsy_specifics.renewalOption"] == "Automatic"
     assert rows["etsy_specifics.category_specifics.sleeveLength"] == "Long sleeve"
     assert rows["etsy_specifics.category_specifics.Primary color"] == "Black"
 

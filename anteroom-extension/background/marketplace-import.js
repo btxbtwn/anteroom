@@ -118,7 +118,7 @@ async function poshmarkImportPage(cursor, deadline) {
     quantity: poshmarkQuantity(post),
   }));
   const next = typeof body.more?.next_max_id === 'string' && body.more.next_max_id ? body.more.next_max_id : null;
-  return { rows, next_cursor: rows.length ? next : null };
+  return { rows, next_cursor: rows.length ? next : null, account: String(account) };
 }
 
 function poshmarkQuantity(post) {
@@ -154,6 +154,7 @@ async function poshmarkImportListing(id, deadline) {
   const category = poshmarkCategoryNames(post, catalog);
   const size = sizes[0] || {};
   return {
+    account: String(account),
     id, url: poshmarkListingUrl(id), title: importText(post.title, 200), description: importText(post.description),
     price: importMoney(post.price_amount?.val), currency: 'USD', quantity: poshmarkQuantity(post),
     brand: importText(post.brand, 120) || null,
@@ -183,7 +184,7 @@ async function mercariImportPage(cursor, deadline) {
     id: String(item.id), url: `https://www.mercari.com/us/item/${item.id}/`, title: importText(item.name, 200) || String(item.id),
     price: importMoney(Number(item.price) / 100), quantity: 1,
   }));
-  return { rows, next_cursor: items.length >= IMPORT_PAGE_SIZE ? String(offset + items.length) : null };
+  return { rows, next_cursor: items.length >= IMPORT_PAGE_SIZE ? String(offset + items.length) : null, account: String(seller) };
 }
 
 function mercariCategoryPath(master, id) {
@@ -211,6 +212,7 @@ async function mercariImportListing(id, deadline) {
   const name = (rows, value, key = 'name') => importText(rows?.find(row => String(row.id) === String(value))?.[key], 120) || null;
   const brandId = item.brand?.id;
   return {
+    account: String(session.user.userId),
     id, url: `https://www.mercari.com/us/item/${id}/`, title: importText(item.name, 200), description: importText(item.description),
     price: importMoney(Number(item.price) / 100), currency: 'USD', quantity: 1,
     brand: brandId != null && Number(brandId) !== 0 ? name(master?.itemBrands, brandId) : null,
@@ -247,7 +249,7 @@ async function depopImportPage(cursor, deadline) {
       title: importTitleFromText(product.description) || String(product.slug), price: importMoney(depopProductPrice(product)),
       quantity: importCount(product.quantity) }));
   const next = body?.meta?.end === true ? '' : depopCursorToken(body?.meta?.last_offset_id);
-  return { rows, next_cursor: products.length && next && next !== token ? decodeURIComponent(next) : null };
+  return { rows, next_cursor: products.length && next && next !== token ? decodeURIComponent(next) : null, account: shop };
 }
 
 function depopImportVariants(product) {
@@ -311,6 +313,7 @@ async function depopImportListing(slug, deadline) {
   const size = variant ? importText(String(variant.name ?? depopName(sizeSet?.sizes?.find(entry => String(entry.id) === variant.id)) ?? ''), 80) || null : null;
   const pictures = depopPictureRows(product.pictures ?? product.pictures_data ?? product);
   return {
+    account,
     id: slug, url: depopListingUrl(slug), title: importTitleFromText(product.description), description: importText(product.description),
     price: importMoney(listed), currency: 'USD',
     quantity: variant ? variant.quantity : importCount(product.quantity),
@@ -342,7 +345,8 @@ async function readMarketplaceImportPage(marketplace, cursor) {
   try {
     const clean = typeof cursor === 'string' && cursor.length <= 300 ? cursor : null;
     const page = await IMPORT_READERS[marketplace].page(clean, Date.now() + IMPORT_DEADLINE_MS);
-    return { ok: true, rows: page.rows, next_cursor: page.next_cursor };
+    // The signed-in account the page was read from, so a run that continues across pages can tell it changed.
+    return { ok: true, rows: page.rows, next_cursor: page.next_cursor, account: page.account };
   } catch (error) {
     return importFailure(error);
   }

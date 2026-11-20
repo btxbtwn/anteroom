@@ -27,10 +27,31 @@ test("the Etsy tab is Etsy's listing form, and its edits stay on Etsy", async ({
     await expect(form.getByRole("button", { name: `Category: ${TEE.path.split(" > ").join(" → ")}` })).toBeVisible();
     await expect(form.getByText("Etsy's attributes for this category could not be loaded", { exact: false })).toBeVisible();
     if (process.env.ETSY_FORM_SHOTS) {
-      for (const [index, heading] of ["Photo & video", "Item details", "Pricing & shipping", "How it's made"].entries()) {
+      for (const [index, heading] of ["Photo & video", "Item details", "Pricing & shipping", "How it's made", "Settings"].entries()) {
         await form.getByRole("region", { name: heading }).scrollIntoViewIfNeeded();
         await page.screenshot({ path: `${process.env.ETSY_FORM_SHOTS}/etsy-form-${info.project.name}-${index + 1}.png` });
       }
+    }
+
+    // Renewal options starts on Manual and can be switched to Automatic from the dropdown.
+    const renewal = form.getByRole("combobox", { name: "Renewal options" });
+    await renewal.scrollIntoViewIfNeeded();
+    await expect(renewal).toBeEnabled();
+    await expect(renewal).toHaveValue("Manual");
+    await renewal.click();
+    await expect(page.getByRole("option", { name: "Automatic", exact: true })).toBeVisible();
+    await expect(page.getByRole("option", { name: "Manual", exact: true })).toBeVisible();
+    if (process.env.ETSY_FORM_SHOTS) {
+      await page.screenshot({ path: `${process.env.ETSY_FORM_SHOTS}/etsy-renewal-open-${info.project.name}.png` });
+    }
+    await page.getByRole("option", { name: "Automatic", exact: true }).click();
+    await expect.poll(async () => {
+      const body = await (await request.get(`/api/conversations/${id}/listing`)).json();
+      return body.listing.etsy_specifics?.renewalOption;
+    }, { timeout: 15_000 }).toBe("Automatic");
+    await expect(renewal).toHaveValue("Automatic");
+    if (process.env.ETSY_FORM_SHOTS) {
+      await page.screenshot({ path: `${process.env.ETSY_FORM_SHOTS}/etsy-renewal-automatic-${info.project.name}.png` });
     }
 
     // A title typed here is Etsy's; General keeps its own.

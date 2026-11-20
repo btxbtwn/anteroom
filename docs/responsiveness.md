@@ -45,14 +45,6 @@ that sample. A confirmed save retains its answer outcome
 despite a concurrent lease revocation. `total_ms` ends with the answer's cleanup
 wait, not the later journal settlement or log emission.
 
-<!-- coderabbit-ai-generated:v1 -->
-
-<!-- coderabbit-ai-generated-section:v1:c16ae77c1fa266df95938d44689e61b2522ff68f559affd05d4c47994dd17247 -->
-
-<!-- coderabbit-ai-generated:v1 -->
-
-<!-- coderabbit-ai-generated-section:v1:a7bf8ddaba1ad12e7f8db7edee06b4c705d6b50d207af17c02a51d566f3f7868 -->
-
 Answers under 30 s log at INFO, which hosted logging drops; slower ones log at
 WARNING and, when operator alerts are enabled, enter the hourly batched operator alert email (grouped by call site,
 as `Slow response` lines are). The digest retains only the latest sample in each
@@ -64,13 +56,10 @@ are capped at 4,000 characters. Operators can read this worker-local file; it is
 not shared across Machines and can be lost with the filesystem. Disk logging is
 best effort and does not change alert delivery. No stderr handler is added.
 
-<!-- /coderabbit-ai-generated:v1 -->
 `queue_wait_ms` compares the worker clock with the database's `created_at`;
 skew is clamped at zero, not corrected. Time between `total_ms` and the
 follower seeing `[DONE]` (journal polling) is not included. This line measures;
 it changes no answer behavior and proves no cause by itself.
-
-<!-- /coderabbit-ai-generated:v1 -->
 
 
 ## Assistant shop read: shared range inputs, 2026-11-18

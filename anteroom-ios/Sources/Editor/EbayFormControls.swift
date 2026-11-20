@@ -14,12 +14,21 @@ final class CategoryTreeCache {
         loading[marketplace] = task
         do {
             let value = try await task.value
-            loaded[marketplace] = value
+            if loading[marketplace] == task {
+                loaded[marketplace] = value
+                loading[marketplace] = nil
+            }
             return value
         } catch {
-            loading[marketplace] = nil
+            if loading[marketplace] == task { loading[marketplace] = nil }
             throw error
         }
+    }
+
+    func clear() {
+        for task in loading.values { task.cancel() }
+        loading.removeAll()
+        loaded.removeAll()
     }
 }
 

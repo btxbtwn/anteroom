@@ -478,10 +478,12 @@ def _after_preview(db: Session, marketplace: str, body: ListRequest, snapshot: d
         from anteroom.services import user_settings
 
         defaults = user_settings.get_etsy_listing_defaults()
+        field_defaults = user_settings.get_listing_field_defaults()
         options = {"shipping_profile_id": body.shipping_profile_id or defaults.get("shipping_profile_id"),
                    "readiness_state_id": body.readiness_state_id or defaults.get("readiness_state_id"),
                    "return_policy_id": body.return_policy_id or defaults.get("return_policy_id"),
-                   "package": body.etsy_package.model_dump() if body.etsy_package else listing_package(snapshot)}
+                   "package": body.etsy_package.model_dump() if body.etsy_package else listing_package(snapshot),
+                   "default_renewal": (field_defaults.get("etsy_specifics.renewalOption") or {}).get("label")}
     return options
 
 

@@ -11,6 +11,7 @@ import { SIDEBAR_ROW } from "./sidebarStyles";
 import { prefetchAssistantThread } from "../../api/navigationQueries";
 import { useNavigationIntent } from "../../lib/useNavigationIntent";
 import { groupChats } from "../chat/chatHistory";
+import { clearComposerDraft } from "../chat/composerDrafts";
 
 function ThreadButton({ thread, selected, onPick }: {
   thread: AssistantThread; selected: boolean; onPick: (id: string) => void;
@@ -55,6 +56,7 @@ export function AssistantThreadPanel({
   const remove = useMutation({
     mutationFn: (id: string) => api.assistant.deleteThread(id),
     onSuccess: (_result, id) => {
+      clearComposerDraft(`assistant:${id}`);
       queryClient.setQueryData<AssistantThread[]>(["assistant", "threads"], (saved) => saved?.filter((thread) => thread.id !== id));
       queryClient.removeQueries({ queryKey: ["assistant", "messages", id] });
       if (selectedId === id) onSelect(null);

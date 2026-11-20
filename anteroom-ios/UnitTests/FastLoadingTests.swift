@@ -74,13 +74,13 @@ final class FastLoadingTests: XCTestCase {
             await order.add("cover")
             await gate.leave()
         }
-        await waitUntil { await gate.waitingCount == 1 }
+        await Self.waitUntil { await gate.waitingCount == 1 }
         let urgent = Task {
             try await gate.enter(urgent: true)
             await order.add("open listing")
             await gate.leave()
         }
-        await waitUntil { await gate.waitingCount == 2 }
+        await Self.waitUntil { await gate.waitingCount == 2 }
         await gate.leave()
         try await background.value
         try await urgent.value
@@ -92,7 +92,7 @@ final class FastLoadingTests: XCTestCase {
         let gate = RequestGate(limit: 1)
         try await gate.enter()
         let offscreen = Task { try await gate.enter() }
-        await waitUntil { await gate.waitingCount == 1 }
+        await Self.waitUntil { await gate.waitingCount == 1 }
         offscreen.cancel()
         do {
             try await offscreen.value
@@ -100,7 +100,7 @@ final class FastLoadingTests: XCTestCase {
         } catch {
             XCTAssertTrue(error.isCancellation)
         }
-        await waitUntil { await gate.waitingCount == 0 }
+        await Self.waitUntil { await gate.waitingCount == 0 }
         // The running caller's turn is free again once it leaves.
         await gate.leave()
         try await gate.enter()
@@ -176,9 +176,33 @@ final class FastLoadingTests: XCTestCase {
         XCTAssertEqual(StubProtocol.requests.last?.url?.path, "/api/conversations/a/native-marketplaces/depop/form")
     }
 
+    func testSignOutClearsChoiceLists() async throws {
+        let form = #"""
+        {"marketplace":"depop","fields":[
+          {"key":"depop_specifics.brand","label":"Brand","selection_only":true,"choice_list":{"name":"depop-brands","version":"v1"}}]}
+        """#
+        StubProtocol.answer([{ request in
+            if request.url?.path == "/api/catalog/choice-lists/depop-brands" {
+                return .init(status: 200, body: #"{"options":["Nike"],"option_values":{"Nike":"nike"}}"#)
+            }
+            return .init(status: 200, body: form)
+        }])
+        _ = try await api.nativeForm("a", marketplace: "depop")
+        XCTAssertEqual(StubProtocol.requests.count, 2)
+
+        // Cached in memory before sign-out: only the form is fetched.
+        _ = try await api.nativeForm("a", marketplace: "depop")
+        XCTAssertEqual(StubProtocol.requests.count, 3)
+
+        // Sign-out clears both in-memory ChoiceListCache and on-disk ImmutableReadCache.
+        await api.forgetSeller()
+        _ = try await api.nativeForm("a", marketplace: "depop")
+        XCTAssertEqual(StubProtocol.requests.count, 5)
+    }
+
     // MARK: Helpers
 
-    private func waitUntil(_ condition: () async -> Bool) async {
+    private static func waitUntil(_ condition: () async -> Bool) async {
         for _ in 0..<500 {
             if await condition() { return }
             try? await Task.sleep(nanoseconds: 2_000_000)

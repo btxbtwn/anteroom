@@ -91,7 +91,7 @@ final class ListingAssistantModel {
             needsReconnect = serverBusy
             progress = serverBusy ? values.1.items.joined(separator: " · ") : "Work finished. Review the saved draft."
             if !serverBusy { runsFinished += 1 }
-        } catch is CancellationError {
+        } catch let stopped where stopped.isCancellation {
             needsReconnect = true
             progress = "Reconnect to check the saved draft."
         } catch {
