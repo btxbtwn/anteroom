@@ -176,13 +176,15 @@ def test_the_server_takes_ipv4_and_ipv6_connections():
         sock.close()
 
 
-def test_a_stop_signal_starts_the_handoff_before_requests_drain():
+def test_a_stop_signal_starts_the_handoff_before_requests_drain(monkeypatch):
     import signal
     import uvicorn
     from anteroom.hosted_server import HostedServer
 
     server = HostedServer(uvicorn.Config('anteroom.hosted:app'))
-    server.handle_exit(signal.SIGTERM, None)
+    with monkeypatch.context() as patch:
+        patch.setattr(process_handoff, 'clear_route_cache', lambda: pytest.fail('signal callback took the cache lock'))
+        server.handle_exit(signal.SIGTERM, None)
     assert process_handoff.draining()
     assert server.should_exit
 

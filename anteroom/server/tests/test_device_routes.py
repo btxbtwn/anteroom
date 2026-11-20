@@ -291,3 +291,26 @@ def test_confirmed_device_route_is_cached_and_cleared_on_handoff_release(storage
         event.remove(engine, 'before_cursor_execute', record)
         device_routes.clear_route_cache()
 
+
+
+def test_lookup_does_not_postpone_heartbeat_and_release_fences_late_fill(storage, monkeypatch):  # noqa: F811
+    from anteroom.services import process_handoff
+
+    engine, _ = storage
+    owner = str(uuid.uuid4())
+    monkeypatch.setenv('FLY_MACHINE_ID', 'blue')
+    monkeypatch.setenv('ANTEROOM_PROCESS_BASE_URL', 'http://127.0.0.1:8080')
+    assert claim(owner, 'chrome', engine).owned
+    device_routes.clear_route_cache()
+    assert device_routes.lookup(owner, 'chrome', engine).owned
+    store = device_routes._store_owned_route
+
+    def release_before_fill(*args):
+        process_handoff.release(engine)
+        store(*args)
+
+    monkeypatch.setattr(device_routes, '_store_owned_route', release_before_fill)
+    assert claim(owner, 'chrome', engine).owned
+    # A cached lookup would skip the renewal (and the hook); a stale fill
+    # would hide the release. In either case this would still appear owned.
+    assert device_routes.lookup(owner, 'chrome', engine) is None

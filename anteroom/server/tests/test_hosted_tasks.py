@@ -298,3 +298,43 @@ def test_a_task_no_worker_claims_ends_its_stream_and_frees_the_draft(migration_e
         statuses = {task.id: task.status for task in session.scalars(select(BackgroundTask))}
     # Failed, not left queued: a worker that comes back never runs work the seller was told stopped.
     assert statuses == {stale_id: 'failed', fresh_id: 'queued'}
+
+
+def test_overlapping_seller_key_submissions_release_settings_before_vault(migration_engine, monkeypatch):  # noqa: F811
+    from sqlalchemy import create_engine, literal
+    from anteroom.models.conversation import Conversation
+    from anteroom.models.user_preference import UserPreference
+    from anteroom.routes import hosted_tasks
+    from anteroom.services.hosted_context import VaultSecretStore, for_seller
+    from anteroom.services.service_context import use
+
+    if migration_engine.dialect.name != 'postgresql':
+        pytest.skip('Hosted work requires Postgres')
+    schema_migrations.ensure_schema(migration_engine)
+    with Session(migration_engine) as db:
+        for owner in (USER_ID, BOB):
+            db.add(Conversation(id=owner, user_id=owner, title='Coat'))
+            db.add(UserPreference(user_id=owner, key='settings', value={'listing_provider': {'primary': 'openai'}}))
+        db.commit()
+    engine = create_engine(migration_engine.url, pool_size=2, max_overflow=0, pool_timeout=.5)
+    monkeypatch.setattr('anteroom.database.engine', engine)
+    monkeypatch.setattr('anteroom.services.hosted_provider.managed_ai_enabled', lambda: False)
+    together = threading.Barrier(2, timeout=5)
+
+    def credential(db, account):
+        assert account == 'ai-api-keys'
+        together.wait()
+        # Exercise a real second checkout without needing the Supabase Vault extension.
+        return db.scalar(select(literal('{"openai":"test-fixture"}')))
+
+    monkeypatch.setattr(VaultSecretStore, '_read', staticmethod(credential))
+
+    def submit(owner):
+        with use(for_seller(owner)) as context, context.session_factory() as db:
+            return hosted_tasks.submit(db, owner, 'chat', 'Revise')
+
+    try:
+        with ThreadPoolExecutor(2) as executor:
+            assert all(executor.map(submit, (USER_ID, BOB)))
+    finally:
+        engine.dispose()

@@ -1351,6 +1351,26 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.tick()
         self.assertEqual(self.promoted(), [])
 
+    def _offer_rule_changes_during_review(self, changes):
+        saved = self.create({**OFFER, "minimum_price": "30"})
+        self.enable(saved["id"])
+        self.due(saved["id"])
+
+        def change_rule():
+            self.db.query(PromotionAutomation).filter_by(id=saved["id"]).update(changes)
+            self.db.commit()
+
+        self.on_check = change_rule
+        self.tick()
+        self.assertEqual(self.promoted(), [])
+        self.assertIn("changed", self.db.query(PromotionRun).one().note)
+
+    def test_new_like_threshold_blocks_a_stale_offer(self):
+        self._offer_rule_changes_during_review({"min_likes": 10})
+
+    def test_new_shipping_label_blocks_a_stale_offer(self):
+        self._offer_rule_changes_during_review({"shipping_label": None})
+
     def test_changed_minimum_blocks_the_final_send_reservation(self):
         saved = self.create({**OFFER, "minimum_price": "30"})
         self.enable(saved["id"])

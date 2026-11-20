@@ -206,3 +206,19 @@ it("falls back to the direct endpoint if a /screen payload omits a newer key", a
     ]);
   } finally { stop(); vi.unstubAllGlobals(); }
 });
+
+it("refetches marketplace status while an older screen response is in flight", async () => {
+  const stop = installHostedApiSession({ seller: "seller", origin: "https://app.test", accessToken: async () => "token", unauthorized: () => {} });
+  let finish!: (response: Response) => void;
+  const fetch = vi.fn().mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; }))
+    .mockImplementation(async () => Response.json({ running: true }));
+  vi.stubGlobal("fetch", fetch);
+  try {
+    const initial = Promise.all([api.conversations.get("item"), api.nativeMarketplaces.status("item")]);
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    const refresh = api.nativeMarketplaces.status("item");
+    finish(Response.json({ conversation: {}, native_marketplaces: { running: false } }));
+    expect(await refresh).toEqual({ running: true });
+    expect((await initial)[1]).toEqual({ running: false });
+  } finally { stop(); vi.unstubAllGlobals(); }
+});

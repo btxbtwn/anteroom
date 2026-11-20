@@ -26,6 +26,7 @@ STALE_SECONDS = {'mac': 45, 'chrome': 30}
 # Cache confirmed local ownership for 1/3 of the staleness window so heartbeats
 # and replies still renew seen_at well before expiry without a DB write per call.
 _CACHE_TTL_FRACTION = 1 / 3
+_cache_generation = 0
 _route_cache_lock = threading.Lock()
 _route_cache: dict[tuple[str, int, str, str], tuple[float, DeviceRoute]] = {}
 _MACHINE = re.compile(r'^[A-Za-z0-9]{1,64}$')
@@ -45,27 +46,32 @@ class DeviceRoute:
 
 def clear_route_cache() -> None:
     """Drop cached locally-owned device routes (called on drain, release, and reset)."""
+    global _cache_generation
     with _route_cache_lock:
+        _cache_generation += 1
         _route_cache.clear()
 
 
-def _cached_owned_route(key: tuple[str, int, str, str], expected_url: str | None = None) -> DeviceRoute | None:
+def _cached_owned_route(key: tuple[str, int, str, str], expected_url: str | None = None) -> tuple[DeviceRoute | None, int]:
     now = time.monotonic()
     with _route_cache_lock:
         entry = _route_cache.get(key)
         if entry is None:
-            return None
+            return None, _cache_generation
         expires_at, route = entry
         if expires_at <= now or (expected_url is not None and route.base_url != expected_url):
             _route_cache.pop(key, None)
-            return None
-        return route
+            return None, _cache_generation
+        return route, _cache_generation
 
 
-def _store_owned_route(key: tuple[str, int, str, str], device: str, route: DeviceRoute | None) -> None:
+def _store_owned_route(key: tuple[str, int, str, str], device: str, route: DeviceRoute | None,
+                       generation: int, started: float) -> None:
     with _route_cache_lock:
+        if generation != _cache_generation:
+            return
         if route is not None and route.owned:
-            _route_cache[key] = (time.monotonic() + STALE_SECONDS[device] * _CACHE_TTL_FRACTION, route)
+            _route_cache[key] = (started + STALE_SECONDS[device] * _CACHE_TTL_FRACTION, route)
         else:
             _route_cache.pop(key, None)
 
@@ -122,7 +128,8 @@ def claim(owner: str, device: str, engine=None) -> DeviceRoute | None:
         return None
     target_engine = _engine(engine)
     cache_key = (current, id(target_engine), identity, device)
-    cached = _cached_owned_route(cache_key, expected_url=url)
+    started = time.monotonic()
+    cached, generation = _cached_owned_route(cache_key, expected_url=url)
     if cached is not None:
         return cached
     try:
@@ -136,10 +143,10 @@ def claim(owner: str, device: str, engine=None) -> DeviceRoute | None:
         _warn_route('Device route was not recorded', exc)
         return None
     if row is None:
-        _store_owned_route(cache_key, device, None)
+        _store_owned_route(cache_key, device, None, generation, started)
         return None
     route = DeviceRoute(row.machine_id, row.base_url, bool(row.owned))
-    _store_owned_route(cache_key, device, route)
+    _store_owned_route(cache_key, device, route, generation, started)
     return route
 
 
@@ -152,7 +159,9 @@ def lookup(owner: str, device: str, engine=None) -> DeviceRoute | None:
     current = machine_id()
     target_engine = _engine(engine)
     cache_key = (current, id(target_engine), identity, device)
-    cached = _cached_owned_route(cache_key)
+    # Only heartbeats populate this cache: a lookup miss costs a read, but
+    # cannot postpone the next seen_at renewal or outlive the database row.
+    cached, _ = _cached_owned_route(cache_key)
     if cached is not None:
         return cached
     with target_engine.begin() as connection:
@@ -160,11 +169,8 @@ def lookup(owner: str, device: str, engine=None) -> DeviceRoute | None:
             'SELECT machine_id, base_url FROM anteroom_private.device_route(:owner, :device, :stale)'
         ), {'owner': identity, 'device': device, 'stale': STALE_SECONDS[device]}).first()
     if row is None:
-        _store_owned_route(cache_key, device, None)
         return None
-    route = DeviceRoute(row.machine_id, row.base_url, row.machine_id == current)
-    _store_owned_route(cache_key, device, route)
-    return route
+    return DeviceRoute(row.machine_id, row.base_url, row.machine_id == current)
 
 
 def replay_instance(route: DeviceRoute | None) -> str | None:

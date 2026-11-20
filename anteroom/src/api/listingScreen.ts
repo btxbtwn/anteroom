@@ -69,9 +69,10 @@ export async function listingScreenRead<T>(path: string, read: ScreenRead, signa
     if (callerIsBackground) registerBackgroundSignal(controller.signal);
     const promise = Promise.resolve().then(async () => {
       if (currentHostedSession() !== session) throw new Error("Your account changed.");
+      // Once dispatched, this snapshot cannot satisfy a later invalidation.
+      if (pending.get(id) === started) pending.delete(id);
       // A single polling read should not reload the whole screen.
       if (keys.size === 1) {
-        if (pending.get(id) === started) pending.delete(id);
         return { [key]: await read<unknown>(path, controller.signal) };
       }
       return read<Record<string, unknown>>(`/conversations/${id}/screen`, controller.signal);

@@ -1,5 +1,5 @@
 import { isBackgroundSignal, promoteBackgroundSignal, registerBackgroundSignal } from "./requestScheduler";
-import { currentHostedSession, studioFetch } from "./transport";
+import { currentHostedSession, studioImage, type HostedApiSession } from "./transport";
 
 /**
  * Signed-in cloud images, kept for the page's lifetime so a row that scrolls
@@ -173,18 +173,19 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-async function fetchImageBlob(src: string, signal: AbortSignal): Promise<Blob> {
+async function fetchImageBlob(src: string, signal: AbortSignal, session: HostedApiSession | null): Promise<Blob> {
   for (let attempt = 0; ; attempt += 1) {
-    let response: Response | undefined;
+    let status: number | undefined;
     try {
-      response = await studioFetch(src, { signal });
+      const result = await studioImage(src, signal, session);
+      if (result.blob) return result.blob;
+      status = result.status;
     } catch (error) {
-      if (signal.aborted) throw error;
+      if (signal.aborted || currentHostedSession() !== session) throw error;
       if (attempt >= RETRY_DELAYS_MS.length) throw new PhotoLoadError(null);
     }
-    if (response?.ok) return response.blob();
-    const transient = !response || response.status === 429 || response.status >= 500;
-    if (!transient || attempt >= RETRY_DELAYS_MS.length) throw new PhotoLoadError(response?.status ?? null);
+    const transient = status === undefined || status === 429 || status >= 500;
+    if (!transient || attempt >= RETRY_DELAYS_MS.length) throw new PhotoLoadError(status ?? null);
     await wait(RETRY_DELAYS_MS[attempt], signal);
   }
 }
@@ -193,7 +194,7 @@ async function fetchPrivateImage(src: string, signal: AbortSignal): Promise<stri
   const session = currentHostedSession();
   const kept = await readFromDevice(src);
   signal.throwIfAborted();
-  const blob = kept ?? await fetchImageBlob(src, signal);
+  const blob = kept ?? await fetchImageBlob(src, signal, session);
   if (!kept && currentHostedSession() === session) void keepOnDevice(src, blob);
   if (currentHostedSession() !== session) throw new Error("Your account changed.");
   const cache = forCurrentSession();
