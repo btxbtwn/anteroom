@@ -187,13 +187,20 @@ async function saveNativeOperationJournal(key, entry) {
     const { shop_before: _dropped, ...compact } = next;
     next = compact;
   }
-  await chrome.storage.local.set({ [key]: next });
-  await pruneStorageJournal(NATIVE_OPERATION_JOURNAL_PREFIX, {
+  const pruneOptions = {
     maxSettled: NATIVE_OPERATION_JOURNAL_LIMIT,
     ttlMs: NATIVE_OPERATION_JOURNAL_TTL_MS,
     keepKey: key,
     isSettled: nativeOperationSettled,
-  });
+  };
+  try {
+    await chrome.storage.local.set({ [key]: next });
+  } catch (error) {
+    if (error?.name !== 'QuotaExceededError' && !/quota/i.test(String(error?.message || error))) throw error;
+    await pruneStorageJournal(NATIVE_OPERATION_JOURNAL_PREFIX, pruneOptions);
+    await chrome.storage.local.set({ [key]: next });
+  }
+  await pruneStorageJournal(NATIVE_OPERATION_JOURNAL_PREFIX, pruneOptions);
   return next;
 }
 

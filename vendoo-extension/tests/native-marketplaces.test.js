@@ -276,3 +276,47 @@ test('settled native operations strip shop_before while unsettled publishes keep
   });
   assert.equal(Object.hasOwn(store.native_operation_d10002, 'shop_before'), false);
 });
+
+for (const failure of ['quota', 'persistent quota', 'unrelated']) {
+  test(`native journal handles ${failure} write failure before marketplace execution`, async () => {
+    const s = setup('poshmark');
+    s.msg.payload.draft_url = null;
+    const expired = { finished: true, at: Date.now() - 8 * 24 * 60 * 60 * 1000, result: { ok: true } };
+    const store = fullStorage(s.context, {
+      native_operation_dead: expired,
+      native_operation_active: { finished: false, at: expired.at },
+      native_operation_uncertain: { ...expired, result: { ok: false, safe_to_retry: false } },
+      unrelated: 'keep',
+    });
+    const save = s.context.chrome.storage.local.set;
+    let writes = 0;
+    let executions = 0;
+    s.context.chrome.storage.local.set = async values => {
+      writes++;
+      if (failure !== 'quota' || store.native_operation_dead) {
+        throw new Error(failure === 'unrelated' ? 'Storage unavailable' : 'QUOTA_BYTES quota exceeded');
+      }
+      await save(values);
+    };
+    s.context.runPoshmarkApi = async () => {
+      executions++;
+      assert.ok(store.native_operation_abc123, 'journal must persist before execution');
+      return { ok: true, state: 'draft' };
+    };
+    if (failure === 'quota') {
+      await s.context.handleNativeMarketplaceMessage(s.msg);
+      assert.equal(executions, 1);
+      assert.equal(writes, 3); // initial failure, retry, settlement
+      assert.equal(store.native_operation_dead, undefined);
+    } else {
+      await assert.rejects(s.context.handleNativeMarketplaceMessage(s.msg), /quota exceeded|Storage unavailable/);
+      assert.equal(executions, 0);
+      assert.equal(writes, failure === 'unrelated' ? 1 : 2);
+      assert.equal(Boolean(store.native_operation_dead), failure === 'unrelated');
+    }
+    assert.ok(store.native_operation_active);
+    assert.ok(store.native_operation_uncertain);
+    assert.equal(store.unrelated, 'keep');
+    assert.equal(call(s.context, 'nativeOperationsRunning'), false);
+  });
+}

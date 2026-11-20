@@ -26,6 +26,7 @@
     expired: 'This action\'s approval expired before Chrome received it. Check this computer\'s clock, then try again.',
     invalid: 'Chrome did not run this action because its approval is not valid. Reload Anteroom and try again.',
     mismatch: 'Chrome did not run this action because it is not the one Anteroom approved. Reload Anteroom and try again.',
+    capacity: 'Chrome cannot accept more approvals yet. Wait a few minutes, then start the action again in Anteroom.',
     replayed: 'Chrome already ran this approval once. Start the action again in Anteroom.',
     photos: 'Chrome did not run this action because its photos are not the ones Anteroom approved. Reload Anteroom and try again.',
   };
@@ -85,18 +86,12 @@
         for (const [nonce, until] of Object.entries(used)) {
           if (!Number.isFinite(until) || until + LEEWAY_S < seconds) delete used[nonce];
         }
-        if (Object.hasOwn(used, id)) return false;
-        used[id] = expires;
-        const keys = Object.keys(used);
+        if (Object.hasOwn(used, id)) return 'replayed';
         const cap = Number.isInteger(maxUsed) && maxUsed > 0 ? maxUsed : MAX_USED_APPROVALS;
-        if (keys.length > cap) {
-          const excess = keys.filter(nonce => nonce !== id)
-            .sort((a, b) => used[a] - used[b])
-            .slice(0, keys.length - cap);
-          for (const nonce of excess) delete used[nonce];
-        }
+        if (Object.keys(used).length >= cap) return 'capacity';
+        used[id] = expires;
         await api.storage.local.set({ [USED_KEY]: used });
-        return true;
+        return null;
       });
       tail = result.catch(() => {});
       return result;
@@ -131,7 +126,7 @@
           || claims.sha !== await commandHash(command)) return 'mismatch';
       // Checked before the approval is used, so the page can still send the approved bytes.
       if (!await photosMatch(claims, photos)) return 'photos';
-      return await use(claims.jti, claims.exp) ? null : 'replayed';
+      return await use(claims.jti, claims.exp);
     }
     return {
       // Null when the command may run with `photos`; otherwise the Bridge's refusal, which
