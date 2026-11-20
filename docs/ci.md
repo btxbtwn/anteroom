@@ -225,3 +225,27 @@ recorded. Remove `HISTORICAL_RECOVERY_CHECKPOINT` in a cleanup PR once
 production is verified past `b73c5347` (artifact `14596571781` expires
 `2026-12-20`). The offline gate-recovery tests live in
 `.github/scripts/test_wait_for_tested_code.py` and run in `Repo checks`.
+
+## Sandbox browser timing evidence
+
+The sandbox job runs the existing full suite, then compares the actual test
+inventory with three Playwright collection-only observations. The two proposed
+file-level shard inventories must cover the full set exactly once across
+desktop Chromium, phone Chromium and phone WebKit. The ordinary sandbox and
+hosted test commands still decide the browser check result. Missing, failed or
+inconsistent measurements leave the optional profile unavailable.
+
+The seven-day profile records hashed Playwright case and file identities,
+project names, retry outcomes, skips, expected failures, attempt durations and
+checkout, lock and runner provenance. These hashes are identifiers and can be
+guessed. Runtime-derived sensitive test titles must stay out of public evidence,
+even when hashed. Install steps expose Python, npm, browser OS dependencies and
+browser download timings separately for both jobs.
+
+For a later hosted A/B, use the same frozen source, locks, toolchain and runner
+image. Compare the full one-worker run with two isolated one-worker shards.
+Verify the exact disjoint case union on the executing runners and report skips,
+expected failures, retries and missing cases. Measure time to green from run
+creation including queue, and sum job start-to-finish seconds across all
+executed jobs and attempts, including setup and validation. Report any rounded
+runner minutes as estimates. Billing data is needed for monetary claims.
