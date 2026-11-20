@@ -123,15 +123,15 @@ def inputs(listing: dict, market: str, fields: list[dict]) -> dict:
     return result
 
 
-def _zero_empty_number(value: Any) -> Any:
-    """Treat unset and zero weights/dimensions as one no-answer; keep positive numbers comparable."""
+def _zero_empty_number(value: Any, *, keep_zero: bool = False) -> Any:
+    """Treat unset weights/dimensions as one no-answer; keep zero as an answer when keep_zero is set."""
     if value is None or value == "" or isinstance(value, bool):
         return None
     try:
         number = Decimal(str(value).strip())
     except InvalidOperation:
         return value
-    if not number.is_finite() or number == 0:
+    if not number.is_finite() or (number == 0 and not keep_zero):
         return None
     return number.normalize()
 
@@ -140,18 +140,22 @@ def _normalize_mercari_package(pkg: Any) -> Any:
     if not isinstance(pkg, dict):
         return pkg
     normalized: dict[str, Any] = {}
-    for key, val in pkg.items():
-        if key in {"pounds", "ounces", "length", "width", "height"}:
-            clean = _zero_empty_number(val)
-        elif key == "fitsShoebox":
-            text = str(val or "").strip().casefold()
-            clean = text or None
-        elif key == "skipDimensions":
-            clean = True if val in (True, "true") else None
-        else:
-            clean = _answered(val)
+    pounds = _zero_empty_number(pkg.get("pounds"), keep_zero=True)
+    ounces = _zero_empty_number(pkg.get("ounces"), keep_zero=True)
+    # mercari_form.package() uses native pounds/ounces once either is answered
+    # (including explicit 0), defaulting an unset companion to 0.
+    if pounds is not None or ounces is not None:
+        normalized["pounds"] = Decimal(0) if pounds is None else pounds
+        normalized["ounces"] = Decimal(0) if ounces is None else ounces
+    for key in ("length", "width", "height"):
+        clean = _zero_empty_number(pkg.get(key), keep_zero=True)
         if clean is not None:
             normalized[key] = clean
+    fits = str(pkg.get("fitsShoebox") or "").strip().casefold()
+    if fits:
+        normalized["fitsShoebox"] = fits
+    if pkg.get("skipDimensions") in (True, "true"):
+        normalized["skipDimensions"] = True
     return normalized or None
 
 

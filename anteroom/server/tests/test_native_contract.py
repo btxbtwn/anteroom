@@ -547,6 +547,21 @@ class NativeContractTest(unittest.TestCase):
         different_box["mercari_specifics"]["package"]["fitsShoebox"] = "no"
         self.assertFalse(contract.inputs_match(different_box, "mercari", fields, stored["mercari"]["inputs"]))
 
+        # An explicit 0 package weight or dimension overrides General fallback in
+        # mercari_form.package(), so removing that zero override must mark the form stale.
+        for zero_pkg in ({"ounces": 0}, {"pounds": 0}, {"length": 0}):
+            with_zero = copy.deepcopy(raw)
+            with_zero["mercari_specifics"]["package"] = zero_pkg
+            without_zero = copy.deepcopy(raw)
+            without_zero["mercari_specifics"]["package"] = {}
+            zero_stored = contract.capture(
+                with_zero, {"mercari": {"category_id": "303", "fields": fields, "page_labels": True}}, ["mercari"],
+            )
+            self.assertFalse(
+                contract.inputs_match(without_zero, "mercari", fields, zero_stored["mercari"]["inputs"]),
+                zero_pkg,
+            )
+
 
 class NativeContractRevisionTest(unittest.TestCase):
     def setUp(self):

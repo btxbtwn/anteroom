@@ -355,10 +355,6 @@ def _record_forms(db: Session, conv_id: str, revision_id: str, saved: dict, form
     listing[native_contract.KEY] = {**(listing.get(native_contract.KEY) or {}),
                                     **native_contract.capture(listing, forms, markets)}
     native_contract.constrain_generated(listing, listing, freeze_categories=False)
-    for market in forms:
-        contract = (listing.get(native_contract.KEY) or {}).get(market)
-        if isinstance(contract, dict) and not contract.get("unavailable") and contract.get("fields"):
-            contract["inputs"] = native_contract.inputs(listing, market, contract["fields"])
     if listing != saved:
         listing_persistence.save_revision(db, conv_id, listing, source="native_schema", parent_revision_id=revision_id, expected_revision_id=revision_id)
     return listing[native_contract.KEY]

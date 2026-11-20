@@ -719,6 +719,34 @@ class CategoryFillLocksTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(
             native_contract.inputs_match(latest, "mercari", contracts["mercari"]["fields"], contracts["mercari"]["inputs"]),
         )
+
+        # Conversely, when constrain_generated strips a controlling package answer
+        # used for quoting (string skipDimensions="true"), keep the quoted inputs so
+        # zero-dimension quotes are not marked current for a dimensioned package.
+        quoted_conv = ConversationRepo(db).create(title="Boxed Tee")
+        quoted_saved = {
+            **saved,
+            "mercari_specifics": {
+                "shippingMethod": "MERCARI",
+                "shipsFrom": "70115",
+                "package": {
+                    "pounds": 0, "ounces": 8, "fitsShoebox": "no",
+                    "skipDimensions": "true", "length": 10, "width": 8, "height": 4,
+                },
+            },
+        }
+        listing_persistence.save_revision(db, quoted_conv.id, quoted_saved, source="model")
+        quoted_form = mercari_form.form(quoted_saved)
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"mercari": quoted_form})):
+            quoted_contracts = await native_field_fill.record_forms(quoted_conv.id, {"mercari"})
+        quoted_current = ListingRepo(db).get_current(quoted_conv.id)
+        quoted_latest = ListingRepo(db).get_revision(quoted_current.current_revision_id).listing_json
+        self.assertNotIn("skipDimensions", (quoted_latest.get("mercari_specifics") or {}).get("package") or {})
+        self.assertFalse(
+            native_contract.inputs_match(
+                quoted_latest, "mercari", quoted_contracts["mercari"]["fields"], quoted_contracts["mercari"]["inputs"],
+            ),
+        )
         db.close()
         engine.dispose()
 

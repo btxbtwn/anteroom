@@ -169,6 +169,8 @@ class MercariFormTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(size_value({'direct_category_ids': {'mercari': '275'}, 'size': 'S', 'sizeType': 'Petite'}), '292')
         self.assertEqual(size_value({'direct_category_ids': {'mercari': '303'}, 'size': 'S',
                                      'mercari_specifics': {'nativeSizeId': ''}}), '')
+        self.assertEqual(size_value({'direct_category_ids': {'mercari': '303'}, 'size': 'S',
+                                     'mercari_specifics': {'size': ''}}), '')
 
     def test_brand_uses_reference_options_source_so_editor_skips_contradictory_alert(self):
         row = next(row for row in mercari_form.form({'brand': 'Hind Performance'})['fields']
@@ -206,3 +208,14 @@ class MercariFormTest(unittest.IsolatedAsyncioTestCase):
         )
         cleared_blocking = {gap['field'] for gap in native_contract.gaps(cleared, 'mercari') if gap.get('blocking')}
         self.assertEqual(cleared_blocking, {'mercari_specifics.nativeSizeId', 'mercari_specifics.condition'})
+
+        # Explicitly clearing mercari_specifics.size without nativeSizeId also stays empty and blocks.
+        cleared_size_key = copy.deepcopy(listing)
+        cleared_size_key['mercari_specifics']['size'] = ''
+        cleared_size_key[native_contract.KEY] = native_contract.capture(
+            cleared_size_key, {'mercari': mercari_form.form(cleared_size_key)}, ['mercari'],
+        )
+        cleared_size_blocking = {
+            gap['field'] for gap in native_contract.gaps(cleared_size_key, 'mercari') if gap.get('blocking')
+        }
+        self.assertEqual(cleared_size_blocking, {'mercari_specifics.nativeSizeId'})

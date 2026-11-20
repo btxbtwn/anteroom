@@ -154,7 +154,8 @@ def match_size_id(listing: dict, category_or_sizes: str | dict | list[dict] | No
         sizes = []
     if not sizes:
         return ""
-    wanted = str(specifics.get("size") or listing.get("size") or "").strip()
+    raw_size = specifics["size"] if "size" in specifics else listing.get("size")
+    wanted = str(raw_size or "").strip()
     if not wanted:
         return ""
     folded = wanted.casefold()
