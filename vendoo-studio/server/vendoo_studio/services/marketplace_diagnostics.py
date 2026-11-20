@@ -7,7 +7,7 @@ import re
 _ACTIONS = frozenset({"offer", "share", "list", "publish", "update", "save_draft", "delist", "delete"})
 _OPERATIONS = frozenset({"marketplace.execute", "marketplace.delete", "marketplace.promote",
                          "marketplace.promotion_check", "marketplace.promotion_result", "marketplace.sessions",
-                         "marketplace.orders", "marketplace.inspect", "marketplace.listings"})
+                         "marketplace.orders", "marketplace.listings"})
 _PREVIEW_STEPS = frozenset({"mercari-account", "mercari-item", "mercari-eligibility", "mercari-bounds",
                             "depop-account", "depop-product", "depop-offer-preview"})
 _NUMBERS = frozenset({"elapsed_ms", "timeout_ms", "discount_percent", "price_cents", "offer_price_cents",

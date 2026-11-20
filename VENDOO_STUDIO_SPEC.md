@@ -23,8 +23,7 @@ lists or updates anything.
 
 The system is local-only, intended for one user, and never publishes without
 the seller's confirmation. Direct actions run side by side, one per
-marketplace, never alongside another automation job such as a delist or a page
-inspection.
+marketplace, never alongside another automation job such as a delist.
 
 Generation prepares category ids and marketplace fields in the saved Anteroom
 listing using read-only category/schema requests. List and Update reuse this
@@ -47,7 +46,7 @@ marketplace.
 - Draft saving only; never publish automatically.
 - Publishing, updating and delisting happen only when the seller confirms that action: `POST /api/conversations/{id}/native-marketplaces/{marketplace}/list` or `.../update` (one marketplace, named in the path, body `confirm`), `POST /api/conversations/{id}/marketplace-listings/delist` (marketplaces named, body `confirm`), and eBay `POST /api/ebay/actions/confirm` (`confirm: true`). Nothing publishes everywhere by default, on a queue, on a retry, or as a side effect.
 - The extension runs without its own interface. Anteroom owns review, confirmed actions, progress, and diagnostics.
-- Direct List, Update and Save draft run side by side, one per marketplace, but never alongside another automation job such as a delist or a page inspection.
+- Direct List, Update and Save draft run side by side, one per marketplace, but never alongside another automation job such as a delist.
 
 ### Marketplace workspace
 
@@ -295,7 +294,7 @@ Each marketplace's **List** is enabled only when:
 - The marketplace is connected (the extension for Poshmark, Mercari, Depop; the API sign-in for eBay and Etsy).
 - The listing passes validation and the marketplace's pre-flight.
 - Required photos are present.
-- No other action on that marketplace, delist or page inspection is running.
+- No other action on that marketplace or delist is running.
 - The seller confirms that one marketplace and the saved revision.
 
 List and Update carry `confirm`; Save draft never publishes.

@@ -44,6 +44,22 @@ def test_package_holds_every_file_the_bridge_loads_and_no_developer_files(tmp_pa
     assert json.loads(zipfile.ZipFile(out).read("manifest.json"))["version"] == version
 
 
+def test_package_carries_no_developer_page_inspection(tmp_path):
+    # Page inspection read open marketplace tabs for protocol investigation, a
+    # developer feature no seller can start. Chrome Web Store policy allows web
+    # browsing data only for features sellers use, so it stays out of the Bridge
+    # (tools/marketplace-inspect/ keeps it as a DevTools snippet).
+    out = tmp_path / "bridge.zip"
+    store.package(out)
+    with zipfile.ZipFile(out) as archive:
+        assert not [name for name in archive.namelist() if "inspect" in name]
+        for name in archive.namelist():
+            if name.endswith(".js"):
+                text = archive.read(name).decode()
+                assert "marketplace.inspect" not in text, name
+                assert "inspectMarketplaceDocument" not in text, name
+
+
 def test_package_refuses_when_a_loaded_file_is_not_tracked(tmp_path):
     repo = tmp_path / "repo"
     source = repo / "vendoo-extension"

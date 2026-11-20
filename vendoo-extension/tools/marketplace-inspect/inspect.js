@@ -1,11 +1,15 @@
-// Read-only marketplace diagnostics for protocol investigation. No form values,
-// inline state, cookies, headers, or arbitrary JavaScript leave the page.
-const MARKETPLACE_INSPECTION_PAGES = {
-  poshmark: 'https://poshmark.com/feed',
-  mercari: 'https://www.mercari.com/mypage/listings/draft/action-required/',
-  depop: 'https://www.depop.com/sellinghub/drafts/',
-  etsy: 'https://www.etsy.com/your/shops/me/tools/listings',
-};
+// Marketplace page inspection, for developers investigating a marketplace's protocol.
+// Paste into the DevTools console on a signed-in marketplace page (Poshmark, Mercari,
+// Depop or Etsy) and press Enter. Read-only: it never saves, posts or changes the page.
+//
+// It prints and downloads <marketplace>-inspection.json: the page URL without its query,
+// title, visible field and button labels, listing links, and public script URLs. Form
+// values, inline state, cookies and headers are left out. To download one of the listed
+// public scripts instead, set SCRIPT_URL to it before running.
+//
+// This runs only in your own DevTools. It is not part of Anteroom Bridge: the store
+// package and the Mac app's copy leave tools/ out.
+const SCRIPT_URL = null;
 
 async function inspectMarketplaceDocument(origin, requestedScript) {
   if (location.href === 'about:blank') return { waiting: true };
@@ -116,60 +120,12 @@ async function inspectMarketplaceDocument(origin, requestedScript) {
   };
 }
 
-async function handleMarketplaceInspection(msg) {
-  const page = MARKETPLACE_INSPECTION_PAGES[msg.payload?.marketplace];
-  const operation = page ? claimNativeOperation('*', `inspection-${Date.now()}`) : null;
-  if (!operation) {
-    sendBrowserResult(msg, { ok: false, error: page ? 'Another automation job is running.' : 'Unsupported marketplace.' });
-    return;
-  }
-  try {
-    if (msg.payload.background === true) {
-      const cookies = await chrome.cookies.getAll(msg.payload.marketplace === 'mercari' ? { domain: 'mercari.com' } : { url: page });
-      const names = cookies.map(cookie => cookie.name);
-      let session = {};
-      if (msg.payload.marketplace === 'depop') session = await depopApiAction('session', {
-        listing: {}, deadline: Date.now() + 25000,
-      });
-      if (msg.payload.marketplace === 'poshmark') {
-        const jwt = cookies.find(cookie => cookie.name === 'jwt')?.value || '';
-        let claims = {};
-        try { claims = JSON.parse(atob(jwt.split('.')[1])); } catch {}
-        const id = String(claims.user_id || '');
-        const response = await fetch(/^[a-f0-9]{24}$/.test(id)
-          ? `https://poshmark.com/vm-rest/users/${id}?app_version=2.55&pm_version=2026.43.00` : 'https://poshmark.com/feed', {
-          credentials: 'include', headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(10000),
-        });
-        const body = await response.json().catch(() => ({}));
-        const csrf = await chrome.cookies.getAll({ domain: 'poshmark.com', name: '_csrf' });
-        session = { status: response.status, authenticated: response.ok, csrf_available: csrf.length > 0, response_keys: Object.keys(body.data || body), claim_keys: Object.keys(claims),
-          has_account_id: Object.values(claims).some(value => /^[a-f0-9]{24}$/.test(String(value))) };
-      }
-      sendBrowserResult(msg, { ok: true, background: true, cookie_names: names, session, tab_count: (await chrome.tabs.query({})).length });
-      return;
-    }
-    const origin = new URL(page).origin;
-    const tabs = await chrome.tabs.query({ url: `${origin}/*` });
-    const existing = tabs.findLast(tab => /\/listing-editor\/edit\//.test(new URL(tab.url).pathname))
-      || tabs.findLast(tab => /edit-listing|\/sell\/?$|sellinghub\/drafts|\/your\/shops\/[^/]+\/tools\/listings/.test(new URL(tab.url).pathname)) || tabs.at(-1);
-    if (!existing) {
-      sendBrowserResult(msg, { ok: false, error: 'No existing marketplace page to inspect. No tab was opened.' });
-      return;
-    }
-    const tab = existing;
-    const deadline = Date.now() + 30000;
-    let result;
-    do {
-      try {
-        result = (await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN',
-          func: inspectMarketplaceDocument, args: [origin, msg.payload.script_url || null] }))?.[0]?.result;
-      } catch (error) {
-        if (!nativeFrameNavigated(error)) throw error;
-      }
-      if (result?.error || (result?.ok && result.ready !== 'loading')) break;
-      await new Promise(resolve => setTimeout(resolve, 300));
-    } while (Date.now() < deadline);
-    sendBrowserResult(msg, result || { ok: false, error: 'Chrome did not return the marketplace document.' });
-  } catch (error) { sendBrowserResult(msg, { ok: false, error: String(error.message || error) }); }
-  finally { releaseNativeOperation(operation); }
-}
+inspectMarketplaceDocument(location.origin, SCRIPT_URL).then(result => {
+  console.log(result);
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' }));
+  link.download = `${location.hostname.replace(/^www\./, '').split('.')[0]}-inspection.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+});

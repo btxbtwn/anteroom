@@ -135,7 +135,7 @@ const OWN_STEP = /^native_(ebay|etsy|poshmark|mercari|depop)_/;
 
 /**
  * Whether open jobs keep a marketplace busy. A listing step holds its own
- * marketplace; anything else (a delist, an inspection) holds them all. A guess
+ * marketplace; anything else (a delist) holds them all. A guess
  * that is wrong only costs a busy refusal, which keeps the action waiting.
  */
 export function busyFromJobs(jobs: readonly { current_step?: string | null }[]): (marketplace: NativeMarketplace) => boolean {
