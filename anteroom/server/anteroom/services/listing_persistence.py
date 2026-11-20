@@ -80,7 +80,7 @@ def _drop_fixed_marketplace_errors(db: Session, conv_id: str, before: dict, afte
             row.error = row.error_code = row.error_fields = row.marketplace_message = None
 
 
-def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None, *, expected_revision_id: str | None = None) -> ListingRevision:
+def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None, *, expected_revision_id: str | None = None, commit: bool = True) -> ListingRevision:
     """Save atomically; an empty expected id means no listing may exist yet."""
     repo = ListingRepo(db)
     from anteroom.services.native_field_fill import (
@@ -131,7 +131,10 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
         if conv and not parse_notes(conv.notes).get("titlePinned"):
             conv.title = title
 
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     db.refresh(revision)
     if source in FILL_ON_SOURCES:
         # A newly chosen marketplace category has new fields for the listing agent to fill.

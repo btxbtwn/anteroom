@@ -86,7 +86,7 @@ def test_every_seller_table_in_the_database_is_deleted(cloud):  # noqa: F811
     # A new seller table must be added to the models (and so to the deletion) or this fails.
     assert public == policed == covered
     # anteroom_private.delete_account() clears each private seller table by name.
-    assert private == {'device_routes'}
+    assert private == {'device_routes', 'account_cleanup'}
 
 
 def test_seller_deletes_only_their_own_account(cloud, signing_keys, monkeypatch):  # noqa: F811
@@ -168,7 +168,8 @@ def test_private_functions_only_reach_the_claimed_seller(cloud):  # noqa: F811
     # Without a verified seller claim the functions refuse.
     with engine.connect() as db:
         db.execute(text("SELECT set_config('role', 'anteroom_seller', true)"))
-        for function in ('delete_account()', 'account_photo_keys()', 'account_deletion_ready()'):
+        for function in ('delete_account()', 'account_photo_keys()', 'account_deletion_ready()',
+                         'stage_account_deletion()', 'finish_account_deletion()'):
             with pytest.raises(DBAPIError, match='A verified seller is required'), db.begin_nested():
                 db.execute(text(f'SELECT anteroom_private.{function}')).all()
     with engine.connect() as db:
@@ -185,6 +186,7 @@ def test_vault_credentials_of_only_the_deleted_seller_go(vault_storage):  # noqa
     database.engine = engine
     try:
         account_deletion._delete_records(ALICE)
+        account_deletion._finish_deletion(ALICE)
     finally:
         database.engine = original
     with engine.connect() as db:
@@ -285,31 +287,46 @@ def test_concurrent_active_job_refuses_without_touching_storage_or_relay(cloud, 
         assert ALICE in set(map(str, db.scalars(text('SELECT id FROM auth.users'))))
 
 
-def test_post_commit_storage_and_relay_failures_log_and_succeed(cloud, signing_keys, monkeypatch, caplog):  # noqa: F811
-    import logging
-
+@pytest.mark.parametrize("failure", ["storage", "relay"])
+def test_cleanup_failure_keeps_targets_and_credentials_for_retry(cloud, signing_keys, monkeypatch, failure):  # noqa: F811
     client, engine = cloud
     supabase_schemas(engine)
     seed(engine, ALICE, job_status='completed')
-    monkeypatch.setattr(account_deletion, '_read_relay_device', lambda: {'deviceId': 'dev-1', 'token': 'tok-1'})
+    device = {'deviceId': 'dev-1', 'token': 'tok-1'}
+    monkeypatch.setattr(account_deletion, '_read_relay_device', lambda: device)
+    calls = []
+    failing = True
 
-    async def broken_relay(*_args, **_kwargs):
-        raise RuntimeError('relay offline')
+    async def relay(*_args, **kwargs):
+        assert kwargs['device'] == device
+        if failing and failure == 'relay':
+            raise RuntimeError('relay offline')
+        return type('Reply', (), {'status_code': 200})()
 
-    def broken_storage(*_args, **_kwargs):
-        raise RuntimeError('storage unavailable')
+    def remove_storage(keys, _token):
+        calls.append(list(keys))
+        if failing and failure == 'storage':
+            raise RuntimeError('storage unavailable')
 
-    monkeypatch.setattr('anteroom.services.relay_client.relay_request', broken_relay)
-    monkeypatch.setattr('anteroom.services.hosted_photos.remove_objects', broken_storage)
-
-    with caplog.at_level(logging.WARNING, logger='anteroom.services.account_deletion'):
-        response = client.request('DELETE', '/api/account', headers=headers(signing_keys), json={'confirm': True})
-
-    assert response.status_code == 200, response.text
-    assert response.json() == {'deleted': True}
-    assert owned_rows(engine, ALICE) == {}
+    monkeypatch.setattr('anteroom.services.relay_client.relay_request', relay)
+    monkeypatch.setattr('anteroom.services.hosted_photos.remove_objects', remove_storage)
+    alice = headers(signing_keys)
+    response = client.request('DELETE', '/api/account', headers=alice, json={'confirm': True})
+    assert response.status_code == 503, response.text
     with engine.connect() as db:
-        assert set(map(str, db.scalars(text('SELECT id FROM auth.users')))) == {BOB}
-    messages = '\n'.join(record.getMessage() for record in caplog.records)
-    assert 'relay deregistration failed' in messages
-    assert 'Storage cleanup failed' in messages
+        assert ALICE in set(map(str, db.scalars(text('SELECT id FROM auth.users'))))
+        keys = db.scalar(text('SELECT object_keys FROM anteroom_private.account_cleanup WHERE user_id = :owner'),
+                         {'owner': ALICE})
+        assert sorted(keys) == [f'{ALICE}/item/{"a" * 32}.jpg', f'{ALICE}/thread/{"b" * 32}.jpg']
+    # A fresh request must use the durable targets even if Storage enumeration
+    # no longer returns them (for example a partial batch delete before failure).
+    with engine.begin() as db:
+        db.execute(text('DELETE FROM storage.objects WHERE name LIKE :prefix'), {'prefix': ALICE + '/%'})
+    failing = False
+    again = client.request('DELETE', '/api/account', headers=alice, json={'confirm': True})
+    assert again.status_code == 200, again.text
+    assert sorted(calls[-1]) == sorted(keys)
+    with engine.connect() as db:
+        assert ALICE not in set(map(str, db.scalars(text('SELECT id FROM auth.users'))))
+        assert db.scalar(text('SELECT count(*) FROM anteroom_private.account_cleanup')) == 0
+    assert owned_rows(engine, ALICE) == {}

@@ -118,20 +118,23 @@ def test_measurements_streaming_size_cap_and_upload_slots(monkeypatch):
 def test_measurements_hold_upload_slot_rejects_concurrent_seller_upload(monkeypatch):
     slots = UploadSlots(total=2, wait=0.05)
 
-    class _FakeApp:
-        state = SimpleNamespace(upload_slots=slots)
-
-    fake_request = SimpleNamespace(app=_FakeApp())
+    app = FastAPI()
+    app.include_router(measurements.hosted_router)
+    app.state.upload_slots = slots
     ctx = SimpleNamespace(seller_id="seller-1")
 
     async def exercise():
-        with use(ctx):  # type: ignore[arg-type]
+        from starlette.requests import Request
+        route = next(r for r in measurements._hosted_upload_router.routes if getattr(r, "path", "") == "/api/size-tags/read")
+        async def receive():
+            pytest.fail("A rejected request must not receive or parse its body")
+        request = Request({"type": "http", "method": "POST", "path": "/api/size-tags/read",
+                           "headers": [(b"content-type", b"multipart/form-data; boundary=x")],
+                           "app": app, "query_string": b""}, receive)
+        with use(ctx):
             async with slots.hold("seller-1"):
-                fake_provider = SimpleNamespace(vision_chat=lambda *_args, **_kwargs: "{}")
-                monkeypatch.setattr(measurements, "get_photo_provider", lambda: fake_provider)
-                upload = UploadFile(file=io.BytesIO(b"abc"), filename="a.jpg")
                 with pytest.raises(HTTPException) as exc_info:
-                    await measurements.read_size_tags(fake_request, files=[upload])  # type: ignore[arg-type]
+                    await route.get_route_handler()(request)
                 assert exc_info.value.status_code == 429
 
     asyncio.run(exercise())

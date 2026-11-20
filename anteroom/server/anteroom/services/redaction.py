@@ -23,12 +23,14 @@ _QUOTED_HEADER = re.compile(
     rf"""(["']\b(?:{_HEADER_KEYS})\b["']\s*[:=]\s*["'])([^"'\r\n]+)(["'])""",
     re.IGNORECASE,
 )
+# Raw header lines end at a newline; punctuation (including &, comma and })
+# can be part of the credential. Quoted mapping values use their own boundaries.
 _UNQUOTED_HEADER = re.compile(
-    rf"""(\b(?:{_HEADER_KEYS})\s*[:=]\s*)(?!["'])(?!Bearer\s+…\(masked\))([^\r\n,}}&]+)""",
+    rf"""(\b(?:{_HEADER_KEYS})\s*[:=]\s*)(?!["'])(?!Bearer\s+…\(masked\))([^\r\n]+)""",
     re.IGNORECASE,
 )
 _POSTGRES_DSN = re.compile(
-    r"(\bpostgres(?:ql)?(?:\+[\w.-]+)?://[^/\s:@]+:)([^/\s@]+)(@)",
+    r"(\bpostgres(?:ql)?(?:\+[\w.-]+)?://[^/\s:@]+:)([^/\s?#]+)(@)",
     re.IGNORECASE,
 )
 _JWT = re.compile(r"\beyJ[\w-]{6,}\.[\w-]+\.[\w-]+")

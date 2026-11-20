@@ -11,7 +11,7 @@ from anteroom.config import MAX_PHOTO_SIZE_MB
 from anteroom.database import get_db, in_worker_session
 from anteroom.models.scout import ScoutCheck
 from anteroom.services import scout
-from anteroom.services.hosted_limits import bounded_route_class, hold_upload_slot, read_bounded_upload
+from anteroom.services.hosted_limits import bounded_route_class, read_bounded_upload
 from anteroom.services.photo_store import photo_store
 from anteroom.services.photos import process_bytes
 
@@ -21,11 +21,15 @@ def _max_scout_body_bytes() -> int:
     return scout.MAX_PHOTOS * MAX_PHOTO_SIZE_MB * 1024 * 1024 + 2 * 1024 * 1024
 
 
-router = APIRouter(
+_scout_router = APIRouter(
     prefix="/api/scout",
     tags=["scout"],
     route_class=bounded_route_class(_max_scout_body_bytes, too_large_detail="Upload is too large"),
 )
+
+_upload_router = APIRouter(prefix="/api/scout", tags=["scout"], route_class=bounded_route_class(
+    _max_scout_body_bytes, too_large_detail="Upload is too large", use_upload_slots=True,
+))
 
 
 class ScoutCheckResponse(BaseModel):
@@ -80,7 +84,7 @@ def _response(db: Session, check: ScoutCheck) -> ScoutCheckResponse:
     return ScoutCheckResponse.model_validate(scout.to_dict(check, scout.outcomes(db).get(check.id)))
 
 
-@router.get("", response_model=ScoutResponse)
+@_scout_router.get("", response_model=ScoutResponse)
 def list_checks(db: Session = Depends(get_db)):
     sold = scout.outcomes(db)
     return ScoutResponse(
@@ -89,7 +93,7 @@ def list_checks(db: Session = Depends(get_db)):
     )
 
 
-@router.post("", response_model=ScoutCheckResponse)
+@_upload_router.post("", response_model=ScoutCheckResponse)
 async def create_check(
     request: Request,
     files: list[UploadFile] = File(...),
@@ -101,22 +105,21 @@ async def create_check(
     collection_id = 'scout-' + new_id()
     max_photo_bytes = MAX_PHOTO_SIZE_MB * 1024 * 1024
     photos = []
-    async with hold_upload_slot(request):
-        for upload in files:
-            raw = await read_bounded_upload(
-                upload,
-                max_photo_bytes,
-                too_large_detail=f"{upload.filename or 'Photo'}: File too large. Max {MAX_PHOTO_SIZE_MB}MB",
-            )
-            try:
-                # Decoding, hashing and storing a photo run on a worker thread, never the event loop.
-                photos.append(await asyncio.to_thread(
-                    process_bytes, bytes(raw), upload.filename, upload.content_type, collection_id=collection_id,
-                ))
-            except ValueError as exc:
-                raise HTTPException(400, f"{upload.filename or 'Photo'}: {exc}") from exc
-            finally:
-                del raw
+    for upload in files:
+        raw = await read_bounded_upload(
+            upload,
+            max_photo_bytes,
+            too_large_detail=f"{upload.filename or 'Photo'}: File too large. Max {MAX_PHOTO_SIZE_MB}MB",
+        )
+        try:
+            # Decoding, hashing and storing a photo run on a worker thread, never the event loop.
+            photos.append(await asyncio.to_thread(
+                process_bytes, bytes(raw), upload.filename, upload.content_type, collection_id=collection_id,
+            ))
+        except ValueError as exc:
+            raise HTTPException(400, f"{upload.filename or 'Photo'}: {exc}") from exc
+        finally:
+            del raw
     check_id, response = await in_worker_session(_create, photos, asking_price)
     scout.start(check_id)
     return response
@@ -127,18 +130,18 @@ def _create(db: Session, photos: list[dict], asking_price: float | None) -> tupl
     return check.id, _response(db, check)
 
 
-@router.get("/{check_id}", response_model=ScoutCheckResponse)
+@_scout_router.get("/{check_id}", response_model=ScoutCheckResponse)
 def get_check(check_id: str, db: Session = Depends(get_db)):
     return _response(db, _check(db, check_id))
 
 
-@router.patch("/{check_id}", response_model=ScoutCheckResponse)
+@_scout_router.patch("/{check_id}", response_model=ScoutCheckResponse)
 def update_check(check_id: str, body: AskingPriceUpdate, db: Session = Depends(get_db)):
     check = scout.set_asking_price(db, _check(db, check_id), body.asking_price)
     return _response(db, check)
 
 
-@router.post("/{check_id}/decision", response_model=ScoutCheckResponse)
+@_scout_router.post("/{check_id}/decision", response_model=ScoutCheckResponse)
 def decide(check_id: str, body: DecisionRequest, db: Session = Depends(get_db)):
     check = _check(db, check_id)
     if check.status != "done" and body.decision == "bought":
@@ -146,7 +149,7 @@ def decide(check_id: str, body: DecisionRequest, db: Session = Depends(get_db)):
     return _response(db, scout.decide(db, check, body.decision))
 
 
-@router.get("/{check_id}/photos/{index}")
+@_scout_router.get("/{check_id}/photos/{index}")
 def serve_photo(check_id: str, index: int, db: Session = Depends(get_db, scope="function")):
     check = _check(db, check_id)
     photo_list = list(check.photos or [])
@@ -161,3 +164,8 @@ def serve_photo(check_id: str, index: int, db: Session = Depends(get_db, scope="
     except (FileNotFoundError, ValueError):
         raise HTTPException(404, "Photo not found") from None
     return FileResponse(path)
+
+
+router = APIRouter()
+router.include_router(_scout_router)
+router.include_router(_upload_router)

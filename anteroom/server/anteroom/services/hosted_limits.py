@@ -28,6 +28,7 @@ UPLOAD_SLOTS = 4
 # Long enough to ride out a burst, short enough that nobody stares at a
 # spinner behind someone else's 120-second upload.
 UPLOAD_WAIT_SECONDS = 10.0
+BODY_RECEIVE_SECONDS = 120.0
 STREAM_CHUNK_BYTES = 64 * 1024
 
 
@@ -194,11 +195,21 @@ def bounded_route_class(
                 _check_content_length(request, limit, too_large_detail)
                 raw_receive = request._receive
                 received = 0
+                receive_deadline = None
+                body_complete = False
 
                 async def limited_receive():
-                    nonlocal received
-                    message = await raw_receive()
+                    nonlocal received, body_complete
+                    if receive_deadline is not None and not body_complete:
+                        try:
+                            async with asyncio.timeout_at(receive_deadline):
+                                message = await raw_receive()
+                        except TimeoutError:
+                            raise HTTPException(408, 'Upload timed out. Try again.') from None
+                    else:
+                        message = await raw_receive()
                     if message.get('type') == 'http.request':
+                        body_complete = not message.get('more_body', False)
                         received += len(message.get('body', b''))
                         if received > limit:
                             raise HTTPException(413, too_large_detail)
@@ -207,6 +218,7 @@ def bounded_route_class(
                 request._receive = limited_receive
                 if use_upload_slots and request.method in {'POST', 'PUT', 'PATCH'}:
                     async with hold_upload_slot(request):
+                        receive_deadline = asyncio.get_running_loop().time() + BODY_RECEIVE_SECONDS
                         return await original_handler(request)
                 return await original_handler(request)
 

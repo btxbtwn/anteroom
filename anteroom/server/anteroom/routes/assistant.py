@@ -10,6 +10,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import threading
+import weakref
+from contextlib import contextmanager
 import traceback
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -701,11 +704,36 @@ async def answer_task(task_id: str, token: str, task) -> bool:
     return True
 
 
-def _proposal(message_id: str, db: Session) -> AssistantMessage:
-    row = db.scalar(select(AssistantMessage).where(AssistantMessage.id == message_id).with_for_update())
+# SQLite has no row-level locks. Keep requests for one proposal exclusive in
+# the Mac process; Postgres also takes a NOWAIT row lock across each item save.
+_change_locks: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
+_change_locks_guard = threading.Lock()
+
+
+@contextmanager
+def _change_request(message_id: str):
+    with _change_locks_guard:
+        lock = _change_locks.setdefault(message_id, threading.Lock())
+    if not lock.acquire(blocking=False):
+        raise HTTPException(409, "Those changes are being applied. Try again when it finishes.")
+    try:
+        yield
+    finally:
+        lock.release()
+
+
+def _proposal(message_id: str, db: Session, *, allow_applying: bool = False) -> AssistantMessage:
+    try:
+        row = db.scalar(select(AssistantMessage).where(AssistantMessage.id == message_id)
+                        .with_for_update(nowait=True).execution_options(populate_existing=True))
+    except DBAPIError as exc:
+        db.rollback()
+        if getattr(exc.orig, "sqlstate", None) == "55P03":
+            raise HTTPException(409, "Those changes are being applied. Try again when it finishes.") from None
+        raise
     if row is None or not row.changes:
         raise HTTPException(404, "Those changes are no longer in the conversation.")
-    if row.changes.get("status") != "proposed":
+    if row.changes.get("status") not in ({"proposed", "applying"} if allow_applying else {"proposed"}):
         raise HTTPException(409, "Those changes were already applied or dismissed.")
     return row
 
@@ -750,7 +778,7 @@ def _apply_to_listing(item: dict, db: Session) -> str | None:
             return STALE_PROPOSAL
         updated = assistant_changes.apply_fields(revisions[0].listing_json, to_set)
         try:
-            saved = save_listing_edit(conv_id, updated, db, expected_revision_id=reviewed)
+            saved = save_listing_edit(conv_id, updated, db, expected_revision_id=reviewed, commit=False)
         except RevisionConflict as refused:
             return str(refused)
         except HTTPException as refused:
@@ -762,7 +790,7 @@ def _apply_to_listing(item: dict, db: Session) -> str | None:
         db.query(ListingCorrection).filter_by(revision_id=saved["revision_id"]).update({"source": REVISION_SOURCE})
     if "box" in to_set:
         boxes.assign_box(db, conv, to_set["box"])
-    db.commit()
+    db.flush()
     return None
 
 
@@ -774,19 +802,44 @@ def apply_changes(message_id: str, db: Session = Depends(get_db)):
     seller can restore from. A listing that cannot be changed right now is
     skipped and says why; the rest still apply.
     """
-    row = _proposal(message_id, db)
-    assert row.changes is not None
-    original_items = list(row.changes["items"])
-    # Claim the locked proposal before per-listing commits release the row lock.
-    row.changes = {**row.changes, "status": "applying"}
-    db.commit()
-    items = []
-    for item in original_items:
-        skipped = _apply_to_listing(item, db)
-        items.append({**item, "skipped": skipped} if skipped else item)
-    row.changes = {"status": "applied", "items": items}
-    db.commit()
-    return business_assistant.message_view(row)
+    with _change_request(message_id):
+        return _apply_changes(message_id, db)
+
+
+def _apply_changes(message_id: str, db: Session):
+    # Each item and its receipt commit together. A failed item rolls back to
+    # proposed, so a retry skips the durable prefix and resumes the remainder.
+    while True:
+        row = _proposal(message_id, db)
+        assert row.changes is not None
+        items = list(row.changes["items"])
+        completed = row.changes.get("completed", 0)
+        if completed == len(items):
+            row.changes = {"status": "applied", "items": items}
+            db.commit()
+            return business_assistant.message_view(row)
+        row.changes = {**row.changes, "status": "applying"}
+        db.flush()
+        try:
+            item = items[completed]
+            skipped = _apply_to_listing(item, db)
+            if skipped:
+                # Revision-conflict helpers may roll back their transaction.
+                # Reacquire the proposal before recording a skipped item.
+                row = _proposal(message_id, db, allow_applying=True)
+                if row.changes.get("completed", 0) != completed:
+                    db.rollback()
+                    continue
+            items[completed] = {**item, "skipped": skipped} if skipped else item
+            done = completed + 1 == len(items)
+            row.changes = {"status": "applied" if done else "proposed", "items": items,
+                           **({} if done else {"completed": completed + 1})}
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        if done:
+            return business_assistant.message_view(row)
 
 
 def _automation_message(message_id: str, db: Session) -> AssistantMessage:
@@ -807,20 +860,19 @@ def confirm_automation_message(message_id: str, db: Session = Depends(get_db)):
     row = _automation_message(message_id, db)
     assert row.automation is not None
     proposal = row.automation.get("proposal") or {}
-    # Flush the claim inside the locked transaction so confirm_proposal's commit
-    # transitions state atomically and concurrent confirms receive 409.
+    # Keep the claim, automation and receipt in the same locked transaction.
     row.automation = {**row.automation, "status": "confirming"}
     db.flush()
     try:
-        saved = automations.confirm_proposal(db, proposal)
+        saved = automations.confirm_proposal(db, proposal, commit=False)
+        row.automation = {"status": "confirmed", "proposal": proposal, "automation_id": saved.get("id")}
+        db.commit()
     except AutomationError as exc:
         db.rollback()
         raise HTTPException(exc.status_code, str(exc)) from exc
     except Exception:
         db.rollback()
         raise
-    row.automation = {"status": "confirmed", "proposal": proposal, "automation_id": saved.get("id")}
-    db.commit()
     return business_assistant.message_view(row)
 
 
@@ -835,11 +887,12 @@ def dismiss_automation_message(message_id: str, db: Session = Depends(get_db)):
 
 @router.post("/messages/{message_id}/changes/dismiss")
 def dismiss_changes(message_id: str, db: Session = Depends(get_db)):
-    row = _proposal(message_id, db)
-    assert row.changes is not None
-    row.changes = {**row.changes, "status": "dismissed"}
-    db.commit()
-    return business_assistant.message_view(row)
+    with _change_request(message_id):
+        row = _proposal(message_id, db)
+        assert row.changes is not None
+        row.changes = {**row.changes, "status": "dismissed"}
+        db.commit()
+        return business_assistant.message_view(row)
 
 
 router.include_router(_message_router)
