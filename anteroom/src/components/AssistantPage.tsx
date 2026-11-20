@@ -171,6 +171,8 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   const followThread = useRef<string | null>(null);
   /** Increments on thread transitions so a late createThread() only transfers drafts from its own new-chat session. */
   const draftSessionRef = useRef(0);
+  /** Maps a new-chat session to the thread ID created for it, so async prepare() stays bound to its own thread. */
+  const createdThreadBySession = useRef<Map<number, string>>(new Map());
 
   const keepFold = (id: string, fold: FoldedTurn) => {
     const next = [...foldsFor(id), fold];
@@ -191,36 +193,54 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     inThread: string | null = threadIdRef.current,
     retry = false,
     clearDraft = question !== null,
+    originSession = draftSessionRef.current,
   ) => {
-    if (controller.current) return;
     let id = inThread;
     let transferred = false;
     const originDraftKey = `assistant:${inThread ?? "__new__"}`;
-    const originSession = draftSessionRef.current;
     const restoreQuestion = (targetId: string | null, text: string) => {
       const targetKey = `assistant:${targetId ?? "__new__"}`;
       if (!getComposerDraft(targetKey).text) setComposerDraftText(targetKey, text);
     };
+    const sendInBackground = (targetId: string, text: string) => {
+      void api.assistant.ask(text, { onEvent: () => undefined }, new AbortController().signal, uploads, targetId)
+        .then((result) => {
+          if (result.error) {
+            restoreQuestion(targetId, text);
+            if (threadIdRef.current === targetId) setError(result.error);
+          }
+        })
+        .catch((failure) => {
+          restoreQuestion(targetId, text);
+          if (threadIdRef.current === targetId) {
+            setError(failure instanceof Error ? failure.message : "Could not send message.");
+          }
+        })
+        .finally(() => {
+          void queryClient.invalidateQueries({ queryKey: THREADS_KEY });
+          void queryClient.invalidateQueries({ queryKey: messagesKey(targetId) });
+        });
+    };
+    if (question !== null && id && threadIdRef.current !== id && followThread.current !== id) {
+      if (clearDraft && getComposerDraft(originDraftKey).text.trim() === question.trim()) {
+        setComposerDraftText(originDraftKey, "");
+      }
+      sendInBackground(id, question);
+      return;
+    }
+    if (controller.current) return;
     if (question !== null && !id) {
       try {
         const created = await api.assistant.createThread();
         id = created.id;
+        createdThreadBySession.current.set(originSession, id);
         // The sidebar lists it while the answer is still being written.
         void queryClient.invalidateQueries({ queryKey: THREADS_KEY });
         const stillOnOriginDraft = threadIdRef.current === null && draftSessionRef.current === originSession;
         if (!stillOnOriginDraft) {
-          // The seller already left this new-chat composer; clear only matching submitted text,
-          // leave newer drafts untouched, and deliver the question without hijacking the view.
-          if (clearDraft && getComposerDraft(originDraftKey).text.trim() === question.trim()) {
-            setComposerDraftText(originDraftKey, "");
-          }
-          const createdId = id;
-          void api.assistant.ask(question, { onEvent: () => undefined }, new AbortController().signal, uploads, createdId)
-            .catch(() => undefined)
-            .finally(() => {
-              void queryClient.invalidateQueries({ queryKey: THREADS_KEY });
-              void queryClient.invalidateQueries({ queryKey: messagesKey(createdId) });
-            });
+          // The seller already left this new-chat composer; leave assistant:__new__ untouched
+          // (it may belong to a fresh session) and deliver to the created thread without hijacking focus.
+          sendInBackground(id, question);
           return;
         }
         followThread.current = id;
@@ -230,7 +250,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         onThreadReady?.(id);
       } catch (failure) {
         setError(failure instanceof Error ? failure.message : "Could not start a conversation.");
-        restoreQuestion(inThread, question);
+        if (inThread !== null || draftSessionRef.current === originSession) restoreQuestion(inThread, question);
         return;
       }
     }
@@ -402,28 +422,36 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     const question = raw.trim();
     const attached = images.images;
     if (!question && !attached.length) return;
+    const originThread = threadIdRef.current;
+    const originSession = draftSessionRef.current;
+    const originDraftKey = `assistant:${originThread ?? "__new__"}`;
     const uploads = attached.length ? await images.prepare(attached) : [];
     if (uploads === null) return;
     // The live bubble shows the images by name until the saved turn brings them back.
     const shown = attached.map((image, index) => ({ id: "", name: uploads[index]?.name ?? image.file.name, mime_type: image.file.type }));
     const sentIds = attached.map((image) => image.id);
+    const targetThread = originThread ?? createdThreadBySession.current.get(originSession) ?? null;
+    const targetDraftKey = `assistant:${targetThread ?? "__new__"}`;
     images.clear(sentIds);
-    const activeThread = followThread.current ?? threadIdRef.current;
-    const activeDraftKey = `assistant:${activeThread ?? "__new__"}`;
-    if (activeDraftKey !== draftKey) {
-      // A concurrent new-thread transfer may have moved these images off assistant:__new__ during prepare().
-      removeComposerDraftImages(activeDraftKey, sentIds);
+    if (targetDraftKey !== originDraftKey) {
+      // A concurrent new-thread transfer for this session may have moved these images during prepare().
+      removeComposerDraftImages(targetDraftKey, sentIds);
     }
-    if (askNow(Boolean(live || controller.current), queued) === "queue") {
-      if (getComposerDraft(draftKey).text.trim() === question) setComposerDraftText(draftKey, "");
-      if (activeDraftKey !== draftKey && getComposerDraft(activeDraftKey).text.trim() === question) {
-        setComposerDraftText(activeDraftKey, "");
+    const stillOnOriginNew = originThread === null && draftSessionRef.current === originSession;
+    const activeThread = followThread.current ?? threadIdRef.current;
+    if (targetThread === activeThread && askNow(Boolean(live || controller.current), queued) === "queue") {
+      if ((originThread !== null || stillOnOriginNew) && getComposerDraft(originDraftKey).text.trim() === question) {
+        setComposerDraftText(originDraftKey, "");
+      }
+      if (targetDraftKey !== originDraftKey && getComposerDraft(targetDraftKey).text.trim() === question) {
+        setComposerDraftText(targetDraftKey, "");
       }
       scroll.pinChatToBottom();
-      setQueued((current) => [...current, { ...newQueuedChatMessage(question), uploads, shown, threadId: activeThread }]);
+      setQueued((current) => [...current, { ...newQueuedChatMessage(question), uploads, shown, threadId: targetThread }]);
       return;
     }
-    void follow(question, uploads, shown);
+    const clearDraft = targetThread !== null || stillOnOriginNew;
+    void follow(question, uploads, shown, targetThread, false, clearDraft, originSession);
   };
 
   const stop = async () => {
