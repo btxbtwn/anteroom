@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,6 +19,37 @@ def _load_make_icon() -> ModuleType:
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _write_sqlite_with_committed_row(db_path: Path, value: str = "kept") -> None:
+    """Temp-dir SQLite only: committed row, connection closed. Never a live seller DB."""
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("CREATE TABLE item (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
+        conn.execute("INSERT INTO item (name) VALUES (?)", (value,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _open_sqlite_with_uncheckpointed_wal(db_path: Path, value: str) -> sqlite3.Connection:
+    """Open temp SQLite with a committed row still in the WAL (autocheckpoint off)."""
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA wal_autocheckpoint=0")
+    conn.execute("CREATE TABLE item (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
+    conn.execute("INSERT INTO item (name) VALUES (?)", (value,))
+    conn.commit()
+    return conn
+
+
+def _read_sqlite_names(db_path: Path) -> list[str]:
+    conn = sqlite3.connect(db_path)
+    try:
+        return [row[0] for row in conn.execute("SELECT name FROM item ORDER BY id")]
+    finally:
+        conn.close()
 
 
 class ConfigPathTest(unittest.TestCase):
@@ -84,56 +116,85 @@ class ConfigPathTest(unittest.TestCase):
                 config.adopt_legacy_data_dir()
             self.assertFalse((home / "Library" / "Application Support" / config.LEGACY_APP_NAME).exists())
 
-    def test_pre_rename_database_moves_with_wal_sidecars(self):
+    def test_pre_rename_database_moves_sqlite_with_committed_rows(self):
         with tempfile.TemporaryDirectory() as tmp:
             data = Path(tmp)
-            (data / "vendoo_studio.db").write_text("db", encoding="utf-8")
-            (data / "vendoo_studio.db-wal").write_text("wal", encoding="utf-8")
-            (data / "vendoo_studio.db-shm").write_text("shm", encoding="utf-8")
+            legacy = data / "vendoo_studio.db"
+            _write_sqlite_with_committed_row(legacy, "row-one")
             os.environ.pop("ANTEROOM_DATABASE_URL", None)
             config.adopt_legacy_database(data)
             config.adopt_legacy_database(data)
-            self.assertEqual((data / "anteroom.db").read_text(encoding="utf-8"), "db")
-            self.assertEqual((data / "anteroom.db-wal").read_text(encoding="utf-8"), "wal")
-            self.assertEqual((data / "anteroom.db-shm").read_text(encoding="utf-8"), "shm")
-            self.assertFalse((data / "vendoo_studio.db").exists())
+            target = data / "anteroom.db"
+            self.assertTrue(target.is_file())
+            self.assertFalse(legacy.exists())
+            self.assertFalse((data / config.LEGACY_DATABASE_ADOPTION_MARKER).exists())
+            self.assertEqual(_read_sqlite_names(target), ["row-one"])
 
-    def test_interrupted_main_rename_finishes_legacy_sidecars(self):
-        """A crash after renaming the main file must not strand old-name WAL/journal.
-
-        Fixture-only: temp text files stand in for SQLite main/sidecars. Never opens
-        a real database.
-        """
+    def test_marker_proven_interruption_finishes_sidecars_and_keeps_rows(self):
+        """Crash after marker + main rename: finish sidecars; committed rows survive."""
         with tempfile.TemporaryDirectory() as tmp:
             data = Path(tmp)
-            (data / "anteroom.db").write_text("committed-main", encoding="utf-8")
-            (data / "vendoo_studio.db-wal").write_text("committed-wal", encoding="utf-8")
-            (data / "vendoo_studio.db-shm").write_text("committed-shm", encoding="utf-8")
-            (data / "vendoo_studio.db-journal").write_text("committed-journal", encoding="utf-8")
+            legacy = data / "vendoo_studio.db"
+            # Keep the connection open so close does not checkpoint the WAL away before
+            # we rename only the main file (the interruption window).
+            conn = _open_sqlite_with_uncheckpointed_wal(legacy, "from-wal")
+            try:
+                (data / config.LEGACY_DATABASE_ADOPTION_MARKER).write_text(
+                    config.LEGACY_DATABASE_ADOPTION_MARKER_BODY,
+                    encoding="utf-8",
+                )
+                legacy.rename(data / "anteroom.db")
+                self.assertTrue((data / "vendoo_studio.db-wal").is_file())
+            finally:
+                conn.close()
             os.environ.pop("ANTEROOM_DATABASE_URL", None)
             config.adopt_legacy_database(data)
             config.adopt_legacy_database(data)
-            self.assertEqual((data / "anteroom.db").read_text(encoding="utf-8"), "committed-main")
-            self.assertEqual((data / "anteroom.db-wal").read_text(encoding="utf-8"), "committed-wal")
-            self.assertEqual((data / "anteroom.db-shm").read_text(encoding="utf-8"), "committed-shm")
-            self.assertEqual(
-                (data / "anteroom.db-journal").read_text(encoding="utf-8"),
-                "committed-journal",
-            )
+            self.assertFalse((data / config.LEGACY_DATABASE_ADOPTION_MARKER).exists())
             for suffix in ("", "-wal", "-shm", "-journal"):
                 self.assertFalse((data / f"vendoo_studio.db{suffix}").exists())
+            self.assertEqual(_read_sqlite_names(data / "anteroom.db"), ["from-wal"])
 
-    def test_interrupted_adoption_keeps_existing_new_sidecars(self):
-        """Do not overwrite a sidecar that already landed under the new name."""
+    def test_ambiguous_new_primary_with_orphan_legacy_wal_is_left_alone(self):
+        """anteroom.db existing is not provenance: do not attach an unmarked old WAL."""
         with tempfile.TemporaryDirectory() as tmp:
             data = Path(tmp)
-            (data / "anteroom.db").write_text("main", encoding="utf-8")
-            (data / "anteroom.db-wal").write_text("kept-wal", encoding="utf-8")
-            (data / "vendoo_studio.db-wal").write_text("orphan-wal", encoding="utf-8")
+            _write_sqlite_with_committed_row(data / "anteroom.db", "new-primary")
+            new_wal = data / "anteroom.db-wal"
+            new_wal_before = new_wal.read_bytes() if new_wal.is_file() else None
+            orphan = data / "vendoo_studio.db-wal"
+            orphan.write_bytes(b"not-this-primary-wal")
             os.environ.pop("ANTEROOM_DATABASE_URL", None)
             config.adopt_legacy_database(data)
-            self.assertEqual((data / "anteroom.db-wal").read_text(encoding="utf-8"), "kept-wal")
-            self.assertEqual((data / "vendoo_studio.db-wal").read_text(encoding="utf-8"), "orphan-wal")
+            self.assertEqual(_read_sqlite_names(data / "anteroom.db"), ["new-primary"])
+            self.assertEqual(orphan.read_bytes(), b"not-this-primary-wal")
+            if new_wal_before is not None:
+                self.assertEqual(new_wal.read_bytes(), new_wal_before)
+            self.assertFalse((data / config.LEGACY_DATABASE_ADOPTION_MARKER).exists())
+
+    def test_ambiguous_both_primaries_are_left_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            _write_sqlite_with_committed_row(data / "anteroom.db", "new")
+            _write_sqlite_with_committed_row(data / "vendoo_studio.db", "old")
+            os.environ.pop("ANTEROOM_DATABASE_URL", None)
+            config.adopt_legacy_database(data)
+            self.assertEqual(_read_sqlite_names(data / "anteroom.db"), ["new"])
+            self.assertEqual(_read_sqlite_names(data / "vendoo_studio.db"), ["old"])
+            self.assertFalse((data / config.LEGACY_DATABASE_ADOPTION_MARKER).exists())
+
+    def test_marker_with_both_primaries_stops_without_consuming_either(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            _write_sqlite_with_committed_row(data / "anteroom.db", "new")
+            _write_sqlite_with_committed_row(data / "vendoo_studio.db", "old")
+            marker = data / config.LEGACY_DATABASE_ADOPTION_MARKER
+            marker.write_text(config.LEGACY_DATABASE_ADOPTION_MARKER_BODY, encoding="utf-8")
+            os.environ.pop("ANTEROOM_DATABASE_URL", None)
+            config.adopt_legacy_database(data)
+            self.assertTrue(marker.exists())
+            self.assertEqual(_read_sqlite_names(data / "anteroom.db"), ["new"])
+            self.assertEqual(_read_sqlite_names(data / "vendoo_studio.db"), ["old"])
 
     def test_log_path_lives_under_user_data(self):
         with tempfile.TemporaryDirectory() as tmp:

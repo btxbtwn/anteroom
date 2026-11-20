@@ -1,1 +1,1 @@
-- Finish renaming a leftover Vendoo database file after an interrupted Mac update, so listing data in the sidecar files is not left behind.
+- Finish renaming a Vendoo database file only when an update was clearly in progress, and leave mixed leftover files alone so listing data is not attached by mistake.

@@ -83,6 +83,11 @@ FILL_LOGS_DIR = str(user_data_root() / "fill-logs")
 LOGS_DIR = str(user_data_root() / "logs")
 DATABASE_NAME = "anteroom.db"
 LEGACY_DATABASE_NAME = "vendoo_studio.db"
+# Written before any rename; only a marker with this body proves an in-progress
+# transfer. Presence of anteroom.db alone is not provenance.
+LEGACY_DATABASE_ADOPTION_MARKER = "anteroom.db.adopting-from-vendoo_studio"
+LEGACY_DATABASE_ADOPTION_MARKER_BODY = "anteroom-legacy-db-adoption/1\n"
+_LEGACY_DATABASE_SIDECARS = ("-wal", "-shm", "-journal")
 DATABASE_PATH = str(user_data_root() / DATABASE_NAME)
 # The Mac app keeps its SQLite file. The hosted API points this at Postgres.
 DATABASE_URL = os.environ.get("ANTEROOM_DATABASE_URL") or f"sqlite:///{DATABASE_PATH}"
@@ -107,28 +112,76 @@ def adopt_legacy_data_dir() -> None:
     legacy.symlink_to(APP_NAME, target_is_directory=True)
 
 
+def _legacy_database_paths(root: Path) -> tuple[Path, Path, Path]:
+    return (
+        root / DATABASE_NAME,
+        root / LEGACY_DATABASE_NAME,
+        root / LEGACY_DATABASE_ADOPTION_MARKER,
+    )
+
+
+def _is_legacy_database_adoption_marker(marker: Path) -> bool:
+    try:
+        return marker.read_text(encoding="utf-8") == LEGACY_DATABASE_ADOPTION_MARKER_BODY
+    except OSError:
+        return False
+
+
+def _legacy_database_names_present(root: Path) -> bool:
+    if (root / LEGACY_DATABASE_NAME).exists():
+        return True
+    return any((root / f"{LEGACY_DATABASE_NAME}{suffix}").exists() for suffix in _LEGACY_DATABASE_SIDECARS)
+
+
+def _finish_legacy_database_adoption(root: Path, target: Path, legacy: Path, marker: Path) -> None:
+    """Continue a marker-proven transfer. Never deletes; stops on ambiguity."""
+    if legacy.is_file() and target.exists():
+        # Both primaries present: do not choose. Leave every file and the marker.
+        return
+    if legacy.is_file() and not target.exists():
+        legacy.rename(target)
+    if not target.exists():
+        if not _legacy_database_names_present(root):
+            marker.unlink(missing_ok=True)
+        return
+    for suffix in _LEGACY_DATABASE_SIDECARS:
+        sidecar = root / f"{LEGACY_DATABASE_NAME}{suffix}"
+        target_sidecar = root / f"{DATABASE_NAME}{suffix}"
+        if sidecar.exists() and target_sidecar.exists():
+            # Same sidecar under both names: leave both; keep the marker.
+            return
+        if sidecar.exists() and not target_sidecar.exists():
+            sidecar.rename(target_sidecar)
+    if not _legacy_database_names_present(root):
+        marker.unlink(missing_ok=True)
+
+
 def adopt_legacy_database(data_dir: Path | None = None) -> None:
     """Rename a pre-rename SQLite file (and its WAL/SHM siblings) to anteroom.db, once.
 
-    Safe to call again after an interruption: if the main file already moved but a
-    legacy ``-wal`` / ``-shm`` / ``-journal`` remains, the next start finishes those
-    renames so committed sidecar bytes are not left under the old name. Never opens
-    the database; it only renames files that are present.
+    A transfer starts only when the legacy primary is alone. Before any rename a
+    marker file is written; only that marker proves an in-progress adoption, so a
+    later start can finish sidecars after a crash. ``anteroom.db`` existing is not
+    provenance: if both primaries exist, or a preexisting new primary sits beside
+    old-name sidecars without a valid marker, every file is left alone. Historical
+    interruptions from builds that never wrote the marker cannot be identified
+    safely and are not guessed. Never opens the database; it only renames files.
     """
     if os.environ.get("ANTEROOM_DATABASE_URL"):
         return
     root = data_dir or user_data_root()
-    target = root / DATABASE_NAME
-    legacy = root / LEGACY_DATABASE_NAME
-    if legacy.is_file() and not target.exists():
-        legacy.rename(target)
-    if not target.exists():
+    target, legacy, marker = _legacy_database_paths(root)
+
+    if marker.is_file() and _is_legacy_database_adoption_marker(marker):
+        _finish_legacy_database_adoption(root, target, legacy, marker)
         return
-    for suffix in ("-wal", "-shm", "-journal"):
-        sidecar = root / f"{LEGACY_DATABASE_NAME}{suffix}"
-        target_sidecar = root / f"{DATABASE_NAME}{suffix}"
-        if sidecar.exists() and not target_sidecar.exists():
-            sidecar.rename(target_sidecar)
+
+    # No proven in-progress transfer. Start only when the legacy primary stands alone.
+    if target.exists() or not legacy.is_file():
+        return
+
+    marker.write_text(LEGACY_DATABASE_ADOPTION_MARKER_BODY, encoding="utf-8")
+    _finish_legacy_database_adoption(root, target, legacy, marker)
 
 
 def ensure_user_data_dirs() -> None:
