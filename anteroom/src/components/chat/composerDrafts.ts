@@ -55,6 +55,28 @@ export function clearComposerDraft(key: string): void {
   emit();
 }
 
+/**
+ * Moves unsent remainder from `fromKey` to `toKey` (e.g. when a new Assistant
+ * chat creates its thread ID). Submitted text is cleared rather than copied,
+ * while newer text and any remaining images transfer to `toKey`.
+ */
+export function transferComposerDraftRemainder(fromKey: string, toKey: string, submittedText: string | null): void {
+  if (fromKey === toKey) return;
+  const from = drafts.get(fromKey);
+  if (!from) return;
+  const keepText = submittedText !== null && from.text.trim() === submittedText.trim() ? "" : from.text;
+  const keepImages = from.images;
+  drafts.delete(fromKey);
+  if (keepText || keepImages.length) {
+    const existing = drafts.get(toKey) ?? EMPTY_DRAFT;
+    drafts.set(toKey, {
+      text: existing.text || keepText,
+      images: existing.images.length ? [...existing.images, ...keepImages] : keepImages,
+    });
+  }
+  emit();
+}
+
 /** Test helper to isolate draft state across test cases. */
 export function resetComposerDrafts(): void {
   if (!drafts.size) return;

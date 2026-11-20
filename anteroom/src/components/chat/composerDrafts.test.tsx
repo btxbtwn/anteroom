@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 import { useComposerImages } from "./ComposerAttachments";
-import { clearComposerDraft, resetComposerDrafts, useComposerDraftText } from "./composerDrafts";
+import { clearComposerDraft, getComposerDraft, resetComposerDrafts, setComposerDraftImages, setComposerDraftText, transferComposerDraftRemainder, useComposerDraftText } from "./composerDrafts";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -136,5 +136,27 @@ describe("composer draft persistence", () => {
       await act(() => root.unmount());
       container.remove();
     }
+  });
+
+  it("transfers unsent images and newer text off assistant:__new__ to a newly created thread", () => {
+    const imgB = { id: "img-b", file: makeImageFile("second.png"), previewUrl: "blob:second" };
+
+    // Case 1: submitted text matches the draft — drop submitted text, move remaining image to new thread.
+    setComposerDraftText("assistant:__new__", "First question");
+    setComposerDraftImages("assistant:__new__", [imgB]);
+    transferComposerDraftRemainder("assistant:__new__", "assistant:thread-new", "First question");
+
+    expect(getComposerDraft("assistant:__new__")).toEqual({ text: "", images: [] });
+    expect(getComposerDraft("assistant:thread-new").text).toBe("");
+    expect(getComposerDraft("assistant:thread-new").images).toEqual([imgB]);
+
+    // Case 2: user edited newer text while createThread was in flight — preserve both newer text and image.
+    setComposerDraftText("assistant:__new__", "Follow-up thought");
+    setComposerDraftImages("assistant:__new__", [imgB]);
+    transferComposerDraftRemainder("assistant:__new__", "assistant:thread-2", "First question");
+
+    expect(getComposerDraft("assistant:__new__")).toEqual({ text: "", images: [] });
+    expect(getComposerDraft("assistant:thread-2").text).toBe("Follow-up thought");
+    expect(getComposerDraft("assistant:thread-2").images).toEqual([imgB]);
   });
 });

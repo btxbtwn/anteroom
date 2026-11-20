@@ -16,7 +16,7 @@ import { coalesceSseEvents, emptySseParts, type SseParts } from "./sseCoalesce";
 import { streamingDisplayText } from "./streamingText";
 import { settleAgents } from "./liveTrace";
 import { useComposerImages } from "./chat/ComposerAttachments";
-import { getComposerDraft, setComposerDraftText, useComposerDraftText } from "./chat/composerDrafts";
+import { getComposerDraft, setComposerDraftText, transferComposerDraftRemainder, useComposerDraftText } from "./chat/composerDrafts";
 import { ChatComposer } from "./chat/ChatComposer";
 import { chatTime } from "./chat/chatHistory";
 import { foldSseEvent } from "./chat/chatStream";
@@ -192,6 +192,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   ) => {
     if (controller.current) return;
     let id = inThread;
+    let transferred = false;
     const originDraftKey = `assistant:${inThread ?? "__new__"}`;
     const restoreQuestion = (targetId: string | null, text: string) => {
       const targetKey = `assistant:${targetId ?? "__new__"}`;
@@ -202,6 +203,9 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         const created = await api.assistant.createThread();
         id = created.id;
         followThread.current = id;
+        // Move any remaining images or newer text off assistant:__new__ before switching threads.
+        transferComposerDraftRemainder(originDraftKey, `assistant:${id}`, clearDraft ? question : null);
+        transferred = true;
         onThreadReady?.(id);
         // The sidebar lists it, and the page selects it, while the answer is still being written.
         void queryClient.invalidateQueries({ queryKey: THREADS_KEY });
@@ -230,7 +234,9 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     if (question !== null || retry) {
       scroll.pinChatToBottom();
       setError("");
-      if (clearDraft) setComposerDraftText(originDraftKey, "");
+      if (clearDraft && !transferred && question !== null && getComposerDraft(originDraftKey).text.trim() === question.trim()) {
+        setComposerDraftText(originDraftKey, "");
+      }
       parts.status = "Reading your shop…";
       show();
     }
