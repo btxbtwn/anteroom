@@ -12,12 +12,17 @@
   // While it is empty, the Bridge refuses every command the web relays.
   const BRIDGE_APPROVAL_PUBLIC_KEY = 'MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAETSODemzvbkZtbvrN9kXt4ERklx7tQbbrqLkgX6QwByD/MFVX1TWzNeYgtsP5Gx0G4eLKXbCrCT1emOHbRIYq+A==';
   const USED_KEY = 'anteroom_used_approvals';
+  const BUCKETS_KEY = 'anteroom_approval_buckets';
   // Allowed clock difference between this computer and the server.
   const LEEWAY_S = 60;
   // The longest life an approval may claim; the server issues five minutes.
   const MAX_LIFE_S = 600;
   // Cap stored nonces alongside the 660 s TTL so a burst cannot fill chrome.storage.local.
   const MAX_USED_APPROVALS = 2000;
+  // Bound both replay maps to 1 MiB of the shared local storage quota, leaving
+  // room for journals. Ordinary commands cannot consume the last eighth, which
+  // is reserved for cancellation. Never evict a live nonce to admit new work.
+  const MAX_REPLAY_BYTES = 1024 * 1024;
   // The claims carry an id and SHA-256 for each of up to 30 photos.
   const TOKEN = /^[A-Za-z0-9_-]{10,200}\.[A-Za-z0-9_-]{10,10000}\.[A-Za-z0-9_-]{80,90}$/;
   const REFUSALS = {
@@ -54,7 +59,7 @@
     return JSON.stringify(value);
   }
 
-  function createApprovalVerifier(api, { publicKey = BRIDGE_APPROVAL_PUBLIC_KEY, now = Date.now, subtle = crypto.subtle, maxUsed = MAX_USED_APPROVALS } = {}) {
+  function createApprovalVerifier(api, { publicKey = BRIDGE_APPROVAL_PUBLIC_KEY, now = Date.now, subtle = crypto.subtle, maxUsed = MAX_USED_APPROVALS, maxStorageBytes = MAX_REPLAY_BYTES } = {}) {
     let key = null;
     let tail = Promise.resolve();
     async function commandHash(command) {
@@ -79,18 +84,48 @@
       return true;
     }
     // Remember each approval until it expires, so a copy of it cannot run again.
-    function use(id, expires) {
+    // Partition capacity per account and reserve a separate bucket for Cancel so one
+    // high-volume account cannot exhaust another bucket. The shared byte budget
+    // below still bounds physical storage across all accounts.
+    function use(id, expires, bucket) {
       const result = tail.then(async () => {
         const used = (await api.storage.local.get(USED_KEY))[USED_KEY] || {};
+        const buckets = (await api.storage.local.get(BUCKETS_KEY))[BUCKETS_KEY] || {};
         const seconds = now() / 1000;
-        for (const [nonce, until] of Object.entries(used)) {
-          if (!Number.isFinite(until) || until + LEEWAY_S < seconds) delete used[nonce];
+        let migrated = false;
+        let bucketCount = 0;
+        for (const [nonce, raw] of Object.entries(used)) {
+          const until = typeof raw === 'number' ? raw : raw?.exp;
+          const entryBucket = typeof raw === 'number' ? (buckets[nonce] || '') : (raw?.b || '');
+          if (!Number.isFinite(until) || until + LEEWAY_S < seconds) {
+            delete used[nonce];
+          } else {
+            if (typeof raw !== 'number') {
+              used[nonce] = until;
+              buckets[nonce] = entryBucket;
+              migrated = true;
+            }
+            if (entryBucket === bucket) bucketCount += 1;
+          }
         }
+        for (const nonce of Object.keys(buckets)) {
+          if (!Object.hasOwn(used, nonce)) delete buckets[nonce];
+        }
+        // Keep the original numeric map readable by installed older versions.
+        // Normalize records from the object format before any early refusal too.
+        if (migrated) await api.storage.local.set({ [USED_KEY]: used, [BUCKETS_KEY]: buckets });
         if (Object.hasOwn(used, id)) return 'replayed';
         const cap = Number.isInteger(maxUsed) && maxUsed > 0 ? maxUsed : MAX_USED_APPROVALS;
-        if (Object.keys(used).length >= cap) return 'capacity';
+        if (bucketCount >= cap) return 'capacity';
         used[id] = expires;
-        await api.storage.local.set({ [USED_KEY]: used });
+        buckets[id] = bucket;
+        const budget = Number.isInteger(maxStorageBytes) && maxStorageBytes > 0 ? maxStorageBytes : MAX_REPLAY_BYTES;
+        const limit = bucket === 'cancel' || bucket.startsWith('cancel:') ? budget : Math.floor(budget * 7 / 8);
+        const storedBytes = new TextEncoder().encode(
+          USED_KEY + JSON.stringify(used) + BUCKETS_KEY + JSON.stringify(buckets),
+        ).byteLength;
+        if (storedBytes > limit) return 'capacity';
+        await api.storage.local.set({ [USED_KEY]: used, [BUCKETS_KEY]: buckets });
         return null;
       });
       tail = result.catch(() => {});
@@ -126,7 +161,11 @@
           || claims.sha !== await commandHash(command)) return 'mismatch';
       // Checked before the approval is used, so the page can still send the approved bytes.
       if (!await photosMatch(claims, photos)) return 'photos';
-      return await use(claims.jti, claims.exp);
+      const acct = String(accountId || '').toLowerCase();
+      const bucket = command.type === 'job.cancel'
+        ? (acct ? `cancel:${acct}` : 'cancel')
+        : acct ? `acct:${acct}` : '';
+      return await use(claims.jti, claims.exp, bucket);
     }
     return {
       // Null when the command may run with `photos`; otherwise the Bridge's refusal, which

@@ -180,4 +180,14 @@ test('Poshmark sales propagates signed_out during sale confirmation and avoids r
   assert.equal(fastResult.ok, false);
   assert.equal(fastResult.error_code, 'signed_out');
   assert.equal(fastFail.calls.length, 1);
+
+  // 403 browser-check challenge pages classify as challenge (not signed_out) and stop immediately.
+  const challenged = worker({
+    [`/vm-rest/posts/${missing}`]: [403, '<html><title>Just a moment...</title><div class="cf-chl-widget"></div></html>'],
+    [`/vm-rest/posts/${live}`]: [200, { data: { id: live, creator_id: seller, inventory: { status: 'available' } } }],
+  });
+  const challengeResult = await read(challenged.c, 'poshmark', ids);
+  assert.equal(challengeResult.ok, false);
+  assert.equal(challengeResult.error_code, 'challenge');
+  assert.equal(challenged.calls.length, 1);
 });
