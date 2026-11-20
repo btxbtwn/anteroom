@@ -180,6 +180,15 @@ def _read_legacy_database_move_plan(marker: Path) -> list[_LegacyDbMove] | None:
         return None
 
 
+def _fsync_directory(directory: Path) -> None:
+    """Make recent directory entries durable (create/rename/unlink)."""
+    dir_fd = os.open(str(directory), os.O_RDONLY)
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
+
+
 def _write_legacy_database_adoption_marker(marker: Path, plan: list[_LegacyDbMove]) -> None:
     """Persist the move plan before any rename (file + directory fsync)."""
     data = _serialize_legacy_database_move_plan(plan)
@@ -187,11 +196,7 @@ def _write_legacy_database_adoption_marker(marker: Path, plan: list[_LegacyDbMov
         handle.write(data)
         handle.flush()
         os.fsync(handle.fileno())
-    dir_fd = os.open(str(marker.parent), os.O_RDONLY)
-    try:
-        os.fsync(dir_fd)
-    finally:
-        os.close(dir_fd)
+    _fsync_directory(marker.parent)
 
 
 def _legacy_database_names_present(root: Path) -> bool:
@@ -203,6 +208,7 @@ def _legacy_database_names_present(root: Path) -> bool:
 def _abandon_legacy_database_adoption(marker: Path) -> None:
     """Stop claiming an in-progress transfer. Database files are left untouched."""
     marker.unlink(missing_ok=True)
+    _fsync_directory(marker.parent)
 
 
 def _build_fresh_legacy_database_move_plan(
@@ -286,6 +292,11 @@ def _execute_legacy_database_move_plan(
             _abandon_legacy_database_adoption(marker)
             return
         source.rename(destination)
+    # Renames must be durable before the marker can go; keep it if sync fails.
+    try:
+        _fsync_directory(root)
+    except OSError:
+        return
     if not _legacy_database_names_present(root):
         _abandon_legacy_database_adoption(marker)
 
