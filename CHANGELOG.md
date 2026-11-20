@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1062 — 2026-11-20
+
+- Harden hosted upload limits, account deletion ordering, assistant proposal locking, and network/log security safeguards.
+
 ## 0.1.1061 — 2026-11-20
 
 - Fix hosted deploys that get stuck waiting for CI after a rebase merge.
