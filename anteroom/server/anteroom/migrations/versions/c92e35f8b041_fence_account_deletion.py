@@ -82,4 +82,34 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError('Deletion fences are forward-only; do not re-enable writes for deleted accounts')
+    db = op.get_bind()
+    if db.dialect.name != 'postgresql':
+        return
+    # Refuse a downgrade that would re-enable writes for pending or deleted accounts.
+    op.execute('''DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM anteroom_private.account_cleanup) THEN
+            RAISE EXCEPTION 'Deletion fences cannot be removed while deleted or pending accounts exist';
+        END IF;
+    END $$''')
+    op.execute('''CREATE OR REPLACE FUNCTION anteroom_private.finish_account_deletion()
+        RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
+        DECLARE owner_id uuid := anteroom_private.seller_id()::uuid;
+        BEGIN
+            PERFORM anteroom_private.delete_account();
+            DELETE FROM anteroom_private.account_cleanup WHERE user_id = owner_id;
+        END $$''')
+    if db.scalar(sa.text("SELECT to_regclass('storage.objects')")) is not None:
+        op.execute('''DO $$ BEGIN
+            DROP TRIGGER IF EXISTS account_write_guard ON storage.objects;
+        EXCEPTION WHEN insufficient_privilege THEN
+            NULL;
+        END $$''')
+        for action in ('insert', 'update'):
+            op.execute(f'DROP POLICY IF EXISTS anteroom_photo_delete_fence_{action} ON storage.objects')
+    tables = db.execute(sa.text("""SELECT table_name FROM information_schema.columns
+        WHERE table_schema = 'public' AND column_name = 'user_id'""")).scalars().all()
+    for table in tables:
+        quoted = db.dialect.identifier_preparer.quote(table)
+        op.execute(f'DROP TRIGGER IF EXISTS account_write_guard ON public.{quoted}')
+    op.execute('DROP FUNCTION IF EXISTS anteroom_private.guard_account_write()')
+    op.execute('DROP FUNCTION IF EXISTS anteroom_private.account_write_allowed(text)')
