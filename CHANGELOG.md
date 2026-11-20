@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1049 — 2026-11-20
+
+- Hosted web and iOS accounts can now use a platform-managed OpenRouter Gemini Flash model (`ANTEROOM_MANAGED_OPENROUTER_KEY`, defaulting to `google/gemini-3.8-flash`) automatically, hiding provider setup and model pickers on hosted while keeping local desktop provider sign-ins unchanged.
+
 ## 0.1.1048 — 2026-11-20
 
 - Remove the developer-only marketplace page inspection from Anteroom Bridge so the Chrome Web Store package carries only seller features.
