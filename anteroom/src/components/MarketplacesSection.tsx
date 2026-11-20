@@ -588,8 +588,11 @@ export function MarketplacesLayout({
   function preflightGaps(marketplace: Marketplace): PreflightGap[] {
     return preflightCheck(marketplace)?.gaps ?? [];
   }
+  // List, Save draft and Update send the saved revision. While the listing is
+  // still loading there is none yet, so they wait for it rather than fail.
+  const noRevision = !revisionId;
   function listBlocked(marketplace: Marketplace): boolean {
-    return retryIn(marketplace) > 0;
+    return noRevision || retryIn(marketplace) > 0;
   }
 
   /** The marketplace holds an older revision than the one being edited. */
@@ -622,7 +625,7 @@ export function MarketplacesLayout({
       // Nothing to send until the listing changes; Update stays in the row's menu.
       if (!outdated(marketplace)) return null;
       const pending = starting[m] === "update";
-      return <Button size="xs" variant="outline" disabled={busy || startingOn(m)} onClick={() => void updateNow(m)}>{pending ? "Updating…" : "Update…"}</Button>;
+      return <Button size="xs" variant="outline" disabled={busy || startingOn(m) || noRevision} onClick={() => void updateNow(m)}>{pending ? "Updating…" : "Update…"}</Button>;
     }
     if (!listable(marketplace, status)) return null;
     const pending = startingOn(m);
@@ -652,7 +655,7 @@ export function MarketplacesLayout({
           {canList && <MenuItem disabled={listBlocked(marketplace)} onClick={() => void listNow(m)}>List…</MenuItem>}
           {canList && REMOTE_DRAFT.has(marketplace) && <MenuItem disabled={listBlocked(marketplace)}
             onClick={() => action.mutate({ marketplace: m, kind: "save_draft" })}>Save draft</MenuItem>}
-          {canUpdate && <MenuItem onClick={() => void updateNow(m)}>Update…</MenuItem>}
+          {canUpdate && <MenuItem disabled={noRevision} onClick={() => void updateNow(m)}>Update…</MenuItem>}
           {canDelist && <MenuItem variant="destructive" onClick={() => void runDelist([marketplace])}>Delist…</MenuItem>}
           {(canList || canUpdate || canDelist) && <MenuSeparator />}
           <MenuItem disabled={running(marketplace)}
@@ -954,7 +957,7 @@ export function MarketplacesLayout({
                 );
               })}
               <MenuSeparator />
-              {showListEverywhere && <MenuItem disabled={busy} onClick={() => setPicking(true)}><SendIcon />List everywhere…</MenuItem>}
+              {showListEverywhere && <MenuItem disabled={busy || noRevision} onClick={() => setPicking(true)}><SendIcon />List everywhere…</MenuItem>}
               {!soldSomewhere && <MenuItem disabled={busy} onClick={() => startSale("other")}><ReceiptIcon />Record a sale…</MenuItem>}
               {showDelistEverywhere && <MenuSeparator />}
               {showDelistEverywhere && <MenuItem variant="destructive" disabled={busy} onClick={() => void runDelist(removable)}>
@@ -1013,7 +1016,7 @@ export function MarketplacesLayout({
         <div className="relative mt-auto flex flex-col gap-0.5 border-t pt-1.5 [&_[data-slot=button]]:justify-start">
           {railStatus && <div className="pointer-events-none absolute bottom-full end-1 mb-1 flex items-center gap-1.5">{railStatus}</div>}
           {showListEverywhere && (
-            <Button size="xs" variant="default" disabled={busy} className="mb-1 w-full" title={`List on ${readyToList.map(marketplaceName).join(", ")}`}
+            <Button size="xs" variant="default" disabled={busy || noRevision} className="mb-1 w-full" title={`List on ${readyToList.map(marketplaceName).join(", ")}`}
               onClick={() => setPicking(true)}><SendIcon />List everywhere…</Button>
           )}
           {(railActions || railMenu) && (

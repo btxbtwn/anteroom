@@ -64,6 +64,9 @@ SIZING_ROWS = 10
 PRICE_CHANGE_ROWS = 10
 TOP_GROUPS = 12
 OVER_TIME_BUCKETS = 24
+# Listings read per statement for a question: a few megabytes, well inside the
+# hosted statement timeout even when the database is busy.
+LISTING_BATCH = 200
 # What the whole prompt may cost on a large shop, in tokens (about 3.5 characters each). The tests hold a
 # shop of hundreds of listings to it, so a new section cannot quietly bring every row back.
 PROMPT_TOKEN_BUDGET = 20_000
@@ -1000,11 +1003,24 @@ def _records(db: Session, rows: list[AnalyticsItem], now: datetime) -> list[dict
     from anteroom.services import size_audit
     from anteroom.services.vendoo_import import parse_notes, split_vendoo_labels
 
-    listings = dict(
-        db.query(Listing.conversation_id, ListingRevision.listing_json)
-        .join(ListingRevision, ListingRevision.id == Listing.current_revision_id)
-        .all()
-    )
+    listings: dict[str, Any] = {}
+    after = ""
+    # A large shop's listings run to tens of megabytes. Read them a batch at a
+    # time, so each statement stays well inside the hosted statement timeout
+    # when the database is busy, however big the shop grows.
+    while True:
+        batch = (
+            db.query(Listing.conversation_id, ListingRevision.listing_json)
+            .join(ListingRevision, ListingRevision.id == Listing.current_revision_id)
+            .filter(Listing.conversation_id > after)
+            .order_by(Listing.conversation_id)
+            .limit(LISTING_BATCH)
+            .all()
+        )
+        listings.update(batch)
+        if len(batch) < LISTING_BATCH:
+            break
+        after = batch[-1][0]
     notes = {conv_id: parse_notes(raw) for conv_id, raw in db.query(Conversation.id, Conversation.notes).all()}
     photo_sizes = _photo_sizes(db)
     # These inputs are plain values. A large shop's size audits can take longer

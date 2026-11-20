@@ -1,0 +1,2 @@
+- List, Save draft and Update wait until the listing has loaded, instead of saying "Fill in the listing first." on a slow connection.
+- The business assistant answers on large shops while Anteroom is busy, instead of failing on a database timeout.
