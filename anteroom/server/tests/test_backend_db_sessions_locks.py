@@ -6,7 +6,6 @@ from io import BytesIO
 import logging
 import threading
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 from fastapi.testclient import TestClient
 from PIL import Image, ImageDraw
@@ -17,14 +16,11 @@ from sqlalchemy.orm import sessionmaker
 from anteroom.database import Base, get_db, load_models
 from anteroom.main import app
 from anteroom.models.conversation import Photo
-from anteroom.repositories.queries import ConversationRepo, JobRepo
+from anteroom.repositories.queries import ConversationRepo
 from anteroom.services import (
     automation_actions,
     background_worker,
-    ebay_listings,
-    etsy_listings,
     listing_persistence,
-    native_marketplaces,
     photo_edits,
 )
 from anteroom.services.photo_store import LocalPhotoStore
@@ -47,217 +43,6 @@ def _make_sqlite_sessions(tmp_path):
     )
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine)
-
-
-# ---------------------------------------------------------------------------
-# Fix 1: Release Postgres sessions before eBay/Etsy awaits & offload sync I/O
-# ---------------------------------------------------------------------------
-
-
-def test_ebay_execute_releases_db_session_before_await_and_after_callbacks(tmp_path, monkeypatch):
-    sessions = _make_sqlite_sessions(tmp_path)
-    monkeypatch.setattr("anteroom.services.photo_store._store", LocalPhotoStore(str(tmp_path)))
-    db = sessions()
-    try:
-        repo = ConversationRepo(db)
-        conv = repo.create(title="Vintage jacket")
-        data = _sample_jpeg()
-        (tmp_path / "p1.jpg").write_bytes(data)
-        photo = listing_persistence.add_photo(
-            db, conv.id, "p1.jpg", "p1.jpg", "image/jpeg", len(data),
-            checksum="1" * 64, width=240, height=160,
-        )
-        snapshot = {
-            "title": "Vintage jacket",
-            "_approved_photos": [{"id": photo.id, "stored_filename": photo.stored_filename, "checksum": photo.checksum}],
-        }
-        job = JobRepo(db).create(conv.id, "rev-1", snapshot, status="dispatched", current_step="native_ebay_list")
-        native_marketplaces._store(db, conv.id, "ebay", {"state": "listing", "action": "list", "job_id": job.id})
-
-        observations: list[tuple[str, bool]] = []
-
-        async def fake_execute(step, snap, photos, binding, record, active, *, confirm=False, conversation_id=""):
-            observations.append(("execute_enter", db.in_transaction()))
-            record({"ebay_sku": "sku-abc"})
-            observations.append(("after_record", db.in_transaction()))
-            assert active() is True
-            observations.append(("after_active", db.in_transaction()))
-            return {"ok": False, "safe_to_retry": False, "error": "Reply lost"}
-
-        async def fake_check(record, snap, remember):
-            observations.append(("check_enter", db.in_transaction()))
-            remember({"ebay_offer_id": "offer-42"})
-            observations.append(("after_remember", db.in_transaction()))
-            return {"ok": True, "state": "published", "listing_url": "https://www.ebay.com/itm/1234567890"}
-
-        monkeypatch.setattr(ebay_listings, "execute", fake_execute)
-        monkeypatch.setattr(ebay_listings, "check", fake_check)
-
-        stored = asyncio.run(native_marketplaces._execute_step(db, job, conv.id, "ebay", "list", {}))
-        observations.append(("after_step", db.in_transaction()))
-
-        assert stored["state"] == "published"
-        assert stored["ebay_sku"] == "sku-abc"
-        assert stored["ebay_offer_id"] == "offer-42"
-        assert observations == [
-            ("execute_enter", False),
-            ("after_record", False),
-            ("after_active", False),
-            ("check_enter", False),
-            ("after_remember", False),
-            ("after_step", False),
-        ]
-    finally:
-        db.close()
-
-
-def test_etsy_execute_releases_db_session_and_offloads_preflight_shop_read(tmp_path, monkeypatch):
-    sessions = _make_sqlite_sessions(tmp_path)
-    monkeypatch.setattr("anteroom.services.photo_store._store", LocalPhotoStore(str(tmp_path)))
-    db = sessions()
-    try:
-        repo = ConversationRepo(db)
-        conv = repo.create(title="Ceramic mug")
-        data = _sample_jpeg()
-        (tmp_path / "m1.jpg").write_bytes(data)
-        photo = listing_persistence.add_photo(
-            db, conv.id, "m1.jpg", "m1.jpg", "image/jpeg", len(data),
-            checksum="2" * 64, width=240, height=160,
-        )
-        snapshot = {
-            "title": "Ceramic mug",
-            "_approved_photos": [{"id": photo.id, "stored_filename": photo.stored_filename, "checksum": photo.checksum}],
-        }
-        job = JobRepo(db).create(conv.id, "rev-1", snapshot, status="dispatched", current_step="native_etsy_save_draft")
-        native_marketplaces._store(db, conv.id, "etsy", {"state": "saving_draft", "action": "save_draft", "job_id": job.id})
-
-        observations: list[tuple[str, bool]] = []
-
-        async def fake_execute(step, snap, photos, binding, record, active, *, confirm=False, **options):
-            observations.append(("execute_enter", db.in_transaction()))
-            record({"etsy_shop_id": "999"})
-            observations.append(("after_record", db.in_transaction()))
-            assert active() is True
-            observations.append(("after_active", db.in_transaction()))
-            return {"ok": False, "safe_to_retry": False, "error": "Lost reply"}
-
-        async def fake_check(snap, record, candidate):
-            observations.append(("check_enter", db.in_transaction()))
-            return {"ok": True, "state": "draft", "draft_url": "https://www.etsy.com/your/shops/me/listing-editor/edit/123456"}
-
-        monkeypatch.setattr(etsy_listings, "execute", fake_execute)
-        monkeypatch.setattr(etsy_listings, "check", fake_check)
-
-        stored = asyncio.run(native_marketplaces._execute_step(db, job, conv.id, "etsy", "save_draft", {}))
-        observations.append(("after_step", db.in_transaction()))
-
-        assert stored["state"] == "draft"
-        assert stored["etsy_shop_id"] == "999"
-        assert observations == [
-            ("execute_enter", False),
-            ("after_record", False),
-            ("after_active", False),
-            ("check_enter", False),
-            ("after_step", False),
-        ]
-
-        # Also verify _require_etsy runs connected_shop_id off the event-loop thread.
-        loop_threads: list[int | None] = []
-        call_threads: list[int | None] = []
-
-        def fake_shop_id() -> str:
-            call_threads.append(threading.current_thread().ident)
-            return "999"
-
-        monkeypatch.setattr(etsy_listings, "connected_shop_id", fake_shop_id)
-
-        async def run_preflight():
-            loop_threads.append(threading.current_thread().ident)
-            await native_marketplaces._require_etsy()
-
-        asyncio.run(run_preflight())
-        assert call_threads and call_threads[0] != loop_threads[0]
-    finally:
-        db.close()
-
-
-def test_ebay_and_etsy_offload_storage_and_settings_io_to_worker_threads(tmp_path, monkeypatch):
-    store = LocalPhotoStore(str(tmp_path))
-    data = _sample_jpeg()
-    (tmp_path / "shot.jpg").write_bytes(data)
-
-    read_threads: list[int | None] = []
-    local_path_threads: list[int | None] = []
-    settings_threads: list[int | None] = []
-    shop_threads: list[int | None] = []
-
-    orig_read = store.read
-    orig_local_path = store.local_path
-
-    def tracked_read(name: str) -> bytes:
-        read_threads.append(threading.current_thread().ident)
-        return orig_read(name)
-
-    def tracked_local_path(name: str):
-        local_path_threads.append(threading.current_thread().ident)
-        return orig_local_path(name)
-
-    monkeypatch.setattr(store, "read", tracked_read)
-    monkeypatch.setattr(store, "local_path", tracked_local_path)
-    monkeypatch.setattr("anteroom.services.photo_store._store", store)
-
-    photo = SimpleNamespace(
-        id="p1", stored_filename="shot.jpg", original_filename="shot.jpg",
-        mime_type="image/jpeg", checksum="",
-    )
-
-    async def run_all():
-        loop_tid = threading.current_thread().ident
-
-        # 1. eBay image upload & checksum offload photo_store().read
-        fake_client = SimpleNamespace(
-            request=AsyncMock(return_value={
-                "imageUrl": "https://i.ebayimg.com/images/g/abc/s-l1600.jpg",
-                "fulfillmentPolicies": [{"fulfillmentPolicyId": "f1"}],
-                "paymentPolicies": [{"paymentPolicyId": "p1"}],
-                "returnPolicies": [{"returnPolicyId": "r1"}],
-                "locations": [{"merchantLocationKey": "loc1", "merchantLocationStatus": "ENABLED"}],
-            }),
-        )
-        urls = await ebay_listings._image_urls(fake_client, [photo], {}, lambda _v: None, lambda: True)
-        assert urls == ["https://i.ebayimg.com/images/g/abc/s-l1600.jpg"]
-
-        # 2. eBay listing_choices offloads get_ebay_listing_defaults
-        def tracked_defaults():
-            settings_threads.append(threading.current_thread().ident)
-            return {}
-
-        monkeypatch.setattr(ebay_listings, "get_ebay_listing_defaults", tracked_defaults)
-        choices = await ebay_listings.listing_choices(fake_client, {})
-        assert choices["merchantLocationKey"] == "loc1"
-
-        # 3. Etsy _sync_photos offloads photo file read
-        async def fake_write(_method, _path, _kind, **kwargs):
-            return {"listing_image_id": 777}
-
-        await etsy_listings._sync_photos(fake_write, "123", "456", {"images": []}, [photo], {}, lambda _v: None)
-
-        # 4. Etsy check() offloads connected_shop_id
-        def tracked_shop_id():
-            shop_threads.append(threading.current_thread().ident)
-            return "123"
-
-        monkeypatch.setattr(etsy_listings, "connected_shop_id", tracked_shop_id)
-        monkeypatch.setattr(etsy_listings, "find_draft", AsyncMock(return_value=None))
-        checked = await etsy_listings.check({}, {"action": "save_draft"}, None)
-        assert checked["safe_to_retry"] is True
-
-        assert read_threads and all(tid != loop_tid for tid in read_threads)
-        assert local_path_threads and all(tid != loop_tid for tid in local_path_threads)
-        assert settings_threads and all(tid != loop_tid for tid in settings_threads)
-        assert shop_threads and all(tid != loop_tid for tid in shop_threads)
-
-    asyncio.run(run_all())
 
 
 # ---------------------------------------------------------------------------
@@ -685,38 +470,6 @@ def test_turns_work_across_distinct_event_loops(monkeypatch):
 
     assert not errors
     assert automation_actions._turns == {}
-
-
-@pytest.mark.parametrize("cancel_during_lookup", [False, True])
-def test_etsy_publish_rechecks_activity_after_shop_lookup(monkeypatch, cancel_during_lookup):
-    active = True
-    lookups = 0
-    records = []
-
-    def shop():
-        nonlocal active, lookups
-        lookups += 1
-        if lookups == 2 and cancel_during_lookup:
-            active = False
-        return "123"
-
-    monkeypatch.setattr(etsy_listings, "connected_shop_id", shop)
-    monkeypatch.setattr(etsy_listings, "_read", AsyncMock(return_value={"state": "draft"}))
-    monkeypatch.setattr(etsy_listings, "_matches", lambda *_: True)
-    monkeypatch.setattr(etsy_listings, "_video_kept", AsyncMock(return_value=True))
-    api = AsyncMock(return_value={"listing_id": "123456", "shop_id": "123", "state": "active"})
-    monkeypatch.setattr(etsy_listings.marketplace_accounts, "etsy_api", api)
-    result = asyncio.run(etsy_listings.execute(
-        "publish", {}, [], {"draft_url": etsy_listings.edit_url("123456")},
-        records.append, lambda: active, confirm=True,
-    ))
-    assert lookups == 2
-    assert result["ok"] is not cancel_during_lookup
-    if cancel_during_lookup:
-        api.assert_not_awaited()
-        assert {"etsy_pending_write": "publish"} not in records
-    else:
-        api.assert_awaited_once()
 
 
 @pytest.mark.parametrize("failure_stage", ["commit", "refresh", None])

@@ -572,14 +572,6 @@ async def find_draft(shop_id: str, snapshot: dict) -> str | None:
     return edit_url(matches[0]) if matches else None
 
 
-def _photo_file(photo) -> tuple[str, bytes]:
-    try:
-        path = photo_store().local_path(photo.stored_filename)
-        return path.name, path.read_bytes()
-    except (FileNotFoundError, ValueError):
-        raise missing("An Etsy photo is missing from Anteroom. Restore it before continuing.", "photos") from None
-
-
 async def _sync_photos(write, shop_id: str, item_id: str, remote: dict, photos: list, binding: dict,
                        record: Callable[[dict], None]) -> None:
     """Make the Etsy listing's photos the item's photos: upload new ones, remove dropped ones.
@@ -609,9 +601,13 @@ async def _sync_photos(write, shop_id: str, item_id: str, remote: dict, photos: 
     for rank, photo in enumerate(photos, start=1):
         if photo.id in images:
             continue
-        name, data = await asyncio.to_thread(_photo_file, photo)
-        uploaded = await write("POST", f"shops/{shop_id}/listings/{item_id}/images", "photo",
-                               data={"rank": str(rank)}, files={"image": (name, data, photo.mime_type)}, timeout=60)
+        try:
+            path = photo_store().local_path(photo.stored_filename)
+        except (FileNotFoundError, ValueError):
+            raise missing("An Etsy photo is missing from Anteroom. Restore it before continuing.", "photos") from None
+        with path.open("rb") as image:
+            uploaded = await write("POST", f"shops/{shop_id}/listings/{item_id}/images", "photo",
+                                   data={"rank": str(rank)}, files={"image": (path.name, image, photo.mime_type)}, timeout=60)
         image_id = str(uploaded.get("listing_image_id") or "")
         if not re.fullmatch(r"[1-9]\d*", image_id):
             raise ValueError("Etsy did not confirm a photo ID. Check the draft before another upload.")
@@ -726,15 +722,14 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
     attempted = False
     rejected = False
     try:
-        shop_id = await asyncio.to_thread(connected_shop_id)
+        shop_id = connected_shop_id()
         if binding.get("etsy_shop_id") and binding["etsy_shop_id"] != shop_id:
             raise ValueError("This Etsy draft belongs to a different connected shop.")
         record({"etsy_shop_id": shop_id})
 
         async def write(method: str, path: str, kind: str, **kwargs):
             nonlocal attempted, rejected
-            current_shop_id = await asyncio.to_thread(connected_shop_id)
-            if not active() or current_shop_id != shop_id:
+            if not active() or connected_shop_id() != shop_id:
                 raise ValueError("The Etsy action stopped or the connected shop changed. Check its result.")
             record({"etsy_pending_write": kind})
             attempted = True
@@ -867,7 +862,7 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
 async def check(snapshot: dict, binding: dict, candidate: str | None) -> dict:
     """Read the shop for this action's result. Never writes."""
     try:
-        shop_id = await asyncio.to_thread(connected_shop_id)
+        shop_id = connected_shop_id()
         if binding.get("etsy_shop_id") and binding["etsy_shop_id"] != shop_id:
             raise ValueError("This Etsy draft belongs to a different connected shop.")
         found = not candidate

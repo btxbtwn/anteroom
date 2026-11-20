@@ -378,7 +378,12 @@ def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequest) -
             raise NativeMarketplaceError(400, str(exc)) from exc
     if active_generation(conv_id) or activity.running(conv_id):
         raise NativeMarketplaceError(409, "Wait for generation to finish.")
-    if marketplace not in API_MARKETPLACES and (refusal := marketplace_actions_refusal()):
+    if marketplace == "etsy":
+        try:
+            etsy_listings.connected_shop_id()
+        except ValueError as exc:
+            raise NativeMarketplaceError(409, str(exc)) from exc
+    elif marketplace != "ebay" and (refusal := marketplace_actions_refusal()):
         raise NativeMarketplaceError(409, refusal)
     photos, warning = _photos(db, conv_id, snapshot, marketplace)
     snapshot["_approved_photo_warning"] = warning
@@ -395,13 +400,6 @@ async def _require_ebay() -> None:
         raise NativeMarketplaceError(409, str(exc)) from exc
 
 
-async def _require_etsy() -> None:
-    try:
-        await asyncio.to_thread(etsy_listings.connected_shop_id)
-    except ValueError as exc:
-        raise NativeMarketplaceError(409, str(exc)) from exc
-
-
 def _photos(db: Session, conv_id: str, snapshot: dict, marketplace: str) -> tuple[list, str]:
     """This marketplace's photos for the listing being sent, and a warning when its limit leaves some off."""
     return marketplace_media.photos_for(snapshot, ConversationRepo(db).get_all_photos(conv_id), marketplace)
@@ -413,8 +411,6 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str) -
     snapshot, photos, deleted_here = await in_worker_session(_check_start, conv_id, marketplace, body, kind)
     if marketplace == "ebay":
         await _require_ebay()
-    elif marketplace == "etsy":
-        await _require_etsy()
     from anteroom.services.chrome_catalog import live_preview
 
     preview = await live_preview(snapshot) if marketplace in {"poshmark", "depop"} else None
@@ -707,29 +703,20 @@ async def _wait_for_chrome(db: Session, job, conv_id: str, marketplace: str, rec
 async def _execute_step(db: Session, job, conv_id: str, marketplace: str, step: str, options: dict) -> dict:
     from anteroom.services import approved_photos
 
-    job_id = job.id
     snapshot = job.listing_snapshot if isinstance(job.listing_snapshot, dict) else {}
-    warning = snapshot.get("_approved_photo_warning") or ""
-    binding = _record(db, conv_id, marketplace)
-    _release(db)
     try:
         photos = await asyncio.to_thread(approved_photos.load, snapshot)
     except ValueError as exc:
         raise NativeMarketplaceError(409, str(exc)) from exc
+    warning = snapshot.get("_approved_photo_warning") or ""
+    binding = _record(db, conv_id, marketplace)
     if marketplace in API_MARKETPLACES:
         def record(values: dict) -> None:
-            try:
-                _store(db, conv_id, marketplace, values)
-            finally:
-                # _store already committed; end any post-commit refresh transaction before the next await.
-                db.rollback()
             binding.update(values)
+            _store(db, conv_id, marketplace, values)
 
         def active() -> bool:
-            try:
-                return _active(db, job_id, conv_id, marketplace)
-            finally:
-                db.rollback()
+            return _active(db, job.id, conv_id, marketplace)
 
         if marketplace == "ebay":
             from anteroom.services import ebay_listings
@@ -738,33 +725,25 @@ async def _execute_step(db: Session, job, conv_id: str, marketplace: str, step: 
                                                  conversation_id=conv_id)
         else:
             result = await etsy_listings.execute(step, snapshot, photos, binding, record, active, confirm=step in {"list", "publish", "update"}, **options)
-        stored = _apply_result(db, conv_id, marketplace, job_id, step, result)
+        stored = _apply_result(db, conv_id, marketplace, job.id, step, result)
         if stored["state"] == "unknown":
             # A reply was lost. Read what the marketplace has now, while still holding the slot.
-            _progress(db, job_id, marketplace, "checking")
-            _release(db)
-
-            def remember(values: dict) -> None:
-                try:
-                    _store(db, conv_id, marketplace, values)
-                finally:
-                    db.rollback()
-
+            _progress(db, job.id, marketplace, "checking")
             checked = await _read_result(
-                marketplace, stored, snapshot, stored.get("draft_url"), _JobRef(job_id), context=None,
-                remember=remember)
+                marketplace, stored, snapshot, stored.get("draft_url"), job, context=None,
+                remember=lambda values: _store(db, conv_id, marketplace, values))
             if checked is not None:
-                stored = _apply_result(db, conv_id, marketplace, job_id, step, checked)
-        _release(db)
+                stored = _apply_result(db, conv_id, marketplace, job.id, step, checked)
         return stored
     payload = _execute_payload(marketplace, step, binding, snapshot, photos, warning)
-    job_ref = _JobRef(job_id)
+    job = _JobRef(job.id)
+    _release(db)
     try:
-        result = await _unless_cancelled(job_ref.id, browser_bridge.request(
-            job_ref, "marketplace.execute", payload, timeout=EXECUTE_TIMEOUT_S))
+        result = await _unless_cancelled(job.id, browser_bridge.request(
+            job, "marketplace.execute", payload, timeout=EXECUTE_TIMEOUT_S))
     except (browser_bridge.BrowserBridgeError, _Cancelled):
-        result = await _wait_for_chrome(db, job_ref, conv_id, marketplace, binding, snapshot)
-    return _apply_result(db, conv_id, marketplace, job_ref.id, step, result)
+        result = await _wait_for_chrome(db, job, conv_id, marketplace, binding, snapshot)
+    return _apply_result(db, conv_id, marketplace, job.id, step, result)
 
 
 def _finish_job(db: Session, job_id: str, conv_id: str, marketplace: str) -> None:
@@ -804,16 +783,13 @@ async def run_job(job_id: str, conv_id: str, marketplace: str, steps: list[str],
                                                   "operation_id": f"{job_id}-{index + 1}"})
                 _progress(db, job_id, marketplace, step, index, len(steps))
                 job = repo.get(job_id)
-                if not job:
-                    break
-            snapshot = job.listing_snapshot if isinstance(job.listing_snapshot, dict) else {}
             record = await _execute_step(db, job, conv_id, marketplace, step, options)
             if step == "save_draft" and not (record.get("state") == "draft" and not record.get("error") and record.get("draft_url")):
                 break
             # Depop's drafts have no Boost; its live edit does. A List the seller set to boost
             # turns it on with one edit of the listing it just posted.
             if (marketplace == "depop" and step == "publish" and "update" not in steps
-                    and (snapshot.get("depop_specifics") or {}).get("boost") is True
+                    and ((job.listing_snapshot or {}).get("depop_specifics") or {}).get("boost") is True
                     and record.get("state") == "published" and not record.get("error")):
                 from anteroom.services.marketplace_delist import listing_id
 
