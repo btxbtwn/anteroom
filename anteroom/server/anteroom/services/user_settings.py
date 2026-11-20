@@ -328,7 +328,7 @@ def apply_listing_field_defaults(listing: dict) -> bool:
         saved = defaults.get(path)
         if not saved:
             continue
-        if any(isinstance(specifics.get(alias), bool) or str(specifics.get(alias) or "").strip() for alias in aliases):
+        if any(isinstance(specifics.get(alias), (bool, int, float)) or str(specifics.get(alias) or "").strip() for alias in aliases):
             continue
         specifics[aliases[0]] = saved["label"]
         changed = True

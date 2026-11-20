@@ -134,6 +134,8 @@ class EtsyListingsTest(unittest.TestCase):
             self.remote.update(data)
         if "price" in data:
             self.remote["price"] = {"amount": int(Decimal(data["price"]) * 100), "divisor": 100, "currency_code": "USD"}
+        if "should_auto_renew" in data:
+            self.remote["should_auto_renew"] = data["should_auto_renew"] == "true"
         if method == "POST":
             self.inventory = {"products": [{"sku": "keep-sku", "property_values": [], "offerings": [{
                 "price": copy.deepcopy(self.remote["price"]), "quantity": 1, "is_enabled": True, "readiness_state_id": 88}]}]}
@@ -668,6 +670,30 @@ class EtsyListingsTest(unittest.TestCase):
         self.assertEqual(record["state"], "published", record)
         created = next(c[2] for c in self.calls if c[0] == "POST" and c[1].endswith("/listings"))
         self.assertEqual(created["should_auto_renew"], "true")
+
+    def test_live_update_check_verifies_renewal_option_when_specified(self):
+        manual = {**copy.deepcopy(LISTING), "etsy_specifics": {**LISTING["etsy_specifics"], "renewalOption": "Manual"}}
+        auto = {**copy.deepcopy(LISTING), "etsy_specifics": {**LISTING["etsy_specifics"], "renewalOption": "Automatic"}}
+        binding = {}
+        self.assertEqual(self.execute("save_draft", binding, snapshot=manual)["state"], "draft")
+        self.assertEqual(self.execute("publish", binding, snapshot=manual)["state"], "published")
+        self.assertIs(self.remote["should_auto_renew"], False)
+
+        # If a renewal-only live update PATCH timed out and Etsy kept Manual, check must not report success.
+        check_binding = {**binding, "action": "update"}
+        missed = asyncio.run(etsy_listings.check(auto, check_binding, URL))
+        self.assertFalse(missed["ok"])
+
+        # Once Etsy reflects Automatic, check confirms the update.
+        self.remote["should_auto_renew"] = True
+        confirmed = asyncio.run(etsy_listings.check(auto, check_binding, URL))
+        self.assertTrue(confirmed["ok"])
+        self.assertEqual(confirmed["state"], "published")
+
+        # When the snapshot does not specify a renewal option, check still succeeds regardless of remote value.
+        self.remote["should_auto_renew"] = False
+        unspecified = asyncio.run(etsy_listings.check(LISTING, check_binding, URL))
+        self.assertTrue(unspecified["ok"])
 
 
 class RelayMultipartTest(unittest.IsolatedAsyncioTestCase):

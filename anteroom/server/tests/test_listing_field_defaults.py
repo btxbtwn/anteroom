@@ -171,6 +171,10 @@ def test_generation_fills_empty_etsy_renewal_from_saved_default(settings_file):
     assert user_settings.apply_listing_field_defaults(explicit_false) is False
     assert "renewalOption" not in explicit_false["etsy_specifics"]
 
+    explicit_zero = {"title": "Tee", "etsy_specifics": {"should_auto_renew": 0}}
+    assert user_settings.apply_listing_field_defaults(explicit_zero) is False
+    assert "renewalOption" not in explicit_zero["etsy_specifics"]
+
 
 SHOEBOX = "mercari_specifics.package.fitsShoebox"
 

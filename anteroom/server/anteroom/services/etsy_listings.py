@@ -113,6 +113,12 @@ def _matches(remote: dict, snapshot: dict) -> bool:
     try:
         from anteroom.services.seller_overrides import marketplace_text
 
+        details = snapshot.get("etsy_specifics")
+        wanted_renewal = etsy_renewal_raw(details) if isinstance(details, dict) else ""
+        if wanted_renewal:
+            remote_renewal = etsy_renewal_raw({"should_auto_renew": remote.get("should_auto_renew")})
+            if remote_renewal != wanted_renewal:
+                return False
         return (html.unescape(str(remote.get("title") or "")) == etsy_title(snapshot)
                 and html.unescape(str(remote.get("description") or "")) == marketplace_text(snapshot, "etsy", "description")
                 and _remote_price(remote) == _price(etsy_price(snapshot)))
