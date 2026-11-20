@@ -1090,6 +1090,11 @@ def _follow_native_size_rows(listing: dict, seed: dict, size: str) -> None:
                 from vendoo_studio.services.ebay_fields import ebay_size_for_type
 
                 wanted = ebay_size_for_type(size, _ebay_size_type(listing, seed, block))
+            elif market == "mercari" and _size_key_locked(seed, market, "size"):
+                from vendoo_studio.services.seller_overrides import marketplace_text
+
+                # Older saved size labels are restored later; their native ID must already follow them.
+                wanted = marketplace_text(seed, market, "size").strip()
             else:
                 wanted = str(block.get("size") or size)
             options = [str(option) for option in row.get("options") or []]

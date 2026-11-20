@@ -258,6 +258,20 @@ class LockedSizeGenerationTest(unittest.TestCase):
         self.assertEqual(parsed["title"], title.replace(" S ", " "))
         self.assertTrue(parsed["title"].endswith(" Tee"))
 
+    def test_tag_alignment_keeps_a_saved_legacy_mercari_size_effective(self):
+        row = {**MERCARI_ROW, "options": ["S", "M", "L", "0"],
+               "option_values": {**MERCARI_ROW["option_values"], "0": "10"}}
+        for saved, expected in [("L", "13"), ("0", "10")]:
+            with self.subTest(saved=saved):
+                self.seller_set("M", locks=("mercari_specifics.size",), mercari_specifics={"size": saved},
+                                _native_forms={"mercari": {"fields": [row]}})
+                ConversationRepo(self.db).write_notes(self.conv.id, json.dumps({"size": "M"}))
+                parsed = self.generate(mercari_specifics={"size": "S"})
+                block = parsed["mercari_specifics"]
+                effective = block.get("nativeSizeId") or row["option_values"].get(block.get("size"))
+                self.assertEqual(block["size"], saved)
+                self.assertEqual(effective, expected)
+
 
 if __name__ == "__main__":
     unittest.main()

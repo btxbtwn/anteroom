@@ -2,3 +2,4 @@
 - The size you enter in bulk upload in the Mac app and on the web is now the listing's Size, not a line in its notes.
 - Notes for measurements and sizes read from photos no longer name the AI provider or model.
 - Keep the confirmed tag size consistent with marketplace size choices and the listing title.
+- Keep a saved Mercari size when regenerating from a different tag size.

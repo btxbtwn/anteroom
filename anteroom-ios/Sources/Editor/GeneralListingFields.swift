@@ -34,7 +34,7 @@ struct GeneralListingFields: View {
                             .focused($tagSizeFocused)
                             .accessibilityIdentifier("seller-tag-size")
                     }
-                    Text("From the size tag. Generating uses it as the listing's Size.")
+                    Text("Generating uses the tag size unless you set or clear General Size.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }
