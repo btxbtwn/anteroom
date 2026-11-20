@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1065 — 2026-11-20
+
+- Keep marketplace form schemas out of the listing database payload and prevent database pool timeouts during category lookups and listing publishes.
+- Refuse Depop offer previews when no eligible likers exist instead of reporting a server error.
+
 ## 0.1.1064 — 2026-11-20
 
 - Keep concurrent listing generations from timing out while saving marketplace fields by reusing fresh saved forms instead of reloading unchanged marketplaces, avoiding deep copies of saved forms during validation rechecks, and retrying brief database hiccups on background task heartbeats.
