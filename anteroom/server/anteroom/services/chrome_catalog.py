@@ -77,6 +77,12 @@ def remember_direct_categories(db, revision, categories: dict | None) -> None:
     if not apply_direct_ids(updated, categories):
         return
     revision.listing_json = updated
+    if hasattr(revision, "normalized_hash"):
+        from anteroom.services.unsent_edits import invalidate_revision_matches, normalized_listing_hash
+
+        revision.normalized_hash = normalized_listing_hash(updated)
+        if getattr(revision, "id", None):
+            invalidate_revision_matches(revision.id)
     db.commit()
 
 

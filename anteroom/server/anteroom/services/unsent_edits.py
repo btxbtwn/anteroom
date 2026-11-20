@@ -18,6 +18,13 @@ _REVISIONS_MATCH: dict[tuple[str, str], bool] = {}
 _REVISIONS_MATCH_MAX = 20_000
 
 
+def invalidate_revision_matches(revision_id: str) -> None:
+    """Drop cached match pairs for a revision whose JSON was rewritten in place."""
+    stale = [pair for pair in _REVISIONS_MATCH if revision_id in pair]
+    for pair in stale:
+        _REVISIONS_MATCH.pop(pair, None)
+
+
 def normalized_listing_hash(listing: dict | None) -> str | None:
     """SHA-256 of ``listing`` after normalizing sizes and dropdowns, as revision saves do."""
     if not isinstance(listing, dict):
@@ -70,9 +77,17 @@ def unsent_edits(db: Session, conversations: list, revisions: dict[str, str]) ->
                 if digest is not None:
                     hashes[rev_id] = digest
                     computed[rev_id] = digest
-            if computed and not (db.new or db.dirty or db.deleted):
-                repo.store_revision_hashes(computed)
-                db.commit()
+            if computed and not (db.new or db.dirty or db.deleted or db.info.get("changed_topics")):
+                was_quiet = db.info.get("quiet_changes")
+                db.info["quiet_changes"] = True
+                try:
+                    repo.store_revision_hashes(computed)
+                    db.commit()
+                finally:
+                    if was_quiet is None:
+                        db.info.pop("quiet_changes", None)
+                    else:
+                        db.info["quiet_changes"] = was_quiet
         for current, sent in unknown:
             left = hashes.get(current)
             _REVISIONS_MATCH[(current, sent)] = left is not None and left == hashes.get(sent)

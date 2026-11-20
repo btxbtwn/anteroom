@@ -149,7 +149,12 @@ def _save(db: Session, marketplace: str, listing_id: str, snapshot: dict, urls: 
     with start_gate():
         if reused := _reused(db, marketplace, listing_id):
             return reused
-        conv = inventory_imports.create_import(db, marketplace, snapshot, listing_id, downloaded, binding, identity=target_id)
+        from anteroom.services.unsent_edits import normalized_listing_hash
+
+        conv = inventory_imports.create_import(
+            db, marketplace, snapshot, listing_id, downloaded, binding,
+            identity=target_id, normalized_hash=normalized_listing_hash(snapshot),
+        )
         kept["photos"] = True
     warnings = []
     if len(downloaded) < len(urls):

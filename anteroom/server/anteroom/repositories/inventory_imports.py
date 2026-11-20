@@ -28,10 +28,10 @@ def _price(value) -> float | None:
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0 else None
 
 
-def create_import(db: Session, marketplace: str, snapshot: dict, listing_id: str, photos: list[dict], binding: dict | None = None, *, identity: str) -> Conversation:
+def create_import(db: Session, marketplace: str, snapshot: dict, listing_id: str, photos: list[dict], binding: dict | None = None, *, identity: str, normalized_hash: str | None = None) -> Conversation:
     public_url = public_listing_url(marketplace, listing_id)
     conv = Conversation(id=identity, title=snapshot["title"], status="active")
-    revision = ListingRevision(id=new_id(), conversation_id=conv.id, listing_json=snapshot, source=f"{marketplace}_import")
+    revision = ListingRevision(id=new_id(), conversation_id=conv.id, listing_json=snapshot, normalized_hash=normalized_hash, source=f"{marketplace}_import")
     try:
         db.add(conv)
         db.flush()

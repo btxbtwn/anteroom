@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import logging
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -468,12 +468,21 @@ class ListingRepo:
         return result
 
     def store_revision_hashes(self, hashes: dict[str, str]) -> None:
-        """Persist computed normalized hashes for legacy revisions that lacked one."""
-        for rev_id, digest in hashes.items():
+        """Persist computed normalized hashes for legacy revisions in batched UPDATEs."""
+        if not hashes:
+            return
+        items = sorted(hashes.items())
+        for start in range(0, len(items), 200):
+            chunk = items[start:start + 200]
+            mapping = dict(chunk)
             self.db.execute(
                 update(ListingRevision)
-                .where(ListingRevision.id == rev_id, ListingRevision.normalized_hash.is_(None))
-                .values(normalized_hash=digest)
+                .where(
+                    ListingRevision.id.in_(list(mapping)),
+                    ListingRevision.normalized_hash.is_(None),
+                )
+                .values(normalized_hash=case(mapping, value=ListingRevision.id))
+                .execution_options(synchronize_session=False)
             )
 
     def revision_bodies(self, revision_ids: set[str]) -> dict[str, dict]:

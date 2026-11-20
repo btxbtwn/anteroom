@@ -357,3 +357,95 @@ def test_suggestions_reads_compact_columns_without_listing_json(migration_engine
         assert conv_queries
         assert not any("updated_at" in sql or "box_id" in sql for sql in conv_queries)
 
+
+def test_remember_direct_categories_refreshes_normalized_hash_and_clears_match_cache(migration_engine):  # noqa: F811
+    from anteroom.models.marketplace_listing import MarketplaceListing
+    from anteroom.services import chrome_catalog, listing_persistence, unsent_edits as unsent_module
+
+    engine = migration_engine
+    schema_migrations.ensure_schema(engine)
+    with Session(engine) as db:
+        db.add(Conversation(id="item", title="Coat"))
+        db.commit()
+        payload = {"title": "Wool coat", "price": 45}
+        rev1 = listing_persistence.save_revision(db, "item", payload, "user_form")
+        db.add(MarketplaceListing(
+            conversation_id="item", marketplace="poshmark", state="published",
+            listing_id="pm-1", revision_id=rev1.id,
+        ))
+        db.commit()
+
+        # Rewriting direct_category_ids in place must refresh normalized_hash and
+        # invalidate any cached pair comparisons involving that revision.
+        old_hash = rev1.normalized_hash
+        chrome_catalog.remember_direct_categories(db, rev1, {"poshmark": "cat-42"})
+        assert rev1.normalized_hash != old_hash
+        assert rev1.normalized_hash == unsent_module.normalized_listing_hash(rev1.listing_json)
+
+        # Saving an identical copy of the updated payload must not show unsent edits.
+        rev2 = listing_persistence.save_revision(db, "item", dict(rev1.listing_json), "user_form")
+        db.commit()
+        convs = db.query(Conversation).all()
+        unsent_module._REVISIONS_MATCH.clear()
+        assert unsent_module.unsent_edits(db, convs, {"item": rev2.id}) == set()
+
+        # Rewriting rev1 again invalidates the cached match immediately.
+        chrome_catalog.remember_direct_categories(db, rev1, {"depop": "dep-9"})
+        assert unsent_module.unsent_edits(db, convs, {"item": rev2.id}) == {"item"}
+
+
+def test_legacy_hash_backfill_batches_updates_into_one_statement(migration_engine):  # noqa: F811
+    from anteroom.models.marketplace_listing import MarketplaceListing
+    from anteroom.services import unsent_edits as unsent_module
+
+    engine = migration_engine
+    schema_migrations.ensure_schema(engine)
+    with Session(engine) as db:
+        revisions: dict[str, str] = {}
+        for idx in range(10):
+            conv_id = f"item-{idx}"
+            sent_id = f"sent-{idx}"
+            curr_id = f"curr-{idx}"
+            db.add(Conversation(id=conv_id, title=f"Coat {idx}"))
+            db.flush()
+            db.add_all([
+                ListingRevision(id=sent_id, conversation_id=conv_id, source="test",
+                                listing_json={"title": f"Coat {idx}", "price": 40}, normalized_hash=None),
+                ListingRevision(id=curr_id, conversation_id=conv_id, source="test",
+                                listing_json={"title": f"Coat {idx}", "price": 45}, normalized_hash=None),
+            ])
+            db.flush()
+            db.add(Listing(conversation_id=conv_id, current_revision_id=curr_id))
+            db.add(MarketplaceListing(
+                conversation_id=conv_id, marketplace="ebay", state="published",
+                listing_id=f"eb-{idx}", revision_id=sent_id,
+            ))
+            revisions[conv_id] = curr_id
+        db.commit()
+
+        convs = db.query(Conversation).all()
+        unsent_module._REVISIONS_MATCH.clear()
+        updates: list[str] = []
+
+        def capture(_connection, _cursor, statement, _parameters, _context, _many):
+            if statement.lstrip().upper().startswith("UPDATE"):
+                updates.append(statement)
+
+        event.listen(engine, "before_cursor_execute", capture)
+        try:
+            changed = unsent_module.unsent_edits(db, convs, revisions)
+        finally:
+            event.remove(engine, "before_cursor_execute", capture)
+
+        assert changed == set(revisions)
+        # 20 legacy revisions backfilled in a single batched CASE UPDATE, not 20 round trips.
+        assert len(updates) == 1
+        assert "quiet_changes" not in db.info
+        db.expire_all()
+        stored = [
+            row[0] for row in db.query(ListingRevision.normalized_hash).all()
+        ]
+        assert len(stored) == 20
+        assert all(digest is not None for digest in stored)
+
+
