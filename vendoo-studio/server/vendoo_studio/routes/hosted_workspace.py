@@ -137,15 +137,15 @@ async def suggestions(request: Request):
 
 def inventory_response(db):
     from vendoo_studio.repositories.queries import ConversationRepo
-    from vendoo_studio.services.hosted_read_snapshots import inventory_step
+    from vendoo_studio.services.hosted_read_snapshots import snapshot_step
 
     # The shared sidebar filters stored inventory status. Reconcile it from
     # listings and paid sales just as the desktop list endpoint does.
     from vendoo_studio.services.inventory_analytics import read_analytics_inputs, rows_from_inputs
 
-    with inventory_step(db, 'analytics'):
+    with snapshot_step(db, 'analytics'):
         analytics = read_analytics_inputs(db)
-    with inventory_step(db, 'reconcile'):
+    with snapshot_step(db, 'reconcile'):
         ConversationRepo(db).reconcile_item_statuses(
             [row for row in db.scalars(select(Conversation).options(defer(Conversation.notes))).all()
              if row.id in analytics.statuses],
@@ -153,7 +153,7 @@ def inventory_response(db):
             analytics.statuses)
     # Keep the existing sidebar's complete-list contract; it filters and
     # virtualizes locally. No historical pointers or fallback file URLs escape.
-    with inventory_step(db, 'conversations'):
+    with snapshot_step(db, 'conversations'):
         rows = db.scalars(select(Conversation).options(defer(Conversation.notes)).order_by(Conversation.updated_at.desc(), Conversation.id.desc())).all()
     reconciled = {row.id: row.status for row in rows}
     # Parsed once for analytics; the rows themselves leave notes unloaded.
@@ -161,13 +161,13 @@ def inventory_response(db):
     # Another device may create or delete a draft between these committed reads.
     analytics.conversations = [(identity, title, reconciled.get(identity, status), notes, box)
                               for identity, title, status, notes, box in analytics.conversations]
-    with inventory_step(db, 'covers'):
+    with snapshot_step(db, 'covers'):
         ordered = select(Photo.conversation_id, Photo.id, Photo.checksum, func.row_number().over(
             partition_by=Photo.conversation_id, order_by=(Photo.display_order, Photo.id)).label('position')).where(
                 Photo.marketplace.is_(None)).subquery()
         covers = {identity: (photo_id, checksum) for identity, photo_id, checksum in db.execute(
             select(ordered.c.conversation_id, ordered.c.id, ordered.c.checksum).where(ordered.c.position == 1))}
-    with inventory_step(db, 'listings'):
+    with snapshot_step(db, 'listings'):
         current = {}
         for identity, sku, price, quantity in db.execute(select(Listing.conversation_id,
                 json_value(ListingRevision.inventory_fields, 'sku'), json_value(ListingRevision.inventory_fields, 'price'),
@@ -179,20 +179,20 @@ def inventory_response(db):
                                  'quantity': int(quantity) if quantity is not None else None}
     from vendoo_studio.repositories.marketplace_listings import MarketplaceListingRepo
 
-    with inventory_step(db, 'direct'):
+    with snapshot_step(db, 'direct'):
         direct = MarketplaceListingRepo(db).summaries()
     from vendoo_studio.services.sales_records import read_sale_lines, records_from_lines, missing_from_records
 
-    with inventory_step(db, 'sales'):
+    with snapshot_step(db, 'sales'):
         sales = read_sale_lines(db)
     from vendoo_studio.services.unsent_edits import unsent_edits
 
-    with inventory_step(db, 'unsent'):
+    with snapshot_step(db, 'unsent'):
         unsent = unsent_edits(db, rows, ConversationRepo(db).current_revision_ids())
     # Ledger validation, cost allocation and hashing are CPU work over loaded
     # values. Keep scarce connections available while that work runs.
     db.close()
-    with inventory_step(db, 'assemble'):
+    with snapshot_step(db, 'assemble'):
         missing = missing_from_records(records_from_lines(sales, rows_from_inputs(analytics)))
         summaries = []
         for row in rows:

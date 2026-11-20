@@ -1066,3 +1066,36 @@ inventory-response projection test. Production replay, database queries,
 query optimization and load benchmarks are outside this diagnostic's scope.
 Full selected local validation and hosted/Postgres coverage remain required
 before release; focused SQLite coverage alone is insufficient.
+
+### Suggestions and Chrome reply diagnostics — 2026-11-17
+
+This follow-up to the inventory-step diagnostic adds fixed `sug_<step>_ms`
+and `sug_<step>_orm_calls` fields for preferences, covers, photo_counts,
+listing_rows, direct, conversations, busy and ranking. It reuses the same
+session-local observer (now named `snapshot_step`) and preserves queries,
+connection release before ranking, output and cache behavior. Preference
+settings use a separate hosted session: its elapsed work is measured, but its
+SQL is not counted by the observed suggestions session; zero ORM calls there
+must not be read as zero database work. Other limits of the inventory counters
+apply, including fixed labels, saturation and no server SQL attribution.
+
+For `/api/browser-relay/replies`, fixed `relay_lookup_ms/calls` and
+`relay_persist_ms/calls` fields time the existing worker awaits around route
+lookup and diagnostic persistence. Calls are zero or one; milliseconds saturate
+at 600,000. Elapsed time includes scheduling/network/driver/Python work and,
+when cancelled, ends when the await is cancelled, not when its existing worker
+later finishes. Replay, missing-reply, absent-timing and error paths retain
+their original behavior. Persistence still precedes reply resolution; its
+SQLAlchemy errors are still swallowed, other failures/cancellation propagate.
+No new timeout, retry, task, query, log line or external call is introduced.
+These are diagnostic observations, not a speed fix or a common-cause claim
+about the supplied suggestions/jobs/relay samples.
+
+The suggestions parity fixture requires a known validation card and compares
+results and query counts with observation active versus inactive in the current
+implementation; it does not compare against the previous implementation's query
+sequence. Other fixtures cover snapshot cache reset, reply branch ordering,
+error propagation and actual awaiting-task
+cancellation while its original worker finishes. Full selected local checks,
+Postgres/hosted/browser coverage and timing-overhead/load measurements remain
+unverified until separately coordinated; no production replay was used.
