@@ -4,7 +4,13 @@
 CI on main picks its jobs from the change against the previous commit, so a
 docs-only merge can pass while an earlier merge's code failed. Shipping the
 newer one ships both. So every first-parent commit on main after the one
-production runs, up to the one being shipped, must have passed CI. "Release
+production runs, up to the one being shipped, must have passed CI. When GitHub
+pushes multiple commits to main in one push (for example a rebase merge), GitHub
+Actions triggers push CI only on the push tip with ``github.event.before`` set
+to the commit before the push; an intermediate commit without its own push run
+may count as tested only when a later push run at the tip is live-verified to
+have the exact trusted push provenance, the exact same ``base..tip`` Git diff
+and commit sequence, and every required CI job for that diff passing. "Release
 Anteroom" commits from the Version workflow only change version numbers and
 their CI skips the component checks, so they are left out; the merge before
 one can still be running when the release commit's CI passes, so this waits.
@@ -49,6 +55,29 @@ import verification_evidence
 RELEASE_PREFIX = "Release Anteroom "
 DEPLOYED_TITLE = "Deployed commit"
 MAX_HEALTH_BYTES = 64 * 1024
+MAX_COMPARE_BYTES = 16 * 1024 * 1024
+REPO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*")
+CI_WORKFLOW_PATH = ".github/workflows/ci.yml"
+CI_ALWAYS_REQUIRED_JOBS = frozenset({"Changed components", "Changelog", "Repo checks", "CI"})
+CI_COMPONENT_JOBS: dict[str, tuple[str, ...]] = {
+    "frontend": ("Studio frontend",),
+    "backend": (
+        "Studio backend (1/2)",
+        "Studio backend (2/2)",
+        "Studio backend Postgres (1/2)",
+        "Studio backend Postgres (2/2)",
+    ),
+    "browser": ("Studio browser tests (sandbox)", "Studio browser tests (hosted)"),
+    "health": ("Studio code health",),
+    "audit": ("Dependency audit / Audit locked Python dependencies",),
+    "extension": ("Extension",),
+    "relay": ("Webhook relay",),
+}
+PRE_RENAME_PREFIXES = (
+    ("vendoo-studio/", "anteroom/"),
+    ("vendoo-extension/", "anteroom-extension/"),
+    ("vendoo-ios/", "anteroom-ios/"),
+)
 
 # Single-base recovery checkpoint for historical fa824f9a (fixed in #1653).
 # Inert once Deploy hosted records a commit after b73c5347 (or after artifact
@@ -446,6 +475,441 @@ def reconcile_live_production_base(
     }
 
 
+def _load_changed_components():
+    spec = importlib.util.spec_from_file_location(
+        "changed_components",
+        Path(__file__).resolve().parent / "changed-components.py",
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Could not load changed-components.py.")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _parse_strict_json(raw: bytes):
+    return json.loads(
+        raw,
+        object_pairs_hook=recovery_evidence.unique_object,
+        parse_constant=lambda _: (_ for _ in ()).throw(ValueError("Non-finite JSON.")),
+    )
+
+
+def _normalize_pre_rename_path(path: str, *, pre_rename: bool) -> str:
+    if not pre_rename:
+        return path
+    for old_prefix, new_prefix in PRE_RENAME_PREFIXES:
+        if path.startswith(old_prefix):
+            return new_prefix + path[len(old_prefix):]
+    return path
+
+
+def _without_version_for_commit(changed_mod, norm_path: str, text: str, *, pre_rename: bool) -> object:
+    if pre_rename and norm_path.endswith("uv.lock"):
+        text = re.sub(r'(?m)^(name = "vendoo-studio"\nversion = )"[^"]*"', r"\1", text)
+    return changed_mod.without_version(norm_path, text)
+
+
+def _is_version_only(changed_mod, run_git, before: str, tip: str, path: str, *, pre_rename: bool) -> bool:
+    norm_path = _normalize_pre_rename_path(path, pre_rename=pre_rename)
+    if norm_path in changed_mod.VERSION_ONLY:
+        return True
+    if norm_path not in changed_mod.VERSIONED:
+        return False
+    try:
+        old_text = run_git("show", f"{before}:{path}")
+        new_text = run_git("show", f"{tip}:{path}")
+        return _without_version_for_commit(
+            changed_mod, norm_path, old_text, pre_rename=pre_rename
+        ) == _without_version_for_commit(
+            changed_mod, norm_path, new_text, pre_rename=pre_rename
+        )
+    except (KeyError, ValueError, TypeError, AttributeError, RuntimeError, subprocess.SubprocessError, json.JSONDecodeError):
+        return False
+
+
+def _required_push_jobs(changed_mod, run_git, before: str, tip: str, local_files: list[str]) -> set[str]:
+    top_level = set(run_git("ls-tree", "--name-only", tip).splitlines())
+    pre_rename = "vendoo-studio" in top_level and "anteroom" not in top_level
+    relevant_files = [
+        _normalize_pre_rename_path(path, pre_rename=pre_rename)
+        for path in local_files
+        if not _is_version_only(changed_mod, run_git, before, tip, path, pre_rename=pre_rename)
+    ]
+    selected = changed_mod.components(relevant_files)
+    if not isinstance(selected, dict) or set(selected) != set(CI_COMPONENT_JOBS):
+        raise ValueError("Changed-component selector does not match the deploy gate CI job contract.")
+    required = set(CI_ALWAYS_REQUIRED_JOBS)
+    for component, needed in selected.items():
+        if needed:
+            required.update(CI_COMPONENT_JOBS[component])
+    return required
+
+
+def _validate_push_run(
+    run: object,
+    *,
+    repo: str,
+    tip: str,
+    expected_tree: str,
+    expected_run_id: int | None = None,
+    expected_attempt: int | None = None,
+    expected_check_suite_id: int | None = None,
+) -> tuple[int, int, int, str, str]:
+    if not isinstance(run, dict):
+        raise ValueError("CI workflow run payload must be a JSON object.")
+    run_id = run.get("id")
+    attempt = run.get("run_attempt")
+    check_suite_id = run.get("check_suite_id")
+    if (
+        type(run_id) is not int or run_id < 1
+        or type(attempt) is not int or attempt < 1
+        or type(check_suite_id) is not int or check_suite_id < 1
+    ):
+        raise ValueError("CI run must report positive integer run, attempt, and check suite IDs.")
+    if expected_run_id is not None and run_id != expected_run_id:
+        raise ValueError("CI run ID changed during verification.")
+    if expected_attempt is not None and attempt != expected_attempt:
+        raise ValueError("CI run attempt changed during verification.")
+    if expected_check_suite_id is not None and check_suite_id != expected_check_suite_id:
+        raise ValueError("CI check suite ID changed during verification.")
+    repository = run.get("repository")
+    head_repository = run.get("head_repository")
+    head_commit = run.get("head_commit")
+    if (
+        not isinstance(repository, dict)
+        or not isinstance(head_repository, dict)
+        or not isinstance(head_commit, dict)
+    ):
+        raise ValueError("CI run is missing repository or head_commit provenance.")
+    repo_id = repository.get("id")
+    head_repo_id = head_repository.get("id")
+    if (
+        run.get("event") != "push"
+        or run.get("head_branch") != "main"
+        or run.get("head_sha") != tip
+        or run.get("path") != CI_WORKFLOW_PATH
+        or repository.get("full_name") != repo
+        or head_repository.get("full_name") != repo
+        or type(repo_id) is not int or repo_id < 1
+        or head_repo_id != repo_id
+        or head_commit.get("id") != tip
+        or head_commit.get("tree_id") != expected_tree
+    ):
+        raise ValueError("CI push run provenance does not match the exact trusted repository, branch, workflow, and tree.")
+    status = run.get("status")
+    conclusion = run.get("conclusion")
+    if not isinstance(status, str) or not status:
+        raise ValueError("CI push run is missing a valid status.")
+    if conclusion is not None and not isinstance(conclusion, str):
+        raise ValueError("CI push run reported a non-string conclusion.")
+    return run_id, attempt, check_suite_id, status, conclusion or ""
+
+
+def _validate_check_suite(suite: object, *, check_suite_id: int, tip: str) -> str:
+    if not isinstance(suite, dict):
+        raise ValueError("Check suite payload must be a JSON object.")
+    app = suite.get("app")
+    if not isinstance(app, dict):
+        raise ValueError("Check suite payload is missing app metadata.")
+    before = suite.get("before")
+    if (
+        suite.get("id") != check_suite_id
+        or app.get("slug") != "github-actions"
+        or suite.get("head_branch") != "main"
+        or suite.get("head_sha") != tip
+        or suite.get("after") != tip
+    ):
+        raise ValueError("Check suite provenance does not match the GitHub Actions main push at tip.")
+    verification_evidence.require_sha(before)
+    if set(before) == {"0"} or before == tip:
+        raise ValueError("Check suite before SHA is not a valid ancestor commit.")
+    return before
+
+
+def _validate_compare_diff(
+    compare: object,
+    *,
+    before: str,
+    tip: str,
+    before_tree: str,
+    tip_tree: str,
+    push_span: list[str],
+    local_files: list[str],
+) -> None:
+    if not isinstance(compare, dict):
+        raise ValueError("GitHub compare payload must be a JSON object.")
+    if (
+        compare.get("status") != "ahead"
+        or compare.get("behind_by") != 0
+        or compare.get("ahead_by") != len(push_span)
+        or compare.get("total_commits") != len(push_span)
+    ):
+        raise ValueError("GitHub compare commit counts do not match the exact local base..tip push span.")
+    base_commit = compare.get("base_commit")
+    merge_base = compare.get("merge_base_commit")
+    commits = compare.get("commits")
+    files = compare.get("files")
+    if (
+        not isinstance(base_commit, dict)
+        or not isinstance(merge_base, dict)
+        or not isinstance(commits, list)
+        or not isinstance(files, list)
+    ):
+        raise ValueError("GitHub compare payload is missing commit or file evidence.")
+    base_commit_obj = base_commit.get("commit")
+    base_tree_obj = base_commit_obj.get("tree") if isinstance(base_commit_obj, dict) else None
+    base_tree_sha = base_tree_obj.get("sha") if isinstance(base_tree_obj, dict) else None
+    if (
+        base_commit.get("sha") != before
+        or merge_base.get("sha") != before
+        or base_tree_sha != before_tree
+    ):
+        raise ValueError("GitHub compare base commit or tree does not match local Git.")
+    if len(commits) != len(push_span):
+        raise ValueError("GitHub compare commit list is truncated or mismatched.")
+    if any(not isinstance(item, dict) for item in commits):
+        raise ValueError("GitHub compare commit entry must be a JSON object.")
+    if [item.get("sha") for item in commits] != push_span:
+        raise ValueError("GitHub compare commit sequence does not match local main first-parent history.")
+    last_commit_obj = commits[-1].get("commit")
+    last_tree_obj = last_commit_obj.get("tree") if isinstance(last_commit_obj, dict) else None
+    last_tree_sha = last_tree_obj.get("sha") if isinstance(last_tree_obj, dict) else None
+    if last_tree_sha != tip_tree:
+        raise ValueError("GitHub compare tip tree does not match local Git.")
+    compare_files: set[str] = set()
+    for entry in files:
+        if not isinstance(entry, dict):
+            raise ValueError("GitHub compare file entry must be a JSON object.")
+        filename = entry.get("filename")
+        if not isinstance(filename, str) or not filename:
+            raise ValueError("GitHub compare file entry is missing a filename.")
+        compare_files.add(filename)
+        previous = entry.get("previous_filename")
+        if previous is not None:
+            if not isinstance(previous, str) or not previous:
+                raise ValueError("GitHub compare file entry has an invalid previous_filename.")
+            compare_files.add(previous)
+    local_file_set = set(local_files)
+    if len(local_file_set) <= 300:
+        if len(files) > 300 or compare_files != local_file_set:
+            raise ValueError("GitHub compare changed file set does not match local base..tip diff.")
+    else:
+        if len(files) != 300 or not compare_files <= local_file_set:
+            raise ValueError("GitHub compare truncated file set is inconsistent with local base..tip diff.")
+
+
+def _validate_push_jobs(
+    jobs: list[dict],
+    *,
+    run_id: int,
+    attempt: int,
+    tip: str,
+    required_jobs: set[str],
+) -> None:
+    seen_names: set[str] = set()
+    succeeded: set[str] = set()
+    for job in jobs:
+        if not isinstance(job, dict):
+            raise ValueError("CI job entry must be a JSON object.")
+        if (
+            job.get("run_id") != run_id
+            or job.get("run_attempt") != attempt
+            or job.get("head_sha") != tip
+        ):
+            raise ValueError("CI job provenance does not match the verified push run attempt and tip commit.")
+        name = job.get("name")
+        if not isinstance(name, str) or not name or name in seen_names:
+            raise ValueError("CI job inventory has a missing or duplicate job name.")
+        seen_names.add(name)
+        status = job.get("status")
+        conclusion = job.get("conclusion")
+        if status != "completed" or conclusion not in ("success", "skipped"):
+            raise ValueError(f"CI job {name!r} did not succeed or cleanly skip (status={status!r}, conclusion={conclusion!r}).")
+        if conclusion == "success":
+            succeeded.add(name)
+    missing_or_skipped = sorted(required_jobs - succeeded)
+    if missing_or_skipped:
+        raise ValueError(
+            "Required CI checks for the base..tip diff were not exercised and passing: "
+            + ", ".join(missing_or_skipped)
+        )
+
+
+def _evaluate_tip_push(
+    repo: str,
+    tip: str,
+    full_span: list[str],
+    production: str,
+    *,
+    fetch,
+    run_git,
+    changed_mod,
+) -> dict:
+    try:
+        tip_tree = verification_evidence.require_sha(run_git("rev-parse", f"{tip}^{{tree}}"))
+        runs_payload = fetch(f"actions/workflows/ci.yml/runs?head_sha={tip}&event=push&per_page=1")
+        if not isinstance(runs_payload, dict) or not isinstance(runs_payload.get("workflow_runs"), list):
+            raise ValueError("Invalid workflow_runs response for candidate push tip.")
+        runs = runs_payload["workflow_runs"]
+        if not runs:
+            return {"status": "none", "reason": f"No push CI run on {tip[:8]}."}
+        run_id, attempt, check_suite_id, run_status, run_conclusion = _validate_push_run(
+            runs[0], repo=repo, tip=tip, expected_tree=tip_tree
+        )
+        suite = fetch(f"check-suites/{check_suite_id}")
+        before = _validate_check_suite(suite, check_suite_id=check_suite_id, tip=tip)
+        if before != production and before not in full_span:
+            raise ValueError(f"Check suite base {before[:8]} is outside the production..HEAD deploy span.")
+        before_tree = verification_evidence.require_sha(run_git("rev-parse", f"{before}^{{tree}}"))
+        push_span = run_git("rev-list", "--first-parent", "--reverse", f"{before}..{tip}").splitlines()
+        if not push_span or push_span[-1] != tip:
+            raise ValueError(f"Local Git span {before[:8]}..{tip[:8]} is empty or does not end at {tip[:8]}.")
+        if len(push_span) == 1:
+            return {"status": "none", "reason": f"Push CI on {tip[:8]} tested only {tip[:8]}."}
+        if run_git("rev-parse", f"{push_span[0]}^1") != before:
+            raise ValueError(f"First-parent base of {push_span[0][:8]} does not match push base {before[:8]}.")
+        if push_span[0] not in full_span:
+            raise ValueError(f"Push span start {push_span[0][:8]} is outside production..HEAD.")
+        start = full_span.index(push_span[0])
+        if full_span[start : start + len(push_span)] != push_span:
+            raise ValueError(f"Push span {before[:8]}..{tip[:8]} is not contiguous on main first-parent history.")
+        local_raw = run_git("diff", "--no-renames", "--name-only", "-z", before, tip)
+        local_files = sorted({path for path in local_raw.split("\0") if path})
+        compare = fetch(f"compare/{before}...{tip}")
+        _validate_compare_diff(
+            compare,
+            before=before,
+            tip=tip,
+            before_tree=before_tree,
+            tip_tree=tip_tree,
+            push_span=push_span,
+            local_files=local_files,
+        )
+    except (KeyError, ValueError, TypeError, RuntimeError, OSError, subprocess.SubprocessError, json.JSONDecodeError) as error:
+        return {"status": "invalid", "reason": f"Push coverage check at {tip[:8]} failed: {error}"}
+
+    covered_intermediates = set(push_span[:-1])
+    if run_status != "completed":
+        return {
+            "status": "waiting",
+            "covered": covered_intermediates,
+            "detail": f"push CI on {tip[:8]} (run {run_id}, covering {before[:8]}..{tip[:8]}) is {run_status}",
+        }
+    if run_conclusion != "success":
+        return {
+            "status": "failed",
+            "covered": covered_intermediates,
+            "detail": f"covering push CI on {tip[:8]} (run {run_id}, {before[:8]}..{tip[:8]}) finished as {run_conclusion!r}",
+        }
+    try:
+        required_jobs = _required_push_jobs(changed_mod, run_git, before, tip, local_files)
+        jobs = verification_evidence.all_jobs(fetch, str(run_id), str(attempt))
+        _validate_push_jobs(jobs, run_id=run_id, attempt=attempt, tip=tip, required_jobs=required_jobs)
+        # Re-read the run after reading attempt jobs to reject TOCTOU re-runs.
+        latest_run = fetch(f"actions/runs/{run_id}")
+        _, _, _, latest_status, latest_conclusion = _validate_push_run(
+            latest_run,
+            repo=repo,
+            tip=tip,
+            expected_tree=tip_tree,
+            expected_run_id=run_id,
+            expected_attempt=attempt,
+            expected_check_suite_id=check_suite_id,
+        )
+        if latest_status != "completed" or latest_conclusion != "success":
+            raise ValueError(
+                f"Covering push run {run_id} changed state to status={latest_status!r}, conclusion={latest_conclusion!r}."
+            )
+    except (KeyError, ValueError, TypeError, RuntimeError, OSError, subprocess.SubprocessError, json.JSONDecodeError) as error:
+        return {
+            "status": "failed",
+            "covered": covered_intermediates,
+            "detail": f"covering push CI on {tip[:8]} (run {run_id} attempt {attempt}, {before[:8]}..{tip[:8]}): {error}",
+        }
+    return {
+        "status": "covered",
+        "covered": covered_intermediates,
+        "detail": (
+            f"verified push CI on {tip[:8]} (run {run_id} attempt {attempt}, "
+            f"{before[:8]}..{tip[:8]}, {len(required_jobs)} required checks passed)"
+        ),
+    }
+
+
+def verify_push_coverage(
+    repo: str,
+    sha: str,
+    all_checked: list[str],
+    production: str | None,
+    head_sha: str,
+    *,
+    fetch=None,
+    git_fn=None,
+    cache: dict[str, dict] | None = None,
+) -> tuple[str, str]:
+    """Fail-closed check whether a missing commit was tested by a verified multi-commit push at a later tip.
+
+    Returns ``(state, detail)`` where ``state`` is one of:
+    - ``"covered"``: exact trusted push/run, identical ``base..tip`` diff, and all required checks passed.
+    - ``"waiting"``: exact verified covering push run at a later tip is still queued or running.
+    - ``"failed"``: exact verified covering push run completed without all required checks passing.
+    - ``"missing"``: no later tip proved coverage (caller must continue failing closed).
+    """
+    if not isinstance(repo, str) or not REPO_RE.fullmatch(repo):
+        return "missing", f"Invalid repository {repo!r}."
+    if production is None:
+        return "missing", "Recorded production commit is unknown."
+    try:
+        verification_evidence.require_sha(sha)
+        verification_evidence.require_sha(production)
+        verification_evidence.require_sha(head_sha)
+    except ValueError as error:
+        return "missing", str(error)
+    if sha not in all_checked:
+        return "missing", f"Commit {sha[:8]} is not in the deploy span."
+    candidates = all_checked[all_checked.index(sha) + 1 :]
+    if not candidates:
+        return "missing", f"No later commit after {sha[:8]} in the deploy span."
+
+    run_git = git_fn or _read_git
+    try:
+        full_span = run_git("rev-list", "--first-parent", "--reverse", f"{production}..{head_sha}").splitlines()
+        if not full_span or full_span[-1] != head_sha or sha not in full_span:
+            return "missing", f"Commit {sha[:8]} is not on first-parent history {production[:8]}..{head_sha[:8]}."
+        changed_mod = _load_changed_components()
+    except (KeyError, ValueError, RuntimeError, OSError, subprocess.SubprocessError) as error:
+        return "missing", f"Could not inspect local deploy span: {error}"
+
+    def default_fetch(path: str):
+        limit = MAX_COMPARE_BYTES if path.startswith("compare/") else recovery_evidence.MAX_ARCHIVE
+        return _parse_strict_json(
+            recovery_evidence.read_command(["gh", "api", "--method", "GET", f"repos/{repo}/{path}"], limit=limit)
+        )
+
+    api_fetch = fetch or default_fetch
+    tip_cache = {} if cache is None else cache
+    last_reason = f"No verified multi-commit push covered {sha[:8]}."
+    for tip in candidates:
+        if tip not in tip_cache:
+            tip_cache[tip] = _evaluate_tip_push(
+                repo,
+                tip,
+                full_span,
+                production,
+                fetch=api_fetch,
+                run_git=run_git,
+                changed_mod=changed_mod,
+            )
+        result = tip_cache[tip]
+        covered = result.get("covered", ())
+        if sha in covered:
+            return result["status"], result["detail"]
+        if result.get("status") == "invalid" and result.get("reason"):
+            last_reason = result["reason"]
+    return "missing", last_reason
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True)
@@ -480,13 +944,15 @@ def main() -> int:
 
     head_sha = git("rev-parse", args.head)
     production = production_commit(args.repo)
-    pending, why = commits_to_check(head_sha, production)
+    all_checked, why = commits_to_check(head_sha, production)
+    pending = list(all_checked)
     print(why)
     deadline = time.monotonic() + args.timeout
     missing_since: dict[str, float] = {}
     superseded_historical: str | None = None
     while True:
         waiting = []
+        coverage_cache: dict[str, dict] = {}
         for sha in pending:
             status, conclusion = ci_state(args.repo, sha)
             if status == "completed":
@@ -518,10 +984,35 @@ def main() -> int:
                 )
                 return 1
             if status == "missing":
+                cov_state, cov_detail = verify_push_coverage(
+                    args.repo,
+                    sha,
+                    all_checked,
+                    production,
+                    head_sha,
+                    cache=coverage_cache,
+                )
+                if cov_state == "covered":
+                    missing_since.pop(sha, None)
+                    print(f"CI on {sha[:8]} is covered by {cov_detail}.")
+                    continue
+                if cov_state == "waiting":
+                    missing_since.pop(sha, None)
+                    waiting.append((sha, f"waiting ({cov_detail})"))
+                    continue
+                if cov_state == "failed":
+                    print(
+                        f"::error::CI on {sha[:8]} failed closed ({cov_detail}), and this deploy ships its code. "
+                        "Re-run the covering CI run or fix main; its passing run deploys."
+                    )
+                    return 1
                 since = missing_since.setdefault(sha, time.monotonic())
                 # CI registers its check within seconds of a push; a long absence means it never ran.
                 if time.monotonic() - since > 10 * 60:
-                    print(f"::error::No CI check on {sha[:8]}. Its CI never ran, so this code is untested.")
+                    print(
+                        f"::error::No CI check on {sha[:8]}. Its CI never ran, so this code is untested. "
+                        f"({cov_detail})"
+                    )
                     return 1
             else:
                 missing_since.pop(sha, None)

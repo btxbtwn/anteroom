@@ -793,5 +793,497 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
         self.assertIn("--require-group worker", workflow_text)
 
 
+class WaitForTestedCodePushCoverageTests(unittest.TestCase):
+    def setUp(self):
+        self.gate = _load_wait_gate()
+        self.repo = "example/project"
+        self.prod = "1" * 40
+        self.c1 = "2" * 40
+        self.c2 = "3" * 40
+        self.tip = "4" * 40
+        self.release = "5" * 40
+        self.prod_tree = "a" * 40
+        self.tip_tree = "b" * 40
+        self.run_id = 44684943388
+        self.attempt = 1
+        self.check_suite_id = 120952562240
+
+        self.full_span = [self.c1, self.c2, self.tip, self.release]
+        self.all_checked = [self.c1, self.c2, self.tip]
+        self.push_span = [self.c1, self.c2, self.tip]
+        self.changed_files = [
+            "anteroom/server/anteroom/app.py",
+            "anteroom/src/App.tsx",
+            "changelog.d/fix.md",
+        ]
+
+        self.git_values = {
+            ("rev-parse", self.release): self.release,
+            ("rev-parse", self.tip): self.tip,
+            ("rev-parse", f"{self.prod}^{{tree}}"): self.prod_tree,
+            ("rev-parse", f"{self.tip}^{{tree}}"): self.tip_tree,
+            ("rev-parse", f"{self.c1}^1"): self.prod,
+            ("rev-list", "--first-parent", "--reverse", f"{self.prod}..{self.release}"): "\n".join(self.full_span),
+            ("rev-list", "--first-parent", "--reverse", f"{self.prod}..{self.tip}"): "\n".join(self.push_span),
+            ("diff", "--no-renames", "--name-only", "-z", self.prod, self.tip): "\0".join(self.changed_files) + "\0",
+            ("ls-tree", "--name-only", self.tip): ".github\nanteroom\nanteroom-extension\nchangelog.d\ndocs\n",
+        }
+
+        self.run = {
+            "id": self.run_id,
+            "run_attempt": self.attempt,
+            "check_suite_id": self.check_suite_id,
+            "event": "push",
+            "head_branch": "main",
+            "head_sha": self.tip,
+            "path": ".github/workflows/ci.yml",
+            "status": "completed",
+            "conclusion": "success",
+            "repository": {"id": 1183824317, "full_name": self.repo},
+            "head_repository": {"id": 1183824317, "full_name": self.repo},
+            "head_commit": {"id": self.tip, "tree_id": self.tip_tree},
+        }
+        self.latest_run = None
+        self.suite = {
+            "id": self.check_suite_id,
+            "app": {"slug": "github-actions"},
+            "head_branch": "main",
+            "head_sha": self.tip,
+            "before": self.prod,
+            "after": self.tip,
+            "status": "completed",
+            "conclusion": "failure",  # Unrelated workflow in same check suite must not poison CI check.
+        }
+        self.compare = {
+            "status": "ahead",
+            "behind_by": 0,
+            "ahead_by": len(self.push_span),
+            "total_commits": len(self.push_span),
+            "base_commit": {"sha": self.prod, "commit": {"tree": {"sha": self.prod_tree}}},
+            "merge_base_commit": {"sha": self.prod, "commit": {"tree": {"sha": self.prod_tree}}},
+            "commits": [
+                {"sha": self.c1, "commit": {"tree": {"sha": "c" * 40}}},
+                {"sha": self.c2, "commit": {"tree": {"sha": "d" * 40}}},
+                {"sha": self.tip, "commit": {"tree": {"sha": self.tip_tree}}},
+            ],
+            "files": [{"filename": path, "status": "modified"} for path in self.changed_files],
+        }
+        self.jobs = self._make_jobs(
+            succeeded=[
+                "Changed components",
+                "Changelog",
+                "Repo checks",
+                "CI",
+                "Studio frontend",
+                "Studio backend (1/2)",
+                "Studio backend (2/2)",
+                "Studio backend Postgres (1/2)",
+                "Studio backend Postgres (2/2)",
+                "Studio browser tests (sandbox)",
+                "Studio browser tests (hosted)",
+                "Studio code health",
+            ],
+            skipped=["Extension", "Dependency audit", "Webhook relay"],
+        )
+        self.fetch_calls: list[str] = []
+
+    def _make_jobs(self, *, succeeded: list[str], skipped: list[str] = ()) -> list[dict]:
+        items = []
+        idx = 1
+        for name in succeeded:
+            items.append({
+                "id": idx,
+                "run_id": self.run_id,
+                "run_attempt": self.attempt,
+                "head_sha": self.tip,
+                "name": name,
+                "status": "completed",
+                "conclusion": "success",
+            })
+            idx += 1
+        for name in skipped:
+            items.append({
+                "id": idx,
+                "run_id": self.run_id,
+                "run_attempt": self.attempt,
+                "head_sha": self.tip,
+                "name": name,
+                "status": "completed",
+                "conclusion": "skipped",
+            })
+            idx += 1
+        return items
+
+    def fake_git(self, *args: str) -> str:
+        return self.git_values[args]
+
+    def fake_fetch(self, path: str):
+        self.fetch_calls.append(path)
+        if path == f"actions/workflows/ci.yml/runs?head_sha={self.c2}&event=push&per_page=1":
+            return {"workflow_runs": []}
+        if path == f"actions/workflows/ci.yml/runs?head_sha={self.tip}&event=push&per_page=1":
+            return {"workflow_runs": [copy.deepcopy(self.run)]}
+        if path == f"actions/runs/{self.run_id}":
+            return copy.deepcopy(self.run if self.latest_run is None else self.latest_run)
+        if path == f"check-suites/{self.check_suite_id}":
+            return copy.deepcopy(self.suite)
+        if path == f"compare/{self.prod}...{self.tip}":
+            return copy.deepcopy(self.compare)
+        if path.startswith(f"actions/runs/{self.run_id}/attempts/{self.attempt}/jobs?"):
+            return {"total_count": len(self.jobs), "jobs": copy.deepcopy(self.jobs)}
+        raise AssertionError(f"Unexpected API path: {path}")
+
+    def test_valid_multi_commit_push_covers_intermediates_and_uses_cache(self):
+        cache: dict[str, dict] = {}
+        state1, detail1 = self.gate.verify_push_coverage(
+            self.repo,
+            self.c1,
+            self.all_checked,
+            self.prod,
+            self.release,
+            fetch=self.fake_fetch,
+            git_fn=self.fake_git,
+            cache=cache,
+        )
+        self.assertEqual(state1, "covered")
+        self.assertIn(self.tip[:8], detail1)
+        self.assertIn(str(self.run_id), detail1)
+        calls_after_first = len(self.fetch_calls)
+
+        state2, _ = self.gate.verify_push_coverage(
+            self.repo,
+            self.c2,
+            self.all_checked,
+            self.prod,
+            self.release,
+            fetch=self.fake_fetch,
+            git_fn=self.fake_git,
+            cache=cache,
+        )
+        self.assertEqual(state2, "covered")
+        self.assertEqual(len(self.fetch_calls), calls_after_first, "Tip evaluation must be cached within one poll")
+
+    def test_waiting_failed_and_toctou_rerun_states(self):
+        self.run["status"] = "in_progress"
+        self.run["conclusion"] = None
+        state, detail = self.gate.verify_push_coverage(
+            self.repo, self.c1, self.all_checked, self.prod, self.release,
+            fetch=self.fake_fetch, git_fn=self.fake_git,
+        )
+        self.assertEqual(state, "waiting")
+        self.assertIn("in_progress", detail)
+
+        for conclusion in ("failure", "cancelled", "timed_out"):
+            with self.subTest(conclusion=conclusion):
+                self.run["status"] = "completed"
+                self.run["conclusion"] = conclusion
+                state, _ = self.gate.verify_push_coverage(
+                    self.repo, self.c1, self.all_checked, self.prod, self.release,
+                    fetch=self.fake_fetch, git_fn=self.fake_git,
+                )
+                self.assertEqual(state, "failed")
+
+        # TOCTOU: run re-triggered to attempt 2 while attempt 1 jobs were read.
+        self.run["status"] = "completed"
+        self.run["conclusion"] = "success"
+        self.latest_run = {**copy.deepcopy(self.run), "run_attempt": 2, "status": "in_progress", "conclusion": None}
+        state, detail = self.gate.verify_push_coverage(
+            self.repo, self.c1, self.all_checked, self.prod, self.release,
+            fetch=self.fake_fetch, git_fn=self.fake_git,
+        )
+        self.assertEqual(state, "failed")
+        self.assertIn("attempt", detail)
+
+    def test_untrusted_push_provenance_fails_closed(self):
+        mutations = [
+            ("event", "pull_request"),
+            ("event", "workflow_dispatch"),
+            ("head_branch", "feature"),
+            ("path", ".github/workflows/other.yml"),
+            ("head_sha", self.c2),
+            ("repository", {"id": 1183824317, "full_name": "evil/project"}),
+            ("head_repository", {"id": 999999, "full_name": self.repo}),
+            ("head_repository", {"id": 1183824317, "full_name": "fork/project"}),
+            ("head_commit", {"id": self.tip, "tree_id": "f" * 40}),
+            ("head_commit", {"id": self.c2, "tree_id": self.tip_tree}),
+            ("id", True),
+            ("run_attempt", 0),
+            ("check_suite_id", -1),
+        ]
+        for key, bad_value in mutations:
+            with self.subTest(key=key, bad_value=bad_value):
+                orig = copy.deepcopy(self.run)
+                self.run[key] = bad_value
+                state, _ = self.gate.verify_push_coverage(
+                    self.repo, self.c1, self.all_checked, self.prod, self.release,
+                    fetch=self.fake_fetch, git_fn=self.fake_git,
+                )
+                self.run = orig
+                self.assertEqual(state, "missing")
+
+    def test_check_suite_and_ancestry_mismatches_fail_closed(self):
+        # Wrong check suite fields.
+        suite_mutations = [
+            ("id", self.check_suite_id + 1),
+            ("app", {"slug": "other-app"}),
+            ("head_branch", "other"),
+            ("head_sha", self.c2),
+            ("after", self.c2),
+            ("before", "0" * 40),
+            ("before", self.tip),
+            ("before", "e" * 40),  # Outside production..HEAD span.
+        ]
+        for key, bad_value in suite_mutations:
+            with self.subTest(key=key, bad_value=bad_value):
+                orig = copy.deepcopy(self.suite)
+                self.suite[key] = bad_value
+                state, _ = self.gate.verify_push_coverage(
+                    self.repo, self.c1, self.all_checked, self.prod, self.release,
+                    fetch=self.fake_fetch, git_fn=self.fake_git,
+                )
+                self.suite = orig
+                self.assertEqual(state, "missing")
+
+        # Single-commit push at tip (before == c2) cannot cover c1 or c2.
+        self.suite["before"] = self.c2
+        self.git_values[("rev-parse", f"{self.c2}^{{tree}}")] = "d" * 40
+        self.git_values[("rev-list", "--first-parent", "--reverse", f"{self.c2}..{self.tip}")] = self.tip
+        state, _ = self.gate.verify_push_coverage(
+            self.repo, self.c1, self.all_checked, self.prod, self.release,
+            fetch=self.fake_fetch, git_fn=self.fake_git,
+        )
+        self.assertEqual(state, "missing")
+
+        # First-parent gap: c1^1 != before fails closed.
+        self.suite["before"] = self.prod
+        self.git_values[("rev-parse", f"{self.c1}^1")] = "f" * 40
+        state, _ = self.gate.verify_push_coverage(
+            self.repo, self.c1, self.all_checked, self.prod, self.release,
+            fetch=self.fake_fetch, git_fn=self.fake_git,
+        )
+        self.assertEqual(state, "missing")
+
+    def test_compare_diff_mismatches_fail_closed_and_renames_match(self):
+        mutations = [
+            ("status", "diverged"),
+            ("behind_by", 1),
+            ("ahead_by", 2),
+            ("total_commits", 4),
+            ("base_commit", {"sha": self.c1, "commit": {"tree": {"sha": self.prod_tree}}}),
+            ("merge_base_commit", {"sha": self.c1, "commit": {"tree": {"sha": self.prod_tree}}}),
+            ("base_commit", {"sha": self.prod, "commit": {"tree": {"sha": "f" * 40}}}),
+            ("commits", self.compare["commits"][1:]),
+            (
+                "commits",
+                [
+                    self.compare["commits"][0],
+                    self.compare["commits"][1],
+                    {"sha": self.tip, "commit": {"tree": {"sha": "f" * 40}}},
+                ],
+            ),
+            ("files", [{"filename": "anteroom/server/anteroom/app.py", "status": "modified"}]),
+            (
+                "files",
+                [*self.compare["files"], {"filename": "anteroom/uv.lock", "status": "modified"}],
+            ),
+        ]
+        for key, bad_value in mutations:
+            with self.subTest(key=key):
+                orig = copy.deepcopy(self.compare)
+                self.compare[key] = bad_value
+                state, _ = self.gate.verify_push_coverage(
+                    self.repo, self.c1, self.all_checked, self.prod, self.release,
+                    fetch=self.fake_fetch, git_fn=self.fake_git,
+                )
+                self.compare = orig
+                self.assertEqual(state, "missing")
+
+        # GitHub Compare renames include previous_filename; matches git diff --no-renames.
+        renamed_local = [
+            "anteroom/server/anteroom/new_name.py",
+            "anteroom/server/anteroom/old_name.py",
+            "anteroom/src/App.tsx",
+        ]
+        self.git_values[("diff", "--no-renames", "--name-only", "-z", self.prod, self.tip)] = (
+            "\0".join(renamed_local) + "\0"
+        )
+        self.compare["files"] = [
+            {
+                "filename": "anteroom/server/anteroom/new_name.py",
+                "previous_filename": "anteroom/server/anteroom/old_name.py",
+                "status": "renamed",
+            },
+            {"filename": "anteroom/src/App.tsx", "status": "modified"},
+        ]
+        state, _ = self.gate.verify_push_coverage(
+            self.repo, self.c1, self.all_checked, self.prod, self.release,
+            fetch=self.fake_fetch, git_fn=self.fake_git,
+        )
+        self.assertEqual(state, "covered")
+
+    def test_missing_skipped_failed_or_audit_jobs_fail_closed(self):
+        # Required job skipped -> fail closed.
+        orig_jobs = copy.deepcopy(self.jobs)
+        for job in self.jobs:
+            if job["name"] == "Studio backend Postgres (2/2)":
+                job["conclusion"] = "skipped"
+        state, detail = self.gate.verify_push_coverage(
+            self.repo, self.c1, self.all_checked, self.prod, self.release,
+            fetch=self.fake_fetch, git_fn=self.fake_git,
+        )
+        self.assertEqual(state, "failed")
+        self.assertIn("Studio backend Postgres (2/2)", detail)
+
+        # Unselected job failed -> fail closed.
+        self.jobs = copy.deepcopy(orig_jobs)
+        for job in self.jobs:
+            if job["name"] == "Extension":
+                job["conclusion"] = "failure"
+        state, _ = self.gate.verify_push_coverage(
+            self.repo, self.c1, self.all_checked, self.prod, self.release,
+            fetch=self.fake_fetch, git_fn=self.fake_git,
+        )
+        self.assertEqual(state, "failed")
+
+        # Duplicate job name or mismatched job attempt -> fail closed.
+        self.jobs = copy.deepcopy(orig_jobs)
+        self.jobs[0]["run_attempt"] = 2
+        state, _ = self.gate.verify_push_coverage(
+            self.repo, self.c1, self.all_checked, self.prod, self.release,
+            fetch=self.fake_fetch, git_fn=self.fake_git,
+        )
+        self.assertEqual(state, "failed")
+
+        # Dependency change in uv.lock requires reusable Dependency audit job name.
+        self.jobs = copy.deepcopy(orig_jobs)
+        lock_files = ["anteroom/uv.lock"]
+        self.git_values[("diff", "--no-renames", "--name-only", "-z", self.prod, self.tip)] = "anteroom/uv.lock\0"
+        self.git_values[("show", f"{self.prod}:anteroom/uv.lock")] = 'name = "anteroom"\nversion = "0.1.1"\ndep = "1.0"\n'
+        self.git_values[("show", f"{self.tip}:anteroom/uv.lock")] = 'name = "anteroom"\nversion = "0.1.1"\ndep = "2.0"\n'
+        self.compare["files"] = [{"filename": path, "status": "modified"} for path in lock_files]
+        state, detail = self.gate.verify_push_coverage(
+            self.repo, self.c1, self.all_checked, self.prod, self.release,
+            fetch=self.fake_fetch, git_fn=self.fake_git,
+        )
+        self.assertEqual(state, "failed")
+        self.assertIn("Dependency audit / Audit locked Python dependencies", detail)
+
+        # Once the exact reusable audit job succeeded, coverage passes.
+        for job in self.jobs:
+            if job["name"] == "Dependency audit":
+                job["name"] = "Dependency audit / Audit locked Python dependencies"
+                job["conclusion"] = "success"
+        state, _ = self.gate.verify_push_coverage(
+            self.repo, self.c1, self.all_checked, self.prod, self.release,
+            fetch=self.fake_fetch, git_fn=self.fake_git,
+        )
+        self.assertEqual(state, "covered")
+
+    def test_pre_rename_normalization_applies_only_to_historical_pre_rename_tree(self):
+        pre_files = [
+            "vendoo-studio/server/vendoo_studio/app.py",
+            "vendoo-studio/src/App.tsx",
+            "changelog.d/fix.md",
+        ]
+        self.git_values[("diff", "--no-renames", "--name-only", "-z", self.prod, self.tip)] = (
+            "\0".join(pre_files) + "\0"
+        )
+        self.compare["files"] = [{"filename": path, "status": "modified"} for path in pre_files]
+
+        # Post-rename tree (`anteroom` present): unknown vendoo-studio/ paths select ALL components and fail closed
+        # because Extension / Dependency audit / Webhook relay were skipped.
+        state, detail = self.gate.verify_push_coverage(
+            self.repo, self.c1, self.all_checked, self.prod, self.release,
+            fetch=self.fake_fetch, git_fn=self.fake_git,
+        )
+        self.assertEqual(state, "failed")
+        self.assertIn("Extension", detail)
+
+        # Pre-rename tree (`vendoo-studio` present, `anteroom` absent): normalizes to anteroom/ and passes exact 12 checks.
+        self.git_values[("ls-tree", "--name-only", self.tip)] = ".github\nvendoo-studio\nvendoo-extension\nchangelog.d\n"
+        state, _ = self.gate.verify_push_coverage(
+            self.repo, self.c1, self.all_checked, self.prod, self.release,
+            fetch=self.fake_fetch, git_fn=self.fake_git,
+        )
+        self.assertEqual(state, "covered")
+
+    def test_main_handles_covered_waiting_and_failed_rebase_push(self):
+        # 1. Valid multi-commit push: c1 and c2 missing, tip passed -> exits 0 with recovery_checkpoint=false.
+        with tempfile.TemporaryDirectory() as tmp:
+            gh_out = Path(tmp) / "github_output"
+            with (
+                patch.dict(os.environ, {"GITHUB_OUTPUT": str(gh_out)}),
+                patch.object(self.gate, "git", side_effect=self.fake_git),
+                patch.object(self.gate, "_read_git", side_effect=self.fake_git),
+                patch.object(self.gate, "production_commit", return_value=self.prod),
+                patch.object(self.gate, "commits_to_check", return_value=(self.all_checked, "span")),
+                patch.object(
+                    self.gate, "ci_state",
+                    side_effect=lambda r, s: ("completed", "success") if s == self.tip else ("missing", ""),
+                ),
+                patch.object(
+                    self.gate, "verify_push_coverage",
+                    side_effect=lambda repo, sha, all_c, prod, head, **kw: ("covered", "verified push CI"),
+                ),
+                patch.object(sys, "argv", ["gate", "--repo", self.repo, "--head", self.release, "--timeout", "0"]),
+            ):
+                self.assertEqual(self.gate.main(), 0)
+            self.assertEqual(gh_out.read_text(encoding="utf-8"), "recovery_checkpoint=false\n")
+
+        # 2. Covering push initially in_progress, then completes -> waits and exits 0.
+        polls = {"n": 0}
+
+        def fake_ci_poll(repo, sha):
+            if sha == self.tip:
+                polls["n"] += 1
+                return ("in_progress", "") if polls["n"] == 1 else ("completed", "success")
+            return ("missing", "")
+
+        def fake_cov_poll(repo, sha, all_c, prod, head, **kw):
+            return ("waiting", "push CI in_progress") if polls["n"] == 0 else ("covered", "verified push CI")
+
+        with (
+            patch.object(self.gate, "git", side_effect=self.fake_git),
+            patch.object(self.gate, "production_commit", return_value=self.prod),
+            patch.object(self.gate, "commits_to_check", return_value=(self.all_checked, "span")),
+            patch.object(self.gate, "ci_state", side_effect=fake_ci_poll),
+            patch.object(self.gate, "verify_push_coverage", side_effect=fake_cov_poll),
+            patch.object(self.gate.time, "sleep", return_value=None),
+            patch.object(sys, "argv", ["gate", "--repo", self.repo, "--head", self.release, "--timeout", "60", "--interval", "0"]),
+        ):
+            self.assertEqual(self.gate.main(), 0)
+
+        # 3. Failed coverage evidence exits 1 immediately.
+        with (
+            patch.object(self.gate, "git", side_effect=self.fake_git),
+            patch.object(self.gate, "production_commit", return_value=self.prod),
+            patch.object(self.gate, "commits_to_check", return_value=(self.all_checked, "span")),
+            patch.object(
+                self.gate, "ci_state",
+                side_effect=lambda r, s: ("completed", "success") if s == self.tip else ("missing", ""),
+            ),
+            patch.object(self.gate, "verify_push_coverage", return_value=("failed", "missing required check")),
+            patch.object(sys, "argv", ["gate", "--repo", self.repo, "--head", self.release, "--timeout", "60"]),
+        ):
+            self.assertEqual(self.gate.main(), 1)
+
+    def test_ci_job_contract_matches_workflows_and_changed_components(self):
+        changed_mod = self.gate._load_changed_components()
+        self.assertEqual(set(self.gate.CI_COMPONENT_JOBS), set(changed_mod.COMPONENTS))
+        ci_text = (SCRIPTS_DIR.parent / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        audit_text = (SCRIPTS_DIR.parent / "workflows" / "dependency-audit.yml").read_text(encoding="utf-8")
+        for job_name in self.gate.CI_ALWAYS_REQUIRED_JOBS:
+            self.assertIn(f"name: {job_name}\n", ci_text)
+        self.assertIn("name: Studio frontend\n", ci_text)
+        self.assertIn("name: Studio backend (${{ matrix.group }}/2)\n", ci_text)
+        self.assertIn("name: Studio backend Postgres (${{ matrix.group }}/2)\n", ci_text)
+        self.assertIn("name: Studio browser tests (${{ matrix.suite.name }})\n", ci_text)
+        self.assertIn("name: Studio code health\n", ci_text)
+        self.assertIn("name: Dependency audit\n", ci_text)
+        self.assertIn("name: Audit locked Python dependencies\n", audit_text)
+        self.assertIn("name: Extension\n", ci_text)
+        self.assertIn("name: Webhook relay\n", ci_text)
+
+
 if __name__ == "__main__":
     unittest.main()

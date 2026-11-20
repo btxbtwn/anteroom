@@ -1,0 +1,1 @@
+- Verify multi-commit rebase pushes in the hosted deploy gate using trusted push provenance, exact base-to-tip diff parity, and exercised required checks.
