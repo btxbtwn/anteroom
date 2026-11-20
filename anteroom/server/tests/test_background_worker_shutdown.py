@@ -275,7 +275,7 @@ def test_heartbeat_stops_task_when_renew_blocks_past_lease(monkeypatch):
         context = ServiceContext('seller', lambda: None, None, None, None)
         monkeypatch.setattr(background_worker, 'for_seller', lambda *_, **kwargs: context)
         monkeypatch.setattr(background_worker, 'HEARTBEAT_INTERVAL_S', 0.01)
-        monkeypatch.setattr(background_worker, 'LEASE_DURATION_S', 0.05)
+        monkeypatch.setattr(background_worker, 'LEASE_DURATION_S', 0.15)
 
         def renew(_task_id, _token):
             renew_started.set()

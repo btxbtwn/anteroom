@@ -123,6 +123,8 @@ async def run_claimed(task_id, owner, token, *, heartbeat_loop: BackgroundLoop):
                 try:
                     await asyncio.wait_for(asyncio.to_thread(queue.renew, task_id, token), timeout=remaining)
                 except TimeoutError:
+                    if last_error is not None:
+                        raise last_error from None
                     raise queue.TaskLeaseExpired() from None
                 except SQLAlchemyError as exc:
                     last_error = exc
