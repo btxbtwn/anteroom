@@ -181,3 +181,18 @@ if using a run-bound authorization, prove both authenticated record provenance
 and exact-run/first-attempt enforcement before wiring any production effect.
 Keep ordinary gates, all historical failed statuses and marketplace safeguards.
 Merging this precursor and activating any runtime path are separate decisions.
+
+
+A concrete control to evaluate for the missing approval boundary is a dedicated
+GitHub environment used only by the recovery approval job, with an explicitly
+approved required reviewer, administrator bypass disabled, and a reviewed
+self-review/initiator policy. Its creation/configuration needs separate approval;
+changing the existing production environment could otherwise alter ordinary
+release behavior. No credentials need to be copied into the approval job.
+The eventual side-effect job must validate that specific approval job/run and
+immutable input record, run only on the authorized first attempt, reject reused
+upstream outputs after partial reruns, and reconcile live state again inside
+existing serialization. Environment approval alone is not the durable one-use
+proof: approve and independently test the exact run-bound claim or durable claim
+mechanism as well. Until those controls and native/migration/operational receipts
+exist, the runtime route must stay disabled even when evidence validation passes.
