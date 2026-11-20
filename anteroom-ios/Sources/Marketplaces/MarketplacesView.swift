@@ -85,10 +85,16 @@ struct EbayWorkspaceView: View {
         .refreshable { await loadConnection() }
         .task { await loadConnection() }
         // While a sign-in page is open, check every two seconds; otherwise every fifteen.
-        .task(id: connection?.pending == true) {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(connection?.pending == true ? 2 : 15))
-                if Task.isCancelled { break }
+        // Only poll while the app is active so backgrounded sessions don't wake the network.
+        .task(id: PollKey(pending: connection?.pending == true, active: scenePhase == .active)) {
+            guard scenePhase == .active else { return }
+            while !Task.isCancelled && scenePhase == .active {
+                do {
+                    try await Task.sleep(for: .seconds(connection?.pending == true ? 2 : 15))
+                } catch {
+                    break
+                }
+                guard !Task.isCancelled && scenePhase == .active else { break }
                 await loadConnection()
             }
         }
@@ -98,6 +104,11 @@ struct EbayWorkspaceView: View {
                 Task { await loadConnection() }
             }
         }
+    }
+
+    private struct PollKey: Equatable {
+        let pending: Bool
+        let active: Bool
     }
 
     @ViewBuilder

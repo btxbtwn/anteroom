@@ -37,7 +37,7 @@ struct APIAuthorization: Sendable {
 final class AnteroomAPI: Sendable {
     private let baseURL: URL
     private let auth: APIAuthorization
-    private let session: URLSession
+    private let sessions: SessionBox
     private let readRetry: ReadRetry
     private let thumbnails = RequestGate(limit: 4)
     private let choiceLists = ChoiceListCache()
@@ -57,15 +57,23 @@ final class AnteroomAPI: Sendable {
         self.auth = auth
         self.readRetry = readRetry
         immutable = immutableCache
-        session = URLSession(configuration: configuration)
+        sessions = SessionBox(configuration: configuration)
     }
 
+    deinit {
+        sessions.invalidate()
+    }
+
+    var urlSession: URLSession { sessions.current }
+
     /// Forgets what belongs to the signed-in seller: cached server answers,
-    /// kept thumbnails and lists, and exported files.
+    /// kept thumbnails and lists, in-flight session connections, and exported files.
     func forgetSeller() async {
+        sessions.reset()
         await runtimeCache.clear()
         await selectedCache.clear()
         await optionsCache.clear()
+        await choiceLists.clear()
         await immutable.clear()
         try? FileManager.default.removeItem(at: Self.exportsDirectory)
     }
@@ -918,7 +926,7 @@ final class AnteroomAPI: Sendable {
         }
         upload.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         upload.timeoutInterval = 300
-        let (bytes, response) = try await session.bytes(for: upload)
+        let (bytes, response) = try await urlSession.bytes(for: upload)
         guard let http = response as? HTTPURLResponse else {
             throw APIError(status: 0, message: "Anteroom didn't answer. Reconnect to check your draft.")
         }
@@ -1012,7 +1020,7 @@ final class AnteroomAPI: Sendable {
         var upload = request
         upload.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         upload.timeoutInterval = 300
-        let (bytes, response) = try await session.bytes(for: upload)
+        let (bytes, response) = try await urlSession.bytes(for: upload)
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         guard (200..<300).contains(http.statusCode) else {
             var data = Data()
@@ -1197,7 +1205,7 @@ final class AnteroomAPI: Sendable {
 
     private func perform(_ request: URLRequest) async throws -> (Data, Int) {
         let (data, response) = try await readRetry.run(request) { request in
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await urlSession.data(for: request)
             guard let http = response as? HTTPURLResponse else {
                 throw APIError(status: 0, message: "Anteroom didn't answer. Try again.")
             }
@@ -1277,6 +1285,7 @@ actor SharedRead<Value: Sendable> {
     }
 
     func clear() {
+        current?.task.cancel()
         current = nil
     }
 }
@@ -1292,9 +1301,47 @@ actor ChoiceListCache {
             return try await task.value
         } catch {
             // A failed download is tried again the next time a form names the list.
-            lists[ref] = nil
+            if lists[ref] == task { lists[ref] = nil }
             throw error
         }
+    }
+
+    func clear() {
+        for task in lists.values { task.cancel() }
+        lists.removeAll()
+    }
+}
+
+/// Owns `AnteroomAPI`'s `URLSession` so sign-out cancels in-flight requests
+/// and drops pooled connections while keeping the reusable client ready for a
+/// subsequent sign-in, and teardown releases the active session cleanly.
+private final class SessionBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private let configuration: URLSessionConfiguration
+    private var session: URLSession
+
+    init(configuration: URLSessionConfiguration) {
+        let copy = (configuration.copy() as? URLSessionConfiguration) ?? configuration
+        self.configuration = copy
+        session = URLSession(configuration: copy)
+    }
+
+    var current: URLSession {
+        lock.withLock { session }
+    }
+
+    func reset() {
+        let previous: URLSession = lock.withLock {
+            let old = session
+            session = URLSession(configuration: configuration)
+            return old
+        }
+        previous.invalidateAndCancel()
+    }
+
+    func invalidate() {
+        let current = lock.withLock { session }
+        current.finishTasksAndInvalidate()
     }
 }
 

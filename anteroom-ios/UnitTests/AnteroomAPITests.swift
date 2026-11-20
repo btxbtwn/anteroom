@@ -147,13 +147,15 @@ final class AnteroomAPITests: XCTestCase {
     }
 
     func testValidationIssuesAreJoined() async {
+        let api = self.api!
         StubProtocol.answer(.init(status: 422, body: #"{"detail":[{"loc":["body","listing","price"],"msg":"Price is required","type":"missing"},{"loc":["body","listing","title"],"msg":"Title is too long","type":"string_too_long"}]}"#))
-        await assertMessage("Price is required\nTitle is too long") { _ = try await self.api.listing("a") }
+        await Self.assertMessage("Price is required\nTitle is too long") { _ = try await api.listing("a") }
     }
 
     func testUnreadableErrorSaysTryAgain() async {
+        let api = self.api!
         StubProtocol.answer(.init(status: 502, body: "<html>bad gateway</html>"))
-        await assertMessage("Something went wrong (502). Try again.") { _ = try await self.api.listing("a") }
+        await Self.assertMessage("Something went wrong (502). Try again.") { _ = try await api.listing("a") }
     }
 
     // MARK: Seller confirmation
@@ -169,14 +171,15 @@ final class AnteroomAPITests: XCTestCase {
     }
 
     func testAConfirmationForAnotherMarketplaceOrActionSendsNothing() async {
+        let api = self.api!
         StubProtocol.answer(.init(status: 200, body: "{}"))
-        await assertRefused { try await self.api.listOnMarketplace("a", marketplace: "poshmark", revisionID: "r1",
+        await Self.assertRefused { try await api.listOnMarketplace("a", marketplace: "poshmark", revisionID: "r1",
                                                                    confirmation: .unitTestOnly(.list, ["ebay"])) }
-        await assertRefused { try await self.api.updateOnMarketplace("a", marketplace: "ebay", revisionID: "r1",
+        await Self.assertRefused { try await api.updateOnMarketplace("a", marketplace: "ebay", revisionID: "r1",
                                                                      confirmation: .unitTestOnly(.list, ["ebay"])) }
-        await assertRefused { _ = try await self.api.delist("a", marketplaces: ["ebay", "depop"],
+        await Self.assertRefused { _ = try await api.delist("a", marketplaces: ["ebay", "depop"],
                                                             confirmation: .unitTestOnly(.delist, ["ebay"])) }
-        await assertRefused { _ = try await self.api.delist("a", marketplaces: [],
+        await Self.assertRefused { _ = try await api.delist("a", marketplaces: [],
                                                             confirmation: .unitTestOnly(.delist, ["ebay"])) }
         XCTAssertTrue(StubProtocol.requests.isEmpty, "Nothing reaches the server without a matching confirmation")
     }
@@ -213,41 +216,46 @@ final class AnteroomAPITests: XCTestCase {
     }
 
     func testRefusedWriteRenewsButIsNotSentAgain() async {
+        let api = self.api!
         StubProtocol.answer(.init(status: 401, body: #"{"detail":"A valid seller session is required"}"#),
                             .init(status: 200, body: "{}"))
-        await assertMessage(APIError.signInRenewed) { try await self.api.rename("a", title: "New") }
+        await Self.assertMessage(APIError.signInRenewed) { try await api.rename("a", title: "New") }
         XCTAssertEqual(StubProtocol.requests.count, 1, "A write may already have run, so it is never repeated")
         XCTAssertEqual(signIn.refreshCount, 1)
         XCTAssertEqual(signIn.signOutCount, 0)
     }
 
     func testASignInTheServerRefusesToRenewSignsOut() async {
+        let api = self.api!
         signIn.refreshFailure = SignInRejected()
         StubProtocol.answer(.init(status: 401, body: #"{"detail":"A valid seller session is required"}"#))
-        await assertMessage(APIError.signInEnded) { _ = try await self.api.listings() }
+        await Self.assertMessage(APIError.signInEnded) { _ = try await api.listings() }
         XCTAssertEqual(signIn.signOutCount, 1)
         XCTAssertEqual(StubProtocol.requests.count, 1)
     }
 
     func testARenewalTheSignInServerFailedKeepsTheSignIn() async {
+        let api = self.api!
         signIn.refreshFailure = SignInServerFailed()
         StubProtocol.answer(.init(status: 401, body: #"{"detail":"A valid seller session is required"}"#))
-        await assertMessage(APIError.signInNotRenewed) { _ = try await self.api.listings() }
+        await Self.assertMessage(APIError.signInNotRenewed) { _ = try await api.listings() }
         XCTAssertEqual(signIn.signOutCount, 0, "A 5xx or rate limit from the sign-in server must not delete the saved sign-in")
     }
 
     func testAnExpiredTokenTheServerRefusesSignsOutBeforeSending() async {
+        let api = self.api!
         signIn.accessFailure = SignInRejected()
         StubProtocol.answer(.init(status: 200, body: "[]"))
-        await assertMessage(APIError.signInEnded) { _ = try await self.api.listings() }
+        await Self.assertMessage(APIError.signInEnded) { _ = try await api.listings() }
         XCTAssertEqual(signIn.signOutCount, 1)
         XCTAssertEqual(StubProtocol.requests.count, 0)
     }
 
     func testAnExpiredTokenThatCouldntBeRenewedKeepsTheSignIn() async {
+        let api = self.api!
         signIn.accessFailure = SignInServerFailed()
         StubProtocol.answer(.init(status: 200, body: "[]"))
-        await assertMessage(APIError.signInNotRenewed) { _ = try await self.api.listings() }
+        await Self.assertMessage(APIError.signInNotRenewed) { _ = try await api.listings() }
         XCTAssertEqual(signIn.signOutCount, 0)
         XCTAssertEqual(StubProtocol.requests.count, 0)
     }
@@ -264,25 +272,28 @@ final class AnteroomAPITests: XCTestCase {
     }
 
     func testAFreshTokenRefusedAgainSignsOut() async {
+        let api = self.api!
         StubProtocol.answer(.init(status: 401, body: #"{"detail":"A verified seller session is required"}"#))
-        await assertMessage(APIError.signInEnded) { _ = try await self.api.listings() }
+        await Self.assertMessage(APIError.signInEnded) { _ = try await api.listings() }
         XCTAssertEqual(signIn.refreshCount, 1)
         XCTAssertEqual(signIn.signOutCount, 1)
         XCTAssertEqual(StubProtocol.requests.count, 2)
     }
 
     func testAMarketplaces401KeepsItsMessageAndTheSignIn() async {
+        let api = self.api!
         StubProtocol.answer(.init(status: 401, body: #"{"detail":"eBay signed Anteroom out. Reconnect eBay in Settings → Connections."}"#))
-        await assertMessage("eBay signed Anteroom out. Reconnect eBay in Settings → Connections.") {
-            _ = try await self.api.searchEbayCategories("shirt")
+        await Self.assertMessage("eBay signed Anteroom out. Reconnect eBay in Settings → Connections.") {
+            _ = try await api.searchEbayCategories("shirt")
         }
         XCTAssertEqual(signIn.refreshCount, 0)
         XCTAssertEqual(signIn.signOutCount, 0)
     }
 
-    // MARK: Runtime
+    // MARK: Runtime & Sign-out
 
     func testRuntimeIsAskedOnceForScreensOpeningTogether() async throws {
+        let api = self.api!
         StubProtocol.answer(.init(status: 200, body: #"{"mode":"hosted","views":["assistant"],"features":["generation"],"marketplace_forms":["ebay"],"action_marketplaces":["ebay","etsy"]}"#))
         async let first = api.runtime()
         async let second = api.runtime()
@@ -297,10 +308,39 @@ final class AnteroomAPITests: XCTestCase {
         XCTAssertEqual(StubProtocol.requests.count, 3)
     }
 
+    func testSignOutReplacesURLSessionWithoutBreakingNextSignIn() async throws {
+        let before = api.urlSession
+        await api.forgetSeller()
+        let after = api.urlSession
+        XCTAssertTrue(before !== after, "Sign-out invalidates the old URLSession and creates a fresh one")
+        StubProtocol.answer(.init(status: 200, body: "[]"))
+        let rows = try await api.listings()
+        XCTAssertTrue(rows.isEmpty)
+        XCTAssertEqual(StubProtocol.requests.count, 1)
+    }
+
+    func testServerDateParsesStandardAndFractionalISO8601() throws {
+        let whole = try XCTUnwrap(ServerDate.parse("2026-11-01T10:00:00Z"))
+        let bare = try XCTUnwrap(ServerDate.parse("2026-11-01T10:00:00"))
+        let fractional = try XCTUnwrap(ServerDate.parse("2026-11-01T10:00:00.250000Z"))
+        let bareFractional = try XCTUnwrap(ServerDate.parse("2026-11-01T10:00:00.250000"))
+        let offset = try XCTUnwrap(ServerDate.parse("2026-11-01T05:00:00-05:00"))
+        let offsetFractional = try XCTUnwrap(ServerDate.parse("2026-11-01T05:00:00.250-05:00"))
+
+        XCTAssertEqual(whole, bare)
+        XCTAssertEqual(whole, offset)
+        XCTAssertEqual(fractional, bareFractional)
+        XCTAssertEqual(fractional, offsetFractional)
+        XCTAssertEqual(fractional.timeIntervalSince(whole), 0.25, accuracy: 0.0001)
+        XCTAssertNil(ServerDate.parse(nil))
+        XCTAssertNil(ServerDate.parse(""))
+        XCTAssertNil(ServerDate.parse("not-a-date"))
+    }
+
     // MARK: Helpers
 
-    private func assertMessage(_ expected: String, file: StaticString = #filePath, line: UInt = #line,
-                               _ work: @escaping () async throws -> Void) async {
+    private static func assertMessage(_ expected: String, file: StaticString = #filePath, line: UInt = #line,
+                                      _ work: () async throws -> Void) async {
         do {
             try await work()
             XCTFail("Expected an error", file: file, line: line)
@@ -309,7 +349,7 @@ final class AnteroomAPITests: XCTestCase {
         }
     }
 
-    private func assertRefused(file: StaticString = #filePath, line: UInt = #line, _ work: @escaping () async throws -> Void) async {
+    private static func assertRefused(file: StaticString = #filePath, line: UInt = #line, _ work: () async throws -> Void) async {
         do {
             try await work()
             XCTFail("Expected the client to refuse", file: file, line: line)
