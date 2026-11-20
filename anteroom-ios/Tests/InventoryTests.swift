@@ -238,6 +238,18 @@ struct InventoryTests {
         precondition(ListingSort.createdAsc.switching(to: .price) == .priceAsc)
         precondition(ListingSort.priceDesc.switching(to: .sold) == .soldDesc)
         precondition(ListingSort.recent.switching(to: .title) == .titleAsc)
+        // ISO-8601 date parsing: standard, fractional seconds, offsets, and bare UTC strings.
+        let wholeDate = ServerDate.parse("2026-11-01T10:00:00Z")
+        let bareDate = ServerDate.parse("2026-11-01T10:00:00")
+        let offsetDate = ServerDate.parse("2026-11-01T05:00:00-05:00")
+        let fractionalDate = ServerDate.parse("2026-11-01T10:00:00.250000Z")
+        let bareFractionalDate = ServerDate.parse("2026-11-01T10:00:00.250000")
+        let offsetFractionalDate = ServerDate.parse("2026-11-01T05:00:00.250-05:00")
+        precondition(wholeDate != nil && wholeDate == bareDate && wholeDate == offsetDate)
+        precondition(fractionalDate != nil && fractionalDate == bareFractionalDate && fractionalDate == offsetFractionalDate)
+        precondition(abs(fractionalDate!.timeIntervalSince(wholeDate!) - 0.25) < 0.0001)
+        precondition(ServerDate.parse(nil) == nil && ServerDate.parse("") == nil && ServerDate.parse("not-a-date") == nil)
+
         print("Inventory tests passed")
     }
 

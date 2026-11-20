@@ -188,18 +188,18 @@ extension PhotoEdits {
 
 /// The server writes UTC timestamps without a zone and with microseconds.
 enum ServerDate {
-    nonisolated(unsafe) private static let formatter = ISO8601DateFormatter()
+    private static let fractional = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
+    private static let whole = Date.ISO8601FormatStyle(includingFractionalSeconds: false)
 
     static func parse(_ raw: String?) -> Date? {
         guard var text = raw, text.count >= 19 else { return nil }
-        if let dot = text.firstIndex(of: ".") {
-            let rest = text[text.index(after: dot)...].drop(while: \.isNumber)
-            text = String(text[..<dot]) + rest
+        var tail = text.dropFirst(19)
+        if tail.first == "." {
+            tail = tail.dropFirst().drop(while: \.isNumber)
         }
-        let zone = text.dropFirst(19)
-        if !(zone.hasPrefix("Z") || zone.hasPrefix("+") || zone.hasPrefix("-")) {
+        if !(tail.hasPrefix("Z") || tail.hasPrefix("z") || tail.hasPrefix("+") || tail.hasPrefix("-")) {
             text += "Z"
         }
-        return formatter.date(from: text)
+        return (try? fractional.parse(text)) ?? (try? whole.parse(text))
     }
 }
