@@ -12,14 +12,16 @@ afterEach(() => {
 });
 
 function fakeCacheStorage() {
-  const entries = new Map<string, string>();
+  const entries = new Map<string, { body: string; headers: Record<string, string> }>();
   const cache = {
     match: vi.fn(async (key: string) => {
-      const body = entries.get(key);
-      return body === undefined ? undefined : new Response(body, { headers: { "Content-Type": "application/json" } });
+      const entry = entries.get(key);
+      return entry === undefined ? undefined : new Response(entry.body, { headers: entry.headers });
     }),
     put: vi.fn(async (key: string, response: Response) => {
-      entries.set(key, await response.text());
+      const headers: Record<string, string> = {};
+      response.headers.forEach((value, name) => { headers[name] = value; });
+      entries.set(key, { body: await response.text(), headers });
     }),
     delete: vi.fn(async (key: string) => entries.delete(key)),
     keys: vi.fn(async () => Array.from(entries.keys(), (url) => ({ url }))),
@@ -31,34 +33,56 @@ function fakeCacheStorage() {
   };
 }
 
-it("does not persist a mismatched catalog during rollout or reuse it after rollback", async () => {
+it("does not persist a mismatched catalog during rollout, rejects untagged cache entries, and caches server-verified Mercari brands", async () => {
   const { entries, cache, storage } = fakeCacheStorage();
   vi.stubGlobal("caches", storage);
   const client = createStudioQueryClient();
-  const original = { options: ["Nike"], option_values: {} };
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(original)));
-  const version = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, 16);
+  // Mercari's real brand map includes numeric brand names ("1928", "361") that JS
+  // reorders during JSON.parse/stringify; server-verified headers must still cache it.
+  const original = { options: ["Nike", "1928", "Hermès"], option_values: { Nike: "1", "1928": "2", Hermès: "3" } };
+  const version = "8367e142604dbde3";
   vi.spyOn(api.nativeMarketplaces, "form").mockResolvedValue({
     marketplace: "mercari",
     fields: [{ key: "brand", path: "brand", label: "Brand", value: "",
       choice_list: { name: "mercari-brands", version } }],
   } as never);
-  const list = vi.spyOn(api.catalog, "choiceList").mockResolvedValue({ options: ["Adidas"], option_values: {} });
+  const fetchMock = vi.fn().mockResolvedValueOnce(
+    new Response(JSON.stringify({ options: ["Adidas"], option_values: {} }), {
+      status: 200,
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-cache", "X-Choice-List-Version": "different-version" },
+    }),
+  ).mockResolvedValueOnce(
+    new Response(JSON.stringify(original), {
+      status: 200,
+      headers: { "Content-Type": "application/json", "Cache-Control": "private, max-age=31536000, immutable", "X-Choice-List-Version": version },
+    }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
   try {
     await prefetchListingForm(client, "rollout", "mercari", {}, "r1");
     // Wait for any asynchronous persistence to finish.
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(cache.put).not.toHaveBeenCalled();
     expect(entries.size).toBe(0);
-    // Reject an incorrectly keyed entry on a subsequent load too.
-    entries.set(`/api/catalog/choice-lists/mercari-brands?v=${version}`, JSON.stringify({ options: ["Adidas"], option_values: {} }));
+
+    // Reject an untagged or mismatched cached entry on a subsequent load too.
+    entries.set(`/api/catalog/choice-lists/mercari-brands?v=${version}`, {
+      body: JSON.stringify({ options: ["Adidas"], option_values: {} }),
+      headers: { "Content-Type": "application/json" },
+    });
     resetChoiceListCacheForTests();
     client.clear();
-    list.mockResolvedValue(original);
     await prefetchListingForm(client, "rollback", "mercari", {}, "r1");
-    expect(list).toHaveBeenCalledTimes(2);
-    await vi.waitFor(() => expect(Array.from(entries.values())).toEqual([JSON.stringify(original)]));
-    expect(client.getQueryData(nativeFormOptions("rollback", "mercari", {}, "r1").queryKey)?.fields[0]?.options).toEqual(["Nike"]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(entries.get(`/api/catalog/choice-lists/mercari-brands?v=${version}`)?.body).toEqual(JSON.stringify(original)));
+    expect(client.getQueryData(nativeFormOptions("rollback", "mercari", {}, "r1").queryKey)?.fields[0]?.options).toEqual(["Nike", "1928", "Hermès"]);
+
+    // Subsequent reload hits Cache Storage without another network fetch.
+    resetChoiceListCacheForTests();
+    client.clear();
+    await prefetchListingForm(client, "cached", "mercari", {}, "r1");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(client.getQueryData(nativeFormOptions("cached", "mercari", {}, "r1").queryKey)?.fields[0]?.options).toEqual(["Nike", "1928", "Hermès"]);
   } finally { client.clear(); }
 });
 

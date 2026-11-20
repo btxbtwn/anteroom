@@ -138,6 +138,50 @@ function read<T>(path: string, options?: ReadOptions): Promise<T> {
 /** What a proxy answers while the server behind it is down or restarting, such as during a deploy. */
 const UNAVAILABLE_STATUSES = new Set([502, 503, 504]);
 
+const uncacheableChoiceLists = new WeakSet<ChoiceList>();
+
+/** True when the choice-list payload matched the version the client asked for. */
+export function isChoiceListCacheable(data: ChoiceList): boolean {
+  return !uncacheableChoiceLists.has(data);
+}
+
+async function fetchChoiceList(name: string, version: string, options?: ReadOptions): Promise<ChoiceList> {
+  const path = `/catalog/choice-lists/${encodeURIComponent(name)}?v=${encodeURIComponent(version)}`;
+  let res: Response;
+  try {
+    res = await studioFetch(`${BASE}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      signal: options?.signal,
+    });
+  } catch (error) {
+    if (error instanceof TypeError) throw new ApiRequestError(error.message, 0, true);
+    throw error;
+  }
+  if (!res.ok) {
+    const parsed = await res.json().catch(() => null);
+    const explained = errorMessage(parsed, "").trim().length > 0;
+    const body = parsed ?? { detail: res.statusText };
+    const retryable = UNAVAILABLE_STATUSES.has(res.status) && !(res.status === 502 && explained);
+    throw new ApiRequestError(
+      errorMessage(body, `Request failed: ${res.status}`),
+      res.status,
+      retryable,
+      retryAfterMs(res.headers.get("Retry-After")),
+      res.headers.get("X-Anteroom-Reason"),
+    );
+  }
+  const data = (await res.json()) as ChoiceList;
+  const serverVersion = res.headers.get("X-Choice-List-Version");
+  const cacheControl = res.headers.get("Cache-Control") ?? "";
+  const versionMatched = serverVersion !== null
+    ? serverVersion === version
+    : cacheControl.toLowerCase().includes("immutable");
+  if (!versionMatched && data && typeof data === "object") {
+    uncacheableChoiceLists.add(data);
+  }
+  return data;
+}
+
 async function rawRequest<T>(path: string, options?: RequestInit): Promise<T> {
   const isRead = (options?.method ?? "GET").toUpperCase() === "GET";
   let res: Response;
@@ -376,7 +420,7 @@ export const api = {
   },
   catalog: {
     choiceList: (name: string, version: string, options?: ReadOptions) =>
-      read<ChoiceList>(`/catalog/choice-lists/${encodeURIComponent(name)}?v=${encodeURIComponent(version)}`, options),
+      fetchChoiceList(name, version, options),
     dropdownOptions: () =>
       request<{ forms: Record<string, Record<string, string[]>> }>("/catalog/dropdown-options"),
     searchCategories: (q: string, marketplace: string) =>

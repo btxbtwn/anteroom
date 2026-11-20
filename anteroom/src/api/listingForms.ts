@@ -1,5 +1,5 @@
 import { queryOptions, type QueryClient } from "@tanstack/react-query";
-import { api } from "./client";
+import { api, isChoiceListCacheable } from "./client";
 import { ApiRequestError } from "./transport";
 import type { ChoiceList, ListingData, ListingDocument, MarketplaceForm } from "./types";
 import type { NativeMarketplace, NativePreflight } from "./nativeMarketplaces";
@@ -31,21 +31,6 @@ async function openChoiceListCache(): Promise<Cache | null> {
   }
 }
 
-/** The server versions compact UTF-8 JSON with the first 16 SHA-256 hex digits.
- * Serialization differences safely skip caching; they never assign another
- * catalog's content to the requested version.
- */
-async function matchesChoiceListVersion(data: ChoiceList, version: string): Promise<boolean> {
-  try {
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(data)));
-    const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-    return hash.slice(0, 16) === version;
-  } catch {
-    // Crypto may be unavailable on an insecure origin; network reads still work.
-    return false;
-  }
-}
-
 async function readChoiceListFromDevice(name: string, version: string): Promise<ChoiceList | null> {
   if (typeof caches === "undefined") return null;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -54,8 +39,9 @@ async function readChoiceListFromDevice(name: string, version: string): Promise<
     if (!cache) return null;
     const response = await cache.match(choiceListCacheKey(name, version));
     if (!response) return null;
+    if (response.headers.get("X-Choice-List-Version") !== version) return null;
     const data = (await response.json()) as ChoiceList;
-    return data && typeof data === "object" && await matchesChoiceListVersion(data, version) ? data : null;
+    return data && typeof data === "object" ? data : null;
   })();
   try {
     return await Promise.race([
@@ -71,7 +57,7 @@ async function readChoiceListFromDevice(name: string, version: string): Promise<
 }
 
 async function writeChoiceListToDevice(name: string, version: string, data: ChoiceList): Promise<void> {
-  if (!await matchesChoiceListVersion(data, version)) return;
+  if (!isChoiceListCacheable(data)) return;
   const cache = await openChoiceListCache();
   if (!cache) return;
   const targetKey = choiceListCacheKey(name, version);
@@ -79,7 +65,12 @@ async function writeChoiceListToDevice(name: string, version: string, data: Choi
   try {
     await cache.put(
       targetKey,
-      new Response(JSON.stringify(data), { headers: { "Content-Type": "application/json" } }),
+      new Response(JSON.stringify(data), {
+        headers: {
+          "Content-Type": "application/json",
+          "X-Choice-List-Version": version,
+        },
+      }),
     );
     const existing = await cache.keys();
     await Promise.all(
