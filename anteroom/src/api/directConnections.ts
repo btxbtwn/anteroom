@@ -12,6 +12,11 @@ export interface DirectAccountStatus {
   error: string | null;
 }
 
+/** Which eBay account or Etsy shop is connected: changes when another one is connected. */
+export function directAccountKey(account: Pick<DirectAccountStatus, "label" | "connectedAt"> | undefined): string {
+  return `${account?.label || ""}:${account?.connectedAt || ""}`;
+}
+
 export interface DirectConnectionsStatus {
   accounts: Record<DirectMarketplace, DirectAccountStatus>;
   relay: {

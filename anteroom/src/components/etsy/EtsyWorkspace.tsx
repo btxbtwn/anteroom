@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2Icon, RefreshCwIcon, Settings2Icon } from "lucide-react";
 import { api } from "../../api/client";
+import { directAccountKey } from "../../api/directConnections";
 import { BUSY_POLL_MS, pollMs } from "../../api/polling";
 import { WorkspaceTabs } from "../ebay/WorkspaceTabs";
 import "../ebay/ebay.css";
@@ -29,7 +30,7 @@ export function EtsyWorkspace({ onOpenListing }: { onOpenListing: (id: string) =
   });
   const account = connection.data?.accounts.etsy;
   const connected = Boolean(account?.connected);
-  const scope = `${account?.label || ""}:${account?.connectedAt || ""}`;
+  const scope = directAccountKey(account);
   const shop = useQuery({ queryKey: ["etsy-workspace", "shop", scope], queryFn: api.etsy.shop,
     enabled: connected, retry: false, staleTime: 30000 });
   const period: OrderPeriod = {

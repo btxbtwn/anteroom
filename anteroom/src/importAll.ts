@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { api } from "./api/client";
+import { directAccountKey } from "./api/directConnections";
+import { marketplaceName } from "./components/marketplaceNames";
 import type {
   ImportMarketplace, MarketplaceImportHeld, MarketplaceImportMatch, MarketplaceImportPage, MarketplaceImportResult,
 } from "./api/inventoryImport";
@@ -9,7 +11,7 @@ export interface Importer {
   importListing: (listing: string, linkConversationId?: string) => Promise<MarketplaceImportResult>;
   /** Import a listing unless it now looks like an item already in Anteroom; the server checks as it saves. */
   importNew: (listing: string) => Promise<MarketplaceImportResult | MarketplaceImportHeld>;
-  /** eBay and Etsy: the connected account, or null when none is. A run stays on the account it started with. */
+  /** eBay and Etsy: the connected account's ``directAccountKey``, or null when none is. A run stays on the account it was started for. */
   account?: () => Promise<string | null>;
 }
 
@@ -19,7 +21,7 @@ export function importerFor(marketplace: ImportMarketplace): Importer {
     return {
       account: async () => {
         const account = (await api.directConnections.status()).accounts[marketplace];
-        return account.connected ? `${account.label ?? ""}:${account.connectedAt ?? ""}` : null;
+        return account.connected ? directAccountKey(account) : null;
       },
       candidates: (page) => direct.importCandidates(page),
       importListing: (listing, linkConversationId) => linkConversationId ? direct.importListing(listing, linkConversationId) : direct.importListing(listing),
@@ -95,13 +97,15 @@ const message = (error: unknown) => error instanceof Error ? error.message : "Th
  * waits in ``review`` for the seller. The server checks for a match again as
  * it saves, so marketplaces importing side by side do not import one item twice.
  */
-export function startImportAll(key: string, marketplace: ImportMarketplace, importer: Importer, onFinish: () => void, expectedAccount?: string) {
+export function startImportAll(key: string, marketplace: ImportMarketplace, importer: Importer, onFinish: () => void,
+  /** eBay and Etsy: the ``directAccountKey`` of the account the seller started the run for. */
+  account?: string) {
   if (busy(runs.get(key))) return;
   counter += 1;
   const id = counter;
   runs.set(key, { run: id, marketplace, status: "running", page: 1, imported: 0, alreadyIn: 0, skipped: 0, review: [], failures: [], warnings: [], error: null });
   notify();
-  void walk(key, id, importer, expectedAccount).finally(onFinish);
+  void walk(key, id, importer, account).finally(onFinish);
 }
 
 export function stopImportAll(key: string) {
@@ -138,7 +142,7 @@ function update(key: string, id: number, change: Partial<ImportAllRun> | ((run: 
   notify();
 }
 
-async function walk(key: string, id: number, importer: Importer, expectedAccount?: string) {
+async function walk(key: string, id: number, importer: Importer, expected: string | undefined) {
   const live = () => runs.get(key)?.run === id;
   const stopping = () => live() && runs.get(key)!.status === "stopping";
   const marketplace = runs.get(key)!.marketplace;
@@ -157,9 +161,10 @@ async function walk(key: string, id: number, importer: Importer, expectedAccount
       // Pages come from whichever account is connected now, so the account is checked before and after each read:
       // a page read across a change is dropped, and the run stops. Listings of a page read before a change belong
       // to the earlier account, and the server's ownership check refuses them once another one is connected.
+      // Compared with the account the seller started the run for, from the first read on.
       const changed = async () => {
         const now = await importer.account!();
-        return !now || now !== expectedAccount;
+        return !now || now !== expected;
       };
       if (importer.account && await changed()) return update(key, id, { status: "failed", error: ACCOUNT_CHANGED[marketplace] ?? "" });
       if (!live()) return;
@@ -203,7 +208,7 @@ async function walk(key: string, id: number, importer: Importer, expectedAccount
     const next = data.next_cursor ?? null;
     if (!data.has_more) break;
     if (!direct && (!next || cursors.has(next))) {
-      return update(key, id, { status: "failed", error: "The marketplace reported more listings without a new page cursor. This import stopped. Try again to read the remaining listings." });
+      return update(key, id, { status: "failed", error: `${marketplaceName(marketplace)} said there were more listings but did not give the next page.` });
     }
     if (next) cursors.add(next);
     page += 1;

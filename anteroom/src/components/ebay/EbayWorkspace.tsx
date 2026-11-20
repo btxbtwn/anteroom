@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2Icon, Settings2Icon } from "lucide-react";
 import { api } from "../../api/client";
+import { directAccountKey } from "../../api/directConnections";
 import { directConnectionsQuery } from "../../api/pageQueries";
 import { BUSY_POLL_MS, pollMs } from "../../api/polling";
 import { PageError, PageNote } from "../WorkspacePage";
@@ -62,7 +63,7 @@ export function EbayWorkspace({ onOpenListing }: { onOpenListing: (id: string) =
     {account?.connected ? <WorkspaceTabs label="eBay workspace" main items={tabs} value={tab} onChange={(value) => setTab(value as Tab)}>
       <div className="ebay-tab-content" key={`${account.connectedAt}-${tab}`}>
         {tab === "Dashboard" ? <DashboardPanel /> : tab === "Inbox" ? <InboxPanel /> : tab === "Orders" ? <><OrderRecovery marketplace="ebay" connectedAt={account.connectedAt} /><OrdersPanel /></>
-          : tab === "Marketing" ? <><MarketingPanel /><SaleCalendar marketplace="ebay" onOpenListing={onOpenListing} /></> : tab === "Listings" ? <ListingsPanel accountKey={`${account.label}:${account.connectedAt}`} onOpenListing={onOpenListing} /> : tab === "Research" ? <ResearchPanel />
+          : tab === "Marketing" ? <><MarketingPanel /><SaleCalendar marketplace="ebay" onOpenListing={onOpenListing} /></> : tab === "Listings" ? <ListingsPanel accountKey={directAccountKey(account)} onOpenListing={onOpenListing} /> : tab === "Research" ? <ResearchPanel />
             : tab === "Offers" ? <><div className="ebay-tab-intro"><h2>Offers to interested buyers</h2><p>Set each listing’s minimum price before sending or enabling automatic offers.</p></div><EbayOffersSettings /></> : <ActivityPanel />}
       </div>
     </WorkspaceTabs> : <div className="ebay-data-panel space-y-4">
