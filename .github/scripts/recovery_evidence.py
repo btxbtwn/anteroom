@@ -164,11 +164,11 @@ def read_artifact(meta, filename, pin, download):
 
 
 def verify(pin, fetch, download, git):
-    """Validate authenticated read-only API observations and Git objects; authorize nothing.
+    """Validate authenticated read-only API observations and Git objects; authorize nothing itself.
 
     Callbacks are trusted transport adapters, never dispatch-supplied JSON. The CLI
-    supplies bounded GET-only gh calls. Future production integration needs its own
-    authenticated operator control and live probe; this function cannot enable it.
+    supplies bounded GET-only gh calls. Callers (such as wait-for-tested-code.py)
+    are responsible for live base checks, ancestry/CI gating, and serialization.
     """
     validate_run(fetch(f'actions/runs/{pin.run_id}'), pin)
     validate_run(fetch(f'actions/runs/{pin.run_id}/attempts/{pin.attempt}'), pin)

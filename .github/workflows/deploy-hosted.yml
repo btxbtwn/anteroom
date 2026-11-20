@@ -65,6 +65,7 @@ jobs:
         run: python3 .github/scripts/deploy-gate.py --repo "$GITHUB_REPOSITORY" --trigger "$TRIGGER"
 
       - name: Wait for CI on the code being shipped
+        id: wait
         if: steps.gate.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -102,6 +103,38 @@ jobs:
       - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # v1.6
         if: steps.gate.outputs.skip != 'true'
 
+      - name: Install the hosted server
+        if: steps.gate.outputs.skip != 'true'
+        working-directory: vendoo-studio
+        run: ./scripts/install-locked.sh python hosted
+
+      # When the historical recovery checkpoint was used, verify BEFORE any
+      # build push, migration, or rollout that live web/worker Machines and the
+      # live Postgres Alembic revision still match the proven pre-recovery base.
+      - name: Reconcile live production base for recovery
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          ANTEROOM_DATABASE_URL: ${{ secrets.ANTEROOM_MIGRATION_DATABASE_URL }}
+          PGSSLMODE: verify-full
+          PGSSLROOTCERT: ${{ github.workspace }}/deploy/fly/supabase-prod-ca-2021.crt
+          RECOVERY_CHECKPOINT: ${{ steps.wait.outputs.recovery_checkpoint }}
+        run: |
+          if [ "$RECOVERY_CHECKPOINT" = "false" ]; then
+            echo "Ordinary deploy; no recovery base reconciliation required."
+            exit 0
+          fi
+          if [ "$RECOVERY_CHECKPOINT" != "true" ]; then
+            echo "::error::Unexpected recovery_checkpoint state '${RECOVERY_CHECKPOINT}'; refusing to deploy."
+            exit 1
+          fi
+          python .github/scripts/wait-for-tested-code.py \
+            --repo "$GITHUB_REPOSITORY" \
+            --reconcile-live-base \
+            --fly-app "$FLY_APP" \
+            --alembic-cwd vendoo-studio
+
       - name: Build the image
         id: image
         if: steps.gate.outputs.skip != 'true'
@@ -116,11 +149,6 @@ jobs:
             --build-arg VITE_SUPABASE_PUBLISHABLE_KEY="$VITE_SUPABASE_PUBLISHABLE_KEY"
           echo "label=${label}" >> "$GITHUB_OUTPUT"
           echo "ref=registry.fly.io/${FLY_APP}:${label}" >> "$GITHUB_OUTPUT"
-
-      - name: Install the hosted server
-        if: steps.gate.outputs.skip != 'true'
-        working-directory: vendoo-studio
-        run: ./scripts/install-locked.sh python hosted
 
       - name: Apply pending migrations
         if: steps.gate.outputs.skip != 'true'
@@ -190,7 +218,11 @@ jobs:
         run: |
           for attempt in $(seq 1 12); do
             flyctl machines list --app "$FLY_APP" --json > "$RUNNER_TEMP/machines.json"
-            python3 .github/scripts/check-fly-machines.py --label "$LABEL" "$RUNNER_TEMP/machines.json" && exit 0
+            python3 .github/scripts/check-fly-machines.py \
+              --label "$LABEL" \
+              --require-group app \
+              --require-group worker \
+              "$RUNNER_TEMP/machines.json" && exit 0
             echo "Not every Machine is started on $LABEL yet (attempt $attempt)."
             sleep 10
           done

@@ -14,6 +14,7 @@ import argparse
 import json
 import sys
 from collections import defaultdict
+from collections.abc import Iterable
 from pathlib import Path
 
 
@@ -26,7 +27,23 @@ def image_tag(machine: dict) -> str:
     return name.split(":", 1)[1] if ":" in name else ""
 
 
-def problems(machines: list[dict], label: str) -> tuple[dict[str, int], list[str]]:
+def image_digest(machine: dict) -> str:
+    digest = (machine.get("image_ref") or {}).get("digest")
+    if isinstance(digest, str) and digest:
+        return digest
+    image = (machine.get("config") or {}).get("image", "")
+    if "@" in image:
+        return image.rsplit("@", 1)[1]
+    return ""
+
+
+def problems(
+    machines: list[dict],
+    label: str,
+    *,
+    required_groups: Iterable[str] = (),
+    expected_digest: str | None = None,
+) -> tuple[dict[str, int], list[str]]:
     """(Machines per process group, what is wrong)."""
     groups: dict[str, int] = defaultdict(int)
     wrong: list[str] = []
@@ -40,19 +57,38 @@ def problems(machines: list[dict], label: str) -> tuple[dict[str, int], list[str
         tag = image_tag(machine)
         if tag != label:
             wrong.append(f"{name} runs '{tag}', expected '{label}'")
+        if expected_digest is not None:
+            digest = image_digest(machine)
+            if digest != expected_digest:
+                wrong.append(f"{name} has digest '{digest}', expected '{expected_digest}'")
         if machine.get("state") != "started":
             wrong.append(f"{name} is {machine.get('state')}")
     if not groups:
         wrong.append("no Machines found")
+    for required in required_groups:
+        if groups.get(required, 0) < 1:
+            wrong.append(f"required process group '{required}' has no Machines")
     return dict(groups), wrong
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--label", required=True)
+    parser.add_argument(
+        "--require-group",
+        action="append",
+        default=[],
+        help="Process group that must have at least one started Machine (repeatable).",
+    )
+    parser.add_argument("--digest", default=None, help="Optional exact OCI image digest every Machine must run.")
     parser.add_argument("machines", type=Path, help="Output of flyctl machines list --json")
     args = parser.parse_args()
-    groups, wrong = problems(json.loads(args.machines.read_text() or "[]"), args.label)
+    groups, wrong = problems(
+        json.loads(args.machines.read_text() or "[]"),
+        args.label,
+        required_groups=args.require_group,
+        expected_digest=args.digest,
+    )
     for line in wrong:
         print(line)
     if wrong:

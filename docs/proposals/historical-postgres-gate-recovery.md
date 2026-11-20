@@ -1,5 +1,11 @@
 # Historical Postgres gate recovery — proposal only
 
+> **Historical proposal:** Superseded by the single-owner verified recovery
+> checkpoint in `.github/scripts/wait-for-tested-code.py` (documented in
+> [`docs/ci.md`](../ci.md#hosted-deploy-gate-recovery-checkpoint)), which works
+> within the repository's existing protections without adding a second reviewer,
+> new environments, rulesets, or expanded workflow permissions.
+
 Observed 2026-11-18 UTC. No executable gate/workflow change, CI rerun,
 dispatch, merge, deployment, production query or setting change is authorized
 or performed by this proposal. Implementation and activation need separate

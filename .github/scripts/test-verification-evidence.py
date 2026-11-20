@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import verification_evidence as evidence
 from test_recovery_evidence import RecoveryEvidenceTests  # unittest collects the offline consumer contract.
+from test_wait_for_tested_code import WaitForTestedCodeRecoveryTests  # unittest collects the deploy-gate recovery contract.
 
 ROOT = Path(__file__).resolve().parents[2]
 TARGET, BASE = 'a' * 40, 'b' * 40
