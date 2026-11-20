@@ -34,9 +34,22 @@ async function salePause(betweenPages) {
 }
 
 async function saleRead(url, options = {}) {
-  const response = await fetch(url, { signal: AbortSignal.timeout(15000), ...options });
+  let response;
+  try {
+    response = await fetch(url, { signal: AbortSignal.timeout(15000), ...options });
+  } catch (error) {
+    throw marketplaceError(`Marketplace read failed${error?.name === 'TimeoutError' ? ' (timeout)' : ''}.`,
+      { code: 'network', rejected: false });
+  }
   if (response.status === 404) return null;
-  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  if (!response.ok) {
+    const status = response.status;
+    const code = (status === 401 || status === 403) ? 'signed_out'
+      : status === 429 ? 'rate_limited'
+      : (status >= 500 || status === 408) ? 'network'
+      : 'rejected';
+    throw marketplaceError(`HTTP ${status}`, { code, status, rejected: code !== 'network' });
+  }
   return response;
 }
 
@@ -45,12 +58,21 @@ async function saleJson(url, options = {}) {
   return response ? response.json() : null;
 }
 
+const SALE_ERROR_CODES = new Set(['signed_out', 'challenge', 'rate_limited', 'network', 'schema_drift', 'rejected']);
+
 // The first of the seller's listings that names its account.
 async function sellerFrom(ids, read) {
+  let lastError = null;
   for (const id of ids.slice(0, 5)) {
-    const seller = await read(id).catch(() => null);
-    if (seller) return seller;
+    try {
+      const seller = await read(id);
+      if (seller) return seller;
+    } catch (error) {
+      if (error?.code === 'signed_out' || error?.code === 'rate_limited') throw error;
+      lastError = error;
+    }
   }
+  if (lastError) throw lastError;
   throw new Error('Seller not found');
 }
 
@@ -59,7 +81,11 @@ async function soldAmongMissing(ids, live, isSold) {
   const sales = [];
   for (const id of ids.filter(id => !live.has(id)).slice(0, SALE_MAX_CONFIRM)) {
     await salePause(false);
-    if (await isSold(id).catch(() => false)) sales.push({ listing_id: id });
+    try {
+      if (await isSold(id)) sales.push({ listing_id: id });
+    } catch (error) {
+      if (SALE_ERROR_CODES.has(error?.code)) throw error;
+    }
   }
   return sales;
 }
@@ -116,10 +142,12 @@ async function mercariSales(ids) {
 }
 
 async function poshmarkPost(id) {
+  await ensureMarketplaceRequestContext();
   return (await saleJson(`https://poshmark.com/vm-rest/posts/${id}?app_version=2.55`, { credentials: 'include' }))?.data;
 }
 
 async function poshmarkSales(ids) {
+  await ensureMarketplaceRequestContext();
   const seller = await sellerFrom(ids, async id => {
     const creator = String((await poshmarkPost(id))?.creator_id ?? '');
     return SALE_LISTING_ID.poshmark.test(creator) ? creator : null;
@@ -160,8 +188,9 @@ async function readMarketplaceSales(marketplace, listingIds) {
   if (!ids.length) return { ok: true, sales: [] };
   try {
     return { ok: true, sales: await read(ids) };
-  } catch {
-    return { ok: false, error: 'Could not check sales.' };
+  } catch (error) {
+    const code = SALE_ERROR_CODES.has(error?.code) ? error.code : null;
+    return { ok: false, error: 'Could not check sales.', ...(code ? { error_code: code } : {}) };
   }
 }
 

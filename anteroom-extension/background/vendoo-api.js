@@ -257,7 +257,7 @@ async function vendooFetch(url, options = {}) {
   }
 }
 
-async function vendooFetchOnce(url, { method = 'GET', token, json, body, headers = {}, responseType = 'json', timeoutMs } = {}) {
+async function vendooFetchOnce(url, { method = 'GET', token, json, body, headers = {}, responseType = 'json', timeoutMs, credentials = 'include' } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs || VENDOO_REQUEST_TIMEOUT_MS);
   const requestHeaders = {
@@ -268,7 +268,7 @@ async function vendooFetchOnce(url, { method = 'GET', token, json, body, headers
   };
   const requestBody = json !== undefined ? JSON.stringify(json) : body;
   try {
-    const init = { method, credentials: 'include', signal: controller.signal, headers: requestHeaders };
+    const init = { method, credentials, signal: controller.signal, headers: requestHeaders };
     if (requestBody !== undefined) init.body = requestBody;
     const res = await fetch(url, init);
     let data = null;
@@ -287,6 +287,30 @@ async function vendooFetchOnce(url, { method = 'GET', token, json, body, headers
   } finally {
     clearTimeout(timer);
   }
+}
+
+const VENDOO_PHOTO_EXACT_HOSTS = new Set([
+  'storage.googleapis.com',
+  'firebasestorage.googleapis.com',
+]);
+const VENDOO_PHOTO_HOST_SUFFIXES = [
+  '.s3.amazonaws.com',
+  '.s3-accelerate.amazonaws.com',
+];
+
+function vendooPhotoUploadUrl(raw) {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  let destination;
+  try { destination = new URL(raw); } catch { return null; }
+  if (destination.protocol !== 'https:' || destination.username || destination.password || destination.port) return null;
+  const host = destination.hostname.toLowerCase();
+  const allowed = VENDOO_PHOTO_EXACT_HOSTS.has(host)
+    || VENDOO_PHOTO_HOST_SUFFIXES.some(suffix => {
+      if (!host.endsWith(suffix) || host.length <= suffix.length) return false;
+      const prefix = host.slice(0, -suffix.length);
+      return /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/.test(prefix) && !prefix.includes('..');
+    });
+  return allowed ? destination.href : null;
 }
 
 function vendooError(prefix, result) {
@@ -340,8 +364,11 @@ async function uploadVendooPhotoBytes(session, photo, bytes, extension) {
     method: 'POST', token: session.access_token, json: { fileExtension: extension },
   });
   if (!slot.ok || !slot.data?.url || !slot.data?.imagePath) throw new Error(vendooError('Vendoo image slot', slot));
-  const put = await vendooFetch(slot.data.url, {
+  const uploadUrl = vendooPhotoUploadUrl(slot.data.url);
+  if (!uploadUrl) throw new Error('Vendoo did not return a recognised photo upload address.');
+  const put = await vendooFetch(uploadUrl, {
     method: 'PUT',
+    credentials: 'omit',
     body: bytes,
     headers: { 'Content-Type': photo.mime_type || bytes.type || 'image/jpeg' },
     responseType: 'none',

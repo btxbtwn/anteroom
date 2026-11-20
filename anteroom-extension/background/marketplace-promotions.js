@@ -16,10 +16,37 @@ const POSHMARK_SHARE_GAP_MS = 4000;
 const POSHMARK_SHARE_GAP_MAX_MS = 30000;
 const POSHMARK_SHARE_JITTER_MS = 3000;
 const POSHMARK_LAST_SHARE_KEY = 'poshmark_last_share_at';
+const PROMOTION_JOURNAL_PREFIX = 'promotion_';
+const PROMOTION_JOURNAL_LIMIT = 500;
+const PROMOTION_JOURNAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const promotionSettlements = new Map();
 
 function promotionKey(actionId) {
-  return `promotion_${actionId}`;
+  return `${PROMOTION_JOURNAL_PREFIX}${actionId}`;
+}
+
+function promotionEntrySettled(entry) {
+  return Boolean(entry?.finished && (entry.result?.ok === true || entry.result?.safe_to_retry === true));
+}
+
+async function prunePromotionJournal(keepKey) {
+  await pruneStorageJournal(PROMOTION_JOURNAL_PREFIX, {
+    maxSettled: PROMOTION_JOURNAL_LIMIT,
+    ttlMs: PROMOTION_JOURNAL_TTL_MS,
+    keepKey,
+    isSettled: promotionEntrySettled,
+  });
+}
+
+async function savePromotionJournal(key, entry) {
+  try {
+    await chrome.storage.local.set({ [key]: entry });
+  } catch (error) {
+    if (error?.name !== 'QuotaExceededError' && !/quota/i.test(String(error?.message || error))) throw error;
+    await prunePromotionJournal(key);
+    await chrome.storage.local.set({ [key]: entry });
+  }
+  await prunePromotionJournal(key);
 }
 
 // Result checks and the original polling call can finish concurrently. Keep a
@@ -30,7 +57,7 @@ async function settlePromotionJournal(key, result) {
     const stored = (await chrome.storage.local.get(key))[key];
     if (stored?.finished && stored.result?.ok === true && stored.result.state === 'done') return stored;
     const settled = { ...stored, finished: true, at: Date.now(), result };
-    await chrome.storage.local.set({ [key]: settled });
+    await savePromotionJournal(key, settled);
     return settled;
   });
   promotionSettlements.set(key, pending);
@@ -514,7 +541,7 @@ async function handleMarketplacePromotion(msg, respond = result => sendBrowserRe
         marketplaceError('This action was interrupted. Check the listing on the marketplace before doing it again.'), false));
       return;
     }
-    await chrome.storage.local.set({ [key]: { finished: false, at: Date.now(), marketplace: payload.marketplace, action: payload.action } });
+    await savePromotionJournal(key, { finished: false, at: Date.now(), marketplace: payload.marketplace, action: payload.action });
     const result = await runMarketplacePromotion(payload);
     const settled = await settlePromotionJournal(key, result);
     respond(settled.result);

@@ -1781,3 +1781,62 @@ test('a locally chosen Depop size label resolves at publication and wins over an
   assert.ok(read({ size: 'not offered', nativeSizeId: 1 }).problem);
   assert.ok(read({ size: '', nativeSizeId: 1 }).problem);
 });
+
+test('Depop photo upload closes ImageBitmap even when canvas drawing throws', async () => {
+  const c = loadWorker();
+  c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  let closed = false;
+  c.createImageBitmap = async () => ({ width: 800, height: 600, close() { closed = true; } });
+  c.OffscreenCanvas = function OffscreenCanvas() {
+    this.getContext = () => ({
+      fillRect() {},
+      drawImage() { throw new Error('depop canvas draw failed'); },
+    });
+  };
+  c.fetch = async () => reply(200, { id: '99', url: 'https://depop.s3-accelerate.amazonaws.com/p/99.jpg' });
+  const result = await c.depopApiAction('photo', {
+    action: 'save_draft',
+    draft_url: DRAFT,
+    photo: { base64: Buffer.from('jpg').toString('base64'), mime_type: 'image/jpeg' },
+    deadline: Date.now() + 30000,
+  });
+  assert.equal(closed, true);
+  assert.match(result.error, /depop canvas draw failed/);
+});
+
+test('compactDepopShopBefore stores compact slugs and depopPublishEvidence matches them against shop URLs', async () => {
+  const c = loadWorker();
+  const compact = call(c, 'compactDepopShopBefore', {
+    seller_id: '42',
+    urls: ['https://www.depop.com/products/seller-existing/'],
+    seen: ['https://www.depop.com/products/seller-existing/', 'https://www.depop.com/products/seller-other/'],
+  });
+  assert.deepEqual(compact, { seller_id: '42', seen: ['seller-existing', 'seller-other'] });
+  c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  c.fetch = async url => {
+    const { pathname } = new URL(url);
+    if (pathname === '/api/v3/drafts/products/job-1/status/') return reply(404, {});
+    if (pathname === '/presentation/api/v1/drafts/123456/') return reply(404, {});
+    if (pathname === '/presentation/api/v1/users/me/') return reply(200, { id: 42 });
+    if (pathname.startsWith('/api/v1/shop/42/products/')) {
+      return reply(200, {
+        objects: [
+          { id: 1, slug: 'seller-existing', description: 'Private draft', price: { priceAmount: '12.00' } },
+          { id: 2, slug: 'seller-brand-new', description: 'Private draft', price: { priceAmount: '12.00' } },
+        ],
+        meta: { end: true },
+      });
+    }
+    throw new Error(pathname);
+  };
+  const status = await c.depopApiAction('publish_status', {
+    action: 'publish',
+    draft_url: DRAFT,
+    listing,
+    publish_job_id: 'job-1',
+    shop_before: compact,
+    deadline: Date.now() + 30000,
+  });
+  assert.equal(status.complete, true);
+  assert.equal(status.listing_url, 'https://www.depop.com/products/seller-brand-new/');
+});

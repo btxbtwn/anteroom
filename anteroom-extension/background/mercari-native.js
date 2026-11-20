@@ -631,13 +631,17 @@ function mercariOperation(operationName, variables) {
 async function mercariPhotoBlob(photo) {
   const bytes = Uint8Array.from(atob(photo.base64), char => char.charCodeAt(0));
   const image = await createImageBitmap(new Blob([bytes], { type: photo.mime_type }));
-  const scale = Math.min(1, MERCARI_PHOTO_EDGE / Math.max(image.width, image.height));
-  const canvas = new OffscreenCanvas(Math.round(image.width * scale), Math.round(image.height * scale));
-  const context = canvas.getContext('2d');
-  context.fillStyle = '#ffffff';
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  image.close();
+  let canvas;
+  try {
+    const scale = Math.min(1, MERCARI_PHOTO_EDGE / Math.max(image.width, image.height));
+    canvas = new OffscreenCanvas(Math.round(image.width * scale), Math.round(image.height * scale));
+    const context = canvas.getContext('2d');
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  } finally {
+    image.close();
+  }
   return canvas.convertToBlob({ type: 'image/jpeg', quality: 0.92 });
 }
 

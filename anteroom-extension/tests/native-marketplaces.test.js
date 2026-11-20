@@ -182,3 +182,141 @@ test('a delist holds every marketplace', () => {
   c.releaseNativeOperation(operation);
   assert.ok(call(c, 'claimNativeOperation', 'mercari', 'op'));
 });
+
+function fullStorage(context, initial = {}) {
+  const store = { ...initial };
+  context.chrome.storage.local.get = async key => (key == null
+    ? structuredClone(store)
+    : (Object.hasOwn(store, key) ? { [key]: structuredClone(store[key]) } : {}));
+  context.chrome.storage.local.set = async values => {
+    for (const [key, value] of Object.entries(values)) store[key] = structuredClone(value);
+  };
+  context.chrome.storage.local.remove = async keys => {
+    for (const key of (Array.isArray(keys) ? keys : [keys])) delete store[key];
+  };
+  return store;
+}
+
+test('native operation journal prunes expired and excess settled entries while preserving active and unsettled ones', async () => {
+  const s = setup('poshmark');
+  const now = Date.now();
+  const eightDaysAgo = now - 8 * 24 * 60 * 60 * 1000;
+  const seed = {
+    studio_pairing_token: 'keep-unrelated',
+    native_operation_a00001: { finished: false, at: eightDaysAgo, context: { marketplace: 'poshmark' } },
+    native_operation_a00002: { finished: true, at: eightDaysAgo, result: { ok: false, safe_to_retry: false, error: 'uncertain' } },
+    native_operation_a00003: { finished: true, at: eightDaysAgo, result: { ok: true, state: 'draft' } },
+  };
+  for (let i = 0; i < 205; i += 1) {
+    const id = `b${String(i).padStart(5, '0')}`;
+    seed[`native_operation_${id}`] = { finished: true, at: now - (205 - i) * 1000, result: { ok: true, state: 'draft' } };
+  }
+  const store = fullStorage(s.context, seed);
+  s.context.runPoshmarkApi = async () => ({ ok: true, state: 'draft' });
+  await s.context.handleNativeMarketplaceMessage({
+    type: 'marketplace.execute',
+    job_id: 'c00001',
+    payload: { ...s.msg.payload, operation_id: 'c00001', marketplace: 'poshmark', action: 'save_draft', draft_url: null },
+  });
+  assert.equal(store.studio_pairing_token, 'keep-unrelated');
+  assert.ok(store.native_operation_a00001, 'active in-flight operation must never be pruned');
+  assert.ok(store.native_operation_a00002, 'unsettled operation must never be pruned');
+  assert.equal(store.native_operation_a00003, undefined, 'expired settled entry must be pruned');
+  assert.ok(store.native_operation_c00001?.finished, 'current operation must be retained');
+  assert.equal(store.native_operation_b00000, undefined, 'oldest excess settled entry must be pruned');
+  assert.ok(store.native_operation_b00204, 'newest settled entries must be retained');
+  const settledCount = Object.entries(store)
+    .filter(([key, value]) => key.startsWith('native_operation_') && value?.finished && (value.result?.ok || value.result?.safe_to_retry))
+    .length;
+  assert.equal(settledCount, 200);
+});
+
+test('settled native operations strip shop_before while unsettled publishes keep it until recovery finishes', async () => {
+  const s = setup('depop');
+  const store = fullStorage(s.context);
+  const draft = 'https://www.depop.com/sellinghub/drafts/edit/123456/';
+  const shopBefore = { seller_id: '42', seen: ['seller-item-1', 'seller-item-2'] };
+  // Unsettled Depop publish keeps shop_before so a later marketplace.result recovery can use it.
+  s.context.runDepopNative = async () => {
+    store.native_operation_d10001 = { ...store.native_operation_d10001, publish_job_id: 'job-1', shop_before: shopBefore };
+    return { ok: false, safe_to_retry: false, error_code: 'uncertain', error: 'Not confirmed yet.' };
+  };
+  await s.context.handleNativeMarketplaceMessage({
+    type: 'marketplace.execute',
+    job_id: 'd10001',
+    payload: { ...s.msg.payload, operation_id: 'd10001', marketplace: 'depop', action: 'publish', confirm: true, draft_url: draft },
+  });
+  assert.deepEqual(store.native_operation_d10001.shop_before, shopBefore);
+
+  // Recovery receives shop_before, succeeds, and strips shop_before from storage.
+  let seenInRecovery = null;
+  s.context.runDepopNative = async (msg, recovery) => {
+    assert.equal(recovery, true);
+    seenInRecovery = msg.payload.shop_before;
+    return { ok: true, state: 'published', draft_url: draft, listing_url: 'https://www.depop.com/products/seller-new/' };
+  };
+  await s.context.handleNativeMarketplaceMessage({
+    type: 'marketplace.result',
+    job_id: 'd10001',
+    payload: { operation_id: 'd10001', context: { marketplace: 'depop', action: 'publish', draft_url: draft } },
+  });
+  assert.deepEqual(seenInRecovery, shopBefore);
+  assert.equal(Object.hasOwn(store.native_operation_d10001, 'shop_before'), false);
+  assert.equal(store.native_operation_d10001.result.ok, true);
+
+  // A publish that settles immediately also strips shop_before.
+  s.context.runDepopNative = async () => {
+    store.native_operation_d10002 = { ...store.native_operation_d10002, publish_job_id: 'job-2', shop_before: shopBefore };
+    return { ok: true, state: 'published', draft_url: draft, listing_url: 'https://www.depop.com/products/seller-two/' };
+  };
+  await s.context.handleNativeMarketplaceMessage({
+    type: 'marketplace.execute',
+    job_id: 'd10002',
+    payload: { ...s.msg.payload, operation_id: 'd10002', marketplace: 'depop', action: 'publish', confirm: true, draft_url: draft },
+  });
+  assert.equal(Object.hasOwn(store.native_operation_d10002, 'shop_before'), false);
+});
+
+for (const failure of ['quota', 'persistent quota', 'unrelated']) {
+  test(`native journal handles ${failure} write failure before marketplace execution`, async () => {
+    const s = setup('poshmark');
+    s.msg.payload.draft_url = null;
+    const expired = { finished: true, at: Date.now() - 8 * 24 * 60 * 60 * 1000, result: { ok: true } };
+    const store = fullStorage(s.context, {
+      native_operation_dead: expired,
+      native_operation_active: { finished: false, at: expired.at },
+      native_operation_uncertain: { ...expired, result: { ok: false, safe_to_retry: false } },
+      unrelated: 'keep',
+    });
+    const save = s.context.chrome.storage.local.set;
+    let writes = 0;
+    let executions = 0;
+    s.context.chrome.storage.local.set = async values => {
+      writes++;
+      if (failure !== 'quota' || store.native_operation_dead) {
+        throw new Error(failure === 'unrelated' ? 'Storage unavailable' : 'QUOTA_BYTES quota exceeded');
+      }
+      await save(values);
+    };
+    s.context.runPoshmarkApi = async () => {
+      executions++;
+      assert.ok(store.native_operation_abc123, 'journal must persist before execution');
+      return { ok: true, state: 'draft' };
+    };
+    if (failure === 'quota') {
+      await s.context.handleNativeMarketplaceMessage(s.msg);
+      assert.equal(executions, 1);
+      assert.equal(writes, 3); // initial failure, retry, settlement
+      assert.equal(store.native_operation_dead, undefined);
+    } else {
+      await assert.rejects(s.context.handleNativeMarketplaceMessage(s.msg), /quota exceeded|Storage unavailable/);
+      assert.equal(executions, 0);
+      assert.equal(writes, failure === 'unrelated' ? 1 : 2);
+      assert.equal(Boolean(store.native_operation_dead), failure === 'unrelated');
+    }
+    assert.ok(store.native_operation_active);
+    assert.ok(store.native_operation_uncertain);
+    assert.equal(store.unrelated, 'keep');
+    assert.equal(call(s.context, 'nativeOperationsRunning'), false);
+  });
+}

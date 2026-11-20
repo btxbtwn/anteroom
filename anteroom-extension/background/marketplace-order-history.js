@@ -35,6 +35,17 @@ async function historyJson(marketplace, url, options = {}) {
   }
 }
 
+async function historyText(marketplace, url, options = {}) {
+  try {
+    const { data } = await marketplaceFetch(url, { ...options, marketplace, step: 'sales_history',
+      expect: 'text', deadline: Date.now() + 60000 });
+    return typeof data === 'string' ? data : '';
+  } catch (error) {
+    if (error?.status === 404) return '';
+    throw error;
+  }
+}
+
 // "8.23", 8.23, "28.0" → "8.23". Anything else → null.
 function historyMoney(value) {
   if (typeof value !== 'number' && typeof value !== 'string') return null;
@@ -204,7 +215,8 @@ async function poshmarkOrderHistory(settled, incremental = false) {
   for (let page = 0; page < HISTORY_MAX_PAGES; page += 1) {
     if (page) await salePause(true);
     const request = { filters: {}, count: 100, ...(maxId ? { max_id: maxId } : {}) };
-    const body = await saleJson(`https://poshmark.com/vm-rest/users/${seller}/orders/sales?request=${encodeURIComponent(JSON.stringify(request))}`,
+    const body = await historyJson('poshmark',
+      `https://poshmark.com/vm-rest/users/${seller}/orders/sales?request=${encodeURIComponent(JSON.stringify(request))}`,
       { credentials: 'include' });
     if (body?.error || !Array.isArray(body?.data?.sales_summary)) throw new Error('Poshmark sales missing');
     const rows = body.data.sales_summary.filter(row => SALE_LISTING_ID.poshmark.test(String(row?.id ?? '')) && !seen.has(String(row.id)));
@@ -215,12 +227,15 @@ async function poshmarkOrderHistory(settled, incremental = false) {
       if (details >= HISTORY_MAX_DETAILS) { more = true; break; }
       await salePause(false);
       details += 1;
-      const response = await saleRead(`https://poshmark.com/order/sales/${row.id}`, { credentials: 'include' });
-      const html = response ? await response.text() : '';
+      const html = await historyText('poshmark', `https://poshmark.com/order/sales/${row.id}`, { credentials: 'include' });
       let state = null;
       try { state = JSON.parse(/__INITIAL_STATE__\s*=\s*({[^<]*});/.exec(html)?.[1] || 'null'); } catch { state = null; }
       const detail = state?.$_order_details?.order;
-      if (!detail || String(detail.id) !== String(row.id)) throw new Error('Poshmark order page changed');
+      if (!detail || String(detail.id) !== String(row.id)) {
+        if (MARKETPLACE_CHALLENGE.test(html)) throw marketplaceError('Poshmark asked for a browser check.', { code: 'challenge' });
+        if (MARKETPLACE_LOGIN_PAGE.test(html)) throw marketplaceError('Poshmark asked to sign in again.', { code: 'signed_out' });
+        throw new Error('Poshmark order page changed');
+      }
       const order = poshmarkHistoryOrder(detail, row.display_status);
       if (order) orders.push(order);
       else unreadable += 1;
