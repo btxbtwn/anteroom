@@ -316,7 +316,7 @@ fly secrets set --config deploy/fly/fly.toml \
 
 Optional overrides:
 
-- `ANTEROOM_MANAGED_MODEL`: OpenRouter model slug (defaults to `google/gemini-3.8-flash`).
+- `ANTEROOM_MANAGED_MODEL`: OpenRouter model slug (defaults to `google/gemini-3.1-flash-lite`).
 - `ANTEROOM_MANAGED_REASONING`: Optional reasoning effort (`minimal`, `low`, `medium`, `high`, `xhigh`, or `max`).
 
 When `ANTEROOM_MANAGED_OPENROUTER_KEY` is set, `/api/runtime` advertises the

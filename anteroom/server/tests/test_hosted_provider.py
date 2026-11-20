@@ -136,6 +136,7 @@ def test_managed_openrouter_pins_gemini_flash_for_hosted_accounts(monkeypatch):
         monkeypatch.setattr(listing_provider, name, Mock(side_effect=AssertionError('Desktop sign-in')))
 
     assert managed_ai_enabled() is True
+    assert DEFAULT_MANAGED_MODEL == 'google/gemini-3.1-flash-lite'
     assert managed_model() == DEFAULT_MANAGED_MODEL
     assert managed_reasoning() is None
 
