@@ -687,6 +687,10 @@ class NativeContractRevisionTest(unittest.TestCase):
         found = catalog.search({"marketplace": "mercari", "field": "mercari_specifics.brand", "query": "Nike", "offset": 0})
         self.assertTrue(any(item["label"] == "Nike" for item in found["results"]))
         self.assertNotIn("choice_list", contract.prompt(contracts))
+        from anteroom.services import choice_lists
+        shared_ebay = choice_lists.share(ebay_form)
+        shared_brand = next(row for row in shared_ebay["fields"] if row["path"] == "ebay_specifics.Brand")
+        self.assertEqual(shared_brand["option_values"], {name: name for name in ebay_brands})
 
     def test_job_repo_strips_native_forms_and_keeps_approved_photos(self):
         from anteroom.repositories.queries import JobRepo

@@ -55,6 +55,7 @@ def allowed_values(name: str) -> frozenset[str]:
     return frozenset(allowed)
 
 
+@cache
 def _named_sources() -> dict[tuple[str, str], str]:
     return {(marketplace, path): name for name, (marketplace, path, _load) in _sources().items()}
 
@@ -70,7 +71,13 @@ def _strip_identity_option_values(row: dict) -> dict:
     return row
 
 
-def _compact_row(marketplace: str, row: dict, named: dict[tuple[str, str], str]) -> dict:
+def _compact_row(
+    marketplace: str,
+    row: dict,
+    named: dict[tuple[str, str], str],
+    *,
+    strip_identity_option_values: bool = True,
+) -> dict:
     if not isinstance(row, dict):
         return row
     name = named.get((str(marketplace or ""), str(row.get("path") or row.get("key") or "")))
@@ -83,19 +90,29 @@ def _compact_row(marketplace: str, row: dict, named: dict[tuple[str, str], str])
                     return row
                 return {**row, "choice_list": {"name": name, "version": listed[1]}}
             data = payload(name)
-            if data and all(row.get(key) == value for key, value in data.items()):
+            if data and all((row.get(key) is value or row.get(key) == value) for key, value in data.items()):
                 compacted = {key: value for key, value in row.items() if key not in data}
                 compacted["choice_list"] = {"name": name, "version": listed[1]}
                 return compacted
-    return _strip_identity_option_values(row)
+    return _strip_identity_option_values(row) if strip_identity_option_values else row
 
 
-def compact_row(marketplace: str, row: dict) -> dict:
+def compact_row(marketplace: str, row: dict, *, strip_identity_option_values: bool = True) -> dict:
     """Replace a row's static shared choice list with its ``choice_list`` reference."""
-    return _compact_row(marketplace, row, _named_sources())
+    return _compact_row(
+        marketplace,
+        row,
+        _named_sources(),
+        strip_identity_option_values=strip_identity_option_values,
+    )
 
 
-def compact_fields(marketplace: str, fields: list[dict]) -> list[dict]:
+def compact_fields(
+    marketplace: str,
+    fields: list[dict],
+    *,
+    strip_identity_option_values: bool = True,
+) -> list[dict]:
     """Return ``fields`` with static shared choice lists replaced by compact references."""
     if not fields:
         return fields
@@ -103,7 +120,12 @@ def compact_fields(marketplace: str, fields: list[dict]) -> list[dict]:
     rows = []
     changed = False
     for row in fields:
-        compacted = _compact_row(marketplace, row, named)
+        compacted = _compact_row(
+            marketplace,
+            row,
+            named,
+            strip_identity_option_values=strip_identity_option_values,
+        )
         if compacted is not row:
             changed = True
         rows.append(compacted)
@@ -154,5 +176,14 @@ def share(form: dict) -> dict:
     """The form with each shared list replaced by its name and version.
 
     A row whose choices differ from the shared list (a builder narrowed them for
-    this listing) keeps its own."""
-    return {**form, "fields": compact_fields(str(form.get("marketplace") or ""), form.get("fields") or [])}
+    this listing) keeps its own. Non-shared rows stay byte-for-byte identical so
+    clients expanding ``choice_list`` references recover ``read_form()`` verbatim.
+    """
+    return {
+        **form,
+        "fields": compact_fields(
+            str(form.get("marketplace") or ""),
+            form.get("fields") or [],
+            strip_identity_option_values=False,
+        ),
+    }

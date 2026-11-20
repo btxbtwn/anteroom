@@ -411,7 +411,7 @@ def test_etsy_write_clears_pending_marker_when_canceled_during_journal(monkeypat
 
     monkeypatch.setattr(etsy_listings, "connected_shop_id", lambda: "shop-1")
     monkeypatch.setattr(marketplace_accounts, "etsy_api", fake_etsy_api)
-    monkeypatch.setattr(etsy_listings, "draft_fields", lambda _snap, creating=True: {"title": "Tee", "taxonomy_id": ""})
+    monkeypatch.setattr(etsy_listings, "draft_fields", lambda *_args, **_kwargs: {"title": "Tee", "taxonomy_id": ""})
     monkeypatch.setattr(etsy_listings, "_sync_photos", AsyncMock())
 
     result = asyncio.run(
@@ -419,6 +419,7 @@ def test_etsy_write_clears_pending_marker_when_canceled_during_journal(monkeypat
     )
     assert result["ok"] is False
     assert result["safe_to_retry"] is True
+    assert "stopped or the connected shop changed" in (result.get("error") or "")
     assert dispatched == []
     assert {"etsy_pending_write": "create"} in recorded
     assert recorded[-1] == {"etsy_pending_write": None}
