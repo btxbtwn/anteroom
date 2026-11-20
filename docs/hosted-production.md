@@ -357,9 +357,12 @@ poll the database about twice a second while any device was signed in, at
 ~12 ms of database CPU per poll whether or not anything changed: 19% of all
 database time by 2026-11-20. Broadcast streams instead and makes no polls.
 iPhone builds from before the switch still use Postgres Changes, so
-`seller_changes` stays in the `supabase_realtime` publication until
-2026-12-20; then a revision drops it from the publication along with the
-`seller_subscriber` policy.
+`seller_changes` stays in the `supabase_realtime` publication and keeps its
+`seller_subscriber` policy until the installed iPhone app uses Broadcast.
+The target is 2026-12-20: only after confirming that the installed app uses
+Broadcast should a new revision remove the table from the publication and
+drop the policy. If the app still uses Postgres Changes on that date, defer
+the removal.
 
 Chat image messages hold at most one upload per seller and four across the
 Machine (each can hold about 170 MB while it is parsed; four fit the 2 GB
