@@ -802,6 +802,13 @@ export function StructuredEditor({
       {
         signal: controller.signal,
         activeMarket: tab,
+        onMarketError: (market) => {
+          if (!controller.signal.aborted) toastManager.add({
+            type: "error",
+            title: `${marketplaceName(market)} fields could not be reloaded`,
+            description: "Use Reload fields to try again.",
+          });
+        },
         onMarketStart: (market) => {
           if (!controller.signal.aborted) setAutoReloadingMarket(market);
         },

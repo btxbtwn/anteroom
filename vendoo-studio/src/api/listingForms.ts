@@ -142,7 +142,7 @@ export function nativeFormOptions(convId: string, tab: string, listing: ListingD
       failureCount < 1
       && error instanceof ApiRequestError
       && error.retryable
-      && (error.status === 0 || error.status === 503 || error.status === 504),
+      && (error.status === 0 || error.status === 502 || error.status === 503 || error.status === 504),
     retryDelay: 500,
   });
 }
@@ -180,6 +180,7 @@ export function staleFormMarketplaces(
 export interface AutoRefreshStaleFormsOptions {
   signal?: AbortSignal;
   activeMarket?: string;
+  onMarketError?: (market: string, error: unknown) => void;
   onMarketStart?: (market: string | null) => void;
 }
 
@@ -202,6 +203,7 @@ export async function autoRefreshStaleForms(
 
   let currentRevision = revisionId;
   const refreshed: string[] = [];
+  let conflicted = false;
 
   try {
     for (const market of markets) {
@@ -216,19 +218,24 @@ export async function autoRefreshStaleForms(
         attempted.add(`${currentRevision}:${market}`);
         refreshed.push(market);
       } catch (error) {
-        if (signal?.aborted) break;
+        if (signal?.aborted) {
+          attempted.delete(attemptKey);
+          break;
+        }
         if (error instanceof ApiRequestError && error.status === 409) {
+          conflicted = true;
           // A seller edit or background write moved the listing ahead; stop
           // this batch and let the new revision's preflight run cleanly.
           break;
         }
+        options?.onMarketError?.(market, error);
         // Keep moving to any other stale marketplaces; this one stays marked
         // attempted for the current revision so it won't loop.
       }
     }
   } finally {
     options?.onMarketStart?.(null);
-    if (refreshed.length > 0) {
+    if (refreshed.length > 0 || conflicted) {
       await client.invalidateQueries({ queryKey: ["listing", convId] });
       const current = client.getQueryData<ListingDocument>(["listing", convId]);
       const active = options?.activeMarket;

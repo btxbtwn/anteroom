@@ -179,6 +179,50 @@ it("retries transient Load failed errors once when reading a native form but not
   const retry = opts.retry as (count: number, err: unknown) => boolean;
   expect(retry(0, new ApiRequestError("Load failed", 0, true))).toBe(true);
   expect(retry(1, new ApiRequestError("Load failed", 0, true))).toBe(false);
-  expect(retry(0, new ApiRequestError("eBay disconnected", 502, true))).toBe(false);
+  expect(retry(0, new ApiRequestError("eBay disconnected", 502, false))).toBe(false);
 });
 
+
+it("invalidates server state after a conflict with no successful refresh", async () => {
+  const client = createStudioQueryClient();
+  const invalidate = vi.spyOn(client, "invalidateQueries");
+  vi.spyOn(api.nativeMarketplaces, "refreshForm").mockRejectedValue(new ApiRequestError("Changed", 409, false));
+  try {
+    await autoRefreshStaleForms(client, "item", ["ebay"], "r1", new Set());
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["listing", "item"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["native-preflight", "item"] });
+  } finally { client.clear(); }
+});
+
+it("releases only interrupted attempts and reports marketplace failures", async () => {
+  const client = createStudioQueryClient();
+  const attempted = new Set<string>();
+  const controller = new AbortController();
+  const onMarketError = vi.fn();
+  const refresh = vi.spyOn(api.nativeMarketplaces, "refreshForm").mockImplementation(async () => {
+    controller.abort();
+    throw new DOMException("Aborted", "AbortError");
+  });
+  try {
+    await autoRefreshStaleForms(client, "item", ["ebay"], "r1", attempted, { signal: controller.signal, onMarketError });
+    expect(attempted.size).toBe(0);
+    expect(onMarketError).not.toHaveBeenCalled();
+    const failure = new Error("Unavailable");
+    refresh.mockRejectedValue(failure);
+    await autoRefreshStaleForms(client, "item", ["ebay"], "r1", attempted, { onMarketError });
+    expect(attempted.has("r1:ebay")).toBe(true);
+    expect(onMarketError).toHaveBeenCalledWith("ebay", failure);
+  } finally { client.clear(); }
+});
+
+it.each([
+  [new Response("", { status: 502 }), true],
+  [new Response("<html>Bad gateway</html>", { status: 502 }), true],
+  [new Response(JSON.stringify({ detail: "eBay disconnected" }), { status: 502 }), false],
+])("retries unexplained gateway responses once", async (response, expected) => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+  const retry = nativeFormOptions("item", "ebay", {}, "r1").retry as (count: number, err: unknown) => boolean;
+  const error = await api.nativeMarketplaces.form("item", "ebay", "r1").catch((err: unknown) => err);
+  expect(retry(0, error)).toBe(expected);
+  expect(retry(1, error)).toBe(false);
+});

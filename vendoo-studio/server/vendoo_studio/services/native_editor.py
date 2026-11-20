@@ -131,11 +131,11 @@ async def build_form(snapshot: dict, listing_json: dict, marketplace: str, *, re
     if marketplace == "poshmark":
         from vendoo_studio.services.poshmark_form import form
 
-        return form(snapshot)
+        return await asyncio.to_thread(form, snapshot)
     if marketplace == "depop":
         from vendoo_studio.services.depop_form import form
 
-        return form(snapshot)
+        return await asyncio.to_thread(form, snapshot)
     if marketplace == "mercari":
         from vendoo_studio.services.mercari_form import editor_form as mercari_form
 

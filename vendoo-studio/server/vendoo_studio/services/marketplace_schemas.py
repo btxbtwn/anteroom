@@ -42,18 +42,18 @@ class _LazyEbayClient:
     """Connects to eBay at most once across concurrent schema reads that miss cache."""
 
     def __init__(self) -> None:
-        self._client: Any = None
-        self._lock = asyncio.Lock()
+        self._attempt: asyncio.Future[Any] | None = None
 
     async def get(self):
-        if self._client is not None:
-            return self._client
-        async with self._lock:
-            if self._client is None:
-                from vendoo_studio.services.ebay_client import EbayClient
+        if self._attempt is None:
+            from vendoo_studio.services.ebay_client import EbayClient
 
-                self._client = await EbayClient.connect()
-            return self._client
+            self._attempt = asyncio.ensure_future(EbayClient.connect())
+            # Retrieve failures even if all waiting readers are cancelled.
+            self._attempt.add_done_callback(
+                lambda done: done.exception() if not done.cancelled() else None,
+            )
+        return await asyncio.shield(self._attempt)
 
 
 _preloaded_rows: contextvars.ContextVar[dict[tuple[str, str], list[dict] | None] | None] = contextvars.ContextVar(

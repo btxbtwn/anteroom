@@ -17,6 +17,7 @@ _QUOTE_TTL_S = 15 * 60
 _QUOTE_MAX_ENTRIES = 512
 _QuoteKey = tuple[int, int, tuple[float, float, float]]
 _quote_cache: dict[_QuoteKey, tuple[float, list[dict]]] = {}
+_quote_generations: dict[_QuoteKey, object] = {}
 _quote_inflight: dict[_QuoteKey, asyncio.Task[list[dict]]] = {}
 
 
@@ -24,6 +25,7 @@ def clear_quote_cache() -> None:
     """Drop cached public Mercari shipping quotes (for tests)."""
     _quote_cache.clear()
     _quote_inflight.clear()
+    _quote_generations.clear()
 
 
 @lru_cache(maxsize=1)
@@ -284,13 +286,21 @@ async def _cached_shipping_quotes(
         if inflight is not None and not inflight.done() and inflight.get_loop() is asyncio.get_running_loop():
             return await asyncio.shield(inflight)
 
+    generation = object()
+    _quote_generations[key] = generation
+
     async def fetch_and_store() -> list[dict]:
-        quotes = await shipping_quotes(category, ounces, dimensions)
-        _quote_cache.pop(key, None)
-        _quote_cache[key] = (time.monotonic(), quotes)
-        while len(_quote_cache) > _QUOTE_MAX_ENTRIES:
-            _quote_cache.pop(next(iter(_quote_cache)))
-        return quotes
+        try:
+            quotes = await shipping_quotes(category, ounces, dimensions)
+            if _quote_generations.get(key) is generation:
+                _quote_cache.pop(key, None)
+                _quote_cache[key] = (time.monotonic(), quotes)
+                while len(_quote_cache) > _QUOTE_MAX_ENTRIES:
+                    _quote_cache.pop(next(iter(_quote_cache)))
+            return quotes
+        finally:
+            if _quote_generations.get(key) is generation:
+                _quote_generations.pop(key, None)
 
     if refresh:
         return await fetch_and_store()

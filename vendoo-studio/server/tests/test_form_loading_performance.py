@@ -43,6 +43,55 @@ class EbayFormConcurrencyAndCacheTest(unittest.IsolatedAsyncioTestCase):
         saved_choices._path().unlink(missing_ok=True)
         self.addCleanup(lambda: saved_choices._path().unlink(missing_ok=True))
 
+    async def test_failed_connection_is_shared_until_next_schema_session(self):
+        connect = AsyncMock(side_effect=RuntimeError("refresh timed out"))
+        with patch.object(EbayClient, "connect", connect):
+            with marketplace_schemas.schema_session():
+                results = await asyncio.gather(
+                    *(marketplace_schemas._ebay_client(None) for _ in range(4)),
+                    return_exceptions=True,
+                )
+                self.assertTrue(all(isinstance(result, RuntimeError) for result in results))
+                self.assertEqual(connect.await_count, 1)
+            with marketplace_schemas.schema_session():
+                with self.assertRaises(RuntimeError):
+                    await marketplace_schemas._ebay_client(None)
+            self.assertEqual(connect.await_count, 2)
+
+    async def test_older_quotes_cannot_replace_explicit_refresh(self):
+        mercari_form.clear_quote_cache()
+        self.addCleanup(mercari_form.clear_quote_cache)
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def quotes(*args):
+            started.set()
+            await release.wait()
+            return [{"fee": 100}]
+
+        with patch("vendoo_studio.services.mercari_api.shipping_quotes", side_effect=quotes) as read:
+            older = asyncio.create_task(mercari_form._cached_shipping_quotes(275, 16, (1, 2, 3)))
+            await started.wait()
+            read.side_effect = None
+            read.return_value = [{"fee": 200}]
+            fresh = await mercari_form._cached_shipping_quotes(275, 16, (1, 2, 3), refresh=True)
+            release.set()
+            self.assertEqual(await older, [{"fee": 100}])
+            self.assertEqual(await mercari_form._cached_shipping_quotes(275, 16, (1, 2, 3)), fresh)
+
+    async def test_sync_builders_run_in_worker_with_context(self):
+        for market in ("poshmark", "depop"):
+            with marketplace_schemas.schema_session():
+                holder = marketplace_schemas._ebay_client_holder.get()
+                main_thread = threading.get_ident()
+
+                def build(snapshot, main_thread=main_thread, holder=holder):
+                    self.assertNotEqual(threading.get_ident(), main_thread)
+                    self.assertIs(marketplace_schemas._ebay_client_holder.get(), holder)
+                    return snapshot
+
+                with patch(f"vendoo_studio.services.{market}_form.form", side_effect=build):
+                    self.assertEqual(await native_editor.build_form({"title": "test"}, {}, market), {"title": "test"})
+
     async def test_cold_ebay_form_runs_all_five_reads_together_with_one_client_connect(self):
         """Aspects, conditions, variations, listing types and policies are independent reads,
         and a cold eBay form should connect once rather than three times."""
@@ -267,7 +316,6 @@ class EbayFormConcurrencyAndCacheTest(unittest.IsolatedAsyncioTestCase):
 
 def test_hosted_form_releases_db_connection_before_external_network_wait(migration_engine, jwks, signing_keys, monkeypatch):  # noqa: F811
     """Hosted form route must release its pooled Postgres connection before awaiting external APIs."""
-    import os
 
     import httpx
     from sqlalchemy import create_engine as sa_create_engine
@@ -282,7 +330,7 @@ def test_hosted_form_releases_db_connection_before_external_network_wait(migrati
 
     # Single-connection pool proves no connection is held during the Mercari network wait:
     # while the form request waits on Mercari, a concurrent /api/status must succeed immediately.
-    tight_engine = sa_create_engine(os.environ["ANTEROOM_DATABASE_URL"], pool_size=1, max_overflow=0, pool_timeout=1.0)
+    tight_engine = sa_create_engine(migration_engine.url, pool_size=1, max_overflow=0, pool_timeout=1.0)
     monkeypatch.setattr("vendoo_studio.database.engine", tight_engine)
     monkeypatch.setattr("vendoo_studio.database.SessionLocal", sessionmaker(bind=tight_engine, autoflush=False, autocommit=False))
 
@@ -349,7 +397,6 @@ def test_hosted_form_releases_db_connection_before_external_network_wait(migrati
 def test_hosted_concurrent_multiseller_forms_coalesce_and_stay_responsive(migration_engine, jwks, signing_keys, monkeypatch):  # noqa: F811
     """Two sellers loading 24 forms + 16 listing reads concurrently on a 4-connection pool see 0 errors
     and coalesce identical public Mercari shipping quote requests."""
-    import os
     import time
 
     import httpx
@@ -363,7 +410,7 @@ def test_hosted_concurrent_multiseller_forms_coalesce_and_stay_responsive(migrat
         pytest.skip("Hosted data routes require PostgreSQL")
     schema_migrations.ensure_schema(migration_engine)
 
-    pooled_engine = sa_create_engine(os.environ["ANTEROOM_DATABASE_URL"], pool_size=4, max_overflow=0, pool_timeout=5.0)
+    pooled_engine = sa_create_engine(migration_engine.url, pool_size=4, max_overflow=0, pool_timeout=5.0)
     monkeypatch.setattr("vendoo_studio.database.engine", pooled_engine)
     monkeypatch.setattr("vendoo_studio.database.SessionLocal", sessionmaker(bind=pooled_engine, autoflush=False, autocommit=False))
 

@@ -152,11 +152,12 @@ async function rawRequest<T>(path: string, options?: RequestInit): Promise<T> {
     throw error;
   }
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ detail: res.statusText }));
+    const body = await res.json().catch(() => null);
+    const explained = errorMessage(body, "").trim().length > 0;
     throw new ApiRequestError(
       errorMessage(body, `Request failed: ${res.status}`),
       res.status,
-      isRead && UNAVAILABLE_STATUSES.has(res.status),
+      isRead && UNAVAILABLE_STATUSES.has(res.status) && (res.status !== 502 || !explained),
       retryAfterMs(res.headers.get("Retry-After")),
       res.headers.get("X-Anteroom-Reason"),
     );
