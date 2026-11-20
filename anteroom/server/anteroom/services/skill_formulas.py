@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from functools import lru_cache
 
 from anteroom.config import skills_dir
@@ -27,6 +28,145 @@ _FLAW_LIST_RE = re.compile(r"(?m)^[ \t]*-\s+\{")
 DEFAULT_DESCRIPTION_MARKERS = ("measurements:",)
 # A flawless item leaves its Flaws line out, so the marker is never required.
 OPTIONAL_DESCRIPTION_MARKERS = frozenset({"flaws:"})
+# Chosen when the seller turns every description section off. Distinct from an
+# empty setting, which still means the built-in formula.
+NO_SECTION_DESCRIPTION = "{one short factual description with no labeled sections}"
+_SELLER_FORMULA_NOTE = (
+    "\n\nSeller description formula: follow the description template above exactly, "
+    "including any section it adds and omitting any section it leaves out."
+)
+_STOCK_DESCRIPTION_LIMIT = (
+    "Do not add Size, a full condition write-up, shipping speed, or bundle/discount lines "
+    "— those are covered by marketplace fields and marketplace-level promos already."
+)
+_CUSTOM_DESCRIPTION_LIMIT = (
+    "Do not add a section the description template omits. Include a section the template "
+    "shows when the item supports it, including size, condition, shipping, or bundles. "
+    "Leave a templated line out only when the item does not support that fact."
+)
+
+
+@dataclass(frozen=True)
+class DescriptionBlock:
+    id: str
+    label: str
+    detail: str
+    snippet: str
+    default: bool
+    optional: bool = False
+
+
+# Catalog order is the order a generated description uses. The default ids
+# compile to DEFAULT_DESCRIPTION_FORMULA exactly.
+DESCRIPTION_BLOCKS: tuple[DescriptionBlock, ...] = (
+    DescriptionBlock(
+        "vibe",
+        "Vibe",
+        "One short sentence of style and trend keywords.",
+        "{trendy vibe/style keyword sentence with period}",
+        True,
+    ),
+    DescriptionBlock(
+        "item",
+        "Brand, item, color, and size",
+        "The brand, what it is, its color, and the tag size.",
+        "Item: {brand, item, color, and tag size}",
+        False,
+    ),
+    DescriptionBlock(
+        "trend",
+        "Trend",
+        "One supported decade or trend, such as Y2K or 90s.",
+        "Trend: {one supported decade or trend, or leave this line out}",
+        False,
+        True,
+    ),
+    DescriptionBlock(
+        "fit",
+        "Fit",
+        "One recorded fit, such as runs small or oversized.",
+        "Fit: {one recorded fit clause, or leave this line out}",
+        False,
+        True,
+    ),
+    DescriptionBlock(
+        "material",
+        "Material",
+        "Fiber from the label, with blend percentages.",
+        "Material: {fiber from the label with blend percentages, or leave this line out}",
+        False,
+        True,
+    ),
+    DescriptionBlock(
+        "pattern",
+        "Pattern",
+        "The print, such as stripe or floral.",
+        "Pattern: {the print, or leave this line out}",
+        False,
+        True,
+    ),
+    DescriptionBlock(
+        "occasion",
+        "Occasion",
+        "One real use, such as work or a wedding.",
+        "Occasion: {one real use, or leave this line out}",
+        False,
+        True,
+    ),
+    DescriptionBlock(
+        "details",
+        "Construction",
+        "Pockets, closure, neckline, rise, or hem when the photos hide them.",
+        "Details: {pockets, closure, neckline, rise, or hem the photos hide, or leave this line out}",
+        False,
+        True,
+    ),
+    DescriptionBlock(
+        "flaws",
+        "Flaws",
+        "Each flaw on its own line. Leave the block out when there are none.",
+        "Flaws:\n- {one flaw per line}\nSee photos for details.",
+        True,
+    ),
+    DescriptionBlock(
+        "measurements",
+        "Measurements",
+        "Flat measurements, or See photos.",
+        "Measurements: {See photos OR specific measurements}",
+        True,
+    ),
+    DescriptionBlock(
+        "condition",
+        "Condition",
+        "The same grade as the condition field, in a few words.",
+        "Condition: {the condition grade in words, matching the condition field}",
+        False,
+    ),
+    DescriptionBlock(
+        "care",
+        "Care",
+        "Care from the label.",
+        "Care: {care from the label, or leave this line out}",
+        False,
+        True,
+    ),
+    DescriptionBlock(
+        "home",
+        "Smoke-free or pet-free",
+        "Only when it is true.",
+        "Home: {smoke-free or pet-free, only when true, or leave this line out}",
+        False,
+        True,
+    ),
+    DescriptionBlock(
+        "shipping",
+        "Shipping and bundles",
+        "A ship window and one bundle note.",
+        "Shipping: {ship window and one bundle note, or leave this line out}",
+        False,
+        True,
+    ),
+)
 
 
 @lru_cache(maxsize=1)
@@ -63,7 +203,70 @@ def listing_formula_rules(*, max_chars: int = 8000) -> str:
     description = custom.get("description")
     if description:
         text = _DESCRIPTION_BLOCK_RE.sub(lambda m: m.group(1) + description + m.group(2), text, count=1)
+        if description.strip() != DEFAULT_DESCRIPTION_FORMULA.strip():
+            text = text.replace(_STOCK_DESCRIPTION_LIMIT, _CUSTOM_DESCRIPTION_LIMIT, 1)
+            text += _SELLER_FORMULA_NOTE
     return text[:max_chars]
+
+
+def active_description_template() -> str:
+    return get_listing_formulas().get("description") or DEFAULT_DESCRIPTION_FORMULA
+
+
+def description_has_section(label: str) -> bool:
+    """True when the active description formula has a ``Label:`` line."""
+    return re.search(rf"(?im)^{re.escape(label)}\s*:", active_description_template()) is not None
+
+
+def _optional_description_markers(template: str) -> frozenset[str]:
+    labels = set(OPTIONAL_DESCRIPTION_MARKERS)
+    for block in DESCRIPTION_BLOCKS:
+        if not block.optional or block.snippet not in template:
+            continue
+        for match in _MARKER_LINE_RE.finditer(block.snippet):
+            labels.add(f"{match.group(1).strip().lower()}:")
+    return frozenset(labels)
+
+
+def default_description_block_ids() -> tuple[str, ...]:
+    return tuple(block.id for block in DESCRIPTION_BLOCKS if block.default)
+
+
+def compile_description_blocks(ids: list[str] | tuple[str, ...]) -> str:
+    """Join the chosen sections in catalog order. Unknown ids are rejected."""
+    known = {block.id for block in DESCRIPTION_BLOCKS}
+    unknown = [item for item in ids if item not in known]
+    if unknown:
+        raise ValueError(f"Unknown description section: {unknown[0]}")
+    chosen = set(ids)
+    parts = [block.snippet for block in DESCRIPTION_BLOCKS if block.id in chosen]
+    if not parts:
+        return NO_SECTION_DESCRIPTION
+    return "\n\n".join(parts)
+
+
+def match_description_blocks(text: str) -> tuple[str, ...] | None:
+    """Block ids that compile to this formula, or None when it was typed freely."""
+    stripped = text.strip()
+    if stripped == NO_SECTION_DESCRIPTION:
+        return ()
+    present = tuple(block.id for block in DESCRIPTION_BLOCKS if block.snippet in stripped)
+    if compile_description_blocks(present).strip() == stripped:
+        return present
+    return None
+
+
+def description_block_selection(stored: str) -> tuple[tuple[str, ...], bool]:
+    """Enabled block ids and whether the stored formula is free text.
+
+    An empty setting is the built-in formula, not a custom one.
+    """
+    if not stored.strip():
+        return default_description_block_ids(), False
+    matched = match_description_blocks(stored)
+    if matched is None:
+        return (), True
+    return matched, False
 
 
 def description_lists_flaws() -> bool:
@@ -81,9 +284,12 @@ def description_formula_markers() -> tuple[str, ...]:
     Derived from the active (custom or default) DESCRIPTION formula so validation
     stays in sync when the user edits the formula in Settings.
     """
-    template = get_listing_formulas().get("description") or DEFAULT_DESCRIPTION_FORMULA
+    custom = get_listing_formulas().get("description")
+    template = custom or DEFAULT_DESCRIPTION_FORMULA
     labels = {f"{m.group(1).strip().lower()}:" for m in _MARKER_LINE_RE.finditer(template)}
-    found = tuple(sorted(labels - OPTIONAL_DESCRIPTION_MARKERS))
+    found = tuple(sorted(labels - _optional_description_markers(template)))
+    if custom:
+        return found
     return found or DEFAULT_DESCRIPTION_MARKERS
 
 

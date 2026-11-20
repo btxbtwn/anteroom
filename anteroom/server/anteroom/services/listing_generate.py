@@ -597,6 +597,14 @@ def ensure_physical_description(listing: dict) -> bool:
     desc = str(listing.get("description") or "").strip()
     if not desc or _description_follows_formula(desc):
         return False
+    from anteroom.services.skill_formulas import (
+        DEFAULT_DESCRIPTION_FORMULA,
+        description_formula_markers,
+    )
+    from anteroom.services.user_settings import get_listing_formulas
+
+    if "measurements:" not in description_formula_markers():
+        return False
 
     meas = "See photos"
     meas_match = re.search(r"(?is)measurements?:\s*(.+?)(?:\n\n|\n[A-Z]|$)", desc)
@@ -611,7 +619,16 @@ def ensure_physical_description(listing: dict) -> bool:
             meas = "; ".join(re.sub(r"\s+", " ", bit).strip() for bit in bits)
 
     # Prefer appending the missing Measurements block so existing vibe prose stays intact.
-    if "\n" in desc and len(desc) >= 40 and "measurements:" not in desc.lower():
+    # A seller-chosen formula is never rebuilt into the old three blocks.
+    custom = get_listing_formulas().get("description", "")
+    seller_chose = bool(custom.strip()) and custom.strip() != DEFAULT_DESCRIPTION_FORMULA.strip()
+    if seller_chose or ("\n" in desc and len(desc) >= 40 and "measurements:" not in desc.lower()):
+        if "measurements:" in desc.lower():
+            repaired = re.sub(r"(?i)(?<=\S)[ \t]+(?=measurements\s*:)", "\n\n", desc)
+            if repaired == desc or not _description_follows_formula(repaired):
+                return False
+            listing["description"] = repaired
+            return True
         listing["description"] = f"{desc.rstrip()}\n\nMeasurements: {meas}"
         return True
 
@@ -1330,7 +1347,7 @@ def apply_seller_description_facts(listing: dict, seller: dict) -> bool:
         set_description_block,
         without_see_photos,
     )
-    from anteroom.services.skill_formulas import description_lists_flaws
+    from anteroom.services.skill_formulas import description_has_section, description_lists_flaws
 
     if not isinstance(listing, dict):
         return False
@@ -1340,13 +1357,20 @@ def apply_seller_description_facts(listing: dict, seller: dict) -> bool:
     # A model that names the seller's flaws and adds ones it saw keeps its block.
     seller_flaws = "; ".join(flaw_items(flaws))
     described = _comparable(description_block(updated, "flaws?"))
-    if seller_flaws and _comparable(seller_flaws) not in described:
+    flaws_label = "Flaws" if description_has_section("Flaws") else "Flaw"
+    if seller_flaws and description_has_section(flaws_label) and _comparable(seller_flaws) not in described:
         block = render_flaws_block(flaws, as_list=description_lists_flaws())
         if block:
+            block = block.replace("Flaws:", f"{flaws_label}:", 1)
             updated = set_description_block(updated, "flaws?", block, before="measurements?")
     measurements = _description_measurements(seller)
-    if measurements and description_block(updated, "measurements?") != measurements.rstrip("."):
-        updated = set_description_block(updated, "measurements?", f"Measurements: {measurements}")
+    measurements_label = "Measurements" if description_has_section("Measurements") else "Measurement"
+    if (
+        measurements
+        and description_has_section(measurements_label)
+        and description_block(updated, "measurements?") != measurements.rstrip(".")
+    ):
+        updated = set_description_block(updated, "measurements?", f"{measurements_label}: {measurements}")
     if updated == desc:
         return False
     listing["description"] = updated
