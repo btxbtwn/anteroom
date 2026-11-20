@@ -110,6 +110,8 @@ def _snapshot(item: dict, sku: str | None, quantity: int, price: float, properti
         details["styles"] = styles
     if type(item.get("is_supply")) is bool:
         details["what_is"] = "1" if item["is_supply"] else "0"
+    if type(item.get("should_auto_renew")) is bool:
+        details["renewalOption"] = "Automatic" if item["should_auto_renew"] else "Manual"
     details["listing_type"] = "physical"
     attributes = {}
     rows = properties.get("results")

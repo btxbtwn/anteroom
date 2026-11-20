@@ -140,8 +140,8 @@ async def _settings_choices() -> tuple[dict[str, str], dict[str, dict[str, str]]
 async def editor_form(snapshot: dict) -> dict:
     """Etsy's form rows for this listing, in the page's order."""
     from vendoo_studio.services.direct_categories import direct_category_id
-    from vendoo_studio.services.etsy_fields import (etsy_what_raw, etsy_when_options, etsy_when_raw, etsy_when_to_store,
-                                                    etsy_who_raw)
+    from vendoo_studio.services.etsy_fields import (DEFAULT_ETSY_RENEWAL, etsy_renewal_raw, etsy_what_raw,
+                                                    etsy_when_options, etsy_when_raw, etsy_when_to_store, etsy_who_raw)
     from vendoo_studio.services.etsy_listings import etsy_quantity, list_fields
 
     category = direct_category_id(snapshot, "etsy")
@@ -155,9 +155,12 @@ async def editor_form(snapshot: dict) -> dict:
     when = etsy_when_raw(details, snapshot)
     from vendoo_studio.services.user_settings import get_listing_field_defaults
 
-    saved = get_listing_field_defaults()
+    saved = await asyncio.to_thread(get_listing_field_defaults)
     who = etsy_who_raw(details) or (saved.get("etsy_specifics.whoMade") or {}).get("label", "")
     what = etsy_what_raw(details) or (saved.get("etsy_specifics.whatIsIt") or {}).get("label", "")
+    renewal = (etsy_renewal_raw(details)
+               or (saved.get("etsy_specifics.renewalOption") or {}).get("label")
+               or DEFAULT_ETSY_RENEWAL)
     values = {
         CATEGORY_PATH: category,
         "etsy_specifics.whenMade": etsy_when_to_store(when, snapshot, etsy_when_options()) if when else "",
@@ -171,6 +174,7 @@ async def editor_form(snapshot: dict) -> dict:
         "etsy_specifics.itemSize": size,
         "etsy_specifics.whoMade": who,
         "etsy_specifics.whatIsIt": what,
+        "etsy_specifics.renewalOption": renewal,
     }
     rows: list[dict] = []
     for captured in catalog()["fields"]:

@@ -627,6 +627,48 @@ class EtsyListingsTest(unittest.TestCase):
         fields = [item["field"] for item in etsy_listings.requirements({**LISTING, "etsy_specifics": details}, etsy_listings.Context(self.db))]
         self.assertIn("etsy_specifics.who_made", fields)
 
+    def test_renewal_option_reaches_etsy_on_create_draft_update_and_live_update(self):
+        auto = {**copy.deepcopy(LISTING), "etsy_specifics": {**LISTING["etsy_specifics"], "renewalOption": "Automatic"}}
+        self.assertEqual(etsy_listings.draft_fields(auto, creating=True)["should_auto_renew"], "true")
+        self.assertEqual(etsy_listings.draft_fields(auto, creating=False)["should_auto_renew"], "true")
+
+        manual = {**copy.deepcopy(LISTING), "etsy_specifics": {**LISTING["etsy_specifics"], "renewalOption": "Manual"}}
+        self.assertEqual(etsy_listings.draft_fields(manual, creating=True)["should_auto_renew"], "false")
+        self.assertEqual(etsy_listings.draft_fields(manual, creating=False)["should_auto_renew"], "false")
+
+        # An unset renewal option defaults to Manual on create and stays untouched on update.
+        self.assertEqual(etsy_listings.draft_fields(LISTING, creating=True)["should_auto_renew"], "false")
+        self.assertNotIn("should_auto_renew", etsy_listings.draft_fields(LISTING, creating=False))
+
+        # A saved default applies on create when the listing has no explicit choice, and loses to Manual.
+        self.assertEqual(etsy_listings.draft_fields(LISTING, creating=True, default_renewal="Automatic")["should_auto_renew"], "true")
+        self.assertEqual(etsy_listings.draft_fields(manual, creating=True, default_renewal="Automatic")["should_auto_renew"], "false")
+
+        # End-to-end: create draft with Automatic, switch to Manual on draft update, then update live listing back to Automatic.
+        binding = {}
+        self.assertEqual(self.execute("save_draft", binding, snapshot=auto)["state"], "draft")
+        created = next(c[2] for c in self.calls if c[0] == "POST" and c[1].endswith("/listings"))
+        self.assertEqual(created["should_auto_renew"], "true")
+
+        self.calls.clear()
+        self.assertEqual(self.execute("save_draft", binding, snapshot=manual)["state"], "draft")
+        patched = next(c[2] for c in self.calls if c[0] == "PATCH")
+        self.assertEqual(patched["should_auto_renew"], "false")
+
+        self.assertEqual(self.execute("publish", binding, snapshot=manual)["state"], "published")
+        self.calls.clear()
+        self.assertEqual(self.execute("update", binding, snapshot=auto)["state"], "published")
+        live_patch = next(c[2] for c in self.calls if c[0] == "PATCH")
+        self.assertEqual(live_patch["should_auto_renew"], "true")
+
+    def test_saved_renewal_default_is_sent_when_listing_on_etsy(self):
+        with patch("vendoo_studio.services.user_settings.get_listing_field_defaults",
+                   return_value={"etsy_specifics.renewalOption": {"value": "Automatic", "label": "Automatic"}}):
+            record = self.list()
+        self.assertEqual(record["state"], "published", record)
+        created = next(c[2] for c in self.calls if c[0] == "POST" and c[1].endswith("/listings"))
+        self.assertEqual(created["should_auto_renew"], "true")
+
 
 class RelayMultipartTest(unittest.IsolatedAsyncioTestCase):
     async def test_form_and_photo_bytes_reach_the_relay_without_json_wrapping(self):

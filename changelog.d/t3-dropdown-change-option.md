@@ -1,0 +1,1 @@
+- Choose Automatic or Manual in the Etsy Renewal options dropdown, save a default for new listings, and send your selection to Etsy on create and update.

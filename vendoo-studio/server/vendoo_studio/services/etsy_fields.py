@@ -184,6 +184,11 @@ VALID_ETSY_WHAT = frozenset({
     "A finished product",
     "A supply or tool to make things",
 })
+VALID_ETSY_RENEWAL = frozenset({
+    "Automatic",
+    "Manual",
+})
+DEFAULT_ETSY_RENEWAL = "Manual"
 
 MODERN_ETSY_WHEN = (
     "made to order",
@@ -422,6 +427,14 @@ ETSY_WHAT_ALIASES = {
     "a supply or tool": "A supply or tool to make things",
     "supply": "A supply or tool to make things",
 }
+ETSY_RENEWAL_ALIASES = {
+    **{_etsy_choice_key(label): label for label in VALID_ETSY_RENEWAL},
+    "auto": "Automatic",
+    "true": "Automatic",
+    "1": "Automatic",
+    "false": "Manual",
+    "0": "Manual",
+}
 
 
 def _etsy_choice(etsy: dict[str, Any], keys: tuple[str, ...], aliases: dict[str, str]) -> str:
@@ -442,6 +455,21 @@ def etsy_what_raw(etsy: dict[str, Any]) -> str:
     return _etsy_choice(
         etsy, ("what_is", "whatIs", "whatIsIt", "whatIsIt?", "What Is It?"), ETSY_WHAT_ALIASES
     )
+
+
+def etsy_renewal_raw(etsy: dict[str, Any]) -> str:
+    for key in ("renewalOption", "renewal_option", "should_auto_renew", "shouldAutoRenew"):
+        if key not in etsy:
+            continue
+        value = etsy.get(key)
+        if isinstance(value, bool):
+            return "Automatic" if value else "Manual"
+        text = _scalar_text(value)
+        if text:
+            mapped = ETSY_RENEWAL_ALIASES.get(_etsy_choice_key(text), "")
+            if mapped:
+                return mapped
+    return ""
 
 
 def resolve_etsy_when(raw: str, options: list[str]) -> str:

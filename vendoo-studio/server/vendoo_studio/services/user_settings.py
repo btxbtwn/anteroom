@@ -65,6 +65,7 @@ LISTING_FIELD_DEFAULTS = frozenset({
     MERCARI_SHOEBOX_PATH,
     "etsy_specifics.whoMade",
     "etsy_specifics.whatIsIt",
+    "etsy_specifics.renewalOption",
 })
 # Stored value → the label the form shows for it. Mercari's shoebox radio
 # stores "yes" or "no" under the labels "Yes" and "No"; Etsy stores its labels.
@@ -79,11 +80,16 @@ _STORED_FIELD_DEFAULT_CHOICES: dict[str, dict[str, str]] = {
         "A finished product",
         "A supply or tool to make things",
     )},
+    "etsy_specifics.renewalOption": {label: label for label in (
+        "Automatic",
+        "Manual",
+    )},
 }
 # Editor path → listing JSON keys that already answer the same Etsy question.
 _ETSY_FIELD_DEFAULT_KEYS = {
     "etsy_specifics.whoMade": ("who_made", "whoMade", "whoMadeIt"),
     "etsy_specifics.whatIsIt": ("what_is", "whatIs", "whatIsIt"),
+    "etsy_specifics.renewalOption": ("renewalOption", "renewal_option", "should_auto_renew", "shouldAutoRenew"),
 }
 DEFAULT_EBAY_INVENTORY_LOCATION = "70125"
 _INVENTORY_LOCATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,'#-]{0,79}$")
@@ -309,7 +315,7 @@ def clear_listing_field_default(path: object) -> dict[str, dict[str, str]]:
 
 
 def apply_listing_field_defaults(listing: dict) -> bool:
-    """Fill empty Etsy who/what/type answers from the seller's saved defaults."""
+    """Fill empty Etsy who/what/renewal answers from the seller's saved defaults."""
     if not isinstance(listing, dict):
         return False
     defaults = _stored_listing_field_defaults()
@@ -322,7 +328,7 @@ def apply_listing_field_defaults(listing: dict) -> bool:
         saved = defaults.get(path)
         if not saved:
             continue
-        if any(str(specifics.get(alias) or "").strip() for alias in aliases):
+        if any(isinstance(specifics.get(alias), bool) or str(specifics.get(alias) or "").strip() for alias in aliases):
             continue
         specifics[aliases[0]] = saved["label"]
         changed = True

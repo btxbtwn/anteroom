@@ -35,7 +35,7 @@ def imported(tmp_path, monkeypatch):
     item = {"listing_id": 555, "shop_id": 42, "state": "active", "listing_type": "physical", "has_variations": False,
             "title": "Wool &amp; silk coat", "description": "Vintage coat", "quantity": 99, "price": money(100),
             "taxonomy_id": 111, "tags": ["vintage"], "materials": ["wool", "silk"], "style": ["classic"],
-            "who_made": "someone_else", "when_made": "1990_1999", "is_supply": False, "shipping_profile_id": 88,
+            "who_made": "someone_else", "when_made": "1990_1999", "is_supply": False, "should_auto_renew": True, "shipping_profile_id": 88,
             "images": [{"rank": 2, "url_fullxfull": "https://i.etsystatic.com/second.jpg"},
                        {"rank": 1, "url_fullxfull": "https://i.etsystatic.com/first.jpg"}], "private": "never-store"}
     offering = {"quantity": 3, "price": money(), "is_enabled": True, "is_deleted": False, "readiness_state_id": 77}
@@ -94,6 +94,7 @@ def test_import_uses_exact_offering_and_saves_only_public_inventory(imported):
     assert snapshot["marketplace_category_ids"] == {"etsy": "111"}
     assert snapshot["etsy_specifics"]["readiness_state_id"] == 77
     assert snapshot["etsy_specifics"]["what_is"] == "0"
+    assert snapshot["etsy_specifics"]["renewalOption"] == "Automatic"
     assert "never-store" not in str(snapshot) and "fixture-token" not in str(snapshot)
     binding = imported.db.query(MarketplaceListing).one()
     assert (binding.listing_id, binding.etsy_shop_id, binding.state) == ("555", "42", "published")

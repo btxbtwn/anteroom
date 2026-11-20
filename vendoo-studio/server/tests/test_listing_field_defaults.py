@@ -68,6 +68,7 @@ def test_etsy_who_and_what_can_be_saved_as_defaults(settings_file):
     ("mercari_specifics.shippingClassId", "2550", ""),
     ("etsy_specifics.whoMade", "My grandma", "My grandma"),
     ("etsy_specifics.whatIsIt", "A hat", "A hat"),
+    ("etsy_specifics.renewalOption", "Yearly", "Yearly"),
     ("etsy_specifics.listingType", "Physical item", "Physical item"),
     ("title", "A tee", None),
 ])
@@ -136,6 +137,9 @@ def test_etsy_form_starts_with_saved_who_and_what(settings_file):
     user_settings.set_listing_field_default(
         "etsy_specifics.whatIsIt", "A finished product", "A finished product",
     )
+    user_settings.set_listing_field_default(
+        "etsy_specifics.renewalOption", "Automatic", "Automatic",
+    )
 
     form = asyncio.run(etsy_form.editor_form({"etsy_specifics": {}, "direct_category_ids": {}}))
     rows = {row["path"]: row for row in form["fields"]}
@@ -143,6 +147,29 @@ def test_etsy_form_starts_with_saved_who_and_what(settings_file):
     assert rows["etsy_specifics.whoMade"]["save_as_default"] is True
     assert rows["etsy_specifics.whatIsIt"]["value"] == "A finished product"
     assert rows["etsy_specifics.whatIsIt"]["save_as_default"] is True
+    assert rows["etsy_specifics.renewalOption"]["value"] == "Automatic"
+    assert rows["etsy_specifics.renewalOption"]["save_as_default"] is True
+
+    # A listing's own choice wins over the saved default.
+    own = asyncio.run(etsy_form.editor_form({"etsy_specifics": {"renewalOption": "Manual"}, "direct_category_ids": {}}))
+    own_rows = {row["path"]: row for row in own["fields"]}
+    assert own_rows["etsy_specifics.renewalOption"]["value"] == "Manual"
+
+
+def test_generation_fills_empty_etsy_renewal_from_saved_default(settings_file):
+    user_settings.set_listing_field_default("etsy_specifics.renewalOption", "Automatic", "Automatic")
+
+    listing = {"title": "Tee", "etsy_specifics": {}}
+    assert listing_generate.apply_send_readiness_fixes(listing) is True
+    assert listing["etsy_specifics"]["renewalOption"] == "Automatic"
+
+    listing["etsy_specifics"]["renewalOption"] = "Manual"
+    assert user_settings.apply_listing_field_defaults(listing) is False
+    assert listing["etsy_specifics"]["renewalOption"] == "Manual"
+
+    explicit_false = {"title": "Tee", "etsy_specifics": {"should_auto_renew": False}}
+    assert user_settings.apply_listing_field_defaults(explicit_false) is False
+    assert "renewalOption" not in explicit_false["etsy_specifics"]
 
 
 SHOEBOX = "mercari_specifics.package.fitsShoebox"
