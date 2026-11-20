@@ -296,3 +296,18 @@ def test_import_all_holds_a_listing_when_a_look_alike_leaves_that_marketplace_wh
     body = post(chrome, "poshmark", POST, unless_matched=True).json()
     assert body["conversation_id"] is None and body["match"]["conversation_id"] == item.id
     assert chrome.db.query(Conversation).count() == 1 and chrome.db.query(Photo).count() == 0
+
+
+def test_preview_names_the_account_chrome_read_and_import_all_refuses_another(chrome):
+    chrome.remote.page = {"ok": True, "next_cursor": None, "account": "seller-one", "rows": [{"id": POST, "title": "Denim jacket", "price": 45}]}
+    assert chrome.client.get("/api/chrome-import/poshmark/active").json()["account"] == "seller-one"
+    # Chrome is now signed in to another Poshmark account.
+    chrome.remote.listings["poshmark"]["account"] = "seller-two"
+    refused = post(chrome, "poshmark", POST, unless_matched=True, account="seller-one")
+    assert refused.status_code == 409 and "different Poshmark account" in refused.json()["detail"]
+    assert chrome.db.query(Conversation).count() == 0 and chrome.remote.downloads == []
+    # The same account, or an extension that does not say which account it read, still imports.
+    chrome.remote.listings["poshmark"]["account"] = "seller-one"
+    assert post(chrome, "poshmark", POST, unless_matched=True, account="seller-one").json()["conversation_id"]
+    assert "account" not in chrome.remote.listings["mercari"]
+    assert post(chrome, "mercari", "m12345678901", account="seller-one").json()["conversation_id"]

@@ -14,6 +14,8 @@ class ImportRequest(BaseModel):
     link_conversation_id: str | None = Field(None, min_length=1, max_length=64)
     # Import all: leave a listing that looks like an existing item for the seller to review.
     unless_matched: bool = False
+    # Import all: the marketplace account the run's pages came from.
+    account: str | None = Field(None, min_length=1, max_length=64)
 
 
 @router.get("/{marketplace}/active")
@@ -30,6 +32,6 @@ async def import_item(marketplace: str, body: ImportRequest):
     try:
         if body.link_conversation_id:
             return await chrome_import.link_listing(marketplace, body.listing, body.link_conversation_id)
-        return await chrome_import.import_listing(marketplace, body.listing, unless_matched=body.unless_matched)
+        return await chrome_import.import_listing(marketplace, body.listing, unless_matched=body.unless_matched, account=body.account)
     except ChromeImportError as exc:
         raise HTTPException(exc.status_code, str(exc)) from exc

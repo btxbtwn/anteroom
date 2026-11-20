@@ -329,9 +329,9 @@ export const api = {
         method: "POST", body: JSON.stringify({ listing, ...(linkConversationId ? { link_conversation_id: linkConversationId } : {}) }),
       }),
     /** Import all: a listing that looks like an existing item is left for the seller, not imported. */
-    importNew: (marketplace: ChromeImportMarketplace, listing: string) =>
+    importNew: (marketplace: ChromeImportMarketplace, listing: string, account?: string) =>
       request<MarketplaceImportResult | MarketplaceImportHeld>(`/chrome-import/${marketplace}`, {
-        method: "POST", body: JSON.stringify({ listing, unless_matched: true }),
+        method: "POST", body: JSON.stringify({ listing, unless_matched: true, ...(account ? { account } : {}) }),
       }),
   },
   etsy: {

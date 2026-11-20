@@ -41,7 +41,7 @@ describe("import all active listings", () => {
 
     expect(candidates.mock.calls).toEqual([[1, null], [2, "c2"]]);
     // Only listings with no local item and no suggested match are imported; nothing is linked on its own.
-    expect(importNew.mock.calls).toEqual([["a"], ["e"]]);
+    expect(importNew.mock.calls).toEqual([["a", undefined], ["e", undefined]]);
     expect(importListing).not.toHaveBeenCalled();
     expect(run).toMatchObject({ status: "done", page: 2, imported: 2, alreadyIn: 1, skipped: 1, failures: [] });
     expect(run.review).toEqual([{ id: "c", title: "Item c", price: "10.00", match }]);
@@ -158,6 +158,27 @@ describe("import all active listings", () => {
     const run = await finished("depop:me");
     expect(run).toMatchObject({ status: "failed", error: "Connect Chrome to import from Depop." });
     expect(importNew).toHaveBeenCalledTimes(5);
+  });
+
+  it("keeps a Chrome run on the account its first page came from", async () => {
+    const { importer, candidates, importNew } = fakeImporter([
+      { total: null, has_more: true, next_cursor: "c2", account: "closet-one", rows: [row("a")] },
+      { total: null, has_more: false, next_cursor: null, account: "closet-two", rows: [row("b")] },
+    ]);
+    startImportAll("poshmark:poshmark", "poshmark", importer, vi.fn());
+    const run = await finished("poshmark:poshmark");
+    expect(run).toMatchObject({ status: "failed", imported: 1,
+      error: "Chrome is signed in to a different Poshmark account now, so this import stopped." });
+    expect(candidates).toHaveBeenCalledTimes(2);
+    // Each import names the account, so the server refuses a listing read from another.
+    expect(importNew.mock.calls).toEqual([["a", "closet-one"]]);
+  });
+
+  it("imports as before when the extension does not say which account it read", async () => {
+    const { importer, importNew } = fakeImporter([{ total: null, has_more: false, next_cursor: null, rows: [row("a")] }]);
+    startImportAll("depop:depop", "depop", importer, vi.fn());
+    expect(await finished("depop:depop")).toMatchObject({ status: "done", imported: 1 });
+    expect(importNew.mock.calls).toEqual([["a", undefined]]);
   });
 
   it("reports a marketplace whose cursors go round in a circle, keeping what was imported", async () => {

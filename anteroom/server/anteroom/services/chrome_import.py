@@ -189,7 +189,13 @@ def _page(db: Session, marketplace: str, reply: dict, raw: list) -> dict:
                      "reason": reason, "conversation_id": existing.id if existing else None, "match": match})
     next_cursor = reply.get("next_cursor")
     next_cursor = next_cursor if isinstance(next_cursor, str) and 0 < len(next_cursor) <= 300 else None
-    return {"rows": rows, "total": None, "has_more": next_cursor is not None, "next_cursor": next_cursor}
+    return {"rows": rows, "total": None, "has_more": next_cursor is not None, "next_cursor": next_cursor,
+            "account": _account(reply.get("account"))}
+
+
+def _account(value) -> str | None:
+    """The marketplace account Chrome was signed in to for a read. Extensions before 2026-11-20 do not send it."""
+    return value if isinstance(value, str) and 0 < len(value) <= 64 else None
 
 
 def _condition(marketplace: str, value) -> str | None:
@@ -264,12 +270,19 @@ def _already_imported(db: Session, marketplace: str, listing_id: str) -> dict | 
             "warnings": ["Already in Anteroom. Existing edits and photos were kept."]}
 
 
-async def import_listing(marketplace: str, listing: str, *, unless_matched: bool = False) -> dict:
-    """Create a local item for one listing, or reopen the item that already has it."""
+async def import_listing(marketplace: str, listing: str, *, unless_matched: bool = False, account: str | None = None) -> dict:
+    """Create a local item for one listing, or reopen the item that already has it.
+
+    ``account`` (import all) is the marketplace account the run began with: a listing read while Chrome is
+    signed in to another one is not imported.
+    """
     listing_id = listing_id_from(marketplace, listing)
     if existing := await in_worker_session(_already_imported, marketplace, listing_id):
         return existing
-    data, photos = snapshot(marketplace, await _read(marketplace, listing_id))
+    read = await _read(marketplace, listing_id)
+    if account is not None and (signed_in := _account(read.get("account"))) is not None and signed_in != account:
+        raise ChromeImportError(409, f"Chrome is signed in to a different {_name(marketplace)} account now. Nothing was imported.")
+    data, photos = snapshot(marketplace, read)
     try:
         result = await inventory_import.save_owned_listing(marketplace, listing_id, data, photos, lambda: None,
                                                            unless_matched=unless_matched)

@@ -10,7 +10,8 @@ export interface Importer {
   candidates: (page: number, cursor: string | null) => Promise<MarketplaceImportPage>;
   importListing: (listing: string, linkConversationId?: string) => Promise<MarketplaceImportResult>;
   /** Import a listing unless it now looks like an item already in Anteroom; the server checks as it saves. */
-  importNew: (listing: string) => Promise<MarketplaceImportResult | MarketplaceImportHeld>;
+  /** ``account``: Chrome marketplaces, the account the run's pages came from; the server refuses a listing read from another. */
+  importNew: (listing: string, account?: string) => Promise<MarketplaceImportResult | MarketplaceImportHeld>;
   /** eBay and Etsy: the connected account's ``directAccountKey``, or null when none is. A run stays on the account it was started for. */
   account?: () => Promise<string | null>;
 }
@@ -31,7 +32,7 @@ export function importerFor(marketplace: ImportMarketplace): Importer {
   return {
     candidates: (_page, cursor) => api.chromeImport.importCandidates(marketplace, cursor),
     importListing: (listing, linkConversationId) => api.chromeImport.importListing(marketplace, listing, linkConversationId),
-    importNew: (listing) => api.chromeImport.importNew(marketplace, listing),
+    importNew: (listing, account) => api.chromeImport.importNew(marketplace, listing, account),
   };
 }
 
@@ -149,6 +150,9 @@ async function walk(key: string, id: number, importer: Importer, expected: strin
   const direct = marketplace === "ebay" || marketplace === "etsy";
   const seen = new Set<string>();
   const cursors = new Set<string>();
+  // Chrome marketplaces: the account the first page was read from. Chrome reads whichever account is signed in,
+  // so a later page from another one ends the run, and each import must come from this one.
+  let chromeAccount: string | undefined;
   let streak = 0;
   let page = 1;
   let cursor: string | null = null;
@@ -170,6 +174,12 @@ async function walk(key: string, id: number, importer: Importer, expected: strin
       if (!live()) return;
       data = await importer.candidates(page, cursor);
       if (importer.account && await changed()) return update(key, id, { status: "failed", error: ACCOUNT_CHANGED[marketplace] ?? "" });
+      if (!direct && data.account) {
+        chromeAccount ??= data.account;
+        if (data.account !== chromeAccount) {
+          return update(key, id, { status: "failed", error: `Chrome is signed in to a different ${marketplaceName(marketplace)} account now, so this import stopped.` });
+        }
+      }
     } catch (error) {
       // Stopped while the page was loading: that is a stop, not a failure.
       return update(key, id, stopping() ? { status: "stopped" } : { status: "failed", error: message(error) });
@@ -186,7 +196,7 @@ async function walk(key: string, id: number, importer: Importer, expected: strin
       } else {
         if (stopping()) return update(key, id, { status: "stopped" });
         try {
-          const result = await importer.importNew(row.id);
+          const result = await importer.importNew(row.id, chromeAccount);
           if (result.conversation_id === null) {
             // Another import brought in a matching item after this page was read.
             const { match } = result;

@@ -66,7 +66,7 @@ test('Poshmark reads the signed-in closet a page at a time and only with GETs', 
     },
   }, { cookies: { jwt: jwt({ user_id: POSH_ME }) } });
   const result = await page(c, 'poshmark', 'prev-0');
-  assert.deepEqual(result, { ok: true, next_cursor: 'next-1', rows: [
+  assert.deepEqual(result, { ok: true, next_cursor: 'next-1', account: 'aaaaaaaaaaaaaaaaaaaaaaaa', rows: [
     { id: POSH_POST, url: `https://poshmark.com/listing/${POSH_POST}`, title: 'Denim jacket', price: 45, quantity: 2 }] });
   assert.deepEqual(request.filters.inventory_status, ['available']);
   assert.equal(request.max_id, 'prev-0');
@@ -81,6 +81,7 @@ test('Poshmark returns a full listing with category names and https photos', asy
   const result = await listing(c, 'poshmark', POSH_POST.toUpperCase());
   assert.equal(result.ok, true);
   assert.deepEqual(result.listing, {
+    account: 'aaaaaaaaaaaaaaaaaaaaaaaa',
     id: POSH_POST, url: `https://poshmark.com/listing/${POSH_POST}`, title: 'Denim jacket', description: 'Classic fit.\nNo flaws.',
     price: 45, currency: 'USD', quantity: 2, brand: 'Levi\'s', size: 'M', condition: 'not_nwt',
     category_path: 'Women > Jackets & Coats > Jean Jackets', category_id: 'd1/c1/f1', sku: 'JKT-1', colors: ['Blue'],
@@ -146,6 +147,7 @@ test('Mercari reads its edit-page item details and names the catalog ids', async
   const { c, requests, ops } = mercari(MERCARI_ITEM);
   const result = await listing(c, 'mercari', 'm12345678901');
   assert.deepEqual(result.listing, {
+    account: '42',
     id: 'm12345678901', url: 'https://www.mercari.com/us/item/m12345678901/', title: 'Denim jacket', description: 'Classic fit',
     price: 45, currency: 'USD', quantity: 1, brand: 'Levi\'s', size: 'M', condition: 'Good',
     category_path: 'Women > Coats & jackets > Jean jackets', category_id: '111', sku: null, colors: [],
@@ -185,7 +187,7 @@ test('Depop reads the shop inventory with the seller bearer token and skips sold
     { slug: 'shop-sold-tee-136d', status: 'STATUS_PURCHASED', description: 'Sold tee' },
   ], meta: { last_offset_id: 'cursor-2', end: false } });
   const result = await page(c, 'depop');
-  assert.deepEqual(result, { ok: true, next_cursor: 'cursor-2', rows: [{ id: 'shop-denim-jacket-136d',
+  assert.deepEqual(result, { ok: true, next_cursor: 'cursor-2', account: '5', rows: [{ id: 'shop-denim-jacket-136d',
     url: 'https://www.depop.com/products/shop-denim-jacket-136d/', title: 'Denim jacket', price: 45, quantity: null }] });
   const shop = requests.find(request => request.pathname === '/api/v1/shop/5/products/');
   assert.equal(shop.credentials, 'omit');
@@ -197,6 +199,7 @@ test('Depop returns the product with names from its attribute list', async () =>
   const { c, requests } = depop();
   const result = await listing(c, 'depop', 'shop-denim-jacket-136d');
   assert.deepEqual(result.listing, {
+    account: '5',
     id: 'shop-denim-jacket-136d', url: 'https://www.depop.com/products/shop-denim-jacket-136d/', title: 'Denim jacket',
     description: 'Denim jacket #levis\nClassic fit', price: 45, currency: 'USD', quantity: 1, brand: 'Levi\'s', size: 'M',
     condition: 'used_excellent', category_path: 'Womenswear > Coats and jackets > Denim jackets', category_id: 'womenswear_denim-jackets',

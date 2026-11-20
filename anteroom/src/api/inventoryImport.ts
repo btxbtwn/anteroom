@@ -16,6 +16,8 @@ export interface MarketplaceImportPage {
   has_more: boolean;
   /** Chrome marketplaces page with the marketplace's own cursor. */
   next_cursor?: string | null;
+  /** Chrome marketplaces: the account Chrome was signed in to for this page, when the extension says. */
+  account?: string | null;
   rows: {
     id: string;
     title: string;
