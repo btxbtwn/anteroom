@@ -96,4 +96,11 @@ def _create_realtime_stand_in() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError('The change feed migration is forward-only')
+    # The feed table and its publication stay (7c4e1a9f2b38), so devices on
+    # Postgres Changes keep working. A stand-in realtime schema stays too.
+    bind = op.get_bind()
+    if bind.dialect.name != 'postgresql':
+        return
+    op.execute('DROP POLICY IF EXISTS anteroom_seller_changes_receive ON realtime.messages')
+    op.execute('DROP TRIGGER IF EXISTS announce_seller_change ON seller_changes')
+    op.execute('DROP FUNCTION IF EXISTS anteroom_private.announce_seller_change()')
