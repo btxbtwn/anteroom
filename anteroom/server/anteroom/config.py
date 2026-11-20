@@ -108,15 +108,22 @@ def adopt_legacy_data_dir() -> None:
 
 
 def adopt_legacy_database(data_dir: Path | None = None) -> None:
-    """Rename a pre-rename SQLite file (and its WAL/SHM siblings) to anteroom.db, once."""
+    """Rename a pre-rename SQLite file (and its WAL/SHM siblings) to anteroom.db, once.
+
+    Safe to call again after an interruption: if the main file already moved but a
+    legacy ``-wal`` / ``-shm`` / ``-journal`` remains, the next start finishes those
+    renames so committed sidecar bytes are not left under the old name. Never opens
+    the database; it only renames files that are present.
+    """
     if os.environ.get("ANTEROOM_DATABASE_URL"):
         return
     root = data_dir or user_data_root()
     target = root / DATABASE_NAME
     legacy = root / LEGACY_DATABASE_NAME
-    if target.exists() or not legacy.is_file():
+    if legacy.is_file() and not target.exists():
+        legacy.rename(target)
+    if not target.exists():
         return
-    legacy.rename(target)
     for suffix in ("-wal", "-shm", "-journal"):
         sidecar = root / f"{LEGACY_DATABASE_NAME}{suffix}"
         target_sidecar = root / f"{DATABASE_NAME}{suffix}"

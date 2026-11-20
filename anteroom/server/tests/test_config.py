@@ -98,6 +98,43 @@ class ConfigPathTest(unittest.TestCase):
             self.assertEqual((data / "anteroom.db-shm").read_text(encoding="utf-8"), "shm")
             self.assertFalse((data / "vendoo_studio.db").exists())
 
+    def test_interrupted_main_rename_finishes_legacy_sidecars(self):
+        """A crash after renaming the main file must not strand old-name WAL/journal.
+
+        Fixture-only: temp text files stand in for SQLite main/sidecars. Never opens
+        a real database.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            (data / "anteroom.db").write_text("committed-main", encoding="utf-8")
+            (data / "vendoo_studio.db-wal").write_text("committed-wal", encoding="utf-8")
+            (data / "vendoo_studio.db-shm").write_text("committed-shm", encoding="utf-8")
+            (data / "vendoo_studio.db-journal").write_text("committed-journal", encoding="utf-8")
+            os.environ.pop("ANTEROOM_DATABASE_URL", None)
+            config.adopt_legacy_database(data)
+            config.adopt_legacy_database(data)
+            self.assertEqual((data / "anteroom.db").read_text(encoding="utf-8"), "committed-main")
+            self.assertEqual((data / "anteroom.db-wal").read_text(encoding="utf-8"), "committed-wal")
+            self.assertEqual((data / "anteroom.db-shm").read_text(encoding="utf-8"), "committed-shm")
+            self.assertEqual(
+                (data / "anteroom.db-journal").read_text(encoding="utf-8"),
+                "committed-journal",
+            )
+            for suffix in ("", "-wal", "-shm", "-journal"):
+                self.assertFalse((data / f"vendoo_studio.db{suffix}").exists())
+
+    def test_interrupted_adoption_keeps_existing_new_sidecars(self):
+        """Do not overwrite a sidecar that already landed under the new name."""
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            (data / "anteroom.db").write_text("main", encoding="utf-8")
+            (data / "anteroom.db-wal").write_text("kept-wal", encoding="utf-8")
+            (data / "vendoo_studio.db-wal").write_text("orphan-wal", encoding="utf-8")
+            os.environ.pop("ANTEROOM_DATABASE_URL", None)
+            config.adopt_legacy_database(data)
+            self.assertEqual((data / "anteroom.db-wal").read_text(encoding="utf-8"), "kept-wal")
+            self.assertEqual((data / "vendoo_studio.db-wal").read_text(encoding="utf-8"), "orphan-wal")
+
     def test_log_path_lives_under_user_data(self):
         with tempfile.TemporaryDirectory() as tmp:
             os.environ["ANTEROOM_DATA_DIR"] = tmp
