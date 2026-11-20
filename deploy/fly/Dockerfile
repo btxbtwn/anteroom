@@ -1,7 +1,7 @@
 # Base images are pinned by digest so a rebuild gets the same system packages.
 # Python stays on the minor version CI tests and basedpyright targets (3.12);
 # moving it is a deliberate change to all three (tests/test_hosted_image_runtime.py).
-FROM node:25-slim@sha256:81db02c4b671288a03915da9534dbd54f96d0e7c24d80ccc54f5b36b2e684370 AS web
+FROM node:26-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc AS web
 WORKDIR /src/anteroom
 COPY anteroom/package.json anteroom/package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -14,7 +14,7 @@ ARG VITE_SUPABASE_PUBLISHABLE_KEY
 RUN node -e 'if (!process.env.VITE_SUPABASE_URL || !process.env.VITE_SUPABASE_PUBLISHABLE_KEY) throw new Error("Cloud public configuration is required")' \
     && ANTEROOM_HOSTED_BUILD=1 npm run build
 
-FROM ghcr.io/astral-sh/uv:0.13.8@sha256:5cc1805e2426484abca4ad46ea783bab281fdb225fd82d8ce6d66a81254bac85 AS uv
+FROM ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d AS uv
 
 # The hosted packages exactly as uv.lock pins them, with their hashes.
 FROM python:3.12-slim@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b AS requirements
