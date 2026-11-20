@@ -91,7 +91,7 @@ def _condition_from_text(value) -> str:
     return ""
 
 
-def _general_condition(listing: dict) -> str:
+def general_condition(listing: dict) -> str:
     """The condition List sends when this form has none of its own, or empty when General has none."""
     chosen = _condition_from_text((listing.get("poshmark_specifics") or {}).get("poshmarkCondition"))
     if chosen:
@@ -155,7 +155,7 @@ def form(listing: dict) -> dict:
                 value = _initial_inventory(listing, groups)
         elif path == "poshmark_specifics.condition" and value is None:
             # Follows General until the seller picks one here, as List does.
-            value = _general_condition(listing)
+            value = general_condition(listing)
         elif path == "poshmark_specifics.multiItem" and value is None:
             value = "true" if _multiple(listing) else "false"
         elif path == "poshmark_specifics.colors" and value is None:

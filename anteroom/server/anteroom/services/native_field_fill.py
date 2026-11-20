@@ -355,6 +355,10 @@ def _record_forms(db: Session, conv_id: str, revision_id: str, saved: dict, form
     listing[native_contract.KEY] = {**(listing.get(native_contract.KEY) or {}),
                                     **native_contract.capture(listing, forms, markets)}
     native_contract.constrain_generated(listing, listing, freeze_categories=False)
+    for market in forms:
+        contract = (listing.get(native_contract.KEY) or {}).get(market)
+        if isinstance(contract, dict) and not contract.get("unavailable") and contract.get("fields"):
+            contract["inputs"] = native_contract.inputs(listing, market, contract["fields"])
     if listing != saved:
         listing_persistence.save_revision(db, conv_id, listing, source="native_schema", parent_revision_id=revision_id, expected_revision_id=revision_id)
     return listing[native_contract.KEY]
@@ -409,7 +413,7 @@ async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
     from anteroom.services.catalog_index import relevant_skill_rules
 
     query = " ".join([*rows, str(summary.get("category_path") or "")])
-    rules = await in_worker_session(lambda db: relevant_skill_rules(db, query, max_chars=40000))
+    rules = await asyncio.to_thread(relevant_skill_rules, None, query, max_chars=40000)
     messages = [
         {"role": "system", "content": f"--- Canonical listing rules ---\n{rules}\n\n"
             "The native fields and choices below override generic marketplace templates. " + FILL_RULES + (

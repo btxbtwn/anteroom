@@ -686,3 +686,60 @@ class CategoryFillLocksTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("ebay_specifics", updated)
         db.close()
         engine.dispose()
+
+    async def test_record_forms_captures_inputs_after_constrain_generated(self):
+        from anteroom.services import mercari_form, native_contract
+
+        engine = memory_engine()
+        Base.metadata.create_all(engine)
+        self.enterContext(worker_sessions(engine))
+        db = sessionmaker(bind=engine)()
+        conv = ConversationRepo(db).create(title="Tee")
+        # An unknown subkey inside mercari_specifics.package is stripped by
+        # constrain_generated; the captured contract must match the stripped listing.
+        saved = {
+            "title": "Hind Performance S Tee",
+            "description": "Long sleeve tee.",
+            "brand": "Hind Performance",
+            "condition": "Good",
+            "size": "S",
+            "weight_oz": 8,
+            "price": 18,
+            "direct_category_ids": {"mercari": "303"},
+            "mercari_specifics": {"shippingMethod": "SOYO", "shipsFrom": "70115",
+                                  "package": {"pounds": 0, "ounces": 8, "fitsShoebox": "yes", "extra": "drop-me"}},
+        }
+        listing_persistence.save_revision(db, conv.id, saved, source="model")
+        form = mercari_form.form(saved)
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"mercari": form})):
+            contracts = await native_field_fill.record_forms(conv.id, {"mercari"})
+        current = ListingRepo(db).get_current(conv.id)
+        latest = ListingRepo(db).get_revision(current.current_revision_id).listing_json
+        self.assertNotIn("extra", (latest.get("mercari_specifics") or {}).get("package") or {})
+        self.assertTrue(
+            native_contract.inputs_match(latest, "mercari", contracts["mercari"]["fields"], contracts["mercari"]["inputs"]),
+        )
+        db.close()
+        engine.dispose()
+
+    async def test_fill_native_fields_reads_skill_rules_without_a_db_session(self):
+        engine = memory_engine()
+        Base.metadata.create_all(engine)
+        self.enterContext(worker_sessions(engine))
+        db = sessionmaker(bind=engine)()
+        conv = ConversationRepo(db).create(title="Jeans")
+        listing_persistence.save_revision(db, conv.id, {"title": "Levi's"}, source="model")
+        seen_dbs = []
+
+        def fake_rules(session, query, **kwargs):
+            seen_dbs.append(session)
+            return "rules"
+
+        reply = json.dumps({"fields": {"depop_specifics.age": ["90s"]}})
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"depop": DEPOP})), \
+                patch("anteroom.services.catalog_index.relevant_skill_rules", side_effect=fake_rules), \
+                patch("anteroom.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
+            await fill_native_fields(conv.id, object(), evidence="90s", markets={"depop"})
+        self.assertEqual(seen_dbs, [None])
+        db.close()
+        engine.dispose()

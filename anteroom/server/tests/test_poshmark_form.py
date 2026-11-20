@@ -32,6 +32,22 @@ class PoshmarkFormTest(unittest.TestCase):
             row = next(row for row in poshmark_form.form(listing)["fields"] if row["path"] == "poshmark_specifics.condition")
             self.assertEqual(row["value"], own)
 
+    def test_followed_condition_has_no_contract_gap_and_preserves_explicit_clear(self):
+        listing = {"title": "Vintage Tee", "condition": "Pre-Owned - Good", "price": 20}
+        listing[native_contract.KEY] = native_contract.capture(
+            listing, {"poshmark": poshmark_form.form(listing)}, ["poshmark"],
+        )
+        self.assertFalse(any(gap["field"] == "poshmark_specifics.condition"
+                             for gap in native_contract.gaps(listing, "poshmark")))
+
+        cleared = copy.deepcopy(listing)
+        cleared["poshmark_specifics"] = {"condition": ""}
+        cleared[native_contract.KEY] = native_contract.capture(
+            cleared, {"poshmark": poshmark_form.form(cleared)}, ["poshmark"],
+        )
+        self.assertTrue(any(gap["field"] == "poshmark_specifics.condition" and gap.get("blocking")
+                            for gap in native_contract.gaps(cleared, "poshmark")))
+
     def test_every_general_condition_is_one_of_poshmarks_and_none_is_invented(self):
         expected = {"New With Tags/Box": "nwt", "New Without Tags/Box": "uln", "New With Imperfections": "ug",
                     "Pre-Owned - Excellent": "uln", "Pre-Owned - Good": "ug", "Pre-Owned - Fair": "uf",

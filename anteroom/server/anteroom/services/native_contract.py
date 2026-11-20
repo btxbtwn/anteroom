@@ -123,8 +123,40 @@ def inputs(listing: dict, market: str, fields: list[dict]) -> dict:
     return result
 
 
+def _zero_empty_number(value: Any) -> Any:
+    """Treat unset and zero weights/dimensions as one no-answer; keep positive numbers comparable."""
+    if value is None or value == "" or isinstance(value, bool):
+        return None
+    try:
+        number = Decimal(str(value).strip())
+    except InvalidOperation:
+        return value
+    if not number.is_finite() or number == 0:
+        return None
+    return number.normalize()
+
+
+def _normalize_mercari_package(pkg: Any) -> Any:
+    if not isinstance(pkg, dict):
+        return pkg
+    normalized: dict[str, Any] = {}
+    for key, val in pkg.items():
+        if key in {"pounds", "ounces", "length", "width", "height"}:
+            clean = _zero_empty_number(val)
+        elif key == "fitsShoebox":
+            text = str(val or "").strip().casefold()
+            clean = text or None
+        elif key == "skipDimensions":
+            clean = True if val in (True, "true") else None
+        else:
+            clean = _answered(val)
+        if clean is not None:
+            normalized[key] = clean
+    return normalized or None
+
+
 def _condition_inputs(value: dict, market: str, fields: list[dict]) -> dict:
-    """Compare eBay's condition label and its native id as the same choice."""
+    """Compare equivalent marketplace input spellings (eBay condition IDs, Mercari zero weights)."""
     result = copy.deepcopy(value)
     if market == "ebay":
         condition = str(result.get("condition") or "").strip().casefold()
@@ -133,6 +165,12 @@ def _condition_inputs(value: dict, market: str, fields: list[dict]) -> dict:
                 for label, native_id in (row.get("option_values") or {}).items():
                     if str(label).strip().casefold() == condition:
                         result["condition"] = str(native_id)
+    if market == "mercari":
+        for key in ("weight_lb", "weight_oz"):
+            if key in result:
+                result[key] = _zero_empty_number(result[key])
+        if "mercari_specifics.package" in result:
+            result["mercari_specifics.package"] = _normalize_mercari_package(result["mercari_specifics.package"])
     return result
 
 
@@ -711,8 +749,41 @@ def shared_answer(listing: dict, row: dict, market: str, path: str) -> Any:
                 value = listing.get(key)
                 if value not in (None, "", [], {}):
                     return value
-    # No other marketplace fills its item-specific rows from General at send:
-    # their forms keep the seller's own answer, so an empty row stays empty.
+    if market == "depop":
+        specifics = listing.get("depop_specifics")
+        specifics = specifics if isinstance(specifics, dict) else {}
+        if path == "depop_specifics.size" and "size" not in specifics and "nativeSizeId" not in specifics:
+            from anteroom.services.depop_form import size_label
+
+            category_id = str((listing.get("direct_category_ids") or {}).get("depop") or "")
+            return size_label(category_id, marketplace_text(listing, "depop", "size")) or None
+        if path == "depop_specifics.condition" and "condition" not in specifics:
+            from anteroom.services.depop_form import general_condition
+
+            return general_condition(listing) or None
+        if path == "depop_specifics.colour" and "colour" not in specifics:
+            from anteroom.services.depop_form import general_colours
+
+            return general_colours(listing) or None
+    if market == "mercari":
+        specifics = listing.get("mercari_specifics")
+        specifics = specifics if isinstance(specifics, dict) else {}
+        if path == "mercari_specifics.condition" and "condition" not in specifics:
+            from anteroom.services.mercari_form import general_condition
+
+            return general_condition(listing) or None
+        if path == "mercari_specifics.nativeSizeId" and "nativeSizeId" not in specifics:
+            from anteroom.services.mercari_form import match_size_id
+
+            category_id = str((listing.get("direct_category_ids") or {}).get("mercari") or "")
+            return match_size_id(listing, category_id) or None
+    if market == "poshmark":
+        specifics = listing.get("poshmark_specifics")
+        specifics = specifics if isinstance(specifics, dict) else {}
+        if path == "poshmark_specifics.condition" and "condition" not in specifics:
+            from anteroom.services.poshmark_form import general_condition
+
+            return general_condition(listing) or None
     return None
 
 

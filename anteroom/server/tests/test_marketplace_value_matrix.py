@@ -292,10 +292,15 @@ def _mercari_size(listing: dict) -> tuple[str | None, list[str]]:
     if row is None:
         return None, []
     labels = list(row["option_values"])
+    groups = row.get("option_groups") or {}
+    # A plain General size ("M") is Regular/Standard; do not demand that it pick
+    # Tall's verbatim "M" over Regular's "M (38-40)".
+    regular_labels = [label for label in labels if groups.get(label, "").casefold() in {"", "regular", "standard"}]
+    exact_labels = regular_labels or labels
     if row["value"] == "":
-        return None, labels
+        return None, exact_labels
     label = next((label for label, native in row["option_values"].items() if native == row["value"]), None)
-    return label or f"invalid id {row['value']}", labels
+    return label or f"invalid id {row['value']}", exact_labels
 
 
 def _depop_size(listing: dict) -> tuple[str | None, list[str]]:
@@ -389,6 +394,11 @@ def test_size_regressions(monkeypatch):
     listing = {"size": "XXL", "ebay_specifics": {}}
     listing_generate.propagate_general_size(listing)
     assert listing["ebay_specifics"]["size"] == "2XL"
+    # Men's T-shirts on Mercari spells Regular sizes with ranges ("S (34-36)", "M (38-40)")
+    # while Tall uses bare "M"; General S/M must pick the Regular sizes.
+    mens_tees = by_name["Shirts > T-Shirts"]
+    assert _mercari_size(_listing(mens_tees, "mercari", "S"))[0] == "S (34-36)"
+    assert _mercari_size(_listing(mens_tees, "mercari", "M"))[0] == "M (38-40)"
 
 
 # --- Brands -------------------------------------------------------------------

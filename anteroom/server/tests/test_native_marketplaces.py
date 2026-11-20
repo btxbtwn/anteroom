@@ -513,6 +513,7 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         snapshot = copy.deepcopy(LISTING)
         snapshot["direct_category_ids"] = {"depop": "menswear_tshirts"}
         snapshot = native.direct_preflight.prepare(self.db, self.conv, snapshot, "depop")
+        snapshot["depop_specifics"]["size"] = ""
         form = {"category_id": "menswear_tshirts", "page_labels": True, "fields": [
             {"path": "depop_specifics.size", "label": "Size", "required": True,
              "selection_only": True, "options": ["M", "L"]}]}
