@@ -52,7 +52,6 @@ importScripts('background/marketplace-sessions.js');
 importScripts('background/marketplace-sales.js');
 importScripts('background/marketplace-order-history.js');
 importScripts('background/marketplace-import.js');
-importScripts('background/marketplace-inspection.js');
 importScripts('background/direct-check.js');
 importScripts('background/native-forms.js');
 
@@ -330,11 +329,6 @@ async function handleStudioMessage(msg) {
     case 'marketplace.execute':
     case 'marketplace.result': {
       await handleNativeMarketplaceMessage(msg);
-      break;
-    }
-
-    case 'marketplace.inspect': {
-      await handleMarketplaceInspection(msg);
       break;
     }
 

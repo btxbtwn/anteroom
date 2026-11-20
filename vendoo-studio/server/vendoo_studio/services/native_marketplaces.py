@@ -56,7 +56,6 @@ class NativeMarketplaceError(RuntimeError):
 
 
 Marketplace = Literal["ebay", "poshmark", "mercari", "depop", "etsy"]
-InspectionMarketplace = Literal["poshmark", "mercari", "depop", "etsy"]
 API_MARKETPLACES = frozenset({"ebay", "etsy"})
 DRAFT_MARKETPLACES = frozenset({"ebay", "mercari", "depop", "etsy", "poshmark"})
 NAMES = {"ebay": "eBay", "etsy": "Etsy", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop"}
@@ -109,11 +108,6 @@ class CheckRequest(BaseModel):
     draft_url: str | None = None
 
 
-class InspectRequest(BaseModel):
-    script_url: str | None = None
-    background: bool = False
-
-
 def _launch(coro) -> None:
     from vendoo_studio.services.streaming import spawn
 
@@ -150,8 +144,8 @@ def blocking_job(repo: JobRepo, marketplace: str | None):
     """The active job that stops a new action on ``marketplace``, if any.
 
     Listing actions on different marketplaces run side by side; one
-    marketplace runs one action at a time. Delists and page inspections still
-    have Chrome to themselves. With no marketplace, only those exclusive jobs
+    marketplace runs one action at a time. Delists still have Chrome to
+    themselves. With no marketplace, only those exclusive jobs
     count.
     """
     for job in repo.get_active():
@@ -1084,34 +1078,6 @@ async def reconcile_after_reconnect() -> None:
         await reconcile(chrome=True)
     except Exception:  # noqa: BLE001 - logged; the next reconnect tries again
         log.exception("Reconnect reconcile failed")
-
-
-async def inspect_page(conv_id: str, marketplace: InspectionMarketplace, body: InspectRequest):
-    """Read a marketplace page's form. Holds the automation slot so no action starts into a busy Chrome."""
-    job_id = await in_worker_session(_open_inspection, conv_id, marketplace)
-    try:
-        reply = await browser_bridge.request(_JobRef(job_id), "marketplace.inspect", {
-            "marketplace": marketplace, "script_url": body.script_url, "background": body.background,
-        }, timeout=45)
-        await in_worker_session(lambda db: JobRepo(db).update_status(job_id, "completed"))
-        return reply
-    except browser_bridge.BrowserBridgeError as exc:
-        await in_worker_session(lambda db: JobRepo(db).update_status(
-            job_id, "failed", error="Chrome could not inspect the marketplace page."))
-        raise NativeMarketplaceError(502, "Chrome could not inspect the marketplace page.") from exc
-    finally:
-        release_api_job(job_id)
-
-
-def _open_inspection(db: Session, conv_id: str, marketplace: str) -> str:
-    _conversation(db, conv_id)
-    repo = JobRepo(db)
-    with start_gate():
-        if repo.get_active():
-            raise NativeMarketplaceError(409, "Wait for the current Chrome job to finish.")
-        job = repo.create(conv_id, "", {}, status="dispatched", current_step=f"native_{marketplace}_inspect")
-        claim_api_job(db, job.id)
-    return job.id
 
 
 def listing_package(snapshot: dict) -> dict | None:

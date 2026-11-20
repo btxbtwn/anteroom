@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from vendoo_studio.database import get_db
 from vendoo_studio.services import native_marketplaces as native
-from vendoo_studio.services.native_marketplaces import CheckRequest, InspectionMarketplace, InspectRequest, ListRequest, Marketplace
+from vendoo_studio.services.native_marketplaces import CheckRequest, ListRequest, Marketplace
 
 router = APIRouter(prefix="/api/conversations/{conv_id}/native-marketplaces", tags=["native-marketplaces"])
 
@@ -62,11 +62,6 @@ def preflight(conv_id: str, db: Session = Depends(get_db, scope="function")):
 
 # These actions wait on Chrome or a marketplace. They take no request session: the service runs
 # each database step on a worker thread with a short session of its own.
-@router.post("/{marketplace}/inspect")
-async def inspect_page(conv_id: str, marketplace: InspectionMarketplace, body: InspectRequest):
-    return await _reply(native.inspect_page(conv_id, marketplace, body))
-
-
 @router.post("/{marketplace}/list")
 async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest):
     return await _reply(native.list_now(conv_id, marketplace, body))

@@ -1,0 +1,1 @@
+- Remove the developer-only marketplace page inspection from Anteroom Bridge so the Chrome Web Store package carries only seller features.

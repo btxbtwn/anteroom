@@ -81,18 +81,6 @@ test('form contract keeps native rows/layout and strips uncontracted private res
   assert.equal(protocol.form({ ...FORM, marketplace: 'depop' }), null);
 });
 
-test('inspection holds the shared lock so the hosted reader cannot overlap it', async () => {
-  const c = loadWorker(); let release, entered;
-  const started = new Promise(resolve => { entered = resolve; });
-  c.chrome.tabs = { query: async () => { entered(); return new Promise(resolve => { release = resolve; }); } };
-  c.sendBrowserResult = () => {};
-  const inspecting = c.handleMarketplaceInspection({ payload: { marketplace: 'poshmark' } });
-  await started;
-  assert.equal((await c.readCloudPoshmarkForm({})).error_code, 'busy');
-  release([]); await inspecting;
-  assert.equal(c.nativeOperationsRunning(), false);
-});
-
 test('disconnecting during the final document probe also discards the result', async () => {
   const s = await connected(async () => ({ ok: true, form: FORM }));
   let finish, entered; let calls = 0;

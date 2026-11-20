@@ -312,7 +312,7 @@ class ChromeThatNeverRepliesTest(unittest.IsolatedAsyncioTestCase):
         with patch.object(browser_bridge, "_manager", return_value=chrome):
             with self.assertRaises(browser_bridge.BrowserBridgeError) as caught:
                 await asyncio.wait_for(
-                    browser_bridge.request(SimpleNamespace(id="job-1"), "marketplace.inspect", timeout=SHORT), HUNG,
+                    browser_bridge.request(SimpleNamespace(id="job-1"), "marketplace.sessions", timeout=SHORT), HUNG,
                 )
         self.assertIn("Chrome did not answer", str(caught.exception))
         request_id = chrome.sent[0]["message_id"]

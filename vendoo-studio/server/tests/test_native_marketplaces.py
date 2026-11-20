@@ -1628,20 +1628,6 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
 
     # --- the slot, restarts and reconnects ------------------------------------------------
 
-    def test_inspection_is_read_only_and_holds_the_slot(self):
-        seen = []
-
-        async def bridge(job, kind, payload, timeout=None):
-            running = await asyncio.to_thread(lambda: [j.current_step for j in JobRepo(self.sessions()).get_running()])
-            seen.append((running, kind))
-            return {"ok": True, "fields": [], "scripts": []}
-
-        self.bridge.side_effect = bridge
-        self.assertEqual(self.client.post(f"{self.base}/mercari/inspect", json={}).status_code, 200)
-        self.assertEqual(seen, [(["native_mercari_inspect"], "marketplace.inspect")])
-        self.assertFalse(JobRepo(self.db).get_running())
-        self.assertEqual(self.client.post(f"{self.base}/unknown/inspect", json={}).status_code, 422)
-
     def test_a_bridge_from_another_build_runs_actions_it_declares(self):
         # Chrome may run an older or separately loaded copy of the Bridge. What
         # decides is whether it declares the ability, not which build it is.
@@ -1680,11 +1666,9 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         self.assertEqual(refused.status_code, 409)
         self.assertIsNone(refused.headers.get("X-Anteroom-Reason"))
 
-    def test_delist_and_inspection_still_hold_every_marketplace(self):
-        for step in ("native_delist", "native_poshmark_inspect"):
-            job = JobRepo(self.db).create(self.conv.id, self.rev.id, LISTING, status="dispatched", current_step=step)
-            self.assertEqual(native.blocking_job(JobRepo(self.db), "mercari").id, job.id)
-            JobRepo(self.db).update_status(job.id, "completed")
+    def test_delist_still_holds_every_marketplace(self):
+        job = JobRepo(self.db).create(self.conv.id, self.rev.id, LISTING, status="dispatched", current_step="native_delist")
+        self.assertEqual(native.blocking_job(JobRepo(self.db), "mercari").id, job.id)
 
     def test_restart_marks_cut_off_actions_unconfirmed_and_reconcile_reads_them(self):
         repo = JobRepo(self.db)
