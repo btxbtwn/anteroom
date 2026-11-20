@@ -1,0 +1,3 @@
+- Inventory now has three tabs, Active, Sold and Draft, and opens on Active. The Open and Failed tabs are gone.
+- Anything that isn't live or sold appears under Draft: new drafts, listings still sending to a marketplace, failed sends (still labelled Failed on the row) and delisted items. Every item sits under exactly one tab, on the web and on iPhone.
+- Starting a new listing switches to Draft so it shows up right away, and a listing you have open keeps its row if it sells or goes live while you're editing.

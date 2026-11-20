@@ -87,15 +87,15 @@ extension ListingSort {
 }
 
 enum StatusTab: String, CaseIterable, Identifiable, Sendable {
-    /// Open: everything not sold (drafts, in progress, active, failed).
-    case open, draft, active, sold, failed
+    /// One tab per lifecycle state, as on the web: every listing sits under exactly one.
+    case draft, active, sold
 
     var id: String { rawValue }
     var label: String { rawValue.capitalized }
 }
 
 struct InventoryFilters: Equatable, Sendable {
-    var status: StatusTab = .open
+    var status: StatusTab = .active
     var marketplaces: [String] = []
     /// Turns the marketplace picks around: keep listings missing from one of
     /// them, or, with none picked, the listings no marketplace carries.
@@ -259,7 +259,10 @@ extension ConversationSummary {
         return status
     }
 
-    var statusTab: String { ["in_progress", "inactive"].contains(inventoryStatus) ? "draft" : inventoryStatus }
+    /// Every listing has a tab: anything not live or sold (a generation or a
+    /// send in progress, a failed send, an inactive listing, any status this
+    /// build does not know) files under Draft, where its row keeps its label.
+    var statusTab: String { ["active", "sold"].contains(inventoryStatus) ? inventoryStatus : "draft" }
     var statusLabel: String { inventoryStatus.replacingOccurrences(of: "_", with: " ").capitalized }
 
     fileprivate var activeAnchor: Double {
@@ -306,14 +309,13 @@ enum InventoryQuery {
         return listing.displayTitle.lowercased().contains(needle) || (listing.sku ?? "").lowercased().contains(needle)
     }
 
-    /// Open holds what is still for sale. A search there spans the whole
-    /// inventory, so a sold item is still found by its title or SKU.
-    static func inTab(_ listing: ConversationSummary, _ tab: StatusTab, searching: Bool = false) -> Bool {
-        tab == .open ? searching || listing.statusTab != "sold" : listing.statusTab == tab.rawValue
+    /// Search runs within the tab; the tab counts show where the matches are.
+    static func inTab(_ listing: ConversationSummary, _ tab: StatusTab) -> Bool {
+        listing.statusTab == tab.rawValue
     }
 
-    static func matchesFilters(_ listing: ConversationSummary, _ filters: InventoryFilters, searching: Bool = false) -> Bool {
-        guard inTab(listing, filters.status, searching: searching) else { return false }
+    static func matchesFilters(_ listing: ConversationSummary, _ filters: InventoryFilters) -> Bool {
+        guard inTab(listing, filters.status) else { return false }
         let listed = listing.liveMarketplaces
         if filters.notListed {
             if filters.marketplaces.isEmpty { return listed.isEmpty }
@@ -332,7 +334,7 @@ enum InventoryQuery {
     static func rows(_ listings: [ConversationSummary], search: String, filters: InventoryFilters) -> [ConversationSummary] {
         let needle = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let matching = listings
-            .filter { matchesSearch($0, needle) && matchesFilters($0, filters, searching: !needle.isEmpty) }
+            .filter { matchesSearch($0, needle) && matchesFilters($0, filters) }
             .filter { visible($0, tab: filters.status, searching: !needle.isEmpty) }
             .map(SortKeys.init)
         let working = stableSorted(matching.filter { $0.listing.settledAt == nil }) { $0.active > $1.active }
@@ -345,11 +347,8 @@ enum InventoryQuery {
     /// Tab counts over the searched inventory.
     static func counts(_ listings: [ConversationSummary], search: String) -> [StatusTab: Int] {
         let needle = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        var counts: [StatusTab: Int] = [.open: 0]
+        var counts: [StatusTab: Int] = [:]
         for listing in listings where matchesSearch(listing, needle) {
-            if inTab(listing, .open, searching: !needle.isEmpty), visible(listing, tab: .open, searching: !needle.isEmpty) {
-                counts[.open, default: 0] += 1
-            }
             if let tab = StatusTab(rawValue: listing.statusTab), visible(listing, tab: tab, searching: !needle.isEmpty) {
                 counts[tab, default: 0] += 1
             }

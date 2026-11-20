@@ -1,4 +1,4 @@
-import { createListing, expect, test, titleBox } from "./fixtures";
+import { createListing, expect, showStatusTab, test, titleBox } from "./fixtures";
 
 test("another batch and inventory selection stay available while generation waits", async ({ page, phone, request }, info) => {
   const suffix = `${info.project.name} ${Date.now()}`;
@@ -26,6 +26,7 @@ test("another batch and inventory selection stay available while generation wait
       await page.getByRole("button", { name: "Open navigation" }).click();
       await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
     }
+    await showStatusTab(page, "Draft");
     for (let index = 0; index < 2; index++) {
       await page.getByRole("button", { name: "Select listings", exact: true }).click();
       await page.getByRole("list", { name: "Listings" }).getByRole("checkbox", { name: `Select ${titles[index]}`, exact: true }).click();

@@ -12,9 +12,12 @@ import type { WorkspaceView } from "./workspaceCrumbs";
 import type { Suggestion } from "../api/types";
 import {
   DEFAULT_LISTING_FILTERS,
+  activeFilterCount,
+  emptyTabLabel,
   labelCounts,
   labelOptions,
   inStatusTab,
+  listingStatusTab,
   matchesSearch,
   marketplaceCounts,
   marketplaceOptions,
@@ -25,6 +28,7 @@ import {
   staleCounts,
   statusCounts,
   type ListingFilters as Filters,
+  type ListingStatusFilter,
 } from "./inventoryFilters";
 import { LightbulbIcon, PlusIcon, SearchIcon, Table2Icon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
@@ -36,6 +40,7 @@ import { ListingRowsSkeleton } from "./sidebar/ListingRowsSkeleton";
 import { VirtualListingList } from "./sidebar/VirtualListingList";
 import type { Listing } from "./sidebar/listingShelves";
 import { shelveListings } from "./sidebar/shelveListings";
+import { inventoryStatus } from "./sidebar/listingStatus";
 import { setListingSearch, useListingSearch } from "./sidebar/listingSearch";
 import { BulkActionBar, BulkSelectionDialogs } from "./sidebar/BulkSelection";
 import { SettingsSidebarNav } from "./sidebar/SettingsSidebarNav";
@@ -126,10 +131,28 @@ export function ListingSidebar({
   const deferredQuery = useDeferredValue(listingQuery);
   const needle = deferredQuery.trim().toLowerCase();
   const openListingId = activeView === "listings" ? selectedConvId : null;
+  const listingsById = useMemo(
+    () => new Map((conversations || []).map((listing) => [listing.id, listing])),
+    [conversations],
+  );
+  // Opening a listing shows its own tab, so a draft just started appears under
+  // Draft and a listing opened from a link sits among its kind. The tab moves
+  // once per listing opened; the seller can pick another tab while it is open.
+  const [followed, setFollowed] = useState<{ id: string; tab: ListingStatusFilter } | null>(null);
+  const openListing = openListingId ? listingsById.get(openListingId) : undefined;
+  if (!openListingId && followed) setFollowed(null);
+  if (openListingId && openListing && openListingId !== followed?.id) {
+    const tab = listingStatusTab(inventoryStatus(openListing));
+    setFollowed({ id: openListingId, tab });
+    if (tab !== filters.status) setFilters({ ...filters, status: tab });
+  }
+  // The open listing keeps its row on the tab it was opened from, even after
+  // it sells or goes live there; another tab shows only its own listings.
+  const keptOpenId = followed && followed.id === openListingId && followed.tab === filters.status ? openListingId : null;
   // Finished listings stay out of the working list. Search and the Sold tab still find them.
-  const { shown: shownListings, matched } = useMemo(
-    () => shelveListings(conversations || [], needle, filters, openListingId),
-    [conversations, needle, filters, openListingId],
+  const { shown: shownListings } = useMemo(
+    () => shelveListings(conversations || [], needle, filters, keptOpenId),
+    [conversations, needle, filters, keptOpenId],
   );
 
 
@@ -144,10 +167,6 @@ export function ListingSidebar({
     refetchInterval: () => pollMs(IDLE_POLL_MS),
   });
   const suggestions = suggestionData?.suggestions ?? NO_SUGGESTIONS;
-  const listingsById = useMemo(
-    () => new Map((conversations || []).map((listing) => [listing.id, listing])),
-    [conversations],
-  );
   // Each listing appears once: its suggestion is a hint on its own row.
   const hints = useMemo(
     () => new Map(suggestions.map((suggestion) => [suggestion.conversation_id, suggestionHint(suggestion)])),
@@ -176,13 +195,13 @@ export function ListingSidebar({
     () => (conversations || []).filter((listing) => matchesSearch(listing, needle)),
     [conversations, needle],
   );
-  const counts = useMemo(() => statusCounts(searched, Boolean(needle), activeView === "listings" ? selectedConvId : null),
-    [searched, needle, activeView, selectedConvId]);
+  const counts = useMemo(() => statusCounts(searched, Boolean(needle), openListingId, keptOpenId ? filters.status : undefined),
+    [searched, needle, openListingId, keptOpenId, filters.status]);
   // Each filter row carries how many listings it would keep, counted over the
   // status tab in front of the reader rather than the whole inventory.
   const facetSource = useMemo(
-    () => searched.filter((listing) => inStatusTab(listing, filters.status)),
-    [searched, filters.status],
+    () => searched.filter((listing) => listing.id === keptOpenId || inStatusTab(listing, filters.status)),
+    [searched, filters.status, keptOpenId],
   );
   const filterMarketplaces = useMemo(
     () => marketplaceOptions(conversations || [], marketplaceSettings?.selected || [], filters.notListed),
@@ -417,8 +436,10 @@ export function ListingSidebar({
             {conversations?.length === 0 && (
               <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">No listings yet</p>
             )}
-            {conversations && conversations.length > 0 && matched === 0 && (
-              <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">No matching listings</p>
+            {conversations && conversations.length > 0 && shownListings.length === 0 && (
+              <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">
+                {needle || activeFilterCount(filters) ? "No matching listings" : emptyTabLabel(filters.status)}
+              </p>
             )}
           </VirtualListingList>
         </>

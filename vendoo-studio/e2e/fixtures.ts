@@ -70,19 +70,37 @@ export async function createListing(request: APIRequestContext, title: string): 
   return conversation.id;
 }
 
+/** Pick an inventory status tab in the sidebar. The inventory opens on Active. */
+export async function showStatusTab(page: Page, name: "Draft" | "Active" | "Sold"): Promise<void> {
+  const tab = page.getByRole("tablist", { name: "Listing status" }).getByRole("tab", { name: new RegExp(`^${name}\\b`) });
+  await tab.click();
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+}
+
 /**
  * Open a listing from the inventory; on a phone the inventory sits behind the
  * navigation menu. The list only draws the rows near the screen, and earlier
  * tests add listings above the samples, so search for it as a seller would.
+ * Search runs within a status tab, so look under each, drafts first.
  */
-export async function openListing(page: Page, phone: boolean, title: string): Promise<void> {
+export async function openListing(page: Page, phone: boolean, title: string, expectedActiveCount?: number): Promise<void> {
   await page.goto("/");
   if (phone) {
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
   }
+  // Counts appear only after the inventory arrives; do not spend the Draft
+  // search window waiting for the initial request.
+  const activeTab = page.getByRole("tablist", { name: "Listing status" })
+    .getByRole("tab", { name: /^Active\b/ });
+  await expect(activeTab).toHaveAttribute("title", expectedActiveCount === undefined ? /^Active · \d+$/ : `Active · ${expectedActiveCount}`, { timeout: 30_000 });
   await page.getByRole("searchbox", { name: /^Search listings/ }).fill(title);
-  await page.getByRole("list", { name: "Listings" }).getByRole("link", { name: title, exact: true }).click();
+  const link = page.getByRole("list", { name: "Listings" }).getByRole("link", { name: title, exact: true });
+  for (const tab of ["Draft", "Active", "Sold"] as const) {
+    await showStatusTab(page, tab);
+    if (await link.waitFor({ timeout: tab === "Sold" ? 15_000 : 3_000 }).then(() => true, () => false)) break;
+  }
+  await link.click();
 }
 
 /** The editor's Title box; on a phone it is on the Listing tab. */

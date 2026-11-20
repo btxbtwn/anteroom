@@ -20,7 +20,8 @@ describe("InventoryTablePage", () => {
     const html = table(undefined);
     expect(html).toContain('aria-label="Loading listings"');
     expect(html).not.toContain("No listings yet");
-    expect(html).toContain(">Open<");
+    expect(html).toContain(">Active<");
+    expect(html).not.toContain(">Open<");
     expect(html).not.toMatch(/tabular-nums">0</);
   });
 

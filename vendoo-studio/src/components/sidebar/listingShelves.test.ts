@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_LISTING_FILTERS,
+  LISTING_STATUS_TABS,
   filterListings,
   marketplaceCounts,
   matchesSearch,
@@ -127,7 +128,10 @@ describe("sidebar search", () => {
   ];
 
   // The sidebar trims and lowercases what the seller types before matching.
-  const search = (needle: string) => filterListings(listings, needle, DEFAULT_LISTING_FILTERS).map((l) => l.id);
+  // Search runs within a tab; this looks through every tab.
+  const search = (needle: string) => LISTING_STATUS_TABS
+    .flatMap((status) => filterListings(listings, needle, { ...DEFAULT_LISTING_FILTERS, status }))
+    .map((l) => l.id);
 
   it("finds a listing by part of its title, SKU or label", () => {
     expect(search("501")).toEqual(["1"]);
