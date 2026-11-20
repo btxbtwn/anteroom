@@ -243,8 +243,8 @@ test('Depop form reads native general attribute objects, maximums and category a
   assert.equal(fields['depop_specifics.source'].max_values, 2);
   assert.deepEqual(fields['depop_specifics.attributes.bottom-fit'].options, ['Straight']);
   assert.ok(fields['depop_specifics.attributes.bottom-fit'].required);
-  assert.equal(fields['depop_specifics.nativeSizeId'].value, 1);
-  assert.equal(fields['depop_specifics.nativeSizeId'].category_specific, true);
+  assert.equal(fields['depop_specifics.size'].value, '30');
+  assert.equal(fields['depop_specifics.size'].category_specific, true);
   assert.equal(fields['depop_specifics.attributes.bottom-fit'].category_specific, true);
   assert.ok(!fields['depop_specifics.age'].category_specific);
   assert.ok(!form.fields.some(row => row.path === 'title'));

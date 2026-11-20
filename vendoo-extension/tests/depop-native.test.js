@@ -1139,6 +1139,41 @@ test('a men\'s waist keeps the tag size when Depop spells it with inches', () =>
   assert.ok(c.depopSize({ ...listing, size: 'fits small', depop_specifics: {} }, category, attributes).problem);
 });
 
+test('Depop clothing Size edits replace a cleared label and serialize the selected category size', async () => {
+  const c = loadWorker();
+  const attributes = { ...ATTRIBUTES,
+    category_size_mapping: [{ department: 'womenswear', product_type: 'jeans', size_set_by_region: { US: 41 } }],
+    size_sets: [{ id: 41, sizes: [{ id: 80, name_i18n: { 'en-US': '0' } },
+      { id: 81, name_i18n: { 'en-US': '00' } }] }] };
+  const listing = { ...FULL, size: '0', direct_category_ids: { depop: 'womenswear_jeans' },
+    depop_specifics: { size: '', nativeSizeId: '', parcelSize: 'Medium' },
+    seller_fields: ['depop_specifics.size', 'depop_specifics.nativeSizeId'] };
+  const category = c.depopCategory(listing, attributes);
+  assert.ok(c.depopSize(listing, category, attributes).problem);
+  const form = c.depopEditorForm(listing, attributes);
+  const row = form.fields.find(field => field.label === 'Size');
+  assert.equal(row.path, 'depop_specifics.size');
+  assert.equal(row.value, '');
+  assert.ok(row.options.includes('0'));
+  assert.ok(form.fields.find(field => field.label === 'Category').clears.includes('depop_specifics.size'));
+  const oldIdForm = c.depopEditorForm({ ...listing, depop_specifics: { nativeSizeId: 81 } }, attributes);
+  assert.equal(oldIdForm.fields.find(field => field.label === 'Size').value, '00');
+  // Apply the same label/option-value write as the editor, without changing General.
+  listing.depop_specifics.size = row.option_values['0'];
+  c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  withCatalog(c, { attributes: [200, attributes] });
+  const fields = await c.depopResolvedFields({ listing, deadline: Date.now() + 30000 });
+  const body = c.depopDraftWriteBody(listing, fields, [], {});
+  assert.equal(body.variant_set, 41);
+  assert.deepEqual(JSON.parse(JSON.stringify(body.variants)), { 80: 1 });
+  assert.equal(listing.size, '0');
+  listing.depop_specifics.size = '';
+  assert.ok(c.depopSize(listing, category, attributes).problem);
+  listing.depop_specifics.size = row.option_values['0'];
+  const recovered = await c.depopResolvedFields({ listing, deadline: Date.now() + 30000 });
+  assert.deepEqual(JSON.parse(JSON.stringify(recovered.variants)), { 80: 1 });
+});
+
 test('Depop publish refuses a draft whose size or type is not the one sent', async () => {
   const { c, requests, payload } = page();
   const fields = { product_type: 'jackets', variant_set: 100, variants: { 23: 1 }, attributes: { 'jacket-type': ['windbreaker'] } };

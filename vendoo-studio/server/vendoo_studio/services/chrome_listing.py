@@ -194,6 +194,18 @@ def depop_requirements(snapshot: dict, context: Context) -> list[dict]:
     specifics = snapshot.get("depop_specifics")
     if not isinstance(specifics, dict):
         specifics = {}
+    # An explicit clear is not a request to use General. Name the editable Size
+    # row before sending rather than letting a later shipping refusal hide it.
+    size_key = "size" if "size" in specifics else "nativeSizeId"
+    if size_key in specifics and not str(specifics[size_key] or "").strip():
+        from vendoo_studio.services.depop_form import catalog
+
+        category = next((row for row in catalog()["categories"] if row["id"] == _category_id(snapshot, "depop")), {})
+        if any(row["id"] == "variants" for row in category.get("fields") or []):
+            fields = ((snapshot.get("_native_forms") or {}).get("depop") or {}).get("fields") or []
+            path = next((row["path"] for row in fields if row.get("path") in {
+                "depop_specifics.size", "depop_specifics.nativeSizeId"}), "depop_specifics.size")
+            found.append(gap(path, "Depop needs a clothing size. Reload Depop fields, then choose Size for this category."))
     worldwide = specifics.get("worldwideShipping") or {}
     if worldwide.get("enabled") is True:
         amount = _money(worldwide.get("price"))
