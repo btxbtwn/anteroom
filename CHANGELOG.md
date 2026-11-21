@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1082 — 2026-11-21
+
+- Stop bulk Regenerate from failing when category lookup times out under load.
+
 ## 0.1.1081 — 2026-11-21
 
 - Mercari checks “No brand / Not sure” when there’s no matching brand. You or the agent can change it directly, and choosing a brand clears the checkbox.
