@@ -1,0 +1,2 @@
+- Offer activity now says how many offers went out on each marketplace and what the marketplace confirmed, instead of "Not available" for Poshmark and Depop.
+- Add an Offer log on the Automations page that lists every offer sent on eBay, Poshmark, Mercari and Depop, newest first.

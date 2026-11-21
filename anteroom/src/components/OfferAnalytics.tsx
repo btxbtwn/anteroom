@@ -1,9 +1,13 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { ListIcon } from "lucide-react";
 import { api } from "../api/client";
 import type { OfferAnalyticsResponse } from "../api/contract.gen";
 import { marketplaceName } from "./marketplaceNames";
+import { OfferLog } from "./OfferLog";
+import { offerProblems, offerReach, offersSent } from "./offerActivityFormat";
 import { FormField, PageError, PageNote, PageSection, Panel } from "./WorkspacePage";
+import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Skeleton } from "./ui/skeleton";
@@ -18,20 +22,18 @@ export function offerDates(period: string, now = new Date()) {
 
 export function OfferEvidence({ data }: { data: OfferAnalyticsResponse }) {
   return <Panel>
-    {data.marketplaces.map((row) => <div key={row.marketplace} role="group" aria-label={`${marketplaceName(row.marketplace)} offer activity`} className="border-b border-border/60 p-3 last:border-0 sm:p-4">
-      <div className="flex items-baseline justify-between gap-4 text-sm">
-        <span className="font-medium">{marketplaceName(row.marketplace)}</span>
-        <span className="tabular-nums">{row.confirmed_recipients == null ? "Not available" : `${row.confirmed_recipients} confirmed recipient offers`}</span>
-      </div>
-      <p className="mt-1 text-xs text-muted-foreground tabular-nums">
-        {row.marketplace === "poshmark" ? `${row.accepted_requests} accepted requests · recipients not reported`
-          : row.marketplace === "depop" ? `${row.completed_jobs} completed bulk jobs · recipients not reported`
-            : `${row.confirmed_sends} confirmed sends with recipient counts`}
-      </p>
-      <p className="mt-1 text-xs text-muted-foreground tabular-nums">
-        {row.unknown} unknown · {row.unverified} unverified · {row.failed} failed · {row.pending} pending
-      </p>
-    </div>)}
+    {data.marketplaces.map((row) => {
+      const sent = offersSent(row);
+      const problems = offerProblems(row);
+      return <div key={row.marketplace} role="group" aria-label={`${marketplaceName(row.marketplace)} offer activity`} className="p-3 sm:p-4">
+        <div className="flex items-baseline justify-between gap-4 text-sm">
+          <span className="font-medium">{marketplaceName(row.marketplace)}</span>
+          <span className="tabular-nums">{sent === 1 ? "1 offer sent" : `${sent} offers sent`}</span>
+        </div>
+        {offerReach(row).map((line) => <p key={line} className="mt-1 text-xs text-muted-foreground tabular-nums">{line}</p>)}
+        {problems ? <p className="mt-1 text-xs text-warning-foreground tabular-nums">{problems}</p> : null}
+      </div>;
+    })}
   </Panel>;
 }
 
@@ -42,6 +44,7 @@ const OFFER_PERIODS = [
 
 export function OfferAnalytics() {
   const [period, setPeriod] = useState("today");
+  const [logOpen, setLogOpen] = useState(false);
   const [custom, setCustom] = useState(offerDates("today"));
   const dates = period === "custom" ? custom : offerDates(period);
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -49,7 +52,9 @@ export function OfferAnalytics() {
     queryFn: () => api.analytics.offers({ ...dates, timezone }),
     enabled: !!dates.start && !!dates.end && dates.start <= dates.end,
     staleTime: 60_000 });
-  return <PageSection aria-label="Offer activity" title="Offer activity" description="Marketplace evidence recorded by Anteroom, separate from automation runs.">
+  return <PageSection aria-label="Offer activity" title="Offer activity"
+    description="Offers Anteroom sent to likers and watchers, and what each marketplace confirmed about them."
+    actions={<Button size="sm" variant="outline" onClick={() => setLogOpen(true)}><ListIcon />Offer log</Button>}>
     <div className="mb-3 flex flex-wrap items-end gap-3">
       <FormField label="Period">
         <Select value={period} onValueChange={(value) => value && setPeriod(value)}>
@@ -66,7 +71,8 @@ export function OfferAnalytics() {
     {dates.start > dates.end ? <PageError message="Choose a start on or before the end." /> : null}
     {query.error ? <PageError message={`Could not read offer activity: ${(query.error as Error).message}`} /> : null}
     {query.isLoading ? <Skeleton className="h-48" /> : query.data ? <OfferEvidence data={query.data} /> : null}
-    <PageNote>Partial history: only recorded sends are included; previews, cooldown checks and skips are excluded. eBay history before send-date tracking is excluded. Counts are recipient offers, not unique buyers; repeat offers count again.</PageNote>
-    <PageNote>Converted sales: Not available. Saved offers cannot be reliably linked to orders. A later sale of the same listing does not prove conversion.</PageNote>
+    <PageNote>Each offer is one listing's offer to its likers or watchers, so one buyer can count more than once. Listings that were checked and skipped aren't counted, and neither are offers sent on eBay before Anteroom recorded send dates.</PageNote>
+    <PageNote>Sales from offers aren't counted: marketplaces don't say which offer led to a sale.</PageNote>
+    <OfferLog open={logOpen} onOpenChange={setLogOpen} />
   </PageSection>;
 }

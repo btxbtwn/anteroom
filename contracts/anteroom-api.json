@@ -1239,6 +1239,155 @@
         "title": "OfferAnalyticsResponse",
         "type": "object"
       },
+      "OfferLogEntry": {
+        "properties": {
+          "confirmation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmation"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "like_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Likes (Depop: eligible likers) read before sending; not a recipient count.",
+            "title": "Like Count"
+          },
+          "listing_id": {
+            "title": "Listing Id",
+            "type": "string"
+          },
+          "marketplace": {
+            "title": "Marketplace",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "offer_price_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offer Price Cents"
+          },
+          "price_cents": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Cents"
+          },
+          "recipients": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Buyers the marketplace said it sent the offer to; null when it did not say.",
+            "title": "Recipients"
+          },
+          "sent_at": {
+            "title": "Sent At",
+            "type": "string"
+          },
+          "status": {
+            "description": "sent, sending, unconfirmed (no reply; check the marketplace), checked or failed.",
+            "title": "Status",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "id",
+          "marketplace",
+          "title",
+          "listing_id",
+          "sent_at",
+          "status",
+          "price_cents",
+          "offer_price_cents",
+          "recipients",
+          "confirmation",
+          "like_count",
+          "note"
+        ],
+        "title": "OfferLogEntry",
+        "type": "object"
+      },
+      "OfferLogResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/OfferLogEntry"
+            },
+            "title": "Entries",
+            "type": "array"
+          },
+          "next_before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass as ``before`` for the next, older page; null on the last page.",
+            "title": "Next Before"
+          }
+        },
+        "required": [
+          "entries",
+          "next_before"
+        ],
+        "title": "OfferLogResponse",
+        "type": "object"
+      },
       "PhotoEdits": {
         "additionalProperties": false,
         "properties": {
@@ -1534,6 +1683,65 @@
           }
         },
         "summary": "Get Offer Analytics"
+      }
+    },
+    "/api/analytics/offers/log": {
+      "get": {
+        "description": "Every offer that reached a marketplace, newest first.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfferLogResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Offer Log"
       }
     },
     "/api/conversations": {

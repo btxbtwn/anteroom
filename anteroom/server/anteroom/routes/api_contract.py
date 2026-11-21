@@ -31,6 +31,7 @@ CONTRACT_OPERATIONS: tuple[tuple[str, str], ...] = (
     ("get", "/api/runtime"),
     ("post", "/api/size-tags/read"),
     ("get", "/api/analytics/offers"),
+    ("get", "/api/analytics/offers/log"),
     ("get", "/api/conversations"),
     ("post", "/api/conversations"),
     ("get", "/api/conversations/{identity}"),
@@ -288,3 +289,27 @@ class OfferAnalyticsResponse(ContractModel):
     timezone: str
     confirmed_conversions: int | None
     marketplaces: list[OfferAnalyticsMarketplace]
+
+
+class OfferLogEntry(ContractModel):
+    id: str
+    marketplace: str
+    title: str | None
+    listing_id: str
+    sent_at: str
+    status: str
+    """sent, sending, unconfirmed (no reply; check the marketplace), checked or failed."""
+    price_cents: int | None
+    offer_price_cents: int | None
+    recipients: int | None
+    """Buyers the marketplace said it sent the offer to; null when it did not say."""
+    confirmation: str | None
+    like_count: int | None
+    """Likes (Depop: eligible likers) read before sending; not a recipient count."""
+    note: str | None
+
+
+class OfferLogResponse(ContractModel):
+    entries: list[OfferLogEntry]
+    next_before: str | None
+    """Pass as ``before`` for the next, older page; null on the last page."""

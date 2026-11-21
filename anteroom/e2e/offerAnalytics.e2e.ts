@@ -28,6 +28,7 @@ with SessionLocal() as db:
 `;
 
 let acceptedRequests = 0;
+let poshmarkSent = 0;
 let originalTheme: string | undefined;
 let sandboxVerified = false;
 let fixturesSeeded = false;
@@ -40,7 +41,10 @@ test.beforeAll(async ({ request }) => {
   originalTheme = (await (await request.get("/api/settings/ui")).json()).theme;
   const today = new Date().toISOString().slice(0, 10);
   const baseline = await (await request.get(`/api/analytics/offers?start=${today}&end=${today}&timezone=UTC`)).json();
-  acceptedRequests = baseline.marketplaces.find((row: { marketplace: string }) => row.marketplace === "poshmark").accepted_requests + 1;
+  const poshmark = baseline.marketplaces.find((row: { marketplace: string }) => row.marketplace === "poshmark");
+  acceptedRequests = poshmark.accepted_requests + 1;
+  // Offers sent counts every accepted send, including the sandbox's sample sends without a receipt.
+  poshmarkSent = poshmark.confirmed_sends + poshmark.accepted_requests + poshmark.completed_jobs + poshmark.unverified + 1;
   execFileSync(".venv/bin/python", ["-c", seed], { env: { ...process.env,
     PYTHONPATH: "server", ANTEROOM_DATA_DIR: sandboxDir, ANTEROOM_DATABASE_URL: "", ANTEROOM_HOSTED: "0", ANTEROOM_SANDBOX: "1" } });
   fixturesSeeded = true;
@@ -78,30 +82,43 @@ for (const theme of ["light", "dark"]) {
     } else await page.getByRole("button", { name: "Automations", exact: true }).click();
     const section = page.getByRole("region", { name: "Offer activity" });
     await expect(section.getByRole("combobox")).toHaveText("Today");
-    await expect(section.getByText("2 confirmed recipient offers", { exact: true })).toBeVisible();
-    await expect(section.getByText("3 confirmed recipient offers", { exact: true })).toBeVisible();
-    await expect(section.getByText(`${acceptedRequests} accepted requests · recipients not reported`)).toBeVisible();
-    await expect(section.getByText("1 completed bulk jobs · recipients not reported")).toBeVisible();
+    const group = (name: string) => section.getByRole("group", { name: `${name} offer activity`, exact: true });
+    await expect(group("eBay").getByText("2 offers sent", { exact: true })).toBeVisible();
+    await expect(group("eBay").getByText("Reached 2 buyers, as eBay reported", { exact: true })).toBeVisible();
+    await expect(group("Mercari").getByText("Reached 3 buyers, as Mercari reported", { exact: true })).toBeVisible();
     for (const marketplace of ["eBay", "Mercari"]) {
-      await expect(section.getByRole("group", { name: `${marketplace} offer activity`, exact: true })
-        .getByText("0 unknown · 1 unverified · 0 failed · 0 pending", { exact: true })).toBeVisible();
+      await expect(group(marketplace).getByText("1 offer with no marketplace receipt saved", { exact: true })).toBeVisible();
     }
-    await expect(section.getByText(/Converted sales: Not available/)).toBeVisible();
+    await expect(group("Poshmark").getByText(`${poshmarkSent} ${poshmarkSent === 1 ? "offer" : "offers"} sent`, { exact: true })).toBeVisible();
+    await expect(group("Poshmark").getByText(`Poshmark accepted ${acceptedRequests === 1 ? "it" : `all ${acceptedRequests}`} but doesn't say how many likers got each offer`, { exact: true })).toBeVisible();
+    await expect(group("Depop").getByText("Depop finished it but doesn't say how many likers got each offer", { exact: true })).toBeVisible();
+    await expect(section.getByText("Not available")).toHaveCount(0);
+    await expect(section.getByText(/Sales from offers aren't counted/)).toBeVisible();
     await expect(page.locator("html")).toHaveCSS("color-scheme", theme);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: testInfo.outputPath(`offer-analytics-${testInfo.project.name}-${theme}.png`), fullPage: true });
+    await section.getByRole("button", { name: "Offer log" }).click();
+    const log = page.getByRole("dialog", { name: "Offer log" });
+    const sends = log.getByRole("list", { name: "Offers sent" });
+    await expect(sends.getByText("Sent to 3 buyers", { exact: true })).toBeVisible();
+    await expect(sends.getByText("Sent to 2 buyers", { exact: true })).toBeVisible();
+    await expect(sends.getByText("Sent · Depop doesn't report how many", { exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: testInfo.outputPath(`offer-log-${testInfo.project.name}-${theme}.png` ) });
+    await page.keyboard.press("Escape");
+    await expect(log).toBeHidden();
     await section.getByRole("combobox").click();
     await page.getByRole("option", { name: "This week", exact: true }).click();
-    await expect(section.getByText("2 confirmed recipient offers", { exact: true })).toBeVisible();
+    await expect(section.getByText("Reached 2 buyers, as eBay reported", { exact: true })).toBeVisible();
     await section.getByRole("combobox").click();
     await page.getByRole("option", { name: "This month", exact: true }).click();
-    await expect(section.getByText("3 confirmed recipient offers", { exact: true })).toBeVisible();
+    await expect(section.getByText("Reached 3 buyers, as Mercari reported", { exact: true })).toBeVisible();
     await section.getByRole("combobox").click();
     await page.getByRole("option", { name: "Custom dates", exact: true }).click();
     await expect(section.getByLabel("From", { exact: true })).toBeVisible();
     await section.getByLabel("From", { exact: true }).fill("2025-01-01");
     await section.getByLabel("Through", { exact: true }).fill("2025-01-01");
-    await expect(section.getByText("Not available", { exact: true })).toHaveCount(4);
+    await expect(section.getByText("0 offers sent", { exact: true })).toHaveCount(4);
     await section.getByLabel("From", { exact: true }).fill("2025-01-02");
     await expect(section.getByText("Choose a start on or before the end.")).toBeVisible();
   });
