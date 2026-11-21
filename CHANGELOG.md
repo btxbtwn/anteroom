@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1114 — 2026-11-21
+
+- Pace hosted bulk photo uploads without blocking concurrent model reads, retry temporary upload-slot waits automatically (canceling cleanly if photos change or the dialog closes), and handle varied JSON formats when locating yardstick tiles.
+
+## 0.1.1113 — 2026-11-21
+
+- Add per-marketplace Inventory tabs on web and iOS with desktop spreadsheet inline editing, phone Quick Edit sheet, and seller-confirmed List actions.
+
 ## 0.1.1112 — 2026-11-21
 
 - When Mercari says an item is no longer available, Delist now records that listing as already gone instead of failing, and shows it as Already gone with Mercari's words. It is never counted as a sale, and Anteroom doesn't guess who removed it.
