@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1099 — 2026-11-21
+
+- Hosted background worker now exits with a non-zero status if its draft loop stops unexpectedly so Fly automatically restarts it instead of leaving queued drafts and assistant answers stalled.
+
 ## 0.1.1098 — 2026-11-21
 
 - Hosted scheduled automations now run with bounded per-process seller concurrency so bursts of due accounts stay smooth without saturating database connections.
