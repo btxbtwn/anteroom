@@ -112,15 +112,20 @@ def read_photo(draft_id: str, photo_id: str, request: Request, db=Depends(get_se
 def delete_photo(draft_id: str, photo_id: str, request: Request, db=Depends(get_seller_db, scope="function")):
     require_draft(db, draft_id, lock=True)
     photo = get_photo(db, draft_id, photo_id)
-    key = photo.stored_filename
+    keys = {photo.stored_filename}
+    if photo.source_filename:
+        photos.check_key(photo.source_filename, db.user_id, draft_id)
+        keys.add(photo.source_filename)
     from anteroom.services.hosted_listing_contract import remove_photo_selections
     remove_photo_selections(db, draft_id, photo_id)
     db.delete(photo)
     # Commit before Storage, so the draft's row lock is not held while it answers.
     db.commit()
-    try:
-        photos.storage_call('DELETE', key, request.headers['authorization'].partition(' ')[2])
-    except HTTPException:
-        # The photo is gone from the draft; only an unreachable private object remains.
-        log.warning('A deleted photo stayed in Storage')
+    token = request.headers['authorization'].partition(' ')[2]
+    for key in keys:
+        try:
+            photos.storage_call('DELETE', key, token)
+        except HTTPException:
+            # The photo is gone from the draft; only an unreachable private object remains.
+            log.warning('A deleted photo stayed in Storage')
     return Response(status_code=204)

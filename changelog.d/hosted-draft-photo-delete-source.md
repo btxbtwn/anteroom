@@ -1,0 +1,1 @@
+- Hosted: deleting an edited draft photo now removes both its edited file and original source photo from storage.
