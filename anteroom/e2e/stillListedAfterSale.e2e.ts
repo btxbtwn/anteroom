@@ -1,0 +1,48 @@
+import { expect, test } from "./fixtures";
+
+// The follow-up and its retries are covered by the backend tests; this checks
+// what the seller sees while a sold item is still listed elsewhere.
+test("a sold item still listed elsewhere is alerted in the sidebar and explained on the item", async ({ page, phone, createConversation }, info) => {
+  test.setTimeout(90_000);
+  const title = `Still listed fleece ${info.project.name}`;
+  const created = await createConversation({ title, notes: "" });
+  expect(created.ok()).toBe(true);
+  const { id } = await created.json();
+  const mutations: string[] = [];
+  page.on("request", request => {
+    if (/\/marketplace-listings\/delist|\/marketplace-sales\/.+\/dismiss/.test(request.url())) mutations.push(request.url());
+  });
+  await page.route("**/api/marketplace-sales/still-listed", route => route.fulfill({ json: { autodelist: true, items: [{
+    conversationId: id, title, saleId: "sale-1", soldOn: "poshmark", soldAt: "2026-11-14T22:00:00", detected: true,
+    stillListed: [
+      { marketplace: "ebay", state: "failed", error: "Sign in to eBay again.", at: null, attempts: 2, url: null },
+      { marketplace: "mercari", state: "live", error: null, at: null, attempts: 0, url: null },
+    ],
+  }] } }));
+  await page.route(/\/api\/marketplace-sales\?/, route => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get("conversation_id") !== id) return route.fulfill({ json: { sales: [] } });
+    return route.fulfill({ json: { sales: [{
+      id: "sale-1", marketplace: "poshmark", orderId: "o1", orderStatus: "paid", listingId: "p1", quantity: 1,
+      stockStatus: "sold_out", remainingQuantity: 0, state: "new", soldAt: "2026-11-14T22:00:00", receivedAt: "2026-11-14T22:00:00",
+      conversationId: id, title, listedElsewhere: ["ebay", "mercari"], delistErrors: { ebay: "Sign in to eBay again." },
+    }] } });
+  });
+
+  await page.goto("/");
+  if (phone) await page.getByRole("button", { name: "Open navigation" }).click().catch(() => undefined);
+  const alert = page.getByRole("alert").filter({ hasText: "A sold item is still listed" });
+  await expect(alert).toBeVisible({ timeout: 45_000 });
+  await expect(alert).toContainText("Sold on Poshmark, still on eBay and Mercari (delist failed)");
+  await expect(alert).toContainText("Anteroom keeps trying to delist them.");
+  await page.screenshot({ path: info.outputPath("still-listed-sidebar.png") });
+
+  await alert.getByRole("button", { name: new RegExp(title) }).click();
+  const notice = page.getByRole("status").filter({ hasText: "Sold on Poshmark" });
+  await expect(notice).toBeVisible({ timeout: 30_000 });
+  await expect(notice).toContainText("Anteroom still has listings on eBay and Mercari.");
+  await expect(notice).toContainText("did not confirm the delist: Sign in to eBay again.");
+  await page.screenshot({ path: info.outputPath("still-listed-item.png") });
+  // Seeing the alert never delists or dismisses anything.
+  expect(mutations).toEqual([]);
+});
