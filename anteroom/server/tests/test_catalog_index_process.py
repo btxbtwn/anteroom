@@ -210,3 +210,43 @@ def test_failed_category_build_preserves_last_good_index_and_does_not_poison_cac
     loaded, hit = catalog._load_saved_category_index(catalog.category_index_dir(), first_fp or '')
     assert (loaded, hit) == (None, False)
     catalog.reset_catalog_index_cache()
+
+
+def test_interrupted_category_promotion_recovers_matching_backup(tmp_path):
+    saved = tmp_path / 'categories.semble'
+    rows = [('ebay', 'leaf-1', 'Clothing > Coats', 'Coats')]
+    trees_text = catalog._category_trees_version({}, rows)
+    index = catalog._index_docs(catalog._write_category_docs(rows, tmp_path / 'docs'))
+    assert index is not None
+    catalog._save_category_index(index, saved, trees_text)
+
+    # Model the on-disk state left by a worker killed just before staging.rename(saved).
+    backup = saved.rename(tmp_path / f'.categories-semble-old-{uuid4().hex}')
+    staging = tmp_path / '.categories-semble-interrupted'
+    index.save(staging)
+    (staging / 'studio-fingerprint.json').write_text('unpublished', encoding='utf-8')
+    assert catalog._load_saved_category_index(saved, 'unpublished') == (None, False)
+    stamp = backup / 'studio-fingerprint.json'
+    stamp.write_bytes(b'\xff\xfe')
+    assert catalog._load_saved_category_index(saved, trees_text) == (None, False)
+    stamp.write_text(trees_text, encoding='utf-8')
+
+    loaded, hit = catalog._load_saved_category_index(saved, trees_text)
+    assert hit
+    assert any('leaf-1' in chunk.content for chunk in loaded.chunks)
+    assert saved.is_dir()
+    assert not backup.exists()
+
+    # A successful replacement also clears backups orphaned by a prior promotion.
+    obsolete = saved.rename(tmp_path / f'.categories-semble-old-{uuid4().hex}')
+    new_rows = [('ebay', 'leaf-2', 'Clothing > Winter Coats', 'Winter Coats')]
+    new_version = catalog._category_trees_version({}, new_rows)
+    new_index = catalog._index_docs(catalog._write_category_docs(new_rows, tmp_path / 'docs'))
+    assert new_index is not None
+    catalog._save_category_index(new_index, saved, new_version)
+    assert not obsolete.exists()
+    assert not staging.exists()
+    assert catalog._load_saved_category_index(saved, trees_text) == (None, False)
+    loaded, hit = catalog._load_saved_category_index(saved, new_version)
+    assert hit
+    assert any('leaf-2' in chunk.content for chunk in loaded.chunks)

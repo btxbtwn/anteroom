@@ -595,22 +595,34 @@ def _category_trees_version(
 
 
 def _load_saved_category_index(saved: Path, trees_text: str) -> tuple[Any, bool]:
-    """Return ``(index, hit)`` when ``saved`` on disk already matches ``trees_text``."""
-    try:
-        stamp = saved / "studio-fingerprint.json"
-        if not (stamp.is_file() and stamp.read_text(encoding="utf-8") == trees_text):
-            return None, False
-        from semble import SembleIndex
+    """Load a matching published index, recovering a backup if promotion stopped early."""
+    # Staging was never published. Only the backup can replace an absent canonical index.
+    candidates = (saved,) if saved.exists() else saved.parent.glob(".categories-semble-old-*")
+    for candidate in candidates:
+        try:
+            stamp = candidate / "studio-fingerprint.json"
+            if not (stamp.is_file() and stamp.read_text(encoding="utf-8") == trees_text):
+                continue
+            from semble import SembleIndex
 
-        return SembleIndex.load_from_disk(saved), True
-    except Exception:
-        log.warning("saved category index unreadable; rebuilding", exc_info=True)
-        return None, False
+            index = SembleIndex.load_from_disk(candidate)
+        except Exception:
+            log.warning("saved category index unreadable at %s", candidate, exc_info=True)
+            continue
+        if candidate != saved:
+            try:
+                candidate.rename(saved)
+            except OSError:
+                log.warning("could not restore category index backup at %s", candidate, exc_info=True)
+        return index, True
+    return None, False
 
 
 def _save_category_index(index, saved: Path, trees_text: str) -> None:
-    """Atomically replace ``saved`` so a failed or interrupted build keeps the last good index."""
+    """Promote a complete index while keeping the previous index available for recovery."""
     saved.parent.mkdir(parents=True, exist_ok=True)
+    # The rebuild lock (held by the parent for hosted builds) serializes promotions.
+    orphaned = list(saved.parent.glob(".categories-semble-*"))
     staging = Path(tempfile.mkdtemp(prefix=".categories-semble-", dir=saved.parent))
     backup: Path | None = None
     try:
@@ -620,13 +632,15 @@ def _save_category_index(index, saved: Path, trees_text: str) -> None:
             backup = saved.parent / f".categories-semble-old-{uuid.uuid4().hex}"
             saved.rename(backup)
         staging.rename(saved)
-        if backup is not None:
-            shutil.rmtree(backup, ignore_errors=True)
     except Exception:
         if backup is not None and backup.exists() and not saved.exists():
             backup.rename(saved)
         shutil.rmtree(staging, ignore_errors=True)
         raise
+    if backup is not None:
+        orphaned.append(backup)
+    for artifact in orphaned:
+        shutil.rmtree(artifact, ignore_errors=True)
 
 
 def _reuse_shared_categories(saved: Path, trees_text: str) -> tuple[Any, bool]:
