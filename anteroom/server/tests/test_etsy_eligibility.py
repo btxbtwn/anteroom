@@ -16,7 +16,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from anteroom.services import listing_persistence
+from anteroom.services import inventory_facets, listing_persistence
 from anteroom.database import Base, get_db, load_models
 from anteroom.main import app
 from anteroom.services.etsy_fields import etsy_eligible, etsy_when_raw, etsy_when_to_store
@@ -147,6 +147,19 @@ class NotAllowedReportTest(unittest.TestCase):
         # Listed as made to order, but the title dates it: When Made may be the mistake.
         self.assertEqual(second["when_made"], "Made To Order (Not Yet Made)")
         self.assertTrue(second["title_says_vintage"])
+
+    def test_year_aliases_agree_in_full_listing_facets_and_live_report(self):
+        live = {"vendooMarketplaces": ["etsy"]}
+        for canonical, eligible in (("2022", False), ("  ", True)):
+            with self.subTest(canonical=canonical):
+                specifics = {"year_manufactured": "1988", "yearManufactured": canonical}
+                dated = listing(ebay_specifics=specifics)
+                conv_id = self.add("Year aliases", {}, live, ebay_specifics=specifics)
+                self.assertEqual(etsy_eligible(dated), eligible)
+                self.assertEqual(inventory_facets.listing_facets(self.db)[conv_id]["etsy_eligible"], eligible)
+                self.assertEqual(inventory_facets.listing_facet(self.db, conv_id)["etsy_eligible"], eligible)
+                reported = {row["conversation_id"] for row in etsy_not_allowed_live(self.db)}
+                self.assertEqual(conv_id in reported, not eligible)
 
     def test_route_is_read_only(self):
         self.seed()

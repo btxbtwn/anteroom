@@ -22,9 +22,7 @@ from anteroom.models.listing_values import (
     normalized_option_key,
     text_value,
 )
-from anteroom.models.schema import (
-    _scalar_text,
-)
+from anteroom.models.schema import EBAY_YEAR_KEYS, _scalar_text
 
 # Etsy OpenAPI: tags may contain letters, numbers, whitespace, -, ', ™, ©, ®.
 # Help center: max 13 tags, max 20 chars each; cannot start with - or '.
@@ -410,7 +408,9 @@ def ebay_year_manufactured(listing: dict[str, Any] | None) -> str:
     for block in (ebay, ebay.get("category_specifics")):
         if not isinstance(block, dict):
             continue
-        for name in ebay_optional_keys(block, "yearManufactured"):
+        # Match the projected rows' precedence before considering other spellings.
+        aliases = (name for name in ebay_optional_keys(block, EBAY_YEAR_KEYS[0]) if name not in EBAY_YEAR_KEYS)
+        for name in (*EBAY_YEAR_KEYS, *aliases):
             text = _scalar_text(block.get(name))
             if text:
                 return text
