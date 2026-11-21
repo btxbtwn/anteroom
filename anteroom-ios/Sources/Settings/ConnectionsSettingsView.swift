@@ -111,7 +111,7 @@ struct ConnectionsSettingsView: View {
             Button {
                 if marketplace == .ebay {
                     actionErrors[.ebay] = nil
-                    loadGeneration += 1
+                    invalidateLoad()
                     showEbaySheet = true
                 } else {
                     Task { await connect(marketplace) }
@@ -178,6 +178,11 @@ struct ConnectionsSettingsView: View {
         }
     }
 
+    private func invalidateLoad() {
+        loadGeneration += 1
+        loading = false
+    }
+
     private func load() async {
         loadGeneration += 1
         let generation = loadGeneration
@@ -200,7 +205,7 @@ struct ConnectionsSettingsView: View {
     }
 
     private func connect(_ marketplace: DirectConnectionMarketplace) async {
-        loadGeneration += 1
+        invalidateLoad()
         busyAction = .connect(marketplace)
         actionErrors[marketplace] = nil
         defer { busyAction = nil }
@@ -214,7 +219,7 @@ struct ConnectionsSettingsView: View {
     }
 
     private func cancelPending(_ marketplace: DirectConnectionMarketplace) async {
-        loadGeneration += 1
+        invalidateLoad()
         busyAction = .cancel(marketplace)
         actionErrors[marketplace] = nil
         defer { busyAction = nil }
@@ -227,7 +232,7 @@ struct ConnectionsSettingsView: View {
     }
 
     private func disconnect(_ marketplace: DirectConnectionMarketplace) async {
-        loadGeneration += 1
+        invalidateLoad()
         busyAction = .disconnect(marketplace)
         actionErrors[marketplace] = nil
         defer { busyAction = nil }
