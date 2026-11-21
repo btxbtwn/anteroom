@@ -351,3 +351,39 @@ def test_seller_facts_respect_custom_section_order():
         < middle_measurements["description"].index("Flaws:")
     )
 
+
+
+@pytest.mark.parametrize("gap", ["\n", "\n\n"])
+def test_missing_flaws_follow_single_newline_formula_headings(gap):
+    from anteroom.services.listing_generate import apply_seller_description_facts
+    from anteroom.services.user_settings import set_listing_formulas
+
+    set_listing_formulas(description="Item: {item}\nFlaws:\n- {flaw}\nMeasurements: {values}")
+    listing = {"description": f"Item: Cotton tee.{gap}Measurements: 20 inches"}
+
+    assert apply_seller_description_facts(listing, {"knownFlaws": "Small stain on hem"})
+    description = listing["description"]
+    assert description == "Item: Cotton tee.\nFlaws:\n- Small stain on hem\nSee photos for details.\nMeasurements: 20 inches"
+
+
+@pytest.mark.parametrize("footer", ["Thanks for looking.", "{closing sentence}"])
+def test_missing_measurements_come_between_distinct_prose_slots(footer):
+    from anteroom.services.listing_generate import ensure_physical_description
+    from anteroom.services.user_settings import set_listing_formulas
+
+    set_listing_formulas(description=f"{{intro}}\n\nMeasurements: {{values}}\n\n{footer}")
+    listing = {"description": "Cotton tee.\n\nThanks for looking."}
+
+    assert ensure_physical_description(listing)
+    assert listing["description"] == "Cotton tee.\n\nMeasurements: See photos\n\nThanks for looking."
+
+
+def test_literal_footer_anchors_measurements_when_intro_is_missing():
+    from anteroom.services.listing_generate import ensure_physical_description
+    from anteroom.services.user_settings import set_listing_formulas
+
+    set_listing_formulas(description="{intro}\n\nMeasurements: {values}\n\nThanks for looking.")
+    listing = {"description": "Thanks for looking."}
+
+    assert ensure_physical_description(listing)
+    assert listing["description"] == "Measurements: See photos\n\nThanks for looking."

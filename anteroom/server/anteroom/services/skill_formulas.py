@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from functools import lru_cache
+from itertools import pairwise
 
 from anteroom.config import skills_dir
 from anteroom.services.user_settings import get_listing_formulas
@@ -221,51 +222,78 @@ def description_has_section(label: str) -> bool:
     return re.search(rf"(?im)^{re.escape(label)}\s*:", active_description_template()) is not None
 
 
-def _template_section_slots(template: str) -> list[str | None]:
-    """Ordered slot keys for each paragraph in ``template`` (``None`` for unlabeled prose)."""
-    slots: list[str | None] = []
-    for chunk in re.split(r"\n{2,}", template.strip()):
-        part = chunk.strip()
-        if not part:
-            continue
-        match = _SECTION_LABEL_RE.match(part)
-        slots.append(match.group(1).strip().lower() if match else None)
-    return slots
+def _section_label(line: str) -> str | None:
+    match = _SECTION_LABEL_RE.match(line)
+    return match.group(1).strip().lower() if match else None
+
+
+def _description_slots(text: str, labels: set[str] | None = None) -> list[tuple[int, str, str | None]]:
+    """Find paragraph starts and headings, including headings within a paragraph."""
+    starts: list[tuple[int, str | None]] = []
+    offset = 0
+    after_blank = True
+    for line in text.splitlines(keepends=True):
+        label = _section_label(line)
+        if labels is not None and label not in labels:
+            label = None
+        if line.strip() and (after_blank or label is not None):
+            starts.append((offset, label))
+        after_blank = not line.strip()
+        offset += len(line)
+    return [(start, text[start:end].rstrip(), label) for (start, label), (end, _) in pairwise([*starts, (len(text), None)])]
 
 
 def insert_description_section(description: str, label: str, block: str) -> str:
-    """Insert a missing ``Label: ...`` block at its position in the active description formula."""
+    """Insert a missing section using headings, literal text, and ordered prose slots."""
     text = description.strip()
     if not text:
         return block
-    slots = _template_section_slots(active_description_template())
+    template = active_description_template().strip()
+    slots = _description_slots(template)
+    slot_labels = [key for _, _, key in slots]
     target = label.strip().lower()
-    if target not in slots:
+    if target not in slot_labels:
         return f"{text}\n\n{block}"
-    target_idx = slots.index(target)
-    paragraphs = [part.strip() for part in re.split(r"\n{2,}", text) if part.strip()]
+    target_idx = slot_labels.index(target)
+
+    def gap_before(index: int) -> str:
+        if 0 < index < len(slots):
+            prev_start, prev_text, _ = slots[index - 1]
+            gap = template[prev_start + len(prev_text):slots[index][0]]
+            return "\n\n" if gap.count("\n") > 1 else "\n"
+        return "\n\n"
+
     if target_idx == 0:
-        paragraphs.insert(0, block)
-        return "\n\n".join(paragraphs)
+        return block + gap_before(1) + text
 
-    known_labels = {slot for slot in slots if slot is not None}
+    paragraphs = _description_slots(text, {key for key in slot_labels if key is not None})
+    # Headings and literal paragraphs give reliable anchors even when optional slots are absent.
+    anchors: list[tuple[int, int]] = [(-1, -1)]
+    for index, (_, part, key) in enumerate(slots):
+        if key is None and "{" in part:
+            continue
+        for position in range(anchors[-1][1] + 1, len(paragraphs)):
+            _, paragraph, paragraph_key = paragraphs[position]
+            if (key is not None and key == paragraph_key) or (key is None and part.strip() == paragraph.strip()):
+                anchors.append((index, position))
+                break
+    anchors.append((len(slots), len(paragraphs)))
 
-    def paragraph_slot(paragraph: str) -> str | None:
-        match = _SECTION_LABEL_RE.match(paragraph)
-        if match:
-            found = match.group(1).strip().lower()
-            if found in known_labels:
-                return found
-        return None
+    matches = dict(anchors[1:-1])
+    for (left, start), (right, end) in pairwise(anchors):
+        prose_slots = [index for index in range(left + 1, right) if slot_labels[index] is None]
+        prose_paragraphs = [position for position in range(start + 1, end) if paragraphs[position][2] is None]
+        # If a run is incomplete, its unlabeled paragraphs cannot be assigned by position reliably.
+        if len(prose_slots) == len(prose_paragraphs):
+            matches.update(zip(prose_slots, prose_paragraphs, strict=True))
 
-    para_slots = [paragraph_slot(paragraph) for paragraph in paragraphs]
-    for later_slot in slots[target_idx + 1 :]:
-        for idx, para_slot in enumerate(para_slots):
-            if para_slot == later_slot:
-                paragraphs.insert(idx, block)
-                return "\n\n".join(paragraphs)
-    paragraphs.append(block)
-    return "\n\n".join(paragraphs)
+    for index in range(target_idx + 1, len(slots)):
+        if index in matches:
+            start = paragraphs[matches[index]][0]
+            before = text[:start].rstrip()
+            prefix = before + gap_before(target_idx) if before else ""
+            return prefix + block + gap_before(target_idx + 1) + text[start:]
+    return text + gap_before(target_idx) + block
 
 
 def _optional_description_markers(template: str) -> frozenset[str]:
