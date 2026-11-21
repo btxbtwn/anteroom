@@ -1,1 +1,0 @@
-- Published public Terms of Service (`/terms`), updated the Privacy Policy (`/privacy`) and webhook relay privacy page to document self-serve account deletion, service providers, and support/privacy contact addresses, and linked them from the web landing, sign-in, account menu, and iOS app.

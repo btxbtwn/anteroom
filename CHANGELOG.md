@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1106 — 2026-11-21
+
+- Published public Terms of Service (`/terms`), updated the Privacy Policy (`/privacy`) and webhook relay privacy page to document self-serve account deletion, service providers, and support/privacy contact addresses, and linked them from the web landing, sign-in, account menu, and iOS app.
+
 ## 0.1.1105 — 2026-11-21
 
 - Make hosted error-alert recipient configurable via `ANTEROOM_OPERATOR_EMAIL` and replace remaining founder-specific URLs and placeholder ZIP codes in server metadata.
