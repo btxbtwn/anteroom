@@ -776,9 +776,20 @@ export function StructuredEditor({
       // refreshes notes when rebuilding did not change the saved definition.
       const current = queryClient.getQueryData<ListingDocument>(["listing", convId]);
       if (current?.current_revision_id === result.revision_id) {
-        await queryClient.fetchQuery({
-          ...nativeFormOptions(convId, market, current.listing, result.revision_id), staleTime: 0,
-        });
+        try {
+          await queryClient.fetchQuery({
+            ...nativeFormOptions(convId, market, current.listing, result.revision_id), staleTime: 0,
+          });
+        } catch (error) {
+          // The save succeeded. Keep this read failure with the saved revision
+          // and still refresh preflight and history below.
+          const detail = error instanceof Error ? error.message.trim() : "";
+          const message = "Fields were saved, but the refreshed form could not be loaded.";
+          setReloadErrors((current) => new Map(current).set(
+            `${convId}:${result.revision_id}:${market}`,
+            [message, detail, "Press Reload fields to try again."].filter(Boolean).join(" ")));
+          toastManager.add({ type: "error", title: message, description: detail });
+        }
       }
       await Promise.all(["native-preflight", "revisions"].map(key =>
         queryClient.invalidateQueries({ queryKey: [key, convId] })));
@@ -931,10 +942,10 @@ export function StructuredEditor({
     ? "Reloading fields…"
     : nativeTab && !nativeQuery.data && (nativeQuery.isFetching || autoReloadingMarket !== null)
       ? "Loading the marketplace’s category fields and choices…"
-      : nativeTab && nativeQuery.isError && !nativeQuery.data
-        ? formLoadError
-        : activeReloadError
-          ? activeReloadError
+      : activeReloadError
+        ? activeReloadError
+        : nativeTab && nativeQuery.isError && !nativeQuery.data
+          ? formLoadError
           : categoryStale
             ? "Updating this category’s fields…"
             : nativeTab && nativeQuery.isFetching
