@@ -2,7 +2,7 @@ import { crc32, deflateSync } from "node:zlib";
 import type { Locator, Page } from "@playwright/test";
 import { expect, openForm, openListing, test } from "./fixtures";
 
-/** An 8x4 PNG of one color, so each upload is a different photo. */
+/** A 320×800 PNG of one color, so each upload is a different photo. */
 function png(red: number, green: number, blue: number): Buffer {
   const chunk = (type: string, data: Buffer) => {
     const body = Buffer.concat([Buffer.from(type), data]);
@@ -13,14 +13,14 @@ function png(red: number, green: number, blue: number): Buffer {
     return Buffer.concat([length, body, crc]);
   };
   const header = Buffer.alloc(13);
-  header.writeUInt32BE(8, 0);
-  header.writeUInt32BE(4, 4);
+  header.writeUInt32BE(320, 0);
+  header.writeUInt32BE(800, 4);
   header.set([8, 2, 0, 0, 0], 8);
-  const row = Buffer.from([0, ...Array.from({ length: 8 }, () => [red, green, blue]).flat()]);
+  const row = Buffer.from([0, ...Array.from({ length: 320 }, () => [red, green, blue]).flat()]);
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", header),
-    chunk("IDAT", deflateSync(Buffer.concat([row, row, row, row]))),
+    chunk("IDAT", deflateSync(Buffer.concat(Array.from({ length: 800 }, () => row)))),
     chunk("IEND", Buffer.alloc(0)),
   ]);
 }
@@ -98,12 +98,31 @@ test("photos on a marketplace form reorder by dragging, with a mouse or a finger
     await viewer.getByRole("button", { name: "Crop photo" }).click();
     const crop = page.getByRole("dialog", { name: /^Crop photo/ });
     await crop.getByRole("button", { name: "Square" }).click();
+    const frame = crop.locator("[data-crop-frame]");
+    const [visibleFrame, frameBounds] = await Promise.all([
+      frame.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const stage = element.closest("div.overflow-hidden")!.getBoundingClientRect();
+        return bounds.top >= stage.top && bounds.bottom <= stage.bottom;
+      }),
+      frame.boundingBox(),
+    ]);
+    expect(visibleFrame).toBe(true);
+    expect(frameBounds?.height).toBeGreaterThan(100);
+    const moveCrop = crop.getByRole("button", { name: "Move crop with arrow keys" });
+    const beforeMove = (await moveCrop.boundingBox())!.y;
+    await moveCrop.press("Shift+ArrowUp");
+    expect((await moveCrop.boundingBox())!.y).toBeLessThan(beforeMove);
+    const beforeResize = (await moveCrop.boundingBox())!.width;
+    await crop.getByRole("button", { name: "Resize from bottom right" }).press("Shift+ArrowLeft");
+    expect((await moveCrop.boundingBox())!.width).toBeLessThan(beforeResize);
+    await crop.getByRole("button", { name: "Square" }).click();
     await info.attach("photo-crop", { body: await crop.screenshot(), contentType: "image/png" });
     const savedCrop = page.waitForResponse((response) =>
       response.request().method() === "PUT" && response.url().endsWith(`/photos/${third}/edits`),
     );
     await crop.getByRole("button", { name: "Save" }).click();
-    expect(await (await savedCrop).json()).toMatchObject({ width: 4, height: 4 });
+    expect(await (await savedCrop).json()).toMatchObject({ width: 320, height: 320 });
     await expect(revert).toBeEnabled();
     await revert.click();
     await expect(revert).toHaveCount(0);

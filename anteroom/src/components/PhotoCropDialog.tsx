@@ -1,6 +1,6 @@
 import { PhotoLoadFailure, StudioImage } from "./StudioImage";
 import { XIcon } from "lucide-react";
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { api } from "../api/client";
 import type { CropBox, ListingPhoto } from "../api/types";
 import { cn } from "../lib/utils";
@@ -97,33 +97,35 @@ export function PhotoCropDialog({ convId, photo, index, onSaved, onClose }: Prop
             <XIcon />
           </Button>
         </div>
-        <div className="grid min-h-0 flex-1 grid-rows-[1fr_auto] md:grid-cols-[1fr_300px] md:grid-rows-1">
+        <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] md:grid-cols-[1fr_300px] md:grid-rows-1">
           <div className="relative flex min-h-0 items-center justify-center overflow-hidden bg-neutral-900 p-6">
-            {previewUrl && unreadablePreview === previewUrl ? (
-              // The same file would fail again: Retry renders these edits anew.
-              // No crop frame here, so nothing covers the button.
-              <PhotoLoadFailure status={null} retry={retry} />
-            ) : previewUrl ? (
-              <div className="relative max-w-full leading-none">
-                <StudioImage
-                  src={previewUrl}
-                  alt={`Photo ${index + 1} crop preview`}
-                  draggable={false}
-                  className="block max-h-[calc(min(92vh,860px)-170px)] max-w-full select-none object-contain"
-                  onError={() => setUnreadablePreview(previewUrl)}
-                  onLoad={(event) => {
-                    const img = event.currentTarget;
-                    if (img.naturalHeight) setFrameAspect(img.naturalWidth / img.naturalHeight);
-                  }}
-                />
-                <CropOverlay
-                  box={crop ?? FULL_FRAME}
-                  aspect={aspect}
-                  frameAspect={frameAspect ?? 1}
-                  onChange={setCrop}
-                />
-              </div>
-            ) : null}
+            <div className="flex size-full items-center justify-center [container-type:size]">
+              {previewUrl && unreadablePreview === previewUrl ? (
+                // The same file would fail again: Retry renders these edits anew.
+                // No crop frame here, so nothing covers the button.
+                <PhotoLoadFailure status={null} retry={retry} />
+              ) : previewUrl ? (
+                <div className="relative max-w-full leading-none">
+                  <StudioImage
+                    src={previewUrl}
+                    alt={`Photo ${index + 1} crop preview`}
+                    draggable={false}
+                    className="block max-h-[100cqh] max-w-[100cqw] select-none object-contain"
+                    onError={() => setUnreadablePreview(previewUrl)}
+                    onLoad={(event) => {
+                      const img = event.currentTarget;
+                      if (img.naturalHeight) setFrameAspect(img.naturalWidth / img.naturalHeight);
+                    }}
+                  />
+                  <CropOverlay
+                    box={crop ?? FULL_FRAME}
+                    aspect={aspect}
+                    frameAspect={frameAspect ?? 1}
+                    onChange={setCrop}
+                  />
+                </div>
+              ) : null}
+            </div>
             {loading ? (
               <span className="absolute top-3 right-3 inline-flex items-center gap-1.5 rounded-md bg-black/60 px-2 py-1 text-white/80 text-xs" role="status">
                 <Spinner className="size-3" />
@@ -168,14 +170,18 @@ export function PhotoCropDialog({ convId, photo, index, onSaved, onClose }: Prop
   );
 }
 
-const HANDLES: { id: Exclude<CropHandle, "move">; className: string }[] = [
-  { id: "nw", className: "-top-1.5 -left-1.5 cursor-nwse-resize" },
-  { id: "ne", className: "-top-1.5 -right-1.5 cursor-nesw-resize" },
-  { id: "sw", className: "-bottom-1.5 -left-1.5 cursor-nesw-resize" },
-  { id: "se", className: "-bottom-1.5 -right-1.5 cursor-nwse-resize" },
+const HANDLES: { id: Exclude<CropHandle, "move">; label: string; className: string }[] = [
+  { id: "nw", label: "Resize from top left", className: "-top-1.5 -left-1.5 cursor-nwse-resize" },
+  { id: "ne", label: "Resize from top right", className: "-top-1.5 -right-1.5 cursor-nesw-resize" },
+  { id: "sw", label: "Resize from bottom left", className: "-bottom-1.5 -left-1.5 cursor-nesw-resize" },
+  { id: "se", label: "Resize from bottom right", className: "-bottom-1.5 -right-1.5 cursor-nwse-resize" },
 ];
 
-/** The crop box over the whole frame: drag inside to move it, drag a corner to resize. */
+const ARROW_OFFSETS = new Map<string, [number, number]>([
+  ["ArrowLeft", [-1, 0]], ["ArrowRight", [1, 0]], ["ArrowUp", [0, -1]], ["ArrowDown", [0, 1]],
+]);
+
+/** The crop box over the whole frame. Arrow keys work on the box and its handles. */
 function CropOverlay({ box, aspect, frameAspect, onChange }: {
   box: CropBox;
   aspect: number | null;
@@ -203,32 +209,47 @@ function CropOverlay({ box, aspect, frameAspect, onChange }: {
     drag.current = null;
   };
 
+  const nudge = (handle: CropHandle) => (event: KeyboardEvent<HTMLButtonElement>) => {
+    const offset = ARROW_OFFSETS.get(event.key);
+    if (!offset) return;
+    event.preventDefault();
+    const step = event.shiftKey ? 0.05 : 0.01;
+    onChange(dragCrop(box, handle, offset[0] * step, offset[1] * step, aspect, frameAspect));
+  };
+
   return (
     <div ref={frameRef} className="absolute inset-0" data-crop-frame="">
       <div
-        role="presentation"
-        className="absolute cursor-move border border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.55)] touch-none"
+        className="absolute border border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.55)]"
         style={{
           left: `${box.x * 100}%`,
           top: `${box.y * 100}%`,
           width: `${box.width * 100}%`,
           height: `${box.height * 100}%`,
         }}
-        onPointerDown={start("move")}
-        onPointerMove={move}
-        onPointerUp={end}
-        onPointerCancel={end}
       >
+        <button
+          type="button"
+          aria-label="Move crop with arrow keys"
+          className="absolute inset-0 touch-none cursor-move focus-visible:outline-2 focus-visible:outline-ring"
+          onKeyDown={nudge("move")}
+          onPointerDown={start("move")}
+          onPointerMove={move}
+          onPointerUp={end}
+          onPointerCancel={end}
+        />
         {/* Rule-of-thirds guides, as in Photos and Photoroom. */}
         <span className="pointer-events-none absolute inset-y-0 left-1/3 border-white/40 border-l" />
         <span className="pointer-events-none absolute inset-y-0 left-2/3 border-white/40 border-l" />
         <span className="pointer-events-none absolute inset-x-0 top-1/3 border-white/40 border-t" />
         <span className="pointer-events-none absolute inset-x-0 top-2/3 border-white/40 border-t" />
         {HANDLES.map((handle) => (
-          <span
+          <button
             key={handle.id}
-            aria-hidden="true"
-            className={cn("absolute size-3 touch-none rounded-sm border border-black/30 bg-white", handle.className)}
+            type="button"
+            aria-label={handle.label}
+            className={cn("absolute size-3 touch-none rounded-sm border border-black/30 bg-white focus-visible:outline-2 focus-visible:outline-ring", handle.className)}
+            onKeyDown={nudge(handle.id)}
             onPointerDown={start(handle.id)}
             onPointerMove={move}
             onPointerUp={end}
