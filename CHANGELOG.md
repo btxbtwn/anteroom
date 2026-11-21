@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1115 — 2026-11-21
+
+- iPhone inventory rows now mark marketplaces where an item sold as Sold instead of Listed and exclude them from live marketplaces while keeping Sold-tab marketplace filtering working.
+
 ## 0.1.1114 — 2026-11-21
 
 - Pace hosted bulk photo uploads without blocking concurrent model reads, retry temporary upload-slot waits automatically (canceling cleanly if photos change or the dialog closes), and handle varied JSON formats when locating yardstick tiles.

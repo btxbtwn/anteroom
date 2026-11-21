@@ -1,1 +1,0 @@
-- iPhone inventory rows now mark marketplaces where an item sold as Sold instead of Listed and exclude them from live marketplaces while keeping Sold-tab marketplace filtering working.
