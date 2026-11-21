@@ -140,6 +140,9 @@ describe("Connections settings", () => {
     expect(html).toContain("Where the sign-in lives");
     expect(html).toContain("Detect sales");
     expect(html).toContain("Sale detection for Poshmark");
+    expect(html).toContain('id="sale-autodelist"');
+    expect(html).toContain("Delist the other marketplaces");
+    expect(html).toContain('aria-label="Delist the other marketplaces when something sells"');
     expect(html).not.toContain("this Mac");
   });
 
