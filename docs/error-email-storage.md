@@ -1,18 +1,48 @@
 # Operator error-mail storage
 
-The outbox retains every unsent group and its occurrence count. No retention
-limit removes warnings or errors. Daily/hourly mail budgets and retry delays
-control attempts, not diagnostic retention.
+The outbox retains queued groups until delivery. Daily and hourly mail
+budgets and retry delays control attempts. Triage suppresses mail while
+continuing to record occurrences in issue history.
 
 ## Per-group access
 
-`error_email_groups` holds one row per fingerprint. Pending JSON preserves the
+`error_email_groups` holds one row per severity and fingerprint. Pending JSON preserves the
 report, count, first occurrence and due time; scalar count/due/warning columns
 support aggregate status and bounded due selection without returning reports.
-A delivered fingerprint keeps only its last-send timestamp until the rolling
-24-hour history expires. Pending repeats retain that timestamp through long
-pauses so they cannot bypass the repeat digest as first alerts. Re-enqueuing
+The issue fields survive delivery. `occurrence_count` counts all observed
+occurrences, including suppressed ones, and appears as `count` in the
+group API. `headline` and `last_release` describe the latest arrival.
+`first_seen`, `last_seen`, `resolved_at`, and `muted_until` store UTC Unix
+seconds. The API returns exposed timestamps as ISO 8601. Activation
+initializes history from pending reports. Previously discarded history
+cannot be reconstructed.
+
+Completed groups age out of last-send accounting after 24 hours. Pending
+repeats retain their last-send timestamp through long pauses. Re-enqueuing
 joins the end of the pending queue.
+
+## Issue lifecycle
+
+- **Open** is the schema default and the default group list filter.
+- **Resolved** records `resolved_at` and `resolved_release`. An occurrence
+  from a demonstrably newer release reopens the group and clears
+  `resolved_at`. Errors become eligible as first alerts with `[Regression]`
+  in the subject and the earlier release in the body.
+- **Muted** with no `muted_until` is indefinite. The first occurrence at
+  or after a timed mute expires opens the group. An error is then eligible
+  for immediate delivery.
+
+Browser events use the browser release. Server reports and the resolve
+default use `ANTEROOM_RELEASE`, then `FLY_IMAGE_REF`, then the app version.
+Ordering supports numeric app versions, the hosted workflow's versioned
+image labels, and Fly deployment ULIDs. Equal, older, missing, or incomparable
+releases keep the group resolved. Pass `resolved_release` explicitly for
+browser issues when the browser and server releases use different formats.
+
+Suppressed occurrences update issue history without joining a mail batch.
+Previously queued mail is held until the issue opens again. SMTP attempts
+already reserved when an operator acts may still complete. Reopen clears
+resolution and mute fields and preserves the optional 500-character note.
 
 All writers first lock the singleton `error_email_state` row (SQLite uses
 `BEGIN IMMEDIATE`). This preserves the existing shared lease and budget
@@ -49,7 +79,31 @@ processes use this revision, remove the legacy JSON maps, projection trigger,
 `group_sync_version`, and mirror assembly in a forward Alembic revision. Keep
 the per-group table, control lock, budget/lease semantics, and regression tests.
 Do not remove compatibility while an old SMTP sender could still finish.
-This PR does not perform that deployment or any production migration.
+
+### Lifecycle rollout
+
+1. Apply the additive lifecycle revision and roll out the new binary across
+   both web and worker processes with `ANTEROOM_ERROR_EMAIL_LIFECYCLE` unset.
+   The migration preserves the queue, ordering, last-send history,
+   deadlines, attempt budget, and lease. PostgreSQL normalizes NUL
+   characters in both copies of the queue on upgrade and on subsequent
+   writes from old senders. It preserves report order and accounting.
+   Indexes build after the additive DDL commits.
+   During this phase, upgraded and old senders share the hourly warning gate.
+   The operator group endpoints return 503 until activation.
+2. Verify all pre-lifecycle web and worker processes have stopped, including
+   any old send in progress. Then set `ANTEROOM_ERROR_EMAIL_LIFECYCLE=1` for
+   the upgraded senders. The first opted-in sender seeds issue summaries from
+   the pending queue under the control lock and records activation in
+   `error_email_state`. All upgraded senders honor the
+   active policy from that point, including processes awaiting the config
+   restart. The first daily warning window carries forward the prior hourly
+   window's anchor.
+
+Issue counts are authoritative for occurrences processed after activation.
+Pending reports queued by old writers during rollout are included in the
+initial summaries. Activation is persistent and removing the environment flag does
+not undo it. After activation, keep every sender on a lifecycle-aware build.
 
 ## Security
 
@@ -123,7 +177,7 @@ successful repeat reservations are at least one hour apart across processes and
 restarts, with up to 20 due groups in insertion order. Staggered first alerts can
 make a repeat miss a digest and wait for the following hour. Extra groups remain
 queued for later digests. New first-alert successes initialize, but never slide, the shared
-deadline. Warning digests keep their own hourly gate and run before repeats when
+deadline. After activation, warning digests keep their own 24-hour gate and run before repeats when
 due and below the existing warning budget (daily limit minus one quarter of the
 limit rounded down, with at least one attempt reserved for errors). First alerts
 still precede both digest types, so warning delivery cannot be guaranteed during
@@ -138,10 +192,8 @@ new first alerts can also send in a burst within the existing attempt ceilings.
 The 60/hour ceiling and configured rolling-24-hour budget still count every
 reserved SMTP attempt, including failures and uncertain crash outcomes.
 
-No durable outbox occurrence is evicted, sampled or suppressed. Each group
-retains its unsent count, first timestamp and latest full report/trace. This
-preserves the existing aggregate representation; it does not introduce
-individual historical reports.
+Each queued group keeps its unsent count, first timestamp and latest full
+report and trace. Issue history stores aggregate counts and timestamps.
 Arrivals during SMTP survive exact reserved-count subtraction. Failures retain
 the whole batch and existing backoff/quota pause; they do not advance a successful
 digest deadline. A failed digest can retry after backoff, consuming another
@@ -149,7 +201,6 @@ budgeted attempt. An expired lease after a process stall can also cause an
 uncertain retry; SMTP delivery is not exactly once. Unknown control metadata and
 the rolling JSON mirror remain intact. All sending processes must be updated
 before relying on the new digest bound; old binaries do not honor the new gate.
-No schema migration or production configuration change is part of this policy update.
 
 The existing logging handler still has a 500-report in-memory ingress buffer;
 overflow or a crash before durable insertion can lose those unstored events.

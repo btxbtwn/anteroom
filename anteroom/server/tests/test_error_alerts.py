@@ -26,6 +26,7 @@ def email_store(tmp_path, monkeypatch):
         connection.execute(store.table.insert().values(id=1, payload={}))
     monkeypatch.setattr(error_email, 'EmailStore', lambda _engine: store)
     monkeypatch.setenv('ANTEROOM_ERROR_EMAIL_DAILY_LIMIT', '100')
+    monkeypatch.setenv('ANTEROOM_ERROR_EMAIL_LIFECYCLE', '1')
     yield store
     engine.dispose()
 
@@ -199,6 +200,80 @@ def test_delivery_status_is_only_visible_to_the_configured_operator(monkeypatch,
     data = response.json()
     assert data['visible'] == visible
     assert ('pending' in data) == visible
+
+
+@pytest.fixture
+def groups_client(monkeypatch, email_store):
+    from fastapi import FastAPI, Request
+    from fastapi.testclient import TestClient
+    from anteroom.routes import error_reports
+
+    monkeypatch.setattr(error_reports, 'EmailStore', lambda _engine: email_store)
+    monkeypatch.setenv('ANTEROOM_OPERATOR_USER_ID', 'operator')
+    app = FastAPI()
+
+    @app.middleware('http')
+    async def identify(request: Request, call_next):
+        if seller := request.headers.get('x-test-seller'):
+            request.state.seller = SimpleNamespace(user_id=seller)
+        return await call_next(request)
+
+    app.include_router(error_reports.router)
+    with TestClient(app) as client:
+        yield client
+
+
+@pytest.mark.parametrize('seller', [None, 'another-seller'])
+def test_group_endpoints_require_operator(groups_client, seller):
+    headers = {'x-test-seller': seller} if seller else {}
+    path = '/api/error-reports/groups'
+    assert groups_client.get(path, headers=headers).status_code == 403
+    for action in ('resolve', 'mute', 'reopen'):
+        assert groups_client.post(f'{path}/ERROR/abcdef/{action}', headers=headers).status_code == 403
+
+
+def test_operator_triage_is_unavailable_until_senders_activate_it(groups_client):
+    headers = {'x-test-seller': 'operator'}
+    path = '/api/error-reports/groups'
+    assert groups_client.get(path, headers=headers).status_code == 503
+    for action in ('resolve', 'mute', 'reopen'):
+        assert groups_client.post(f'{path}/ERROR/abcdef/{action}', headers=headers).status_code == 503
+
+
+def test_operator_can_list_and_triage_groups(groups_client, email_store, monkeypatch):
+    from anteroom.services.error_email_delivery import EmailDelivery
+
+    monkeypatch.delenv('ANTEROOM_RELEASE', raising=False)
+    monkeypatch.setenv('FLY_IMAGE_REF', 'registry.fly.io/anteroom:v1.2.9-deadbeef')
+    delivery = EmailDelivery(email_store, lambda *_: None, daily_limit=0)
+    item = build_report(record_with_exception())
+    delivery.add(item)
+    delivery.add(item)
+    warning = build_report(logging.LogRecord('anteroom.jobs', logging.WARNING, '/jobs.py', 6, 'warning', (), None))
+    delivery.add(warning)
+
+    path = '/api/error-reports/groups'
+    target = f"{path}/ERROR/{item['fingerprint']}"
+    headers = {'x-test-seller': 'operator'}
+    rows = groups_client.get(path, headers=headers, params={'sort': 'count'}).json()
+    assert [row['severity'] for row in rows] == ['ERROR', 'WARNING']
+    assert rows[0]['count'] == 2 and rows[0]['headline'] == item['title']
+    assert rows[0]['first_seen'].endswith(('Z', '+00:00'))
+    assert rows[0]['last_seen'] == rows[0]['first_seen']
+    assert rows[0]['last_release'] == item['environment']['release']
+    assert groups_client.get(path, headers=headers, params={'severity': 'WARNING'}).json() == rows[1:]
+    assert groups_client.post(f'{target}/resolve', headers=headers).json() == {'status': 'resolved'}
+    resolved = groups_client.get(path, headers=headers, params={'status': 'resolved'}).json()[0]
+    assert resolved['resolved_release'] == 'registry.fly.io/anteroom:v1.2.9-deadbeef'
+    assert groups_client.post(f'{target}/mute', headers=headers, json={'duration_hours': 0}).status_code == 422
+    assert groups_client.post(f'{target}/mute', headers=headers,
+                              json={'duration_hours': 168, 'note': 'Known outage'}).json() == {'status': 'muted'}
+    row = groups_client.get(path, headers=headers, params={'status': 'muted'}).json()[0]
+    assert row['muted_until'] and row['note'] == 'Known outage'
+    assert groups_client.post(f'{target}/reopen', headers=headers).json() == {'status': 'open'}
+    reopened = groups_client.get(path, headers=headers, params={'severity': 'ERROR'}).json()[0]
+    assert reopened['muted_until'] is None and reopened['resolved_release'] is None
+    assert groups_client.post(f'{path}/ERROR/missing/reopen', headers=headers).status_code == 404
 
 
 def handler(send, clock=lambda: 0.0):

@@ -1,0 +1,1 @@
+- Operators can resolve, mute, and reopen error groups. Errors that return on a newer release alert again, and warnings arrive in a daily digest.
