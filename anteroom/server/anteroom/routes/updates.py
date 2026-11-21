@@ -126,6 +126,14 @@ async def version_plan(tag: str):
 
 @router.post("/versions/install")
 async def install_version(payload: InstallVersionRequest):
+    if not update_service.is_packaged():
+        raise HTTPException(409, "Earlier versions can only be installed in the Mac app.")
+    try:
+        plan = await asyncio.to_thread(update_service.version_plan, payload.tag)
+    except UpdateBlocked as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if plan.get("action") == "blocked":
+        raise HTTPException(409, plan.get("reason") or "That version cannot be installed.")
     cancelled_jobs = await in_worker_session(_cancel_leftover_jobs)
     try:
         result = await asyncio.to_thread(update_service.install_version, payload.tag, payload.snapshot)
