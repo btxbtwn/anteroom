@@ -408,6 +408,8 @@ def ebay_year_manufactured(listing: dict[str, Any] | None) -> str:
     if not isinstance(ebay, dict):
         return ""
     for block in (ebay, ebay.get("category_specifics")):
+        if not isinstance(block, dict):
+            continue
         for name in ebay_optional_keys(block, "yearManufactured"):
             text = _scalar_text(block.get(name))
             if text:
