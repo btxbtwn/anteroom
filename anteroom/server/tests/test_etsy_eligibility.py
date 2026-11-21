@@ -100,7 +100,10 @@ class EtsyUnclearWhenTest(unittest.TestCase):
     in 2008 was told to Etsy as vintage. Etsy removes such listings.
     """
 
-    UNCLEAR = ("2000-2009", "2000 - 2009", "2000s", "early 2000s", "1995 to 2010")
+    UNCLEAR = ("2000-2009", "2000 - 2009", "2000s", "early 2000s", "1995 to 2010",
+               # Other ways people and eBay write the same span.
+               "2000's", "2000’s", "2000-09", "2000 thru 2009", "2000 until 2009", "between 1995 and 2010",
+               "1995/2010", "1990s to 2010", "1999-present", "2003-now", "2009–2000")
 
     def test_a_range_across_the_cutoff_is_left_blank(self):
         options = etsy_when_options()
@@ -143,6 +146,15 @@ class EtsyUnclearWhenTest(unittest.TestCase):
         self.assertEqual(_canonical_etsy_when(text), "")
         self.assertIn(text, etsy_when_unclear_note(text))
 
+    def test_the_vendoo_export_leaves_an_unclear_answer_unset(self):
+        # Neither 2000_2006 (vintage) nor the 2020_2026 fallback: the export does not guess either.
+        for text in self.UNCLEAR:
+            with self.subTest(text=text):
+                self.assertEqual(_etsy_when_code(text), "")
+        self.assertEqual(_etsy_when_code("1988"), "1980s")
+        self.assertEqual(_etsy_when_code("2007 - 2009 (Recently)"), "2007_2009")
+        self.assertEqual(_etsy_when_code(""), "2020_2026")
+
     def test_an_unclear_ebay_year_does_not_make_the_item_vintage(self):
         nascar = listing(ebay_specifics={"Year Manufactured": "2000-2009", "Vintage": "Yes"})
         self.assertFalse(etsy_eligible(nascar))
@@ -159,6 +171,15 @@ class EtsyUnclearWhenTest(unittest.TestCase):
 
 class EtsyCutoffTest(unittest.TestCase):
     """Runs the real cutoff, unpinned, so a cutoff that stopped moving fails here."""
+
+    def test_cached_eligibility_follows_the_cutoff_into_a_new_year(self):
+        # 2005-2007 spans the line in 2026 but is all vintage in 2027; a long-running
+        # process must not keep the 2026 answer after New Year.
+        item = listing({"who_made": "Another company or person", "when_made": "2005-2007"})
+        with patch("anteroom.services.etsy_fields._first_recent_year", lambda today=None: 2007):
+            self.assertFalse(etsy_eligible(item))
+        with patch("anteroom.services.etsy_fields._first_recent_year", lambda today=None: 2008):
+            self.assertTrue(etsy_eligible(item))
 
     def test_the_cutoff_moves_with_the_year(self):
         # Vintage is 20 years old: the first non-vintage year is 2007 in 2026, 2009 in 2028.

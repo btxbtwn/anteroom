@@ -287,15 +287,18 @@ def _etsy_when_code(raw: Any) -> str:
     """The form's code for a when-made label; a vintage decade stays that decade.
 
     Made To Order is not selected. An already-made item gets a year range.
-    Anything unreadable falls to the recent bucket.
+    A range across Etsy's vintage line stays unset rather than guessed either
+    way; anything else unreadable falls to the recent bucket.
     """
-    from anteroom.services.etsy_fields import etsy_when_options, etsy_when_to_store
+    from anteroom.services.etsy_fields import etsy_when_is_unclear_answer, etsy_when_options, etsy_when_to_store
 
     text = _clean(raw) or ""
     if not text:
         return "2020_2026"
     if text in _ETSY_WHEN_CODE_VALUES and text != "made_to_order":
         return text
+    if etsy_when_is_unclear_answer(text):
+        return ""
     return _ETSY_WHEN_CODES.get(etsy_when_to_store(text, options=etsy_when_options()), "2020_2026")
 
 

@@ -342,8 +342,31 @@ def _first_recent_year(today: date | None = None) -> int:
     return (today or date.today()).year - 19
 
 
-_WHEN_SPAN = re.compile(r"\b(1[7-9]\d{2}|20\d{2})\s*(?:-|–|—|to|through)\s*(1[7-9]\d{2}|20\d{2})\b", re.IGNORECASE)
-_WHEN_DECADE = re.compile(r"\b(1[7-9]\d|20\d)0s\b", re.IGNORECASE)
+_WHEN_YEAR = r"(1[7-9]\d{2}|20\d{2})"
+# A start year or decade, a separator, then a year, a two-digit year or "now":
+# "2000-2009", "1990s to 2010", "between 1995 and 2010", "2000-09", "1999-present".
+_WHEN_SPAN = re.compile(
+    _WHEN_YEAR + r"(?:['’]?s)?\s*(?:-|–|—|/|\bto\b|\bthrough\b|\bthru\b|\buntil\b|\btill\b|\band\b)\s*"
+    r"(?:" + _WHEN_YEAR + r"|(\d{2})|(present|now|today))\b",
+    re.IGNORECASE,
+)
+_WHEN_DECADE = re.compile(r"\b(1[7-9]\d|20\d)0['’]?s\b", re.IGNORECASE)
+
+
+def _when_spans(text: str, today: date | None = None) -> list[tuple[int, int]]:
+    spans = []
+    for start, end, short, _now in _WHEN_SPAN.findall(text):
+        first = int(start)
+        if end:
+            last = int(end)
+        elif short:
+            last = first // 100 * 100 + int(short)
+            last += 100 if last < first else 0
+        else:
+            last = (today or date.today()).year
+        spans.append((first, last))
+    spans += [(int(decade) * 10, int(decade) * 10 + 9) for decade in _WHEN_DECADE.findall(text)]
+    return spans
 
 
 def etsy_when_is_unclear(text: str, today: date | None = None) -> bool:
@@ -353,11 +376,8 @@ def etsy_when_is_unclear(text: str, today: date | None = None) -> bool:
     an answer dates nothing: guessing vintage lists a modern piece that Etsy
     removes, and guessing recent hides a vintage one.
     """
-    raw = str(text or "")
     cutoff = _first_recent_year(today)
-    spans = [(int(start), int(end)) for start, end in _WHEN_SPAN.findall(raw)]
-    spans += [(int(decade) * 10, int(decade) * 10 + 9) for decade in _WHEN_DECADE.findall(raw)]
-    return any(min(span) < cutoff <= max(span) for span in spans)
+    return any(min(span) < cutoff <= max(span) for span in _when_spans(str(text or ""), today))
 
 
 def etsy_when_unclear_note(text: str, today: date | None = None) -> str:
@@ -379,7 +399,7 @@ def _is_etsy_when_label(text: str, options: list[str] | None = None) -> bool:
     return any(answer == collapse_option(option) for option in (options if options else etsy_when_options()))
 
 
-def _unclear_answer(text: str, options: list[str] | None = None) -> bool:
+def etsy_when_is_unclear_answer(text: str, options: list[str] | None = None) -> bool:
     """An unclear range that is not one of Etsy's own When made labels.
 
     Etsy's labels are its answers, not guesses: a saved "2007 - 2009 (Recently)"
@@ -390,7 +410,7 @@ def _unclear_answer(text: str, options: list[str] | None = None) -> bool:
 
 def _canonical_etsy_when(value: str) -> str:
     raw = str(value or "").strip()
-    if not raw or _unclear_answer(raw):
+    if not raw or etsy_when_is_unclear_answer(raw):
         return ""
     normalized = _normalize_when_text(raw)
     if normalized in UNKNOWN_ETSY_WHEN or _is_non_vintage_phrase(raw):
@@ -539,7 +559,7 @@ def etsy_renewal_raw(etsy: dict[str, Any]) -> str:
 
 def resolve_etsy_when(raw: str, options: list[str]) -> str:
     text = str(raw or "").strip()
-    if not text or _unclear_answer(text, options):
+    if not text or etsy_when_is_unclear_answer(text, options):
         return ""
     mapped = _canonical_etsy_when(text)
     allowed = options or [mapped, DEFAULT_ETSY_WHEN]
@@ -647,14 +667,15 @@ def etsy_eligible(listing: dict[str, Any] | None) -> bool:
     who = etsy_who_raw(etsy)
     what = etsy_what_raw(etsy)
     return _etsy_eligible(
-        who, what, etsy_when_raw(etsy, payload), etsy_listing_type(etsy),
+        who, what, etsy_when_raw(etsy, payload), etsy_listing_type(etsy), _first_recent_year(),
     )
 
 
 @lru_cache(maxsize=4096)
-def _etsy_eligible(who: str, what: str, when: str, listing_type: str) -> bool:
-    # Cached: the sidebar asks for every listing on each poll, and the answer
-    # depends only on these four strings.
+def _etsy_eligible(who: str, what: str, when: str, listing_type: str, cutoff: int) -> bool:
+    # Cached: the sidebar asks for every listing on each poll. The answer depends
+    # on these four strings and on the vintage cutoff, which moves each January
+    # (``cutoff`` is only part of the key; ``resolve_etsy_when`` reads the clock).
     dropdown_when = resolve_etsy_when(when, etsy_when_options()) if when else ""
     if who in _ETSY_HANDMADE_WHO:
         return True
