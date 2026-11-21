@@ -108,4 +108,23 @@ describe("listing photo uploads from chat", () => {
     expect(handleGenerate).toHaveBeenCalledTimes(1);
     expect(sendMessage).not.toHaveBeenCalled();
   });
+
+  it("does not start generation when saved listing copy loads during the photo upload", async () => {
+    const front = new File(["front"], "front.jpg", { type: "image/jpeg" });
+    setComposerDraftImages(draftKey, [{ id: "front", file: front }]);
+    uploadPhotos.mockImplementationOnce(async () => {
+      queryClient.setQueryData(["listing", "listing-a"], {
+        conversation_id: "listing-a",
+        listing: { title: "Existing Wool Coat", brand: "Pendleton", price: 120 },
+      });
+    });
+
+    await renderChat();
+    await send();
+
+    expect(uploadPhotos).toHaveBeenCalledTimes(1);
+    expect(getComposerDraft(draftKey).images).toEqual([]);
+    expect(handleGenerate).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
 });

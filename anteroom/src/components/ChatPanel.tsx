@@ -121,6 +121,8 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     [],
   );
   const hasListingJson = checkListingCopy(messages, listing);
+  const hasListingJsonRef = useRef(hasListingJson);
+  hasListingJsonRef.current = hasListingJson;
 
   const handleSend = useCallback(() => {
     const text = input.trim();
@@ -167,21 +169,25 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
           sendMessage: (note) => { void sendMessage(note); },
           generate: () => { void handleGenerate(); },
           hasListingCopy: async () => {
+            if (hasListingJsonRef.current) return true;
             const latestMessages = queryClient.getQueryData<Message[]>(["messages", convId]);
             let latestListing = queryClient.getQueryData<ListingDocument>(["listing", convId]);
             if (checkListingCopy(latestMessages, latestListing)) return true;
-            if (latestListing === undefined) {
-              try {
-                latestListing = await queryClient.ensureQueryData({
-                  queryKey: ["listing", convId],
-                  queryFn: ({ signal }) => api.listings.get(convId, { signal }),
-                });
-              } catch {
-                // If listing state cannot be confirmed absent, preserve any existing copy.
-                return true;
+            const listingState = queryClient.getQueryState(["listing", convId]);
+            if (latestListing === undefined && listingState) {
+              if (listingState.status === "error") return true;
+              if (listingState.fetchStatus === "fetching" && api.listings?.get) {
+                try {
+                  latestListing = await queryClient.ensureQueryData({
+                    queryKey: ["listing", convId],
+                    queryFn: ({ signal }) => api.listings.get(convId, { signal }),
+                  });
+                } catch {
+                  return true;
+                }
               }
             }
-            return checkListingCopy(
+            return hasListingJsonRef.current || checkListingCopy(
               queryClient.getQueryData<Message[]>(["messages", convId]) ?? latestMessages,
               latestListing,
             );
