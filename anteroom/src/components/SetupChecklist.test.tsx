@@ -74,6 +74,8 @@ describe("hosted first-run checklist", () => {
     );
     expect(loadingHtml).toContain("Checking eBay and Etsy connections");
     expect(loadingHtml).not.toContain("Sign in directly from your browser");
+    expect(loadingHtml).not.toContain("Connect eBay or Etsy in Settings.");
+    expect(loadingHtml).not.toContain("Open Connections");
 
     const errorHtml = renderToStaticMarkup(
       <HostedSetupChecklistView
@@ -90,6 +92,7 @@ describe("hosted first-run checklist", () => {
     );
     expect(errorHtml).toContain("Could not check eBay and Etsy connections.");
     expect(errorHtml).toContain("Retry");
-    expect(errorHtml).toContain("Open Connections");
+    expect(errorHtml).not.toContain("Connect eBay or Etsy in Settings.");
+    expect(errorHtml).not.toContain("Open Connections");
   });
 });

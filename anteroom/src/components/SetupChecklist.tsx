@@ -103,7 +103,8 @@ export function HostedSetupChecklistView({
           : etsyConnected
             ? "Etsy connected. You can also connect eBay anytime in Settings."
             : "Sign in directly from your browser — no extension needed for eBay or Etsy.";
-  const showOpenConnections = connectionsStatus !== "ready" || !(ebayConnected && etsyConnected);
+  const showOpenConnections = connectionsStatus === "ready" && !(ebayConnected && etsyConnected);
+  const retryConnections = connectionsStatus === "error" ? onRetryConnections : undefined;
 
   return (
     <Empty className="flex-1 overflow-y-auto">
@@ -128,18 +129,21 @@ export function HostedSetupChecklistView({
               )}
             </Step>
           ) : null}
-          <Step index={directStep} done={directDone} label="Connect eBay or Etsy in Settings.">
+          <Step index={directStep} done={directDone}
+            label={showOpenConnections ? "Connect eBay or Etsy in Settings." : "eBay and Etsy connections"}>
             <Note>{directNote}</Note>
-            {showOpenConnections ? (
+            {retryConnections || showOpenConnections ? (
               <div className="mt-2.5 flex flex-wrap gap-2">
-                {connectionsStatus === "error" && onRetryConnections ? (
-                  <Button type="button" variant="outline" size="sm" onClick={onRetryConnections}>
+                {retryConnections ? (
+                  <Button type="button" variant="outline" size="sm" onClick={retryConnections}>
                     Retry
                   </Button>
                 ) : null}
-                <Button type="button" variant="outline" size="sm" onClick={onOpenConnections}>
-                  Open Connections
-                </Button>
+                {showOpenConnections ? (
+                  <Button type="button" variant="outline" size="sm" onClick={onOpenConnections}>
+                    Open Connections
+                  </Button>
+                ) : null}
               </div>
             ) : null}
           </Step>
@@ -174,14 +178,14 @@ export function HostedSetupChecklistView({
 
 /** Queries the seller's direct marketplace connections for the hosted onboarding checklist. */
 export function HostedSetupChecklist(props: HostedSetupChecklistProps) {
-  const { data, isPending, isError, refetch } = useQuery({
+  const { data, isFetching, isError, refetch } = useQuery({
     queryKey: ["direct-connections"],
     queryFn: api.directConnections.status,
     staleTime: 30_000,
     retry: false,
   });
   // Preserve cached results during background refreshes; only report loading or error when no data exists yet.
-  const connectionsStatus = data !== undefined ? "ready" : isError ? "error" : isPending ? "loading" : "ready";
+  const connectionsStatus = data !== undefined ? "ready" : isError && !isFetching ? "error" : "loading";
   return (
     <HostedSetupChecklistView
       {...props}
