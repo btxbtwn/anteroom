@@ -28,18 +28,9 @@ joins the end of the pending queue.
   from a demonstrably newer release reopens the group and clears
   `resolved_at`. Errors become eligible as first alerts with `[Regression]`
   in the subject and the earlier release in the body.
-<!-- coderabbit-ai-generated:v1 -->
-
-<!-- coderabbit-ai-generated-section:v1:dbb6e999c422d1ee88dc13952b13e16c1e0daf788fb9bebf6db611ecc90bbf60 -->
-
-- **Muted** with no `muted_until` is indefinite. Once a timed mute expires,
-  a delivery tick that passes the budget, pause and lease checks reopens groups
-  with queued mail that has reached its due time. That mail keeps its existing
-  delivery schedule and counts. A new occurrence at or after expiry also opens
-  a group that is still muted; a new error in that case is eligible for immediate
-  delivery.
-
-<!-- /coderabbit-ai-generated:v1 -->
+- **Muted** with no `muted_until` is indefinite. The first occurrence at
+  or after a timed mute expires opens the group. An error is then eligible
+  for immediate delivery.
 
 Browser events use the browser release. Server reports and the resolve
 default use `ANTEROOM_RELEASE`, then `FLY_IMAGE_REF`, then the app version.

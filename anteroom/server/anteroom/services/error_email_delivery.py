@@ -135,8 +135,6 @@ class EmailDelivery:
                     or sum(t > now - 3600 for t in attempts) >= HOURLY_CAP
                     or state.get('paused_until', 0) > now or state.get('lease_until', 0) > now):
                 return
-            if active:
-                transaction.reopen_expired_queued_mutes(now)
             # A first alert never waits behind already-notified fingerprints.
             errors = transaction.due_groups(now, warning=False, limit=MAX_GROUPS_PER_EMAIL,
                                             first_alert=True)
