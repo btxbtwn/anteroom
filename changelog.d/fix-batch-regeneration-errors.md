@@ -1,0 +1,1 @@
+- Stop bulk Regenerate from failing when category lookup times out under load.
