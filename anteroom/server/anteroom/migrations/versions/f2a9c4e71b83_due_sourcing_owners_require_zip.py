@@ -59,7 +59,7 @@ CHECK_WITHOUT_ZIP_GUARD = r"""
 CHECK_WITH_ZIP_GUARD = r"""
     SELECT state.user_id FROM state
     WHERE state.effective_zip ~ '^\d{5}$'
-        AND state.effective_zip !~ '^(?:00[6-9]|09\d|340|96[2-9]|99[5-9])'
+        AND state.effective_zip !~ '^(00[6-9]|09\d|340|96[2-9]|99[5-9])'
         AND (
             jsonb_typeof(state.snapshot) IS DISTINCT FROM 'object'
             OR state.snapshot -> 'format' IS DISTINCT FROM to_jsonb(snapshot_format)
