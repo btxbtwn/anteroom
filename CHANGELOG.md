@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1088 — 2026-11-21
+
+- Etsy draft generation uses the selected category’s choices and leaves unavailable options out of the draft.
+
 ## 0.1.1087 — 2026-11-21
 
 - Build your description formula by dragging attributes into the order you want, dragging them out to remove them, or using the add, move, and remove controls.
