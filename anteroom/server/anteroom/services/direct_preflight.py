@@ -68,7 +68,7 @@ _GAP_FIXES = {
     "mercari_specifics.package.fitsShoebox": "anteroom conversations fields --conv-id CONV --path mercari_specifics.package.fitsShoebox --value yes",
     "mercari_specifics.package.pounds": "anteroom conversations fields --conv-id CONV --path mercari_specifics.package.pounds --value 1",
     "mercari_specifics.shippingClassId": "anteroom conversations fields --conv-id CONV --path mercari_specifics.shippingClassId --value LABEL_ID",
-    "mercari_specifics.shipsFrom": "anteroom conversations fields --conv-id CONV --path mercari_specifics.shipsFrom --value 70125",
+    "mercari_specifics.shipsFrom": "anteroom conversations fields --conv-id CONV --path mercari_specifics.shipsFrom --value ZIP_CODE",
     "size": "anteroom conversations fields --conv-id CONV --path size --value M",
     "mercari_specifics.brand": "anteroom conversations fields --conv-id CONV --path mercari_specifics.noBrand --value true",
     "mercari_specifics.noBrand": "anteroom conversations fields --conv-id CONV --path mercari_specifics.noBrand --value true",

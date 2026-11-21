@@ -33,7 +33,7 @@ from anteroom.services.shared_http import http_client
 from anteroom.version import app_version
 
 # OpenRouter shows the calling app on the seller's activity page.
-APP_URL = "https://github.com/btxbtwn/anteroom"
+APP_URL = "https://myanteroom.com"
 APP_TITLE = "Anteroom"
 
 

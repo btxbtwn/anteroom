@@ -1,0 +1,1 @@
+- Make hosted error-alert recipient configurable via `ANTEROOM_OPERATOR_EMAIL` and replace remaining founder-specific URLs and placeholder ZIP codes in server metadata.
