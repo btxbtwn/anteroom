@@ -153,7 +153,8 @@ def test_an_unclear_ebay_year_leaves_when_made_blank_and_says_why(studio):
     etsy = {key: value for key, value in studio.listing["etsy_specifics"].items() if key != "whenMade"}
     listing = {**studio.listing, "etsy_specifics": etsy, "ebay_specifics": {"Year Manufactured": "2000-2009"}}
     revision = listing_persistence.save_revision(studio.db, studio.conv.id, listing, "test")
-    form = native_editor.read_form(studio.db, studio.conv.id, "etsy", revision.id)
+    with patch("anteroom.services.etsy_fields._first_recent_year", lambda today=None: 2007):
+        form = native_editor.read_form(studio.db, studio.conv.id, "etsy", revision.id)
     rows = {row["path"]: row for row in form["fields"]}
     assert rows["etsy_specifics.whenMade"]["value"] == ""
     assert any("2000-2009" in note and "When was it made?" in note for note in form["notes"])

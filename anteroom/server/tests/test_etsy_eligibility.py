@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import unittest
 from datetime import date
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -86,6 +87,12 @@ class EtsyEligibleTest(unittest.TestCase):
         self.assertTrue(etsy_eligible(listing({**MODERN, "listing_type": "Digital files"})))
 
 
+# The cutoff is "today": pin it so these answers mean the same thing every year.
+FROZEN_CLOCK = patch("anteroom.services.etsy_fields._first_recent_year",
+                     lambda today=None: (today or date(2026, 11, 21)).year - 19)
+
+
+@FROZEN_CLOCK
 class EtsyUnclearWhenTest(unittest.TestCase):
     """A range on both sides of Etsy's 20-year vintage line dates nothing.
 
@@ -119,6 +126,14 @@ class EtsyUnclearWhenTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertFalse(etsy_when_is_unclear(text, today=date(2026, 11, 21)))
                 self.assertEqual(resolve_etsy_when(text, options), label)
+
+    def test_etsys_own_range_stays_an_answer_after_the_cutoff_moves(self):
+        # In 2027 the cutoff is 2008, inside "2007 - 2009", but that label is Etsy's answer, not a guess.
+        with patch("anteroom.services.etsy_fields._first_recent_year", lambda today=None: 2008):
+            self.assertEqual(resolve_etsy_when("2007 - 2009 (Recently)", etsy_when_options()), "2007 - 2009 (Recently)")
+            self.assertEqual(_canonical_etsy_when("2007 - 2009 (Recently)"), "2007 - 2009 (Recently)")
+            self.assertEqual(etsy_when_unclear_note("2007 - 2009 (Recently)"), "")
+            self.assertEqual(resolve_etsy_when("2000-2009", etsy_when_options()), "")
 
     def test_the_cutoff_moves_with_the_year(self):
         # Vintage is 20 years old: the first non-vintage year is 2007 in 2026, 2009 in 2028.

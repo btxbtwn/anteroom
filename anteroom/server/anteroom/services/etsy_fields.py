@@ -362,16 +362,27 @@ def etsy_when_is_unclear(text: str, today: date | None = None) -> bool:
 def etsy_when_unclear_note(text: str, today: date | None = None) -> str:
     """The Etsy tab's reason for an empty When was it made?, or "" when the answer is clear."""
     raw = str(text or "").strip()
-    if not raw or not etsy_when_is_unclear(raw, today):
+    if not raw or not etsy_when_is_unclear(raw, today) or canonical_option(raw, etsy_when_options()):
         return ""
     cutoff = _first_recent_year(today)
     return (f'When was it made? is blank: "{raw}" could be before or after {cutoff}, and Etsy calls only '
             f"items made before {cutoff} vintage. Choose the date range that fits.")
 
 
+def _unclear_answer(text: str, options: list[str] | None = None) -> bool:
+    """An unclear range that is not one of Etsy's own When made labels.
+
+    Etsy's labels are its answers, not guesses: a saved "2007 - 2009 (Recently)"
+    keeps meaning that range after the cutoff moves past 2007 in January.
+    """
+    if not etsy_when_is_unclear(text):
+        return False
+    return canonical_option(text, options if options else etsy_when_options()) is None
+
+
 def _canonical_etsy_when(value: str) -> str:
     raw = str(value or "").strip()
-    if not raw or etsy_when_is_unclear(raw):
+    if not raw or _unclear_answer(raw):
         return ""
     normalized = _normalize_when_text(raw)
     if normalized in UNKNOWN_ETSY_WHEN or _is_non_vintage_phrase(raw):
@@ -520,7 +531,7 @@ def etsy_renewal_raw(etsy: dict[str, Any]) -> str:
 
 def resolve_etsy_when(raw: str, options: list[str]) -> str:
     text = str(raw or "").strip()
-    if not text or etsy_when_is_unclear(text):
+    if not text or _unclear_answer(text, options):
         return ""
     mapped = _canonical_etsy_when(text)
     allowed = options or [mapped, DEFAULT_ETSY_WHEN]
