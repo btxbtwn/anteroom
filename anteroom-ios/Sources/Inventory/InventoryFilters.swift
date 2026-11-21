@@ -259,10 +259,24 @@ extension ConversationSummary {
         return status
     }
 
-    /// Every listing has a tab: anything not live or sold (a generation or a
-    /// send in progress, a failed send, an inactive listing, any status this
-    /// build does not know) files under Draft, where its row keeps its label.
-    var statusTab: String { ["active", "sold"].contains(inventoryStatus) ? inventoryStatus : "draft" }
+    /// True when the listing is currently live on at least one marketplace.
+    var hasLiveListing: Bool {
+        let sold = Set(soldMarketplaces.map(Self.canonical)).union(vendooSoldDates.keys.map(Self.canonical))
+        let live = liveMarketplaces.filter { !sold.contains(Self.canonical($0)) }
+        guard !live.isEmpty else { return false }
+        if !removed.isEmpty, !live.contains(where: Self.delistable.contains) { return false }
+        return true
+    }
+
+    /// Every listing has a tab: live items stay under Active even while a send
+    /// or other job is running (keeping their Listing label); anything not live
+    /// or sold files under Draft, where its row keeps its label.
+    var statusTab: String {
+        let current = inventoryStatus
+        if current == "active" || current == "sold" { return current }
+        if current == "listing", hasLiveListing { return "active" }
+        return "draft"
+    }
     var statusLabel: String { inventoryStatus.replacingOccurrences(of: "_", with: " ").capitalized }
 
     fileprivate var activeAnchor: Double {

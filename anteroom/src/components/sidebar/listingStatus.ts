@@ -59,6 +59,21 @@ export function liveMarketplaces(listing: {
     .filter((id) => !sold.has(MARKETPLACE_ID_ALIASES[id] || id));
 }
 
+/** True when the listing is currently live on at least one marketplace. */
+export function hasLiveListing(listing: {
+  vendoo_marketplaces?: string[];
+  direct_marketplaces?: string[];
+  removed_marketplaces?: string[];
+  sold_marketplaces?: string[];
+}): boolean {
+  const live = liveMarketplaces(listing);
+  if (!live.length) return false;
+  if ((listing.removed_marketplaces || []).length && !live.some((id) => DELISTABLE_MARKETPLACES.has(id))) {
+    return false;
+  }
+  return true;
+}
+
 /**
  * The inventory label. Vendoo can still say draft after Anteroom published the
  * item itself; that row reads Active, the same as any other live listing. Once

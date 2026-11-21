@@ -17,7 +17,7 @@ import {
   labelCounts,
   labelOptions,
   inStatusTab,
-  listingStatusTab,
+  listingTab,
   matchesSearch,
   marketplaceCounts,
   marketplaceOptions,
@@ -40,7 +40,6 @@ import { ListingRowsSkeleton } from "./sidebar/ListingRowsSkeleton";
 import { VirtualListingList } from "./sidebar/VirtualListingList";
 import type { Listing } from "./sidebar/listingShelves";
 import { shelveListings } from "./sidebar/shelveListings";
-import { inventoryStatus } from "./sidebar/listingStatus";
 import { setListingSearch, useListingSearch } from "./sidebar/listingSearch";
 import { BulkActionBar, BulkSelectionDialogs } from "./sidebar/BulkSelection";
 import { SettingsSidebarNav } from "./sidebar/SettingsSidebarNav";
@@ -142,7 +141,7 @@ export function ListingSidebar({
   const openListing = openListingId ? listingsById.get(openListingId) : undefined;
   if (!openListingId && followed) setFollowed(null);
   if (openListingId && openListing && openListingId !== followed?.id) {
-    const tab = listingStatusTab(inventoryStatus(openListing));
+    const tab = listingTab(openListing);
     setFollowed({ id: openListingId, tab });
     if (tab !== filters.status) setFilters({ ...filters, status: tab });
   }

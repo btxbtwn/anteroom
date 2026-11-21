@@ -8,6 +8,7 @@ import {
   filterListings,
   labelOptions,
   listingStatusTab,
+  listingTab,
   marketplaceOptions,
   matchesSearch,
   sortListings,
@@ -99,6 +100,29 @@ describe("filterListings", () => {
 
   it("filters by status tab", () => {
     expect(filterListings(inventory, "", withFilters({ status: "sold" }))).toEqual([boots]);
+  });
+
+  it("keeps a live item under Active while a job runs on it, and unlisted sends under Draft", () => {
+    const liveSending = { ...tee, id: "live-sending", status: "listing", direct_marketplaces: ["poshmark"], vendoo_marketplaces: [] };
+    const importedSending = { ...tee, id: "imported-sending", status: "listing", vendoo_marketplaces: ["poshmark"], direct_marketplaces: [] };
+    const draftSending = { ...draft, id: "draft-sending", status: "listing", direct_marketplaces: [], vendoo_marketplaces: [] };
+    const delistedSending = {
+      ...draft,
+      id: "delisted-sending",
+      status: "listing",
+      vendoo_marketplaces: ["poshmark", "sellwild"],
+      removed_marketplaces: ["poshmark"],
+    };
+
+    expect(listingTab(liveSending)).toBe("active");
+    expect(listingTab(importedSending)).toBe("active");
+    expect(listingTab(draftSending)).toBe("draft");
+    expect(listingTab(delistedSending)).toBe("draft");
+
+    const rows = [liveSending, draftSending];
+    expect(filterListings(rows, "", withFilters({ status: "active" })).map((row) => row.id)).toEqual(["live-sending"]);
+    expect(filterListings(rows, "", withFilters({ status: "draft" })).map((row) => row.id)).toEqual(["draft-sending"]);
+    expect(statusCounts(rows)).toEqual({ active: 1, draft: 1 });
   });
 
   it("keeps an in-progress listing in the Draft tab", () => {

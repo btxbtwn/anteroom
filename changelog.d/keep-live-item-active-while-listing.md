@@ -1,0 +1,1 @@
+- Keeps live listings under the Active tab (and preserves Active/Draft tab counts) while a background marketplace job runs on them, on both web and iPhone.

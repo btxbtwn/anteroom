@@ -1,5 +1,4 @@
-import { inventoryStatus } from "./listingStatus";
-import { filterListings, listingStatusTab, sortListings, visibleInInventory, type ListingFilters } from "../inventoryFilters";
+import { filterListings, listingTab, sortListings, visibleInInventory, type ListingFilters } from "../inventoryFilters";
 import { activeAnchorMs, settledAnchorMs, type Listing } from "./listingShelves";
 
 /**
@@ -24,7 +23,7 @@ export function shelveListings(
     // its row stays here until the seller opens something else.
     const own = listings.find((listing) => listing.id === openListingId);
     const open = own
-      && filterListings([own], needle, { ...filters, status: listingStatusTab(inventoryStatus(own)) })[0];
+      && filterListings([own], needle, { ...filters, status: listingTab(own) })[0];
     if (open) shown.unshift(open);
   }
   return { shown, matched: ordered.length };
