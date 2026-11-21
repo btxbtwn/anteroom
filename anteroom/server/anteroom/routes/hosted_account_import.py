@@ -20,7 +20,7 @@ from anteroom.services.hosted_limits import (
 MAX_ROWS_BYTES = 16 * 1024 * 1024
 MAX_CONFIG_BYTES = 1 * 1024 * 1024
 # Keep Storage HTTP I/O off the event loop's default executor (shared with DB work)
-# while still permitting parallel same-seller photo migration (4 concurrent uploads).
+# while permitting multiple sellers' photo migrations to upload concurrently.
 STORAGE_UPLOAD_SLOTS = 12
 _storage_executor = ThreadPoolExecutor(max_workers=STORAGE_UPLOAD_SLOTS, thread_name_prefix='import-storage')
 _storage_semaphores: WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = WeakKeyDictionary()

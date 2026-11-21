@@ -28,9 +28,9 @@ from anteroom.services.hosted_limits import BODY_RECEIVE_SECONDS
 BATCH_ROWS = 200
 BATCH_BYTES = 2 * 1024 * 1024
 MARKER = Path(DATA_DIR) / "account-move.json"
-# Wait at least as long as a permitted same-seller body read (plus normalization
-# headroom) when sibling photo uploads hit the per-seller 429 guard.
-PHOTO_RATE_LIMIT_BUDGET_SECONDS = BODY_RECEIVE_SECONDS + 10.0
+# Wait at least as long as a concurrent same-seller body read (plus normalization
+# and wait headroom) if another session holds the per-seller upload slot.
+PHOTO_RATE_LIMIT_BUDGET_SECONDS = BODY_RECEIVE_SECONDS + 20.0
 
 _lock = threading.Lock()
 _progress: dict = {"state": "idle"}
@@ -197,7 +197,7 @@ class Account:
     ) -> httpx.Response:
         extra_headers = kwargs.pop("headers", {})
         attempt = 0
-        rate_limit_started: float | None = None
+        rate_limit_started = time.monotonic()
         rate_limit_waited = 0.0
         while True:
             with self._refreshing:
@@ -213,10 +213,7 @@ class Account:
                 attempt += 1
                 continue
             if response.status_code == 429 and rate_limit_budget is not None:
-                now = time.monotonic()
-                if rate_limit_started is None:
-                    rate_limit_started = now
-                elapsed = max(now - rate_limit_started, rate_limit_waited)
+                elapsed = max(time.monotonic() - rate_limit_started, rate_limit_waited)
                 remaining = rate_limit_budget - elapsed
                 if remaining > 0:
                     delay = min(_retry_after_seconds(response), remaining)
@@ -380,19 +377,24 @@ def _move_photos(account: Account, source, store) -> dict:
     _set(step="Copying photos…", done=0, total=len(work))
     counts = {"copied": 0, "missing": 0, "refused": 0}
     lock = threading.Lock()
+    # Resize photos concurrently across workers, but send one upload POST at a
+    # time so sibling workers do not contend on the server's per-seller upload slot.
+    upload_lock = threading.Lock()
 
     def upload(task) -> str:
         photo_id, field, key = task
         if not key or not store.exists(key):
             return "missing"
+        payload = shrink(store.read(key))
         try:
-            account.request(
-                "POST",
-                f"/api/account-import/photos/{photo_id}/{field}",
-                content=shrink(store.read(key)),
-                headers={"Content-Type": "application/octet-stream"},
-                rate_limit_budget=PHOTO_RATE_LIMIT_BUDGET_SECONDS,
-            )
+            with upload_lock:
+                account.request(
+                    "POST",
+                    f"/api/account-import/photos/{photo_id}/{field}",
+                    content=payload,
+                    headers={"Content-Type": "application/octet-stream"},
+                    rate_limit_budget=PHOTO_RATE_LIMIT_BUDGET_SECONDS,
+                )
         except MoveError as error:
             # One photo the account cannot take must not stop the whole move.
             if error.status in {413, 422}:

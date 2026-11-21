@@ -429,8 +429,7 @@ def test_photo_upload_429_retries_outlast_slow_same_seller_body_read(monkeypatch
             rate_limit_budget=account_move.PHOTO_RATE_LIMIT_BUDGET_SECONDS,
         )
     assert exc.value.status == 429
-    assert sum(sleeps) >= BODY_RECEIVE_SECONDS
-    assert sum(sleeps) == pytest.approx(account_move.PHOTO_RATE_LIMIT_BUDGET_SECONDS)
+    assert BODY_RECEIVE_SECONDS <= sum(sleeps) <= account_move.PHOTO_RATE_LIMIT_BUDGET_SECONDS
 
     # 3. Non-429 transient errors (e.g. 503) preserve the 3-attempt limit even when rate_limit_budget is set.
     sleeps.clear()
@@ -491,5 +490,63 @@ def test_photo_upload_429_retries_outlast_slow_same_seller_body_read(monkeypatch
         engine.dispose()
     assert counts == {'copied': 1, 'missing': 0, 'refused': 0}
     assert move_calls == 6 and sleeps == [5.0] * 5
+
+
+def test_move_photos_serializes_same_seller_upload_requests():
+    """Workers resize in parallel, but only one photo POST runs at a time so siblings never trigger 429."""
+    import threading
+    import httpx
+
+    load_models()
+    from anteroom.models.conversation import Conversation, Photo
+
+    engine = create_engine('sqlite://')
+    Base.metadata.create_all(engine)
+    photo_ids = [f'pser{i}' for i in range(6)]
+    with Session(engine) as db:
+        db.add(Conversation(id='cser', title='Coat'))
+        db.flush()
+        for pid in photo_ids:
+            db.add(Photo(id=pid, conversation_id='cser', original_filename=f'{pid}.png',
+                         stored_filename=f'{pid}.png', mime_type='image/png', size_bytes=10))
+        db.commit()
+
+    raw = png()
+
+    class _FakeStore:
+        def exists(self, key):
+            return True
+
+        def read(self, key):
+            return raw
+
+    counter_lock = threading.Lock()
+    in_flight = 0
+    max_in_flight = 0
+    uploaded = 0
+
+    def handler(request):
+        nonlocal in_flight, max_in_flight, uploaded
+        if request.url.path == '/api/account-import/photos':
+            return httpx.Response(200, json=[{'id': pid, 'fields': ['stored']} for pid in photo_ids])
+        with counter_lock:
+            in_flight += 1
+            max_in_flight = max(max_in_flight, in_flight)
+        time.sleep(0.02)
+        with counter_lock:
+            in_flight -= 1
+            uploaded += 1
+        return httpx.Response(200, json={'copied': True})
+
+    account = account_move.Account('https://account.example', client=httpx.Client(transport=httpx.MockTransport(handler)))
+    account.session = {'access_token': 'tok', 'refresh_token': 'ref', 'expires_at': time.time() + 3600}
+    try:
+        counts = account_move._move_photos(account, engine, _FakeStore())
+    finally:
+        engine.dispose()
+    assert counts == {'copied': len(photo_ids), 'missing': 0, 'refused': 0}
+    assert uploaded == len(photo_ids)
+    assert max_in_flight == 1
+
 
 
