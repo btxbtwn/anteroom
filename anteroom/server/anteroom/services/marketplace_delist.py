@@ -19,6 +19,7 @@ listed" one.
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime
 
 import httpx
@@ -514,7 +515,9 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
                     "marketplace_message": _marketplace_message(name, exc)})
         await in_worker_session(lambda db: JobRepo(db).update_status(
             job_id, "failed" if failed else "completed", "native_delist",
-            error="A delist did not finish." if failed else None))
+            error="A delist did not finish." if failed else None,
+            # A follow-up retry alerts the operator itself, on its first try and every few after.
+            failure_log_level=logging.INFO if sale_id else logging.ERROR))
     except BaseException:
         await asyncio.shield(in_worker_session(lambda db: JobRepo(db).update_status(
             job_id, "failed", "native_delist", error="The delist stopped before it finished.")))
@@ -563,10 +566,14 @@ def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
     if changed:
         raise DelistError(409, f"The {', '.join(changed)} listing changed. Nothing was delisted.", reason="listing_changed")
     if sale_id is not None:
+        from anteroom.services.sale_delist_followup import WINDOW
         from anteroom.services.sale_inventory import stock_after_sale
 
         sale = db.get(MarketplaceSale, sale_id)
-        if (sale is None or str(sale.conversation_id) != conv_id or sale.order_status not in PAID_STATUSES
+        sold_at = _time(sale.sold_at or sale.received_at) if sale else None
+        if (sale is None or str(sale.conversation_id) != conv_id or sale.source != "marketplace"
+                or sale.order_status not in PAID_STATUSES or sale.marketplace in names
+                or sold_at is None or sold_at < datetime.now(UTC) - WINDOW
                 or stock_after_sale(db, conv_id, sale.marketplace, sale.listing_id)["status"] != "sold_out"):
             raise DelistError(409, "The sale changed: it is no longer paid or the item has stock. Nothing was delisted.",
                               reason="sale_changed")

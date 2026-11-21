@@ -242,6 +242,12 @@ class SaleDelistFollowupTest(unittest.TestCase):
     def test_a_failure_that_keeps_failing_alerts_the_operator_on_the_first_try(self):
         self._sold()
         self.ebay.side_effect = RuntimeError("Sign in to eBay again.")
-        with self.assertLogs("anteroom.sale_delist_followup", level="ERROR") as logs:
+        with self.assertLogs("anteroom", level="ERROR") as logs:
             self._run()
         self.assertTrue(any("still listed on ebay" in line for line in logs.output), logs.output)
+        # The failed job itself is not a second operator alert: the follow-up decides when to alert.
+        self.assertFalse(any(line.startswith("ERROR:anteroom.jobs") for line in logs.output), logs.output)
+        # The second try is not due an alert.
+        self._age_records(6)
+        with self.assertNoLogs("anteroom", level="WARNING"):
+            self._run()

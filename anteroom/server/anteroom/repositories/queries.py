@@ -641,7 +641,8 @@ class JobRepo:
     def list_by_conversation(self, conv_id: str) -> list[Job]:
         return self.db.query(Job).filter(Job.conversation_id == conv_id).order_by(Job.created_at.desc()).all()
 
-    def update_status(self, job_id: str, status: str, current_step: str | None = None, error: str | None = None) -> Job | None:
+    def update_status(self, job_id: str, status: str, current_step: str | None = None, error: str | None = None,
+                      *, failure_log_level: int = logging.ERROR) -> Job | None:
         from anteroom.models.job import is_terminal_job_status
 
         job = self.db.query(Job).filter(Job.id == job_id).first()
@@ -659,8 +660,8 @@ class JobRepo:
         self.db.commit()
         self.db.refresh(job)
         if newly_failed:
-            logging.getLogger("anteroom.jobs").error(
-                "Job %s failed at %s (seller %s): %s", job.id, job.current_step,
+            logging.getLogger("anteroom.jobs").log(
+                failure_log_level, "Job %s failed at %s (seller %s): %s", job.id, job.current_step,
                 job.user_id, job.last_error or "No failure detail was recorded.")
         return job
 
