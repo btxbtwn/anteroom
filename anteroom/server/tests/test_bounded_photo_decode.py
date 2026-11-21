@@ -149,10 +149,34 @@ def test_a_stalled_dns_lookup_ends_at_its_deadline(monkeypatch):
 
 
 def test_cached_thumbnail_refuses_image_past_pixel_cap(local_store):
+    from fastapi import HTTPException
+    from anteroom.routes import photos as photos_route
+    from anteroom.services.image_decode import ImageTooLargeError
+
     (local_store / "huge.png").write_bytes(_png(*HUGE))
-    with pytest.raises(ValueError):
+    with pytest.raises(ImageTooLargeError):
         photos.get_or_create_thumbnail("huge.png", 96)
     assert not photos.thumbnail_path("huge.png", 96).exists()
+
+    class _FakePhoto:
+        id = "p-huge"
+        stored_filename = "huge.png"
+        mime_type = "image/png"
+
+    class _FakeQuery:
+        def filter(self, *_args, **_kwargs):
+            return self
+
+        def first(self):
+            return _FakePhoto()
+
+    class _FakeDB:
+        def query(self, *_args, **_kwargs):
+            return _FakeQuery()
+
+    with pytest.raises(HTTPException) as exc:
+        photos_route.serve_photo_thumbnail("p-huge", size=96, db=_FakeDB())  # type: ignore[arg-type]
+    assert exc.value.status_code == 422
 
 
 def test_photo_edit_preview_enforces_pixel_cap_and_passes_max_side(local_store, monkeypatch):

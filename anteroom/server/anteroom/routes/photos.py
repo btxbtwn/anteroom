@@ -198,10 +198,15 @@ def serve_photo_thumbnail(photo_id: str, size: int = 96, db: Session = Depends(g
     if not photo:
         raise HTTPException(404, "Photo not found")
 
+    from anteroom.services.image_decode import ImageTooLargeError
+
     try:
         thumb = get_or_create_thumbnail(photo.stored_filename, size)
     except FileNotFoundError:
         raise HTTPException(404, "Photo file not found") from None
+    except ImageTooLargeError:
+        # Never stream a >50 MP original in response to a size-bounded thumbnail request.
+        raise HTTPException(422, "Photo is too large to thumbnail") from None
     except Exception:
         # HEIC and other formats Pillow cannot decode fall back to the original.
         try:
