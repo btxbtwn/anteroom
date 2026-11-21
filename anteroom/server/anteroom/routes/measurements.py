@@ -15,7 +15,7 @@ from anteroom.config import MAX_PHOTO_SIZE_MB
 from anteroom.database import in_worker_session
 from anteroom.models.conversation import Conversation, Photo
 from anteroom.repositories.queries import ConversationRepo
-from anteroom.routes.api_contract import SIZE_TAG_READ_ERRORS, SizeTagReadResult
+from anteroom.routes.api_contract import NOT_FOUND, SIZE_TAG_READ_ERRORS, SizeTagReadResult
 from anteroom.services import hosted_photos, measure_read, size_tag_read
 from anteroom.services.hosted_database import SellerDatabaseSession, in_seller_session
 from anteroom.services.hosted_limits import bounded_route_class, release_upload_slot, stream_upload_to_path
@@ -112,6 +112,10 @@ async def _read(provider, paths: list[Path], garment: str) -> dict:
     return await _explained(measure_read.read_measurements(provider, paths, garment), "measurements", provider)
 
 
+async def _read_size_tag(provider, paths: list[Path]) -> dict:
+    return await _explained(size_tag_read.read_size_tag(provider, paths), "size", provider)
+
+
 @_upload_router.post("/api/measurements/read")
 @_hosted_upload_router.post("/api/measurements/read")
 async def read_measurements(request: Request, files: list[UploadFile] = File(...), garment: str = Form(...)):
@@ -132,7 +136,7 @@ async def read_size_tags(request: Request, files: list[UploadFile] = File(...)):
     with tempfile.TemporaryDirectory(prefix="size-tag-upload-") as workdir:
         paths = await _write_uploads(files, workdir)
         await release_upload_slot(request)
-        return await _explained(size_tag_read.read_size_tag(provider, paths), "size", provider)
+        return await _read_size_tag(provider, paths)
 
 
 @router.post("/api/conversations/{conv_id}/measurements/read")
@@ -144,6 +148,19 @@ async def read_saved_measurements(conv_id: str, body: ReadSavedRequest):
     return await _read(provider, paths, body.garment)
 
 
+@router.post(
+    "/api/conversations/{conv_id}/size-tags/read",
+    response_model=SizeTagReadResult,
+    responses={**NOT_FOUND, **SIZE_TAG_READ_ERRORS},
+)
+async def read_saved_size_tags(conv_id: str):
+    """Suggest a saved listing's clothing size from its size tag in its photos, in their order. Saves nothing."""
+    provider = _photo_provider("size tags")
+    filenames = await in_worker_session(_photo_filenames, conv_id)
+    paths = await asyncio.to_thread(photo_store().local_paths, filenames)
+    return await _read_size_tag(provider, paths)
+
+
 def _photo_filenames(db: Session, conv_id: str) -> list[str]:
     repo = ConversationRepo(db)
     if not repo.get(conv_id):
@@ -151,19 +168,39 @@ def _photo_filenames(db: Session, conv_id: str) -> list[str]:
     return [photo.stored_filename for photo in repo.get_photos(conv_id)]
 
 
+async def _download_hosted_photos(workdir: str, keys: list[str], token: str) -> list[Path]:
+    paths = []
+    for index, key in enumerate(keys):
+        path = Path(workdir) / f"{index:02d}.jpg"
+        path.write_bytes(await asyncio.to_thread(hosted_photos.storage_call, "GET", key, token))
+        paths.append(path)
+    return paths
+
+
 @hosted_router.post("/api/conversations/{conv_id}/measurements/read")
 async def read_hosted_saved_measurements(conv_id: str, body: ReadSavedRequest, request: Request):
     """The hosted read of a saved listing: its photos come from private storage. Saves nothing."""
     provider = _provider(body.garment)
     keys = await in_seller_session(request, _hosted_photo_keys, conv_id)
-    token = request.headers['authorization'].partition(' ')[2]
-    with tempfile.TemporaryDirectory(prefix='measure-saved-') as workdir:
-        paths = []
-        for index, key in enumerate(keys):
-            path = Path(workdir) / f'{index:02d}.jpg'
-            path.write_bytes(await asyncio.to_thread(hosted_photos.storage_call, 'GET', key, token))
-            paths.append(path)
+    token = request.headers["authorization"].partition(" ")[2]
+    with tempfile.TemporaryDirectory(prefix="measure-saved-") as workdir:
+        paths = await _download_hosted_photos(workdir, keys, token)
         return await _read(provider, paths, body.garment)
+
+
+@hosted_router.post(
+    "/api/conversations/{conv_id}/size-tags/read",
+    response_model=SizeTagReadResult,
+    responses={**NOT_FOUND, **SIZE_TAG_READ_ERRORS},
+)
+async def read_hosted_saved_size_tags(conv_id: str, request: Request):
+    """The hosted size-tag read of a saved listing: its photos come from private storage. Saves nothing."""
+    provider = _photo_provider("size tags")
+    keys = await in_seller_session(request, _hosted_photo_keys, conv_id)
+    token = request.headers["authorization"].partition(" ")[2]
+    with tempfile.TemporaryDirectory(prefix="size-tag-saved-") as workdir:
+        paths = await _download_hosted_photos(workdir, keys, token)
+        return await _read_size_tag(provider, paths)
 
 
 def _hosted_photo_keys(db: SellerDatabaseSession, conv_id: str) -> list[str]:

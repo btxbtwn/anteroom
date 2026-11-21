@@ -1,0 +1,1 @@
+- Add the clothing Size tag field and Read size tags to the bulk Regenerate review dialog, matching bulk upload so sellers can enter, check or read tag sizes from saved photos before rewriting listings.

@@ -181,6 +181,16 @@ describe("Reading size tags from photos", () => {
       "The server restarted while reading. Press Read size tags again.",
     );
   });
+
+  it("reads a saved listing's size tag from its saved photos", async () => {
+    const result = { photos_read: 2, status: "accepted", size: "M", sizes: ["M"] };
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(result)));
+    vi.stubGlobal("fetch", fetch);
+    await expect(api.sizeTags.readSaved("conv-1")).resolves.toEqual(result);
+    const [url, init] = fetch.mock.calls[0]!;
+    expect(String(url)).toMatch(/\/api\/conversations\/conv-1\/size-tags\/read$/);
+    expect(init.method).toBe("POST");
+  });
 });
 
 describe("Requests while the server restarts", () => {
