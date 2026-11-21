@@ -214,7 +214,7 @@ def active_description_template() -> str:
     return get_listing_formulas().get("description") or DEFAULT_DESCRIPTION_FORMULA
 
 
-_SECTION_LABEL_RE = re.compile(r"^([A-Za-z][A-Za-z /]{1,20})\s*:")
+_SECTION_LABEL_RE = re.compile(r"^[ \t]*([A-Za-z][A-Za-z /]{1,20})\s*:")
 
 
 def description_has_section(label: str) -> bool:

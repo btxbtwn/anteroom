@@ -387,3 +387,15 @@ def test_literal_footer_anchors_measurements_when_intro_is_missing():
 
     assert ensure_physical_description(listing)
     assert listing["description"] == "Measurements: See photos\n\nThanks for looking."
+
+
+@pytest.mark.parametrize("indent", ["  ", "\t"])
+def test_missing_measurements_come_before_indented_heading(indent):
+    from anteroom.services.listing_generate import ensure_physical_description
+    from anteroom.services.user_settings import set_listing_formulas
+
+    set_listing_formulas(description="Item: {item}\n\nMeasurements: {values}\n\nCare: {instructions}")
+    listing = {"description": f"Item: Cotton tee.\n\n{indent}Care: Machine wash cold."}
+
+    assert ensure_physical_description(listing)
+    assert listing["description"] == f"Item: Cotton tee.\n\nMeasurements: See photos\n\n{indent}Care: Machine wash cold."

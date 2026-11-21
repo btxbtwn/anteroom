@@ -489,6 +489,8 @@ def _strip_description_sentences(listing: dict, pattern: re.Pattern[str]) -> boo
     def keep(part: str) -> bool:
         return bool(part.strip()) and not pattern.search(part)
 
+    structural_headings = ("flaws:", "measurements:")
+    opens_with_section = desc.lstrip().lower().startswith(structural_headings)
     kept_blocks: list[str] = []
     for block in re.split(r"\n\s*\n", desc):
         block = _PARENTHETICAL_RE.sub(
@@ -506,7 +508,7 @@ def _strip_description_sentences(listing: dict, pattern: re.Pattern[str]) -> boo
         sentences = _SENTENCE_SPLIT_RE.split(raw)
         # Flaws:/Measurements: blocks are structural; their labelled first
         # sentence stays, only trailing asides can go.
-        if raw.lower().startswith(("flaws:", "measurements:")):
+        if raw.lower().startswith(structural_headings):
             kept = [sentences[0], *filter(keep, sentences[1:])]
         else:
             kept = [part for part in sentences if keep(part)]
@@ -514,7 +516,7 @@ def _strip_description_sentences(listing: dict, pattern: re.Pattern[str]) -> boo
             kept_blocks.append(" ".join(part.strip() for part in kept))
     # Stripping can eat the whole vibe sentence; fall back to the title so the
     # description keeps its opening line.
-    if kept_blocks and kept_blocks[0].strip().lower().startswith(("flaws:", "measurements:")):
+    if not opens_with_section and kept_blocks and kept_blocks[0].lower().startswith(structural_headings):
         title = str(listing.get("title") or "").strip()
         kept_blocks.insert(0, f"{title}." if title else "Resale-ready item.")
     cleaned = "\n\n".join(block for block in kept_blocks if block.strip()).strip()
