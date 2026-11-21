@@ -13,13 +13,16 @@ import unittest
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from anteroom.services import listing_persistence
+from test_seller_ownership import migration_engine  # noqa: F401
+
+from anteroom.models.listing import Listing, ListingRevision
+from anteroom.services import inventory_facets, listing_persistence, schema_migrations
 from anteroom.database import Base, get_db, load_models
 from anteroom.main import app
-from anteroom.services.etsy_fields import etsy_eligible
+from anteroom.services.etsy_fields import etsy_eligible, etsy_when_raw, etsy_when_to_store
 from anteroom.repositories.queries import ConversationRepo, ListingRepo
 from anteroom.services.etsy_audit import etsy_not_allowed_live
 from anteroom.services.vendoo_marketplace_fields import _etsy_when_code
@@ -59,6 +62,19 @@ class EtsyEligibleTest(unittest.TestCase):
 
     def test_the_ebay_year_dates_an_item_with_no_etsy_answer(self):
         self.assertTrue(etsy_eligible(listing({"who_made": "someone_else"}, ebay_specifics={"yearManufactured": "1988"})))
+
+    def test_the_ebay_form_year_dates_an_item_with_no_etsy_answer(self):
+        # eBay's native form saves the aspect under its own name. A generated
+        # NASCAR tee had only this, and Etsy called it modern resale.
+        dated = listing(ebay_specifics={"Year Manufactured": "2000-2009", "Vintage": "Yes"})
+        self.assertTrue(etsy_eligible(dated))
+        self.assertEqual(etsy_when_raw({}, dated), "2000-2009")
+        self.assertEqual(etsy_when_to_store("2000-2009", dated), "2000 - 2006 (Vintage)")
+        # Any spelling, flat or nested, and a blank spelling does not hide a filled one.
+        for ebay in ({"Year manufactured": "1988"}, {"category_specifics": {"Year Manufactured": "1988"}},
+                     {"yearManufactured": "", "Year Manufactured": "1988"}):
+            with self.subTest(ebay=ebay):
+                self.assertEqual(etsy_when_raw({}, listing(ebay_specifics=ebay)), "1988")
 
     def test_handmade_supplies_and_digital_are_allowed(self):
         self.assertTrue(etsy_eligible(listing({**MODERN, "who_made": "I did"})))
@@ -100,9 +116,9 @@ class NotAllowedReportTest(unittest.TestCase):
         app.dependency_overrides.clear()
         self.db.close()
 
-    def add(self, title: str, etsy: dict, notes: dict) -> str:
+    def add(self, title: str, etsy: dict, notes: dict, **extra) -> str:
         conv = self.convs.create(title=title, notes=json.dumps(notes))
-        listing_persistence.save_revision(self.listings.db, conv.id, listing(etsy, title=title), "test")
+        listing_persistence.save_revision(self.listings.db, conv.id, listing(etsy, title=title, **extra), "test")
         return conv.id
 
     def seed(self) -> str:
@@ -116,6 +132,7 @@ class NotAllowedReportTest(unittest.TestCase):
             **live, "vendooDates": {"listedByMarketplace": {"etsy": "2026-08-01T00:00:00+00:00"}},
         })
         self.add("Vintage Cardigan", VINTAGE, live)
+        self.add("NASCAR Tee", {}, live, ebay_specifics={"Year Manufactured": "2000-2009"})
         self.add("Sold on Etsy", MODERN, {**live, "vendooDates": {"soldByMarketplace": {"etsy": "2026-09-01"}}})
         self.add("Not on Etsy", MODERN, {"vendooMarketplaces": ["ebay"]})
         self.add("Never synced", MODERN, {})
@@ -134,6 +151,19 @@ class NotAllowedReportTest(unittest.TestCase):
         self.assertEqual(second["when_made"], "Made To Order (Not Yet Made)")
         self.assertTrue(second["title_says_vintage"])
 
+    def test_year_aliases_agree_in_full_listing_facets_and_live_report(self):
+        live = {"vendooMarketplaces": ["etsy"]}
+        for canonical, eligible in (("2022", False), ("  ", True)):
+            with self.subTest(canonical=canonical):
+                specifics = {"year_manufactured": "1988", "yearManufactured": canonical}
+                dated = listing(ebay_specifics=specifics)
+                conv_id = self.add("Year aliases", {}, live, ebay_specifics=specifics)
+                self.assertEqual(etsy_eligible(dated), eligible)
+                self.assertEqual(inventory_facets.listing_facets(self.db)[conv_id]["etsy_eligible"], eligible)
+                self.assertEqual(inventory_facets.listing_facet(self.db, conv_id)["etsy_eligible"], eligible)
+                reported = {row["conversation_id"] for row in etsy_not_allowed_live(self.db)}
+                self.assertEqual(conv_id in reported, not eligible)
+
     def test_route_is_read_only(self):
         self.seed()
 
@@ -149,6 +179,40 @@ class NotAllowedReportTest(unittest.TestCase):
         self.assertEqual({conv.id: conv.notes for conv in self.convs.list_all()}, before)
         # There is no write side to this report.
         self.assertEqual(client.post("/api/etsy/not-allowed").status_code, 405)
+
+
+def test_projected_etsy_eligibility_matches_stored_legacy_listings(migration_engine):  # noqa: F811
+    schema_migrations.ensure_schema(migration_engine)
+    cases = (
+        ("Nested year", {"category_specifics": {"Year Manufactured": "1988"}}, True),
+        ("Variant year", {"YeAr-Manufactured": "1988"}, True),
+        ("Conflicting aliases", {"year_manufactured": "1988", "yearManufactured": "2022"}, False),
+        ("Blank preferred year", {"yearManufactured": "  ", "category_specifics": {"Year manufactured": "1988"}}, True),
+        ("Flat before nested", {"Year manufactured": "2022", "category_specifics": {"yearManufactured": "1988"}}, False),
+        ("Malformed nested block", {"category_specifics": ["1988"]}, False),
+    )
+    with Session(migration_engine) as db:
+        expected = {}
+        for title, specifics, eligible in cases:
+            conv = ConversationRepo(db).create(title=title, notes=json.dumps({"vendooMarketplaces": ["etsy"]}))
+            # Store the historical payload without the current save normalizer.
+            revision = ListingRevision(conversation_id=conv.id, source="test", listing_json=listing(
+                title=title, ebay_specifics=specifics,
+            ))
+            db.add(revision)
+            db.flush()
+            db.add(Listing(conversation_id=conv.id, current_revision_id=revision.id))
+            db.commit()
+            assert etsy_eligible(revision.listing_json) is eligible
+            expected[conv.id] = eligible
+
+        facets = inventory_facets.listing_facets(db)
+        assert {conv_id: facet["etsy_eligible"] for conv_id, facet in facets.items()} == expected
+        for conv_id, eligible in expected.items():
+            assert inventory_facets.listing_facet(db, conv_id)["etsy_eligible"] is eligible
+        assert {row["conversation_id"] for row in etsy_not_allowed_live(db)} == {
+            conv_id for conv_id, eligible in expected.items() if not eligible
+        }
 
 
 if __name__ == "__main__":

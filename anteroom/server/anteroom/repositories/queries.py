@@ -81,10 +81,8 @@ def _facet_columns() -> tuple:
         json_value(doc, "sku"),
         json_value(doc, "price"),
         json_value(doc, "etsy_specifics"),
-        func.coalesce(
-            json_value(doc, "ebay_specifics.yearManufactured"),
-            json_value(doc, "ebay_specifics.year_manufactured"),
-        ),
+        # The shared Etsy reader recognizes historical keys inside this block.
+        json_value(doc, "ebay_specifics"),
     )
 
 

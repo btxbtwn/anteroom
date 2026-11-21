@@ -9,6 +9,7 @@ from typing import Any
 
 from anteroom.services.ebay_fields import (
     ebay_optional_blank,
+    ebay_optional_keys,
     ebay_optional_raw,
     ebay_season_haystack,
 )
@@ -21,9 +22,7 @@ from anteroom.models.listing_values import (
     normalized_option_key,
     text_value,
 )
-from anteroom.models.schema import (
-    _scalar_text,
-)
+from anteroom.models.schema import EBAY_YEAR_KEYS, _scalar_text
 
 # Etsy OpenAPI: tags may contain letters, numbers, whitespace, -, ', ™, ©, ®.
 # Help center: max 13 tags, max 20 chars each; cannot start with - or '.
@@ -395,11 +394,26 @@ def etsy_when_raw(etsy: dict[str, Any], listing: dict[str, Any] | None = None) -
         text = _scalar_text(etsy.get(key)) if key in etsy else None
         if text:
             return text
+    return ebay_year_manufactured(listing)
+
+
+def ebay_year_manufactured(listing: dict[str, Any] | None) -> str:
+    """eBay's Year Manufactured under any spelling, flat or in category_specifics, skipping blanks.
+
+    eBay's native form saves it as "Year Manufactured"; the listing JSON as yearManufactured.
+    """
     ebay = (listing or {}).get("ebay_specifics")
-    if isinstance(ebay, dict):
-        text = _scalar_text(ebay.get("yearManufactured") or ebay.get("year_manufactured"))
-        if text:
-            return text
+    if not isinstance(ebay, dict):
+        return ""
+    for block in (ebay, ebay.get("category_specifics")):
+        if not isinstance(block, dict):
+            continue
+        # Honor the standard aliases before considering other spellings.
+        aliases = (name for name in ebay_optional_keys(block, EBAY_YEAR_KEYS[0]) if name not in EBAY_YEAR_KEYS)
+        for name in (*EBAY_YEAR_KEYS, *aliases):
+            text = _scalar_text(block.get(name))
+            if text:
+                return text
     return ""
 
 
@@ -501,10 +515,7 @@ def resolve_etsy_when(raw: str, options: list[str]) -> str:
 
 
 def _ebay_year_when(listing: dict[str, Any] | None, options: list[str]) -> str:
-    ebay = (listing or {}).get("ebay_specifics")
-    if not isinstance(ebay, dict):
-        return ""
-    year = _scalar_text(ebay.get("yearManufactured") or ebay.get("year_manufactured"))
+    year = ebay_year_manufactured(listing)
     if not year:
         return ""
     resolved = resolve_etsy_when(year, options)
