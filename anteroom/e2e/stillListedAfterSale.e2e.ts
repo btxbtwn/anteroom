@@ -30,7 +30,11 @@ test("a sold item still listed elsewhere is alerted in the sidebar and explained
   });
 
   await page.goto("/");
-  if (phone) await page.getByRole("button", { name: "Open navigation" }).click().catch(() => undefined);
+  if (phone) {
+    // On a phone the alert sits at the top of the inventory list.
+    await page.getByRole("button", { name: "Open navigation" }).click();
+    await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
+  }
   const alert = page.getByRole("alert").filter({ hasText: "A sold item is still listed" });
   await expect(alert).toBeVisible({ timeout: 45_000 });
   await expect(alert).toContainText("Sold on Poshmark, still on eBay and Mercari (delist failed)");
@@ -38,6 +42,8 @@ test("a sold item still listed elsewhere is alerted in the sidebar and explained
   await page.screenshot({ path: info.outputPath("still-listed-sidebar.png") });
 
   await alert.getByRole("button", { name: new RegExp(title) }).click();
+  // This item has no listing text yet, so a phone opens it on Chat.
+  if (phone) await page.getByRole("tablist", { name: "Listing views" }).getByRole("tab", { name: "Listing" }).click();
   const notice = page.getByRole("status").filter({ hasText: "Sold on Poshmark" });
   await expect(notice).toBeVisible({ timeout: 30_000 });
   await expect(notice).toContainText("Anteroom still has listings on eBay and Mercari.");
