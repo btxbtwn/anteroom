@@ -1124,8 +1124,7 @@ def test_empty_hosted_answer_logs_after_finish(monkeypatch, caplog, failure_name
 
     caplog.set_level('INFO', logger='anteroom.assistant')
     monkeypatch.setattr(assistant_route, '_require_provider', Provider)
-    monkeypatch.setattr(assistant_route, '_prepare', lambda *_: ([], SimpleNamespace(
-        lookups=SimpleNamespace(close=lambda: None))))
+    monkeypatch.setattr(assistant_route, '_prepare', lambda *_: ([], SimpleNamespace(close=lambda: None)))
     monkeypatch.setattr(background_tasks, 'append_events', lambda *_: None)
 
     async def empty(*_):
@@ -1362,8 +1361,7 @@ def test_answer_commit_is_confirmed_before_blocked_refresh(workspace, monkeypatc
 
     monkeypatch.setattr(assistant_route, '_Journal', Journal)
     monkeypatch.setattr(assistant_route, 'SessionLocal', sessions)
-    monkeypatch.setattr(assistant_route, '_prepare', lambda *_: ([], SimpleNamespace(
-        lookups=SimpleNamespace(close=lambda: None))))
+    monkeypatch.setattr(assistant_route, '_prepare', lambda *_: ([], SimpleNamespace(close=lambda: None)))
     monkeypatch.setattr(assistant_route, '_require_provider', WaitingProvider)
     monkeypatch.setattr(background_tasks, 'EVENT_INTERVAL', .001)
     monkeypatch.setattr(background_tasks, 'append_events', append)
@@ -1417,3 +1415,89 @@ def test_listing_details_are_read_a_batch_at_a_time(workspace, monkeypatch):
     assert len(statements) == 3 and all("LIMIT" in statement for statement in statements)
     assert sorted(json.loads(record["details"])["description"] for record in records) == [
         f"Shirt number {n}" for n in range(5)]
+
+
+def test_the_lookup_copy_is_built_only_when_a_lookup_runs(workspace, monkeypatch):
+    db, _client = workspace
+    seed(db)
+    built = 0
+    real = business_assistant._lookup_database
+
+    def counted(tables):
+        nonlocal built
+        built += 1
+        return real(tables)
+
+    monkeypatch.setattr(business_assistant, "_lookup_database", counted)
+    shop = business_assistant.read_shop(db, now=NOW)
+    assert built == 0
+    shop.close()
+    assert built == 0
+
+    first = shop.lookups
+    second = shop.lookups
+    assert first is second and built == 1
+    shop.close()
+
+
+def test_an_answer_without_a_lookup_never_builds_the_copy(workspace, monkeypatch):
+    db, client = workspace
+    seed(db)
+    built = 0
+    real = business_assistant._lookup_database
+
+    def counted(tables):
+        nonlocal built
+        built += 1
+        return real(tables)
+
+    monkeypatch.setattr(business_assistant, "_lookup_database", counted)
+    monkeypatch.setattr(assistant_route, "get_listing_provider", lambda: Provider(("No.",)))
+    response = client.post("/api/assistant/messages", json={"text": "Any sales?"})
+    assert response.status_code == 200 and "No." in response.text
+    assert built == 0
+
+
+def test_the_copy_is_built_off_the_event_loop(workspace, monkeypatch):
+    from anteroom.services import box_media
+
+    db, _client = workspace
+    seed(db)
+    real = business_assistant._lookup_database
+    built_on_loop: list[bool] = []
+
+    def checked(tables):
+        try:
+            asyncio.get_running_loop()
+            built_on_loop.append(True)
+        except RuntimeError:
+            built_on_loop.append(False)
+        return real(tables)
+
+    async def fake_view_boxes(chosen):
+        return [box_media.BoxView(box_id=row["id"], title=row["title"], store=row["store"], url=row["url"])
+                for row in chosen]
+
+    monkeypatch.setattr(business_assistant, "_lookup_database", checked)
+    monkeypatch.setattr(box_media, "view_boxes", fake_view_boxes)
+
+    async def exercise():
+        shop_sql = business_assistant.read_shop(db, now=NOW)
+        try:
+            result = await business_assistant.run_any_lookup(
+                business_assistant.Lookup("sql", "SELECT count(*) FROM listings", 0, 1), shop_sql, [],
+            )
+            assert isinstance(result, str) and result.endswith("\n3")
+        finally:
+            shop_sql.close()
+
+        shop_media = business_assistant.read_shop(db, now=NOW)
+        try:
+            await business_assistant.run_any_lookup(
+                business_assistant.Lookup("media", "raghouse:1", 0, 1), shop_media, [],
+            )
+        finally:
+            shop_media.close()
+
+    asyncio.run(exercise())
+    assert built_on_loop == [False, False]

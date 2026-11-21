@@ -29,6 +29,7 @@ import logging
 import re
 import sqlite3
 import statistics
+import threading
 import time
 from collections import Counter
 from collections.abc import AsyncIterator, Callable
@@ -435,10 +436,31 @@ def message_view(row: AssistantMessage) -> dict[str, Any]:
 
 @dataclass
 class Shop:
-    """The business as of one moment: what the model is told, and what it can look up."""
+    """The business as of one moment: what the model is told, and what it can look up.
+
+    ``tables`` may be shared across questions via ``business_context``; never mutate it.
+    The in-memory SQLite copy is built on first access to ``lookups`` so answers that
+    need no lookup never pay to create it.
+    """
 
     brief: str
-    lookups: sqlite3.Connection
+    tables: dict[str, list[dict[str, Any]]]
+    _conn: sqlite3.Connection | None = field(default=None, init=False, repr=False)
+    _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
+
+    @property
+    def lookups(self) -> sqlite3.Connection:
+        if self._conn is None:
+            with self._lock:
+                if self._conn is None:
+                    self._conn = _lookup_database(self.tables)
+        return self._conn
+
+    def close(self) -> None:
+        with self._lock:
+            conn, self._conn = self._conn, None
+        if conn is not None:
+            conn.close()
 
 
 def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
@@ -465,7 +487,7 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
         f"--- What the seller says about their business ---\n{note}" if note else "",
         assistant_memory.section(db),
     ]
-    return Shop(brief="\n\n".join(section for section in sections if section), lookups=_lookup_database(tables))
+    return Shop(brief="\n\n".join(section for section in sections if section), tables=tables)
 
 
 def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[str, Any]]]]:
@@ -845,13 +867,17 @@ def lookup_label(lookup: Lookup | str) -> str:
     return f"Looking up {words[:80]}…" if words else "Looking up more detail…"
 
 
+def _run_sql(shop: Shop, body: str) -> str:
+    return run_lookup(shop.lookups, body)
+
+
 async def run_any_lookup(lookup: Lookup, shop: Shop, viewed: list[str]) -> str | list[dict[str, Any]]:
     """Run one lookup and return what goes back to the model; a failure comes back as its reason."""
     name = "view_box_media" if lookup.kind == "media" else _lookup_name(lookup.body)
     try:
         if lookup.kind == "media":
             return await view_box_media(shop, lookup.body, viewed)
-        return await asyncio.to_thread(run_lookup, shop.lookups, lookup.body)
+        return await asyncio.to_thread(_run_sql, shop, lookup.body)
     except Exception as exc:  # noqa: BLE001 - the model is told, so it never answers from nothing
         log.exception("assistant lookup failed")
         return f"Lookup {name} failed: {type(exc).__name__}: {str(exc).strip() or 'no detail'}"
@@ -941,7 +967,7 @@ async def view_box_media(shop: Shop, body: str, viewed: list[str]) -> str | list
     if not ids:
         return ("Lookup view_box_media failed: no box ids were given. Put the id of each box from the "
                 "sourcing_boxes table on its own line.")
-    rows = await asyncio.to_thread(_sourcing_rows, shop.lookups)
+    rows = await asyncio.to_thread(lambda: _sourcing_rows(shop.lookups))
     by_id = {row["id"]: row for row in rows}
     by_title: dict[str, list[dict[str, Any]]] = {}
     for row in rows:

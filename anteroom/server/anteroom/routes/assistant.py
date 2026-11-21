@@ -293,7 +293,7 @@ async def _answer(
         run.publish(sse_event("error", error))
     finally:
         if shop is not None:
-            shop.lookups.close()
+            shop.close()
         # Also reached when the seller presses Stop: keep what was written so far.
         # Off the event loop: a save that waits on SQLite's write lock must not
         # freeze every other request, or hold this answer's stream open.
