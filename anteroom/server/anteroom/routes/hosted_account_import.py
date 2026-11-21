@@ -107,10 +107,10 @@ def pending_photos(db=Depends(get_import_db, scope="function")):
 
 @router.post('/photos/{photo_id}/{field}')
 async def photo(photo_id: str, field: str, request: Request):
-    # Guard memory globally (allowing parallel same-seller photo migration up to
-    # UploadSlots capacity) and release before Storage HTTP I/O so slow Storage
-    # calls never stall or 429 concurrent account-move uploads.
-    async with hold_upload_slot(request, per_seller=False):
+    # Cap each seller to one memory slot during body read and normalization so
+    # one migrating seller cannot starve other sellers, while releasing before
+    # Storage HTTP I/O still lets 4 same-seller uploads overlap in Storage.
+    async with hold_upload_slot(request, per_seller=True):
         data = await read_bounded_body(
             request,
             hosted_photos.MAX_BYTES,

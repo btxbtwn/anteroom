@@ -183,7 +183,7 @@ class Account:
                     raise MoveError("Lost the connection to your account. Run the move again to pick up where it stopped.") from None
                 time.sleep(2 ** attempt)
                 continue
-            if response.status_code in {502, 503, 504} and attempt < 2:
+            if response.status_code in {429, 502, 503, 504} and attempt < 2:
                 time.sleep(2 ** attempt)
                 continue
             if response.status_code >= 400:
