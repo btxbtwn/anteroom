@@ -237,7 +237,7 @@ class SaleDelistFollowupTest(unittest.TestCase):
         followup._next.clear()
         followup._running.clear()
 
-        def enabled():
+        def enabled(*, fresh=False):
             return not (self.ebay.await_count or self.etsy.await_count or self.bridge.await_count)
 
         with patch("anteroom.services.user_settings.autodelist_enabled", side_effect=enabled), \
@@ -271,6 +271,44 @@ class SaleDelistFollowupTest(unittest.TestCase):
         self.assertTrue(any("sale changed" in line for line in logs.output), logs.output)
         self.ebay.assert_not_awaited()
         self.assertEqual(self.bridge.await_count, 0)
+
+    def test_a_refund_during_one_marketplace_delist_stops_the_remaining_targets(self):
+        sale_id = self._sold()
+
+        async def end_ebay(*_args):
+            from anteroom.services.api_job_lock import start_gate
+
+            with start_gate(), sessionmaker(bind=self.db.get_bind())() as db:
+                db.get(MarketplaceSale, sale_id).order_status = "refunded"
+                db.commit()
+            return {"ok": True, "state": "deleted"}
+
+        self.ebay.side_effect = end_ebay
+        self._run()
+        self.ebay.assert_awaited_once()
+        self.etsy.assert_not_awaited()
+        self.bridge.assert_not_awaited()
+        states = self._states()
+        self.assertEqual((states["ebay"], states["etsy"], states["mercari"]), ("deleted", "live", "live"))
+
+    def test_stock_observed_during_a_delist_stops_the_remaining_targets(self):
+        from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
+
+        self._sold()
+
+        async def end_ebay(*_args):
+            with sessionmaker(bind=self.db.get_bind())() as db:
+                MarketplaceListingRepo(db).save(self.conv.id, "depop", {"inventory_observation": {
+                    "listing_id": "shop-classic-tee-136d", "state": "active", "quantity": 1,
+                    "checked_at": datetime.now(UTC).isoformat(),
+                }})
+            return {"ok": True, "state": "deleted"}
+
+        self.ebay.side_effect = end_ebay
+        self._run()
+        self.ebay.assert_awaited_once()
+        self.etsy.assert_not_awaited()
+        self.bridge.assert_not_awaited()
 
     def test_a_failure_that_keeps_failing_alerts_the_operator_on_the_first_try(self):
         self._sold()

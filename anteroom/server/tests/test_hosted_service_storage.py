@@ -137,3 +137,22 @@ def test_concurrent_settings_updates_keep_both_saves_and_separate_owners(storage
         list(executor.map(update, ['theme', 'models']))
     assert HostedSettingsStore(sessions(ALICE)).read() == {'theme': 'theme', 'models': 'models'}
     assert HostedSettingsStore(sessions(BOB)).read() == {}
+
+
+def test_followup_reads_opt_out_saved_by_a_separate_hosted_execution(storage):
+    from unittest.mock import MagicMock
+
+    from anteroom.services import sale_delist_followup, user_settings
+    from anteroom.services.service_context import ServiceContext, use
+
+    _engine, sessions = storage
+    read_sessions = sessions(ALICE)
+    store = HostedSettingsStore(read_sessions, ALICE)
+    writer = HostedSettingsStore(read_sessions, ALICE)
+    writer.update(lambda value: value.update(sale_autodelist=True))
+    with use(ServiceContext(ALICE, read_sessions, store, MagicMock(), MagicMock())):
+        assert user_settings.autodelist_enabled() is True  # Prime the execution snapshot.
+        assert sale_delist_followup._enabled() is True
+        writer.update(lambda value: value.update(sale_autodelist=False))
+        assert sale_delist_followup._enabled() is False
+        assert user_settings.autodelist_enabled() is True  # Ordinary snapshot reads are unchanged.

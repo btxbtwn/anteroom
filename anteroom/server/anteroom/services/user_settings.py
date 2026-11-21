@@ -1206,8 +1206,14 @@ def set_sale_detection(marketplace: str, enabled: bool) -> dict[str, bool]:
 AUTODELIST_KEY = "sale_autodelist"
 
 
-def autodelist_enabled() -> bool:
+def autodelist_enabled(*, fresh: bool = False) -> bool:
     """The seller asked Anteroom to delist the other marketplaces after a sale. Off unless saved."""
+    if fresh:
+        from anteroom.services.service_context import current
+
+        context = current()
+        if context is not None:
+            return context.settings.read_fresh().get(AUTODELIST_KEY) is True
     return read_settings().get(AUTODELIST_KEY) is True
 
 

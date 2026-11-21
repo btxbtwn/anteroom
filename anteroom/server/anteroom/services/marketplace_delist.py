@@ -490,7 +490,16 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
             entry = known[name]
             base = {"listing_id": entry["listing_id"], "url": entry["url"], "at": _now(),
                     "attempts": _attempt(entry)}
-            ebay_record = await in_worker_session(_start_delete, conv_id, name, base, job_id)
+            try:
+                if sale_id is None:
+                    ebay_record = await in_worker_session(_start_delete, conv_id, name, base, job_id)
+                else:
+                    ebay_record = await in_worker_session(_start_followup_delete, conv_id, name, base, job_id, sale_id)
+            except DelistError as exc:
+                if exc.reason != "sale_changed":
+                    raise
+                skipped = names[index:]
+                break
             try:
                 if name == "ebay":
                     result = await _delete_ebay(entry["listing_id"], ebay_record)
@@ -576,19 +585,7 @@ def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
         changed = [name for name in names if expected is not None and known[name]["listing_id"] != expected.get(name)]
         if changed:
             raise DelistError(409, f"The {', '.join(changed)} listing changed. Nothing was delisted.", reason="listing_changed")
-        sold_at = None
-        if sale_id is not None:
-            from anteroom.services.sale_delist_followup import WINDOW
-            from anteroom.services.sale_inventory import stock_after_sale
-
-            sale = db.get(MarketplaceSale, sale_id)
-            sold_at = _time(sale.sold_at or sale.received_at) if sale else None
-            if (sale is None or str(sale.conversation_id) != conv_id or sale.source != "marketplace"
-                    or sale.order_status not in PAID_STATUSES or sale.marketplace in names
-                    or sold_at is None or sold_at < datetime.now(UTC) - WINDOW
-                    or stock_after_sale(db, conv_id, sale.marketplace, sale.listing_id)["status"] != "sold_out"):
-                raise DelistError(409, "The sale changed: it is no longer paid or the item has stock. Nothing was delisted.",
-                                  reason="sale_changed")
+        sold_at = _require_followup_sale(db, conv_id, sale_id, names) if sale_id is not None else None
         if BROWSER_MARKETPLACES & set(names) and not current_extension().connected:
             raise DelistError(409, "Connect Chrome first.")
         repo = JobRepo(db)
@@ -612,14 +609,41 @@ def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
     return names, known, job.id
 
 
+def _require_followup_sale(db: Session, conv_id: str, sale_id: str, names: list[str], *,
+                           lock: bool = False) -> datetime:
+    from anteroom.services.sale_delist_followup import WINDOW
+    from anteroom.services.sale_inventory import stock_after_sale
+
+    sale = db.get(MarketplaceSale, sale_id, with_for_update=lock, populate_existing=True)
+    sold_at = _time(sale.sold_at or sale.received_at) if sale else None
+    if (sale is None or str(sale.conversation_id) != conv_id or sale.source != "marketplace"
+            or sale.order_status not in PAID_STATUSES or sale.marketplace in names
+            or sold_at is None or sold_at < datetime.now(UTC) - WINDOW
+            or stock_after_sale(db, conv_id, sale.marketplace, sale.listing_id)["status"] != "sold_out"):
+        raise DelistError(409, "The sale changed: it is no longer paid or the item has stock.", reason="sale_changed")
+    return sold_at
+
+
+def _start_followup_delete(db: Session, conv_id: str, name: str, base: dict, job_id: str,
+                           sale_id: str) -> dict | None:
+    # Serialize the local start with order recovery; the row lock also fences
+    # concurrent writes to this sale from other processes until the start commits.
+    # No database connection or lock is held while the marketplace responds.
+    with start_gate():
+        _require_followup_sale(db, conv_id, sale_id, [name], lock=True)
+        return _start_delete(db, conv_id, name, base, job_id)
+
+
 def _start_delete(db: Session, conv_id: str, name: str, base: dict, job_id: str) -> dict | None:
     """Record the delete as started. Returns the eBay listing record the eBay delete reads."""
-    _record_delete(db, conv_id, name, {**base, "state": "deleting"})
+    _record_delete(db, conv_id, name, {**base, "state": "deleting"}, commit=False)
+    ebay_record = MarketplaceListingRepo(db).get(conv_id, "ebay") if name == "ebay" else None
+    # add_event commits both the progress event and the deleting record.
     JobRepo(db).add_event(job_id, "native_progress", "native_delist", {"marketplace": name, "step": "delist", "label": "Delisting"})
-    return MarketplaceListingRepo(db).get(conv_id, "ebay") if name == "ebay" else None
+    return ebay_record
 
 
-def _record_delete(db: Session, conv_id: str, name: str, value: dict) -> None:
+def _record_delete(db: Session, conv_id: str, name: str, value: dict, *, commit: bool = True) -> None:
     """Write a delete record, in one notes write with retiring a superseded seller link.
 
     Delist targets the seller's "listed" link unless a newer receipt superseded
@@ -637,7 +661,8 @@ def _record_delete(db: Session, conv_id: str, name: str, value: dict) -> None:
     if isinstance(mark, dict) and mark.get("state") == "listed" and listing_id(name, mark.get("url")) != value.get("listing_id"):
         updates["marketplaceMarks"] = {key: entry for key, entry in marks.items() if key != name}
     conv.notes = merge_notes(conv.notes, updates)
-    db.commit()
+    if commit:
+        db.commit()
 
 
 def _deleted(db: Session, conv_id: str, name: str, base: dict) -> None:

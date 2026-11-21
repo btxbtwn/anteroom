@@ -198,7 +198,7 @@ def _enabled() -> bool:
     from anteroom.services.user_settings import autodelist_enabled
 
     # While the Mac's window shows the account, that account follows its own sales.
-    return autodelist_enabled() and not account_shown()
+    return autodelist_enabled(fresh=True) and not account_shown()
 
 
 async def run(*, session_factory=None) -> None:
