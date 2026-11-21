@@ -67,26 +67,28 @@ def test_one_sellers_failed_tick_does_not_stop_the_clock(monkeypatch):
     assert started.count("bob") > 1
 
 
-def test_concurrent_seller_ticks_are_bounded_and_drain_without_waiting_for_next_poll(monkeypatch):
+def test_database_active_steps_are_bounded_across_concurrent_sellers(monkeypatch):
+    from anteroom.services.automation_scheduler import db_slot
+
     owners = [f"seller-{i}" for i in range(8)]
-    active = 0
-    peak_active = 0
+    active_db = 0
+    peak_db = 0
     finished: list[str] = []
     all_done = asyncio.Event()
 
     async def run_owner(owner):
-        nonlocal active, peak_active
-        active += 1
-        peak_active = max(peak_active, active)
-        try:
-            await asyncio.sleep(0.02)
-        finally:
-            active -= 1
-            finished.append(owner)
-            if len(finished) >= len(owners):
-                all_done.set()
+        nonlocal active_db, peak_db
+        async with db_slot():
+            active_db += 1
+            peak_db = max(peak_db, active_db)
+            try:
+                await asyncio.sleep(0.02)
+            finally:
+                active_db -= 1
+        finished.append(owner)
+        if len(finished) >= len(owners):
+            all_done.set()
 
-    # Large tick interval ensures queued sellers run as slots free up rather than waiting 60s.
     monkeypatch.setattr(scheduler, "TICK_SECONDS", 60)
     monkeypatch.setattr(scheduler, "due_owners", lambda _engine: list(owners))
     monkeypatch.setattr(scheduler, "run_owner", run_owner)
@@ -100,8 +102,59 @@ def test_concurrent_seller_ticks_are_bounded_and_drain_without_waiting_for_next_
             await asyncio.gather(clock, return_exceptions=True)
 
     asyncio.run(scenario())
-    assert peak_active == 3
+    assert peak_db == 3
     assert set(finished) == set(owners)
+
+
+def test_waiting_regenerations_above_concurrency_limit_do_not_block_other_sellers(monkeypatch):
+    from anteroom.services import automation_scheduler as auto_sched
+
+    slow_owners = [f"slow-{i}" for i in range(5)]
+    fast_owner = "fast-seller"
+    regenerating: set[str] = set()
+    all_slow_waiting = asyncio.Event()
+    fast_finished = asyncio.Event()
+
+    async def fake_in_worker(work, *args):
+        if work is auto_sched._pending_items:
+            return [{"conversation_id": f"conv-{args[0]}"}]
+        if work is auto_sched._start_item:
+            return {"remote": {"type": "regenerate"}, "markets": []}
+        return {"outcome": {"ok": True}}
+
+    async def run_owner(owner):
+        if owner in slow_owners:
+            async def slow_executor(_item, _action, _markets, _rev):
+                regenerating.add(owner)
+                if len(regenerating) == len(slow_owners):
+                    all_slow_waiting.set()
+                await asyncio.Event().wait()
+
+            await auto_sched._execute_items(f"run-{owner}", f"auto-{owner}", auto_sched.datetime.now(auto_sched.UTC), slow_executor)
+            return
+
+        # Fast seller waits until all 5 slow sellers (> max_concurrency=2) are actively waiting on regenerate.
+        await all_slow_waiting.wait()
+        async with auto_sched.db_slot():
+            await asyncio.sleep(0.01)
+        fast_finished.set()
+
+    monkeypatch.setattr(auto_sched, "in_worker_session", fake_in_worker)
+    monkeypatch.setattr(scheduler, "TICK_SECONDS", 60)
+    monkeypatch.setattr(scheduler, "due_owners", lambda _engine: [*slow_owners, fast_owner])
+    monkeypatch.setattr(scheduler, "run_owner", run_owner)
+
+    async def scenario():
+        clock = asyncio.create_task(scheduler.serve(object(), max_concurrency=2))
+        try:
+            await asyncio.wait_for(fast_finished.wait(), timeout=2.0)
+        finally:
+            clock.cancel()
+            await asyncio.gather(clock, return_exceptions=True)
+
+    asyncio.run(scenario())
+    assert len(regenerating) == 5
+    assert fast_finished.is_set()
 
 
 def test_scheduler_concurrency_env_validation(monkeypatch):

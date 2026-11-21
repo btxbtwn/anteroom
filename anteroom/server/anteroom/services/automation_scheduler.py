@@ -11,13 +11,15 @@ from __future__ import annotations
 import asyncio
 import copy
 import logging
+from contextlib import asynccontextmanager, contextmanager
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import cast
 
 from sqlalchemy import CursorResult, update
 from sqlalchemy.orm import Session
 
-from anteroom.database import SessionLocal, in_worker_session
+from anteroom.database import SessionLocal, end_read, in_worker_session
 from anteroom.models.automation import Automation, AutomationRun
 from anteroom.repositories.queries import JobRepo
 from anteroom.services.automation_schedule import as_utc
@@ -44,50 +46,87 @@ TICK_SECONDS = 30.0
 _task: asyncio.Task | None = None
 # Runs this process is inside. A restart starts empty, so a leftover "running" row is picked up again.
 _inflight: set[str] = set()
+_db_gate: ContextVar[asyncio.Semaphore | None] = ContextVar("automation_db_gate", default=None)
+
+
+@contextmanager
+def bind_db_gate(gate: asyncio.Semaphore | None):
+    """Bound concurrent database-active automation steps in this async task tree."""
+    token = _db_gate.set(gate)
+    try:
+        yield
+    finally:
+        _db_gate.reset(token)
+
+
+@asynccontextmanager
+async def db_slot():
+    """Hold one hosted scheduler database slot for a short DB step, never across long waits."""
+    gate = _db_gate.get()
+    if gate is None:
+        yield
+        return
+    async with gate:
+        yield
+
+
+async def _db_work(work, /, *args):
+    async with db_slot():
+        return await in_worker_session(work, *args)
 
 
 async def tick(db: Session, *, now: datetime | None = None, executor=None) -> int:
     """Run every due automation that can start. Returns how many runs finished or stepped aside."""
     moment = as_utc(now or datetime.now(UTC))
     handled = 0
-    _recover_stale(db, moment)
+    recovered = False
     while True:
-        if _bridge_busy(db):
-            return handled
-        run = _resume_waiting(db, moment)
-        if run is None:
-            run = _claim_next(db, moment)
-        if run is None:
-            return handled
-        automation = db.get(Automation, run.automation_id)
-        if automation is None or automation.status not in {"active", "paused"}:
-            run.status = "failed"
-            run.error = "The automation is no longer active."
-            run.finished_at = _naive(moment)
+        async with db_slot():
+            if not recovered:
+                _recover_stale(db, moment)
+                recovered = True
+            if _bridge_busy(db):
+                end_read(db)
+                return handled
+            run = _resume_waiting(db, moment)
+            if run is None:
+                run = _claim_next(db, moment)
+            if run is None:
+                end_read(db)
+                return handled
+            automation = db.get(Automation, run.automation_id)
+            if automation is None or automation.status not in {"active", "paused"}:
+                run.status = "failed"
+                run.error = "The automation is no longer active."
+                run.finished_at = _naive(moment)
+                db.commit()
+                handled += 1
+                continue
+            # A paused task still finishes a run that was already claimed. It does not start a new slot.
+            if automation.status == "paused" and run.origin == "schedule" and run.attempt_count <= 1 and run.status == "running":
+                # Claimed this tick, before a pause could land. Run it: the seller confirmed the slot.
+                pass
+            run_id, automation_id = run.id, automation.id
+            # End this read: the run's steps open their own short sessions and wait on the model without one.
             db.commit()
-            handled += 1
-            continue
-        # A paused task still finishes a run that was already claimed. It does not start a new slot.
-        if automation.status == "paused" and run.origin == "schedule" and run.attempt_count <= 1 and run.status == "running":
-            # Claimed this tick, before a pause could land. Run it: the seller confirmed the slot.
-            pass
-        run_id, automation_id = run.id, automation.id
-        # End this read: the run's steps open their own short sessions and wait on the model without one.
-        db.commit()
         try:
             await _execute(run_id, automation_id, moment, executor)
         except AutomationBusy:
-            db.expire_all()
-            mark_waiting(db, run, moment)
+            async with db_slot():
+                db.expire_all()
+                mark_waiting(db, run, moment)
+                end_read(db)
             return handled + 1
         except Exception as exc:  # noqa: BLE001 - one bad run must not kill the clock
-            db.expire_all()
-            log.exception("automation run %s failed", run_id)
-            mark_retry(db, run, moment, str(exc) or "The run failed.")
-            if run.origin == "schedule":
-                finish_schedule = run.status == "failed"
-                if finish_schedule:
-                    finish_run(db, run, automation, moment, status="failed", error=run.error)
+            async with db_slot():
+                db.expire_all()
+                log.exception("automation run %s failed", run_id)
+                mark_retry(db, run, moment, str(exc) or "The run failed.")
+                if run.origin == "schedule":
+                    finish_schedule = run.status == "failed"
+                    if finish_schedule:
+                        finish_run(db, run, automation, moment, status="failed", error=run.error)
+                end_read(db)
             return handled + 1
         db.expire_all()
         handled += 1
@@ -230,9 +269,9 @@ async def _execute(run_id: str, automation_id: str, now: datetime, executor) -> 
 
 
 async def _execute_items(run_id: str, automation_id: str, now: datetime, executor) -> None:
-    items = await in_worker_session(_pending_items, run_id, automation_id, now)
+    items = await _db_work(_pending_items, run_id, automation_id, now)
     for item in items:
-        step = await in_worker_session(_start_item, run_id, automation_id, item, now)
+        step = await _db_work(_start_item, run_id, automation_id, item, now)
         if "outcome" not in step:
             action = step["remote"]
             # Scheduled marketplace writes become approval proposals; only a regenerate runs here.
@@ -241,9 +280,9 @@ async def _execute_items(run_id: str, automation_id: str, now: datetime, executo
             result = await executor(item, action, step["markets"], None)
             error = None if result.get("ok") else (result.get("error") or f"{action['type']} failed.")
             stepped = {"remote": {"type": action["type"], **result}, "error": error}
-            step = await in_worker_session(_settle_after_remote, run_id, automation_id, item, now, stepped)
-        await in_worker_session(_record_outcome, run_id, step["outcome"])
-    await in_worker_session(_finish_completed, run_id, automation_id, now)
+            step = await _db_work(_settle_after_remote, run_id, automation_id, item, now, stepped)
+        await _db_work(_record_outcome, run_id, step["outcome"])
+    await _db_work(_finish_completed, run_id, automation_id, now)
 
 
 def _loaded(db: Session, run_id: str, automation_id: str) -> tuple[AutomationRun, Automation]:

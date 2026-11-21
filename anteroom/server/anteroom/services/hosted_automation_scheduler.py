@@ -7,21 +7,20 @@ every marketplace write becomes an approval the seller reviews.
 
 Sellers' ticks run side by side, so one seller's long run (a regenerate can
 wait minutes per draft) never holds another seller's due automation. A seller
-is never ticked twice at once. A tick commits before it waits on anything
-outside the app, so a waiting run holds no pooled database connection.
+is never ticked twice at once. Database-active steps share a bounded semaphore
+so many simultaneous due sellers cannot exhaust the connection pool, while
+waiting regenerations hold neither a database connection nor a scheduler slot.
 """
 from __future__ import annotations
 
 import asyncio
-from collections import deque
 import logging
 import os
-import time
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from anteroom.services.automation_scheduler import TICK_SECONDS, tick
+from anteroom.services.automation_scheduler import TICK_SECONDS, bind_db_gate, tick
 from anteroom.services.hosted_context import for_seller
 from anteroom.services.service_context import use
 
@@ -60,15 +59,13 @@ async def run_owner(owner: str) -> None:
 
 
 async def serve(engine, *, max_concurrency: int | None = None) -> None:
-    limit = _scheduler_concurrency(max_concurrency)
+    db_gate = asyncio.Semaphore(_scheduler_concurrency(max_concurrency))
     running: dict[str, asyncio.Task] = {}
-    queued: deque[str] = deque()
-    queued_set: set[str] = set()
-    next_poll = 0.0
 
     async def run_guarded(owner: str) -> None:
         try:
-            await run_owner(owner)
+            with bind_db_gate(db_gate):
+                await run_owner(owner)
         except Exception:
             log.error('Automation tick failed for one seller', exc_info=True)
         finally:
@@ -77,31 +74,16 @@ async def serve(engine, *, max_concurrency: int | None = None) -> None:
 
     try:
         while True:
-            if time.monotonic() >= next_poll:
-                try:
-                    owners = await asyncio.to_thread(due_owners, engine)
-                except SQLAlchemyError:
-                    log.warning('Automation schedule database is temporarily unavailable')
-                    owners = []
-                for owner in owners:
-                    if owner in running or owner in queued_set:
-                        continue  # Still running or already waiting; a later poll picks up newly due work.
-                    queued.append(owner)
-                    queued_set.add(owner)
-                next_poll = time.monotonic() + TICK_SECONDS
-
-            while queued and len(running) < limit:
-                owner = queued.popleft()
-                queued_set.discard(owner)
+            try:
+                owners = await asyncio.to_thread(due_owners, engine)
+            except SQLAlchemyError:
+                log.warning('Automation schedule database is temporarily unavailable')
+                owners = []
+            for owner in owners:
                 if owner in running:
-                    continue
+                    continue  # Still running; the next poll picks up any newly due work.
                 running[owner] = asyncio.create_task(run_guarded(owner))
-
-            wait_for = max(0.0, next_poll - time.monotonic())
-            if queued and running:
-                await asyncio.wait(running.values(), timeout=wait_for, return_when=asyncio.FIRST_COMPLETED)
-            else:
-                await asyncio.sleep(wait_for)
+            await asyncio.sleep(TICK_SECONDS)
     finally:
         remaining = list(running.values())
         for task in remaining:
