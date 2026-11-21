@@ -449,6 +449,62 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved["depop_specifics"]["age"], ["modern"])
         self.assertEqual(saved["depop_specifics"]["source"], ["preloved"])
 
+    async def test_depop_source_and_style_are_never_left_blank_by_the_evidence_check(self):
+        # Production: generation wrote Source "Vintage" and Style ["Vintage", "Retro", "Streetwear"];
+        # the evidence-checked fill had no quote for them and cleared both.
+        from anteroom.services import native_contract
+
+        form = {"category_id": "menswear_t-shirts", "page_labels": True, "fields": [
+            row("depop_specifics.source", "Source", ["Vintage", "Preloved"], multi=True, max_values=2,
+                option_values={"Vintage": "vintage", "Preloved": "preloved"}),
+            row("depop_specifics.age", "Age", ["Modern", "90s"], multi=True, max_values=1,
+                option_values={"Modern": "modern", "90s": "90s"}),
+            row("depop_specifics.style", "Style", ["Streetwear", "Retro", "Casual", "Military"], multi=True,
+                max_values=3, option_values={"Streetwear": "streetwear", "Retro": "retro", "Casual": "casual",
+                                             "Military": "military"}),
+        ]}
+        listing = {"title": "Hanes XL 90s Vintage Desert Storm Graphic Tee",
+                   "description": "Vintage 1990s retro graphic t-shirt.",
+                   "direct_category_ids": {"depop": "menswear_t-shirts"},
+                   "depop_specifics": {"source": "Vintage", "age": "90s", "style": ["Vintage", "Retro", "Streetwear"]}}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"depop": form}, ["depop"])
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, "native_schema")
+        provider_text = AsyncMock(return_value=json.dumps({"fields": {}}))
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"depop": form})), \
+                patch("anteroom.services.listing_generate.collect_provider_text", provider_text):
+            await fill_native_fields(self.conv.id, object(), evidence="White Hanes tee, Desert Storm print.",
+                                     markets={"depop"})
+        saved = self._current().listing_json["depop_specifics"]
+        self.assertEqual(saved["source"], ["vintage"])
+        self.assertEqual(saved["age"], ["90s"])
+        self.assertTrue(saved["style"])
+        self.assertIn("retro", saved["style"])
+        self.assertLessEqual(len(saved["style"]), 3)
+        prompt = provider_text.await_args.args[1][1]["content"]
+        for path in native_field_fill.DEPOP_TAGS:
+            self.assertRegex(prompt, rf"- {path} \| [^|]+ \| required \|")
+
+    async def test_a_style_the_seller_cleared_stays_empty(self):
+        from anteroom.services import native_contract
+
+        form = {"category_id": "menswear_t-shirts", "page_labels": True, "fields": [
+            row("depop_specifics.style", "Style", ["Streetwear", "Retro"], multi=True, max_values=3,
+                option_values={"Streetwear": "streetwear", "Retro": "retro"}),
+            row("depop_specifics.source", "Source", ["Vintage", "Preloved"], multi=True, max_values=2,
+                option_values={"Vintage": "vintage", "Preloved": "preloved"}),
+        ]}
+        listing = {"title": "Retro tee", "direct_category_ids": {"depop": "menswear_t-shirts"},
+                   "depop_specifics": {"style": []}, "seller_fields": ["depop_specifics.style"]}
+        listing[native_contract.KEY] = native_contract.capture(listing, {"depop": form}, ["depop"])
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, "native_schema")
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"depop": form})), \
+                patch("anteroom.services.listing_generate.collect_provider_text",
+                      AsyncMock(return_value=json.dumps({"fields": {}}))):
+            await fill_native_fields(self.conv.id, object(), evidence="Retro tee.", markets={"depop"})
+        saved = self._current().listing_json["depop_specifics"]
+        self.assertEqual(saved["style"], [])
+        self.assertEqual(saved["source"], ["preloved"])
+
     async def test_refill_preserves_verified_answers_when_model_only_answers_missing_field(self):
         from anteroom.services import native_contract
 

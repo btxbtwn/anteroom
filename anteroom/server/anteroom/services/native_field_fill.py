@@ -39,8 +39,15 @@ FILL_RULES = (
     "use a short supported description when the suggestions do not fit. Leave out any field you cannot tell. Never guess a measurement, material "
     "or fit that the evidence does not show. Reply with one JSON object and nothing else: "
     '{"fields": {"<field path>": "<choice>" or ["<choice>", ...]}}. '
-    "Use a list only where a field allows more than one choice, and never more than its limit."
+    "Use a list only where a field allows more than one choice, and never more than its limit. "
+    "Depop's Source, Age and Style describe what kind of item it is, its era and its look: always answer "
+    "them with the closest listed choices, quoting the words they rest on (a decade, vintage, preloved, "
+    "graphic tee, the cut or print)."
 )
+
+# Depop leaves these optional, but a listing without them is harder to find,
+# so the agent always answers them, and falls back to the listing's own words.
+DEPOP_TAGS = ("depop_specifics.source", "depop_specifics.age", "depop_specifics.style")
 
 
 def _empty(value: Any) -> bool:
@@ -124,7 +131,7 @@ def forms_prompt(rows_by_market: dict[str, list[dict]], forms: dict[str, dict]) 
             if row.get("max_length") is not None:
                 mode += f"; max length {row['max_length']}"
             label = str(row.get("label") or "").removesuffix(" *")
-            requirement = "required" if row.get("required") else "optional"
+            requirement = "required" if row.get("required") or _path(row) in DEPOP_TAGS else "optional"
             from anteroom.services.option_lookup import project_row
 
             projected = project_row(row)
@@ -217,24 +224,31 @@ def clear_value(listing: dict, path: str) -> None:
         del parent[name]
 
 
-DEPOP_AGE = "depop_specifics.age"
+def _keep_depop_tags(listing: dict, rows: dict[str, dict]) -> None:
+    """Depop's Source, Age and Style always have an answer. The evidence check
+    leaves blank what the model did not quote (photos never show "Modern"), so
+    a blank one gets the default generation uses, spelled as the form stores it."""
+    from anteroom.services.depop_fields import depop_default_age, depop_default_source, infer_depop_styles
 
-
-def _keep_depop_age(listing: dict, row: dict | None) -> None:
-    """Depop's Age always has an answer. Photos never show "Modern", so the
-    evidence check leaves it blank; give it the default generation uses."""
-    from anteroom.services.depop_fields import depop_default_age
-
-    if row is None or not _empty(get_path(listing, DEPOP_AGE)):
-        return
-    wanted = fold_key(depop_default_age(listing))
-    values = row.get("option_values") or {}
-    label = next((label for label in row.get("options") or []
-                  if wanted in (fold_key(label), fold_key(str(values.get(label, label))))), None)
-    if label is None:
-        return
-    stored = str(values.get(label, label))
-    write_value(listing, DEPOP_AGE, [stored] if row.get("multi") else stored)
+    for path in DEPOP_TAGS:
+        row = rows.get(path)
+        if row is None or not _empty(get_path(listing, path)):
+            continue
+        if path.endswith(".source"):
+            wanted = [depop_default_source(listing)]
+        elif path.endswith(".age"):
+            wanted = [depop_default_age(listing)]
+        else:
+            wanted = infer_depop_styles(listing, limit=_limit(row))
+        values = row.get("option_values") or {}
+        by_fold = {}
+        for label in row.get("options") or []:
+            by_fold.setdefault(fold_key(label), label)
+            by_fold.setdefault(fold_key(str(values.get(label, label))), label)
+        labels = list(dict.fromkeys(by_fold[fold_key(item)] for item in wanted if fold_key(item) in by_fold))
+        stored = [str(values.get(label, label)) for label in labels[:_limit(row)]]
+        if stored:
+            write_value(listing, path, stored if row.get("multi") else stored[0])
 
 
 async def load_forms(conv_id: str, markets: Iterable[str] = MARKETS) -> dict[str, dict]:
@@ -571,7 +585,7 @@ def _save_fill(db: Session, conv_id: str, revision_id: str, fingerprint: str, li
         if strict:
             updated.setdefault(native_contract.EVIDENCE_KEY, {})[path] = {
                 "value": copy.deepcopy(value), "quote": reply["fields"][path]["evidence"]}
-    _keep_depop_age(updated, rows.get(DEPOP_AGE))
+    _keep_depop_tags(updated, rows)
     if updated == listing:
         return updated if strict else None
     revision = listing_persistence.save_revision(db, conv_id, updated, source="native_categories" if categories else "native_fields", parent_revision_id=revision_id, expected_revision_id=revision_id)

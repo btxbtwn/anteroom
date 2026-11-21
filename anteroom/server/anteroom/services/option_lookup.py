@@ -170,6 +170,8 @@ async def chat_with_options(provider, messages: list[dict], catalog: OptionCatal
     searches = 0
     target_replies = 0
     targets_declared = on_targets is None
+    declared: tuple[str, ...] = ()
+    asked_for_changes = False
     allowed_targets = {path for (_market, path), row in catalog.rows.items()
                        if path and not row.get("locked") and row.get("input_type") not in {"note", "badge"}}
 
@@ -191,6 +193,15 @@ async def chat_with_options(provider, messages: list[dict], catalog: OptionCatal
         text = "".join(parts)
         request = _request(text)
         if request is None:
+            if declared and not asked_for_changes and "{" not in text:
+                # Declaring fields and then answering in prose saves nothing,
+                # while the reply reads as if the work were done. Ask once.
+                asked_for_changes = True
+                target_reply(text, f"You declared {', '.join(declared)} but your reply has no JSON, "
+                                   "so nothing was saved. Reply now with a short confirmation and the fenced "
+                                   "JSON that saves those fields. Only if no value is supported, say why "
+                                   "in plain words.")
+                continue
             if not targets_declared and on_targets is not None:
                 if "```" not in text:
                     # A plain answer changes nothing; an empty scope saves nothing.
@@ -205,19 +216,23 @@ async def chat_with_options(provider, messages: list[dict], catalog: OptionCatal
         if "_field_targets" in request and on_targets is not None:
             if targets_declared:
                 target_reply(text, "Field targets already acknowledged and cannot change. Do not declare them again. "
-                                   "Complete the request using only the previously acknowledged fields.")
+                                   "Give your final answer now: a short confirmation and the fenced JSON that "
+                                   "saves the previously acknowledged fields.")
                 continue
             raw = request["_field_targets"]
             paths = [_target_path(path) for path in raw] if isinstance(raw, list) else None
             rejected = [path for path in paths or [] if not isinstance(path, str) or path not in allowed_targets]
             if paths is not None and not rejected:
-                on_targets(tuple(sorted(set(paths))))
+                declared = tuple(sorted(set(paths)))
+                on_targets(declared)
                 targets_declared = True
                 # The handshake applies once, not at the start of every model call.
                 protocol_message["content"] = protocol_message["content"].removesuffix(target_rules) + (
                     "\nField targets have been acknowledged. Do not declare _field_targets again. "
-                    "Complete the request, modifying only the acknowledged fields.\n")
-                target_reply(text, 'Field targets acknowledged. Complete the request using only these fields.')
+                    "Complete the request, modifying only the acknowledged fields. Your final answer must "
+                    "include the fenced JSON that saves them.\n")
+                target_reply(text, 'Field targets acknowledged. Now give your final answer: a short confirmation '
+                                   'and the fenced JSON that saves these fields.')
                 continue
             target_reply(text, 'Invalid field targets' + (f": {json.dumps(rejected, ensure_ascii=False)}" if rejected else "")
                          + '. Declare exact editable path values from the current forms rows, or [] for no changes.')
