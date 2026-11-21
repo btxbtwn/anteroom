@@ -1,0 +1,1 @@
+- Enabled Settings → Help on the web app with hosted-appropriate how-to guides (filtering desktop-only topics) and added a Support and legal section with direct support, privacy, and terms links.
