@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1091 — 2026-11-21
+
+- Operators can resolve, mute, and reopen error groups. Errors that return on a newer release alert again, and warnings arrive in a daily digest.
+
 ## 0.1.1090 — 2026-11-21
 
 - Show Depop’s duplicate-SKU error when Depop reports it. Keep uncertain publishes blocked from retrying while you check the result.
