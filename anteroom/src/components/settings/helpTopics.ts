@@ -4,6 +4,10 @@ export type HelpTopic = {
   id: string;
   title: string;
   steps: readonly string[];
+  /** Shown only in the local desktop app (not hosted web). */
+  desktopOnly?: boolean;
+  /** Alternative steps shown in the hosted web app when the workflow differs. */
+  hostedSteps?: readonly string[];
 };
 
 export const HELP_TOPICS: readonly HelpTopic[] = [
@@ -77,6 +81,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
   {
     id: "help-connect-agent",
     title: "Connect an agent",
+    desktopOnly: true,
     steps: [
       "Go to Settings → Agents. It shows whether the **anteroom** command is installed and the address an agent on this Mac should use.",
       "If it says the command is not installed, run the install command shown there from the anteroom folder, then reopen Agents.",
@@ -94,10 +99,17 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "Sign in to the marketplaces you list on in that Chrome window.",
       "Settings → Connections shows **Connected** when it works. If it says offline or outdated, press **Connect Chrome** again.",
     ],
+    hostedSteps: [
+      "Install **Anteroom Bridge** in desktop Chrome from the [Chrome Web Store](https://chromewebstore.google.com/detail/empinkdlhndpfoigoipbiiofaeepcheo), then reload this page.",
+      "Open the **Account** menu in the top-right corner and choose **Connect Anteroom Extension**, then approve the prompt in Chrome.",
+      "Sign in to Poshmark, Mercari, or Depop in that same Chrome window. (eBay and Etsy connect directly in Settings → Connections without Chrome.)",
+      "Keep an Anteroom tab open in Chrome whenever you want marketplace actions or automatic sale checks to run.",
+    ],
   },
   {
     id: "help-backups",
     title: "Back up and restore",
+    desktopOnly: true,
     steps: [
       "Anteroom backs itself up when it starts, every six hours, and before any update. To make one now, go to Settings → Data and press **Back up now**.",
       "Set a **Backup folder** that is not on this Mac, such as an external drive or a synced folder, and press **Save**. Every backup and photo is copied there.",
@@ -105,6 +117,14 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
     ],
   },
 ];
+
+/** Help topics appropriate for the current runtime (desktop or hosted web). */
+export function helpTopicsFor(hosted: boolean): readonly HelpTopic[] {
+  if (!hosted) return HELP_TOPICS;
+  return HELP_TOPICS.filter((topic) => !topic.desktopOnly).map((topic) =>
+    topic.hostedSteps ? { ...topic, steps: topic.hostedSteps } : topic,
+  );
+}
 
 /** A topic's steps as a numbered markdown list. */
 export function helpTopicMarkdown(topic: HelpTopic): string {

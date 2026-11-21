@@ -46,7 +46,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsSectionId, string>
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionId = "general";
 
 /** Sections the web app has; the others need the Mac. */
-export const HOSTED_SETTINGS_SECTIONS: readonly SettingsSectionId[] = ["general", "listings", "providers", "connections", "experimental"];
+export const HOSTED_SETTINGS_SECTIONS: readonly SettingsSectionId[] = ["general", "listings", "providers", "connections", "experimental", "help"];
 
 /** Sections the hosted web app offers; managed AI handles the model automatically so Providers is hidden. */
 export function hostedSettingsSections(managedAI = false): readonly SettingsSectionId[] {
@@ -68,6 +68,7 @@ export function settingsSearchItemsFor(hosted: boolean, managedAI = false): read
       (item.section === "general" && item.id !== "setup-guide") ||
       item.section === "listings" ||
       item.section === "experimental" ||
+      item.section === "help" ||
       (!managedAI && item.section === "providers" && !["chatgpt", "claude", "cursor", "brave"].includes(item.id)) ||
       (item.section === "connections" && ["accounts", "direct-ebay", "ebay-inventory-location", "direct-etsy"].includes(item.id)),
   );
@@ -312,6 +313,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     section: "help",
     targetId: "help",
     searchTerms: ["help", "how to", "guide", "steps", "instructions", "faq"],
+  },
+  {
+    id: "support",
+    title: "Support and legal",
+    section: "help",
+    targetId: "support",
+    searchTerms: ["support", "contact", "email", "privacy", "terms", "policy"],
   },
 ];
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HELP_TOPICS, helpTopicMarkdown } from "./helpTopics";
+import { HELP_TOPICS, helpTopicMarkdown, helpTopicsFor } from "./helpTopics";
 
 describe("help topics", () => {
   it("have unique ids and a few steps each", () => {
@@ -52,5 +52,17 @@ describe("help topics", () => {
     expect(regenerate).not.toContain("**History** in the listing header");
     const backups = helpTopicMarkdown(HELP_TOPICS.find((topic) => topic.id === "help-backups")!);
     expect(backups).not.toContain("**History** in its header");
+  });
+
+  it("filters desktop-only topics and uses Chrome Web Store steps on hosted web", () => {
+    const hosted = helpTopicsFor(true);
+    const ids = hosted.map((topic) => topic.id);
+    expect(ids).not.toContain("help-connect-agent");
+    expect(ids).not.toContain("help-backups");
+    const chrome = hosted.find((topic) => topic.id === "help-connect-chrome")!;
+    const text = helpTopicMarkdown(chrome);
+    expect(text).toContain("chromewebstore.google.com/detail/empinkdlhndpfoigoipbiiofaeepcheo");
+    expect(text).not.toContain("Load unpacked");
+    expect(helpTopicsFor(false)).toEqual(HELP_TOPICS);
   });
 });

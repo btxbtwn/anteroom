@@ -67,10 +67,13 @@ describe("searchSettings", () => {
 });
 
 describe("settings on the web", () => {
-  it("opens every section the web sidebar offers, Connections included", () => {
+  it("opens every section the web sidebar offers, Connections and Help included", () => {
     for (const id of HOSTED_SETTINGS_SECTIONS) expect(settingsSectionFor(id, true)).toBe(id);
     expect(HOSTED_SETTINGS_SECTIONS).toContain("connections");
     expect(HOSTED_SETTINGS_SECTIONS).toContain("experimental");
+    expect(HOSTED_SETTINGS_SECTIONS).toContain("help");
+    expect(searchSettings("support", settingsSearchItemsFor(true, true)).map((item) => item.id)).toContain("support");
+    expect(searchSettings("how to", settingsSearchItemsFor(true, true)).map((item) => item.id)).toContain("help");
   });
 
   it("sends desktop-only sections to Providers on the web, and changes nothing on the Mac", () => {
