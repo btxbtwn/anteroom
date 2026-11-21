@@ -5,7 +5,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatPanel } from "./ChatPanel";
 import type { ChatComposer } from "./chat/ChatComposer";
-import { getComposerDraft, resetComposerDrafts, setComposerDraftImages } from "./chat/composerDrafts";
+import { getComposerDraft, resetComposerDrafts, setComposerDraftImages, setComposerDraftText } from "./chat/composerDrafts";
+
+import { getLive, patchLive, resetChatLive } from "./chat/liveChatStore";
 
 const { uploadPhotos, handleGenerate, sendMessage } = vi.hoisted(() => ({
   uploadPhotos: vi.fn(),
@@ -15,10 +17,10 @@ const { uploadPhotos, handleGenerate, sendMessage } = vi.hoisted(() => ({
 
 vi.mock("../api/client", () => ({ api: { conversations: { uploadListingPhoto: uploadPhotos } } }));
 vi.mock("./chat/useChatServerState", () => ({
-  useChatServerState: () => ({
+  useChatServerState: (_convId: string, busy: boolean) => ({
     photos: uploadPhotos.mock.calls.length ? [{ id: "photo-1" }] : [],
     messages: [],
-    busy: false,
+    busy,
   }),
 }));
 vi.mock("./chat/useChatStream", () => ({
@@ -37,6 +39,12 @@ vi.mock("./chat/ChatComposer", () => ({
   ),
 }));
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+}
+
 describe("listing photo uploads from chat", () => {
   const draftKey = "listing:listing-a";
   let root: Root;
@@ -47,6 +55,8 @@ describe("listing photo uploads from chat", () => {
     vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
     vi.resetAllMocks();
     resetComposerDrafts();
+    resetChatLive("listing-a");
+    sendMessage.mockResolvedValue(true);
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
@@ -60,10 +70,10 @@ describe("listing photo uploads from chat", () => {
     vi.unstubAllGlobals();
   });
 
-  async function renderChat(convId = "listing-a") {
+  async function renderChat(convId = "listing-a", queuedMessage?: string) {
     await act(async () => root.render(
       <QueryClientProvider client={queryClient}>
-        <ChatPanel key={convId} convId={convId} />
+        <ChatPanel key={convId} convId={convId} queuedMessage={queuedMessage} />
       </QueryClientProvider>,
     ));
   }
@@ -127,4 +137,74 @@ describe("listing photo uploads from chat", () => {
     expect(handleGenerate).not.toHaveBeenCalled();
     expect(sendMessage).not.toHaveBeenCalled();
   });
+  async function startUpload(note = "") {
+    const file = new File(["front"], "front.jpg", { type: "image/jpeg" });
+    setComposerDraftImages(draftKey, [{ id: "front", file }]);
+    setComposerDraftText(draftKey, note);
+    const upload = deferred<void>();
+    uploadPhotos.mockReturnValueOnce(upload.promise);
+    await renderChat();
+    await send();
+    return upload;
+  }
+
+  function startInspectorMessage() {
+    const inspector = deferred<boolean>();
+    sendMessage.mockImplementationOnce(() => {
+      patchLive("listing-a", { streaming: true, controller: new AbortController() });
+      return inspector.promise;
+    });
+    return async () => {
+      await act(async () => {
+        patchLive("listing-a", { streaming: false, controller: null });
+        inspector.resolve(true);
+      });
+    };
+  }
+
+  it("holds the submitted note through an inspector reply and preserves a newer draft", async () => {
+    const upload = await startUpload("  Submitted note  ");
+    const finishInspector = startInspectorMessage();
+    await renderChat("listing-a", "Inspector prompt");
+    const controller = getLive("listing-a").controller;
+    expect(controller).not.toBeNull();
+    await act(async () => {
+      setComposerDraftText(draftKey, "Newer text");
+      upload.resolve();
+    });
+    expect(sendMessage.mock.calls.map(([text]) => text)).toEqual(["Inspector prompt"]);
+    expect(getComposerDraft(draftKey).text).toBe("Newer text");
+
+    await finishInspector();
+    expect(sendMessage).toHaveBeenLastCalledWith("Submitted note", { preserveInput: true });
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+    expect(getComposerDraft(draftKey).text).toBe("Newer text");
+  });
+
+  it("clears the submitted draft text when handing the note off for dispatch", async () => {
+    const upload = await startUpload("  Submitted note  ");
+    await act(async () => upload.resolve());
+    expect(getComposerDraft(draftKey).text).toBe("");
+    expect(sendMessage).toHaveBeenCalledWith("Submitted note", { preserveInput: true });
+  });
+
+  it.each([false, true])("waits for an inspector reply before deciding to generate (copy saved: %s)", async (copySaved) => {
+    const upload = await startUpload();
+    const finishInspector = startInspectorMessage();
+    await renderChat("listing-a", "Inspector prompt");
+    const controller = getLive("listing-a").controller;
+    expect(controller).not.toBeNull();
+    await act(async () => upload.resolve());
+    expect(handleGenerate).not.toHaveBeenCalled();
+    expect(controller?.signal.aborted).toBe(false);
+
+    if (copySaved) {
+      queryClient.setQueryData(["listing", "listing-a"], {
+        listing: { title: "Existing Wool Coat", brand: "Pendleton", price: 120 },
+      });
+    }
+    await finishInspector();
+    expect(handleGenerate).toHaveBeenCalledTimes(copySaved ? 0 : 1);
+  });
+
 });

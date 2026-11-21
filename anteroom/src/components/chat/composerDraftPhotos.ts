@@ -24,19 +24,11 @@ export interface DraftPhotoUploadDeps {
   invalidatePhotos: () => Promise<void>;
   clearImages: (ids: readonly string[]) => void;
   setError: (message: string) => void;
-  sendMessage: (text: string) => unknown;
-  generate: () => unknown;
-  hasListingCopy: () => boolean | Promise<boolean>;
 }
 
-/**
- * Promote chat-composer images to the draft's listing photos when the draft has
- * none yet, then kick off generation (only if the draft still has no listing
- * copy after upload completes) or send the seller's accompanying note.
- */
+/** Upload the batch and leave any failed images in the composer for retry. */
 export async function uploadComposerDraftPhotos(
   attached: readonly ComposerImage[],
-  text: string,
   deps: DraftPhotoUploadDeps,
 ): Promise<boolean> {
   const uploadedIds: string[] = [];
@@ -61,11 +53,6 @@ export async function uploadComposerDraftPhotos(
   if (errors.length || !uploadedIds.length) {
     deps.setError(errors.join("; ") || "Could not upload photos.");
     return false;
-  }
-  if (text) {
-    deps.sendMessage(text);
-  } else if (!(await deps.hasListingCopy())) {
-    deps.generate();
   }
   return true;
 }
