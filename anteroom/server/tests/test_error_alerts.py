@@ -134,7 +134,8 @@ def test_handled_http_refusal_is_logged_without_private_url_or_body():
     assert message % tuple(args) == "GET /api/items/{item_id} answered 409"
 
 
-def test_email_goes_to_operator_over_tls():
+def test_email_goes_to_operator_over_tls(monkeypatch):
+    monkeypatch.delenv("ANTEROOM_OPERATOR_EMAIL", raising=False)
     with patch("smtplib.SMTP") as factory:
         send_email("subject", "body")
     factory.assert_called_once_with("smtp-relay.gmail.com", 587, local_hostname="myanteroom.com", timeout=20)
