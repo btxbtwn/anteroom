@@ -62,6 +62,7 @@ def fillable_rows(form: dict, market: str, listing: dict, *, evidence: str = "")
     """Empty or unverified item fields the agent may choose values for."""
     prefix = f"{market}_specifics."
     strict = native_contract.KEY in listing
+    etsy_attributes_locked = market == "etsy" and is_locked(listing, ETSY_ATTRIBUTES.rstrip("."))
     rows = []
     for row in form.get("fields") or []:
         row = native_contract.applicable_row(row, listing, form.get("fields") or [])
@@ -70,6 +71,8 @@ def fillable_rows(form: dict, market: str, listing: dict, *, evidence: str = "")
         if not path.startswith(prefix) or row.get("locked") or (not options and not strict):
             continue
         if not native_contract.item_field(row, market) or (not strict and not _empty(row.get("value"))):
+            continue
+        if etsy_attributes_locked and path.startswith(ETSY_ATTRIBUTES):
             continue
         if market == "etsy" and fold_key(str(row.get("label") or "")) in _FROM_GENERAL:
             continue

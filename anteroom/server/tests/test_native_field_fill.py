@@ -62,6 +62,23 @@ class FillableRowsTest(unittest.TestCase):
         # Filled (Body fit), locked (Fit), sale rows (price, package) and brand are left alone.
         self.assertEqual(paths, ["depop_specifics.attributes.bottom-fit", "depop_specifics.age"])
 
+    def test_legacy_etsy_fill_skips_the_seller_locked_attribute_group(self):
+        from anteroom.services.seller_overrides import lock_seller_edits
+
+        sleeve = "etsy_specifics.category_specifics.Sleeve length"
+        graphic = "etsy_specifics.category_specifics.Graphic"
+        materials = "etsy_specifics.materials"
+        form = {"fields": [
+            row(sleeve, "Sleeve length", ["Short sleeve"], category_specific=True),
+            row(graphic, "Graphic", ["Text"], category_specific=True),
+            row(materials, "Materials", ["Cotton"]),
+        ]}
+        previous = {"etsy_specifics": {"category_specifics": {"Sleeve length": "Short sleeve"}}}
+        edited = {"etsy_specifics": {"category_specifics": {"Sleeve length": ""}}}
+        self.assertEqual([r["path"] for r in fillable_rows(form, "etsy", edited)], [sleeve, graphic, materials])
+        lock_seller_edits(previous, edited)
+        self.assertEqual([r["path"] for r in fillable_rows(form, "etsy", edited)], [materials])
+
     def test_locked_rows_are_skipped_but_large_catalogs_are_searchable(self):
         form = {"fields": [row("ebay_specifics.Color", "Color", [str(n) for n in range(400)]),
                            row("ebay_specifics.Style", "Style", ["Jeans"], locked=True),
