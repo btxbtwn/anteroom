@@ -18,7 +18,7 @@ export function ErrorEmailStatus() {
   return (
     <SettingsSection id="error-email" title="Error emails">
       <SettingsRow id="error-email-delivery" title="Operator email delivery"
-        description="Warnings are grouped into hourly digests. Errors use the reserved email budget."
+        description="Warnings are grouped into digests. Errors use the reserved email budget."
         status={data.state ? labels[data.state] : undefined}>
         {error ? <SettingsNote tone="error">{error.message}</SettingsNote> : null}
         {data.state === "needs_budget" ? <SettingsNote>Reports are retained until the operator configures a verified daily allowance.</SettingsNote> : null}

@@ -1,7 +1,7 @@
 """Global operator mail accounting; seller roles have no access."""
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, Float, Index, Integer, String
+from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, Float, Index, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from anteroom.database import Base
@@ -25,6 +25,21 @@ class OperatorEmailGroup(Base):
     due: Mapped[float | None] = mapped_column(Float, nullable=True)
     warning: Mapped[bool] = mapped_column(Boolean, nullable=False)
     last_sent: Mapped[float | None] = mapped_column(Float, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, server_default='open')
+    resolved_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    resolved_release: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    muted_until: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_release: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    occurrence_count: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default='0')
+    headline: Mapped[str | None] = mapped_column(String, nullable=True)
+    first_seen: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_seen: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     __table_args__ = (Index('ix_error_email_groups_due', 'warning', 'due'),
+                      Index('ix_error_email_groups_status_last_seen', 'status', 'last_seen'),
+                      Index('ix_error_email_groups_completed', 'last_sent',
+                            postgresql_where=text('last_sent IS NOT NULL AND payload IS NULL'),
+                            sqlite_where=text('last_sent IS NOT NULL AND payload IS NULL')),
+                      CheckConstraint("status IN ('open', 'resolved', 'muted')", name='ck_error_email_group_status'),
                       CheckConstraint('count >= 0', name='ck_error_email_group_count'),)
