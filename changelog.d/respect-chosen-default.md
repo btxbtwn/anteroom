@@ -1,0 +1,1 @@
+- Generated listings now always use the defaults you saved (Etsy who made it, what it is and renewal; Mercari ships-from ZIP, shipping label and shoebox answer) instead of the model picking its own. A value you set on a listing yourself still wins.

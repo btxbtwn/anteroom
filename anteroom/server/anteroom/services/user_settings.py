@@ -314,26 +314,53 @@ def clear_listing_field_default(path: object) -> dict[str, dict[str, str]]:
     return get_listing_field_defaults()
 
 
-def apply_listing_field_defaults(listing: dict) -> bool:
-    """Fill empty Etsy who/what/renewal answers from the seller's saved defaults."""
+def apply_listing_field_defaults(listing: dict, seed: dict | None = None) -> bool:
+    """Answer every field the seller saved a default for with that default, over the model's answer.
+
+    A saved default is the seller's choice, so a generated listing never guesses
+    another. Only a value the seller set on this listing (a lock in ``seed``) wins.
+    Etsy's answers are written into the listing. Mercari's ships-from ZIP, shipping
+    label and shoebox answer are form preferences ``native_form.attach_form`` fills
+    in, so the model's answer is removed and the saved one shows instead.
+    """
+    from anteroom.services.seller_overrides import field_locked, fold_key
+
     if not isinstance(listing, dict):
         return False
-    defaults = _stored_listing_field_defaults()
-    if not any(path in defaults for path in _ETSY_FIELD_DEFAULT_KEYS):
-        return False
-    specifics = listing.get("etsy_specifics")
-    specifics = dict(specifics) if isinstance(specifics, dict) else {}
     changed = False
+    defaults = _stored_listing_field_defaults()
+    etsy = listing.get("etsy_specifics")
+    etsy = dict(etsy) if isinstance(etsy, dict) else {}
     for path, aliases in _ETSY_FIELD_DEFAULT_KEYS.items():
         saved = defaults.get(path)
-        if not saved:
+        if not saved or any(field_locked(seed, "etsy", alias) for alias in aliases):
             continue
-        if any(isinstance(specifics.get(alias), (bool, int, float)) or str(specifics.get(alias) or "").strip() for alias in aliases):
+        folded = {fold_key(alias) for alias in aliases}
+        answer = {key: value for key, value in etsy.items() if fold_key(key) in folded}
+        if answer == {aliases[0]: saved["label"]}:
             continue
-        specifics[aliases[0]] = saved["label"]
+        etsy = {key: value for key, value in etsy.items() if key not in answer}
+        etsy[aliases[0]] = saved["label"]
         changed = True
     if changed:
-        listing["etsy_specifics"] = specifics
+        listing["etsy_specifics"] = etsy
+
+    mercari = listing.get("mercari_specifics")
+    if not isinstance(mercari, dict):
+        return changed
+    preferences = {
+        "shipsFrom": bool(get_ships_from_zip()),
+        "shippingClassId": get_mercari_shipping_label() is not None,
+    }
+    for key, saved in preferences.items():
+        if saved and key in mercari and not field_locked(seed, "mercari", key):
+            mercari.pop(key)
+            changed = True
+    package = mercari.get("package")
+    if MERCARI_SHOEBOX_PATH in defaults and isinstance(package, dict) and "fitsShoebox" in package \
+            and not field_locked(seed, "mercari", "fitsShoebox"):
+        package.pop("fitsShoebox")
+        changed = True
     return changed
 
 
