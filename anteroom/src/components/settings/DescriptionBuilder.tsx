@@ -13,7 +13,7 @@ import {
   useSensors,
   type CollisionDetection,
   type DragEndEvent,
-  type DragOverEvent,
+  type DragMoveEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
 import {
@@ -25,7 +25,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { ArrowDownIcon, ArrowUpIcon, GripVerticalIcon, PlusIcon, XIcon } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { DescriptionFormulaBlock } from "../../api/client";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
@@ -72,7 +72,7 @@ export function removeBlockId(ids: readonly string[], id: string): string[] {
 }
 
 function computeInsertIndex(
-  event: DragOverEvent | DragEndEvent,
+  event: Pick<DragMoveEvent, "active" | "over">,
   activeIds: readonly string[],
 ): number | null {
   const { over, active } = event;
@@ -138,6 +138,7 @@ function SortableActiveRow({
           type="button"
           disabled={disabled}
           aria-label={`Drag to reorder ${block.label}`}
+          data-focus-control="reorder"
           className="inline-flex size-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing disabled:pointer-events-none disabled:opacity-50 sm:size-7"
           {...attributes}
         >
@@ -178,6 +179,7 @@ function SortableActiveRow({
           variant="ghost-muted"
           disabled={disabled}
           aria-label={`Remove ${block.label}`}
+          data-focus-control="remove"
           onClick={() => onRemove(block.id)}
         >
           <XIcon aria-hidden />
@@ -234,6 +236,7 @@ function DraggableAvailableCard({
         variant="ghost-muted"
         disabled={disabled}
         aria-label={`Add ${block.label}`}
+        data-focus-control="add"
         onClick={() => onAdd(block.id)}
       >
         <PlusIcon aria-hidden />
@@ -395,6 +398,22 @@ export function DescriptionBuilder({
   const [insertIndex, setInsertIndex] = useState<number | null>(null);
   const [overAvailable, setOverAvailable] = useState(false);
   const [announcement, setAnnouncement] = useState("");
+  const builderRef = useRef<HTMLDivElement>(null);
+  const pendingFocus = useRef<{ control: "add" | "remove" | "reorder"; id?: string } | null>(null);
+
+  // Button actions replace their source control in the parent's next render.
+  useLayoutEffect(() => {
+    const target = pendingFocus.current;
+    pendingFocus.current = null;
+    if (!target || !builderRef.current) return;
+    const controls = builderRef.current.querySelectorAll<HTMLButtonElement>(
+      `[data-focus-control="${target.control}"]`,
+    );
+    Array.from(controls).find((button) =>
+      !button.disabled &&
+      (target.id === undefined || button.closest<HTMLElement>("[data-block-id]")?.dataset.blockId === target.id),
+    )?.focus();
+  }, [blockIds]);
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
@@ -443,12 +462,18 @@ export function DescriptionBuilder({
 
   const handleAdd = (id: string) => {
     const label = byId.get(id)?.label ?? id;
+    pendingFocus.current = { control: "reorder", id };
     onChange(insertBlockId(blockIds, id));
     setAnnouncement(`Added ${label} to description.`);
   };
 
   const handleRemove = (id: string) => {
     const label = byId.get(id)?.label ?? id;
+    const index = activeBlocks.findIndex((block) => block.id === id);
+    const neighbor = activeBlocks[index + 1] ?? activeBlocks[index - 1];
+    pendingFocus.current = neighbor
+      ? { control: "remove", id: neighbor.id }
+      : { control: "add", id };
     onChange(removeBlockId(blockIds, id));
     setAnnouncement(`Removed ${label} from description.`);
   };
@@ -462,6 +487,7 @@ export function DescriptionBuilder({
   };
 
   const handleClear = () => {
+    pendingFocus.current = { control: "add" };
     onChange([]);
     setAnnouncement("Cleared all description attributes.");
   };
@@ -481,7 +507,7 @@ export function DescriptionBuilder({
     setOverAvailable(false);
   };
 
-  const handleDragOver = (event: DragOverEvent) => {
+  const updateDragIndicator = (event: DragMoveEvent) => {
     const { over } = event;
     if (!over || !draggingId) {
       setInsertIndex(null);
@@ -529,7 +555,7 @@ export function DescriptionBuilder({
   };
 
   return (
-    <div className="grid min-w-0 gap-3">
+    <div ref={builderRef} className="grid min-w-0 gap-3">
       <div className="sr-only" role="status" aria-live="polite">
         {announcement}
       </div>
@@ -537,7 +563,8 @@ export function DescriptionBuilder({
         sensors={sensors}
         collisionDetection={collisionDetection}
         onDragStart={handleDragStart}
-        onDragOver={handleDragOver}
+        onDragOver={updateDragIndicator}
+        onDragMove={dragOrigin === "available" ? updateDragIndicator : undefined}
         onDragEnd={handleDragEnd}
         onDragCancel={resetDrag}
       >

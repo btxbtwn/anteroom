@@ -127,6 +127,33 @@ describe("DescriptionBuilder interactions", () => {
     };
   }
 
+  it("keeps focus in the builder after adding, removing, and clearing", () => {
+    const { container, unmount } = renderBuilder(["vibe", "flaws", "measurements"]);
+    const button = (label: string) =>
+      container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
+    const activate = (control: HTMLButtonElement) => {
+      control.focus();
+      act(() => control.click());
+    };
+
+    try {
+      activate(button("Add Material"));
+      expect(document.activeElement).toBe(button("Drag to reorder Material"));
+
+      activate(button("Remove Flaws"));
+      expect(document.activeElement).toBe(button("Remove Measurements"));
+
+      activate(Array.from(container.querySelectorAll("button")).find((btn) => btn.textContent === "Clear")!);
+      expect(document.activeElement).toBe(button("Add Vibe"));
+
+      activate(button("Add Care"));
+      activate(button("Remove Care"));
+      expect(document.activeElement).toBe(button("Add Care"));
+    } finally {
+      unmount();
+    }
+  });
+
   it("adds, reorders, removes, and clears attributes with live preview and status updates", () => {
     const { container, onChange, unmount } = renderBuilder(["vibe", "flaws", "measurements"]);
 

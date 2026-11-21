@@ -89,13 +89,25 @@ test("description maker supports dragging, dropping, reordering, and saving attr
         "material",
       ]);
     } else {
-      // Drag Material from Available attributes into the description above Flaws.
-      await mouseDrag(
-        page,
-        formulas.locator('[data-slot="description-available-block"][data-block-id="material"] button[aria-label="Drag Material into description"]'),
-        formulas.locator('[data-slot="description-active-block"][data-block-id="flaws"]'),
-        0.2,
+      // Move across the same row's midpoint without leaving its drop target.
+      const material = formulas.getByRole("button", { name: "Drag Material into description" });
+      await material.scrollIntoViewIfNeeded();
+      const start = (await material.boundingBox())!;
+      const flaws = formulas.locator('[data-slot="description-active-block"][data-block-id="flaws"]');
+      const row = (await flaws.boundingBox())!;
+      const x = row.x + row.width / 2;
+      const indicator = formulas.locator('[data-slot="description-drop-indicator"]');
+      await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(x, row.y + row.height * 0.8, { steps: 12 });
+      await expect.poll(async () => (await indicator.boundingBox())?.y ?? 0).toBeGreaterThan(
+        row.y + row.height / 2,
       );
+      await page.mouse.move(x, row.y + row.height * 0.2, { steps: 4 });
+      await expect(flaws.locator("xpath=preceding-sibling::*[1]")).toHaveAttribute(
+        "data-slot", "description-drop-indicator",
+      );
+      await page.mouse.up();
       await expect.poll(() => activeOrder(formulas)).toEqual([
         "vibe",
         "material",
