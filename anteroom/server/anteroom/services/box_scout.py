@@ -63,7 +63,7 @@ SNAPSHOT_FORMAT = 5
 TOP_PICKS = 5  # boxes shown per supplier on every check, however few qualify
 
 DEFAULT_PREFS = {
-    "budget": 300.0, "min_roi": 1.0, "raghouse_vip": False, "zip": "70115", "recent_zips": ["70115"],
+    "budget": 300.0, "min_roi": 1.0, "raghouse_vip": False, "zip": "", "recent_zips": [],
     "sell_through": 0.5, "sell_through_auto": True, "fees": 0.2, "fees_auto": True,
     "cost_per_piece": 2.0, "cost_per_piece_auto": True,
     "ready_in_weeks": 4, "selling_window_weeks": 4, "selling_window_auto": True,
@@ -162,6 +162,19 @@ def _save(state: dict) -> None:
         db.commit()
 
 
+def _default_zip() -> str:
+    """Use the seller's configured ships-from ZIP when it falls in the contiguous 48 states."""
+    from anteroom.services.user_settings import get_ships_from_zip
+
+    try:
+        candidate = get_ships_from_zip()
+    except Exception:
+        return ""
+    if candidate and scout().valid_zip(candidate) and not scout().OUTSIDE_48.match(candidate):
+        return candidate
+    return ""
+
+
 def read_state() -> dict:
     with _state_lock:
         state = _stored()
@@ -170,7 +183,16 @@ def read_state() -> dict:
 
 def _complete(state: dict) -> dict:
     state.setdefault("prefs", {})
-    state["prefs"] = {**DEFAULT_PREFS, **{k: v for k, v in state["prefs"].items() if k in DEFAULT_PREFS}}
+    prefs = {**DEFAULT_PREFS, **{k: v for k, v in state["prefs"].items() if k in DEFAULT_PREFS}}
+    if not prefs["zip"]:
+        fallback = _default_zip()
+        if fallback:
+            prefs["zip"] = fallback
+    recent = [z for z in prefs.get("recent_zips") or [] if isinstance(z, str) and z]
+    if prefs["zip"] and prefs["zip"] not in recent:
+        recent = [prefs["zip"], *recent][:RECENT_ZIPS]
+    prefs["recent_zips"] = recent[:RECENT_ZIPS]
+    state["prefs"] = prefs
     state.setdefault("trend", {"terms": [], "updated_at": None, "source": None})
     state.setdefault("resale", {})
     state.setdefault("zone_charts", {})
@@ -186,7 +208,10 @@ def _write_state(state: dict, *, preserve_prefs: bool = False) -> None:
     with _state_lock:
         if preserve_prefs:
             latest = _stored()
-            state["prefs"] = {**DEFAULT_PREFS, **latest.get("prefs", state["prefs"])}
+            merged = {**DEFAULT_PREFS, **latest.get("prefs", state["prefs"])}
+            if not merged["zip"] and state["prefs"].get("zip"):
+                merged["zip"] = state["prefs"]["zip"]
+            state["prefs"] = merged
         _save(state)
     # The business assistant keeps a copy of the buy list; a refresh or new prefs must reach the next question.
     from anteroom.services.business_context import invalidate_business_context
@@ -779,6 +804,8 @@ def _refresh(*, recrawl: bool, research: bool) -> dict:
 
 
 def _rebuild(*, recrawl: bool, research: bool) -> dict:
+    if not read_state()["prefs"]["zip"]:
+        raise ValueError("Enter a 5-digit US ZIP code before building a buy list.")
     s = scout()
     now = _now()
     sales = _own_sales()
@@ -950,7 +977,9 @@ def refreshing() -> bool:
 
 
 def refresh_in_background(*, recrawl: bool = True) -> bool:
-    """Start a refresh unless one is running. Returns whether one was started."""
+    """Start a refresh unless one is running or no destination ZIP is configured."""
+    if not read_state()["prefs"]["zip"]:
+        return False
     lock = _refresh_lock()
     if not lock.acquire(blocking=False):
         return False
@@ -974,6 +1003,8 @@ def refresh_in_background(*, recrawl: bool = True) -> bool:
 
 def refresh_is_due(*, now: datetime | None = None) -> bool:
     state = read_state()
+    if not state["prefs"]["zip"]:
+        return False
     snapshot = state["snapshot"]
     if snapshot and any(snapshot["preferences"][key] != state["prefs"][key] for key in PLAN_PREFS):
         return True

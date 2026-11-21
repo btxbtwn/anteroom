@@ -219,6 +219,19 @@ describe("planning settings", () => {
     expect(sourcingNeedsPoll(state())).toBe(false);
   });
 
+  it("prompts for a shipping ZIP instead of polling when none is configured", () => {
+    const noZip: SourcingState = {
+      ...state(),
+      snapshot: null,
+      prefs: { ...state().prefs, zip: "", recent_zips: [] },
+    };
+    expect(planNeedsUpdate(noZip)).toBe(false);
+    expect(sourcingNeedsPoll(noZip)).toBe(false);
+    const html = renderSourcing(noZip);
+    expect(html).toContain("Enter your shipping ZIP code");
+    expect(html).not.toContain("Getting your first list ready");
+  });
+
   it("shows operating cash separately from the purchase budget", () => {
     const plan = state().snapshot!.buy_list;
     expect(planMetrics(plan)).toEqual({ usable: 62.1, sold: 62.1 * 0.75, operating: 124.2, downside: 25 });

@@ -1,6 +1,6 @@
 ---
 name: box-scout
-description: Use when the user wants to know which wholesale clothing boxes, lots or bales to buy on raghouse.com, thriftvintagefashion.com or papercranewholesale.com: trending themes, a decent piece count and cost per piece, expected profit, with shipping estimated to New Orleans, LA 70115.
+description: Use when the user wants to know which wholesale clothing boxes, lots or bales to buy on raghouse.com, thriftvintagefashion.com or papercranewholesale.com: trending themes, a decent piece count and cost per piece, expected profit, with shipping estimated to the seller's destination ZIP.
 triggers:
   - "raghouse"
   - "thrift vintage fashion"
@@ -13,7 +13,7 @@ triggers:
 # Box Scout
 
 ## Purpose
-Decide which wholesale clothing lots to buy. Crawl Raghouse (Phoenix, AZ 85043), Thrift Vintage Fashion (Hialeah, FL 33016) and PaperCrane (a marketplace of vetted US sellers), estimate what each lot costs landed in New Orleans (70115), price what its pieces resell for, and return a buy list within a budget with a cart link per store.
+Decide which wholesale clothing lots to buy. Crawl Raghouse (Phoenix, AZ 85043), Thrift Vintage Fashion (Hialeah, FL 33016) and PaperCrane (a marketplace of vetted US sellers), estimate what each lot costs landed at the seller's destination ZIP, price what its pieces resell for, and return a buy list within a budget with a cart link per store.
 
 Anteroom's **Sourcing** page runs this same script on a timer and keeps the buy list ready. Use this skill when working outside Anteroom or when the seller asks in chat.
 

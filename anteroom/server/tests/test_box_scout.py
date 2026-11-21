@@ -546,7 +546,9 @@ class RefreshTest(unittest.TestCase):
         self.ebay = mock.patch.object(sold_listings, "ebay_sold", return_value={}).start()
         self.poshmark = mock.patch.object(sold_listings, "poshmark_listings", return_value=[]).start()
         mock.patch.object(box_scout, "RESEARCH_PAUSE_SEC", 0).start()
+        mock.patch.object(box_scout, "_default_zip", return_value="").start()
         self.addCleanup(mock.patch.stopall)
+        box_scout.set_prefs(zip="70115")
 
     def _models(self, search=None):
         return mock.patch("anteroom.services.comp_research.model_search", return_value=search)
@@ -623,7 +625,7 @@ class RefreshTest(unittest.TestCase):
             self.assertTrue(plan["carts"][0]["lots"][0]["comps_count"])
 
     def test_old_snapshot_cache_is_rebuilt_without_losing_preferences(self):
-        self.state_file.write_text(json.dumps({"prefs": {"budget": 180}, "snapshot": {"updated_at": "old"}}))
+        self.state_file.write_text(json.dumps({"prefs": {"budget": 180, "zip": "70115"}, "snapshot": {"updated_at": "old"}}))
         state = box_scout.read_state()
         self.assertIsNone(state["snapshot"])
         self.assertEqual(state["prefs"]["budget"], 180)
@@ -895,7 +897,7 @@ class RefreshTest(unittest.TestCase):
         self.assertFalse(box_scout.refresh_is_due())
 
     def test_old_price_only_cache_cannot_qualify(self):
-        box_scout._write_state({"prefs": box_scout.DEFAULT_PREFS,
+        box_scout._write_state({"prefs": {**box_scout.DEFAULT_PREFS, "zip": "70115"},
                                 "resale": {"cartoon t-shirts": {"per_piece": 100,
                                                                "updated_at": box_scout._now().isoformat()}}})
         with self._models():
@@ -1025,17 +1027,41 @@ class SourcingRouteTest(unittest.TestCase):
         mock.patch.object(box_scout, "_shipping_calibration", return_value={}).start()
         mock.patch.object(box_scout, "_own_sales", return_value=[]).start()
         mock.patch.object(box_scout, "_announce_new_picks").start()
+        self.ships_from_zip = mock.patch("anteroom.services.user_settings.get_ships_from_zip", return_value="").start()
         self.addCleanup(mock.patch.stopall)
         self.client = TestClient(app)
 
-    def test_first_visit_starts_a_refresh(self):
+    def test_first_visit_without_zip_does_not_refresh_until_zip_is_set(self):
         body = self.client.get("/api/sourcing").json()
         self.assertIsNone(body["snapshot"])
         self.assertEqual(body["prefs"]["budget"], 300.0)
-        self.assertEqual(body["prefs"]["zip"], "70115")
+        self.assertEqual(body["prefs"]["zip"], "")
+        self.assertEqual(body["prefs"]["recent_zips"], [])
+        self.background.assert_not_called()
+        self.assertEqual(self.client.post("/api/sourcing/refresh").status_code, 422)
+        saved_budget = self.client.put("/api/sourcing/prefs", json={"budget": 450}).json()
+        self.assertEqual(saved_budget["prefs"]["budget"], 450)
+        self.background.assert_not_called()
+        saved_zip = self.client.put("/api/sourcing/prefs", json={"zip": "60601"}).json()
+        self.assertEqual(saved_zip["prefs"]["zip"], "60601")
+        self.assertEqual(saved_zip["prefs"]["recent_zips"], ["60601"])
+        self.background.assert_called_once_with(recrawl=False)
+
+    def test_first_visit_inherits_contiguous_ships_from_zip_and_starts_refresh(self):
+        self.ships_from_zip.return_value = "60601"
+        body = self.client.get("/api/sourcing").json()
+        self.assertEqual(body["prefs"]["zip"], "60601")
+        self.assertEqual(body["prefs"]["recent_zips"], ["60601"])
         self.background.assert_called_once()
 
+    def test_non_contiguous_ships_from_zip_is_not_inherited(self):
+        self.ships_from_zip.return_value = "96815"
+        body = self.client.get("/api/sourcing").json()
+        self.assertEqual(body["prefs"]["zip"], "")
+        self.background.assert_not_called()
+
     def test_saving_the_budget_rebuilds_the_list(self):
+        self.ships_from_zip.return_value = "70115"
         body = self.client.put("/api/sourcing/prefs", json={"budget": 500, "raghouse_vip": True}).json()
         self.assertEqual(body["prefs"]["budget"], 500)
         self.assertTrue(body["prefs"]["raghouse_vip"])
@@ -1048,6 +1074,7 @@ class SourcingRouteTest(unittest.TestCase):
         self.assertIn("48 contiguous states", hawaii.json()["detail"])
 
     def test_selling_window_preferences_are_validated_and_rebuild_the_plan(self):
+        self.ships_from_zip.return_value = "70115"
         body = self.client.put("/api/sourcing/prefs", json={"ready_in_weeks": 0, "selling_window_weeks": 8}).json()
         self.assertEqual((body["prefs"]["ready_in_weeks"], body["prefs"]["selling_window_weeks"]), (0, 8))
         self.background.assert_called_once_with(recrawl=False)
@@ -1056,6 +1083,7 @@ class SourcingRouteTest(unittest.TestCase):
             self.assertEqual(self.client.put("/api/sourcing/prefs", json=prefs).status_code, 422)
 
     def test_saved_snapshot_is_served(self):
+        self.ships_from_zip.return_value = "70115"
         with mock.patch.object(box_scout.scout(), "fetch_catalog", side_effect=lambda store: CATALOGS[store]), \
                 mock.patch.object(box_scout.scout(), "fetch_zone_chart", side_effect=ZONE_CHARTS.__getitem__), \
                 mock.patch.dict(box_scout._catalogs, clear=True), \
@@ -1242,6 +1270,13 @@ class PriceEvidenceTest(unittest.TestCase):
 
 
 class RefreshConcurrencyTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        mock.patch.object(box_scout, "state_path", return_value=Path(tmp.name) / "sourcing.json").start()
+        mock.patch("anteroom.services.user_settings.get_ships_from_zip", return_value="70115").start()
+        self.addCleanup(mock.patch.stopall)
+
     def test_background_refresh_reserves_the_job_before_starting_a_thread(self):
         with mock.patch.object(box_scout.threading, "Thread") as thread:
             self.assertTrue(box_scout.refresh_in_background())

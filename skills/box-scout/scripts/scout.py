@@ -1014,7 +1014,7 @@ def print_top_picks(picks):
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--stores", default="raghouse,tvf,papercrane", help="comma-separated: raghouse, tvf, papercrane")
-    ap.add_argument("--zip", default="70115", help="5-digit ZIP the boxes ship to")
+    ap.add_argument("--zip", required=True, help="5-digit US ZIP code the boxes ship to")
     ap.add_argument("--trend", default="", help="comma-separated resale trend terms to boost")
     ap.add_argument("--min-pcs", type=int, default=10)
     ap.add_argument("--max-price", type=float, default=0, help="max lot price, 0 = no limit")

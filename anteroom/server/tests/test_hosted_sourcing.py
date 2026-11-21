@@ -39,14 +39,18 @@ def test_sourcing_is_private_to_each_seller(cloud, signing_keys, monkeypatch):  
     assert done.wait(5) and refreshed[0] == USER_ID
     assert client.get('/api/sourcing', headers=alice).json()['prefs']['budget'] == 500
     bob_state = client.get('/api/sourcing', headers=bob).json()
-    assert bob_state['prefs']['zip'] == box_scout.DEFAULT_PREFS['zip']
+    assert bob_state['prefs']['zip'] == ''
+    assert bob_state['prefs']['recent_zips'] == []
     assert bob_state['prefs']['budget'] == box_scout.DEFAULT_PREFS['budget']
 
 
-def save_sourcing(owner, *, age=None, snapshot_format=box_scout.SNAPSHOT_FORMAT, **changed_prefs):
+def save_sourcing(owner, *, age=None, snapshot_format=box_scout.SNAPSHOT_FORMAT, zip='60601', **changed_prefs):
     """Save a seller's sourcing state with a buy list built `age` ago, then change their plan."""
     with use(for_seller(owner)):
         state = box_scout.read_state()
+        if zip is not None:
+            state['prefs']['zip'] = zip
+            state['prefs']['recent_zips'] = [zip] if zip else []
         if age is not None:
             state['snapshot'] = {'format': snapshot_format, 'preferences': dict(state['prefs']),
                                  'updated_at': (box_scout._now() - age).isoformat(), 'boxes': []}
@@ -57,11 +61,12 @@ def save_sourcing(owner, *, age=None, snapshot_format=box_scout.SNAPSHOT_FORMAT,
 def test_only_the_trusted_login_lists_sellers_whose_sourcing_refresh_is_due(cloud):  # noqa: F811
     _client, engine = cloud
     sellers = {name: str(uuid.uuid4()) for name in
-               ('fresh', 'stale', 'new_plan', 'no_buy_list', 'old_format', 'future', 'never_opened')}
+               ('fresh', 'stale', 'new_plan', 'no_buy_list', 'no_zip', 'old_format', 'future', 'never_opened')}
     save_sourcing(sellers['fresh'], age=timedelta(hours=1))
     save_sourcing(sellers['stale'], age=box_scout.REFRESH_INTERVAL + timedelta(minutes=1))
-    save_sourcing(sellers['new_plan'], age=timedelta(hours=1), zip='10001')
+    save_sourcing(sellers['new_plan'], age=timedelta(hours=1), budget=450.0)
     save_sourcing(sellers['no_buy_list'])
+    save_sourcing(sellers['no_zip'], zip='')
     save_sourcing(sellers['old_format'], age=timedelta(hours=1), snapshot_format=box_scout.SNAPSHOT_FORMAT - 1)
     save_sourcing(sellers['future'], age=-timedelta(hours=1))
 
@@ -114,7 +119,7 @@ def test_web_timer_refreshes_each_due_seller_in_their_own_context(cloud, monkeyp
     _client, engine = cloud
     broken, carol = str(uuid.uuid4()), str(uuid.uuid4())
     save_sourcing(USER_ID, age=box_scout.REFRESH_INTERVAL + timedelta(hours=1), zip='10001')
-    save_sourcing(BOB, age=timedelta(hours=1))
+    save_sourcing(BOB, age=timedelta(hours=1), zip='90210')
     save_sourcing(broken, age=box_scout.REFRESH_INTERVAL + timedelta(hours=1))
     save_sourcing(carol, age=box_scout.REFRESH_INTERVAL + timedelta(hours=1), zip='60601')
     refreshed = []
@@ -145,7 +150,7 @@ def test_web_timer_refreshes_each_due_seller_in_their_own_context(cloud, monkeyp
     assert sorted(refreshed) == sorted([(USER_ID, '10001'), (carol, '60601')])
     assert set(hosted_sourcing_scheduler.due_owners(engine)) == {broken}
     with use(for_seller(BOB)):
-        assert box_scout.read_state()['prefs']['zip'] == box_scout.DEFAULT_PREFS['zip']
+        assert box_scout.read_state()['prefs']['zip'] == '90210'
 
 
 def test_web_timer_skips_a_seller_whose_refresh_is_already_running(cloud, monkeypatch):  # noqa: F811
