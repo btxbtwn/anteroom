@@ -849,6 +849,30 @@ class EtsyNativeContractTest(unittest.TestCase):
         self.assertNotIn("clothingStyle", etsy)
         self.assertEqual(etsy["category_specifics"], {"Sleeve length": "Short sleeve"})
 
+    def test_etsy_row_values_and_gaps_resolve_legacy_aliases_without_a_double_dot(self):
+        form = self._etsy_form()
+        listing = {
+            "title": "Vintage Tee",
+            "direct_category_ids": {"etsy": "482"},
+            "etsy_specifics": {
+                "who_made": "someone_else",
+                "what_is": "0",
+                "category_specifics": {"Sleeve length": "Short sleeve"},
+            },
+        }
+        listing[contract.KEY] = contract.capture(listing, {"etsy": form}, ["etsy"])
+        rows = {contract.path_of(row): row for row in form["fields"]}
+        self.assertIn("A finished product", [
+            contract._etsy_canonical_value("etsy_specifics.whatIsIt", rows["etsy_specifics.whatIsIt"], value)
+            or value
+            for value in contract._row_values(listing, "etsy", "etsy_specifics.whatIsIt", rows)
+        ])
+        self.assertIn("someone_else", contract._row_values(listing, "etsy", "etsy_specifics.whoMade", rows))
+        with patch("anteroom.services.user_settings.get_listing_field_defaults", return_value={}):
+            gap_fields = {item["field"] for item in contract.gaps(listing, "etsy")}
+        self.assertNotIn("etsy_specifics.whatIsIt", gap_fields)
+        self.assertNotIn("etsy_specifics.whoMade", gap_fields)
+
     def test_etsy_properties_unavailable_marks_contract_unavailable_and_preserves_seed(self):
         base = {
             "title": "Vintage 90s Graphic Tee",

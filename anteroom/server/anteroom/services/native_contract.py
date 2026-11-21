@@ -562,8 +562,8 @@ def _row_values(listing: dict, market: str, path: str, rows: dict[str, dict]) ->
     """
     found = [get_path(listing, path)]
     want = _fold(path)
-    prefix = f"{market}_specifics."
-    block = listing.get(f"{market}_specifics")
+    prefix = f"{market}_specifics"
+    block = listing.get(prefix)
     if not isinstance(block, dict):
         return found
     for stored, value in _leaves(block, prefix, set(rows)):

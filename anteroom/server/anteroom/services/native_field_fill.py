@@ -439,6 +439,7 @@ def _record_forms(db: Session, conv_id: str, revision_id: str, saved: dict, form
                 write_value(listing, path, str(form["category_id"]))
             sale_field = row.get("locked") or native_contract.is_sale_field(path)
             if (path.startswith(f"{market}_specifics.") and ".package." not in path and sale_field
+                    and not is_locked(listing, path)
                     and not (market == "etsy" and row.get("locked"))
                     and path not in CATEGORY_PATHS and not _empty(value) and not native_contract.value_error(row, value)):
                 write_value(listing, path, value)

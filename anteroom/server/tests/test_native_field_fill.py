@@ -1249,6 +1249,41 @@ class EtsyNativeFieldFillTest(unittest.IsolatedAsyncioTestCase):
         db.close()
         engine.dispose()
 
+    async def test_record_forms_keeps_a_seller_locked_blank_etsy_sale_field(self):
+        from anteroom.services.seller_overrides import is_locked, lock_seller_edits
+
+        engine = memory_engine()
+        Base.metadata.create_all(engine)
+        self.enterContext(worker_sessions(engine))
+        db = sessionmaker(bind=engine)()
+        conv = ConversationRepo(db).create(title="Tee")
+        previous = {
+            "title": "Vintage Tee",
+            "direct_category_ids": {"etsy": "482"},
+            "etsy_specifics": {"whoMade": "Another company or person", "renewalOption": "Manual"},
+        }
+        edited = {
+            "title": "Vintage Tee",
+            "direct_category_ids": {"etsy": "482"},
+            "etsy_specifics": {"whoMade": "", "renewalOption": "Manual"},
+        }
+        lock_seller_edits(previous, edited)
+        self.assertTrue(is_locked(edited, "etsy_specifics.whoMade"))
+        listing_persistence.save_revision(db, conv.id, edited, source="user")
+        form = self._etsy_form()
+        form["fields"] = [
+            {**row, "value": "I did"} if row["path"] == "etsy_specifics.whoMade" else row
+            for row in form["fields"]
+        ]
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"etsy": form})):
+            await native_field_fill.record_forms(conv.id, {"etsy"})
+        current = ListingRepo(db).get_current(conv.id)
+        saved = ListingRepo(db).get_revision(current.current_revision_id).listing_json
+        self.assertEqual(saved["etsy_specifics"].get("whoMade", ""), "")
+        self.assertTrue(is_locked(saved, "etsy_specifics.whoMade"))
+        db.close()
+        engine.dispose()
+
     async def test_etsy_strict_fill_validates_attributes_clears_legacy_aliases_and_keeps_made_fields(self):
         from anteroom.services import native_contract
 
