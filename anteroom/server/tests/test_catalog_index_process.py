@@ -1,5 +1,7 @@
 import json
 import subprocess
+from contextlib import contextmanager, nullcontext
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -45,7 +47,7 @@ def test_hosted_builder_runs_in_child_without_database_and_keeps_sellers_private
             [schema_row],
         )
         with use(for_seller(owner)):
-            result = catalog.build_catalog_index(snapshot)
+            result = catalog.build_catalog_index(lambda snapshot=snapshot: snapshot)
             assert result['ok']
             assert result['counts']['categories'] == 1
             docs_index = catalog._state().index
@@ -86,11 +88,50 @@ def test_hosted_builder_runs_in_child_without_database_and_keeps_sellers_private
         [],
     )
     with use(for_seller(third_owner)):
-        result = catalog.build_catalog_index(snapshot)
+        result = catalog.build_catalog_index(lambda: snapshot)
         assert result['ok']
         assert catalog._SHARED_CATEGORIES.index is not None
     assert worker_inputs[0]['build_categories'] is False
     assert worker_inputs[0]['category_rows'] == []
+
+
+def test_queued_hosted_build_reads_categories_after_previous_publication(tmp_path, monkeypatch):
+    from anteroom import database
+
+    monkeypatch.setenv('ANTEROOM_DATA_DIR', str(tmp_path))
+    monkeypatch.setenv('ANTEROOM_SKILLS_DIR', str(tmp_path / 'empty-skills'))
+    monkeypatch.setenv('ANTEROOM_EXTENSION_DIR', str(tmp_path / 'empty-extension'))
+    catalog.reset_catalog_index_cache()
+    old = catalog.CatalogSnapshot(
+        {'trees': {'ebay': {'content_hash': 'old'}}}, [('ebay', 'old', 'Old', 'Old')], [],
+    )
+    new = catalog.CatalogSnapshot(
+        {'trees': {'ebay': {'content_hash': 'new'}}}, [('ebay', 'new', 'New', 'New')], [],
+    )
+    current = old
+
+    @contextmanager
+    def queued_lock():
+        # Complete a preceding seller's build before the queued seller takes the lock.
+        nonlocal current
+        current = new
+        preceding_owner = str(uuid4())
+        with use(for_seller(preceding_owner)):
+            catalog._build_hosted(new, preceding_owner)
+        yield
+
+    monkeypatch.setattr(catalog, '_REBUILD_LOCK', queued_lock())
+    monkeypatch.setattr(database, 'SessionLocal', nullcontext)
+    monkeypatch.setattr(catalog, 'catalog_snapshot', lambda _db: current)
+    monkeypatch.setattr(catalog, 'threading', SimpleNamespace(Thread=lambda target, **_kw: SimpleNamespace(start=target)))
+
+    with use(for_seller(str(uuid4()))):
+        catalog._kick_rebuild()
+        expected = catalog._category_trees_version(new.fingerprint['trees'], new.category_rows)
+        assert catalog._SHARED_CATEGORIES.fingerprint == expected
+        assert (catalog.category_index_dir() / 'studio-fingerprint.json').read_text() == expected
+        assert catalog._state().fingerprint == json.dumps(new.fingerprint, sort_keys=True)
+        assert not catalog._state().rebuilding
 
 
 def test_failed_child_does_not_replace_published_index(tmp_path, monkeypatch):
@@ -111,7 +152,7 @@ def test_failed_child_does_not_replace_published_index(tmp_path, monkeypatch):
         catalog._SHARED_CATEGORIES.fingerprint = 'previous-trees'
         catalog._SHARED_CATEGORIES.root = str(catalog.category_index_dir())
         with pytest.raises(subprocess.CalledProcessError):
-            catalog.build_catalog_index(catalog.CatalogSnapshot({'trees': {}}, [], []))
+            catalog.build_catalog_index(lambda: catalog.CatalogSnapshot({'trees': {}}, [], []))
         assert catalog._state().index is previous
         assert catalog._state().fingerprint == 'previous'
         assert catalog._SHARED_CATEGORIES.index is previous_categories

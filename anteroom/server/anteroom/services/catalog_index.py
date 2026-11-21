@@ -13,8 +13,9 @@ import tempfile
 import threading
 import time
 import uuid
-from dataclasses import asdict, dataclass
+from collections.abc import Callable
 from contextvars import copy_context
+from dataclasses import asdict, dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -725,13 +726,16 @@ def _build_unlocked(
 
 def rebuild_catalog_index(db: Session) -> dict[str, Any]:
     """Export catalog/skill/fill docs and rebuild the Semble index."""
-    return build_catalog_index(catalog_snapshot(db))
+    return build_catalog_index(lambda: catalog_snapshot(db))
 
 
-def build_catalog_index(snapshot: CatalogSnapshot) -> dict[str, Any]:
+def build_catalog_index(read_snapshot: Callable[[], CatalogSnapshot]) -> dict[str, Any]:
+    from anteroom.services.service_context import current
+
     with _REBUILD_LOCK:
-        from anteroom.services.service_context import current
-
+        # A queued build must read after the previous publication so it cannot
+        # replace the shared category index with a snapshot from before it waited.
+        snapshot = read_snapshot()
         context = current()
         if context is not None:
             return _build_hosted(snapshot, context.seller_id)
@@ -817,15 +821,16 @@ def _kick_rebuild() -> None:
             return
         _state().rebuilding = True
 
+    def read_snapshot() -> CatalogSnapshot:
+        from anteroom.database import SessionLocal
+
+        with SessionLocal() as session:
+            return catalog_snapshot(session)
+
     def run() -> None:
-
         try:
-            from anteroom.database import SessionLocal
-
-            with SessionLocal() as session:
-                snapshot = catalog_snapshot(session)
-            # The session is closed: the slow part runs without a pooled connection.
-            build_catalog_index(snapshot)
+            # The session closes before the slow build starts.
+            build_catalog_index(read_snapshot)
         except Exception:
             log.exception("catalog index rebuild failed")
         finally:
