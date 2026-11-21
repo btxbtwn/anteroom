@@ -38,6 +38,11 @@ export function AccountMenu({ account, chrome, canDelete, onSignOut }: { account
         {deleting ? "Deleting account…" : "Delete account…"}
       </button>}
       {error && <p className="cloud-profile-error" role="alert">{error}</p>}
+      <nav className="cloud-profile-links" aria-label="Legal and support">
+        <a href="/privacy" target="_blank" rel="noreferrer">Privacy</a>
+        <a href="/terms" target="_blank" rel="noreferrer">Terms</a>
+        <a href="mailto:support@myanteroom.com">Support</a>
+      </nav>
     </PopoverPopup>
   </Popover>;
 }

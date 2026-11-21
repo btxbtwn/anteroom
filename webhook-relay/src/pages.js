@@ -57,15 +57,15 @@ export function privacyPage() {
 </head>
 <body>
 <main>
-<h1>Anteroom privacy</h1>
-<p>Anteroom is a Mac app for resellers. Your listings, photos and sales history stay on your Mac. This page covers the small relay service at relay.anteroom.workers.dev, which lets eBay and Etsy tell Anteroom about sales.</p>
+<h1>Anteroom relay privacy</h1>
+<p>Anteroom helps resellers manage and cross-list inventory across the web (<a href="https://myanteroom.com">myanteroom.com</a>), iPhone, and Mac. This page covers the small relay service at relay.anteroom.workers.dev, which routes eBay and Etsy sign-ins, sale notifications, and public eBay research for Anteroom. See the full <a href="https://myanteroom.com/privacy">Anteroom Privacy Policy</a> and <a href="https://myanteroom.com/terms">Terms of Service</a>.</p>
 
 <h2>What the relay keeps</h2>
 <ul>
-  <li>An ID for each Mac running Anteroom, and a scrambled (hashed) copy of its access key.</li>
-  <li>The eBay user ID and Etsy shop ID you connect, with the account or shop name, so events reach the right Mac.</li>
-  <li>For each sale or listing change: the event type and the order, listing and shop IDs. These are deleted when your Anteroom picks them up, and after 30 days at the latest.</li>
-  <li>While you sign in to eBay or Etsy: the sign-in tokens, for up to 15 minutes, until your Anteroom collects them. After that the tokens live only in your Mac's Keychain.</li>
+  <li>An ID for each connected Anteroom installation or hosted seller account, and a hashed copy of its access key.</li>
+  <li>The eBay user ID and Etsy shop ID you connect, with the account or shop name, so sale events reach the right account.</li>
+  <li>For each sale or listing change: the event type and the order, listing and shop IDs. These are deleted when Anteroom picks them up, and after 30 days at the latest.</li>
+  <li>While you sign in to eBay or Etsy: the sign-in tokens, for up to 15 minutes, until Anteroom collects them. After that the tokens are stored only in your Anteroom account (or your Mac's Keychain in local mode).</li>
 </ul>
 
 <h2>What it does not keep</h2>
@@ -75,13 +75,13 @@ export function privacyPage() {
 </ul>
 
 <h2>Sharing</h2>
-<p>Nothing is sold or shared. The relay runs on Cloudflare, which processes the traffic to deliver it.</p>
+<p>Nothing is sold or shared. The relay runs on Cloudflare Workers, which processes the traffic to deliver it.</p>
 
 <h2>Removing your data</h2>
-<p>Disconnecting an account in Anteroom (Settings → Connections) removes its link. Removing Anteroom's connection removes the Mac's ID, key and any waiting events. If eBay tells the relay an account was closed, its link is removed automatically.</p>
+<p>Disconnecting an account in Anteroom (Settings → Connections) removes its link. Deleting your Anteroom account or removing Anteroom's connection removes the relay ID, key and any waiting events. If eBay tells the relay an account was closed, its link is removed automatically.</p>
 
-<h2>Questions</h2>
-<p>Open an issue at <a href="https://github.com/btxbtwn/anteroom/issues">github.com/btxbtwn/anteroom</a>.</p>
+<h2>Contact</h2>
+<p>Privacy questions: <a href="mailto:privacy@myanteroom.com">privacy@myanteroom.com</a> · Support: <a href="mailto:support@myanteroom.com">support@myanteroom.com</a></p>
 </main>
 </body>
 </html>`;

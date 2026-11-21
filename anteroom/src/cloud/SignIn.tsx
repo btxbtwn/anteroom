@@ -92,6 +92,13 @@ export function SignIn({ client, notice, sandbox }: { client: SupabaseClient; no
           {mode !== "sign_in" && <button type="button" className="link" onClick={() => switchTo("sign_in")}>Back to sign in</button>}
         </nav>
         {mac && <p className="hint">To go back to this Mac’s listings, choose Account › This Mac’s Listings in the menu bar.</p>}
+        <p className="sign-in-legal">
+          {mode === "create_account" ? "By creating an account, you agree to the " : null}
+          <a href={mac ? `${HOSTED_ORIGIN}/terms` : "/terms"} target="_blank" rel="noreferrer">Terms</a>
+          {mode === "create_account" ? " and " : " · "}
+          <a href={mac ? `${HOSTED_ORIGIN}/privacy` : "/privacy"} target="_blank" rel="noreferrer">Privacy Policy</a>
+          {mode === "create_account" ? "." : null}
+        </p>
       </main>
     </div>
   );

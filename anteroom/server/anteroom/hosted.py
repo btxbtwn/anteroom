@@ -212,7 +212,7 @@ class SellerSessionMiddleware:
             (scope["path"] in {"/api/health", "/api/ready", "/api/auth-config"} and scope["method"] == "GET")
             or scope["path"].startswith("/internal/")
             or (scope["method"] in {"GET", "HEAD"} and scope["app"].state.web_dir is not None
-                and (scope["path"] in {"/", "/favicon.png", "/privacy"} or scope["path"].startswith("/assets/")))
+                and (scope["path"] in {"/", "/favicon.png", "/privacy", "/terms"} or scope["path"].startswith("/assets/")))
         ):
             await self.app(scope, receive, send)
             return
@@ -580,6 +580,10 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         def web_privacy():
             # Linked from the Chrome Web Store listing; reviewers have no session.
             return FileResponse(web_dir / "privacy.html", media_type="text/html")
+
+        @app.get("/terms", include_in_schema=False)
+        def web_terms():
+            return FileResponse(web_dir / "terms.html", media_type="text/html")
 
     @app.get("/api/auth-config")
     def auth_config():
