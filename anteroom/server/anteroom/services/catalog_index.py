@@ -44,6 +44,7 @@ _rebuild_gate = threading.Lock()
 class _SharedCategoryState:
     index: Any = None
     fingerprint: str | None = None
+    trees_fp: str | None = None
     root: str | None = None
 
 
@@ -518,12 +519,19 @@ def _has_shared_categories() -> bool:
     )
 
 
-def _index_needs_rebuild(fp_text: str) -> bool:
+def _index_needs_rebuild(fp_text: str, trees_fp_text: str | None = None) -> bool:
     """Caller holds ``_INDEX_LOCK``."""
     meta = catalog_meta_path()
     cached = meta.read_text(encoding="utf-8") if meta.is_file() else None
     has_index = _state().index is not None or _has_shared_categories()
-    return _state().stale or not has_index or _state().fingerprint != fp_text or cached != fp_text
+    if _state().stale or not has_index or _state().fingerprint != fp_text or cached != fp_text:
+        return True
+    if trees_fp_text is not None and (
+        _SHARED_CATEGORIES.root != str(category_index_dir())
+        or _SHARED_CATEGORIES.trees_fp != trees_fp_text
+    ):
+        return True
+    return False
 
 
 def _publish_index(
@@ -548,6 +556,12 @@ def _publish_index(
         if category_fingerprint is not None:
             _SHARED_CATEGORIES.index = categories
             _SHARED_CATEGORIES.fingerprint = category_fingerprint
+            try:
+                _SHARED_CATEGORIES.trees_fp = json.dumps(
+                    json.loads(category_fingerprint).get("trees", {}), sort_keys=True,
+                )
+            except (ValueError, AttributeError):
+                _SHARED_CATEGORIES.trees_fp = None
             _SHARED_CATEGORIES.root = category_root or str(category_index_dir())
 
 
@@ -828,8 +842,9 @@ def ensure_catalog_index(db: Session) -> dict[str, Any]:
         return {"ok": True, "rebuilt": False}
     fp = fingerprint(db)
     fp_text = json.dumps(fp, sort_keys=True)
+    trees_fp_text = json.dumps(fp.get("trees", {}), sort_keys=True)
     with _INDEX_LOCK:
-        needs = _index_needs_rebuild(fp_text)
+        needs = _index_needs_rebuild(fp_text, trees_fp_text)
         if not needs:
             _state().checked_at = time.monotonic()
     if not needs:
@@ -1177,6 +1192,7 @@ def search_catalog(
 
     results: list[dict] = []
     seen: set[tuple[str, str, str]] = set()
+    failed_indexes: set[int] = set()
 
     if indexes:
         raw = []
@@ -1185,6 +1201,7 @@ def search_catalog(
             try:
                 raw.extend(index.search(query, top_k=fetch_k))
             except Exception:
+                failed_indexes.add(id(index))
                 log.exception("semble catalog search failed; using lexical fallback")
         if len(indexes) > 1:
             raw.sort(key=lambda item: -float(getattr(item, "score", 0.0) or 0.0))
@@ -1211,8 +1228,8 @@ def search_catalog(
                 break
 
     if kind == "all":
-        missing_docs = docs_index is None
-        missing_categories = cat_index is None
+        missing_docs = docs_index is None or id(docs_index) in failed_indexes
+        missing_categories = cat_index is None or id(cat_index) in failed_indexes
         if missing_docs or missing_categories:
             supplement: list[dict] = []
             if missing_categories:
