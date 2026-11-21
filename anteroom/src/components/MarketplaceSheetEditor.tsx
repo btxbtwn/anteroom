@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type MutableRefObject } from "react";
-import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRightIcon, CheckIcon, ExternalLinkIcon, SquareArrowOutUpRightIcon } from "lucide-react";
 import { api } from "../api/client";
-import { refreshInventory } from "../api/inventoryRefresh";
+import { invalidateSheetForListing, refreshInventory } from "../api/inventoryRefresh";
 import { listingEdits } from "../api/listingEdits";
 import { nativeFormOptions } from "../api/listingForms";
 import type { NativeMarketplace } from "../api/nativeMarketplaces";
@@ -15,6 +15,7 @@ import {
   marketplaceDisplayValue,
   setListingEditorValue,
 } from "../listingPaths";
+import { nativeFormCategoryKey } from "./nativeFormStability";
 import { agentFieldLocked } from "./agentFieldLocks";
 import { pathCategoryChoices } from "./categoryTree";
 import { marketplaceCell } from "./inventoryTable";
@@ -120,19 +121,9 @@ function displayValueForField(
   return optionLabelForValue(formFieldText(raw), field.optionValues);
 }
 
-/** Invalidate only the cached listing-sheet block(s) containing `convId`. */
-function invalidateSheetForListing(
-  queryClient: QueryClient,
-  marketplace: NativeMarketplace,
-  convId: string,
-) {
-  void queryClient.invalidateQueries({
-    queryKey: ["listing-sheet", marketplace],
-    predicate: (query) => {
-      const idsKey = query.queryKey[2];
-      return typeof idsKey !== "string" || idsKey.split(",").includes(convId);
-    },
-  });
+function ebayCategoryAgentLocked(agentLocks: readonly string[]) {
+  return agentFieldLocked("direct_category_ids.ebay", agentLocks)
+    || agentFieldLocked("direct_category_ids.ebay_path", agentLocks);
 }
 
 const EMPTY_EDIT_SNAPSHOT = { draft: null, saving: false, error: null } as const;
@@ -150,14 +141,6 @@ function useSheetListingForm(convId: string | null, marketplace: NativeMarketpla
     edits ? edits.getSnapshot : GET_EMPTY_SNAPSHOT,
     GET_EMPTY_SNAPSHOT,
   );
-  const wasSaving = useRef(false);
-  useEffect(() => {
-    if (wasSaving.current && !editState.saving && !editState.error && convId) {
-      invalidateSheetForListing(queryClient, marketplace, convId);
-    }
-    wasSaving.current = editState.saving;
-  }, [editState.saving, editState.error, queryClient, marketplace, convId]);
-
   const docQuery = useQuery({
     queryKey: ["listing", convId],
     queryFn: () => api.listings.get(convId!),
@@ -185,6 +168,7 @@ function useSheetListingForm(convId: string | null, marketplace: NativeMarketpla
     [editState.draft, persistedListing],
   );
   const revisionId = docQuery.data?.current_revision_id ?? null;
+  const categoryChanged = nativeFormCategoryKey(listing, marketplace) !== nativeFormCategoryKey(persistedListing, marketplace);
 
   // Match ListingEditor: wait until in-flight/unpersisted edits settle before
   // querying nativeForm so category changes are persisted before fetching dependent choices.
@@ -214,8 +198,7 @@ function useSheetListingForm(convId: string | null, marketplace: NativeMarketpla
       !edits
       || !docQuery.data
       || formDisabled
-      || agentFieldLocked("direct_category_ids.ebay", agentLocks)
-      || agentFieldLocked("direct_category_ids.ebay_path", agentLocks)
+      || ebayCategoryAgentLocked(agentLocks)
     ) return;
     const updated = cloneListing(listing);
     setListingEditorValue(updated, "direct_category_ids.ebay", categoryId);
@@ -231,6 +214,7 @@ function useSheetListingForm(convId: string | null, marketplace: NativeMarketpla
     fields,
     editState,
     formDisabled,
+    categoryChanged,
     agentLocks,
     commit,
     commitEbayCategory,
@@ -247,6 +231,7 @@ function SheetFieldControl({
   marketplace,
   phoneNativeSelect,
   formDisabled,
+  categoryChanged,
   agentLocks,
   flushRef,
   onCommit,
@@ -260,6 +245,7 @@ function SheetFieldControl({
   marketplace: NativeMarketplace;
   phoneNativeSelect: boolean;
   formDisabled: boolean;
+  categoryChanged: boolean;
   agentLocks: readonly string[];
   flushRef?: MutableRefObject<(() => void) | null>;
   onCommit: (key: string, value: string | string[] | boolean, also?: Record<string, string>) => void;
@@ -272,8 +258,13 @@ function SheetFieldControl({
   const text = field
     ? displayValueForField(field, listing, marketplace)
     : formFieldText(marketplaceDisplayValue(listing, fieldKey, { tab: marketplace }));
-  const isAgentLocked = agentFieldLocked(fieldKey, agentLocks);
-  const controlDisabled = Boolean(formDisabled || field?.locked || isAgentLocked);
+  const isAgentLocked = fieldKey === "direct_category_ids.ebay"
+    ? ebayCategoryAgentLocked(agentLocks)
+    : agentFieldLocked(fieldKey, agentLocks);
+  const staleChoices = categoryChanged && column.kind !== "category"
+    && (column.kind === "select" || column.kind === "multi"
+      || Boolean(field?.selectionOnly || field?.multi || field?.options.length || field?.type === "cascade"));
+  const controlDisabled = Boolean(formDisabled || field?.locked || isAgentLocked || staleChoices);
 
   const [draft, setDraft] = useState(text);
   const draftRef = useRef(draft);
@@ -577,7 +568,7 @@ export function DesktopCellPopover({
   onOpenListing: (id: string, tab?: string) => void;
 }) {
   const convId = active?.listing.id ?? null;
-  const { docQuery, formQuery, listing, fields, editState, formDisabled, agentLocks, commit, commitEbayCategory } =
+  const { docQuery, formQuery, listing, fields, editState, formDisabled, categoryChanged, agentLocks, commit, commitEbayCategory } =
     useSheetListingForm(convId, marketplace);
   const flushRef = useRef<(() => void) | null>(null);
   const column = active?.column;
@@ -652,6 +643,7 @@ export function DesktopCellPopover({
                 marketplace={marketplace}
                 phoneNativeSelect={false}
                 formDisabled={formDisabled}
+                categoryChanged={categoryChanged}
                 agentLocks={agentLocks}
                 flushRef={flushRef}
                 onCommit={commit}
@@ -702,7 +694,7 @@ export function useSheetListMutation(marketplace: NativeMarketplace) {
         description: "Started publishing this saved listing.",
       });
       refreshInventory(queryClient);
-      invalidateSheetForListing(queryClient, marketplace, convId);
+      invalidateSheetForListing(queryClient, convId, marketplace);
       void queryClient.invalidateQueries({ queryKey: ["native-marketplaces", convId] });
       void queryClient.invalidateQueries({ queryKey: ["marketplace-listings", convId] });
     },
@@ -750,6 +742,7 @@ export function MarketplaceQuickEditSheet({
     fields,
     editState,
     formDisabled,
+    categoryChanged,
     agentLocks,
     commit,
     commitEbayCategory,
@@ -898,6 +891,7 @@ export function MarketplaceQuickEditSheet({
                           marketplace={marketplace}
                           phoneNativeSelect
                           formDisabled={formDisabled}
+                          categoryChanged={categoryChanged}
                           agentLocks={agentLocks}
                           onCommit={commit}
                           onCommitEbayCategory={commitEbayCategory}

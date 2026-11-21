@@ -305,6 +305,49 @@ describe("MarketplaceSheetEditor", () => {
     }
   });
 
+  it.each(["direct_category_ids.ebay", "direct_category_ids.ebay_path", null])(
+    "applies the paired eBay category lock (%s)",
+    async (lockedPath) => {
+      vi.spyOn(api.listings, "get").mockResolvedValue(SAMPLE_DOC);
+      vi.spyOn(api.conversations, "activity").mockResolvedValue({
+        ...IDLE_ACTIVITY, locked_fields: lockedPath ? [lockedPath] : [],
+      });
+      vi.spyOn(api.nativeMarketplaces, "form").mockResolvedValue({
+        ...DEPOP_FORM, marketplace: "ebay", fields: [{
+          ...DEPOP_FORM.fields[1], key: "category", path: "direct_category_ids.ebay",
+        }],
+      });
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      client.setQueryData(["catalog-categories", "ebay"], { complete: false, nodes: [] });
+      const anchor = document.createElement("button");
+      const container = document.createElement("div");
+      document.body.append(anchor, container);
+      const root = createRoot(container);
+      const category = MARKETPLACE_SHEET_COLUMNS.ebay.find((column) => column.kind === "category")!;
+      try {
+        await act(() => root.render(
+          <QueryClientProvider client={client}>
+            <WorkspaceRuntimeProvider value={LOCAL_RUNTIME}>
+              <DesktopCellPopover
+                active={{ listing: LISTING_ROW, column: category, anchor }}
+                marketplace="ebay"
+                sheetRow={READY_SHEET_ROW}
+                onClose={vi.fn()}
+                onOpenListing={vi.fn()}
+              />
+            </WorkspaceRuntimeProvider>
+          </QueryClientProvider>,
+        ));
+        await flushMicrotasks();
+        const picker = document.querySelector<HTMLButtonElement>('[data-listing-field="direct_category_ids.ebay"]');
+        expect(picker?.disabled).toBe(Boolean(lockedPath));
+      } finally {
+        await act(() => root.unmount());
+        client.clear();
+      }
+    },
+  );
+
   it("shows per-marketplace price in phone Quick Edit confirmation and hides List when unready", async () => {
     vi.spyOn(api.listings, "get").mockResolvedValue({
       ...SAMPLE_DOC,
@@ -395,7 +438,7 @@ describe("MarketplaceSheetEditor", () => {
     }
   });
 
-  it("waits for a category save to finish before fetching dependent nativeForm options (P2)", async () => {
+  it.each(["save", "discard"] as const)("gates dependent choices while the category changes (%s)", async (outcome) => {
     const initialDoc: ListingDocument = {
       ...SAMPLE_DOC,
       conversation_id: "conv-cat",
@@ -454,9 +497,11 @@ describe("MarketplaceSheetEditor", () => {
     );
 
     let resolveSave!: (result: ListingSaveResult) => void;
+    let rejectSave!: (error: Error) => void;
     const saveSpy = vi.spyOn(api.listings, "update").mockImplementation(
-      () => new Promise<ListingSaveResult>((resolve) => {
+      () => new Promise<ListingSaveResult>((resolve, reject) => {
         resolveSave = resolve;
+        rejectSave = reject;
       }),
     );
 
@@ -499,6 +544,25 @@ describe("MarketplaceSheetEditor", () => {
       expect(saveSpy).toHaveBeenCalledTimes(1);
       // Must NOT have queried nativeForm before the category PUT finishes.
       expect(formSpy).toHaveBeenCalledTimes(1);
+
+      const sizeSelect = [...document.querySelectorAll("select")]
+        .find((el) => [...el.options].some((option) => option.value === "S"));
+      expect(sizeSelect?.disabled).toBe(true);
+      expect(catSelect!.disabled).toBe(false);
+
+      if (outcome === "discard") {
+        await act(() => rejectSave(new Error("Category save failed")));
+        await flushMicrotasks();
+        expect(sizeSelect?.disabled).toBe(true);
+        const discard = [...document.querySelectorAll("button")]
+          .find((button) => button.textContent?.includes("Discard"));
+        expect(discard).toBeDefined();
+        await act(() => discard!.click());
+        await flushMicrotasks();
+        expect(sizeSelect?.disabled).toBe(false);
+        expect(formSpy).toHaveBeenCalledTimes(1);
+        return;
+      }
 
       // Now finish the category save -> rev-2 -> nativeForm fetches with rev-2 and loads shoe sizes.
       await act(async () => {

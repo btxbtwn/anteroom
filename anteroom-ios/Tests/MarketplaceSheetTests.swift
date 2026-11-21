@@ -423,6 +423,8 @@ struct MarketplaceSheetTests {
         // 1. P1: MainActorSerialGate serializes concurrent main-actor saves in strict FIFO order without spinning.
         let gate = MainActorSerialGate()
         var events: [String] = []
+        let (started, startSignal) = AsyncStream<Void>.makeStream()
+        var start = started.makeAsyncIterator()
         var firstRelease: CheckedContinuation<Void, Never>?
 
         let t1 = Task { @MainActor in
@@ -430,30 +432,31 @@ struct MarketplaceSheetTests {
                 events.append("start-1")
                 await withCheckedContinuation { continuation in
                     firstRelease = continuation
+                    startSignal.yield(())
                 }
                 events.append("end-1")
             }
         }
-        // Yield so t1 acquires the gate and suspends on firstRelease.
-        await Task.yield()
+        _ = await start.next()
 
+        let (queued, queueSignal) = AsyncStream<Void>.makeStream()
+        var queue = queued.makeAsyncIterator()
         let t2 = Task { @MainActor in
-            await gate.withLock {
+            await gate.withLock(onQueued: { queueSignal.yield(()) }) {
                 events.append("start-2")
-                await Task.yield()
                 events.append("end-2")
             }
         }
+        _ = await queue.next()
         let t3 = Task { @MainActor in
-            await gate.withLock {
+            await gate.withLock(onQueued: { queueSignal.yield(()) }) {
                 events.append("start-3")
                 events.append("end-3")
             }
         }
-        await Task.yield()
-        // Neither t2 nor t3 may have entered while t1 holds the gate.
+        _ = await queue.next()
         precondition(events == ["start-1"])
-        firstRelease?.resume()
+        firstRelease!.resume()
         _ = await (t1.value, t2.value, t3.value)
         precondition(events == ["start-1", "end-1", "start-2", "end-2", "start-3", "end-3"])
 
@@ -588,6 +591,11 @@ struct MarketplaceSheetTests {
         ))
         precondition(MarketplaceSheetRules.canListFromSheet(
             listing: draft, status: notListed, sheetRow: readyRowRev1, canAct: true, revisionID: "rev-1"
+        ))
+
+        let unversionedReadyRow = try decode(ListingSheetRow.self, #"{"ready":true,"needs_load":false}"#)
+        precondition(!MarketplaceSheetRules.canListFromSheet(
+            listing: draft, status: notListed, sheetRow: unversionedReadyRow, canAct: true, revisionID: "rev-1"
         ))
 
         // 6. priceLabel ignores stale sheetRow when documentRevisionID differs from sheetRow.revisionID.

@@ -1,6 +1,6 @@
 import type { QueryClient } from "@tanstack/react-query";
 import { api } from "./client";
-import { refreshInventory } from "./inventoryRefresh";
+import { invalidateSheetForListing, refreshInventory } from "./inventoryRefresh";
 import { ApiRequestError } from "./transport";
 import type { ConversationSummary, ListingData, ListingDocument } from "./types";
 import { listingCategorySignature } from "../components/nativeFormStability";
@@ -127,6 +127,7 @@ class ListingEdits {
         if (listingCategorySignature(previous?.listing) !== listingCategorySignature(result.listing)) {
           void this.client.invalidateQueries({ queryKey: ["listing-fields", this.id] });
         }
+        invalidateSheetForListing(this.client, this.id);
         if (!pending) {
           void this.client.invalidateQueries({ queryKey: ["conversation", this.id] });
           // The row shows the saved price at once; the shared schedule picks up the rest.

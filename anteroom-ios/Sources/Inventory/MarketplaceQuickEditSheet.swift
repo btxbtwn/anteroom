@@ -13,7 +13,6 @@ final class MarketplaceQuickEditModel {
     let marketplace: String
     let runtime: WorkspaceRuntime?
 
-    private(set) var latestSheetRow: ListingSheetRow?
     private(set) var document: [String: JSONValue]?
     private(set) var revisionID: String?
     private(set) var fieldsByPath: [String: NativeField] = [:]
@@ -34,6 +33,7 @@ final class MarketplaceQuickEditModel {
     @ObservationIgnored private let saveGate = MainActorSerialGate()
     /// Monotonic counters preventing an older in-flight `load()` from overwriting a newer save.
     @ObservationIgnored private var loadGeneration = 0
+    @ObservationIgnored private var activityGeneration = 0
     @ObservationIgnored private var saveGeneration = 0
     @ObservationIgnored private var categorySaveGeneration = 0
 
@@ -111,6 +111,7 @@ final class MarketplaceQuickEditModel {
     func load(preserveDrafts: Bool = false) async {
         loadGeneration += 1
         let startLoadGen = loadGeneration
+        let startActivityGen = activityGeneration
         let startSaveGen = saveGeneration
         let startCategoryGen = categorySaveGeneration
 
@@ -140,14 +141,13 @@ final class MarketplaceQuickEditModel {
 
         let (docResult, formResult, loadedActivity) = await (docRead, formRead, activityRead)
         guard loadGeneration == startLoadGen else { return }
-        if let loadedActivity { activity = loadedActivity }
+        if activityGeneration == startActivityGen, let loadedActivity { activity = loadedActivity }
 
         if saveGeneration == startSaveGen {
             switch docResult {
             case .success(let doc):
                 document = doc.listing
                 revisionID = doc.currentRevisionID
-                saveError = nil
             case .failure(let error) where error.isCancellation:
                 return
             case .failure(let error):
@@ -172,8 +172,11 @@ final class MarketplaceQuickEditModel {
         }
     }
 
-    func updateSheetRow(_ row: ListingSheetRow?) {
-        if let row { latestSheetRow = row }
+    private func refreshActivity() async {
+        if let updated = try? await api.activity(listingID) {
+            activityGeneration += 1
+            activity = updated
+        }
     }
 
     @discardableResult
@@ -181,7 +184,7 @@ final class MarketplaceQuickEditModel {
         column: MarketplaceSheetColumn,
         value: JSONValue,
         companion: [String: JSONValue] = [:],
-        onSaved: @escaping () async -> ListingSheetRow?
+        onSaved: @escaping () async -> Void
     ) async -> Bool {
         let capturedVersion = drafts.version(for: column.key)
         return await saveGate.withLock {
@@ -200,7 +203,7 @@ final class MarketplaceQuickEditModel {
         value: JSONValue,
         companion: [String: JSONValue],
         draftVersion: Int,
-        onSaved: @escaping () async -> ListingSheetRow?
+        onSaved: @escaping () async -> Void
     ) async -> Bool {
         guard let document else {
             saveError = "Listing hasn't finished loading yet."
@@ -256,16 +259,12 @@ final class MarketplaceQuickEditModel {
                         : error.localizedDescription
                 }
             }
-            if let refreshedRow = await onSaved() {
-                latestSheetRow = refreshedRow
-            }
+            await onSaved()
             return true
         } catch let error as APIError where error.isConflict {
             if MarketplaceSheetRules.isAgentLockConflict(error.message) {
                 saveError = error.message
-                if let refreshedActivity = try? await api.activity(listingID) {
-                    activity = refreshedActivity
-                }
+                await refreshActivity()
             } else {
                 saveError = "This listing changed on another device. Reload or discard your unsaved changes."
                 hasConflict = true
@@ -288,22 +287,19 @@ final class MarketplaceQuickEditModel {
     @discardableResult
     func retryPendingSaves(
         columns: [MarketplaceSheetColumn],
-        onSaved: @escaping () async -> ListingSheetRow?
+        onSaved: @escaping () async -> Void
     ) async -> Bool {
         await saveGate.withLock {
             isSaving = true
-            let refreshedActivity = try? await api.activity(listingID)
+            await refreshActivity()
             isSaving = false
-            if let refreshedActivity {
-                activity = refreshedActivity
-            }
             return await flushPendingTextUnlocked(columns: columns, onSaved: onSaved)
         }
     }
 
     /// Commits any pending typed text/number drafts before blur, close, advance, or List.
     @discardableResult
-    func flushPendingText(columns: [MarketplaceSheetColumn], onSaved: @escaping () async -> ListingSheetRow?) async -> Bool {
+    func flushPendingText(columns: [MarketplaceSheetColumn], onSaved: @escaping () async -> Void) async -> Bool {
         await saveGate.withLock {
             await flushPendingTextUnlocked(columns: columns, onSaved: onSaved)
         }
@@ -311,7 +307,7 @@ final class MarketplaceQuickEditModel {
 
     private func flushPendingTextUnlocked(
         columns: [MarketplaceSheetColumn],
-        onSaved: @escaping () async -> ListingSheetRow?
+        onSaved: @escaping () async -> Void
     ) async -> Bool {
         for column in columns {
             // Re-check in case newer text was typed into this column while its save ran.
@@ -326,7 +322,7 @@ final class MarketplaceQuickEditModel {
                 if !ok { return false }
             }
         }
-        return true
+        return drafts.isEmpty
     }
 }
 
@@ -338,11 +334,11 @@ struct MarketplaceQuickEditSheet: View {
     let api: AnteroomAPI
     let listing: ConversationSummary
     let marketplace: String
-    let sheetRow: ListingSheetRow?
+    let sheetRow: () -> ListingSheetRow?
     let runtime: WorkspaceRuntime?
     let nextDraftID: String?
     let isListingInFlight: Bool
-    let onSaved: () async -> ListingSheetRow?
+    let onSaved: () async -> Void
     let onSelectListing: (String) -> Void
     let onOpenFullForm: () -> Void
     let onListConfirmed: (String, SellerConfirmation) async -> SheetListOutcome
@@ -361,11 +357,11 @@ struct MarketplaceQuickEditSheet: View {
         api: AnteroomAPI,
         listing: ConversationSummary,
         marketplace: String,
-        sheetRow: ListingSheetRow?,
+        sheetRow: @escaping () -> ListingSheetRow?,
         runtime: WorkspaceRuntime?,
         nextDraftID: String?,
         isListingInFlight: Bool,
-        onSaved: @escaping () async -> ListingSheetRow?,
+        onSaved: @escaping () async -> Void,
         onSelectListing: @escaping (String) -> Void,
         onOpenFullForm: @escaping () -> Void,
         onListConfirmed: @escaping (String, SellerConfirmation) async -> SheetListOutcome
@@ -390,15 +386,13 @@ struct MarketplaceQuickEditSheet: View {
     }
 
     private var effectiveSheetRow: ListingSheetRow? {
-        model.latestSheetRow ?? sheetRow
+        sheetRow()
     }
 
     private var sheetRowIsStale: Bool {
-        guard let docRev = model.revisionID, !docRev.isEmpty,
-              let rowRev = effectiveSheetRow?.revisionID, !rowRev.isEmpty else {
-            return false
-        }
-        return docRev != rowRev
+        guard let docRev = model.revisionID, !docRev.isEmpty else { return false }
+        let row = effectiveSheetRow
+        return row?.revisionID != docRev || (row?.ready == true && sheetPriceLabel(row) == nil)
     }
 
     private var orderedColumns: [MarketplaceSheetColumn] {
@@ -419,23 +413,18 @@ struct MarketplaceQuickEditSheet: View {
     }
 
     private var canList: Bool {
-        MarketplaceSheetRules.canListFromSheet(
+        let row = effectiveSheetRow
+        return sheetPriceLabel(row) != nil && MarketplaceSheetRules.canListFromSheet(
             listing: listing,
-            status: status,
-            sheetRow: effectiveSheetRow,
+            status: MarketplaceSheetRules.rowStatus(listing: listing, marketplace: marketplace, sheetRow: row),
+            sheetRow: row,
             canAct: canAct,
             revisionID: activeRevisionID
         )
     }
 
-    private var priceLabel: String? {
-        MarketplaceSheetRules.priceLabel(
-            marketplace: marketplace,
-            sheetRow: effectiveSheetRow,
-            document: model.document,
-            fallbackPrice: listing.price,
-            documentRevisionID: model.revisionID
-        )
+    private func sheetPriceLabel(_ row: ListingSheetRow?) -> String? {
+        MarketplaceSheetRules.priceLabel(marketplace: marketplace, sheetRow: row, document: nil, fallbackPrice: nil)
     }
 
     @ViewBuilder
@@ -486,18 +475,22 @@ struct MarketplaceQuickEditSheet: View {
 
     private var staleRowBanner: some View {
         HStack(spacing: 10) {
-            Label("Saved, but status could not refresh yet.", systemImage: "arrow.clockwise")
+            Label("Listing status needs a refresh.", systemImage: "arrow.clockwise")
                 .font(.footnote)
                 .foregroundStyle(WorkspaceStyle.mutedText)
             Spacer()
             Button("Refresh") {
                 Task {
-                    let row = await onSaved()
-                    model.updateSheetRow(row)
+                    await onSaved()
+                    if let rowRevision = effectiveSheetRow?.revisionID, !rowRevision.isEmpty,
+                       rowRevision != model.revisionID, model.drafts.isEmpty, !model.isSaving {
+                        await model.load(preserveDrafts: true)
+                    }
                 }
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
+            .disabled(model.isSaving || model.isLoading)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -562,7 +555,7 @@ struct MarketplaceQuickEditSheet: View {
                         focusedColumnKey = nil
                         Task {
                             let ok = await model.flushPendingText(columns: orderedColumns, onSaved: onSaved)
-                            if ok { dismiss() }
+                            if ok && model.drafts.isEmpty { dismiss() }
                         }
                     }
                     .disabled(model.isSaving)
@@ -679,6 +672,7 @@ struct MarketplaceQuickEditSheet: View {
                 confirmingListRevisionID = nil
                 guard let rev = capturedRev, !rev.isEmpty,
                       rev == activeRevisionID,
+                      canList,
                       model.drafts.isEmpty,
                       !model.isSaving else {
                     listError = "This listing changed before you confirmed. Review the updated details and tap List again."
@@ -932,7 +926,7 @@ struct MarketplaceQuickEditSheet: View {
         focusedColumnKey = nil
         Task {
             let ok = await model.flushPendingText(columns: orderedColumns, onSaved: onSaved)
-            if ok {
+            if ok && model.drafts.isEmpty {
                 dismiss()
                 onOpenFullForm()
             }
@@ -960,7 +954,7 @@ struct MarketplaceQuickEditSheet: View {
                     focusedColumnKey = nil
                     Task {
                         let ok = await model.flushPendingText(columns: orderedColumns, onSaved: onSaved)
-                        if ok {
+                        if ok && model.drafts.isEmpty {
                             onSelectListing(nextDraftID)
                         }
                     }
@@ -978,7 +972,7 @@ struct MarketplaceQuickEditSheet: View {
                     listError = nil
                     Task {
                         let ok = await model.flushPendingText(columns: orderedColumns, onSaved: onSaved)
-                        guard ok else { return }
+                        guard ok, model.drafts.isEmpty else { return }
                         // Re-check readiness after flushing pending edits (e.g. if price/title was cleared).
                         let latestRow = effectiveSheetRow
                         let latestStatus = MarketplaceSheetRules.rowStatus(
@@ -994,7 +988,8 @@ struct MarketplaceQuickEditSheet: View {
                             canAct: canAct,
                             revisionID: capturedRev
                         )
-                        guard stillReady, let capturedRev, !capturedRev.isEmpty else {
+                        guard stillReady, let capturedRev, !capturedRev.isEmpty,
+                              let confirmedPrice = sheetPriceLabel(latestRow) else {
                             listError = sheetRowIsStale
                                 ? "Saved, but status could not refresh yet. Tap Refresh before listing."
                                 : "Fill in the required \(Marketplaces.name(marketplace)) fields before listing."
@@ -1004,7 +999,7 @@ struct MarketplaceQuickEditSheet: View {
                         confirmingList = SellerConfirmationRequest.list(
                             title: listing.displayTitle,
                             marketplace: marketplace,
-                            priceLabel: priceLabel
+                            priceLabel: confirmedPrice
                         )
                     }
                 } label: {

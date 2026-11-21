@@ -482,7 +482,7 @@ enum MarketplaceSheetRules {
     }
 
     /// Single source of truth for whether the row or Quick Edit sheet may offer `List`.
-    /// Requires a loaded, ready `sheetRow` whose revision matches `revisionID` when both are known.
+    /// Requires a loaded, ready `sheetRow` with a revision that matches `revisionID` when supplied.
     static func canListFromSheet(
         listing: ConversationSummary,
         status: MarketplaceSheetStatus,
@@ -496,11 +496,7 @@ enum MarketplaceSheetRules {
         guard let sheetRow, sheetRow.ready else { return false }
         let rowRev = (sheetRow.revisionID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let passedRev = (revisionID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !passedRev.isEmpty && !rowRev.isEmpty && passedRev != rowRev {
-            return false
-        }
-        let rev = !passedRev.isEmpty ? passedRev : rowRev
-        return !rev.isEmpty
+        return !rowRev.isEmpty && (revisionID == nil || passedRev == rowRev)
     }
 
     /// Floats rejected fields first, then missing fields, then remaining columns.
@@ -596,17 +592,18 @@ final class MainActorSerialGate {
     private var locked = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
 
-    func acquire() async {
+    private func acquire(onQueued: (() -> Void)?) async {
         if !locked {
             locked = true
             return
         }
         await withCheckedContinuation { continuation in
             waiters.append(continuation)
+            onQueued?()
         }
     }
 
-    func release() {
+    private func release() {
         if !waiters.isEmpty {
             let next = waiters.removeFirst()
             next.resume()
@@ -615,8 +612,8 @@ final class MainActorSerialGate {
         }
     }
 
-    func withLock<T>(_ operation: () async throws -> T) async rethrows -> T {
-        await acquire()
+    func withLock<T>(onQueued: (() -> Void)? = nil, _ operation: @MainActor () async throws -> T) async rethrows -> T {
+        await acquire(onQueued: onQueued)
         defer { release() }
         return try await operation()
     }

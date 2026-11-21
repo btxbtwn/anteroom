@@ -39,6 +39,25 @@ it("waits for a draft task and saves retained edits against its latest revision"
   } finally { client.clear(); }
 });
 
+it("invalidates only sheet blocks containing the saved listing after the editor detaches", async () => {
+  const { client, edits } = setup();
+  const savedBlocks = [["listing-sheet", "depop", "another,item"], ["listing-sheet", "ebay", "item"]];
+  const unrelatedBlock = ["listing-sheet", "depop", "item-suffix"];
+  for (const key of [...savedBlocks, unrelatedBlock]) client.setQueryData(key, {});
+  let finish!: (value: ListingSaveResult) => void;
+  vi.spyOn(api.listings, "update").mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  const unsubscribe = edits.subscribe(() => {});
+  try {
+    edits.save({ price: 25 });
+    unsubscribe();
+    finish(result("r1", { price: 25 }));
+    await vi.waitFor(() => {
+      for (const key of savedBlocks) expect(client.getQueryState(key)?.isInvalidated).toBe(true);
+    });
+    expect(client.getQueryState(unrelatedBlock)?.isInvalidated).toBe(false);
+  } finally { client.clear(); }
+});
+
 it("keeps newer typing while waiting and retains conflicting edits", async () => {
   const { client, edits } = setup();
   let finish!: (value: Awaited<ReturnType<typeof api.conversations.activity>>) => void;

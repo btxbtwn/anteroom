@@ -382,7 +382,7 @@ struct InventoryView: View {
                     api: model.api,
                     listing: listing,
                     marketplace: market,
-                    sheetRow: model.sheetRow(marketplace: market, id: listing.id),
+                    sheetRow: { model.sheetRow(marketplace: market, id: listing.id) },
                     runtime: model.runtime,
                     nextDraftID: MarketplaceSheetRules.nextQuickEditListingID(
                         rows: rows,
@@ -391,7 +391,7 @@ struct InventoryView: View {
                     ),
                     isListingInFlight: model.listingInFlight.contains(listing.id),
                     onSaved: {
-                        await model.refreshSheetRow(marketplace: market, id: listing.id)
+                        _ = await model.refreshSheetRow(marketplace: market, id: listing.id)
                     },
                     onSelectListing: { nextID in
                         quickEditListingID = nextID
