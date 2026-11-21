@@ -11,6 +11,7 @@ and scheduled edits run once, from the account.
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from datetime import UTC, date, datetime
@@ -26,6 +27,7 @@ from anteroom.config import DATA_DIR, HOSTED_URL
 BATCH_ROWS = 200
 BATCH_BYTES = 2 * 1024 * 1024
 MARKER = Path(DATA_DIR) / "account-move.json"
+_VENDOO_LABEL_ID = re.compile(r"[A-Za-z0-9]{20}")
 
 _lock = threading.Lock()
 _progress: dict = {"state": "idle"}
@@ -60,12 +62,67 @@ def serialize(row) -> dict:
     return {name: _json_value(value) for name, value in row._mapping.items()}
 
 
+def _vendoo_label_names() -> dict[str, str]:
+    """Read the catalog saved by Macs that used the old Vendoo importer."""
+    try:
+        catalog = json.loads((Path(DATA_DIR) / "vendoo-label-catalog.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(catalog, dict):
+        return {}
+    names = catalog.get("by_id", catalog)
+    if not isinstance(names, dict):
+        return {}
+    return {key: name.strip() for key, name in names.items() if isinstance(name, str) and name.strip()}
+
+
+def _carry_vendoo_labels(record: dict, labels: object, names: dict[str, str]) -> None:
+    from anteroom.services.vendoo_import import parse_notes
+
+    if not isinstance(labels, list) or not labels:
+        return
+    notes = parse_notes(record.get("notes"))
+    # An explicit empty field is a seller edit and must survive the move.
+    if not notes.get("vendooItemId") or "vendooLabels" in notes:
+        return
+    recovered = []
+    for value in labels:
+        if not isinstance(value, str) or not (label := value.strip()):
+            continue
+        if label in names:
+            label = names[label]
+        elif _VENDOO_LABEL_ID.fullmatch(label) and label != label.lower() and label != label.upper():
+            # Keep unknown codes in the copied revision history.
+            continue
+        recovered.append(label)
+    if recovered:
+        notes["vendooLabels"] = ", ".join(dict.fromkeys(recovered))
+        record["notes"] = json.dumps(notes)
+
+
 def batches(connection, table):
     """Rows of one table as JSON-ready dicts, in batches bounded by count and size."""
     order = list(table.primary_key.columns)
+    query = select(table)
+    names = {}
+    if table.name == "conversations":
+        from anteroom.models.listing import Listing, ListingRevision
+
+        names = _vendoo_label_names()
+        notes = table.c.notes
+        query = (
+            select(table, ListingRevision.listing_json["labels"].label("revision_labels"))
+            .outerjoin(Listing, (Listing.conversation_id == table.c.id)
+                       & (Listing.user_id == table.c.user_id)
+                       & notes.contains("vendooItemId") & ~notes.contains('"vendooLabels"'))
+            .outerjoin(ListingRevision, (ListingRevision.id == Listing.current_revision_id)
+                       & (ListingRevision.conversation_id == Listing.conversation_id)
+                       & (ListingRevision.user_id == Listing.user_id))
+        )
     batch, size = [], 0
-    for row in connection.execute(select(table).order_by(*order)):
+    for row in connection.execute(query.order_by(*order)):
         record = serialize(row)
+        _carry_vendoo_labels(record, record.pop("revision_labels", None), names)
         weight = len(json.dumps(record, default=str))
         if batch and (len(batch) >= BATCH_ROWS or size + weight > BATCH_BYTES):
             yield batch

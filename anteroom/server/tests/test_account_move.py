@@ -180,6 +180,46 @@ def test_import_rows_never_trust_the_mac_for_ownership_or_fields(cloud, signing_
     assert client.post('/api/account-import/rows', json={'table': 'conversations', 'rows': [row]}).status_code == 401
 
 
+def test_move_restores_legacy_vendoo_labels_from_the_current_listing(cloud, mac, storage, signing_keys, monkeypatch):  # noqa: F811
+    from anteroom.models.conversation import Conversation
+    from anteroom.models.listing import Listing, ListingRevision
+
+    client, _ = cloud
+    catalog = mac[1].root.parent / 'vendoo-label-catalog.json'
+    catalog.write_text(json.dumps({'by_id': {'aBcDeFgHiJkLmNoP1234': 'Bin 4'}}))
+    monkeypatch.setattr(account_move, 'DATA_DIR', str(catalog.parent))
+    monkeypatch.setattr(account_move, 'local_secrets', lambda slots: {})
+    cases = {
+        'legacy': ({'vendooItemId': 'old-import', 'sellerNotes': 'Keep me'}, ['Bin 4', 'Winter']),
+        'edited': ({'vendooItemId': 'edited-import', 'vendooLabels': 'Seller edit'}, ['Seller edit']),
+        'cleared': ({'vendooItemId': 'cleared-import', 'vendooLabels': ''}, []),
+        'local': ({'sellerNotes': 'Created locally'}, []),
+    }
+    with Session(mac[0]) as db:
+        for item, (notes, _) in cases.items():
+            db.add_all([
+                Conversation(id=item, title=item, notes=json.dumps(notes)),
+                Listing(conversation_id=item, current_revision_id=f'{item}-current'),
+                ListingRevision(id=f'{item}-old', conversation_id=item, source='vendoo_import',
+                                listing_json={'labels': ['Old label']}),
+                ListingRevision(id=f'{item}-current', conversation_id=item, source='vendoo_import',
+                                listing_json={'labels': ['aBcDeFgHiJkLmNoP1234', 'Winter', 'qRsTuVwXyZaBcDeF5678']}),
+            ])
+        db.commit()
+
+    account = account_for(client, signing_keys)
+    account_move.move('seller@example.com', 'pw', account, source=mac[0], photos=mac[1])
+    alice = headers(signing_keys)
+    inventory = {row['id']: row for row in client.get('/api/conversations', headers=alice).json()}
+    for item, (_, labels) in cases.items():
+        assert inventory[item]['vendoo_labels'] == labels
+    detail = client.get('/api/conversations/legacy', headers=alice)
+    assert detail.status_code == 200
+    assert json.loads(detail.json()['notes']) == {**cases['legacy'][0], 'vendooLabels': 'Bin 4, Winter'}
+    with Session(mac[0]) as db:
+        assert db.scalar(select(Conversation.notes).where(Conversation.id == 'legacy')) == json.dumps(cases['legacy'][0])
+
+
 def test_the_account_tells_the_mac_where_to_sign_in(cloud, monkeypatch):  # noqa: F811
     client, _ = cloud
     monkeypatch.setenv('SUPABASE_URL', 'https://project.supabase.co')
