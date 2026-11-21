@@ -215,6 +215,22 @@ class SaleDelistFollowupTest(unittest.TestCase):
         self.assertEqual(touched, ["poshmark"])
         self.assertEqual(self._states()["mercari"], "live")
 
+    def test_turning_the_setting_off_stops_other_marketplaces_for_the_same_item(self):
+        self._sold()
+        followup._next.clear()
+        followup._running.clear()
+
+        def enabled():
+            return not (self.ebay.await_count or self.etsy.await_count or self.bridge.await_count)
+
+        with patch("anteroom.services.user_settings.autodelist_enabled", side_effect=enabled), \
+                patch("anteroom.services.mac_workspace.account_shown", return_value=False):
+            asyncio.run(followup.run(session_factory=sessionmaker(bind=self.db.get_bind())))
+
+        self.assertEqual(self.ebay.await_count + self.etsy.await_count + self.bridge.await_count, 1)
+        [item] = self._still()
+        self.assertEqual([entry["state"] for entry in item["stillListed"]], ["live"] * 3)
+
     def test_an_in_person_sale_is_alerted_but_never_delisted_automatically(self):
         self._sold(marketplace="other", listing_id=None, source="seller")
         [item] = self._still()

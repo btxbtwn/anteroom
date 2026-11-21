@@ -467,7 +467,8 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
     ``expected`` pins the listing ID to delete on each marketplace: when one names
     another listing now, such as a relist, nothing is deleted. ``sale_id`` names the
     sale a delist after a sale follows: once that order is no longer paid, or the
-    item has stock again, nothing is deleted.
+    item has stock again, nothing is deleted. A follow-up stops before its
+    next marketplace if automatic delisting is turned off.
 
     Each database step runs on a worker thread with its own session; none is open while
     eBay, Etsy or Chrome answers.
@@ -475,12 +476,17 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
     from types import SimpleNamespace
 
     from anteroom.database import in_worker_session
+    from anteroom.services.sale_delist_followup import _enabled
 
     names, known, job_id = await in_worker_session(_open_delist, conv_id, marketplaces, confirm, expected, sale_id)
     job = SimpleNamespace(id=job_id)
     failed = False
+    skipped: list[str] = []
     try:
-        for name in names:
+        for index, name in enumerate(names):
+            if sale_id is not None and not await asyncio.to_thread(_enabled):
+                skipped = names[index:]
+                break
             entry = known[name]
             base = {"listing_id": entry["listing_id"], "url": entry["url"], "at": _now(),
                     "attempts": _attempt(entry)}
@@ -524,7 +530,11 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
         raise
     finally:
         release_api_job(job_id)
-    return await in_worker_session(listings, conv_id)
+    result = await in_worker_session(listings, conv_id)
+    # Skipped marketplaces may have failures from a prior sweep; don't report them as new tries.
+    for name in skipped:
+        result.pop(name, None)
+    return result
 
 
 def _attempt(entry: dict) -> int:
