@@ -345,8 +345,8 @@ def _stale_markets(listing: dict | None, markets: set[str], *, include_unavailab
 
 
 async def fill_native_fields(conv_id: str, provider, *, evidence: str,
-                             markets: Iterable[str] = MARKETS) -> dict | None:
-    """Choose required categories first, then read their forms again to fill item fields."""
+                             markets: Iterable[str] = MARKETS, expected_photo_fingerprint: str | None = None) -> dict | None:
+    """Choose categories, then fill item fields using evidence tied to the supplied photos, if any."""
     from anteroom.database import in_worker_session
 
     markets = set(markets)
@@ -354,7 +354,8 @@ async def fill_native_fields(conv_id: str, provider, *, evidence: str,
     strict = bool(listing is not None and native_contract.KEY in listing)
     if strict and listing is not None:
         markets &= set(listing[native_contract.KEY])
-    categories = await _fill_native_fields(conv_id, provider, evidence=evidence, markets=markets, categories=True)
+    categories = await _fill_native_fields(conv_id, provider, evidence=evidence, markets=markets, categories=True,
+                                          expected_photo_fingerprint=expected_photo_fingerprint)
     if strict:
         current = await in_worker_session(_current_listing, conv_id)
         stale = _stale_markets(current, markets, include_unavailable=True)
@@ -365,7 +366,8 @@ async def fill_native_fields(conv_id: str, provider, *, evidence: str,
     for _round in range(3 if strict else 1):
         before = await in_worker_session(_current_listing, conv_id) or {}
         fields = await _fill_native_fields(conv_id, provider, evidence=evidence, markets=markets,
-                                           categories=False, required_only=required_only)
+                                           categories=False, required_only=required_only,
+                                           expected_photo_fingerprint=expected_photo_fingerprint)
         dependencies_changed = fields is not None and any(
             native_contract.inputs(before, market, contract.get("fields") or [])
             != native_contract.inputs(fields, market, contract.get("fields") or [])
@@ -441,7 +443,8 @@ def _record_forms(db: Session, conv_id: str, revision_id: str, saved: dict, form
                 write_value(listing, path, value)
     listing[native_contract.KEY] = {**choice_lists.compact_contracts(listing.get(native_contract.KEY) or {}),
                                     **native_contract.capture(listing, forms, markets)}
-    native_contract.constrain_generated(listing, listing, freeze_categories=False)
+    # Keep a separate seed so normalization cannot erase answers it must restore.
+    native_contract.constrain_generated(listing, native_contract.copy_listing(listing), freeze_categories=False)
     if listing != saved:
         listing_persistence.save_revision(db, conv_id, listing, source="native_schema", parent_revision_id=revision_id, expected_revision_id=revision_id)
     return listing[native_contract.KEY]
@@ -462,7 +465,8 @@ def _note(db: Session, conv_id: str, text: str) -> None:
 
 
 async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
-                              markets: Iterable[str], categories: bool, required_only: bool = False) -> dict | None:
+                              markets: Iterable[str], categories: bool, required_only: bool = False,
+                              expected_photo_fingerprint: str | None = None) -> dict | None:
     """Save picks; a valid strict check returns its snapshot even when unchanged."""
     from anteroom.database import in_worker_session
 
@@ -472,6 +476,10 @@ async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
     if inputs is None:
         return None
     fingerprint, revision_id, listing = inputs
+    # The save already checks this fingerprint again. Do not adopt new photos
+    # between passes when the evidence was read from a different set.
+    if expected_photo_fingerprint is not None and fingerprint != expected_photo_fingerprint:
+        return None
     has_contract = native_contract.KEY in listing
     strict = has_contract and not categories
     # Finishing just captured these definitions. Reuse them while their
@@ -821,15 +829,17 @@ def _finished(conv_id: str) -> None:
 
 def _category_fill_evidence(db: Session, conv_id: str) -> tuple[str, str] | None:
     """The evidence for a category refill, with the fingerprint of the photos it describes."""
-    from anteroom.services.listing_generate import current_photo_analysis, photo_fingerprint, seller_item_details
+    from anteroom.services.listing_generate import latest_photo_analysis, photo_fingerprint, seller_item_details
 
     repo = ConversationRepo(db)
     conv = repo.get(conv_id)
     if conv is None:
         return None
-    return photo_fingerprint(repo.get_photos(conv_id)), "\n\n".join(part for part in (
-        current_photo_analysis(repo, conv_id) or "", seller_item_details(conv.notes),
-        "Seller messages:\n" + "\n".join(message.text for message in repo.get_messages(conv_id)
+    photos = photo_fingerprint(repo.get_photos(conv_id))
+    messages = repo.get_messages(conv_id)
+    return photos, "\n\n".join(part for part in (
+        latest_photo_analysis(messages, fingerprint=photos) or "", seller_item_details(conv.notes),
+        "Seller messages:\n" + "\n".join(message.text for message in messages
                                             if message.role == "user" and message.text)) if part)
 
 
@@ -847,7 +857,8 @@ async def _fill_after_category(conv_id: str, markets: set[str]) -> None:
         photos, evidence = read
         native = markets & set(MARKETS)
         if native:
-            await fill_native_fields(conv_id, provider, evidence=evidence, markets=native)
+            await fill_native_fields(conv_id, provider, evidence=evidence, markets=native,
+                                     expected_photo_fingerprint=photos)
         if "etsy" in markets:
             await fill_etsy_attributes(conv_id, provider, evidence=evidence, photos=photos)
     except Exception:

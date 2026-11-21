@@ -209,12 +209,12 @@ def gaps(snapshot: dict, marketplace: str, context: Context | None = None) -> li
     for module in RULE_MODULES:
         importlib.import_module(module)
     context = context or Context()
-    found = [*(item for check in _REQUIREMENTS.get(marketplace, []) for item in check(snapshot, context)),
-             *_unresolved(snapshot, marketplace)]
+    found = [item for check in _REQUIREMENTS.get(marketplace, []) for item in check(snapshot, context)]
     from anteroom.services.etsy_fields import etsy_eligible
     from anteroom.services.native_contract import gaps as native_form_gaps
 
     if marketplace != "etsy" or etsy_eligible(snapshot):
+        found.extend(_unresolved(snapshot, marketplace))
         found.extend(native_form_gaps(snapshot, marketplace))
     found.extend(_empty_form_rows(snapshot, marketplace))
     # One missing answer is said once. The module checks and the captured form

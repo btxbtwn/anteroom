@@ -896,6 +896,7 @@ class EtsyNativeContractTest(unittest.TestCase):
         self.assertFalse(any(err["field"].startswith("etsy_specifics") for err in validation.errors), validation.errors)
         self.assertTrue(any(warn["field"] == "etsy_specifics.when_made" for warn in validation.warnings))
         # Direct preflight for ineligible item reports only the eligibility notice, not missing form rows.
+        ineligible["form"] = {"unresolved": [{"field": "etsy:Color", "value": ""}]}
         preflight_ineligible = direct_preflight.gaps(ineligible, "etsy")
         self.assertEqual([item["field"] for item in preflight_ineligible], ["etsy_specifics.when_made"])
         # Eligible vintage item with saved Settings defaults resolves whoMade/whatIsIt without gaps.
@@ -910,5 +911,8 @@ class EtsyNativeContractTest(unittest.TestCase):
         # Eligible vintage item without defaults deduplicates who_made / whoMade in direct_preflight.
         with patch("anteroom.services.user_settings.get_listing_field_defaults", return_value={}):
             preflight_vintage = direct_preflight.gaps(vintage, "etsy")
+        vintage["form"] = ineligible["form"]
+        self.assertTrue(any(item["field"] == "etsy_specifics.category_specifics.Color" and item["required"]
+                            for item in direct_preflight.gaps(vintage, "etsy")))
         who_gaps = [item for item in preflight_vintage if item["field"] in {"etsy_specifics.who_made", "etsy_specifics.whoMade"}]
         self.assertEqual(len(who_gaps), 1)

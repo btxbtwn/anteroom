@@ -523,9 +523,11 @@ async def _finish_generation_background(
             from anteroom.services.native_field_fill import fill_etsy_attributes, fill_native_fields
 
             async with live_trace.agent("native-fields", "Marketplace category fields") as agent, model_slots.slot():
-                filled = await fill_native_fields(conv_id, provider, evidence=evidence)
-                if "etsy" in await asyncio.to_thread(get_selected_marketplaces):
-                    await check_photos()
+                filled = await fill_native_fields(conv_id, provider, evidence=evidence,
+                                                  expected_photo_fingerprint=expected_photo_fingerprint)
+                selected = await asyncio.to_thread(get_selected_marketplaces)
+                await check_photos()
+                if "etsy" in selected:
                     filled = await fill_etsy_attributes(conv_id, provider, evidence=evidence,
                                                           photos=expected_photo_fingerprint) or filled
                 agent.result("Filled category fields" if filled else "No category fields to fill")

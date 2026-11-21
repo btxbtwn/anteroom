@@ -52,7 +52,8 @@ def test_finishing_fills_etsy_attributes_when_etsy_is_selected(monkeypatch):
         if work is listing_generation._finish_summary:
             summaries.append(args[1])
 
-    async def fill_native_fields(*args, **kwargs):
+    async def fill_native_fields(conv_id, provider, *, evidence, expected_photo_fingerprint):
+        assert (conv_id, evidence, expected_photo_fingerprint) == ("draft", "short sleeves", "photos")
         return None
 
     async def fill_etsy_attributes(conv_id, provider, *, evidence, photos):

@@ -175,6 +175,47 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         saved = self.repo.get_current(self.conv.id)
         return self.repo.get_revision(saved.current_revision_id)
 
+    async def test_photo_change_between_category_and_field_passes_rejects_stale_answers(self):
+        from anteroom.services.listing_generate import photo_fingerprint
+
+        photos = photo_fingerprint([])
+        category = row("direct_category_ids.etsy", "Category", ["Clothing"], value="482",
+                       option_values={"Clothing": "482"})
+        path = "etsy_specifics.category_specifics.Sleeve length"
+        form = {"fields": [category, row(path, "Sleeve length", ["Short sleeve"])]}
+        loads = 0
+
+        async def load_forms(*_args):
+            nonlocal loads
+            loads += 1
+            if loads == 1:
+                ConversationRepo(self.db).insert_photo(self.conv.id, "new.jpg", "new.jpg", "image/jpeg", 1)
+                self.db.commit()
+            return {"etsy": form}
+
+        ask = AsyncMock(return_value=json.dumps({"fields": {path: "Short sleeve"}}))
+        with patch.object(native_field_fill, "load_forms", load_forms), \
+                patch("anteroom.services.listing_generate.collect_provider_text", ask), \
+                patch("anteroom.services.listing_provider.get_listing_provider", return_value=object()), \
+                patch.object(native_field_fill, "_category_fill_evidence", return_value=(photos, "short sleeves")) as read_evidence:
+            await native_field_fill._fill_after_category(self.conv.id, {"etsy"})
+            ask.assert_not_awaited()
+            self.assertNotIn("etsy_specifics", self._current().listing_json)
+            read_evidence.return_value = (photo_fingerprint(ConversationRepo(self.db).get_photos(self.conv.id)),
+                                          "short sleeves")
+            await native_field_fill._fill_after_category(self.conv.id, {"etsy"})
+            self.assertEqual(self._current().listing_json["etsy_specifics"]["category_specifics"],
+                             {"Sleeve length": "Short sleeve"})
+
+    async def test_recording_a_changed_etsy_form_keeps_seller_locked_answers(self):
+        listing = {"title": "Tee", "seller_fields": ["etsy_specifics.category_specifics"],
+                   "etsy_specifics": {"category_specifics": {"Sleeve length": "", "Neckline": "Boat"}}}
+        listing_persistence.save_revision(self.db, self.conv.id, listing, source="native_schema")
+        form = {"fields": [row("etsy_specifics.category_specifics.Neckline", "Neckline", ["Crew"])]}
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"etsy": form})):
+            await native_field_fill.record_forms(self.conv.id, {"etsy"})
+        self.assertEqual(self._current().listing_json["etsy_specifics"], listing["etsy_specifics"])
+
     async def test_finishing_reuses_the_form_it_just_recorded(self):
         from anteroom.services import native_contract
 
