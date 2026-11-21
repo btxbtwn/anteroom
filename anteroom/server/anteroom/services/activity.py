@@ -41,39 +41,16 @@ _runs = itertools.count(1)
 edit_fields: ContextVar[tuple[str, ...] | None] = ContextVar("agent_edit_fields", default=None)
 
 
-def scoped_listing(
-    previous: dict,
-    candidate: dict,
-    paths: tuple[str, ...],
-    *,
-    notes: dict | None = None,
-) -> dict:
+def scoped_listing(previous: dict, candidate: dict, paths: tuple[str, ...]) -> dict:
     """Merge only declared agent edits onto the seller's latest revision."""
-    from anteroom.services.depop_measurements import sync_depop_measurements
-    from anteroom.services.general_measurements import (
-        is_garment_measurement_path,
-        is_measurement_path,
-    )
-    from anteroom.services.seller_overrides import is_locked, set_path
+    from anteroom.services.general_measurements import is_measurement_path
+    from anteroom.services.seller_overrides import set_path
 
     result = copy.deepcopy(previous)
-    has_garment_measurements = False
-    depop_measurements_declared = False
     for path in paths:
         if is_measurement_path(path):
-            if is_garment_measurement_path(path):
-                has_garment_measurements = True
             continue
-        if path == "depop_specifics.measurements" or path.startswith("depop_specifics.measurements."):
-            depop_measurements_declared = True
         set_path(result, path, copy.deepcopy(field_value(candidate, path)))
-    if (
-        has_garment_measurements
-        and not depop_measurements_declared
-        and notes is not None
-        and not is_locked(previous, "depop_specifics.measurements")
-    ):
-        sync_depop_measurements(result, notes, clear_empty=True)
     locks = set(previous.get("seller_fields") or [])
     for path in paths:
         if is_measurement_path(path):

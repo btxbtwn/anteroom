@@ -123,7 +123,7 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
 
     scope = activity.edit_fields.get()
     if scope is not None and source in FILL_ON_SOURCES:
-        listing_json = activity.scoped_listing(before, listing_json, scope, notes=depop_notes)
+        listing_json = activity.scoped_listing(before, listing_json, scope)
     from anteroom.services import choice_lists, native_contract
 
     if source != "native_schema" and (native_contract.KEY in before or use_saved_defaults):
@@ -144,6 +144,17 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
         if compacted is not listing_json[native_contract.KEY]:
             listing_json = native_contract.copy_listing(listing_json)
             listing_json[native_contract.KEY] = compacted
+    if depop_notes is not None:
+        from anteroom.services.depop_measurements import sync_depop_measurements
+        from anteroom.services.general_measurements import is_garment_measurement_path
+
+        path = "depop_specifics.measurements"
+        if scope is None or (
+            any(is_garment_measurement_path(field) for field in scope)
+            and not any(field == path or field.startswith(f"{path}.") for field in scope)
+        ):
+            # Reconcile accepted General changes after native answers have been restored.
+            sync_depop_measurements(listing_json, depop_notes, clear_empty=True)
     from anteroom.services.unsent_edits import normalized_listing_hash
 
     revision = repo.insert_revision(

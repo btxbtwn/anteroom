@@ -136,13 +136,6 @@ def _save_chat_candidate(db: Session, conv_id: str, listing: dict, **kwargs) -> 
         return None
 
 
-def _sync_chat_depop(listing: dict, notes: dict | None) -> None:
-    from anteroom.services.depop_measurements import sync_depop_measurements
-
-    if notes is not None:
-        sync_depop_measurements(listing, notes, clear_empty=True)
-
-
 def _save_missing_fields(db: Session, conv_id: str, missing_fields: list[dict], *, user_message: str = "") -> bool:
     from anteroom.services.fill_log import (
         FillLogService,
@@ -204,7 +197,6 @@ def _save_missing_fields(db: Session, conv_id: str, missing_fields: list[dict], 
     )
     accepted = [{**measurement_fields[path], "value": value} for path, value in applied.items()] + accepted
     if listing_missing_fields:
-        _sync_chat_depop(updated, depop_notes)
         from anteroom.services.seller_overrides import preserving_locks
 
         def _normalize(candidate: dict) -> None:
@@ -451,7 +443,6 @@ def apply_listing_payload(
         if _reject_best_offer(db, conv_id, updated):
             return parsed_ops, False
         _, depop_notes = _apply_measurement_notes(db, conv_id, measurement_ops, updated, commit=False)
-        _sync_chat_depop(updated, depop_notes)
         sku_keys = _patched_sku_keys(listing_ops) if _seller_asked_for_sku(user_message) else set()
         if _save_chat_candidate(
             db, conv_id, updated, operations=listing_ops, sku_keys=sku_keys,

@@ -163,6 +163,27 @@ class ChatMeasurementsTest(unittest.TestCase):
             ],
         )
 
+    def test_mixed_field_command_clears_inherited_measurements_on_native_depop_form(self):
+        ConversationRepo(self.db).write_notes(
+            self.conv.id, json.dumps({"garment": "top", "measurements": {"top": {"pitToPit": "16"}}}),
+        )
+        listing_persistence.save_revision(self.db, self.conv.id, {
+            **self.listing,
+            "_native_forms": {"depop": {}},
+            "depop_specifics": {
+                "size": "S",
+                "measurements": {"unit": "in", "values": [{"id": "pit_to_pit", "value": "16"}]},
+            },
+        }, "test")
+        reply = "```json\n" + json.dumps({"fields": [
+            {"path": "measurements.top.pitToPit", "clear": True},
+            {"path": "description", "value": "Updated description"},
+        ]}) + "\n```"
+        self.assertTrue(apply_listing_payload(self.db, self.conv.id, reply)[1])
+        saved = ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json
+        self.assertNotIn("measurements", saved["depop_specifics"])
+        self.assertEqual(saved["depop_specifics"]["size"], "S")
+
     def test_json_patch_saves_measurements_and_supports_remove_and_mixed_edits(self):
         patch_reply = 'Updated General measurements and description.\n```json\n' + json.dumps([
             {"op": "replace", "path": "/measurements/top/pitToPit", "value": 16},
@@ -531,5 +552,3 @@ class ChatMeasurementsTest(unittest.TestCase):
         self.assertTrue(saved)
         latest = ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json
         self.assertEqual(latest["depop_specifics"]["measurements"], depop_block)
-
-

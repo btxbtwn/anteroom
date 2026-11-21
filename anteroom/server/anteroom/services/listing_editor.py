@@ -102,7 +102,9 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
             raise HTTPException(409, "The agent is editing: " + ", ".join(sorted(set(locked))))
     from anteroom.services.vendoo_import import parse_notes
 
-    listing_data = prepared_listing(previous_json, listing_data, notes=parse_notes(conv.notes))
+    # Chat applies accepted changes to inherited measurements after native edits are locked.
+    notes = parse_notes(conv.notes) if depop_notes is None else None
+    listing_data = prepared_listing(previous_json, listing_data, notes=notes)
     from anteroom.services.agent_categories import map_general_category
 
     map_general_category(db, previous_json, listing_data)
