@@ -10,7 +10,7 @@ import { type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { currentPhaseIndex } from "./liveTrace";
 import { assistantDisplayText, extractJson, isListingJson, isStreamError } from "./chat/assistantDisplay";
 import { useComposerImages } from "./chat/ComposerAttachments";
-import { useComposerDraftText } from "./chat/composerDrafts";
+import { getComposerDraft, setComposerListingPhotoBatch, useComposerDraftText } from "./chat/composerDrafts";
 import { ChatComposer } from "./chat/ChatComposer";
 import { uploadComposerDraftPhotos } from "./chat/composerDraftPhotos";
 import { StreamErrorPanel, UnfinishedGenerationPanel } from "./chat/ChatErrors";
@@ -120,21 +120,25 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     const text = input.trim();
     const attached = images.images;
     if (!text && !attached.length) return;
+    const listingPhotoBatch = getComposerDraft(draftKey).listingPhotoBatch;
+    if (listingPhotoBatch === "uploading") return;
     // sendMessage refuses while background work runs, so hold the message instead of dropping it.
     if (busy || serverBusy) {
       if (attached.length) {
         images.setError("Images go with the next message once the current run finishes.");
         return;
       }
+      setComposerListingPhotoBatch(draftKey, undefined);
       enqueue(newQueuedChatMessage(text));
       setInput("");
       pinChatToBottom();
       return;
     }
     // When a draft has no listing photos yet, images attached in chat become
-    // its listing photos so phone sellers can start a listing directly from Chat.
-    if (draftHasNoPhotos && attached.length > 0) {
+    // its listing photos. Keep that intent when a partial upload adds photos.
+    if ((draftHasNoPhotos || listingPhotoBatch) && attached.length > 0) {
       if (uploadingPhotos || photosUploading(convId)) return;
+      setComposerListingPhotoBatch(draftKey, "uploading");
       void uploadComposerDraftPhotos(attached, text, hasListingJson, {
         uploadPhotos: (files) => api.conversations.uploadPhotos(convId, files),
         invalidatePhotos: async () => {
@@ -145,9 +149,14 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
         setError: images.setError,
         sendMessage: (note) => { void sendMessage(note); },
         generate: () => { void handleGenerate(); },
+      }).then((complete) => {
+        if (getComposerDraft(draftKey).listingPhotoBatch === "uploading") {
+          setComposerListingPhotoBatch(draftKey, complete ? undefined : "retry");
+        }
       });
       return;
     }
+    if (!attached.length) setComposerListingPhotoBatch(draftKey, undefined);
     void (async () => {
       const uploads = attached.length ? await images.prepare(attached) : [];
       if (uploads === null) return;
@@ -165,6 +174,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     enqueue,
     images,
     draftHasNoPhotos,
+    draftKey,
     uploadingPhotos,
     convId,
     queryClient,
