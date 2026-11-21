@@ -6,7 +6,8 @@ from typing import Any
 from sqlalchemy.orm import Session
 from anteroom.repositories.queries import ConversationRepo
 
-def _facet(sku: Any, price: Any, etsy: Any = None, year: Any = None) -> dict[str, Any]:
+def _facet(sku: Any, price: Any, etsy: Any = None, *years: Any) -> dict[str, Any]:
+    from anteroom.models.schema import EBAY_YEAR_KEYS
     from anteroom.services.etsy_fields import etsy_eligible
 
     text = str(sku or "").strip()
@@ -21,7 +22,7 @@ def _facet(sku: Any, price: Any, etsy: Any = None, year: Any = None) -> dict[str
         specifics = None
     listing = {
         "etsy_specifics": specifics if isinstance(specifics, dict) else {},
-        "ebay_specifics": {"yearManufactured": year} if year else {},
+        "ebay_specifics": dict(zip(EBAY_YEAR_KEYS, years, strict=True)),
     }
     return {"sku": text or None, "price": amount, "etsy_eligible": etsy_eligible(listing)}
 

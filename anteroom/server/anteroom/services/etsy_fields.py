@@ -22,6 +22,7 @@ from anteroom.models.listing_values import (
     text_value,
 )
 from anteroom.models.schema import (
+    EBAY_YEAR_KEYS,
     _scalar_text,
 )
 
@@ -395,9 +396,15 @@ def etsy_when_raw(etsy: dict[str, Any], listing: dict[str, Any] | None = None) -
         text = _scalar_text(etsy.get(key)) if key in etsy else None
         if text:
             return text
+    return ebay_year_manufactured(listing)
+
+
+def ebay_year_manufactured(listing: dict[str, Any] | None) -> str:
     ebay = (listing or {}).get("ebay_specifics")
-    if isinstance(ebay, dict):
-        text = _scalar_text(ebay.get("yearManufactured") or ebay.get("year_manufactured"))
+    if not isinstance(ebay, dict):
+        return ""
+    for key in EBAY_YEAR_KEYS:
+        text = _scalar_text(ebay.get(key))
         if text:
             return text
     return ""
@@ -501,10 +508,7 @@ def resolve_etsy_when(raw: str, options: list[str]) -> str:
 
 
 def _ebay_year_when(listing: dict[str, Any] | None, options: list[str]) -> str:
-    ebay = (listing or {}).get("ebay_specifics")
-    if not isinstance(ebay, dict):
-        return ""
-    year = _scalar_text(ebay.get("yearManufactured") or ebay.get("year_manufactured"))
+    year = ebay_year_manufactured(listing)
     if not year:
         return ""
     resolved = resolve_etsy_when(year, options)

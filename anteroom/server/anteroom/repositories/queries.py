@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from anteroom.database import json_value
+from anteroom.models.schema import EBAY_YEAR_KEYS
 from anteroom.models.conversation import (
     Conversation,
     Message,
@@ -81,11 +82,16 @@ def _facet_columns() -> tuple:
         json_value(doc, "sku"),
         json_value(doc, "price"),
         json_value(doc, "etsy_specifics"),
-        func.coalesce(
-            json_value(doc, "ebay_specifics.yearManufactured"),
-            json_value(doc, "ebay_specifics.year_manufactured"),
-        ),
+        *ebay_year_columns(doc),
     )
+
+
+def ebay_year_columns(doc) -> tuple:
+    """eBay's year under each key a listing may keep it in (``EBAY_YEAR_KEYS``), in that order.
+
+    Separate columns, not one coalesce: SQLite reads a missing key as JSON null, not SQL NULL.
+    """
+    return tuple(json_value(doc, f"ebay_specifics.{key}") for key in EBAY_YEAR_KEYS)
 
 
 class ConversationRepo:

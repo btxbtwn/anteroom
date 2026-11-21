@@ -16,7 +16,6 @@ import json
 import re
 from typing import Any
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from anteroom.database import json_value
@@ -29,6 +28,8 @@ from anteroom.services.etsy_fields import (
     resolve_etsy_when,
 )
 from anteroom.models.listing import Listing, ListingRevision
+from anteroom.models.schema import EBAY_YEAR_KEYS
+from anteroom.repositories.queries import ebay_year_columns
 from anteroom.services.vendoo_import import parse_notes
 
 # A title that dates the piece. "Y2K" is left out: it names a look that new
@@ -46,10 +47,7 @@ def etsy_not_allowed_live(db: Session) -> list[dict[str, Any]]:
             Conversation.notes,
             json_value(doc, "title"),
             json_value(doc, "etsy_specifics"),
-            func.coalesce(
-                json_value(doc, "ebay_specifics.yearManufactured"),
-                json_value(doc, "ebay_specifics.year_manufactured"),
-            ),
+            *ebay_year_columns(doc),
         )
         .join(Listing, Listing.conversation_id == Conversation.id)
         .join(ListingRevision, ListingRevision.id == Listing.current_revision_id)
@@ -57,7 +55,7 @@ def etsy_not_allowed_live(db: Session) -> list[dict[str, Any]]:
         .all()
     )
     out: list[dict[str, Any]] = []
-    for conv_id, conv_title, raw_notes, title, raw_etsy, year in rows:
+    for conv_id, conv_title, raw_notes, title, raw_etsy, *years in rows:
         notes = parse_notes(raw_notes)
         live = notes.get("vendooMarketplaces")
         if not isinstance(live, list) or "etsy" not in live:
@@ -72,7 +70,7 @@ def etsy_not_allowed_live(db: Session) -> list[dict[str, Any]]:
             continue
         listing = {
             "etsy_specifics": _json_object(raw_etsy),
-            "ebay_specifics": {"yearManufactured": year} if year else {},
+            "ebay_specifics": dict(zip(EBAY_YEAR_KEYS, years, strict=True)),
         }
         if etsy_eligible(listing):
             continue

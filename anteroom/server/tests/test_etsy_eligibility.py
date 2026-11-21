@@ -19,7 +19,7 @@ from sqlalchemy.pool import StaticPool
 from anteroom.services import listing_persistence
 from anteroom.database import Base, get_db, load_models
 from anteroom.main import app
-from anteroom.services.etsy_fields import etsy_eligible
+from anteroom.services.etsy_fields import etsy_eligible, etsy_when_raw, etsy_when_to_store
 from anteroom.repositories.queries import ConversationRepo, ListingRepo
 from anteroom.services.etsy_audit import etsy_not_allowed_live
 from anteroom.services.vendoo_marketplace_fields import _etsy_when_code
@@ -59,6 +59,14 @@ class EtsyEligibleTest(unittest.TestCase):
 
     def test_the_ebay_year_dates_an_item_with_no_etsy_answer(self):
         self.assertTrue(etsy_eligible(listing({"who_made": "someone_else"}, ebay_specifics={"yearManufactured": "1988"})))
+
+    def test_the_ebay_form_year_dates_an_item_with_no_etsy_answer(self):
+        # eBay's native form saves the aspect under its own name. A generated
+        # NASCAR tee had only this, and Etsy called it modern resale.
+        dated = listing(ebay_specifics={"Year Manufactured": "2000-2009", "Vintage": "Yes"})
+        self.assertTrue(etsy_eligible(dated))
+        self.assertEqual(etsy_when_raw({}, dated), "2000-2009")
+        self.assertEqual(etsy_when_to_store("2000-2009", dated), "2000 - 2006 (Vintage)")
 
     def test_handmade_supplies_and_digital_are_allowed(self):
         self.assertTrue(etsy_eligible(listing({**MODERN, "who_made": "I did"})))
@@ -100,9 +108,9 @@ class NotAllowedReportTest(unittest.TestCase):
         app.dependency_overrides.clear()
         self.db.close()
 
-    def add(self, title: str, etsy: dict, notes: dict) -> str:
+    def add(self, title: str, etsy: dict, notes: dict, **extra) -> str:
         conv = self.convs.create(title=title, notes=json.dumps(notes))
-        listing_persistence.save_revision(self.listings.db, conv.id, listing(etsy, title=title), "test")
+        listing_persistence.save_revision(self.listings.db, conv.id, listing(etsy, title=title, **extra), "test")
         return conv.id
 
     def seed(self) -> str:
@@ -116,6 +124,7 @@ class NotAllowedReportTest(unittest.TestCase):
             **live, "vendooDates": {"listedByMarketplace": {"etsy": "2026-08-01T00:00:00+00:00"}},
         })
         self.add("Vintage Cardigan", VINTAGE, live)
+        self.add("NASCAR Tee", {}, live, ebay_specifics={"Year Manufactured": "2000-2009"})
         self.add("Sold on Etsy", MODERN, {**live, "vendooDates": {"soldByMarketplace": {"etsy": "2026-09-01"}}})
         self.add("Not on Etsy", MODERN, {"vendooMarketplaces": ["ebay"]})
         self.add("Never synced", MODERN, {})

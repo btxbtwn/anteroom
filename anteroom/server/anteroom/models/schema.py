@@ -6,6 +6,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from anteroom.models.mercari_shipping import DEFAULT_SHIPPING_LABEL
 
+# Where a listing keeps eBay's Year Manufactured: eBay's native form saves the
+# aspect under eBay's own name; older listings and imports use the field name.
+EBAY_YEAR_KEYS = ("Year Manufactured", "yearManufactured", "year_manufactured")
+
 VALID_CONDITIONS = frozenset((
     "New With Tags/Box",
     "New Without Tags/Box",
