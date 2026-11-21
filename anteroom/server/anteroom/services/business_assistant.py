@@ -8,12 +8,12 @@ current buy list with its best boxes, ad spend, sale events, and sourcing
 checks — and the exact tables it can look the rest up in. The brief is read
 fresh each time, so an answer reflects Anteroom's records as they are now.
 
-Every row behind the summary can be looked up. Each listing with its
-description and full field values, every Sourcing-tab box, and the sales
-breakdowns are copied into a throwaway in-memory SQLite database, and the model
-may ask for a ``SELECT`` over it before it answers. The copy is the only thing a
-lookup can touch. The summary stays small, so a question does not spend the
-seller's model usage on rows it never needed.
+Every row behind the summary can be looked up. Each listing, its description and
+full field values (in ``listing_details``), every Sourcing-tab box, and the sales
+breakdowns are copied into a throwaway in-memory SQLite database on first lookup,
+and the model may ask for a ``SELECT`` over it before it answers. The copy is the
+only thing a lookup can touch. The summary stays small, so a question does not
+spend the seller's model usage on rows it never needed.
 
 It reads, and it proposes. A reply may end with changes to listings, which are
 kept with the reply for the seller to apply or dismiss
@@ -142,9 +142,10 @@ LOOKUP_INSTRUCTIONS = (
     "one; `listed_on` is where it is cross-listed, `sold_on` where it sold, and `box` the id of the bought box it "
     "came from (`boxes.id`). `form_sizes` is the size each marketplace form holds, `photo_size` the size read "
     "from the photos and where it was read, and `size_issue` why the sizing needs a look (NULL when nothing "
-    "stands out, and for sold listings). `details` is the listing's full JSON, including each marketplace's fields; read it with "
-    "json_extract(details, '$.ebay_specifics'). `category` is the Analytics category; a kind of piece is best "
-    "matched on the title too, like title LIKE '%jacket%'.\n"
+    "stands out, and for sold listings). `listing_details(listing_id, description, details)` holds each listing's "
+    "description and full JSON (including each marketplace's fields; read with json_extract(details, '$.ebay_specifics')), "
+    "one row per listing; join `listing_details.listing_id = listings.id` and select it only for the listings you need. "
+    "`category` is the Analytics category; a kind of piece is best matched on the title too, like title LIKE '%jacket%'.\n"
     "`boxes` is the wholesale boxes the seller bought and what each returned; `price_changes` each asking-price "
     "change made in Anteroom.\n"
     "`sourcing_boxes` is every box on the Sourcing tab from its last check: `contents` the kind of piece, `landed` "
@@ -233,8 +234,9 @@ ACTIVE_GROUP_COLUMNS = ("category", "active", "asking_value", "median_days_liste
 LISTING_COLUMNS = (
     "id", "title", "status", "brand", "category", "size", "condition", "color", "labels", "sku", "listed_on",
     "asking", "cost", "sold_for", "fees", "profit", "sold_on", "listed", "sold", "days", "box",
-    "shipping_cost", "shipping_credit", "form_sizes", "photo_size", "size_issue", "description", "details",
+    "shipping_cost", "shipping_credit", "form_sizes", "photo_size", "size_issue",
 )
+LISTING_DETAIL_COLUMNS = ("listing_id", "description", "details")
 # A listing whose sizing needs a look, as the summary shows it.
 SIZING_COLUMNS = ("id", "title", "status", "category", "size", "form_sizes", "photo_size", "size_issue")
 CHANGE_COLUMNS = ("listing_id", "changed_on", "old_price", "new_price")
@@ -251,6 +253,7 @@ EVENT_COLUMNS = (
 )
 TABLES = {
     "listings": LISTING_COLUMNS,
+    "listing_details": LISTING_DETAIL_COLUMNS,
     "price_changes": CHANGE_COLUMNS,
     "boxes": BOX_COLUMNS,
     "ad_spend": AD_COLUMNS,
@@ -502,7 +505,7 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
     rows = rows_from_inputs(inputs)
     ranges = analytics_ranges(db, ANALYTICS_RANGES, now=clock, rows=rows)
     everything = ranges["all"]
-    records = _records(db, rows, clock)
+    records, detail_rows = _records(db, rows, clock)
     changes = _price_changes(db)
     box_results = boxes.results(db, rows=rows, release=True)
     ads = [ad_spend.entry_view(row) for row in ad_spend.list_entries(db)]
@@ -566,6 +569,7 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
         "\n\n".join(section for section in sections if section),
         {
             "listings": records,
+            "listing_details": detail_rows,
             "price_changes": changes,
             "boxes": box_results["boxes"],
             "ad_spend": ads,
@@ -1023,8 +1027,10 @@ def _section(title: str, payload: Any) -> str:
     return f"--- {title} ---\n{json.dumps(payload, separators=(',', ':'), default=str)}"
 
 
-def _records(db: Session, rows: list[AnalyticsItem], now: datetime) -> list[dict[str, Any]]:
-    """Every listing as one record, newest sales first, then what is still for sale."""
+def _records(
+    db: Session, rows: list[AnalyticsItem], now: datetime,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Every listing as one slim record, plus one detail row per listing with description and full JSON."""
     from anteroom.models.conversation import Conversation
     from anteroom.models.listing import Listing, ListingRevision
     from anteroom.services import size_audit
@@ -1055,6 +1061,8 @@ def _records(db: Session, rows: list[AnalyticsItem], now: datetime) -> list[dict
     # calculating, so the following price-history read starts a fresh transaction.
     db.rollback()
     records = []
+    detail_rows = []
+    seen_details: set[str] = set()
     for item in _ordered(rows):
         listing = listings.get(item.conversation_id)
         listing = listing if isinstance(listing, dict) else {}
@@ -1091,10 +1099,16 @@ def _records(db: Session, rows: list[AnalyticsItem], now: datetime) -> list[dict
             "form_sizes": ", ".join(f"{name}: {size}" for name, size in size_audit.form_sizes(listing).items()) or None,
             "photo_size": photo_sizes.get(item.conversation_id),
             "size_issue": None if sold else size_audit.size_problems(listing, photo_sizes.get(item.conversation_id)),
-            "description": _text(listing.get("description")),
-            "details": json.dumps(listing, default=str) if listing else None,
         })
-    return records
+        if item.conversation_id not in seen_details:
+            seen_details.add(item.conversation_id)
+            detail_rows.append({
+                "listing_id": item.conversation_id,
+                "description": _text(listing.get("description")),
+                # Kept as a dict here; _cell serializes it only when a lookup builds the SQLite copy.
+                "details": listing or None,
+            })
+    return records, detail_rows
 
 
 def _photo_sizes(db: Session) -> dict[str, str]:
@@ -1162,9 +1176,9 @@ def _listing_summary(records: list[dict[str, Any]]) -> str:
     longest = sorted(active, key=lambda record: (record["days"] is None, -(record["days"] or 0), record["id"]))
     latest = [record for record in records if record["status"] == "sold"][:LATEST_SALES]
     note = (
-        "Only these rows are here. The `listings` lookup table has every listing with every column: brand, size, "
-        "condition, labels, cost, fees, profit, description and each marketplace's fields. `days` is days listed "
-        "so far for an active listing and days to sell for a sold one. Empty means not recorded."
+        "Only these rows are here. The `listings` lookup table has every listing with every column (brand, size, "
+        "condition, labels, cost, fees, profit); `listing_details` has each listing's description and marketplace "
+        "fields. `days` is days listed so far for an active listing and days to sell for a sold one. Empty means not recorded."
     )
     parts = [title, note]
     if active:

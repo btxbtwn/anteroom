@@ -263,8 +263,8 @@ def test_a_lookup_reads_the_copy_and_nothing_else(workspace, tmp_path):
     lookups = business_assistant.read_shop(db, now=NOW).lookups
 
     assert business_assistant.run_lookup(
-        lookups, "-- sold sizes\nSELECT size, sold_for, json_extract(details, '$.ebay_specifics.Rise') AS rise,"
-                 " description FROM listings WHERE status = 'sold';",
+        lookups, "-- sold sizes\nSELECT l.size, l.sold_for, json_extract(d.details, '$.ebay_specifics.Rise') AS rise,"
+                 " d.description FROM listings l JOIN listing_details d ON d.listing_id = l.id WHERE l.status = 'sold';",
     ) == "Lookup result (1 rows):\nsize | sold_for | rise | description\n34 | 48.0 | Mid | Classic straight leg denim."
     assert f"{coat.id} | 150.0 | 120.0" in business_assistant.run_lookup(
         lookups, "SELECT listing_id, old_price, new_price FROM price_changes")
@@ -400,7 +400,7 @@ def ask_through(client, monkeypatch, *turns):
     (f"{FENCE}sql\n{FENCE}", "Lookup sql failed: the sql block was empty. Put one SELECT in it."),
     (f"{FENCE}sql\n-- just a comment\n{FENCE}", "Lookup sql failed: the sql block was empty."),
     (f"{FENCE}sql\nSELECT * FROM sourcing_box\n{FENCE}",
-     "Lookup sourcing_box failed: no such table: sourcing_box. The tables are: listings, price_changes"),
+     "Lookup sourcing_box failed: no such table: sourcing_box. The tables are: listings, listing_details, price_changes"),
     (f"{FENCE}sql\nSELECT title FROM listings WHERE size = '99'\n{FENCE}",
      "Lookup result: 0 rows matched WHERE size = '99'.\ntitle"),
     (f"{FENCE}sql\nSELECT nope FROM listings\n{FENCE}", "Lookup listings failed: no such column: nope."),
@@ -1408,12 +1408,13 @@ def test_listing_details_are_read_a_batch_at_a_time(workspace, monkeypatch):
     engine = db.get_bind()
     event.listen(engine, "before_cursor_execute", seen)
     try:
-        records = business_assistant._records(db, load_rows(db), NOW)
+        records, detail_rows = business_assistant._records(db, load_rows(db), NOW)
     finally:
         event.remove(engine, "before_cursor_execute", seen)
 
     assert len(statements) == 3 and all("LIMIT" in statement for statement in statements)
-    assert sorted(json.loads(record["details"])["description"] for record in records) == [
+    assert len(records) == 5
+    assert sorted(detail["details"]["description"] for detail in detail_rows) == [
         f"Shirt number {n}" for n in range(5)]
 
 
@@ -1534,3 +1535,46 @@ def test_sold_listings_skip_the_size_audit(workspace, monkeypatch):
         assert result == "Lookup result (1 rows):\nsize_issue\n"
     finally:
         shop.close()
+
+
+def test_select_star_on_listings_fits_a_large_shop(workspace):
+    db, _client = workspace
+    seed(db)
+    long_description = "Measurements and fabric notes. " * 70
+    for n in range(60):
+        add_listing(
+            db, f"Vintage Tee {n}",
+            {"price": 24, "brand": "Nike", "size": "M", "description": long_description,
+             "ebay_specifics": {"Department": "Men", "Material": "Cotton"}},
+            {"vendooStatus": "active", "vendooDates": {"listed": "2026-09-01T00:00:00+00:00"}},
+        )
+    shop = business_assistant.read_shop(db, now=NOW)
+    try:
+        result = business_assistant.run_lookup(shop.lookups, "SELECT * FROM listings")
+        assert result.startswith("Lookup result (63 rows):\n")
+        assert "there are more" not in result
+    finally:
+        shop.close()
+
+
+def test_listing_details_has_one_row_per_listing_including_drafts(workspace):
+    db, _client = workspace
+    _box, jeans, coat = seed(db)
+    shop = business_assistant.read_shop(db, now=NOW)
+    try:
+        assert business_assistant.run_lookup(
+            shop.lookups, "SELECT count(*) FROM listing_details",
+        ).endswith("\n3")
+        joined = business_assistant.run_lookup(
+            shop.lookups,
+            "SELECT l.status, d.description, json_extract(d.details, '$.price') FROM listings l "
+            "JOIN listing_details d ON d.listing_id = l.id ORDER BY l.status",
+        )
+        assert "active |  | 120" in joined
+        assert "draft |  | 15" in joined
+        assert "sold | Classic straight leg denim. | 60" in joined
+        assert f"{jeans.id}" in business_assistant.run_lookup(shop.lookups, "SELECT listing_id FROM listing_details")
+        assert f"{coat.id}" in business_assistant.run_lookup(shop.lookups, "SELECT listing_id FROM listing_details")
+    finally:
+        shop.close()
+
