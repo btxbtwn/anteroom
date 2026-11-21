@@ -36,7 +36,10 @@ export function SuggestionsPage({ active, onOpenListing, conversations, bulk }: 
   const listingsById = useMemo(() => new Map(conversations?.map(item => [item.id, item])), [conversations]);
   const pendingIds = new Set(bulk.pendingIds);
   const eligibleIds = features.has("bulk_regenerate") ? visible
-    .filter(item => !pendingIds.has(item.conversation_id) && listingCanRegenerate(listingsById.get(item.conversation_id) ?? item))
+    .filter(item => {
+      const listing = listingsById.get(item.conversation_id);
+      return listing && !pendingIds.has(listing.id) && listingCanRegenerate(listing);
+    })
     .map(item => item.conversation_id) : [];
   const eligible = new Set(eligibleIds);
   const selection = useListingSelection({ eligibleIds, listingsById, suggestions, bulk });

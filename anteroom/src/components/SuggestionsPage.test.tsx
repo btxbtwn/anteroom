@@ -4,9 +4,9 @@ import { expect, it } from "vitest";
 import { SuggestionsPage } from "./SuggestionsPage";
 import { useBulkRegenerate } from "./useBulkRegenerate";
 
-function Page() {
+function Page({ inventoryLoaded = false }: { inventoryLoaded?: boolean }) {
   const bulk = useBulkRegenerate(() => false);
-  return <SuggestionsPage active onOpenListing={() => {}} conversations={undefined} bulk={bulk} />;
+  return <SuggestionsPage active onOpenListing={() => {}} conversations={inventoryLoaded ? [{ id: "coat", title: "Wool coat", cover_photo_url: "/cover.png", price: 50 }] : undefined} bulk={bulk} />;
 }
 
 it("explains an empty feed without showing a relisting action", () => {
@@ -31,7 +31,11 @@ it("offers regeneration selection beside a suggested listing with a photo", () =
     conversation_id: "coat", title: "Wool coat", reason: "Listed over 60 days.",
     kind: "stale_active", cover_photo_url: "/cover.png",
   }] });
-  const html = renderToStaticMarkup(<QueryClientProvider client={client}><Page /></QueryClientProvider>);
+  const render = (inventoryLoaded: boolean) => renderToStaticMarkup(
+    <QueryClientProvider client={client}><Page inventoryLoaded={inventoryLoaded} /></QueryClientProvider>,
+  );
+  expect(render(false)).not.toContain('aria-label="Select Wool coat"');
+  const html = render(true);
   expect(html).toContain('aria-label="Select Wool coat"');
   expect(html).toContain("Regenerate selected");
 });
