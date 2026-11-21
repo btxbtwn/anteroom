@@ -187,6 +187,7 @@ def checked(action_id: str, body: Checked, db: Session = Depends(get_db, scope="
         if not action or action.account_id != identity()[0] or action.state != "unknown":
             raise EbayFailure("This action does not need a result check.", 409)
         action.state = "checked"
+        action.ad_listing_ids = None
         db.commit()
         return {"ok": True}
     except (EbayFailure, SignInRequired) as exc:

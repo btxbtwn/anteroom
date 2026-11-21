@@ -534,16 +534,15 @@ def _ad_listing_ids(operations: list[dict]) -> set[str]:
 
 
 def _has_unresolved_action(db: Session, account_id: str, plan: dict, action_id: str | None = None) -> bool:
-    query = db.query(EbayAction.resource_id).filter_by(account_id=account_id, kind=plan["kind"]).filter(
+    query = db.query(EbayAction.resource_id, EbayAction.ad_listing_ids).filter_by(account_id=account_id, kind=plan["kind"]).filter(
         EbayAction.state.in_(("sending", "unknown")),
     )
     if action_id is not None:
         query = query.filter(EbayAction.id != action_id)
-    targets = {plan["target"]}
-    if plan["kind"] == "ad":
-        # Older ad rows were keyed by listing ID; bulk rows use the campaign.
-        targets.update(_ad_listing_ids(plan["operations"]))
-    return any(resource_id in targets for (resource_id,) in query)
+    listing_ids = _ad_listing_ids(plan["operations"]) if plan["kind"] == "ad" else set()
+    # Older ad rows were keyed by listing ID; bulk rows retain campaign and membership.
+    return any(resource_id == plan["target"] or (prior_ids is None and resource_id in listing_ids)
+               or not listing_ids.isdisjoint(prior_ids or ()) for resource_id, prior_ids in query)
 
 
 def _open_review(db: Session, account_id: str, kind: str, plan: dict, fingerprint: str) -> dict:
@@ -640,15 +639,19 @@ def _reviewed(db: Session, action_id: str, account_id: str, kind: str) -> tuple[
 
 def _claim(db: Session, action_id: str, account_id: str, fingerprint: str, plan: dict) -> None:
     kind = plan["kind"]
-    if _has_unresolved_action(db, account_id, plan, action_id):
-        raise EbayFailure("An earlier action for this item needs a result check in Activity.", 409)
     if db.query(EbayAction.id).filter(EbayAction.account_id == account_id, EbayAction.fingerprint == fingerprint,
                                      EbayAction.state.in_(_repeatable(kind)), EbayAction.id != action_id).first():
         raise EbayFailure("This action was already sent or has an uncertain result.", 409)
     try:
-        claimed = db.execute(update(EbayAction).where(EbayAction.id == action_id, EbayAction.state == "preview").values(state="sending"))
+        listing_ids = sorted(_ad_listing_ids(plan["operations"])) if kind == "ad" else None
+        claimed = db.execute(update(EbayAction).where(EbayAction.id == action_id, EbayAction.state == "preview")
+                             .values(state="sending", ad_listing_ids=listing_ids))
         if type_cast(CursorResult, claimed).rowcount != 1:
             raise EbayFailure("This action already started.", 409)
+        # Check after taking the sending slot: a competing action may have just settled as unknown.
+        if _has_unresolved_action(db, account_id, plan, action_id):
+            db.rollback()
+            raise EbayFailure("An earlier action for this item needs a result check in Activity.", 409)
         db.execute(update(EbayAction).where(EbayAction.account_id == account_id, EbayAction.fingerprint == fingerprint,
                                            EbayAction.state == "preview", EbayAction.id != action_id).values(state="superseded"))
         db.commit()
@@ -659,6 +662,8 @@ def _claim(db: Session, action_id: str, account_id: str, fingerprint: str, plan:
 
 def _settle(db: Session, action_id: str, state: str, receipt_id: str | None) -> None:
     values: dict = {"state": state}
+    if state != "unknown":
+        values["ad_listing_ids"] = None
     if receipt_id is not None:
         values["receipt_id"] = receipt_id
     db.execute(update(EbayAction).where(EbayAction.id == action_id).values(**values))

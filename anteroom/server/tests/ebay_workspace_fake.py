@@ -156,7 +156,7 @@ class WorkspaceEbay(BaseHTTPRequestHandler):
                 <SellingStatus><CurrentPrice currencyID="USD">50.00</CurrentPrice></SellingStatus></Item>"""
                 for identifier, title in listings[offset:offset + page_size])
             self.reply(200, f"""<GetMyeBaySellingResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack>
-                <ActiveList><PaginationResult><TotalNumberOfPages>{pages}</TotalNumberOfPages>
+                <ActiveList><PaginationResult><TotalNumberOfPages>{getattr(state, "active_pages", pages)}</TotalNumberOfPages>
                 <TotalNumberOfEntries>{getattr(state, "active_total", len(listings))}</TotalNumberOfEntries></PaginationResult>
                 <ItemArray>{items}</ItemArray></ActiveList></GetMyeBaySellingResponse>""".encode())
             return

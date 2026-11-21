@@ -232,19 +232,26 @@ async def advertising_listings(client: EbayClient) -> dict[str, str]:
     page_size = 200
     page_number = 1
     count = 0
+    reported_total: int | None = None
     listings: dict[str, str] = {}
+    incomplete = "eBay returned an incomplete active listings page. Refresh and try again."
     while True:
         active = await active_listing_page(client, page_number, page_size)
         if active is None:
             if page_number == 1:
                 return listings
-            raise EbayFailure("eBay returned an incomplete active listings page. Refresh and try again.")
+            raise EbayFailure(incomplete)
         items = active.findall("e:ItemArray/e:Item", NS)
         count += len(items)
-        total = active.findtext("e:PaginationResult/e:TotalNumberOfEntries", namespaces=NS)
+        total_text = active.findtext("e:PaginationResult/e:TotalNumberOfEntries", namespaces=NS)
+        total = int(total_text) if total_text is not None else None
         # GetMyeBaySelling reports 25,000 even when more listings exist.
-        if count >= 25_000 or (total is not None and int(total) >= 25_000):
+        if count >= 25_000 or (total is not None and total >= 25_000):
             raise EbayFailure("eBay limits this inventory response to 25,000 listings, so we cannot verify the full selection. Use Seller Hub to promote listings.", 422)
+        if total is not None:
+            if reported_total is not None and total != reported_total:
+                raise EbayFailure(incomplete)
+            reported_total = total
         for item in items:
             identifier = item.findtext("e:ItemID", namespaces=NS) or ""
             price = item.find("e:SellingStatus/e:CurrentPrice", NS)
@@ -256,9 +263,11 @@ async def advertising_listings(client: EbayClient) -> dict[str, str]:
         pages = active.findtext("e:PaginationResult/e:TotalNumberOfPages", namespaces=NS)
         has_more = page_number < int(pages) if pages is not None else len(items) == page_size
         if not has_more:
+            if reported_total is not None and count != reported_total:
+                raise EbayFailure(incomplete)
             return listings
         if not items:
-            raise EbayFailure("eBay returned an incomplete active listings page. Refresh and try again.")
+            raise EbayFailure(incomplete)
         page_number += 1
 
 

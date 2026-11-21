@@ -15,6 +15,7 @@ from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import sessionmaker
 
 from ebay_workspace_fake import ITEM_ID, WorkspaceEbay, order
+from test_seller_ownership import migration_config, migration_engine  # noqa: F401
 from anteroom.services import listing_persistence
 from anteroom.database import Base, get_db, load_models
 from anteroom.main import app
@@ -652,3 +653,88 @@ def test_first_ad_batch_http_conflict_requires_reconciliation(workspace):
     assert response.json()["state"] == "unknown"
     assert workspace.client.post("/api/ebay/actions/preview", json={"kind": "ad", "payload": payload}).status_code == 409
     assert len(workspace.remote.writes) == 1
+
+
+@pytest.mark.parametrize("returned", [600, 620])
+def test_incomplete_terminal_ad_inventory_is_rejected(workspace, returned):
+    payload = action_cases()["ad"]
+    review = preview(workspace, "ad", payload)
+    workspace.remote.active_items = [(str(int(ITEM_ID) + i), str(i)) for i in range(returned)]
+    workspace.remote.active_total = 631
+    workspace.remote.active_pages = 4
+    expected = {"detail": "eBay returned an incomplete active listings page. Refresh and try again."}
+    read = workspace.client.get("/api/ebay/read/advertising-listings")
+    assert read.status_code == 502 and read.json() == expected
+    result = confirm(workspace, review, "ad", payload)
+    assert result.status_code == 502 and result.json() == expected
+    assert not workspace.remote.writes
+
+
+def test_empty_ad_inventory_is_valid(workspace):
+    workspace.remote.active_items = []
+    assert workspace.client.get("/api/ebay/read/advertising-listings").json() == {"rows": []}
+
+
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_unresolved_bulk_ad_blocks_overlapping_listings_across_campaigns(workspace, interrupted):
+    second_id = "123456789013"
+    other_id = "123456789014"
+    workspace.remote.active_items = [(ITEM_ID, "Coat"), (second_id, "Jeans"), (other_id, "Shoes")]
+    first = {**action_cases()["ad"], "listing_ids": [ITEM_ID, second_id]}
+    workspace.remote.overrides["/sell/marketing/v1/ad_campaign/campaign-2"] = {
+        "campaignName": "Another campaign", "campaignStatus": "RUNNING", "marketplaceId": "EBAY_US",
+        "fundingStrategy": {"fundingModel": "COST_PER_SALE"},
+    }
+    overlap = {**first, "campaign_id": "campaign-2", "listing_ids": [second_id]}
+    old_review = preview(workspace, "ad", overlap)
+    first_review = preview(workspace, "ad", first)
+    if interrupted:
+        # Claim the action without settling, then run the startup recovery.
+        async def prepare():
+            return await ebay_actions.prepare(await ebay_client.EbayClient.connect(), "ad", first)
+
+        plan = asyncio.run(prepare())
+        with workspace.sessions() as db:
+            ebay_actions._claim(db, first_review["id"], "seller-id", ebay_actions.digest(plan), plan)
+        with workspace.sessions() as db:
+            ebay_actions.recover(db)
+    else:
+        workspace.remote.write_error = 409
+        assert confirm(workspace, first_review, "ad", first).json()["state"] == "unknown"
+        workspace.remote.write_error = 0
+    assert workspace.client.post("/api/ebay/actions/preview", json={"kind": "ad", "payload": overlap}).status_code == 409
+    assert confirm(workspace, old_review, "ad", overlap).status_code == 409
+    preview(workspace, "ad", {**overlap, "listing_ids": [other_id]})
+    assert len(workspace.remote.writes) == (0 if interrupted else 1)
+    checked = workspace.client.post(f"/api/ebay/actions/{first_review['id']}/checked", json={"confirm": True})
+    assert checked.status_code == 200
+    assert confirm(workspace, old_review, "ad", overlap).json()["state"] == "sent"
+
+
+def test_ad_membership_migration_preserves_legacy_reconciliation(migration_engine):  # noqa: F811
+    from alembic import command
+    from sqlalchemy.orm import Session
+
+    config = migration_config(migration_engine)
+    command.upgrade(config, "4cf6b35245d2")
+    with migration_engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO ebay_actions
+                (id, account_id, kind, resource_id, fingerprint, state, created_at, expires_at)
+            VALUES ('legacy-ad', 'seller-id', 'ad', :listing, 'legacy-plan', 'unknown',
+                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """), {"listing": ITEM_ID})
+    command.upgrade(config, "head")
+    plan = {"kind": "ad", "target": "campaign-2", "operations": [{"body": {"requests": [{"listingId": ITEM_ID}]}}]}
+    with Session(migration_engine) as db:
+        assert db.get(EbayAction, "legacy-ad").ad_listing_ids is None
+        assert ebay_actions._has_unresolved_action(db, "seller-id", plan)
+        assert not ebay_actions._has_unresolved_action(db, "other-seller", plan)
+        ebay_actions._settle(db, "legacy-ad", "checked", None)
+        first_plan = {**plan, "target": "campaign-1", "summary": []}
+        review = ebay_actions._open_review(db, "seller-id", "ad", first_plan, "bulk-plan")
+        ebay_actions._claim(db, review["id"], "seller-id", "bulk-plan", first_plan)
+    with Session(migration_engine) as db:
+        ebay_actions.recover(db)
+        assert db.get(EbayAction, review["id"]).ad_listing_ids == [ITEM_ID]
+        assert ebay_actions._has_unresolved_action(db, "seller-id", plan)
