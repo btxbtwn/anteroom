@@ -191,6 +191,33 @@ struct InventoryTests {
                      "A sold marketplace cannot keep a listing job in Active")
         precondition(InventoryQuery.counts(sendingAfterSale, search: "") == [.draft: 2, .active: 1])
         precondition(sendingAfterSale[0].rowLogos().first?.sold == true)
+        precondition(sendingAfterSale[1].liveMarketplaces.isEmpty)
+        precondition(sendingAfterSale[1].rowLogos().map(\.marketplace) == ["ebay"])
+        precondition(sendingAfterSale[1].rowLogos().map(\.sold) == [true])
+
+        // An item Anteroom recorded as sold is no longer live there, renders as Sold,
+        // and still matches Sold-tab marketplace filters where it sold.
+        let soldOnPoshmark = try JSONDecoder().decode(ConversationSummary.self, from: Data(#"""
+        {"id":"sp","title":"Crop top","status":"sold","created_at":"2026-11-01T00:00:00Z","updated_at":"2026-11-17T00:00:00Z",
+         "direct_marketplaces":["poshmark"],"sold_marketplaces":["poshmark"],
+         "direct_records":{"poshmark":{"state":"published","listing_url":"https://poshmark.com/listing/1","failed":false,"fields":0}}}
+        """#.utf8))
+        precondition(soldOnPoshmark.liveMarketplaces.isEmpty, "A sold marketplace is no longer live")
+        let soldBadges = soldOnPoshmark.marketplaceBadges()
+        precondition(soldBadges.map(\.marketplace) == ["poshmark"])
+        precondition(soldBadges.map(\.label) == ["Sold"])
+        precondition(soldBadges.map(\.tone) == [.neutral])
+        precondition(soldBadges[0].url?.absoluteString == "https://poshmark.com/listing/1")
+        precondition(soldOnPoshmark.rowLogos().map(\.marketplace) == ["poshmark"])
+        precondition(soldOnPoshmark.rowLogos().map(\.sold) == [true])
+        var soldFilter = InventoryFilters(status: .sold)
+        soldFilter.marketplaces = ["poshmark"]
+        precondition(ids(InventoryQuery.rows([soldOnPoshmark], search: "", filters: soldFilter)) == ["sp"])
+        soldFilter.marketplaces = ["mercari"]
+        precondition(InventoryQuery.rows([soldOnPoshmark], search: "", filters: soldFilter).isEmpty)
+        precondition(InventoryQuery.notListedCount([soldOnPoshmark]) == 0)
+        precondition(InventoryQuery.marketplaceCounts([soldOnPoshmark], options: ["poshmark"], notListed: false) == ["poshmark": 1])
+        precondition(InventoryQuery.marketplaceOptions([soldOnPoshmark], preferred: ["poshmark"], includeUnused: false) == ["poshmark"])
         // Each marketplace's live price, marked when it is not the item price; unknown stays unknown.
         let priced = try JSONDecoder().decode(ConversationSummary.self, from: Data(#"""
         {"id":"g","title":"Tee","status":"active","created_at":"2026-08-01T00:00:00","updated_at":"2026-10-01T00:00:00","price":25,"direct_records":{
