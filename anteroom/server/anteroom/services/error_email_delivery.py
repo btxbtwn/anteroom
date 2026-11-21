@@ -116,7 +116,8 @@ class EmailDelivery:
                     if pending_count is None:
                         pending_count = int(transaction.pending_group_count())
                     if pending_count >= self.max_pending_groups:
-                        evicted = 0 if warning else int(transaction.evict_oldest_warning())
+                        reserved = state.get('lease_keys') if state.get('lease_until', 0) > now else None
+                        evicted = 0 if warning else int(transaction.evict_oldest_warning(exclude=reserved))
                         if evicted > 0:
                             state['overflow_dropped'] = int(state.get('overflow_dropped', 0) or 0) + evicted
                             pending_count -= 1
@@ -188,6 +189,7 @@ class EmailDelivery:
             token = uuid.uuid4().hex
             state['lease'] = token
             state['lease_until'] = now + 120
+            state['lease_keys'] = list(selected)
             overflow = int(state.get('overflow_dropped', 0) or 0)
         count = sum(group['count'] for group in selected.values())
         sections = []
@@ -228,6 +230,7 @@ class EmailDelivery:
             if state.get('lease') != token:
                 return
             state['lease_until'] = 0
+            state.pop('lease_keys', None)
             if failure:
                 state['failure'], state['last_error'], delay = failure
                 state['paused_until'] = self.clock() + delay
@@ -245,7 +248,9 @@ class EmailDelivery:
                         state.pop('overflow_dropped', None)
                 for key, sent in selected.items():
                     current, last = transaction.get_group(key)
-                    remaining = current['count'] - sent['count']
+                    if current is None:
+                        continue
+                    remaining = max(0, current['count'] - sent['count'])
                     superseded = current.get('priority_token') != sent.get('priority_token')
                     if remaining:
                         current['count'] = remaining

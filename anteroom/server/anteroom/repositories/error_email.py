@@ -109,15 +109,16 @@ class EmailTransaction:
             select(func.count()).select_from(self.groups).where(self.groups.c.payload.is_not(None)),
         ) or 0)
 
-    def evict_oldest_warning(self) -> int:
+    def evict_oldest_warning(self, *, exclude=None) -> int:
         """Drop the oldest pending warning payload to make room for an error; preserve triage history."""
         groups = self.groups
-        victim = self.connection.execute(
+        query = (
             select(groups.c.id, groups.c.count, groups.c.last_seen, groups.c.last_sent)
             .where(groups.c.payload.is_not(None), groups.c.warning.is_(True))
-            .order_by(groups.c.id)
-            .limit(1)
-        ).first()
+        )
+        if exclude:
+            query = query.where(groups.c.fingerprint.notin_(exclude))
+        victim = self.connection.execute(query.order_by(groups.c.id).limit(1)).first()
         if victim is None:
             return 0
         if victim.last_seen is None and victim.last_sent is None:

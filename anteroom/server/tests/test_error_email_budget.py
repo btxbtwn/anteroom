@@ -836,3 +836,35 @@ def test_alert_handler_prefers_errors_over_warnings_when_queue_is_full(store):
     all_reports = [item for batch in seen for item in batch]
     assert any(item['severity'] == 'ERROR' and item['message'] == 'boom' for item in all_reports)
 
+
+def test_error_during_inflight_warning_digest_does_not_evict_leased_warnings_or_break_completion(store):
+    now, sent = [100.0], []
+    delivery = EmailDelivery(
+        store, lambda *args: None, daily_limit=10, clock=lambda: now[0], max_pending_groups=2,
+    )
+    w1, w2 = report(logging.WARNING, line=1), report(logging.WARNING, line=2)
+    delivery.add_many([w1, w2])
+    # Advance past the warning digest gate so both warnings are selected and leased.
+    now[0] += 86401
+
+    error = report(logging.ERROR, line=99)
+
+    def send_and_add_error(subject, body):
+        sent.append((subject, body))
+        # While w1 and w2 are leased in flight, an ERROR arrives at the cap.
+        delivery.add(error)
+
+    delivery.send = send_and_add_error
+    delivery.tick()
+    assert len(sent) == 1
+    # Both in-flight warnings were reconciled cleanly, lease was released, and
+    # the next tick does not duplicate the already-sent warnings.
+    assert delivery.status()['pending'] == 0
+    assert store.read()['lease_until'] == 0
+    assert delivery.status()['overflow_dropped'] == 1
+
+    delivery.send = lambda *args: sent.append(args)
+    delivery.tick()
+    assert len(sent) == 1
+
+
