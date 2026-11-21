@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { CheckIcon } from "lucide-react";
+import { api } from "../api/client";
 import { cn } from "../lib/utils";
 import { ConnectChromeButton } from "./ConnectChromeButton";
 import { ExtensionLoadPath } from "./ExtensionLoadPath";
@@ -15,6 +17,19 @@ type SetupChecklistProps = {
   onStartGuide?: () => void;
   onCreate: () => void;
 };
+
+type HostedSetupChecklistViewProps = {
+  managedAI: boolean;
+  providerConfigured: boolean;
+  ebayConnected: boolean;
+  etsyConnected: boolean;
+  creating?: boolean;
+  onOpenProviders: () => void;
+  onOpenConnections: () => void;
+  onCreate: () => void;
+};
+
+type HostedSetupChecklistProps = Omit<HostedSetupChecklistViewProps, "ebayConnected" | "etsyConnected">;
 
 function Step({
   index,
@@ -51,6 +66,110 @@ function Step({
 
 function Note({ children }: { children: ReactNode }) {
   return <p className="mt-1 text-xs text-muted-foreground">{children}</p>;
+}
+
+/** Hosted web first-run checklist shown to new sellers before their first listing. */
+export function HostedSetupChecklistView({
+  managedAI,
+  providerConfigured,
+  ebayConnected,
+  etsyConnected,
+  creating,
+  onOpenProviders,
+  onOpenConnections,
+  onCreate,
+}: HostedSetupChecklistViewProps) {
+  let stepNumber = 1;
+  const aiStep = !managedAI ? stepNumber++ : null;
+  const directStep = stepNumber++;
+  const chromeStep = stepNumber++;
+  const createStep = stepNumber++;
+  const directDone = ebayConnected || etsyConnected;
+  const directNote = ebayConnected && etsyConnected
+    ? "eBay and Etsy connected."
+    : ebayConnected
+      ? "eBay connected. You can also connect Etsy anytime in Settings."
+      : etsyConnected
+        ? "Etsy connected. You can also connect eBay anytime in Settings."
+        : "Sign in directly from your browser — no extension needed for eBay or Etsy.";
+
+  return (
+    <Empty className="flex-1 overflow-y-auto">
+      <div className="flex w-full max-w-md flex-col gap-6">
+        <EmptyHeader className="max-w-none">
+          <EmptyTitle>Turn product photos into marketplace-ready drafts</EmptyTitle>
+          <EmptyDescription>
+            Create your first listing now, or connect marketplaces first so you’re ready to cross-list.
+          </EmptyDescription>
+        </EmptyHeader>
+        <ol className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-card text-left shadow-xs/5">
+          {aiStep !== null ? (
+            <Step index={aiStep} done={providerConfigured} label="Add an AI provider key to generate listings.">
+              {providerConfigured ? (
+                <Note>AI provider ready.</Note>
+              ) : (
+                <div className="mt-2.5 flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" size="sm" onClick={onOpenProviders}>
+                    Open AI settings
+                  </Button>
+                </div>
+              )}
+            </Step>
+          ) : null}
+          <Step index={directStep} done={directDone} label="Connect eBay or Etsy in Settings.">
+            <Note>{directNote}</Note>
+            {!(ebayConnected && etsyConnected) ? (
+              <div className="mt-2.5 flex flex-wrap gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={onOpenConnections}>
+                  Open Connections
+                </Button>
+              </div>
+            ) : null}
+          </Step>
+          <Step
+            index={chromeStep}
+            done={false}
+            label="Optional: connect Chrome with Anteroom Bridge for Poshmark, Mercari, and Depop."
+          >
+            <Note>
+              Install Anteroom Bridge in Chrome on a computer when you want to list on those marketplaces, then connect it from your account menu.
+            </Note>
+          </Step>
+          <Step index={createStep} done={false} label="Create a listing and drop in product photos.">
+            <Button
+              type="button"
+              size="sm"
+              className="mt-2.5"
+              disabled={creating}
+              onClick={onCreate}
+            >
+              Create a listing
+            </Button>
+            {!providerConfigured ? (
+              <Note>You can add photos now and configure an AI provider key before generating.</Note>
+            ) : null}
+          </Step>
+        </ol>
+      </div>
+    </Empty>
+  );
+}
+
+/** Queries the seller's direct marketplace connections for the hosted onboarding checklist. */
+export function HostedSetupChecklist(props: HostedSetupChecklistProps) {
+  const { data } = useQuery({
+    queryKey: ["direct-connections"],
+    queryFn: api.directConnections.status,
+    staleTime: 30_000,
+    retry: false,
+  });
+  return (
+    <HostedSetupChecklistView
+      {...props}
+      ebayConnected={Boolean(data?.accounts?.ebay?.connected)}
+      etsyConnected={Boolean(data?.accounts?.etsy?.connected)}
+    />
+  );
 }
 
 /** First-run steps on the empty listings view, laid out as T3 Code's Empty card. */

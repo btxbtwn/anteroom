@@ -9,7 +9,7 @@ import { BUSY_POLL_MS, IDLE_POLL_MS, hasOpenJob, inventoryPollMs, pollMs } from 
 import { useReloadStaleFrontend } from "../components/BuildVersion";
 import { isChatToggleShortcut } from "../components/ListingChatPopup";
 import { ListingSession } from "../components/listingSession";
-import { SetupChecklist } from "../components/SetupChecklist";
+import { HostedSetupChecklist, SetupChecklist } from "../components/SetupChecklist";
 import { ListingSidebar } from "../components/ListingSidebar";
 import { AssistantThreadPanel } from "../components/sidebar/AssistantThreadPanel";
 import { SIDEBAR_FOOTER_WIDTH } from "../components/sidebar/SidebarFooter";
@@ -377,6 +377,15 @@ export function App() {
     if (!runtime.views.has("settings")) return;
     if (activeView !== "settings") viewBeforeSettings.current = activeView;
     setSettingsSection("providers");
+    setSettingsTargetId(null);
+    setActiveView("settings");
+    setMobilePane(runtime.hosted ? "editor" : "workspace");
+    closeMobileSidebar();
+  };
+  const openConnections = () => {
+    if (!runtime.views.has("settings")) return;
+    if (activeView !== "settings") viewBeforeSettings.current = activeView;
+    setSettingsSection("connections");
     setSettingsTargetId(null);
     setActiveView("settings");
     setMobilePane(runtime.hosted ? "editor" : "workspace");
@@ -924,6 +933,15 @@ export function App() {
                     creating={createConv.isPending}
                     onOpenSettings={openSettings}
                     onStartGuide={() => setSetupGuideOpen(true)}
+                    onCreate={createListing}
+                  />
+                ) : runtime.hosted && status !== undefined && conversations !== undefined && conversations.length === 0 ? (
+                  <HostedSetupChecklist
+                    managedAI={runtime.features.has("managed_ai")}
+                    providerConfigured={providerConfigured}
+                    creating={createConv.isPending}
+                    onOpenProviders={openProviders}
+                    onOpenConnections={openConnections}
                     onCreate={createListing}
                   />
                 ) : (
