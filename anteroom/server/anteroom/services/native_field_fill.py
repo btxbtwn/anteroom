@@ -228,6 +228,7 @@ def _keep_depop_tags(listing: dict, rows: dict[str, dict]) -> None:
     """Depop's Source, Age and Style always have an answer. The evidence check
     leaves blank what the model did not quote (photos never show "Modern"), so
     a blank one gets the default generation uses, spelled as the form stores it."""
+    from anteroom.models.schema import VALID_DEPOP_STYLE
     from anteroom.services.depop_fields import depop_default_age, depop_default_source, infer_depop_styles
 
     for path in DEPOP_TAGS:
@@ -239,7 +240,8 @@ def _keep_depop_tags(listing: dict, rows: dict[str, dict]) -> None:
         elif path.endswith(".age"):
             wanted = [depop_default_age(listing)]
         else:
-            wanted = infer_depop_styles(listing, limit=_limit(row))
+            # Rank every style, keep those this form offers, then apply its limit.
+            wanted = infer_depop_styles(listing, limit=len(VALID_DEPOP_STYLE))
         values = row.get("option_values") or {}
         by_fold = {}
         for label in row.get("options") or []:

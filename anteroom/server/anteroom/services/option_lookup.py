@@ -129,6 +129,25 @@ def _request(text: str) -> dict | None:
     return None
 
 
+def _has_json(text: str) -> bool:
+    """True when a reply carries a JSON object or array (fenced or bare), which is how edits are saved."""
+    stripped = (text or "").strip()
+    candidates = [block.split("\n", 1)[-1] if block.lstrip().startswith(("json", "JSON")) else block
+                  for block in stripped.split("```")[1::2]]
+    candidates.append(stripped)
+    for start, end in (("[", "]"), ("{", "}")):
+        first, last = stripped.find(start), stripped.rfind(end)
+        if 0 <= first < last:
+            candidates.append(stripped[first:last + 1])
+    for candidate in candidates:
+        try:
+            if isinstance(json.loads(candidate.strip()), (dict, list)):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
 def _target_path(path: Any) -> Any:
     """Accept a JSON Patch pointer (/ebay_specifics/brand) for a dotted form path."""
     if isinstance(path, str) and path.startswith("/"):
@@ -193,7 +212,7 @@ async def chat_with_options(provider, messages: list[dict], catalog: OptionCatal
         text = "".join(parts)
         request = _request(text)
         if request is None:
-            if declared and not asked_for_changes and "{" not in text:
+            if declared and not asked_for_changes and not _has_json(text):
                 # Declaring fields and then answering in prose saves nothing,
                 # while the reply reads as if the work were done. Ask once.
                 asked_for_changes = True
