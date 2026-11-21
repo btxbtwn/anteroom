@@ -107,7 +107,7 @@ def _drop_fixed_marketplace_errors(db: Session, conv_id: str, before: dict, afte
             row.error = row.error_code = row.error_fields = row.marketplace_message = None
 
 
-def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None, *, expected_revision_id: str | None = None, commit: bool = True, use_saved_defaults: bool = False) -> ListingRevision:
+def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None, *, expected_revision_id: str | None = None, commit: bool = True, use_saved_defaults: bool = False, depop_notes: dict | None = None) -> ListingRevision:
     """Save atomically; an empty expected id means no listing may exist yet."""
     repo = ListingRepo(db)
     from anteroom.services.native_field_fill import (
@@ -144,6 +144,17 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
         if compacted is not listing_json[native_contract.KEY]:
             listing_json = native_contract.copy_listing(listing_json)
             listing_json[native_contract.KEY] = compacted
+    if depop_notes is not None:
+        from anteroom.services.depop_measurements import sync_depop_measurements
+        from anteroom.services.general_measurements import is_garment_measurement_path
+
+        path = "depop_specifics.measurements"
+        if scope is None or (
+            any(is_garment_measurement_path(field) for field in scope)
+            and not any(field == path or field.startswith(f"{path}.") for field in scope)
+        ):
+            # Reconcile accepted General changes after native answers have been restored.
+            sync_depop_measurements(listing_json, depop_notes, clear_empty=True)
     from anteroom.services.unsent_edits import normalized_listing_hash
 
     revision = repo.insert_revision(

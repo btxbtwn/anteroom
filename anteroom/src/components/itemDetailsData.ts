@@ -72,10 +72,10 @@ export function savedGarment(notes: string | null): Garment | null {
 
 /**
  * Typed measurements keep the garment they were typed for. Before any are typed,
- * a saved garment may be only the default an earlier notes edit wrote, so the
- * listing's category (or title) picks it: jeans open on Pants, not Top.
+ * an unmarked Top may be a legacy default. Use the listing in that case.
  */
-function chooseGarment(saved: Garment | null, measurements: Measurements, listing?: ListingHint): Garment {
+function chooseGarment(saved: Garment | null, measurements: Measurements, listing?: ListingHint, explicit = false): Garment {
+  if (saved && (explicit || saved !== DEFAULTS.garment)) return saved;
   const typed = GARMENTS.filter((g) => Object.keys(measurements[g.id]).length).map((g) => g.id);
   if (typed.length) return saved && typed.includes(saved) ? saved : saved ?? typed[0]!;
   const guess = listing ? garmentForListing(listing) : DEFAULTS.garment;
@@ -97,7 +97,7 @@ export function parseNotes(notes: string | null, defaultPackageDimensions = DEFA
   }
   try {
     const value: unknown = JSON.parse(notes);
-    const parsed = isStructuredNotes(value) ? value as Omit<Partial<ItemDetailsData>, "garment"> & { garment?: string } : { sellerNotes: notes };
+    const parsed = isStructuredNotes(value) ? value as Omit<Partial<ItemDetailsData>, "garment"> & { garment?: string; garmentExplicit?: boolean } : { sellerNotes: notes };
     const measurements = parseMeasurements(parsed.measurements);
     return {
       sku: parsed.sku || "",
@@ -108,7 +108,7 @@ export function parseNotes(notes: string | null, defaultPackageDimensions = DEFA
       cog: parsed.cog || "",
       packageDimensions: parsed.packageDimensions || defaultPackageDimensions,
       vendooLabels: parsed.vendooLabels ?? DEFAULTS.vendooLabels,
-      garment: chooseGarment(knownGarment(parsed.garment), measurements, listing),
+      garment: chooseGarment(knownGarment(parsed.garment), measurements, listing, parsed.garmentExplicit === true),
       measurements,
     };
   } catch {

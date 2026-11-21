@@ -1,0 +1,1 @@
+- Let listing chat see and edit the General tab's Measurements (in) fields (garment type, garment measurements, and other measurements) directly.
