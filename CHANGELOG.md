@@ -6,6 +6,16 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1112 — 2026-11-21
+
+- When Mercari says an item is no longer available, Delist now records that listing as already gone instead of failing, and shows it as Already gone with Mercari's words. It is never counted as a sale, and Anteroom doesn't guess who removed it.
+- After a sale, a delist that didn't go through is tried again automatically for two weeks, until each marketplace confirms it, when Delist the other marketplaces is on. eBay and Etsy sales on the web app now start that delist too. It only ever retries the listings the sale left up: a listing you relisted after the sale is never delisted on its own, and turning the setting off stops it right away. eBay and Etsy are retried even while Chrome is away.
+- A red alert in the sidebar lists every sold item still listed on another marketplace, including sales you recorded or imported from Vendoo (those are never delisted automatically), and the sale notice on the item says why each delist failed.
+
+## 0.1.1111 — 2026-11-21
+
+- Keeps live listings under the Active tab (and preserves Active/Draft tab counts) while a background marketplace job runs on them, on both web and iPhone.
+
 ## 0.1.1110 — 2026-11-21
 
 - Leave Etsy's When was it made? blank when the only date is a range on both sides of Etsy's vintage cutoff, such as eBay's 2000-2009, and say why in the Etsy tab, instead of calling the item vintage.
