@@ -62,29 +62,31 @@ describe("readingSuggestion", () => {
 });
 
 describe("readEach", () => {
-  it("bounds in-flight work to the requested concurrency and visits every item", async () => {
+  it("runs all items concurrently so model reads overlap", async () => {
     let active = 0;
     let peak = 0;
     const seen: number[] = [];
-    await readEach([1, 2, 3, 4, 5, 6], async (item) => {
+    const gates: Array<() => void> = [];
+    const pending = readEach([1, 2, 3, 4], async (item) => {
       active += 1;
       peak = Math.max(peak, active);
-      await new Promise((resolve) => setTimeout(resolve, 5));
+      await new Promise<void>((resolve) => { gates.push(resolve); });
       seen.push(item);
       active -= 1;
-    }, 2);
-    expect(peak).toBe(2);
-    expect(seen.sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6]);
+    });
+    expect(peak).toBe(4);
+    gates.forEach((release) => release());
+    await pending;
+    expect(seen.sort((a, b) => a - b)).toEqual([1, 2, 3, 4]);
   });
 
-  it("stops launching queued items once aborted", async () => {
+  it("does not start work when already aborted", async () => {
     const controller = new AbortController();
+    controller.abort();
     const started: number[] = [];
-    await readEach([1, 2, 3, 4, 5], async (item) => {
+    await readEach([1, 2, 3], async (item) => {
       started.push(item);
-      if (started.length === 2) controller.abort();
-      await new Promise((resolve) => setTimeout(resolve, 5));
-    }, 2, controller.signal);
-    expect(started).toEqual([1, 2]);
+    }, controller.signal);
+    expect(started).toEqual([]);
   });
 });

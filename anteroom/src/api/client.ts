@@ -2,7 +2,7 @@ import { listingScreenRead } from "./listingScreen";
 import { reportError } from "./errorReports";
 import type { VendooDraft } from "./vendooDraft";
 import type { OfferLogResponse } from "./contract.gen";
-import { ApiRequestError, retryAfterMs, studioFetch, hasHostedApiSession } from "./transport";
+import { ApiRequestError, retryAfterMs, studioFetch, studioUpload, hasHostedApiSession } from "./transport";
 import { trackPhotoUpload } from "../photoUploads";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
 import type { CopyPreview, CopyListingRequest, BatchCopyPreviewRow } from "./listingCopy";
@@ -301,6 +301,64 @@ const MAX_UPLOAD_BUSY_RETRIES = 6;
 const DEFAULT_UPLOAD_RETRY_MS = 5000;
 const MAX_UPLOAD_RETRY_MS = 15000;
 
+type UploadGateWaiter = {
+  signal?: AbortSignal;
+  admit: () => void;
+  cleanup: () => void;
+};
+
+let hostedUploadInFlight = false;
+const hostedUploadWaiters: UploadGateWaiter[] = [];
+
+function releaseHostedUploadGate(): void {
+  while (hostedUploadWaiters.length > 0) {
+    const next = hostedUploadWaiters.shift()!;
+    next.cleanup();
+    if (next.signal?.aborted) continue;
+    next.admit();
+    return;
+  }
+  hostedUploadInFlight = false;
+}
+
+/**
+ * Pace only the upload-body transmission phase on hosted sessions (where
+ * `UploadSlots` admits one upload at a time per seller and releases it before
+ * slow vision inference). Once the body finishes transmitting, the slot is
+ * released immediately so the next item uploads while this item's model read
+ * runs concurrently.
+ */
+function acquireHostedUploadGate(signal?: AbortSignal): Promise<() => void> {
+  if (signal?.aborted) {
+    return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+  }
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    releaseHostedUploadGate();
+  };
+  if (!hostedUploadInFlight) {
+    hostedUploadInFlight = true;
+    return Promise.resolve(release);
+  }
+  return new Promise<() => void>((resolve, reject) => {
+    const onAbort = () => {
+      const index = hostedUploadWaiters.indexOf(waiter);
+      if (index !== -1) hostedUploadWaiters.splice(index, 1);
+      reject(signal!.reason ?? new DOMException("Aborted", "AbortError"));
+    };
+    const cleanup = () => signal?.removeEventListener("abort", onAbort);
+    const waiter: UploadGateWaiter = {
+      signal,
+      admit: () => resolve(release),
+      cleanup,
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    hostedUploadWaiters.push(waiter);
+  });
+}
+
 /**
  * Only retry hosted `UploadSlots` contention (per-seller 429 "still uploading" or
  * global 503 "uploads are busy" with `Retry-After`), never rate-limiter 429s or
@@ -314,9 +372,10 @@ function isUploadSlotBusy(status: number, detail: string, retryAfter: number | n
 
 /**
  * Post photos not saved yet for a model to read. A read can take minutes, so a
- * deploy or restart can cut it off; that is tried once more. Hosted upload-slot
- * busy responses wait `Retry-After` and retry a few times. Other errors the
- * server explains (a model that failed, or a rate limit) fail fast.
+ * deploy or restart can cut it off; that is tried once more. On hosted sessions,
+ * uploads are paced one body at a time while model reads overlap concurrently,
+ * and upload-slot busy responses wait `Retry-After` and retry a few times. Other
+ * errors the server explains (a model that failed, or a rate limit) fail fast.
  */
 async function readPhotos<T>(path: string, form: FormData, button: string, signal?: AbortSignal): Promise<T> {
   let restartAttempts = 0;
@@ -325,7 +384,16 @@ async function readPhotos<T>(path: string, form: FormData, button: string, signa
     if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
     let response: Response;
     try {
-      response = await studioFetch(`${BASE}${path}`, { method: "POST", body: form, signal });
+      if (hasHostedApiSession()) {
+        const releaseUpload = await acquireHostedUploadGate(signal);
+        try {
+          response = await studioUpload(`${BASE}${path}`, form, { signal, onUploadComplete: releaseUpload });
+        } finally {
+          releaseUpload();
+        }
+      } else {
+        response = await studioFetch(`${BASE}${path}`, { method: "POST", body: form, signal });
+      }
     } catch (error) {
       if (signal?.aborted) throw error;
       if (error instanceof TypeError && restartAttempts === 0) {

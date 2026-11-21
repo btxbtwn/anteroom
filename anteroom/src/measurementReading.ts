@@ -49,40 +49,18 @@ export function applyReading(
 }
 
 /**
- * Hosted uploads share one per-seller upload slot (`UploadSlots` waits up to
- * 10 seconds before returning 429), and each read releases that slot before
- * slow vision inference starts. Keeping two items in flight overlaps one
- * item's upload with another's inference while keeping bursts small enough
- * for upload-slot retry to absorb contention.
- */
-export const HOSTED_UPLOAD_READ_CONCURRENCY = 2;
-
-/**
- * Run `work` over every item, either all at once (local desktop) or with at
- * most `concurrency` in flight at a time (hosted, so bulk reads do not pile
- * every folder into the per-seller upload slot simultaneously). When `signal`
- * aborts, no further queued items are started.
+ * Run `work` over every item concurrently so model reads overlap instead of
+ * waiting in waves. Hosted upload-body pacing happens in `client.ts` only for
+ * the upload phase, because the server releases its upload slot before model
+ * inference starts.
  */
 export async function readEach<T>(
   items: T[],
   work: (item: T) => Promise<void>,
-  concurrency?: number,
   signal?: AbortSignal,
 ): Promise<void> {
   if (!items.length || signal?.aborted) return;
-  const limit = concurrency && concurrency > 0 ? Math.min(Math.floor(concurrency), items.length) : items.length;
-  if (limit >= items.length && !signal) {
-    await Promise.all(items.map(work));
-    return;
-  }
-  let next = 0;
-  const worker = async () => {
-    while (next < items.length && !signal?.aborted) {
-      const index = next++;
-      await work(items[index]!);
-    }
-  };
-  await Promise.all(Array.from({ length: limit }, worker));
+  await Promise.all(items.map((item) => (signal?.aborted ? Promise.resolve() : work(item))));
 }
 
 /**

@@ -9,7 +9,7 @@ import { formatMoney } from "./analyticsFormat";
 import { BOXES_QUERY_KEY, boxStoreName } from "./boxPurchases";
 import { GARMENTS, garmentFields, guessGarment, type Garment } from "./garmentMeasurements";
 import { dragHasFiles, listingTitleForFolder, moveItem, type PhotoFolderGroup } from "../photoDrop";
-import { applyReading, HOSTED_UPLOAD_READ_CONCURRENCY, readEach } from "../measurementReading";
+import { applyReading, readEach } from "../measurementReading";
 import { applySizeTagReading } from "../sizeTagReading";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { StudioImage } from "./StudioImage";
@@ -26,6 +26,19 @@ const EMPTY_DEFAULTS: BulkUploadDefaults = { cog: "", labels: "" };
 type DragSpot = { group: number; photo: number };
 
 const READING_SIZE_NOTE = "Reading the size tag…";
+const READING_MEASUREMENTS_NOTE = "Reading the yardstick…";
+
+function createLinkedAbortController(parent?: AbortSignal): { controller: AbortController; detach: () => void } {
+  const controller = new AbortController();
+  if (!parent) return { controller, detach: () => {} };
+  if (parent.aborted) {
+    controller.abort(parent.reason);
+    return { controller, detach: () => {} };
+  }
+  const onParentAbort = () => controller.abort(parent.reason);
+  parent.addEventListener("abort", onParentAbort, { once: true });
+  return { controller, detach: () => parent.removeEventListener("abort", onParentAbort) };
+}
 
 type Row = {
   sku: string;
@@ -95,8 +108,10 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
   const formRef = useRef<HTMLFormElement>(null);
   const cogRef = useRef<HTMLInputElement>(null);
   const readAbortRef = useRef<AbortController | null>(null);
+  const photoSetRef = useRef<number[]>(initialGroups.map(() => 0));
+  const measureAbortsRef = useRef<Map<number, AbortController>>(new Map());
+  const sizeAbortsRef = useRef<Map<number, AbortController>>(new Map());
   const count = groups.length;
-  const uploadReadConcurrency = runtime.hosted ? HOSTED_UPLOAD_READ_CONCURRENCY : undefined;
 
   // Created and revoked in the same effect so StrictMode's remount gets fresh URLs.
   useEffect(() => {
@@ -109,8 +124,14 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
   useEffect(() => {
     const controller = new AbortController();
     readAbortRef.current = controller;
+    const measureAborts = measureAbortsRef.current;
+    const sizeAborts = sizeAbortsRef.current;
     return () => {
       controller.abort();
+      measureAborts.forEach((rowController) => rowController.abort());
+      measureAborts.clear();
+      sizeAborts.forEach((rowController) => rowController.abort());
+      sizeAborts.clear();
       if (readAbortRef.current === controller) readAbortRef.current = null;
     };
   }, []);
@@ -136,17 +157,24 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
 
   // Fills blank measurement fields from each item's yardstick photos; typed values stay.
   const readMeasurements = async () => {
-    const signal = readAbortRef.current?.signal;
+    const dialogSignal = readAbortRef.current?.signal;
     const todo = groups.map((_, index) => index).filter((index) => groups[index]!.files.length);
     setReading({ done: 0, total: todo.length });
     await readEach(todo, async (index) => {
-      const garment = rows[index]!.garment;
-      setRow(index, { readNote: "Reading the yardstick…" });
+      const { garment, photoSet } = rows[index]!;
+      if ((photoSetRef.current[index] ?? 0) !== photoSet) {
+        if (!dialogSignal?.aborted) setReading((current) => current && { ...current, done: current.done + 1 });
+        return;
+      }
+      const { controller, detach } = createLinkedAbortController(dialogSignal);
+      measureAbortsRef.current.get(index)?.abort();
+      measureAbortsRef.current.set(index, controller);
+      setRow(index, { readNote: READING_MEASUREMENTS_NOTE });
       try {
-        const result = await api.measurements.read(groups[index]!.files, garment, signal);
-        if (signal?.aborted) return;
+        const result = await api.measurements.read(groups[index]!.files, garment, controller.signal);
+        if (controller.signal.aborted || dialogSignal?.aborted) return;
         setRows((current) => current.map((row, i) => {
-          if (i !== index || row.garment !== garment) return row;
+          if (i !== index || row.garment !== garment || row.photoSet !== photoSet) return row;
           const outcome = applyReading(garment, row.measurements, result);
           return {
             ...row,
@@ -156,28 +184,42 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
           };
         }));
       } catch (error) {
-        if (signal?.aborted) return;
+        if (controller.signal.aborted || dialogSignal?.aborted) return;
         const message = error instanceof Error ? error.message : "Reading failed.";
-        setRow(index, { readNote: `${message} Your entered details are kept. You can enter measurements manually or try reading again.` });
+        setRows((current) => current.map((row, i) => (
+          i !== index || row.garment !== garment || row.photoSet !== photoSet
+            ? row
+            : { ...row, readNote: `${message} Your entered details are kept. You can enter measurements manually or try reading again.` }
+        )));
+      } finally {
+        detach();
+        if (measureAbortsRef.current.get(index) === controller) measureAbortsRef.current.delete(index);
+        if (!dialogSignal?.aborted) setReading((current) => current && { ...current, done: current.done + 1 });
       }
-      if (!signal?.aborted) setReading((current) => current && { ...current, done: current.done + 1 });
-    }, uploadReadConcurrency, signal);
-    if (!signal?.aborted) setReading(null);
+    }, dialogSignal);
+    if (!dialogSignal?.aborted) setReading(null);
   };
 
   // Fills a blank Size from each item's size tag; a typed size stays. A missing,
   // unreadable or conflicting tag is left for the seller, never guessed.
   const readSizeTags = async () => {
-    const signal = readAbortRef.current?.signal;
+    const dialogSignal = readAbortRef.current?.signal;
     const todo = groups.map((_, index) => index).filter((index) => groups[index]!.files.length);
     setSizeReading({ done: 0, total: todo.length });
     setAnnounceSizes(false);
     await readEach(todo, async (index) => {
       const { photoSet } = rows[index]!;
+      if ((photoSetRef.current[index] ?? 0) !== photoSet) {
+        if (!dialogSignal?.aborted) setSizeReading((current) => current && { ...current, done: current.done + 1 });
+        return;
+      }
+      const { controller, detach } = createLinkedAbortController(dialogSignal);
+      sizeAbortsRef.current.get(index)?.abort();
+      sizeAbortsRef.current.set(index, controller);
       setRow(index, { sizeNote: READING_SIZE_NOTE });
       try {
-        const result = await api.sizeTags.read(groups[index]!.files, signal);
-        if (signal?.aborted) return;
+        const result = await api.sizeTags.read(groups[index]!.files, controller.signal);
+        if (controller.signal.aborted || dialogSignal?.aborted) return;
         setRows((current) => current.map((row, i) => {
           if (i !== index || row.photoSet !== photoSet) return row;
           // A size an earlier reading filled is replaced, not treated as typed.
@@ -198,7 +240,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
           };
         }));
       } catch (error) {
-        if (signal?.aborted) return;
+        if (controller.signal.aborted || dialogSignal?.aborted) return;
         const message = error instanceof Error ? error.message : "Reading failed.";
         setRows((current) => current.map((row, i) => {
           if (i !== index || row.photoSet !== photoSet) return row;
@@ -210,10 +252,13 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
           // The error is shown without dropping the tag evidence against the typed size.
           return { ...row, sizeNote: row.sizeWarning ? `${message} ${row.sizeWarning}` : message };
         }));
+      } finally {
+        detach();
+        if (sizeAbortsRef.current.get(index) === controller) sizeAbortsRef.current.delete(index);
+        if (!dialogSignal?.aborted) setSizeReading((current) => current && { ...current, done: current.done + 1 });
       }
-      if (!signal?.aborted) setSizeReading((current) => current && { ...current, done: current.done + 1 });
-    }, uploadReadConcurrency, signal);
-    if (!signal?.aborted) {
+    }, dialogSignal);
+    if (!dialogSignal?.aborted) {
       setSizeReading(null);
       setAnnounceSizes(true);
     }
@@ -225,8 +270,13 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
 
   // A listing keeps at least one photo; there is nothing to generate from otherwise.
   // A size read from the photos may have come from the one removed: it is cleared for the seller
-  // to read again or type, and a reading of the earlier photos still running is not applied.
+  // to read again or type, and any queued or running reading of the earlier photos is cancelled.
   const removePhoto = (spot: DragSpot) => {
+    photoSetRef.current[spot.group] = (photoSetRef.current[spot.group] ?? 0) + 1;
+    sizeAbortsRef.current.get(spot.group)?.abort();
+    sizeAbortsRef.current.delete(spot.group);
+    measureAbortsRef.current.get(spot.group)?.abort();
+    measureAbortsRef.current.delete(spot.group);
     setGroups((current) => current.map((group, index) => (
       index === spot.group ? { ...group, files: group.files.filter((_, photo) => photo !== spot.photo) } : group
     )));
@@ -242,11 +292,14 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
           ? { sizeWarning: undefined, sizeReview: true,
             sizeNote: "A photo was removed, so the earlier tag check no longer applies. Read size tags again or check the tag." }
           : row.sizeNote === READING_SIZE_NOTE
-            // Its reading is of the earlier photos and will be dropped; say so instead of "Reading…".
+            // Its reading is of the earlier photos and was cancelled; say so instead of "Reading…".
             ? { sizeReview: row.size.trim() === "",
               sizeNote: "A photo was removed while reading. Read size tags again or type the size." }
             : {};
-      return { ...row, ...cleared, photoSet: row.photoSet + 1 };
+      const clearedMeasure = row.readNote === READING_MEASUREMENTS_NOTE
+        ? { readNote: "A photo was removed while reading. Read measurements again or measure by hand." }
+        : {};
+      return { ...row, ...cleared, ...clearedMeasure, photoSet: row.photoSet + 1 };
     }));
   };
 
@@ -421,7 +474,15 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
                         tabIndex={-1}
                         aria-checked={g.id === row.garment}
                         className={`pr-pill${g.id === row.garment ? " is-active" : ""}`}
-                        onClick={() => setRow(groupIndex, { garment: g.id })}
+                        onClick={() => {
+                          if (g.id === row.garment) return;
+                          measureAbortsRef.current.get(groupIndex)?.abort();
+                          measureAbortsRef.current.delete(groupIndex);
+                          setRow(groupIndex, {
+                            garment: g.id,
+                            ...(row.readNote === READING_MEASUREMENTS_NOTE ? { readNote: undefined } : {}),
+                          });
+                        }}
                       >
                         {g.label}
                       </button>
