@@ -261,7 +261,8 @@ extension ConversationSummary {
 
     /// True when the listing is currently live on at least one marketplace.
     var hasLiveListing: Bool {
-        let live = liveMarketplaces
+        let sold = Set(soldMarketplaces.map(Self.canonical)).union(vendooSoldDates.keys.map(Self.canonical))
+        let live = liveMarketplaces.filter { !sold.contains(Self.canonical($0)) }
         guard !live.isEmpty else { return false }
         if !removed.isEmpty, !live.contains(where: Self.delistable.contains) { return false }
         return true
