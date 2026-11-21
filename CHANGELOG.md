@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1123 — 2026-11-21
+
+- Hosted: deleting an edited draft photo now removes both its edited file and original source photo from storage.
+
 ## 0.1.1122 — 2026-11-21
 
 - Hosted account migration now enforces per-seller upload slot fairness during photo normalization so one migrating seller cannot starve other sellers' photo uploads, and retries HTTP 429 automatically.
