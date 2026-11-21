@@ -143,12 +143,6 @@ class EtsyUnclearWhenTest(unittest.TestCase):
         self.assertEqual(_canonical_etsy_when(text), "")
         self.assertIn(text, etsy_when_unclear_note(text))
 
-    def test_the_cutoff_moves_with_the_year(self):
-        # Vintage is 20 years old: the first non-vintage year is 2007 in 2026, 2009 in 2028.
-        self.assertTrue(etsy_when_is_unclear("2000-2007", today=date(2026, 1, 1)))
-        self.assertFalse(etsy_when_is_unclear("2000-2008", today=date(2029, 1, 1)))
-        self.assertTrue(etsy_when_is_unclear("2000-2009", today=date(2028, 1, 1)))
-
     def test_an_unclear_ebay_year_does_not_make_the_item_vintage(self):
         nascar = listing(ebay_specifics={"Year Manufactured": "2000-2009", "Vintage": "Yes"})
         self.assertFalse(etsy_eligible(nascar))
@@ -161,6 +155,17 @@ class EtsyUnclearWhenTest(unittest.TestCase):
         self.assertIn("2007", note)
         self.assertEqual(etsy_when_unclear_note("1988", today=date(2026, 11, 21)), "")
         self.assertEqual(etsy_when_unclear_note("", today=date(2026, 11, 21)), "")
+
+
+class EtsyCutoffTest(unittest.TestCase):
+    """Runs the real cutoff, unpinned, so a cutoff that stopped moving fails here."""
+
+    def test_the_cutoff_moves_with_the_year(self):
+        # Vintage is 20 years old: the first non-vintage year is 2007 in 2026, 2009 in 2028.
+        self.assertTrue(etsy_when_is_unclear("2000-2007", today=date(2026, 1, 1)))
+        self.assertFalse(etsy_when_is_unclear("2000-2008", today=date(2029, 1, 1)))
+        self.assertTrue(etsy_when_is_unclear("2000-2009", today=date(2028, 1, 1)))
+        self.assertFalse(etsy_when_is_unclear("2000-2009", today=date(2030, 1, 1)))
 
 
 class EtsyWhenCodeTest(unittest.TestCase):
