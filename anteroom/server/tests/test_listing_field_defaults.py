@@ -416,3 +416,25 @@ def test_a_generated_listing_keeps_the_saved_defaults_over_the_models_answers(
     finally:
         db.close()
         engine.dispose()
+
+
+@pytest.mark.parametrize("answer", ["yes", "no"])
+def test_a_form_saved_before_the_shoebox_default_fills_in_is_not_stale(settings_file, answer):
+    """Capture reads the saved listing; preflight and List read it after attach_form
+    answers the shoebox question from the default. Both are the same choice."""
+    from anteroom.services import native_contract
+
+    user_settings.set_listing_field_default(SHOEBOX, answer)
+    listing = {"title": "Tee", "category_path": "Men > Tops > T-shirts",
+               "direct_category_ids": {"mercari": "303"}, "weight_oz": 8,
+               "mercari_specifics": {"shippingMethod": "MERCARI"}}
+    fields = [{"path": "mercari_specifics.package.fitsShoebox", "label": "Will your item fit in a shoebox?",
+               "required": True, "options": ["Yes", "No"]}]
+    listing[native_contract.KEY] = native_contract.capture(
+        listing, {"mercari": {"category_id": "303", "fields": fields}}, ["mercari"])
+
+    checked = native_form.attach_form(native_contract.copy_listing(listing), "mercari")
+
+    stale = "The form's category or dependent choices changed. Reload its fields before listing."
+    assert stale not in [gap["message"] for gap in native_contract.gaps(checked, "mercari")]
+    assert native_contract.editor_form(listing, "mercari") is not None

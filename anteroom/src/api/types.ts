@@ -495,6 +495,8 @@ export interface MarketplaceForm {
   /** Labels are exactly the page's, required markers included, so none is added. */
   page_labels?: boolean;
   notes?: string[];
+  /** A retry can restore choices missing from this otherwise usable form. */
+  reload_recommended?: boolean;
   category_id: string;
   known: boolean;
   fields: MarketplaceFormField[];
