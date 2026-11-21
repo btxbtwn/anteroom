@@ -105,15 +105,15 @@ def still_listed(db: Session) -> list[dict]:
     since = (_now() - WINDOW).replace(tzinfo=None)
     sales = (db.query(MarketplaceSale)
              .filter(MarketplaceSale.order_status.in_(PAID_STATUSES), MarketplaceSale.conversation_id.isnot(None),
-                     MarketplaceSale.source.in_(("marketplace", "seller")),
+                     MarketplaceSale.source.in_(("marketplace", "seller", "vendoo")),
                      func.coalesce(MarketplaceSale.sold_at, MarketplaceSale.received_at) >= since)
              .order_by(MarketplaceSale.received_at.desc()).all())
     found: dict[str, dict] = {}
     for sale in sales:
         conv_id = str(sale.conversation_id)
         detected = sale.source == "marketplace" and sale.marketplace in MARKETPLACES
-        # A sale the seller recorded, in person included, is shown; only a reported one is delisted automatically.
-        if conv_id in found or not detected and sale.source != "seller":
+        # A sale the seller recorded (in person included) or imported from Vendoo is shown; only a reported one is delisted automatically.
+        if conv_id in found or not detected and sale.source not in {"seller", "vendoo"}:
             continue
         if stock_after_sale(db, conv_id, sale.marketplace, sale.listing_id)["status"] != "sold_out":
             continue
@@ -245,6 +245,17 @@ async def run(*, session_factory=None) -> None:
 
 
 async def _follow(conv_id: str, sale_id: str, targets: dict[str, str]) -> None:
+    """Delist the pinned listings, eBay and Etsy apart from Chrome's, so Chrome away never holds up an API delist."""
+    from anteroom.services.marketplace_delist import BROWSER_MARKETPLACES
+
+    groups = ({name: item for name, item in targets.items() if name not in BROWSER_MARKETPLACES},
+              {name: item for name, item in targets.items() if name in BROWSER_MARKETPLACES})
+    for group in groups:
+        if group:
+            await _follow_group(conv_id, sale_id, group)
+
+
+async def _follow_group(conv_id: str, sale_id: str, targets: dict[str, str]) -> None:
     from anteroom.services.marketplace_delist import DelistError, delist
 
     names = list(targets)

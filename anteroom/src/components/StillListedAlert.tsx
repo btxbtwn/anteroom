@@ -25,7 +25,7 @@ export function stillListedFooter(items: StillListedItem[], autodelist: boolean)
   if (!autodelist) return "Open each item and delist it under Marketplaces.";
   const changed = items.some((item) => !item.detected || item.stillListed.some((entry) => !entry.followed));
   return changed
-    ? "Anteroom keeps trying the listings each sale left up. A listing marked by hand or put up after the sale is yours to delist under Marketplaces."
+    ? "Anteroom keeps trying the listings each reported sale left up. A sale you recorded or imported from Vendoo, or a listing put up after the sale, is yours to delist under Marketplaces."
     : "Anteroom keeps trying to delist them. Open an item to see why a delist failed.";
 }
 

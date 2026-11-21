@@ -18,7 +18,7 @@ describe("still listed after a sale", () => {
   it("promises retries only for listings the sale left up, and only when the seller turned them on", () => {
     expect(stillListedFooter([item([entry("ebay", "failed")])], true)).toBe("Anteroom keeps trying to delist them. Open an item to see why a delist failed.");
     expect(stillListedFooter([item([entry("ebay", "failed")])], false)).toBe("Open each item and delist it under Marketplaces.");
-    expect(stillListedFooter([item([entry("ebay", "live", false)])], true)).toContain("put up after the sale is yours to delist");
-    expect(stillListedFooter([{ ...item([entry("ebay", "live")]), detected: false }], true)).toContain("marked by hand");
+    expect(stillListedFooter([item([entry("ebay", "live", false)])], true)).toContain("a listing put up after the sale, is yours to delist");
+    expect(stillListedFooter([{ ...item([entry("ebay", "live")]), detected: false }], true)).toContain("A sale you recorded or imported from Vendoo");
   });
 });

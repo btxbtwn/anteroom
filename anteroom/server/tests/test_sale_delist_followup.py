@@ -257,6 +257,28 @@ class SaleDelistFollowupTest(unittest.TestCase):
         self.ebay.assert_not_awaited()
         self.assertEqual(self.bridge.await_count, 0)
 
+    def test_a_vendoo_imported_sale_is_alerted_but_never_delisted_automatically(self):
+        self._sold(source="vendoo")
+        [item] = self._still()
+        self.assertEqual((item["soldOn"], item["detected"]), ("depop", False))
+        self._run()
+        self.ebay.assert_not_awaited()
+        self.assertEqual(self.bridge.await_count, 0)
+
+    def test_chrome_away_never_holds_up_the_ebay_and_etsy_delists(self):
+        from types import SimpleNamespace
+
+        self._sold()
+        self.ebay.return_value = self.etsy.return_value = {"ok": True, "state": "deleted"}
+        with patch("anteroom.services.extension_connection.extension_manager", SimpleNamespace(connected=False)):
+            self._run()
+        self.ebay.assert_awaited_once()
+        self.etsy.assert_awaited_once()
+        self.assertEqual(self.bridge.await_count, 0)
+        states = self._states()
+        self.assertEqual((states["ebay"], states["etsy"], states["poshmark"], states["mercari"]),
+                         ("deleted", "deleted", "live", "live"))
+
     def test_a_sale_refunded_before_its_delist_starts_deletes_nothing(self):
         sale_id = self._sold()
         self.db.expire_all()
