@@ -41,8 +41,8 @@ struct SellerConfirmationRequest: Identifiable, Equatable {
 
     var id: String { "\(action.rawValue):\(marketplaces.joined(separator: ","))" }
 
-    static func list(title: String, marketplace: String) -> Self {
-        let question = MarketplaceActions.listQuestion(title: title, marketplace: marketplace)
+    static func list(title: String, marketplace: String, priceLabel: String? = nil) -> Self {
+        let question = MarketplaceActions.listQuestion(title: title, marketplace: marketplace, priceLabel: priceLabel)
         return Self(action: .list, marketplaces: [marketplace], title: question.title, message: question.message, button: question.button)
     }
 

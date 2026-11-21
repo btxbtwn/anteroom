@@ -544,6 +544,35 @@ def _context(db: Session, conv_id: str, marketplace: str, body: ListRequest | No
     return direct_preflight.Context(db=db)
 
 
+def preflight_for_marketplace(
+    db: Session,
+    conv_id: str,
+    prepared: dict,
+    photos: list,
+    records: dict,
+    marketplace: str,
+    *,
+    attached: dict | None = None,
+) -> dict:
+    """Compute cached readiness, gaps, missing, and rejected keys for one marketplace."""
+    from anteroom.services.native_contract import copy_listing
+    from anteroom.services.native_form import attach_form
+
+    snapshot = attached if attached is not None else attach_form(copy_listing(prepared), marketplace, db=db)
+    found = direct_preflight.gaps(snapshot, marketplace, direct_preflight.Context(db=db))
+    left_off = marketplace_media.photos_for(prepared, photos, marketplace)[1]
+    if left_off:
+        found.append(direct_preflight.gap(f"marketplace_photos.{marketplace}", left_off, blocking=False))
+    found = [direct_preflight.with_fix(item) for item in found]
+    rejected = listing_readiness.rejected_fields(records.get(marketplace) or {})
+    return {
+        "ready": not direct_preflight.blocking(found),
+        "gaps": found,
+        "missing": listing_readiness.missing(found, rejected),
+        "rejected": rejected,
+    }
+
+
 def preflight(conv_id: str, db: Session) -> dict:
     """Read saved listing requirements locally, without Chrome or category changes.
 
@@ -555,24 +584,18 @@ def preflight(conv_id: str, db: Session) -> dict:
     if not revision or not isinstance(revision.listing_json, dict):
         return {"revision_id": None, "marketplaces": {}}
     from anteroom.services.job_snapshot import prepare_listing_snapshot
-    from anteroom.services.native_contract import copy_listing
-    from anteroom.services.native_form import attach_form
 
     prepared = prepare_listing_snapshot(db, conv, revision.listing_json)
-    body = ListRequest(revision_id=revision.id)
     photos = ConversationRepo(db).get_all_photos(conv_id)
     records = MarketplaceListingRepo(db).for_conversation(conv_id)
     out = {}
     for marketplace in NAMES:
-        found = direct_preflight.gaps(attach_form(copy_listing(prepared), marketplace, db=db), marketplace,
-                                      _context(db, conv_id, marketplace, body))
-        left_off = marketplace_media.photos_for(prepared, photos, marketplace)[1]
-        if left_off:
-            found.append(direct_preflight.gap(f"marketplace_photos.{marketplace}", left_off, blocking=False))
-        found = [direct_preflight.with_fix(item) for item in found]
-        rejected = listing_readiness.rejected_fields(records.get(marketplace) or {})
-        out[marketplace] = {"ready": not direct_preflight.blocking(found), "gaps": found,
-                            "missing": listing_readiness.missing(found, rejected)}
+        result = preflight_for_marketplace(db, conv_id, prepared, photos, records, marketplace)
+        out[marketplace] = {
+            "ready": result["ready"],
+            "gaps": result["gaps"],
+            "missing": result["missing"],
+        }
     return {"revision_id": revision.id, "marketplaces": out}
 
 

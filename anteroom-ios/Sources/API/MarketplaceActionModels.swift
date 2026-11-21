@@ -171,9 +171,11 @@ enum MarketplaceActions {
 
     /// The confirmation for List on one marketplace (the web's `listNow`). Several
     /// at once go through List everywhere's picker.
-    static func listQuestion(title: String, marketplace: String) -> (title: String, message: String, button: String) {
+    static func listQuestion(title: String, marketplace: String, priceLabel: String? = nil) -> (title: String, message: String, button: String) {
         let name = Marketplaces.name(marketplace)
-        return ("List “\(title)” on \(name)?",
+        let price = priceLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let heading = price.isEmpty ? "List “\(title)” on \(name)?" : "List “\(title)” on \(name) for \(price)?"
+        return (heading,
                 "This creates a live \(name) listing from the listing saved in Anteroom.\(chromeNote([marketplace]))",
                 "List on \(name)")
     }

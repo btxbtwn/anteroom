@@ -58,6 +58,13 @@ import { Textarea } from "./ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { savedDefaultFor, shownSavedDefault } from "./fieldDefaults";
 import { agentFieldLocked } from "./agentFieldLocks";
+import {
+  coerceNumericValue,
+  commitNativeField,
+  independentFieldKey,
+  isInheritedGeneralLock,
+  MARKETPLACE_PRICE_KEYS,
+} from "./nativeFieldCommit";
 
 interface Props {
   convId: string;
@@ -741,7 +748,7 @@ export function StructuredEditor({
     const raw = field ? editorFieldValue(listing, field, tab) : getListingEditorValue(listing, key);
     const current = followed && listing?.price != null ? formFieldText(listing.price) : labelOf(formFieldText(raw));
     if (text === current) return false;
-    setListingEditorValue(target, key, field?.type === "number" ? coerce(text) : text);
+    setListingEditorValue(target, key, field?.type === "number" ? coerceNumericValue(text) : text);
     return true;
   };
 
@@ -883,25 +890,12 @@ export function StructuredEditor({
   }, [hasDrafts]);
 
   const commitField = (key: string, value: string | string[] | boolean, also: Record<string, string> = {}) => {
-    if (editingDisabled.current || agentFieldLocked(key, agentLocks) || fields.find((field) => field.key === key)?.locked) return;
-    if (typeof value === "string" && value.trim() === "[object Object]") return;
-    const updated = cloneListing(listing);
-    const field = fields.find((entry) => entry.key === key);
-    const stored = typeof value === "string" ? field?.optionValues?.[value] ?? (field?.type === "number" ? coerce(value) : value)
-      : Array.isArray(value) ? value.map(label => field?.optionValues?.[label] ?? label) : value;
-    setListingEditorValue(updated, key, stored);
-    for (const [path, extra] of Object.entries(also)) setListingEditorValue(updated, path, extra);
-    if (key === "poshmark_specifics.nativeSizeId") {
-      setListingEditorValue(updated, "poshmark_specifics.sizeSetId", fields.find((row) => row.key === "poshmark_specifics.sizeSetId")?.defaultValue || "");
-    }
-    for (const dependent of field?.clears || []) {
-      const dependentField = fields.find((entry) => entry.key === dependent);
-      setListingEditorValue(updated, dependent,
-        dependent.endsWith(".attributes") ? {}
-          : dependent.endsWith(".inventoryRows") ? []
-          : dependentField?.type === "boolean" ? false : "");
-    }
-    emitChange(updated);
+    const updated = commitNativeField(listing, fields, key, value, {
+      also,
+      agentLocks,
+      disabled: editingDisabled.current,
+    });
+    if (updated) emitChange(updated);
   };
 
   const setFieldDraft = (key: string, value: string) => {
@@ -1336,16 +1330,6 @@ function fieldLeaf(key: string): string {
   return (key.split(".").pop() || "").toLowerCase();
 }
 
-const FOLLOWED_GENERAL = new Set(editorFields.followed_general);
-
-/** General fills these. A marketplace edit is stored on that form alone. */
-function independentFieldKey(tab: string, key: string): string {
-  if (tab === "general" || key.includes(".")) return key;
-  if (key === "price") return MARKETPLACE_PRICE_KEYS[tab] ?? key;
-  if (FOLLOWED_GENERAL.has(key)) return `${tab}_specifics.${key}`;
-  return key;
-}
-
 function independentRows(rows: EditorField[], tab: string): EditorField[] {
   if (tab === "general") return rows;
   return mergeEditorFields(rows.flatMap((field) => {
@@ -1353,7 +1337,7 @@ function independentRows(rows: EditorField[], tab: string): EditorField[] {
     // until it is set here. The shared price would change every form.
     if (field.key === "price" && MARKETPLACE_PRICE_KEYS[tab]) return [{ ...field, key: MARKETPLACE_PRICE_KEYS[tab] }];
     const key = independentFieldKey(tab, field.key);
-    const inherited = Boolean(field.locked && /change it there/i.test(field.help || ""));
+    const inherited = isInheritedGeneralLock(field.locked, field.help);
     if (key === field.key && !inherited) return [field];
     return [{
       ...field,
@@ -1450,8 +1434,6 @@ function sameField(a: EditorField, b: EditorField): boolean {
 }
 
 const MERCARI_DERIVED_LABELS = new Set(["quantity", "shipping label", "delivery method", "who will pay for delivery?", "payer", "who pays"]);
-
-const MARKETPLACE_PRICE_KEYS: Record<string, string> = editorFields.marketplace_price_keys;
 
 function marketplacePriceField(tab: string): EditorField | null {
   const key = MARKETPLACE_PRICE_KEYS[tab];
@@ -1813,12 +1795,6 @@ export function humanizeFieldKey(key: string): string {
   const text = key.replace(/[_-]+/g, " ").trim();
   const spaced = text.includes(" ") ? text : text.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
-}
-
-function coerce(val: string): string | number | null {
-  if (val === "") return null;
-  if (!isNaN(Number(val)) && val.trim() !== "") return Number(val);
-  return val;
 }
 
 const ACTIVE_SEND_STATUSES = new Set(["queued", "awaiting_extension", "dispatched"]);

@@ -24,10 +24,12 @@ export function readinessKey(listing: Pick<Listing, "id" | "updated_at" | "direc
   return `${listing.id}:${listing.updated_at ?? ""}:${JSON.stringify(listing.direct_records ?? {})}`;
 }
 
-export function useInventoryReadiness(rows: readonly Listing[], first: number, last: number): Record<string, ListingReadiness> {
-  const blocks = readinessBlocks(first, Math.min(last, rows.length - 1)).map((block) =>
-    // A sold or settled listing is not listed again, so it needs no check.
-    rows.slice(block * READINESS_BLOCK, (block + 1) * READINESS_BLOCK).filter((listing) => !listing.settled_at));
+export function useInventoryReadiness(rows: readonly Listing[], first: number, last: number, enabled = true): Record<string, ListingReadiness> {
+  const blocks = enabled
+    ? readinessBlocks(first, Math.min(last, rows.length - 1)).map((block) =>
+      // A sold or settled listing is not listed again, so it needs no check.
+      rows.slice(block * READINESS_BLOCK, (block + 1) * READINESS_BLOCK).filter((listing) => !listing.settled_at))
+    : [];
   const results = useQueries({
     queries: blocks.filter((block) => block.length).map((block) => ({
       queryKey: ["listing-readiness", block.map(readinessKey)],

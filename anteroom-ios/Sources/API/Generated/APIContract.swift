@@ -433,6 +433,85 @@ struct ListingSaveResult: Codable, Hashable, Sendable {
     }
 }
 
+/// One display cell in a marketplace inventory sheet.
+struct ListingSheetCell: Codable, Hashable, Sendable {
+    /// Human-readable label for display in the grid or scan list.
+    var value: String = ""
+    /// Stored scalar value or ID.
+    var raw: String = ""
+    var required: Bool = false
+    var missing: Bool = false
+    var rejected: Bool = false
+    var error: String = ""
+    /// False when editing requires the full listing editor.
+    var editable: Bool = true
+}
+
+extension ListingSheetCell {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        value = try values.decodeIfPresent(String.self, forKey: .value) ?? ""
+        raw = try values.decodeIfPresent(String.self, forKey: .raw) ?? ""
+        required = try values.decodeIfPresent(Bool.self, forKey: .required) ?? false
+        missing = try values.decodeIfPresent(Bool.self, forKey: .missing) ?? false
+        rejected = try values.decodeIfPresent(Bool.self, forKey: .rejected) ?? false
+        error = try values.decodeIfPresent(String.self, forKey: .error) ?? ""
+        editable = try values.decodeIfPresent(Bool.self, forKey: .editable) ?? true
+    }
+}
+
+/// One field this marketplace still needs on this listing.
+struct ListingSheetMissing: Codable, Hashable, Sendable {
+    var field: String
+    var label: String
+    var message: String = ""
+    var rejected: Bool = false
+}
+
+extension ListingSheetMissing {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        field = try values.decode(String.self, forKey: .field)
+        label = try values.decode(String.self, forKey: .label)
+        message = try values.decodeIfPresent(String.self, forKey: .message) ?? ""
+        rejected = try values.decodeIfPresent(Bool.self, forKey: .rejected) ?? false
+    }
+}
+
+/// Cached marketplace sheet cells and readiness for the inventory rows on screen.
+struct ListingSheetResponse: Codable, Hashable, Sendable {
+    /// One of: ebay, poshmark, mercari, depop, etsy.
+    var marketplace: String
+    var listings: [String: ListingSheetRow]?
+}
+
+/// One listing's cached cells and readiness for one marketplace.
+struct ListingSheetRow: Codable, Hashable, Sendable {
+    var revisionID: String?
+    var ready: Bool = false
+    /// True when this marketplace's full category form is not cached yet.
+    var needsLoad: Bool = false
+    var cells: [String: ListingSheetCell]?
+    var missing: [ListingSheetMissing]?
+
+    enum CodingKeys: String, CodingKey {
+        case ready, cells, missing
+        case revisionID = "revision_id"
+        case needsLoad = "needs_load"
+    }
+}
+
+extension ListingSheetRow {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        revisionID = try values.decodeIfPresent(String.self, forKey: .revisionID)
+        ready = try values.decodeIfPresent(Bool.self, forKey: .ready) ?? false
+        needsLoad = try values.decodeIfPresent(Bool.self, forKey: .needsLoad) ?? false
+        cells = try values.decodeIfPresent([String: ListingSheetCell].self, forKey: .cells)
+        missing = try values.decodeIfPresent([ListingSheetMissing].self, forKey: .missing)
+    }
+}
+
 struct ListingValidation: Codable, Hashable, Sendable {
     var valid: Bool
     var errors: [[String: String]]

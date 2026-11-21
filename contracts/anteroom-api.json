@@ -1085,6 +1085,151 @@
         "title": "ListingSaveResult",
         "type": "object"
       },
+      "ListingSheetCell": {
+        "description": "One display cell in a marketplace inventory sheet.",
+        "properties": {
+          "editable": {
+            "default": true,
+            "description": "False when editing requires the full listing editor.",
+            "title": "Editable",
+            "type": "boolean"
+          },
+          "error": {
+            "default": "",
+            "title": "Error",
+            "type": "string"
+          },
+          "missing": {
+            "default": false,
+            "title": "Missing",
+            "type": "boolean"
+          },
+          "raw": {
+            "default": "",
+            "description": "Stored scalar value or ID.",
+            "title": "Raw",
+            "type": "string"
+          },
+          "rejected": {
+            "default": false,
+            "title": "Rejected",
+            "type": "boolean"
+          },
+          "required": {
+            "default": false,
+            "title": "Required",
+            "type": "boolean"
+          },
+          "value": {
+            "default": "",
+            "description": "Human-readable label for display in the grid or scan list.",
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "title": "ListingSheetCell",
+        "type": "object"
+      },
+      "ListingSheetMissing": {
+        "description": "One field this marketplace still needs on this listing.",
+        "properties": {
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "message": {
+            "default": "",
+            "title": "Message",
+            "type": "string"
+          },
+          "rejected": {
+            "default": false,
+            "title": "Rejected",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "field",
+          "label"
+        ],
+        "title": "ListingSheetMissing",
+        "type": "object"
+      },
+      "ListingSheetResponse": {
+        "description": "Cached marketplace sheet cells and readiness for the inventory rows on screen.",
+        "properties": {
+          "listings": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ListingSheetRow"
+            },
+            "title": "Listings",
+            "type": "object"
+          },
+          "marketplace": {
+            "enum": [
+              "ebay",
+              "poshmark",
+              "mercari",
+              "depop",
+              "etsy"
+            ],
+            "title": "Marketplace",
+            "type": "string"
+          }
+        },
+        "required": [
+          "marketplace"
+        ],
+        "title": "ListingSheetResponse",
+        "type": "object"
+      },
+      "ListingSheetRow": {
+        "description": "One listing's cached cells and readiness for one marketplace.",
+        "properties": {
+          "cells": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ListingSheetCell"
+            },
+            "title": "Cells",
+            "type": "object"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/ListingSheetMissing"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "needs_load": {
+            "default": false,
+            "description": "True when this marketplace's full category form is not cached yet.",
+            "title": "Needs Load",
+            "type": "boolean"
+          },
+          "ready": {
+            "default": false,
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "revision_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision Id"
+          }
+        },
+        "title": "ListingSheetRow",
+        "type": "object"
+      },
       "ListingValidation": {
         "properties": {
           "can_send": {
@@ -2178,6 +2323,66 @@
           }
         },
         "summary": "Photos"
+      }
+    },
+    "/api/listing-sheet": {
+      "get": {
+        "description": "Read-only, cached-only. Plain def so FastAPI runs DB and catalog reads in the threadpool.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "marketplace",
+            "required": true,
+            "schema": {
+              "enum": [
+                "ebay",
+                "poshmark",
+                "mercari",
+                "depop",
+                "etsy"
+              ],
+              "title": "Marketplace",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 50,
+              "title": "Ids",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListingSheetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sheet"
       }
     },
     "/api/runtime": {

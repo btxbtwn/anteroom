@@ -1,19 +1,39 @@
 import Foundation
 import Observation
 
+enum SheetListOutcome: Equatable, Sendable {
+    case listed
+    case alreadyInFlight
+    case failed(String)
+}
+
 @MainActor
 @Observable
 final class InventoryModel {
     let api: AnteroomAPI
     private(set) var listings: [ConversationSummary] = []
     private(set) var preferredMarketplaces: [String] = []
+    private(set) var runtime: WorkspaceRuntime?
     private(set) var suggestions: [Suggestion] = []
     private(set) var isLoading = false
     private(set) var hasLoaded = false
     /// When the inventory last came back from the server.
     private(set) var loadedAt: Date?
     var filters = InventoryFilters()
+    var activeTab: InventorySheetTab = .overview
+    /// Cached `/api/listing-sheet` rows keyed by marketplace → listing ID.
+    private(set) var sheetRows: [String: [String: ListingSheetRow]] = [:]
+    /// Active load count per marketplace so overlapping loads never clear each other's spinner.
+    private(set) var sheetLoadCounts: [String: Int] = [:]
+    private(set) var sheetErrors: [String: String] = [:]
+    /// Per-listing in-flight List actions so one row never disables the others.
+    private(set) var listingInFlight: Set<String> = []
     var error: String?
+    /// `updatedAt` token each cached sheet row was fetched for (marketplace → listing ID → updatedAt).
+    @ObservationIgnored private var sheetRowTokens: [String: [String: String]] = [:]
+    /// Monotonic version per `(marketplace, id)` bumped on targeted refreshes so a slower
+    /// batch fetch can never overwrite a fresher Quick Edit or List result.
+    @ObservationIgnored private var sheetRowVersions: [String: [String: Int]] = [:]
     /// The markdown review for the stale listings, read ahead so Mark down opens filled.
     @ObservationIgnored private var markdownPreview: MarkdownPreview?
     /// Counts changes to `listings`; the cached queries recompute when it moves.
@@ -36,13 +56,36 @@ final class InventoryModel {
         self.api = api
     }
 
+    /// Marketplace tabs shown beside Overview (Settings → Where you list, gated by workspace runtime).
+    var availableMarketplaceTabs: [String] {
+        MarketplaceSheetRules.availableMarketplaceTabs(preferred: preferredMarketplaces, runtime: runtime)
+    }
+
+    func isLoadingSheet(_ marketplace: String) -> Bool {
+        (sheetLoadCounts[marketplace] ?? 0) > 0
+    }
+
+    func canAct(on marketplace: String) -> Bool {
+        let effective = runtime ?? .unavailable
+        return effective.actionMarketplaces.contains(marketplace)
+    }
+
+    func sheetRow(marketplace: String, id: String) -> ListingSheetRow? {
+        sheetRows[marketplace]?[id]
+    }
+
+    func needsSheetLoad(marketplace: String, listing: ConversationSummary) -> Bool {
+        guard sheetRows[marketplace]?[listing.id] != nil else { return true }
+        return sheetRowTokens[marketplace]?[listing.id] != listing.updatedAt
+    }
+
     func reload() async {
         isLoading = true
         defer { isLoading = false }
-        // Suggestions and the filter menu's order are extras, asked beside the
-        // inventory; it works without them.
+        // Suggestions, runtime capabilities and marketplace order load beside inventory.
         async let rankedRead = try? api.suggestions()
         async let selectedRead = try? api.selectedMarketplaces()
+        async let runtimeRead = try? api.runtime()
         do {
             let rows = try await api.listings()
             try Task.checkCancellation()
@@ -59,6 +102,128 @@ final class InventoryModel {
             prefetchMarkdowns()
         }
         if let selected = await selectedRead { preferredMarketplaces = selected }
+        if let loadedRuntime = await runtimeRead { runtime = loadedRuntime }
+
+        // Fall back to Overview if the active marketplace tab is no longer available.
+        if case .marketplace(let market) = activeTab, !availableMarketplaceTabs.contains(market) {
+            activeTab = .overview
+        }
+
+        // Only refresh already-cached rows on the active tab whose `updatedAt` moved,
+        // avoiding a full-tab preflight storm on every live event.
+        if case .marketplace(let market) = activeTab, let cached = sheetRows[market], !cached.isEmpty {
+            let changed = listings.filter { item in
+                cached[item.id] != nil && sheetRowTokens[market]?[item.id] != item.updatedAt
+            }
+            if !changed.isEmpty {
+                await loadSheet(marketplace: market, listings: changed)
+            }
+        }
+    }
+
+    /// Fetches `/api/listing-sheet` rows for `listings` in chunks of up to 50.
+    /// Merges each batch into live `sheetRows` as it arrives so cancellation preserves
+    /// completed batches and newer targeted refreshes are never overwritten.
+    func loadSheet(marketplace: String, listings batchSource: [ConversationSummary], force: Bool = false) async {
+        var seen = Set<String>()
+        var needed: [ConversationSummary] = []
+        for item in batchSource {
+            guard seen.insert(item.id).inserted else { continue }
+            if force || needsSheetLoad(marketplace: marketplace, listing: item) {
+                needed.append(item)
+            }
+        }
+        guard !needed.isEmpty else { return }
+
+        sheetLoadCounts[marketplace, default: 0] += 1
+        sheetErrors[marketplace] = nil
+        defer {
+            let remaining = max(0, (sheetLoadCounts[marketplace] ?? 1) - 1)
+            if remaining == 0 {
+                sheetLoadCounts.removeValue(forKey: marketplace)
+            } else {
+                sheetLoadCounts[marketplace] = remaining
+            }
+        }
+
+        var start = 0
+        while start < needed.count {
+            let end = min(start + 50, needed.count)
+            let chunk = Array(needed[start..<end])
+            let ids = chunk.map(\.id)
+            let tokensByID = Dictionary(uniqueKeysWithValues: chunk.map { ($0.id, $0.updatedAt) })
+            let versionsBefore = Dictionary(uniqueKeysWithValues: ids.map { ($0, sheetRowVersions[marketplace]?[$0] ?? 0) })
+            do {
+                let response = try await api.listingSheet(marketplace: marketplace, ids: ids)
+                try Task.checkCancellation()
+                var current = sheetRows[marketplace] ?? [:]
+                var tokens = sheetRowTokens[marketplace] ?? [:]
+                for (id, row) in response.listings ?? [:] {
+                    let currentVersion = sheetRowVersions[marketplace]?[id] ?? 0
+                    guard currentVersion == (versionsBefore[id] ?? 0) else { continue }
+                    current[id] = row
+                    if let token = tokensByID[id] {
+                        tokens[id] = token
+                    }
+                }
+                sheetRows[marketplace] = current
+                sheetRowTokens[marketplace] = tokens
+            } catch let failure where failure.isCancellation {
+                return
+            } catch {
+                sheetErrors[marketplace] = error.localizedDescription
+                break
+            }
+            start = end
+        }
+    }
+
+    /// Scoped refresh for a single listing after a Quick Edit save or List action.
+    @discardableResult
+    func refreshSheetRow(marketplace: String, id: String) async -> ListingSheetRow? {
+        do {
+            let response = try await api.listingSheet(marketplace: marketplace, ids: [id])
+            try Task.checkCancellation()
+            guard let updated = response.listings?[id] else { return sheetRows[marketplace]?[id] }
+            var versions = sheetRowVersions[marketplace] ?? [:]
+            versions[id, default: 0] += 1
+            sheetRowVersions[marketplace] = versions
+
+            var existing = sheetRows[marketplace] ?? [:]
+            existing[id] = updated
+            sheetRows[marketplace] = existing
+
+            if let token = listings.first(where: { $0.id == id })?.updatedAt {
+                var tokens = sheetRowTokens[marketplace] ?? [:]
+                tokens[id] = token
+                sheetRowTokens[marketplace] = tokens
+            }
+            return updated
+        } catch {
+            // Keep the last cached row if the background refresh fails.
+            return sheetRows[marketplace]?[id]
+        }
+    }
+
+    /// Lists one listing on `marketplace` after explicit seller confirmation.
+    func listFromSheet(
+        listing: ConversationSummary,
+        marketplace: String,
+        revisionID: String,
+        confirmation: SellerConfirmation
+    ) async -> SheetListOutcome {
+        guard !listingInFlight.contains(listing.id) else { return .alreadyInFlight }
+        listingInFlight.insert(listing.id)
+        defer { listingInFlight.remove(listing.id) }
+        do {
+            try await api.listOnMarketplace(listing.id, marketplace: marketplace, revisionID: revisionID,
+                                            confirmation: confirmation)
+            _ = await refreshSheetRow(marketplace: marketplace, id: listing.id)
+            Task { await reload() }
+            return .listed
+        } catch {
+            return .failed(error.localizedDescription)
+        }
     }
 
     // MARK: Mark down prices

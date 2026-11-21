@@ -99,3 +99,7 @@ xcrun swiftc Sources/API/MarketplaceReadiness.swift Tests/MarketplaceReadinessTe
 echo "Test offer activity API dates under non-Latin locales"
 xcrun swiftc Sources/Automations/OfferActivityDates.swift Tests/OfferActivityDatesTests.swift -o "$RUNNER_TEMP/offer-date-tests"
 "$RUNNER_TEMP/offer-date-tests"
+
+echo "Test marketplace inventory sheet rules and Quick Edit invariants"
+xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/API/AssistantModels.swift Sources/API/MarketplaceReadiness.swift Sources/API/MarketplaceActionModels.swift Sources/API/NativeFormModels.swift Sources/API/EbayFormModels.swift Sources/Inventory/InventoryFilters.swift Sources/Inventory/MarketplaceSheet.swift Tests/MarketplaceSheetTests.swift -o "$RUNNER_TEMP/marketplace-sheet-tests"
+"$RUNNER_TEMP/marketplace-sheet-tests"

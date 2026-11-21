@@ -26,10 +26,23 @@ function names(values: readonly string[]): string {
   return values.map(marketplaceName).join(", ");
 }
 
-export function BulkMarketplaceDialog({ conversationIds, onClose }: { conversationIds: string[]; onClose: () => void }) {
+export function BulkMarketplaceDialog({
+  conversationIds,
+  onClose,
+  initialAction = "list",
+  initialMarketplaces = [],
+}: {
+  conversationIds: string[];
+  onClose: () => void;
+  /** Pre-selected action when opened from a specific marketplace tab. */
+  initialAction?: BulkMarketplaceAction;
+  /** Pre-selected marketplace(s) when the seller explicitly started from a marketplace tab. */
+  initialMarketplaces?: readonly DelistMarketplace[];
+}) {
   const client = useQueryClient();
-  const [action, setAction] = useState<BulkMarketplaceAction>("list");
-  const [chosen, setChosen] = useState<DelistMarketplace[]>([]);
+  const [action, setAction] = useState<BulkMarketplaceAction>(initialAction);
+  const [chosen, setChosen] = useState<DelistMarketplace[]>(() =>
+    BULK_MARKETPLACES.filter((value) => initialMarketplaces.includes(value)));
   const [review, setReview] = useState<BulkMarketplacePreview | null>(null);
   const [unchecked, setUnchecked] = useState<Set<string>>(new Set());
   const [confirmed, setConfirmed] = useState(false);
@@ -48,7 +61,7 @@ export function BulkMarketplaceDialog({ conversationIds, onClose }: { conversati
     retry: false,
     onSettled: (_result, _error, approved) => {
       setActiveIds(new Set());
-      for (const key of ["conversations", "analytics", "automation-approvals"]) void client.invalidateQueries({ queryKey: [key] });
+      for (const key of ["conversations", "analytics", "automation-approvals", "listing-sheet"]) void client.invalidateQueries({ queryKey: [key] });
       for (const task of approved) {
         for (const key of ["marketplace-listings", "native-marketplaces", "listing"]) void client.invalidateQueries({ queryKey: [key, task.id] });
       }
@@ -126,7 +139,11 @@ export function BulkMarketplaceDialog({ conversationIds, onClose }: { conversati
             onCheckedChange={(checked) => setChosen((previous) => checked ? BULK_MARKETPLACES.filter((value) => value === name || previous.includes(value)) : previous.filter((value) => value !== name))} />
           {marketplaceName(name)}
         </label>)}</div>
-        <PageNote>Choose each marketplace by name. None is chosen for you.</PageNote>
+        <PageNote>
+          {initialMarketplaces.length > 0
+            ? "Pre-selected from this tab. You can change the selection here; nothing is sent until you review each item and confirm."
+            : "Choose each marketplace by name. None is chosen for you."}
+        </PageNote>
       </fieldset>
     </div>}
   </PriceDialog>;

@@ -19,6 +19,7 @@ from anteroom.services.local_requests import LocalRequestMiddleware
 from anteroom.services.request_timing import RequestTimingMiddleware
 from anteroom.routes import marketplace_listings, marketplace_schemas, native_marketplaces
 from anteroom.routes import listing_readiness as listing_readiness_route
+from anteroom.routes import listing_sheet as listing_sheet_route
 from anteroom.routes import ebay_offers, listing_promotions, promotion_automations
 from anteroom.routes import account_move, ebay
 from anteroom.routes import chrome_import, similar_items
@@ -242,6 +243,7 @@ app.include_router(promotion_automations.router)
 app.include_router(ebay.router)
 app.include_router(native_marketplaces.router)
 app.include_router(listing_readiness_route.router)
+app.include_router(listing_sheet_route.router)
 app.include_router(marketplace_schemas.router)
 app.include_router(marketplace_listings.router)
 app.include_router(conversations.router)

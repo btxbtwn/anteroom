@@ -1,0 +1,1 @@
+- Add per-marketplace Inventory tabs on web and iOS with desktop spreadsheet inline editing, phone Quick Edit sheet, and seller-confirmed List actions.

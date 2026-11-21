@@ -43,6 +43,7 @@ import type {
   ListingDocument,
   ListingRevision,
   ListingSaveResult,
+  ListingSheetResponse,
   ConversationActivity,
   MarkdownApplyResult,
   MarkdownDropRequest,
@@ -764,6 +765,10 @@ export const api = {
     readiness: (convIds: readonly string[]) =>
       request<{ listings: Record<string, ListingReadiness> }>(
         `/listing-readiness?${convIds.map((id) => `ids=${encodeURIComponent(id)}`).join("&")}`),
+    /** Cached display cells and readiness for one marketplace tab across the inventory rows on screen. */
+    sheet: (marketplace: NativeMarketplace, convIds: readonly string[]) =>
+      request<ListingSheetResponse>(
+        `/listing-sheet?marketplace=${encodeURIComponent(marketplace)}&${convIds.map((id) => `ids=${encodeURIComponent(id)}`).join("&")}`),
     saveDraft: (convId: string, marketplace: NativeMarketplace, revisionId: string) =>
       request<NativeDraft>(`/conversations/${convId}/native-marketplaces/${marketplace}/draft`, {
         method: "POST", body: JSON.stringify({ revision_id: revisionId }),

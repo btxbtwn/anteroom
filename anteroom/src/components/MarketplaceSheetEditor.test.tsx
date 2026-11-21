@@ -1,0 +1,396 @@
+// @vitest-environment happy-dom
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { api } from "../api/client";
+import type { ConversationActivity, ListingDocument, ListingSaveResult, ListingSheetRow, MarketplaceForm } from "../api/types";
+import { WorkspaceRuntimeProvider, type WorkspaceRuntime } from "../app/runtime";
+import type { Listing } from "./sidebar/listingShelves";
+import { MARKETPLACE_SHEET_COLUMNS } from "./marketplaceSheetConfig";
+import { DesktopCellPopover, MarketplaceQuickEditSheet } from "./MarketplaceSheetEditor";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const LOCAL_RUNTIME: WorkspaceRuntime = {
+  hosted: false,
+  features: new Set(),
+  views: new Set(["listings"]),
+  marketplaceForms: new Set(["ebay", "poshmark", "mercari", "depop", "etsy"]),
+  actionMarketplaces: new Set(["ebay", "poshmark", "mercari", "depop", "etsy"]),
+};
+
+const IDLE_ACTIVITY: ConversationActivity = {
+  busy: false,
+  writing: false,
+  items: [],
+  message_count: 0,
+  last_message_id: null,
+  locked_fields: [],
+};
+
+const LISTING_ROW: Listing = {
+  id: "conv-1",
+  title: "Wool cardigan",
+  price: 32,
+  status: "draft",
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+  direct_records: {},
+};
+
+const READY_SHEET_ROW: ListingSheetRow = {
+  revision_id: "rev-1",
+  ready: true,
+  needs_load: false,
+  cells: {
+    price: { value: "32", raw: "32", required: true, missing: false, rejected: false, error: "", editable: true },
+    "depop_specifics.condition": { value: "Used - Good", raw: "used_good", required: true, missing: false, rejected: false, error: "", editable: true },
+  },
+  missing: [],
+};
+
+const SAMPLE_DOC: ListingDocument = {
+  conversation_id: "conv-1",
+  current_revision_id: "rev-1",
+  revision_count: 1,
+  can_send: true,
+  listing: {
+    title: "Wool cardigan",
+    price: 32,
+    depop_specifics: { condition: "used_good" },
+  },
+};
+
+const DEPOP_FORM: MarketplaceForm = {
+  marketplace: "depop",
+  category_id: "tops",
+  known: true,
+  fields: [
+    {
+      key: "price",
+      path: "price",
+      label: "Price",
+      input_type: "number",
+      required: true,
+      locked: false,
+      multi: false,
+      selection_only: false,
+      options: [],
+      value: 32,
+    },
+    {
+      key: "condition",
+      path: "depop_specifics.condition",
+      label: "Condition",
+      required: true,
+      locked: false,
+      multi: false,
+      selection_only: true,
+      options: ["Used - Good", "Brand new"],
+      option_values: { "Used - Good": "used_good", "Brand new": "brand_new" },
+      value: "used_good",
+    },
+  ],
+  notes: [],
+};
+
+function mockSaveResult(listing: Record<string, unknown>, revisionId = "rev-2"): ListingSaveResult {
+  return {
+    ok: true,
+    revision_id: revisionId,
+    listing,
+    etsy_eligible: false,
+    validation: { valid: true, can_send: true, errors: [], warnings: [], info: [] },
+  };
+}
+
+async function flushMicrotasks() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+}
+
+function setInputValue(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  setter?.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+describe("MarketplaceSheetEditor", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = "";
+  });
+
+  it("writes only depop_specifics.price when editing Price on Depop and flushes draft on Done", async () => {
+    vi.spyOn(api.listings, "get").mockResolvedValue(SAMPLE_DOC);
+    vi.spyOn(api.conversations, "activity").mockResolvedValue(IDLE_ACTIVITY);
+    vi.spyOn(api.nativeMarketplaces, "form").mockResolvedValue(DEPOP_FORM);
+    const saveSpy = vi.spyOn(api.listings, "update").mockImplementation(async (_id, listing) => mockSaveResult(listing));
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const anchor = document.createElement("button");
+    const container = document.createElement("div");
+    document.body.append(anchor, container);
+    const root = createRoot(container);
+    const onClose = vi.fn();
+    const priceCol = MARKETPLACE_SHEET_COLUMNS.depop.find((c) => c.key === "price")!;
+
+    try {
+      await act(() => root.render(
+        <QueryClientProvider client={client}>
+          <WorkspaceRuntimeProvider value={LOCAL_RUNTIME}>
+            <DesktopCellPopover
+              active={{ listing: LISTING_ROW, column: priceCol, anchor }}
+              marketplace="depop"
+              sheetRow={READY_SHEET_ROW}
+              onClose={onClose}
+              onOpenListing={vi.fn()}
+            />
+          </WorkspaceRuntimeProvider>
+        </QueryClientProvider>,
+      ));
+      await flushMicrotasks();
+
+      const input = document.querySelector<HTMLInputElement>('input[data-listing-field="depop_specifics.price"]');
+      expect(input).not.toBeNull();
+      await act(() => {
+        setInputValue(input!, "27");
+      });
+
+      // Click Done directly without blurring first — Important 3 flushes the typed value.
+      const doneBtn = [...document.querySelectorAll("button")].find((btn) => btn.textContent?.trim() === "Done");
+      expect(doneBtn).toBeDefined();
+      await act(() => {
+        doneBtn!.click();
+      });
+      await flushMicrotasks();
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+      const savedListing = saveSpy.mock.calls[0]?.[1];
+      expect(savedListing).toBeDefined();
+      expect((savedListing?.depop_specifics as Record<string, unknown>)?.price).toBe(27);
+      expect(savedListing?.price).toBe(32);
+    } finally {
+      await act(() => root.unmount());
+    }
+  });
+
+  it("never falls back to free-text input when native form errors or a select field is missing (B2)", async () => {
+    vi.spyOn(api.listings, "get").mockResolvedValue(SAMPLE_DOC);
+    vi.spyOn(api.conversations, "activity").mockResolvedValue(IDLE_ACTIVITY);
+    const formSpy = vi.spyOn(api.nativeMarketplaces, "form").mockRejectedValue(new Error("Form failed"));
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const anchor = document.createElement("button");
+    const container = document.createElement("div");
+    document.body.append(anchor, container);
+    const root = createRoot(container);
+    const conditionCol = MARKETPLACE_SHEET_COLUMNS.depop.find((c) => c.key === "depop_specifics.condition")!;
+
+    try {
+      await act(() => root.render(
+        <QueryClientProvider client={client}>
+          <WorkspaceRuntimeProvider value={LOCAL_RUNTIME}>
+            <DesktopCellPopover
+              active={{ listing: LISTING_ROW, column: conditionCol, anchor }}
+              marketplace="depop"
+              sheetRow={READY_SHEET_ROW}
+              onClose={vi.fn()}
+              onOpenListing={vi.fn()}
+            />
+          </WorkspaceRuntimeProvider>
+        </QueryClientProvider>,
+      ));
+      await flushMicrotasks();
+
+      expect(document.body.textContent).toContain("Could not load Depop choices");
+      expect(document.querySelector("input")).toBeNull();
+
+      // Now return a form that omits condition — still must render read-only "Open form", never <input>.
+      formSpy.mockResolvedValue({ marketplace: "depop", category_id: "tops", known: true, fields: [], notes: [] });
+      client.clear();
+      await act(() => root.render(
+        <QueryClientProvider client={client}>
+          <WorkspaceRuntimeProvider value={LOCAL_RUNTIME}>
+            <DesktopCellPopover
+              active={{ listing: LISTING_ROW, column: conditionCol, anchor }}
+              marketplace="depop"
+              sheetRow={READY_SHEET_ROW}
+              onClose={vi.fn()}
+              onOpenListing={vi.fn()}
+            />
+          </WorkspaceRuntimeProvider>
+        </QueryClientProvider>,
+      ));
+      await flushMicrotasks();
+
+      expect(document.querySelector("input")).toBeNull();
+      expect(document.body.textContent).toContain("Open form");
+    } finally {
+      await act(() => root.unmount());
+    }
+  });
+
+  it("disables controls and blocks saves when agent-locked or hosted-disabled (B3)", async () => {
+    vi.spyOn(api.listings, "get").mockResolvedValue(SAMPLE_DOC);
+    vi.spyOn(api.conversations, "activity").mockResolvedValue({
+      ...IDLE_ACTIVITY,
+      busy: true,
+      writing: true,
+      locked_fields: ["depop_specifics.price"],
+    });
+    vi.spyOn(api.nativeMarketplaces, "form").mockResolvedValue(DEPOP_FORM);
+    const saveSpy = vi.spyOn(api.listings, "update");
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const anchor = document.createElement("button");
+    const container = document.createElement("div");
+    document.body.append(anchor, container);
+    const root = createRoot(container);
+    const priceCol = MARKETPLACE_SHEET_COLUMNS.depop.find((c) => c.key === "price")!;
+
+    try {
+      await act(() => root.render(
+        <QueryClientProvider client={client}>
+          <WorkspaceRuntimeProvider value={LOCAL_RUNTIME}>
+            <DesktopCellPopover
+              active={{ listing: LISTING_ROW, column: priceCol, anchor }}
+              marketplace="depop"
+              sheetRow={READY_SHEET_ROW}
+              onClose={vi.fn()}
+              onOpenListing={vi.fn()}
+            />
+          </WorkspaceRuntimeProvider>
+        </QueryClientProvider>,
+      ));
+      await flushMicrotasks();
+
+      const input = document.querySelector<HTMLInputElement>('input[data-listing-field="depop_specifics.price"]');
+      expect(input?.disabled).toBe(true);
+      expect(document.body.textContent).toContain("Updating in chat");
+      expect(saveSpy).not.toHaveBeenCalled();
+
+      // Hosted account without Depop form access also disables editing.
+      vi.spyOn(api.conversations, "activity").mockResolvedValue(IDLE_ACTIVITY);
+      client.clear();
+      const hostedRuntime: WorkspaceRuntime = {
+        ...LOCAL_RUNTIME,
+        hosted: true,
+        marketplaceForms: new Set(["ebay"]),
+      };
+      await act(() => root.render(
+        <QueryClientProvider client={client}>
+          <WorkspaceRuntimeProvider value={hostedRuntime}>
+            <DesktopCellPopover
+              active={{ listing: LISTING_ROW, column: priceCol, anchor }}
+              marketplace="depop"
+              sheetRow={READY_SHEET_ROW}
+              onClose={vi.fn()}
+              onOpenListing={vi.fn()}
+            />
+          </WorkspaceRuntimeProvider>
+        </QueryClientProvider>,
+      ));
+      await flushMicrotasks();
+
+      const hostedInput = document.querySelector<HTMLInputElement>('input[data-listing-field="depop_specifics.price"]');
+      expect(hostedInput?.disabled).toBe(true);
+      expect(saveSpy).not.toHaveBeenCalled();
+    } finally {
+      await act(() => root.unmount());
+    }
+  });
+
+  it("shows per-marketplace price in phone Quick Edit confirmation and hides List when unready", async () => {
+    vi.spyOn(api.listings, "get").mockResolvedValue({
+      ...SAMPLE_DOC,
+      current_revision_id: "rev-fresh",
+      listing: {
+        title: "Wool cardigan",
+        price: 32,
+        depop_specifics: { price: 27, condition: "used_good" },
+      },
+    });
+    vi.spyOn(api.conversations, "activity").mockResolvedValue(IDLE_ACTIVITY);
+    vi.spyOn(api.nativeMarketplaces, "form").mockResolvedValue(DEPOP_FORM);
+    const listSpy = vi.spyOn(api.nativeMarketplaces, "list").mockResolvedValue({ state: "working" } as never);
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      // Unready row must not expose a List button on phone (Important 10).
+      const unreadyRow: ListingSheetRow = {
+        ...READY_SHEET_ROW,
+        ready: false,
+        missing: [{ field: "depop_specifics.parcelSize", label: "Package size", message: "Required", rejected: false }],
+      };
+      await act(() => root.render(
+        <QueryClientProvider client={client}>
+          <WorkspaceRuntimeProvider value={LOCAL_RUNTIME}>
+            <MarketplaceQuickEditSheet
+              listing={LISTING_ROW}
+              marketplace="depop"
+              sheetRow={unreadyRow}
+              nextDraftId={null}
+              onClose={vi.fn()}
+              onSelectListing={vi.fn()}
+              onOpenListing={vi.fn()}
+            />
+          </WorkspaceRuntimeProvider>
+        </QueryClientProvider>,
+      ));
+      await flushMicrotasks();
+      expect([...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === "List")).toBeUndefined();
+
+      // Ready row shows List -> confirm shows Depop's $27 (not General $32) and lists with rev-fresh.
+      const priceOverrideRow: ListingSheetRow = {
+        ...READY_SHEET_ROW,
+        cells: {
+          ...READY_SHEET_ROW.cells,
+          price: { value: "27", raw: "27", required: true, missing: false, rejected: false, error: "", editable: true },
+        },
+      };
+      await act(() => root.render(
+        <QueryClientProvider client={client}>
+          <WorkspaceRuntimeProvider value={LOCAL_RUNTIME}>
+            <MarketplaceQuickEditSheet
+              listing={LISTING_ROW}
+              marketplace="depop"
+              sheetRow={priceOverrideRow}
+              nextDraftId={null}
+              onClose={vi.fn()}
+              onSelectListing={vi.fn()}
+              onOpenListing={vi.fn()}
+            />
+          </WorkspaceRuntimeProvider>
+        </QueryClientProvider>,
+      ));
+      await flushMicrotasks();
+
+      const listBtn = [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === "List");
+      expect(listBtn).toBeDefined();
+      await act(() => {
+        listBtn!.click();
+      });
+
+      expect(document.body.textContent).toContain("List on Depop for $27?");
+      const confirmBtn = [...document.querySelectorAll("button")].find((b) => b.textContent?.includes("List on Depop"));
+      expect(confirmBtn).toBeDefined();
+      await act(() => {
+        confirmBtn!.click();
+      });
+      await flushMicrotasks();
+
+      expect(listSpy).toHaveBeenCalledWith("conv-1", "depop", "rev-fresh");
+    } finally {
+      await act(() => root.unmount());
+    }
+  });
+});

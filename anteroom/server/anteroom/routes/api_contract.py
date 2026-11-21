@@ -40,6 +40,7 @@ CONTRACT_OPERATIONS: tuple[tuple[str, str], ...] = (
     ("get", "/api/conversations/{identity}/listing"),
     ("put", "/api/conversations/{identity}/listing"),
     ("get", "/api/conversations/{identity}/photos"),
+    ("get", "/api/listing-sheet"),
 )
 HOSTED_ONLY_OPERATIONS = {("get", "/api/runtime")}
 
@@ -313,3 +314,46 @@ class OfferLogResponse(ContractModel):
     entries: list[OfferLogEntry]
     next_before: str | None
     """Pass as ``before`` for the next, older page; null on the last page."""
+
+
+class ListingSheetMissing(ContractModel):
+    """One field this marketplace still needs on this listing."""
+
+    field: str
+    label: str
+    message: str = ""
+    rejected: bool = False
+
+
+class ListingSheetCell(ContractModel):
+    """One display cell in a marketplace inventory sheet."""
+
+    value: str = ""
+    """Human-readable label for display in the grid or scan list."""
+    raw: str = ""
+    """Stored scalar value or ID."""
+    required: bool = False
+    missing: bool = False
+    rejected: bool = False
+    error: str = ""
+    editable: bool = True
+    """False when editing requires the full listing editor."""
+
+
+class ListingSheetRow(ContractModel):
+    """One listing's cached cells and readiness for one marketplace."""
+
+    revision_id: str | None = None
+    ready: bool = False
+    needs_load: bool = False
+    """True when this marketplace's full category form is not cached yet."""
+    cells: dict[str, ListingSheetCell] = Field(default_factory=dict)
+    missing: list[ListingSheetMissing] = Field(default_factory=list)
+
+
+class ListingSheetResponse(ContractModel):
+    """Cached marketplace sheet cells and readiness for the inventory rows on screen."""
+
+    marketplace: Literal["ebay", "poshmark", "mercari", "depop", "etsy"]
+    listings: dict[str, ListingSheetRow] = Field(default_factory=dict)
+
