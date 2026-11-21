@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1107 — 2026-11-21
+
+- Wholesale box sourcing now defaults to your configured ships-from ZIP (or prompts for your 5-digit US ZIP code) instead of defaulting to New Orleans, LA (`70115`).
+
 ## 0.1.1106 — 2026-11-21
 
 - Published public Terms of Service (`/terms`), updated the Privacy Policy (`/privacy`) and webhook relay privacy page to document self-serve account deletion, service providers, and support/privacy contact addresses, and linked them from the web landing, sign-in, account menu, and iOS app.
