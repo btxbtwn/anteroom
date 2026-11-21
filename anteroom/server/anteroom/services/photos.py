@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import UploadFile
-from PIL import Image, ImageOps
+from PIL import Image
 
 from anteroom.config import ALLOWED_PHOTO_MIME, MAX_PHOTO_SIZE_MB
 from anteroom.services import image_decode
@@ -141,14 +141,7 @@ def get_or_create_thumbnail(stored_filename: str, size: int) -> Path:
     if target.exists() and target.stat().st_mtime >= source.stat().st_mtime:
         return target
 
-    with Image.open(source) as img:
-        img = ImageOps.exif_transpose(img)
-        img.thumbnail((size, size), Image.Resampling.LANCZOS)
-        if img.mode not in ("RGB", "L"):
-            img = img.convert("RGB")
-        tmp = target.with_suffix(f".{uuid.uuid4().hex}.tmp")
-        img.save(tmp, "JPEG", quality=82, optimize=True)
-    os.replace(tmp, target)
+    save_jpeg_thumbnail(source.read_bytes(), target, size)
     return target
 
 

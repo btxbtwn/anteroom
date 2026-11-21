@@ -1,0 +1,1 @@
+- Enforced pixel-count and dimension limits across cached photo thumbnails, photo-edit previews, and ruler measurement photo decoding so oversized images cannot spike server or Mac memory.

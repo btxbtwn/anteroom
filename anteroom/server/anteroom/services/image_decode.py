@@ -15,21 +15,27 @@ FORMATS = frozenset({'JPEG', 'MPO', 'PNG', 'WEBP', 'HEIF', 'HEIC'})
 _decode_slot = threading.Semaphore(1)
 
 
+class ImageTooLargeError(ValueError):
+    """Raised when an image exceeds MAX_PIXELS or triggers Pillow's decompression bomb limit."""
+
+
 def decode(data: bytes, *, max_side: int | None = None) -> tuple[Image.Image, tuple[int, int]]:
     """An upright, loaded copy of ``data`` and the stored image's own size.
 
     With ``max_side`` the result is at most that many pixels on a side, and a
     JPEG decodes at a fraction of its size when that still covers it. Raises
-    ``ValueError`` for anything that is not a JPEG, PNG, WebP or HEIC photo of
-    at most ``MAX_PIXELS``.
+    ``ValueError`` (specifically ``ImageTooLargeError`` past ``MAX_PIXELS``) for
+    anything that is not a JPEG, PNG, WebP or HEIC photo of at most ``MAX_PIXELS``.
     """
     with _decode_slot:
         try:
             with warnings.catch_warnings():
                 warnings.simplefilter('error', Image.DecompressionBombWarning)
                 with Image.open(io.BytesIO(data)) as image:
-                    if image.format not in FORMATS or image.width * image.height > MAX_PIXELS:
-                        raise ValueError('unsupported or too large')
+                    if image.format not in FORMATS:
+                        raise ValueError('unsupported image format')
+                    if image.width * image.height > MAX_PIXELS:
+                        raise ImageTooLargeError('image exceeds maximum pixel limit')
                     size = image.size
                     if max_side:
                         image.draft('RGB', (max_side, max_side))
@@ -38,7 +44,9 @@ def decode(data: bytes, *, max_side: int | None = None) -> tuple[Image.Image, tu
                         upright.thumbnail((max_side, max_side))
                     upright.load()
                     return upright, size
-        except (OSError, SyntaxError, Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
+        except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
+            raise ImageTooLargeError('image exceeds maximum pixel limit') from exc
+        except (OSError, SyntaxError) as exc:
             raise ValueError('not a valid image') from exc
 
 
