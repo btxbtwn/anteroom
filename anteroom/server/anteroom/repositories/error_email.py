@@ -104,6 +104,32 @@ class EmailTransaction:
         rows = self.connection.execute(query.order_by(self.groups.c.id).limit(limit))
         return {key: group for key, group in rows}
 
+    def pending_group_count(self) -> int:
+        return int(self.connection.scalar(
+            select(func.count()).select_from(self.groups).where(self.groups.c.payload.is_not(None)),
+        ) or 0)
+
+    def evict_oldest_warning(self, *, exclude=None) -> int:
+        """Drop the oldest pending warning payload to make room for an error; preserve triage history."""
+        groups = self.groups
+        query = (
+            select(groups.c.id, groups.c.count, groups.c.last_seen, groups.c.last_sent)
+            .where(groups.c.payload.is_not(None), groups.c.warning.is_(True))
+        )
+        if exclude:
+            query = query.where(groups.c.fingerprint.notin_(exclude))
+        victim = self.connection.execute(query.order_by(groups.c.id).limit(1)).first()
+        if victim is None:
+            return 0
+        if victim.last_seen is None and victim.last_sent is None:
+            self.connection.execute(delete(groups).where(groups.c.id == victim.id))
+        else:
+            self.connection.execute(
+                update(groups).where(groups.c.id == victim.id).values(payload=None, due=None, count=0),
+            )
+        self.dirty = True
+        return max(1, int(victim.count or 0))
+
     def expire_sent(self, before):
         # Pending repeats must not turn into first alerts after a long pause.
         # Only completed fingerprints need their bounded history removed.

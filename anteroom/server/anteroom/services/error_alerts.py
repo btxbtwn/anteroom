@@ -23,7 +23,6 @@ import hashlib
 import json
 import logging
 import os
-import queue
 import re
 import sys
 import threading
@@ -242,8 +241,12 @@ def send_email(subject: str, body: str) -> None:
 class AlertHandler(logging.Handler):
     """Hands records to one mail thread; emit never blocks or raises."""
 
-    def __init__(self, send=send_email, *, store=None, daily_limit=None, clock=time.time):
+    MAX_QUEUE = 500
+    MAX_BATCH = 50
+
+    def __init__(self, send=send_email, *, store=None, daily_limit=None, clock=time.time, max_queue: int = MAX_QUEUE):
         super().__init__(logging.WARNING)
+        from collections import deque
         from anteroom.repositories.error_email import EmailStore
         from anteroom.services.error_email_delivery import EmailDelivery
         from anteroom.database import engine
@@ -252,7 +255,10 @@ class AlertHandler(logging.Handler):
                                       daily_limit=int(os.environ.get('ANTEROOM_ERROR_EMAIL_DAILY_LIMIT', '0'))
                                       if daily_limit is None else daily_limit,
                                       enable_lifecycle=os.environ.get('ANTEROOM_ERROR_EMAIL_LIFECYCLE') == '1')
-        self.pending: queue.Queue = queue.Queue(maxsize=500)
+        self.max_queue = max(1, int(max_queue))
+        self._cond = threading.Condition()
+        self._errors: deque[dict[str, Any]] = deque()
+        self._warnings: deque[dict[str, Any]] = deque()
         self.dropped = 0
         self.stopping = threading.Event()
         self.worker = threading.Thread(target=self._run, name="error-email", daemon=True)
@@ -267,28 +273,56 @@ class AlertHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
-            self.pending.put_nowait(build_report(record))
-        except queue.Full:
-            self.dropped += 1
+            report = build_report(record)
+            with self._cond:
+                total = len(self._errors) + len(self._warnings)
+                if report["severity"] == "WARNING":
+                    if total >= self.max_queue:
+                        self.dropped += 1
+                        return
+                    self._warnings.append(report)
+                else:
+                    if total >= self.max_queue:
+                        if self._warnings:
+                            # Prefer real errors over a burst of 4xx warnings.
+                            self._warnings.popleft()
+                            self.dropped += 1
+                        else:
+                            self.dropped += 1
+                            return
+                    self._errors.append(report)
+                self._cond.notify()
         except Exception:
             self.dropped += 1
 
+    def _take_batch(self, timeout: float) -> list[dict[str, Any]]:
+        with self._cond:
+            if not self._errors and not self._warnings and not self.stopping.is_set():
+                self._cond.wait(timeout=timeout)
+            batch: list[dict[str, Any]] = []
+            while self._errors and len(batch) < self.MAX_BATCH:
+                batch.append(self._errors.popleft())
+            while self._warnings and len(batch) < self.MAX_BATCH:
+                batch.append(self._warnings.popleft())
+            return batch
+
+    def _has_queued(self) -> bool:
+        with self._cond:
+            return bool(self._errors or self._warnings)
+
     def _run(self) -> None:
-        report = None
-        while not (self.stopping.is_set() and self.pending.empty()):
+        batch: list[dict[str, Any]] = []
+        while not (self.stopping.is_set() and not batch and not self._has_queued()):
             try:
-                if report is None:
-                    try:
-                        report = self.pending.get(timeout=30)
-                    except queue.Empty:
-                        pass
-                if report is not None:
-                    self.delivery.add(report)
-                    report = None
+                if not batch:
+                    batch = self._take_batch(timeout=30)
+                if batch:
+                    self.delivery.add_many(batch)
+                    batch = []
                 if not self.stopping.is_set():
                     self.delivery.tick()
             except Exception as exc:
-                # Retain the current report and retry storage without reporting
+                # Retain the current batch and retry storage without reporting
                 # the reporter or killing its thread during a database outage.
                 print(f'error-email: storage unavailable ({type(exc).__name__})', file=sys.stderr)
                 if self.stopping.is_set():
@@ -297,10 +331,8 @@ class AlertHandler(logging.Handler):
 
     def close(self) -> None:
         self.stopping.set()
-        try:
-            self.pending.put_nowait(None)
-        except queue.Full:
-            pass
+        with self._cond:
+            self._cond.notify_all()
         self.worker.join(timeout=15)
         # Never bypass the durable budget by flushing mail at shutdown.
         super().close()

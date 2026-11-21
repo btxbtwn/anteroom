@@ -13,12 +13,13 @@ ERROR_DIGEST_INTERVAL = 3600
 WARNING_DIGEST_INTERVAL = 86400
 HOURLY_CAP = 60
 MAX_GROUPS_PER_EMAIL = 20
+MAX_PENDING_GROUPS = 500
 
 
 def _postgres_safe(value: Any) -> Any:
     """Postgres text and JSONB reject NUL characters."""
     if isinstance(value, str):
-        return value.replace('\x00', '�')
+        return value.replace('\x00', '\ufffd')
     if isinstance(value, dict):
         return {_postgres_safe(key): _postgres_safe(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
@@ -54,10 +55,20 @@ def _warning_deadline(state, active):
 
 
 class EmailDelivery:
-    def __init__(self, store, send, *, daily_limit: int, clock=time.time, enable_lifecycle: bool = True):
+    def __init__(
+        self,
+        store,
+        send,
+        *,
+        daily_limit: int,
+        clock=time.time,
+        enable_lifecycle: bool = True,
+        max_pending_groups: int = MAX_PENDING_GROUPS,
+    ):
         self.store, self.send, self.clock = store, send, clock
         self.daily_limit = max(0, daily_limit)
         self.enable_lifecycle = enable_lifecycle
+        self.max_pending_groups = max(1, int(max_pending_groups))
 
     def _lifecycle_active(self, transaction):
         # The first opted-in sender activates the policy for every upgraded
@@ -68,51 +79,72 @@ class EmailDelivery:
         return transaction.state.get(LIFECYCLE_ACTIVE, False)
 
     def add(self, report):
-        report = _postgres_safe(report)
+        self.add_many([report])
+
+    def add_many(self, reports):
+        items = [_postgres_safe(report) for report in reports if report is not None]
+        if not items:
+            return
         with self.store.transaction() as transaction:
             state = transaction.state
             active = self._lifecycle_active(transaction)
             now = self.clock()
-            fingerprint = report['severity'] + ':' + report['fingerprint']
-            issue = transaction.get_issue(fingerprint)
-            group, last = (issue.payload, issue.last_sent) if issue else (None, None)
-            occurred = datetime.fromisoformat(report['occurred_at']).timestamp()
-            release = report_release(report)
-            warning = report['severity'] == 'WARNING'
-            updates = dict(occurrence_count=max(issue.occurrence_count if issue else 0, group['count'] if group else 0) + 1,
-                           first_seen=min(issue.first_seen, occurred) if issue and issue.first_seen is not None else occurred,
-                           last_seen=max(issue.last_seen, occurred) if issue and issue.last_seen is not None else occurred,
-                           headline=report['title'], last_release=release) if active else {}
-            regression = active and issue and issue.status == 'resolved' and _is_newer_release(release, issue.resolved_release)
-            expired = (active and issue and issue.status == 'muted'
-                       and issue.muted_until is not None and now >= issue.muted_until)
-            if issue and issue.status != 'open' and not (regression or expired):
-                transaction.record_issue(fingerprint, **updates)
-                return
-            if regression or expired:
-                updates.update(status='open', resolved_at=None, muted_until=None)
-            if group:
-                group['count'] += 1
-                group['report'] = report
-            else:
-                if warning:
-                    deadline = _warning_deadline(state, active)
-                    if deadline is None:
-                        gate = 'warning_digest_after' if active else 'digest_after'
-                        interval = WARNING_DIGEST_INTERVAL if active else 3600
-                        deadline = state[gate] = now + interval
-                    due = max(now, deadline)
+            pending_count: int | None = None
+            for report in items:
+                fingerprint = report['severity'] + ':' + report['fingerprint']
+                issue = transaction.get_issue(fingerprint)
+                group, last = (issue.payload, issue.last_sent) if issue else (None, None)
+                occurred = datetime.fromisoformat(report['occurred_at']).timestamp()
+                release = report_release(report)
+                warning = report['severity'] == 'WARNING'
+                updates = dict(occurrence_count=max(issue.occurrence_count if issue else 0, group['count'] if group else 0) + 1,
+                               first_seen=min(issue.first_seen, occurred) if issue and issue.first_seen is not None else occurred,
+                               last_seen=max(issue.last_seen, occurred) if issue and issue.last_seen is not None else occurred,
+                               headline=report['title'], last_release=release) if active else {}
+                regression = active and issue and issue.status == 'resolved' and _is_newer_release(release, issue.resolved_release)
+                expired = (active and issue and issue.status == 'muted'
+                           and issue.muted_until is not None and now >= issue.muted_until)
+                if issue and issue.status != 'open' and not (regression or expired):
+                    transaction.record_issue(fingerprint, **updates)
+                    continue
+                if regression or expired:
+                    updates.update(status='open', resolved_at=None, muted_until=None)
+                if group:
+                    group['count'] += 1
+                    group['report'] = report
                 else:
-                    due = max(now, last + ERROR_DIGEST_INTERVAL) if last is not None else now
-                group = {'report': report, 'count': 1, 'first': report['occurred_at'], 'due': due}
-            if not warning and (regression or expired):
-                # An older SMTP reservation may still be completing.
-                group['priority_token'] = uuid.uuid4().hex
-                group['due'], last = now, None
-                if regression:
-                    group['regressed_from'] = issue.resolved_release
-                    group['regression_report'] = report
-            transaction.put_group(fingerprint, group, last, **updates)
+                    if pending_count is None:
+                        pending_count = int(transaction.pending_group_count())
+                    if pending_count >= self.max_pending_groups:
+                        reserved = state.get('lease_keys') if state.get('lease_until', 0) > now else None
+                        evicted = 0 if warning else int(transaction.evict_oldest_warning(exclude=reserved))
+                        if evicted > 0:
+                            state['overflow_dropped'] = int(state.get('overflow_dropped', 0) or 0) + evicted
+                            pending_count -= 1
+                        else:
+                            state['overflow_dropped'] = int(state.get('overflow_dropped', 0) or 0) + 1
+                            if active and issue is not None:
+                                transaction.record_issue(fingerprint, **updates)
+                            continue
+                    if warning:
+                        deadline = _warning_deadline(state, active)
+                        if deadline is None:
+                            gate = 'warning_digest_after' if active else 'digest_after'
+                            interval = WARNING_DIGEST_INTERVAL if active else 3600
+                            deadline = state[gate] = now + interval
+                        due = max(now, deadline)
+                    else:
+                        due = max(now, last + ERROR_DIGEST_INTERVAL) if last is not None else now
+                    group = {'report': report, 'count': 1, 'first': report['occurred_at'], 'due': due}
+                    pending_count += 1
+                if not warning and (regression or expired):
+                    # An older SMTP reservation may still be completing.
+                    group['priority_token'] = uuid.uuid4().hex
+                    group['due'], last = now, None
+                    if regression:
+                        group['regressed_from'] = issue.resolved_release
+                        group['regression_report'] = report
+                transaction.put_group(fingerprint, group, last, **updates)
 
     def tick(self):
         if not self.daily_limit:
@@ -157,6 +189,8 @@ class EmailDelivery:
             token = uuid.uuid4().hex
             state['lease'] = token
             state['lease_until'] = now + 120
+            state['lease_keys'] = list(selected)
+            overflow = int(state.get('overflow_dropped', 0) or 0)
         count = sum(group['count'] for group in selected.values())
         sections = []
         for group in selected.values():
@@ -171,7 +205,13 @@ class EmailDelivery:
         subject = sections[0][0] if len(selected) == 1 and errors else f'[Anteroom hosted] {"Errors" if errors else "Warnings"}: {count} occurrences'
         if any(group.get('regressed_from') for group in selected.values()):
             subject = '[Regression] ' + subject
-        body = f'{count} occurrences in {len(selected)} groups\n\n' + '\n\n'.join(body for _, body in sections)
+        header = f'{count} occurrences in {len(selected)} groups\n\n'
+        if overflow > 0:
+            header += (
+                f'Note: {overflow} additional alerts were omitted while the outbox '
+                f'was at its {self.max_pending_groups}-group limit.\n\n'
+            )
+        body = header + '\n\n'.join(body for _, body in sections)
         failure = None
         try:
             self.send(subject, body)
@@ -190,6 +230,7 @@ class EmailDelivery:
             if state.get('lease') != token:
                 return
             state['lease_until'] = 0
+            state.pop('lease_keys', None)
             if failure:
                 state['failure'], state['last_error'], delay = failure
                 state['paused_until'] = self.clock() + delay
@@ -199,9 +240,17 @@ class EmailDelivery:
                 state['paused_until'] = 0
                 state['last_error'] = None
                 state['failure'] = None
+                if overflow > 0:
+                    remaining_overflow = max(0, int(state.get('overflow_dropped', 0) or 0) - overflow)
+                    if remaining_overflow:
+                        state['overflow_dropped'] = remaining_overflow
+                    else:
+                        state.pop('overflow_dropped', None)
                 for key, sent in selected.items():
                     current, last = transaction.get_group(key)
-                    remaining = current['count'] - sent['count']
+                    if current is None:
+                        continue
+                    remaining = max(0, current['count'] - sent['count'])
                     superseded = current.get('priority_token') != sent.get('priority_token')
                     if remaining:
                         current['count'] = remaining
@@ -237,5 +286,6 @@ class EmailDelivery:
             status, resume = 'budget_exhausted', hour[0] + 3600
         return {'state': status, 'daily_limit': self.daily_limit, 'used': len(attempts),
                 'pending': pending,
+                'overflow_dropped': int(state.get('overflow_dropped', 0) or 0),
                 'resume_at': resume, 'last_error': state.get('last_error'),
                 'last_success_at': state.get('last_success_at')}
