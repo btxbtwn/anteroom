@@ -147,6 +147,153 @@ describe("Reading measurements from photos", () => {
     );
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+
+  it("retries hosted upload-slot 429 and 503 busy responses after Retry-After", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi.fn()
+        .mockResolvedValueOnce(new Response(
+          JSON.stringify({ detail: "Another of your messages is still uploading. Try again when it finishes." }),
+          { status: 429, headers: { "Retry-After": "2" } },
+        ))
+        .mockResolvedValueOnce(new Response(
+          JSON.stringify({ detail: "Image uploads are busy right now. Try again in a moment." }),
+          { status: 503, headers: { "Retry-After": "3" } },
+        ))
+        .mockResolvedValueOnce(new Response(JSON.stringify(result)));
+      vi.stubGlobal("fetch", fetch);
+      const pending = api.measurements.read([photo()], "top");
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(2999);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(pending).resolves.toEqual(result);
+      expect(fetch).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives up after 6 upload-slot busy retries and surfaces the server detail", async () => {
+    const busy = () => new Response(
+      JSON.stringify({ detail: "Another of your messages is still uploading. Try again when it finishes." }),
+      { status: 429, headers: { "Retry-After": "0" } },
+    );
+    const fetch = vi.fn().mockImplementation(async () => busy());
+    vi.stubGlobal("fetch", fetch);
+    await expect(api.measurements.read([photo()], "top")).rejects.toThrow("Another of your messages is still uploading.");
+    expect(fetch).toHaveBeenCalledTimes(7);
+  });
+
+  it("fails fast on a rate-limit 429 instead of treating it as an upload-slot wait", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ detail: "Too many requests in a short time. Try again in a moment." }),
+      { status: 429, headers: { "Retry-After": "30" } },
+    ));
+    vi.stubGlobal("fetch", fetch);
+    await expect(api.measurements.read([photo()], "top")).rejects.toThrow("Too many requests in a short time.");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops waiting and does not retry when aborted during Retry-After", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ detail: "Another of your messages is still uploading. Try again when it finishes." }),
+        { status: 429, headers: { "Retry-After": "5" } },
+      ));
+      vi.stubGlobal("fetch", fetch);
+      const controller = new AbortController();
+      const pending = api.sizeTags.read([photo()], controller.signal);
+      const rejection = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      controller.abort();
+      await rejection;
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("paces hosted uploads one at a time while letting model reads run concurrently and skipping aborted waiters", async () => {
+    const requests: FakeUploadXhr[] = [];
+    class FakeUploadXhr {
+      status = 0;
+      statusText = "";
+      responseText = "";
+      readyState = 0;
+      aborted = false;
+      sentBody: FormData | null = null;
+      private uploadLoadend: (() => void) | null = null;
+      upload = {
+        addEventListener: (event: string, cb: () => void) => {
+          if (event === "loadend") this.uploadLoadend = cb;
+        },
+      };
+      onreadystatechange: (() => void) | null = null;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      ontimeout: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      constructor() { requests.push(this); }
+      open() {}
+      setRequestHeader() {}
+      getAllResponseHeaders() { return "Content-Type: application/json\r\n"; }
+      send(body: FormData) { this.sentBody = body; }
+      finishUpload() { this.uploadLoadend?.(); }
+      respond(status: number, body: unknown) {
+        this.status = status;
+        this.responseText = JSON.stringify(body);
+        this.readyState = 4;
+        this.onreadystatechange?.();
+        this.onload?.();
+      }
+      abort() { this.aborted = true; this.onabort?.(); }
+    }
+
+    vi.stubGlobal("XMLHttpRequest", FakeUploadXhr);
+    const uninstall = installHostedApiSession({
+      seller: "seller-1",
+      origin: "https://anteroom.example",
+      accessToken: async () => "token",
+      unauthorized: vi.fn(),
+    });
+    try {
+      const c2 = new AbortController();
+      const r1 = api.measurements.read([new File(["1"], "1.jpg")], "top");
+      const r2 = api.measurements.read([new File(["2"], "2.jpg")], "top", c2.signal);
+      const r3 = api.measurements.read([new File(["3"], "3.jpg")], "top");
+
+      // Only item 1 starts uploading; items 2 and 3 wait for item 1's upload body to finish.
+      await vi.waitFor(() => expect(requests).toHaveLength(1));
+      expect((requests[0]!.sentBody!.get("files") as File).name).toBe("1.jpg");
+
+      // Aborting queued item 2 cancels it without ever starting its XHR.
+      c2.abort();
+      await expect(r2).rejects.toMatchObject({ name: "AbortError" });
+      expect(requests).toHaveLength(1);
+
+      // As soon as item 1's upload finishes (while its model read response is still pending),
+      // item 3 immediately begins uploading and runs its model read concurrently with item 1.
+      requests[0]!.finishUpload();
+      await vi.waitFor(() => expect(requests).toHaveLength(2));
+      expect((requests[1]!.sentBody!.get("files") as File).name).toBe("3.jpg");
+      requests[1]!.finishUpload();
+
+      // Both item 1 and item 3 have their model reads in flight at the same time; resolve out of order.
+      requests[1]!.respond(200, { photos_read: 1, measurements: { length: { status: "accepted", value: 28, reads: [28, 28] } } });
+      requests[0]!.respond(200, { photos_read: 1, measurements: { length: { status: "accepted", value: 27, reads: [27, 27] } } });
+      await expect(r3).resolves.toMatchObject({ photos_read: 1, measurements: { length: { value: 28 } } });
+      await expect(r1).resolves.toMatchObject({ photos_read: 1, measurements: { length: { value: 27 } } });
+    } finally {
+      uninstall();
+    }
+  });
 });
 
 describe("Reading size tags from photos", () => {

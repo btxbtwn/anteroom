@@ -2,7 +2,7 @@ import { listingScreenRead } from "./listingScreen";
 import { reportError } from "./errorReports";
 import type { VendooDraft } from "./vendooDraft";
 import type { OfferLogResponse } from "./contract.gen";
-import { ApiRequestError, retryAfterMs, studioFetch, hasHostedApiSession } from "./transport";
+import { ApiRequestError, retryAfterMs, studioFetch, studioUpload, hasHostedApiSession } from "./transport";
 import { trackPhotoUpload } from "../photoUploads";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
 import type { CopyPreview, CopyListingRequest, BatchCopyPreviewRow } from "./listingCopy";
@@ -298,25 +298,129 @@ async function followAssistant(
   return { error };
 }
 
+const MAX_UPLOAD_BUSY_RETRIES = 6;
+const DEFAULT_UPLOAD_RETRY_MS = 5000;
+const MAX_UPLOAD_RETRY_MS = 15000;
+
+type UploadGateWaiter = {
+  signal?: AbortSignal;
+  admit: () => void;
+  cleanup: () => void;
+};
+
+let hostedUploadInFlight = false;
+const hostedUploadWaiters: UploadGateWaiter[] = [];
+
+function releaseHostedUploadGate(): void {
+  while (hostedUploadWaiters.length > 0) {
+    const next = hostedUploadWaiters.shift()!;
+    next.cleanup();
+    if (next.signal?.aborted) continue;
+    next.admit();
+    return;
+  }
+  hostedUploadInFlight = false;
+}
+
+/**
+ * Pace only the upload-body transmission phase on hosted sessions (where
+ * `UploadSlots` admits one upload at a time per seller and releases it before
+ * slow vision inference). Once the body finishes transmitting, the slot is
+ * released immediately so the next item uploads while this item's model read
+ * runs concurrently.
+ */
+function acquireHostedUploadGate(signal?: AbortSignal): Promise<() => void> {
+  if (signal?.aborted) {
+    return Promise.reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+  }
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    releaseHostedUploadGate();
+  };
+  if (!hostedUploadInFlight) {
+    hostedUploadInFlight = true;
+    return Promise.resolve(release);
+  }
+  return new Promise<() => void>((resolve, reject) => {
+    const onAbort = () => {
+      const index = hostedUploadWaiters.indexOf(waiter);
+      if (index !== -1) hostedUploadWaiters.splice(index, 1);
+      reject(signal!.reason ?? new DOMException("Aborted", "AbortError"));
+    };
+    const cleanup = () => signal?.removeEventListener("abort", onAbort);
+    const waiter: UploadGateWaiter = {
+      signal,
+      admit: () => resolve(release),
+      cleanup,
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    hostedUploadWaiters.push(waiter);
+  });
+}
+
+/**
+ * Only retry hosted `UploadSlots` contention (per-seller 429 "still uploading" or
+ * global 503 "uploads are busy" with `Retry-After`), never rate-limiter 429s or
+ * unexplained proxy 503s (which use the single restart retry below).
+ */
+function isUploadSlotBusy(status: number, detail: string, retryAfter: number | null): boolean {
+  if (status === 429) return /\bstill uploading\b/i.test(detail);
+  if (status === 503) return retryAfter !== null && /\buploads are busy\b/i.test(detail);
+  return false;
+}
+
 /**
  * Post photos not saved yet for a model to read. A read can take minutes, so a
- * deploy or restart can cut it off; that is tried once more. An error the server
- * explains (a model that failed) is not.
+ * deploy or restart can cut it off; that is tried once more. On hosted sessions,
+ * uploads are paced one body at a time while model reads overlap concurrently,
+ * and upload-slot busy responses wait `Retry-After` and retry a few times. Other
+ * errors the server explains (a model that failed, or a rate limit) fail fast.
  */
-async function readPhotos<T>(path: string, form: FormData, button: string): Promise<T> {
-  for (let attempt = 1; ; attempt++) {
+async function readPhotos<T>(path: string, form: FormData, button: string, signal?: AbortSignal): Promise<T> {
+  let restartAttempts = 0;
+  let busyAttempts = 0;
+  for (;;) {
+    if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
     let response: Response;
     try {
-      response = await studioFetch(`${BASE}${path}`, { method: "POST", body: form });
+      if (hasHostedApiSession()) {
+        const releaseUpload = await acquireHostedUploadGate(signal);
+        try {
+          response = await studioUpload(`${BASE}${path}`, form, { signal, onUploadComplete: releaseUpload });
+        } finally {
+          releaseUpload();
+        }
+      } else {
+        response = await studioFetch(`${BASE}${path}`, { method: "POST", body: form, signal });
+      }
     } catch (error) {
-      if (error instanceof TypeError && attempt === 1) continue;
+      if (signal?.aborted) throw error;
+      if (error instanceof TypeError && restartAttempts === 0) {
+        restartAttempts += 1;
+        continue;
+      }
       throw error;
     }
     const data = await response.json().catch(() => null);
     if (response.ok) return data as T;
-    const explained = typeof data?.detail === "string" && data.detail.trim();
-    if (!explained && response.status >= 500) {
-      if (attempt === 1) continue;
+    const detail = typeof data?.detail === "string" ? data.detail.trim() : "";
+    const retryAfter = retryAfterMs(response.headers.get("Retry-After"));
+    if (isUploadSlotBusy(response.status, detail, retryAfter)) {
+      if (busyAttempts < MAX_UPLOAD_BUSY_RETRIES) {
+        busyAttempts += 1;
+        const waitMs = Math.min(MAX_UPLOAD_RETRY_MS, retryAfter ?? DEFAULT_UPLOAD_RETRY_MS);
+        await sleepAbortable(waitMs, signal);
+        continue;
+      }
+      throw new Error(errorMessage(data, `Reading failed: ${response.status}`));
+    }
+    if (!detail && response.status >= 500) {
+      if (restartAttempts === 0) {
+        restartAttempts += 1;
+        continue;
+      }
       throw new Error(`The server restarted while reading. Press ${button} again.`);
     }
     throw new Error(errorMessage(data, `Reading failed: ${response.status}`));
@@ -496,11 +600,11 @@ export const api = {
   },
   measurements: {
     /** Suggest measurements from an item's yardstick photos. Nothing is saved. */
-    read: (files: File[], garment: string): Promise<MeasurementReadResult> => {
+    read: (files: File[], garment: string, signal?: AbortSignal): Promise<MeasurementReadResult> => {
       const form = new FormData();
       files.forEach((file) => form.append("files", file));
       form.append("garment", garment);
-      return readPhotos<MeasurementReadResult>("/measurements/read", form, "Read measurements");
+      return readPhotos<MeasurementReadResult>("/measurements/read", form, "Read measurements", signal);
     },
     /** The same, from a saved listing's photos. */
     readSaved: (convId: string, garment: string) =>
@@ -511,10 +615,10 @@ export const api = {
   },
   sizeTags: {
     /** Suggest an item's clothing size from the size tag in its photos. Nothing is saved. */
-    read: (files: File[]): Promise<SizeTagReadResult> => {
+    read: (files: File[], signal?: AbortSignal): Promise<SizeTagReadResult> => {
       const form = new FormData();
       files.forEach((file) => form.append("files", file));
-      return readPhotos<SizeTagReadResult>("/size-tags/read", form, "Read size tags");
+      return readPhotos<SizeTagReadResult>("/size-tags/read", form, "Read size tags", signal);
     },
     /** The same, from a saved listing's photos. */
     readSaved: (convId: string) =>

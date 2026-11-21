@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { installHostedApiSession, studioBlob, studioFetch } from "./transport";
+import { installHostedApiSession, studioBlob, studioFetch, studioUpload } from "./transport";
 const ORIGIN = "https://anteroom.example";
 let dispose: (() => void) | undefined;
 afterEach(() => { dispose?.(); dispose = undefined; vi.unstubAllGlobals(); });
@@ -59,6 +59,77 @@ describe("shared desktop and cloud API transport", () => {
     dispose();
     finish(new Blob(["alice inventory"]));
     await expect(pending).rejects.toThrow("account changed");
+  });
+
+  it("notifies onUploadComplete before the response finishes and enforces hosted auth/abort on studioUpload", async () => {
+    const instances: FakeXhr[] = [];
+    class FakeXhr {
+      method = "";
+      url = "";
+      withCredentials = true;
+      headers: Record<string, string> = {};
+      status = 0;
+      statusText = "";
+      responseText = "";
+      readyState = 0;
+      aborted = false;
+      private uploadLoadend: (() => void) | null = null;
+      upload = {
+        addEventListener: (event: string, cb: () => void) => {
+          if (event === "loadend") this.uploadLoadend = cb;
+        },
+      };
+      onreadystatechange: (() => void) | null = null;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      ontimeout: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      constructor() { instances.push(this); }
+      open(method: string, url: string) { this.method = method; this.url = url; }
+      setRequestHeader(k: string, v: string) { this.headers[k] = v; }
+      getAllResponseHeaders() { return "Content-Type: application/json\r\nRetry-After: 5\r\n"; }
+      send() {}
+      finishUpload() { this.uploadLoadend?.(); }
+      respond(status: number, body: string) {
+        this.status = status;
+        this.responseText = body;
+        this.readyState = 4;
+        this.onreadystatechange?.();
+        this.onload?.();
+      }
+      abort() { this.aborted = true; this.onabort?.(); }
+    }
+    vi.stubGlobal("XMLHttpRequest", FakeXhr);
+    const unauthorized = vi.fn();
+    dispose = installHostedApiSession({ seller: "seller", origin: ORIGIN, accessToken: async () => "tok", unauthorized });
+
+    const onUploadComplete = vi.fn();
+    const form = new FormData();
+    const pending = studioUpload("/api/measurements/read", form, { onUploadComplete });
+    await vi.waitFor(() => expect(instances).toHaveLength(1));
+    expect(instances[0]!.url).toBe(`${ORIGIN}/api/measurements/read`);
+    expect(instances[0]!.withCredentials).toBe(false);
+    expect(instances[0]!.headers.Authorization).toBe("Bearer tok");
+    expect(onUploadComplete).not.toHaveBeenCalled();
+
+    instances[0]!.finishUpload();
+    expect(onUploadComplete).toHaveBeenCalledOnce();
+
+    instances[0]!.respond(401, JSON.stringify({ detail: "expired" }));
+    const res = await pending;
+    expect(res.status).toBe(401);
+    expect(res.headers.get("Retry-After")).toBe("5");
+    expect(unauthorized).toHaveBeenCalledOnce();
+    expect(onUploadComplete).toHaveBeenCalledOnce();
+
+    const controller = new AbortController();
+    const onAbortedUpload = vi.fn();
+    const aborted = studioUpload("/api/size-tags/read", form, { signal: controller.signal, onUploadComplete: onAbortedUpload });
+    await vi.waitFor(() => expect(instances).toHaveLength(2));
+    controller.abort();
+    await expect(aborted).rejects.toMatchObject({ name: "AbortError" });
+    expect(instances[1]!.aborted).toBe(true);
+    expect(onAbortedUpload).toHaveBeenCalledOnce();
   });
 });
 

@@ -49,12 +49,18 @@ export function applyReading(
 }
 
 /**
- * Run `work` over every item at once. Each reading is minutes of photo-model calls,
- * so reading two at a time kept a box of items waiting most of half an hour; the
- * server limits the memory-heavy photo search itself.
+ * Run `work` over every item concurrently so model reads overlap instead of
+ * waiting in waves. Hosted upload-body pacing happens in `client.ts` only for
+ * the upload phase, because the server releases its upload slot before model
+ * inference starts.
  */
-export async function readEach<T>(items: T[], work: (item: T) => Promise<void>): Promise<void> {
-  await Promise.all(items.map(work));
+export async function readEach<T>(
+  items: T[],
+  work: (item: T) => Promise<void>,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!items.length || signal?.aborted) return;
+  await Promise.all(items.map((item) => (signal?.aborted ? Promise.resolve() : work(item))));
 }
 
 /**

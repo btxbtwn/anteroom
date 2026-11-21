@@ -263,3 +263,136 @@ it("never shows the provider or model in reading notes", async () => {
     await act(async () => root.unmount());
   }
 });
+
+it("paces hosted uploads without limiting concurrent model reads, cancels queued reads on photo removal, and aborts on unmount", async () => {
+  const { installHostedApiSession } = await import("../api/transport");
+  const requests: FakeDialogXhr[] = [];
+  class FakeDialogXhr {
+    url = "";
+    status = 0;
+    statusText = "";
+    responseText = "";
+    readyState = 0;
+    aborted = false;
+    sentFiles: string[] = [];
+    private uploadLoadend: (() => void) | null = null;
+    upload = {
+      addEventListener: (event: string, cb: () => void) => {
+        if (event === "loadend") this.uploadLoadend = cb;
+      },
+    };
+    onreadystatechange: (() => void) | null = null;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    ontimeout: (() => void) | null = null;
+    onabort: (() => void) | null = null;
+    constructor() { requests.push(this); }
+    open(_method: string, url: string) { this.url = url; }
+    setRequestHeader() {}
+    getAllResponseHeaders() { return "Content-Type: application/json\r\n"; }
+    send(body: FormData) {
+      this.sentFiles = body.getAll("files").map((entry) => (entry as File).name);
+    }
+    finishUpload() { this.uploadLoadend?.(); }
+    respond(status: number, body: unknown) {
+      this.status = status;
+      this.responseText = JSON.stringify(body);
+      this.readyState = 4;
+      this.onreadystatechange?.();
+      this.onload?.();
+    }
+    abort() { this.aborted = true; this.onabort?.(); }
+  }
+
+  vi.stubGlobal("XMLHttpRequest", FakeDialogXhr);
+  const uninstall = installHostedApiSession({
+    seller: "seller-1",
+    origin: "https://anteroom.example",
+    accessToken: async () => "token",
+    unauthorized: vi.fn(),
+  });
+  const threeGroups = ["Item 1", "Item 2", "Item 3"].map((folder) => ({
+    folder,
+    files: [
+      new File(["a"], `${folder}-1.jpg`, { type: "image/jpeg" }),
+      new File(["b"], `${folder}-2.jpg`, { type: "image/jpeg" }),
+    ],
+  }));
+  const hostedRuntime = { ...desktopRuntime, hosted: true };
+  vi.spyOn(api.boxes, "list").mockResolvedValue({ boxes: [] } as never);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(
+      <WorkspaceRuntimeProvider value={hostedRuntime}>
+        <QueryClientProvider client={client}>
+          <BulkUploadDialog groups={threeGroups} onCancel={vi.fn()} onConfirm={vi.fn()} />
+        </QueryClientProvider>
+      </WorkspaceRuntimeProvider>,
+    ));
+    const size = (title: string) => document.querySelector<HTMLInputElement>(`[aria-label="Size for ${title}"]`)!;
+    const button = (name: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === name)!;
+
+    // Start a hosted size-tag batch of 3 items: only Item 1 starts uploading initially.
+    await act(async () => button("Read size tags").click());
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]!.sentFiles).toEqual(["Item 1-1.jpg", "Item 1-2.jpg"]);
+
+    // While Item 3 is still queued waiting to upload, remove photo 2 from Item 3.
+    const removeButtons = document.querySelectorAll<HTMLButtonElement>('[aria-label="Remove photo 2"]');
+    expect(removeButtons).toHaveLength(3);
+    await act(async () => removeButtons[2]!.click());
+    expect(document.getElementById(size("Item 3").getAttribute("aria-describedby")!)!.textContent)
+      .toBe("A photo was removed while reading. Read size tags again or type the size.");
+
+    // Item 1 finishes uploading while its model read is still pending: Item 2 immediately starts uploading
+    // so both model reads run concurrently, and cancelled Item 3 never uploads its old photos.
+    await act(async () => { requests[0]!.finishUpload(); });
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[1]!.sentFiles).toEqual(["Item 2-1.jpg", "Item 2-2.jpg"]);
+    await act(async () => { requests[1]!.finishUpload(); });
+    expect(requests).toHaveLength(2);
+
+    // Resolve both concurrent model reads; batch completes and Item 3 keeps its photo-removed note.
+    await act(async () => {
+      requests[0]!.respond(200, { photos_read: 2, status: "accepted", size: "M", sizes: ["M"] });
+      requests[1]!.respond(200, { photos_read: 2, status: "accepted", size: "L", sizes: ["L"] });
+    });
+    await settle(() => expect(size("Item 2").value).toBe("L"));
+    expect(size("Item 1").value).toBe("M");
+    expect(size("Item 3").value).toBe("");
+    expect(document.getElementById(size("Item 3").getAttribute("aria-describedby")!)!.textContent)
+      .toBe("A photo was removed while reading. Read size tags again or type the size.");
+    expect(button("Read size tags").disabled).toBe(false);
+    expect(button("Create drafts only").disabled).toBe(false);
+
+    // Now start hosted measurement reads across all 3 items, remove photo 2 from queued Item 2,
+    // verify Item 1 & Item 3 overlap model reads while Item 2 never uploads, then unmount mid-read.
+    requests.length = 0;
+    await act(async () => button("Read measurements").click());
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]!.sentFiles).toEqual(["Item 1-1.jpg", "Item 1-2.jpg"]);
+
+    // Item 3 only has 1 photo left, so Remove photo 2 buttons belong to Item 1 (index 0) and Item 2 (index 1).
+    const measureRemoves = document.querySelectorAll<HTMLButtonElement>('[aria-label="Remove photo 2"]');
+    expect(measureRemoves).toHaveLength(2);
+    await act(async () => measureRemoves[1]!.click());
+    expect(document.body.textContent).toContain("A photo was removed while reading. Read measurements again or measure by hand.");
+
+    await act(async () => { requests[0]!.finishUpload(); });
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[1]!.sentFiles).toEqual(["Item 3-1.jpg"]);
+    await act(async () => { requests[1]!.finishUpload(); });
+    expect(requests).toHaveLength(2);
+
+    // Unmounting aborts both concurrent in-flight model reads.
+    await act(async () => root.unmount());
+    expect(requests[0]!.aborted).toBe(true);
+    expect(requests[1]!.aborted).toBe(true);
+  } finally {
+    uninstall();
+    vi.unstubAllGlobals();
+  }
+});

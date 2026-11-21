@@ -232,5 +232,86 @@ class ReadSavedMeasurementsRouteTest(unittest.TestCase):
         self.assertEqual(self.post(FakeProvider([]), "missing").status_code, 404)
 
 
+class LocateParsingTest(unittest.TestCase):
+    """Models occasionally quote numbers, prefix stick names, or return a single tile."""
+
+    def test_tolerates_quoted_numbers_prefixed_sticks_and_single_tiles(self):
+        import asyncio
+
+        from anteroom.services import measure_read
+
+        class VariedLocateProvider:
+            def __init__(self):
+                self.read_prompts: list[str] = []
+
+            async def vision_chat(self, messages):
+                if "Decide which photo" in messages[0]["content"]:
+                    yield json.dumps({
+                        "pit_to_pit": {"photo": "01", "stick": "Stick a", "tiles": ["02", 2, "3", 4]},
+                        "length": {"photo": " 1 ", "stick": " b ", "tiles": 3},
+                        "sleeve": {"photo": True, "stick": "A", "tiles": ["²", "bad", True, 0, 99]},
+                    })
+                else:
+                    texts = [part["text"] for part in messages[1]["content"] if part.get("type") == "text"]
+                    self.read_prompts.extend(texts)
+                    yield json.dumps({"pit_to_pit": 20.5, "length": 27.0})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            img = Path(tmp) / "tile.jpg"
+            img.write_bytes(_plain_photo())
+            img_path = str(img)
+            photos = [{
+                "number": 1,
+                "overview": img_path,
+                "sticks": [
+                    {"stick": "A", "strip": img_path, "tiles": [img_path, img_path, img_path, img_path]},
+                    {"stick": "B", "strip": img_path, "tiles": [img_path, img_path, img_path, img_path]},
+                ],
+            }]
+            provider = VariedLocateProvider()
+            result = asyncio.run(measure_read._read_once(provider, photos, "top", ["pit_to_pit", "length", "sleeve"]))
+
+        self.assertEqual(result, {"pit_to_pit": 20.5, "length": 27.0})
+        joined = "\n".join(provider.read_prompts)
+        # pit_to_pit picked [2, 3] (deduped and capped at 2) -> tiles with neighbours [1, 2, 3, 4]
+        self.assertIn("pit_to_pit: photo 1, stick A (whole stick, then tiles [1, 2, 3, 4]).", joined)
+        # length picked [3] from single int -> tiles with neighbours [2, 3, 4]
+        self.assertIn("length: photo 1, stick B (whole stick, then tiles [2, 3, 4]).", joined)
+        # sleeve had invalid/bool photo and tiles -> skipped cleanly
+        self.assertNotIn("sleeve:", joined)
+
+    def test_ignores_all_invalid_locate_entries_without_calling_read_step(self):
+        import asyncio
+
+        from anteroom.services import measure_read
+
+        class BadLocateProvider:
+            def __init__(self):
+                self.calls = 0
+
+            async def vision_chat(self, messages):
+                self.calls += 1
+                yield json.dumps({
+                    "pit_to_pit": {"photo": False, "stick": "A", "tiles": [1]},
+                    "length": {"photo": "1", "stick": 2, "tiles": ["1"]},
+                    "sleeve": {"photo": "1", "stick": "A", "tiles": [True, "²", "abc", 0]},
+                })
+
+        with tempfile.TemporaryDirectory() as tmp:
+            img = Path(tmp) / "tile.jpg"
+            img.write_bytes(_plain_photo())
+            img_path = str(img)
+            photos = [{
+                "number": 1,
+                "overview": img_path,
+                "sticks": [{"stick": "A", "strip": img_path, "tiles": [img_path, img_path]}],
+            }]
+            provider = BadLocateProvider()
+            result = asyncio.run(measure_read._read_once(provider, photos, "top", ["pit_to_pit", "length", "sleeve"]))
+
+        self.assertEqual(result, {})
+        self.assertEqual(provider.calls, 1)
+
+
 if __name__ == "__main__":
     unittest.main()

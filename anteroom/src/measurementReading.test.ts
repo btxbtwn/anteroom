@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MeasurementReadResult } from "./api/types";
-import { applyReading, readingSuggestion } from "./measurementReading";
+import { applyReading, readEach, readingSuggestion } from "./measurementReading";
 
 describe("applyReading", () => {
   it("fills blank fields with accepted readings and names the rest", () => {
@@ -58,5 +58,35 @@ describe("readingSuggestion", () => {
   it("passes the plain note through when nothing new was read", () => {
     const outcome = applyReading("top", {}, { photos_read: 0, measurements: {} });
     expect(readingSuggestion("top", outcome)).toBe("No yardstick photo found.");
+  });
+});
+
+describe("readEach", () => {
+  it("runs all items concurrently so model reads overlap", async () => {
+    let active = 0;
+    let peak = 0;
+    const seen: number[] = [];
+    const gates: Array<() => void> = [];
+    const pending = readEach([1, 2, 3, 4], async (item) => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise<void>((resolve) => { gates.push(resolve); });
+      seen.push(item);
+      active -= 1;
+    });
+    expect(peak).toBe(4);
+    gates.forEach((release) => release());
+    await pending;
+    expect(seen.sort((a, b) => a - b)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("does not start work when already aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const started: number[] = [];
+    await readEach([1, 2, 3], async (item) => {
+      started.push(item);
+    }, controller.signal);
+    expect(started).toEqual([]);
   });
 });

@@ -44,7 +44,7 @@ it.each([
     await act(async () => Array.from(dialog.querySelectorAll("button"))
       .find(button => button.textContent?.trim() === "Read measurements")!.click());
     expect(read).toHaveBeenCalledTimes(1);
-    expect(read).toHaveBeenCalledWith([file], expect.any(String));
+    expect(read).toHaveBeenCalledWith([file], expect.any(String), expect.any(AbortSignal));
     expect(dialog.textContent).toContain(message);
     expect(dialog.textContent).toContain("Your entered details are kept");
     expect(dialog.textContent).toContain("You can enter measurements manually or try reading again.");
