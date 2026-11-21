@@ -1,1 +1,0 @@
-- Keep Smart Pricing turned on or off as saved when you edit or clear the minimum price on an older Mercari draft.

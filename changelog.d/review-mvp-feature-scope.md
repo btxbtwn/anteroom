@@ -1,1 +1,0 @@
-- Crop and rotate photos or revert to the original from the photo viewer. The tone and background adjustment panels have been removed.

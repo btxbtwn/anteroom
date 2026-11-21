@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1097 — 2026-11-21
+
+- Keep Smart Pricing turned on or off as saved when you edit or clear the minimum price on an older Mercari draft.
+
+## 0.1.1096 — 2026-11-21
+
+- Crop and rotate photos or revert to the original from the photo viewer. The tone and background adjustment panels have been removed.
+
 ## 0.1.1095 — 2026-11-21
 
 - Offer activity now says how many offers went out on each marketplace and what the marketplace confirmed, instead of "Not available" for Poshmark and Depop.
