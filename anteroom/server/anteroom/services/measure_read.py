@@ -161,7 +161,10 @@ def _int_value(value: object) -> int | None:
     if isinstance(value, str):
         text = value.strip()
         if text.isascii() and text.isdigit():
-            return int(text)
+            try:
+                return int(text)
+            except ValueError:
+                return None
     return None
 
 

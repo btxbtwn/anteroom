@@ -31,7 +31,7 @@ async function executeStudioFetch(input: string, options: RequestInit, session: 
   if (url.origin !== session.origin || !url.pathname.startsWith("/api/")) {
     throw new Error("Anteroom API requests must stay on this app's origin.");
   }
-  const token = await session.accessToken();
+  const token = await raceAbort(session.accessToken(), options.signal ?? undefined);
   if (!token || hostedSession !== session) throw new Error("Sign in to continue.");
   const headers = new Headers(options.headers);
   headers.set("Authorization", `Bearer ${token}`);
@@ -48,9 +48,15 @@ export function studioFetch(input: string, options: RequestInit = {}): Promise<R
 
 export interface StudioUploadOptions {
   signal?: AbortSignal;
+  /** Pin the upload to the session captured when the request was queued. */
+  session?: HostedApiSession | null;
+  /** Abort a stalled upload body after this many ms without progress; cleared once body upload completes. */
+  uploadTimeoutMs?: number;
   /** Called once the request body finishes transmitting (or fails/aborts), before waiting on the response. */
   onUploadComplete?: () => void;
 }
+
+const DEFAULT_UPLOAD_PHASE_TIMEOUT_MS = 60_000;
 
 function parseXhrHeaders(raw: string): Headers {
   const headers = new Headers();
@@ -66,6 +72,28 @@ function abortError(signal: AbortSignal): unknown {
   return signal.reason ?? new DOMException("Aborted", "AbortError");
 }
 
+function raceAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) {
+    promise.catch(() => {});
+    return Promise.reject(abortError(signal));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortError(signal));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
 async function executeStudioUpload(
   input: string,
   body: FormData,
@@ -73,8 +101,11 @@ async function executeStudioUpload(
   session: HostedApiSession | null,
 ): Promise<Response> {
   const signal = options.signal;
+  const uploadTimeoutMs = options.uploadTimeoutMs ?? DEFAULT_UPLOAD_PHASE_TIMEOUT_MS;
   let uploadNotified = false;
+  let clearUploadTimer = () => {};
   const notifyUploadComplete = () => {
+    clearUploadTimer();
     if (uploadNotified) return;
     uploadNotified = true;
     options.onUploadComplete?.();
@@ -83,16 +114,16 @@ async function executeStudioUpload(
     notifyUploadComplete();
     throw abortError(signal);
   }
+  if (hostedSession !== session) {
+    notifyUploadComplete();
+    throw new Error("Your account changed. Open the request again.");
+  }
   if (!session || typeof XMLHttpRequest !== "function") {
     try {
       return await executeStudioFetch(input, { method: "POST", body, signal }, session);
     } finally {
       notifyUploadComplete();
     }
-  }
-  if (hostedSession !== session) {
-    notifyUploadComplete();
-    throw new Error("Your account changed. Open the request again.");
   }
   const url = new URL(input, session.origin);
   if (url.origin !== session.origin || !url.pathname.startsWith("/api/")) {
@@ -101,7 +132,7 @@ async function executeStudioUpload(
   }
   let token: string | null;
   try {
-    token = await session.accessToken();
+    token = await raceAbort(session.accessToken(), signal);
   } catch (error) {
     notifyUploadComplete();
     throw error;
@@ -117,16 +148,34 @@ async function executeStudioUpload(
   return new Promise<Response>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     let settled = false;
+    let uploadTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastUploadedBytes = 0;
+    clearUploadTimer = () => {
+      if (uploadTimer !== null) {
+        clearTimeout(uploadTimer);
+        uploadTimer = null;
+      }
+    };
     const finish = (cb: () => void) => {
       if (settled) return;
       settled = true;
+      clearUploadTimer();
       signal?.removeEventListener("abort", onAbort);
       notifyUploadComplete();
       cb();
     };
+    const armUploadTimer = () => {
+      if (uploadNotified || settled || uploadTimeoutMs <= 0 || !Number.isFinite(uploadTimeoutMs)) return;
+      clearUploadTimer();
+      uploadTimer = setTimeout(() => {
+        if (uploadNotified || settled) return;
+        finish(() => reject(new TypeError("Failed to fetch")));
+        xhr.abort();
+      }, uploadTimeoutMs);
+    };
     const onAbort = () => {
-      xhr.abort();
       finish(() => reject(abortError(signal!)));
+      xhr.abort();
     };
     if (signal) {
       if (signal.aborted) {
@@ -138,6 +187,13 @@ async function executeStudioUpload(
     xhr.open("POST", url.href, true);
     xhr.withCredentials = false;
     xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+    xhr.upload?.addEventListener?.("progress", (event) => {
+      const loaded = typeof (event as ProgressEvent)?.loaded === "number" ? (event as ProgressEvent).loaded : 0;
+      if (loaded > lastUploadedBytes) {
+        lastUploadedBytes = loaded;
+        armUploadTimer();
+      }
+    });
     xhr.upload?.addEventListener?.("loadend", notifyUploadComplete, { once: true });
     xhr.onreadystatechange = () => {
       // An early error response (e.g. 429 or 413) can arrive before upload loadend.
@@ -166,6 +222,7 @@ async function executeStudioUpload(
     xhr.onerror = () => finish(() => reject(new TypeError("Failed to fetch")));
     xhr.ontimeout = () => finish(() => reject(new TypeError("Failed to fetch")));
     xhr.onabort = () => finish(() => reject(signal?.aborted ? abortError(signal) : new DOMException("Aborted", "AbortError")));
+    armUploadTimer();
     try {
       xhr.send(body);
     } catch (error) {
@@ -180,7 +237,7 @@ async function executeStudioUpload(
  * so another item can start uploading while this request waits on inference.
  */
 export function studioUpload(input: string, body: FormData, options: StudioUploadOptions = {}): Promise<Response> {
-  const session = hostedSession;
+  const session = options.session !== undefined ? options.session : hostedSession;
   return scheduleRequest(input, { signal: options.signal }, () => executeStudioUpload(input, body, options, session));
 }
 

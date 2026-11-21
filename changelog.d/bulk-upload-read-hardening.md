@@ -1,0 +1,1 @@
+- Keep bulk photo uploads and measurement reads on the active account session, cancel stale reads cleanly when you reorder photos or close the dialog, and avoid stalling on slow upload connections.

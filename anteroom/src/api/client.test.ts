@@ -333,6 +333,152 @@ describe("Reading measurements from photos", () => {
       uninstall();
     }
   });
+
+  it("pins queued hosted uploads and retries to the submission session when accounts switch", async () => {
+    const sent: Array<{ auth: string | undefined; file: string }> = [];
+    const requests: FakeAuthXhr[] = [];
+    class FakeAuthXhr {
+      headers: Record<string, string> = {};
+      status = 0;
+      statusText = "";
+      responseText = "";
+      readyState = 0;
+      private uploadLoadend: (() => void) | null = null;
+      upload = {
+        addEventListener: (event: string, cb: () => void) => {
+          if (event === "loadend") this.uploadLoadend = cb;
+        },
+      };
+      onreadystatechange: (() => void) | null = null;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      ontimeout: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      constructor() { requests.push(this); }
+      open() {}
+      setRequestHeader(key: string, value: string) { this.headers[key] = value; }
+      getAllResponseHeaders() { return "Content-Type: application/json\r\nRetry-After: 0\r\n"; }
+      send(body: FormData) {
+        sent.push({ auth: this.headers.Authorization, file: (body.get("files") as File).name });
+      }
+      finishUpload() { this.uploadLoadend?.(); }
+      respond(status: number, body: unknown) {
+        this.status = status;
+        this.responseText = JSON.stringify(body);
+        this.readyState = 4;
+        this.onreadystatechange?.();
+        this.onload?.();
+      }
+      abort() { this.onabort?.(); }
+    }
+    vi.stubGlobal("XMLHttpRequest", FakeAuthXhr);
+    let uninstall = installHostedApiSession({
+      seller: "seller-A",
+      origin: "https://anteroom.example",
+      accessToken: async () => "token-A",
+      unauthorized: vi.fn(),
+    });
+    try {
+      const a1 = api.measurements.read([new File(["a1"], "a1.jpg")], "top");
+      const a2Queued = api.measurements.read([new File(["a2"], "a2.jpg")], "top");
+      await vi.waitFor(() => expect(requests).toHaveLength(1));
+
+      // Switch to seller B while a1 is uploading and a2Queued is waiting on the upload gate.
+      uninstall();
+      uninstall = installHostedApiSession({
+        seller: "seller-B",
+        origin: "https://anteroom.example",
+        accessToken: async () => "token-B",
+        unauthorized: vi.fn(),
+      });
+      const b1 = api.measurements.read([new File(["b1"], "b1.jpg")], "top");
+
+      // Finish a1's upload; a2Queued must fail without uploading under seller B's token,
+      // and seller B's b1 must immediately be admitted with token-B.
+      requests[0]!.finishUpload();
+      await expect(a2Queued).rejects.toThrow("account changed");
+      await vi.waitFor(() => expect(requests).toHaveLength(2));
+      expect(sent).toEqual([
+        { auth: "Bearer token-A", file: "a1.jpg" },
+        { auth: "Bearer token-B", file: "b1.jpg" },
+      ]);
+
+      // Completing a1's response also rejects because the account changed, and b1 succeeds.
+      requests[0]!.respond(429, { detail: "Another of your messages is still uploading. Try again when it finishes." });
+      await expect(a1).rejects.toThrow("account changed");
+      requests[1]!.finishUpload();
+      requests[1]!.respond(200, { photos_read: 1, measurements: { length: { status: "accepted", value: 29, reads: [29, 29] } } });
+      await expect(b1).resolves.toMatchObject({ photos_read: 1, measurements: { length: { value: 29 } } });
+      expect(sent).toHaveLength(2);
+    } finally {
+      uninstall();
+    }
+  });
+
+  it("releases the hosted upload gate immediately when aborted during token lookup", async () => {
+    const requests: FakeTokenGateXhr[] = [];
+    class FakeTokenGateXhr {
+      status = 0;
+      statusText = "";
+      responseText = "";
+      readyState = 0;
+      private uploadLoadend: (() => void) | null = null;
+      upload = {
+        addEventListener: (event: string, cb: () => void) => {
+          if (event === "loadend") this.uploadLoadend = cb;
+        },
+      };
+      onreadystatechange: (() => void) | null = null;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      ontimeout: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      constructor() { requests.push(this); }
+      open() {}
+      setRequestHeader() {}
+      getAllResponseHeaders() { return "Content-Type: application/json\r\n"; }
+      send() {}
+      finishUpload() { this.uploadLoadend?.(); }
+      respond(status: number, body: unknown) {
+        this.status = status;
+        this.responseText = JSON.stringify(body);
+        this.readyState = 4;
+        this.onreadystatechange?.();
+        this.onload?.();
+      }
+      abort() { this.onabort?.(); }
+    }
+    vi.stubGlobal("XMLHttpRequest", FakeTokenGateXhr);
+    let tokenCalls = 0;
+    let releaseFirstToken!: (token: string | null) => void;
+    const uninstall = installHostedApiSession({
+      seller: "seller-1",
+      origin: "https://anteroom.example",
+      accessToken: () => {
+        tokenCalls += 1;
+        if (tokenCalls === 1) return new Promise<string | null>((resolve) => { releaseFirstToken = resolve; });
+        return Promise.resolve("token-2");
+      },
+      unauthorized: vi.fn(),
+    });
+    try {
+      const c1 = new AbortController();
+      const first = api.sizeTags.read([new File(["1"], "1.jpg")], c1.signal);
+      const second = api.sizeTags.read([new File(["2"], "2.jpg")]);
+      await vi.waitFor(() => expect(releaseFirstToken).toBeDefined());
+      expect(requests).toHaveLength(0);
+
+      c1.abort();
+      await expect(first).rejects.toMatchObject({ name: "AbortError" });
+      await vi.waitFor(() => expect(requests).toHaveLength(1));
+      requests[0]!.finishUpload();
+      requests[0]!.respond(200, { photos_read: 1, status: "accepted", size: "M", sizes: ["M"] });
+      await expect(second).resolves.toMatchObject({ status: "accepted", size: "M" });
+      releaseFirstToken("late");
+    } finally {
+      uninstall();
+    }
+  });
 });
 
 describe("Reading size tags from photos", () => {
