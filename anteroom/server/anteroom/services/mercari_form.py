@@ -329,7 +329,7 @@ def form(listing: dict, shipping_classes: list[dict] | None = None, *, notes: li
     smart = specifics.get("smartPricing")
     enabled = smart.get("enabled") is True if isinstance(smart, dict) else _number(price) >= 1
     fields["mercari_specifics.smartPricing.enabled"]["value"] = enabled
-    minimum = (smart or {}).get("minimumPrice")
+    minimum = smart.get("minimumPrice") if isinstance(smart, dict) else None
     fields["mercari_specifics.smartPricing.minimumPrice"].update(
         value=minimum if minimum not in (None, "") else math.floor(_number(price) * 0.85 + 0.5) if enabled else "",
         required=enabled)
