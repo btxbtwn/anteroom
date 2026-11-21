@@ -1241,7 +1241,7 @@ def search_catalog(
             if len(results) >= top_k:
                 break
 
-    if kind == "all":
+    if kind == "all" and results:
         missing_docs = docs_index is None or id(docs_index) in failed_indexes
         missing_categories = cat_index is None or id(cat_index) in failed_indexes
         if missing_docs or missing_categories:
