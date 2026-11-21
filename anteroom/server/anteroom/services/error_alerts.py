@@ -220,6 +220,11 @@ def render_email(report: dict[str, Any], repeats: int, first_seen: str | None) -
     return subject, "\n".join(lines)
 
 
+def operator_email() -> str:
+    """Alert recipient: ANTEROOM_OPERATOR_EMAIL when configured, else the default operator address."""
+    return os.environ.get("ANTEROOM_OPERATOR_EMAIL", "").strip() or OPERATOR
+
+
 def send_email(subject: str, body: str) -> None:
     """Workspace SMTP relay: allowed by the app's static egress IPs, TLS required."""
     import smtplib
@@ -227,13 +232,15 @@ def send_email(subject: str, body: str) -> None:
     from email.message import EmailMessage
     from email.utils import make_msgid
 
+    recipient = operator_email()
+    domain = recipient.partition("@")[2] or "myanteroom.com"
     message = EmailMessage()
-    message["From"] = f"Anteroom Errors <{OPERATOR}>"
-    message["To"] = OPERATOR
+    message["From"] = f"Anteroom Errors <{recipient}>"
+    message["To"] = recipient
     message["Subject"] = subject
-    message["Message-ID"] = make_msgid(domain="myanteroom.com")
+    message["Message-ID"] = make_msgid(domain=domain)
     message.set_content(body)
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, local_hostname="myanteroom.com", timeout=20) as smtp:
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, local_hostname=domain, timeout=20) as smtp:
         smtp.starttls(context=ssl.create_default_context())
         smtp.send_message(message)
 

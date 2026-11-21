@@ -91,7 +91,6 @@ _ETSY_FIELD_DEFAULT_KEYS = {
     "etsy_specifics.whatIsIt": ("what_is", "whatIs", "whatIsIt"),
     "etsy_specifics.renewalOption": ("renewalOption", "renewal_option", "should_auto_renew", "shouldAutoRenew"),
 }
-DEFAULT_EBAY_INVENTORY_LOCATION = "70125"
 _INVENTORY_LOCATION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,'#-]{0,79}$")
 DEFAULT_PACKAGE_DIMENSIONS = {"length": 13, "width": 10, "height": 3}
 DEFAULT_THEME: Literal["dark", "light", "system"] = "system"

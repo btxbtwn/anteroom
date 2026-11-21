@@ -134,7 +134,8 @@ def test_handled_http_refusal_is_logged_without_private_url_or_body():
     assert message % tuple(args) == "GET /api/items/{item_id} answered 409"
 
 
-def test_email_goes_to_operator_over_tls():
+def test_email_goes_to_operator_over_tls(monkeypatch):
+    monkeypatch.delenv("ANTEROOM_OPERATOR_EMAIL", raising=False)
     with patch("smtplib.SMTP") as factory:
         send_email("subject", "body")
     factory.assert_called_once_with("smtp-relay.gmail.com", 587, local_hostname="myanteroom.com", timeout=20)
@@ -711,4 +712,51 @@ def test_expected_client_4xx_and_fly_replay_do_not_warn():
         # Matched-route refusals still log a warning.
         assert client.get("/api/items/123").status_code == 409
         warning.assert_called_once()
+
+
+def test_operator_email_reads_env_and_falls_back(monkeypatch):
+    import smtplib
+
+    monkeypatch.delenv("ANTEROOM_OPERATOR_EMAIL", raising=False)
+    assert error_alerts.operator_email() == error_alerts.OPERATOR
+
+    monkeypatch.setenv("ANTEROOM_OPERATOR_EMAIL", "ops@example.com")
+    assert error_alerts.operator_email() == "ops@example.com"
+
+    sent = []
+
+    class FakeSMTP:
+        def __init__(self, host, port, *, local_hostname, timeout):
+            self.local_hostname = local_hostname
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def starttls(self, *, context):
+            pass
+
+        def send_message(self, message):
+            sent.append((self.local_hostname, message))
+
+    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    error_alerts.send_email("Subject", "Body")
+    assert len(sent) == 1
+    local_hostname, message = sent[0]
+    assert local_hostname == "example.com"
+    assert message["To"] == "ops@example.com"
+    assert message["From"] == "Anteroom Errors <ops@example.com>"
+    assert message["Message-ID"].endswith("@example.com>")
+
+
+def test_public_app_metadata_uses_myanteroom_and_generic_placeholders():
+    from anteroom.providers import chat_completions
+    from anteroom.services import direct_preflight, user_settings
+
+    assert chat_completions.APP_URL == "https://myanteroom.com"
+    assert not hasattr(user_settings, "DEFAULT_EBAY_INVENTORY_LOCATION")
+    assert "70125" not in direct_preflight._GAP_FIXES["mercari_specifics.shipsFrom"]
+
 
