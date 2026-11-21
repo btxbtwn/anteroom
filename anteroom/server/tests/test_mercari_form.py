@@ -47,50 +47,86 @@ class MercariFormTest(unittest.IsolatedAsyncioTestCase):
             'brand': '', 'description': '', 'shippingMethod': 'SOYO', 'smartPricing': {'enabled': False}}}
         before = copy.deepcopy(listing)
         fields = {row['path']: row for row in mercari_form.form(listing)['fields']}
-        self.assertEqual(fields['mercari_specifics.brand']['value'], mercari_form.NO_BRAND)
+        self.assertEqual(fields['mercari_specifics.brand']['value'], '')
+        self.assertIs(fields['mercari_specifics.noBrand']['value'], True)
         self.assertEqual(fields['mercari_specifics.description']['value'], '')
         self.assertFalse(fields['mercari_specifics.smartPricing.minimumPrice']['required'])
         self.assertFalse(fields['mercari_specifics.shippingClassId']['required'])
         self.assertFalse(fields['mercari_specifics.package.fitsShoebox']['required'])
         self.assertEqual(listing, before)
 
-    def test_a_brand_missing_from_the_catalog_copy_is_not_shown_as_no_brand(self):
-        # AM TEES XL (draft 0b945d2660ec): General brand "AM Tees", no Mercari brand of its own.
-        # The bundled catalog is a dated copy, so absence there is not a confirmed no-match.
-        listing = {'brand': 'AM Tees', 'condition': 'Pre-Owned - Good', 'price': 20}
+    def test_a_brand_missing_from_mercaris_list_checks_no_brand_and_clears_brand(self):
+        # Walt Disney World / AM Tees: General brand is not in Mercari's brand list.
+        listing = {'brand': 'Walt Disney World', 'condition': 'Pre-Owned - Good', 'price': 20}
         before = copy.deepcopy(listing)
-        row = next(row for row in mercari_form.form(listing)['fields'] if row['path'] == 'mercari_specifics.brand')
-        self.assertEqual(row['value'], 'AM Tees')
-        self.assertIn("isn't in Anteroom's copy of Mercari's brand list", row['help'])
-        self.assertIn('otherwise the item is listed with No brand', row['help'])
+        rows = mercari_form.form(listing)['fields']
+        paths = [row['path'] for row in rows]
+        fields = {row['path']: row for row in rows}
+        brand = fields['mercari_specifics.brand']
+        no_brand = fields['mercari_specifics.noBrand']
+        self.assertEqual(paths.index('mercari_specifics.noBrand'), paths.index('mercari_specifics.brand') + 1)
+        self.assertEqual(brand['value'], '')
+        self.assertEqual(brand['options_source'], 'marketplace')
+        self.assertNotIn('No brand / Not sure', brand['options'])
+        self.assertNotIn('help', brand)
+        self.assertIs(no_brand['value'], True)
+        self.assertEqual(no_brand['label'], 'No brand / Not sure')
+        self.assertEqual(no_brand['input_type'], 'boolean')
+        self.assertEqual(no_brand['presentation'], 'checkbox')
+        self.assertEqual(no_brand['clears'], ['mercari_specifics.brand'])
+        self.assertEqual(no_brand['section'], 'Product info')
         self.assertEqual(listing, before)
 
     def test_recognized_blank_and_seller_brands_are_kept(self):
-        row = next(row for row in mercari_form.form({'brand': 'nike'})['fields'] if row['path'] == 'mercari_specifics.brand')
-        self.assertEqual(row['value'], 'Nike')
-        self.assertNotIn('help', row)
-        for listing in ({'brand': ''}, {'brand': 'Unbranded'}, {'brand': 'AM Tees', 'mercari_specifics': {'noBrand': True}}):
-            row = next(row for row in mercari_form.form(listing)['fields'] if row['path'] == 'mercari_specifics.brand')
-            self.assertEqual(row['value'], mercari_form.NO_BRAND, listing)
-            self.assertNotIn('help', row)
-        locked = {'brand': 'Other', 'mercari_specifics': {'brand': 'AM Tees'},
-                  'seller_fields': ['mercari_specifics.brand']}
-        row = next(row for row in mercari_form.form(locked)['fields'] if row['path'] == 'mercari_specifics.brand')
-        self.assertEqual(row['value'], 'AM Tees')
+        fields = {row['path']: row for row in mercari_form.form({'brand': 'nike'})['fields']}
+        self.assertEqual(fields['mercari_specifics.brand']['value'], 'Nike')
+        self.assertIs(fields['mercari_specifics.noBrand']['value'], False)
+        self.assertNotIn('help', fields['mercari_specifics.brand'])
+        for listing in (
+            {'brand': ''},
+            {'brand': 'Unbranded'},
+            {'brand': 'AM Tees'},
+            {'brand': 'Nike', 'mercari_specifics': {'noBrand': True}},
+            {'brand': 'Other', 'mercari_specifics': {'brand': 'AM Tees'}, 'seller_fields': ['mercari_specifics.brand']},
+        ):
+            rows = {row['path']: row for row in mercari_form.form(listing)['fields']}
+            self.assertEqual(rows['mercari_specifics.brand']['value'], '', listing)
+            self.assertIs(rows['mercari_specifics.noBrand']['value'], True, listing)
+            self.assertNotIn('help', rows['mercari_specifics.brand'], listing)
+        # Explicitly unchecking the checkbox leaves both Brand and No brand empty so the seller can pick.
+        unchecked = {'brand': 'Walt Disney World', 'mercari_specifics': {'noBrand': False, 'brand': ''}}
+        rows = {row['path']: row for row in mercari_form.form(unchecked)['fields']}
+        self.assertEqual(rows['mercari_specifics.brand']['value'], '')
+        self.assertIs(rows['mercari_specifics.noBrand']['value'], False)
 
-    def test_an_unconfirmed_brand_does_not_block_list_before_mercaris_live_check(self):
+    def test_unlisted_brand_and_no_brand_checkbox_have_no_gaps_and_stay_fresh(self):
         from anteroom.services import native_contract
 
         def brand_gaps(listing):
             listing = {**listing, native_contract.KEY: native_contract.capture(
                 listing, {'mercari': mercari_form.form(listing)}, ['mercari'])}
-            return [gap for gap in native_contract.gaps(listing, 'mercari') if gap['field'] == 'mercari_specifics.brand']
+            return [gap for gap in native_contract.gaps(listing, 'mercari')
+                    if gap['field'] in {'mercari_specifics.brand', 'mercari_specifics.noBrand'}]
 
-        found = brand_gaps({'brand': 'AM Tees', 'price': 20})
-        self.assertEqual(len(found), 1)
-        self.assertFalse(found[0]['blocking'])
-        self.assertIn("isn't in Anteroom's copy of Mercari's brand list", found[0]['message'])
+        self.assertEqual(brand_gaps({'brand': 'Walt Disney World', 'price': 20}), [])
         self.assertEqual(brand_gaps({'brand': 'Nike', 'price': 20}), [])
+        self.assertEqual(brand_gaps({'brand': 'Nike', 'price': 20, 'mercari_specifics': {'noBrand': True}}), [])
+        # Toggling the No brand checkbox or choosing a Mercari brand does not make the saved form stale.
+        listing = {'title': 'Walt Disney World T-shirt', 'description': 'Short sleeve graphic T-shirt.',
+                   'brand': 'Walt Disney World', 'price': 20, 'condition': 'Good',
+                   'direct_category_ids': {'mercari': '303'}, 'size': 'S',
+                   'mercari_specifics': {'shippingMethod': 'SOYO', 'shipsFrom': '70115',
+                                         'smartPricing': {'enabled': False}}}
+        listing[native_contract.KEY] = native_contract.capture(
+            listing, {'mercari': mercari_form.form(listing)}, ['mercari'])
+        toggled = copy.deepcopy(listing)
+        toggled['mercari_specifics']['noBrand'] = True
+        toggled['mercari_specifics']['brand'] = ''
+        self.assertEqual(native_contract.gaps(toggled, 'mercari'), [])
+        picked = copy.deepcopy(toggled)
+        picked['mercari_specifics']['brand'] = 'Nike'
+        picked['mercari_specifics']['noBrand'] = False
+        self.assertEqual(native_contract.gaps(picked, 'mercari'), [])
 
     def test_an_unreadable_brand_catalog_is_an_error_not_no_brand(self):
         with patch.object(mercari_form, 'catalog', side_effect=OSError('catalog unreadable')):
@@ -111,6 +147,7 @@ class MercariFormTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(field['option_values'], {'USPS Ground Advantage': '2552'})
         self.assertIn('$7.99', field['option_help']['USPS Ground Advantage'])
         self.assertEqual(result['notes'], [])
+        self.assertFalse(result.get('reload_recommended', False))
 
     async def test_shipping_failure_or_unknown_label_keeps_product_fields_and_never_invents_rates(self):
         listing = {'direct_category_ids': {'mercari': '275'}, 'weight_lb': 1,
@@ -123,6 +160,7 @@ class MercariFormTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn('Nike', fields['mercari_specifics.brand']['options'])
             self.assertEqual(fields['mercari_specifics.shippingClassId']['options'], [])
             self.assertTrue(result['notes'])
+            self.assertTrue(result['reload_recommended'])
 
     async def test_a_capitalized_shoebox_answer_still_loads_the_labels(self):
         # Generation saved the radio's label ("Yes") rather than its value ("yes").
@@ -172,13 +210,14 @@ class MercariFormTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(size_value({'direct_category_ids': {'mercari': '303'}, 'size': 'S',
                                      'mercari_specifics': {'size': ''}}), '')
 
-    def test_brand_uses_reference_options_source_so_editor_skips_contradictory_alert(self):
-        row = next(row for row in mercari_form.form({'brand': 'Hind Performance'})['fields']
-                   if row['path'] == 'mercari_specifics.brand')
-        self.assertEqual(row['value'], 'Hind Performance')
-        self.assertEqual(row['options_source'], 'reference')
+    def test_brand_uses_marketplace_options_source_and_checks_no_brand_when_unlisted(self):
+        fields = {row['path']: row for row in mercari_form.form({'brand': 'Hind Performance'})['fields']}
+        row = fields['mercari_specifics.brand']
+        self.assertEqual(row['value'], '')
+        self.assertEqual(row['options_source'], 'marketplace')
         self.assertTrue(row['selection_only'])
-        self.assertIn("isn't in Anteroom's copy of Mercari's brand list", row['help'])
+        self.assertNotIn('help', row)
+        self.assertIs(fields['mercari_specifics.noBrand']['value'], True)
 
     def test_mercari_followed_size_and_condition_have_no_empty_gaps(self):
         from anteroom.services import native_contract

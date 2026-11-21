@@ -297,10 +297,20 @@ test('Mercari shows the seller’s brand and offers a category with subcategorie
   } } } };
   const form = clean(call(c, 'mercariEditorForm', listing, MERCARI));
   const brand = form.fields.find(row => row.label === 'Brand');
+  const noBrand = form.fields.find(row => row.path === 'mercari_specifics.noBrand');
   assert.equal(brand.path, 'mercari_specifics.brand');
   assert.equal(brand.value, 'GB Girls');
-  assert.equal(brand.option_values['No brand / Not sure'], 'No Brand/Not sure');
-  assert.ok(!form.fields.some(row => ['mercari_specifics.sizeType', 'mercari_specifics.noBrand'].includes(row.path)));
+  assert.ok(!brand.options.includes('No brand / Not sure'));
+  assert.equal(noBrand.label, 'No brand / Not sure');
+  assert.equal(noBrand.input_type, 'boolean');
+  assert.equal(noBrand.presentation, 'checkbox');
+  assert.deepEqual(noBrand.clears, ['mercari_specifics.brand']);
+  assert.equal(noBrand.value, false);
+  assert.ok(!form.fields.some(row => row.path === 'mercari_specifics.sizeType'));
+  // An unlisted brand automatically checks No brand / Not sure and leaves Brand empty.
+  const unlisted = clean(call(c, 'mercariEditorForm', { brand: 'Walt Disney World', direct_category_ids: { mercari: '1877' } }, MERCARI));
+  assert.equal(unlisted.fields.find(row => row.path === 'mercari_specifics.brand').value, '');
+  assert.equal(unlisted.fields.find(row => row.path === 'mercari_specifics.noBrand').value, true);
   // Subcategories by display order, then the category's own "All ..." pick; a top-level category is not offered.
   assert.deepEqual(form.fields.find(row => row.label === 'Category').options,
     ['Tees', 'Kids > Girls tops & t-shirts > Girls (4+)', 'Kids > Girls tops & t-shirts']);
@@ -320,7 +330,7 @@ test('Mercari form follows the sell page sections and order', () => {
   assert.deepEqual(form.fields.map(row => [row.section, row.label.replace(/ \*$/, '')]), [
     ['', ''],
     ['Product info', 'Title'], ['Product info', 'Description'], ['Product info', 'Category'], ['Product info', 'Brand'],
-    ['Product info', 'Condition'], ['Product info', 'Size'],
+    ['Product info', 'No brand / Not sure'], ['Product info', 'Condition'], ['Product info', 'Size'],
     ['Shipping', 'Ships from:'], ['Shipping', 'Shipping method'],
     ['Shipping', 'lb'], ['Shipping', 'oz'], ['Shipping', 'Will your item fit in a shoebox?'],
     ['Shipping', 'Length'], ['Shipping', 'Width'], ['Shipping', 'Height'], ['Shipping', 'Skip dimension input'],

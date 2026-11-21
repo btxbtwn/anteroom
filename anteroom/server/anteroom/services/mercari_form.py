@@ -12,7 +12,10 @@ from functools import lru_cache
 from anteroom.config import skills_dir
 from anteroom.services.seller_overrides import get_path, marketplace_text, price_for
 
-NO_BRAND = "No Brand/Not sure"
+_NO_BRAND_TOKENS = frozenset({
+    "", "unbranded", "no brand", "not sure", "no brand not sure",
+    "none", "n a", "na", "unknown",
+})
 _QUOTE_TTL_S = 15 * 60
 _QUOTE_MAX_ENTRIES = 512
 _QuoteKey = tuple[int, int, tuple[float, float, float]]
@@ -20,6 +23,29 @@ _quote_cache: dict[_QuoteKey, tuple[float, list[dict]]] = {}
 _quote_inflight: dict[_QuoteKey, asyncio.Task[list[dict]]] = {}
 _quote_generation: dict[_QuoteKey, int] = {}
 _quote_seq = 0
+
+
+def is_no_brand(value: object) -> bool:
+    """True when a brand value means no brand, unbranded, or not sure."""
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip() in _NO_BRAND_TOKENS
+
+
+def resolve_brand(listing: dict) -> tuple[str, bool]:
+    """Resolve Mercari's brand picker value and ``noBrand`` checkbox state.
+
+    When the brand is absent, unbranded, or not in Mercari's brand list,
+    Mercari selects ``No brand / Not sure`` (``noBrand = True``) and leaves
+    Brand empty unless the seller explicitly unchecked ``noBrand``."""
+    specifics = listing.get("mercari_specifics") or {}
+    if specifics.get("noBrand") is True:
+        return "", True
+    raw = marketplace_text(listing, "mercari", "brand")
+    if is_no_brand(raw):
+        return "", specifics.get("noBrand") is not False
+    known = _brands_by_fold().get(raw.casefold())
+    if known is not None:
+        return known, False
+    return "", specifics.get("noBrand") is not False
 
 
 def clear_quote_cache() -> None:
@@ -68,8 +94,7 @@ def category_choices() -> dict:
 def brand_choices() -> dict:
     """Mercari's brand picker, the same for every listing."""
     brands = [row["name"] for row in catalog()["itemBrands"]]
-    return {"options": [*brands, "No brand / Not sure"],
-            "option_values": {**{name: name for name in brands}, "No brand / Not sure": NO_BRAND}}
+    return {"options": brands, "option_values": {name: name for name in brands}}
 
 
 @lru_cache(maxsize=1)
@@ -248,27 +273,13 @@ def form(listing: dict, shipping_classes: list[dict] | None = None, *, notes: li
     picker = category_choices()
     fields["direct_category_ids.mercari"].update(value=category_id, options=picker["options"],
                                                option_values=picker["option_values"])
-    brand = marketplace_text(listing, "mercari", "brand")
-    blank = re.sub(r"[^a-z0-9]+", " ", brand.casefold()).strip() in {
-        "", "unbranded", "no brand", "not sure", "no brand not sure", "none", "n a", "na", "unknown"}
-    known = _brands_by_fold().get(brand.casefold())
-    unconfirmed = not blank and specifics.get("noBrand") is not True and known is None
-    brand = NO_BRAND if blank or specifics.get("noBrand") is True else known or brand
+    brand, no_brand = resolve_brand(listing)
     picker = brand_choices()
-    # The bundled catalog is a dated reference copy, not a live exhaustive list:
-    # List checks Mercari's current brand list, so the editor should not flag
-    # unconfirmed brands as unavailable above the explanatory help note.
-    fields["mercari_specifics.brand"].update(value=brand, options=picker["options"],
-                                            option_values=picker["option_values"],
-                                            options_source="reference")
-    if unconfirmed:
-        # This catalog is a dated copy, so a missing name is not proof Mercari
-        # lacks the brand. List checks Mercari's current list and sends no brand
-        # only when Mercari has no match; a failed check stops List instead.
-        fields["mercari_specifics.brand"]["help"] = (
-            f"“{brand}” isn't in Anteroom's copy of Mercari's brand list. When you list, Anteroom checks "
-            "Mercari's current list: if Mercari has this brand it's used, otherwise the item is listed with "
-            "No brand. Choose a brand or No brand / Not sure to decide now.")
+    fields["mercari_specifics.brand"].update(
+        value=brand, options=picker["options"], option_values=picker["option_values"],
+        options_source="marketplace",
+    )
+    fields["mercari_specifics.noBrand"]["value"] = no_brand
     fields["mercari_specifics.condition"]["value"] = general_condition(listing)
     sizes = _sizes(category)
     if sizes:
@@ -409,4 +420,7 @@ async def editor_form(listing: dict, *, refresh: bool = False) -> dict:
         except Exception:  # noqa: BLE001 - all product fields remain available without a shipping quote
             classes = []
             notes.append("Mercari shipping labels could not be loaded. Reload choices to try again.")
-    return form(listing, classes, notes=notes)
+    result = form(listing, classes, notes=notes)
+    if notes:
+        result["reload_recommended"] = True
+    return result

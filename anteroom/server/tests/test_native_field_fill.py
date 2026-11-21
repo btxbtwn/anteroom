@@ -644,6 +644,33 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("ebay_specifics.Size |", first_prompt)
         self.assertIn("Size | required | selection-only | pick one | choices: M", second_prompt)
 
+    def test_mercari_brand_batch_respects_the_no_brand_checkbox(self):
+        from anteroom.services import mercari_form
+        from anteroom.services.listing_generate import photo_fingerprint
+
+        brand_path = "mercari_specifics.brand"
+        no_brand_path = "mercari_specifics.noBrand"
+        for no_brand, expected_brand in ((False, "Adidas"), (True, "")):
+            with self.subTest(no_brand=no_brand):
+                listing = {"brand": "Nike", "mercari_specifics": {"brand": "Nike", "noBrand": not no_brand}}
+                revision = listing_persistence.save_revision(self.db, self.conv.id, listing, source="model")
+                form = mercari_form.form(listing)
+                rows = {field["path"]: field for field in form["fields"] if field["path"] in {brand_path, no_brand_path}}
+                quote = "Adidas label"
+                reply = {"fields": {
+                    brand_path: {"value": "Adidas", "evidence": quote},
+                    no_brand_path: {"value": no_brand, "evidence": quote},
+                }}
+                accepted = validated_values(reply, rows, evidence=quote)
+                self.assertEqual(accepted[no_brand_path][0], no_brand)
+                updated = native_field_fill._save_fill(
+                    self.db, self.conv.id, revision.id, photo_fingerprint([]), listing,
+                    {"mercari": form}, rows, reply, accepted, True, False,
+                )
+                self.assertIsNotNone(updated)
+                self.assertEqual(mercari_form.resolve_brand(self._current().listing_json), (expected_brand, no_brand))
+                self.assertEqual(self._current().listing_json["brand"], "Nike")
+
     async def test_saves_valid_picks_and_reports_them(self):
         reply = json.dumps({"fields": {"depop_specifics.attributes.bottom-fit": ["Ripped", "Torn"], "ebay_specifics.Rise": "High"}})
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"depop": DEPOP, "ebay": EBAY})), \

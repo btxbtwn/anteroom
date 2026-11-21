@@ -102,7 +102,7 @@ Use the marketplace ids and field names exactly as listed. Anteroom updates the 
 
 ${OPTIONS_RULE}
 
-When the item's brand is not offered by a marketplace, answer "Other" for Depop and "No Brand/Not sure" for Mercari — never substitute a different brand.
+When the item's brand is not offered by a marketplace, answer "Other" for Depop and set "No brand / Not sure" (mercari_specifics.noBrand) to true for Mercari — never substitute a different brand.
 
 Empty fields:
 ${lines.join("\n")}`;
@@ -178,7 +178,7 @@ Use the marketplace ids and field names exactly as listed. Anteroom updates the 
 
 ${OPTIONS_RULE}
 
-When the item's brand is not offered by a marketplace, answer "Other" for Depop and "No Brand/Not sure" for Mercari — never substitute a different brand.
+When the item's brand is not offered by a marketplace, answer "Other" for Depop and set "No brand / Not sure" (mercari_specifics.noBrand) to true for Mercari — never substitute a different brand.
 
 Fields:
 ${lines.join("\n") || "- (none)"}`;

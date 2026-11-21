@@ -404,10 +404,13 @@ def test_size_regressions(monkeypatch):
 # --- Brands -------------------------------------------------------------------
 
 def test_brand_fallback_regressions():
-    # #415: no brand on Mercari is its own No Brand choice, not free text.
-    form = mercari_form.form({"brand": "Unbranded", "price": 20})
-    row = next(row for row in form["fields"] if row["path"] == "mercari_specifics.brand")
-    assert row["value"] == mercari_form.NO_BRAND and row["value"] in row["option_values"].values()
+    # #415: no brand or an unlisted brand on Mercari checks its No brand checkbox and leaves Brand empty.
+    for brand in ("Unbranded", "Walt Disney World"):
+        form = mercari_form.form({"brand": brand, "price": 20})
+        by_path = {row["path"]: row for row in form["fields"]}
+        assert by_path["mercari_specifics.brand"]["value"] == ""
+        assert by_path["mercari_specifics.noBrand"]["value"] is True
+        assert by_path["mercari_specifics.noBrand"]["presentation"] == "checkbox"
     # #416: no brand on Depop is its Other choice.
     form = depop_form.form({"brand": "Unbranded", "price": 20})
     row = next(row for row in form["fields"] if row["path"] == "depop_specifics.brand")

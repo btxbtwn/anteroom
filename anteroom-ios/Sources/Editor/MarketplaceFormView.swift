@@ -264,11 +264,33 @@ private struct NativeFieldControl: View {
                 NativeInventoryEditor(model: model, field: field, form: form)
             }
         case "boolean", "badge":
-            Toggle(isOn: Binding(get: { current == .bool(true) || current?.text == "true" },
-                                 set: { model.setValue(.bool($0), for: field) })) {
-                Text(field.label).font(.subheadline)
+            if field.inputType == "boolean", field.presentation == "checkbox" {
+                let checked = current == .bool(true) || current?.text == "true"
+                Button {
+                    model.setValue(.bool(!checked), for: field)
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: checked ? "checkmark.square.fill" : "square")
+                            .font(.body)
+                            .foregroundStyle(checked ? Color.accentColor : .secondary)
+                        Text(field.label)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .frame(minHeight: 44)
+                .accessibilityValue(checked ? "Checked" : "Unchecked")
+                .accessibilityAddTraits(checked ? .isSelected : [])
+            } else {
+                Toggle(isOn: Binding(get: { current == .bool(true) || current?.text == "true" },
+                                     set: { model.setValue(.bool($0), for: field) })) {
+                    Text(field.label).font(.subheadline)
+                }
+                .frame(minHeight: 44)
             }
-            .frame(minHeight: 44)
         case "segmented":
             WorkspaceField(title) {
                 Picker(field.label, selection: Binding(get: { field.label(for: current?.text ?? "") },

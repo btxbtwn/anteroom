@@ -84,6 +84,19 @@ class FillLogHelpersTest(unittest.TestCase):
         self.assertNotIn("mpn", listing["ebay_specifics"])
         self.assertTrue(field_intentionally_empty(listing, "ebay", "MPN"))
 
+    def test_mercari_no_brand_missing_field_sets_checkbox_and_clears_brand(self):
+        listing = write_values_into_listing({"brand": "Nike", "mercari_specifics": {"brand": "Nike"}}, [
+            {"marketplace": "mercari", "field": "No brand / Not sure", "value": True},
+        ])
+        self.assertIs(listing["mercari_specifics"]["noBrand"], True)
+        self.assertNotIn("brand", listing["mercari_specifics"])
+        self.assertEqual(listing["brand"], "Nike")
+        updated = write_values_into_listing(listing, [
+            {"marketplace": "mercari", "field": "Brand", "value": "Adidas"},
+        ])
+        self.assertEqual(updated["mercari_specifics"]["brand"], "Adidas")
+        self.assertIs(updated["mercari_specifics"]["noBrand"], False)
+
     def test_extract_missing_fields_ignores_json_patch(self):
         self.assertIsNone(extract_missing_fields('[{"op":"replace","path":"/sku","value":"ABC-1"}]'))
 
