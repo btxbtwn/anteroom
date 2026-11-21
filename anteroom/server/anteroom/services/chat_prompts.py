@@ -159,7 +159,7 @@ async def build_chat_messages(conv_id: str, user_message: str, option_catalog=No
             "direct_category_ids.ebay, direct_category_ids.poshmark, direct_category_ids.depop, "
             "or direct_category_ids.mercari. "
             "An empty value clears the field and it stays cleared. "
-            "Set mercari_specifics.noBrand to true (or clear mercari_specifics.brand) to list that item on Mercari "
+            "Set mercari_specifics.noBrand to true to list that item on Mercari "
             "with no brand while leaving the main brand unchanged. When Mercari has the same size in more than one "
             "group, set mercari_specifics.sizeType or mercari_specifics.sizeGroup (Regular, Petite, Plus, Tall). "
             "When that is empty, Anteroom uses the item's size type, then the regular or standard group.\n"

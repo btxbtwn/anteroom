@@ -1238,7 +1238,7 @@ export function StructuredEditor({
                       emitChange(updated);
                     }}>Looks right</InlineButton>}
                   </p>}
-                  {!labelRow && tools && <div className="mt-1 flex">{tools}</div>}
+                  {!labelRow && !(f.type === "boolean" && f.presentation === "checkbox") && tools && <div className="mt-1 flex">{tools}</div>}
                   {f.help && f.type !== "photos" && !multiSelectControl(f) && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
                   {uniqueMarketplaceMessages(f.type === "photos" ? [] : fieldWarnings.get(f.key) ?? [], shownMessages).map((message) =>
                     <p key={message} role="alert" className="mt-1 text-xs text-warning-foreground">{message}</p>)}

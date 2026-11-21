@@ -90,11 +90,12 @@ describe("native row layout", () => {
     const save = vi.fn();
     const html = renderToStaticMarkup(
       <StructuredEditor convId="item" listing={{ title: "Original", brand: "Nike", mercari_specifics: { noBrand: true } }}
-        tab="mercari" target={null} disabled={false} onChange={save} />,
+        tab="mercari" target={null} disabled={false} onChange={save} onAskChat={vi.fn()} />,
     );
     expect(html).toContain('data-slot="checkbox"');
     expect(html).toContain('data-listing-field="mercari_specifics.noBrand"');
     expect(html).toContain("No brand / Not sure");
+    expect(html.match(/aria-label="Ask chat to fill No brand \/ Not sure"/g)).toHaveLength(1);
     // Even though General brand is "Nike", Mercari's Brand field stays blank while No brand is checked.
     expect(choices.mock.calls[0][0].value).toBe("");
     // Choosing a Mercari brand clears the boolean noBrand dependent to false (not "").

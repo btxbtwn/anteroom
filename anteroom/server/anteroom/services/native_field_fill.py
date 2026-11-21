@@ -565,9 +565,21 @@ def _save_fill(db: Session, conv_id: str, revision_id: str, fingerprint: str, li
         # The seller edited, cleared or regenerated while the forms were read.
         return None
     updated = native_contract.copy_listing(listing)
+    no_brand_path = "mercari_specifics.noBrand"
+    brand_path = "mercari_specifics.brand"
+    no_brand, _ = accepted.get(no_brand_path, (None, []))
+    # An explicit checked box wins over a brand in the same response.
+    if no_brand is True:
+        accepted = {path: answer for path, answer in accepted.items() if path != brand_path}
     changed_parents = {path for path, (value, _labels) in accepted.items() if get_path(listing, path) != value}
     changed_labels = {rows[path].get("label") for path in changed_parents}
-    dependent_paths = {dependent for path in changed_parents for dependent in rows[path].get("clears") or []}
+    dependent_paths = {dependent for path in changed_parents if path != no_brand_path
+                       for dependent in rows[path].get("clears") or []}
+    if no_brand is True:
+        dependent_paths.add(brand_path)
+    elif no_brand is False:
+        # A brand and an unchecked box are compatible and can both be saved.
+        dependent_paths.discard(no_brand_path)
     form_rows = {_path(row): row for form in forms.values() for row in form.get("fields") or []}
     dependent_paths.update(path for path, row in form_rows.items() for rules in (row.get("value_constraints") or {}).values()
                            for rule in rules if rule.get("parentName") in changed_labels)
