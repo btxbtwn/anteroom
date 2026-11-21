@@ -1,0 +1,1 @@
+- Select suggested listings and regenerate them together from the Suggestions page.

@@ -43,6 +43,7 @@ export function useListingSelection({
   const [promoteIds, setPromoteIds] = useState<string[] | null>(null);
   const [deleteIds, setDeleteIds] = useState<string[] | null>(null);
   const selectionAnchor = useRef<string | null>(null);
+  const selectionVersion = useRef(0);
 
   const selectedIds = useMemo(() => {
     if (pickedIds.size === 0) return pickedIds;
@@ -56,25 +57,25 @@ export function useListingSelection({
     return changed ? next : pickedIds;
   }, [eligibleIds, pickedIds]);
 
-  useEffect(() => {
-    if (!selecting) return;
-    const onKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape" || isConfirmDialogOpen() || pricePrompt || reviewPrompt || markdownIds || editIds || copyIds || marketIds || promoteIds || deleteIds) return;
-      setSelecting(false);
-      setPickedIds(new Set());
-      selectionAnchor.current = null;
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [selecting, pricePrompt, reviewPrompt, markdownIds, editIds, copyIds, marketIds, promoteIds, deleteIds]);
-
   const exitSelecting = useCallback(() => {
+    selectionVersion.current += 1;
     setSelecting(false);
     setPickedIds(new Set());
     selectionAnchor.current = null;
   }, []);
 
+  useEffect(() => {
+    if (!selecting) return;
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape" || isConfirmDialogOpen() || pricePrompt || reviewPrompt || markdownIds || editIds || copyIds || marketIds || promoteIds || deleteIds) return;
+      exitSelecting();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selecting, pricePrompt, reviewPrompt, markdownIds, editIds, copyIds, marketIds, promoteIds, deleteIds, exitSelecting]);
+
   const toggleSelect = useCallback((id: string, shift: boolean, orderedIds: readonly string[]) => {
+    selectionVersion.current += 1;
     setPickedIds((prev) => {
       const eligible = new Set(eligibleIds);
       const visible = new Set<string>();
@@ -88,6 +89,7 @@ export function useListingSelection({
   }, [eligibleIds]);
 
   const toggleSelectAll = useCallback(() => {
+    selectionVersion.current += 1;
     setPickedIds((prev) => {
       const allSelected = eligibleIds.length > 0 && eligibleIds.every((id) => prev.has(id));
       selectionAnchor.current = null;
@@ -106,9 +108,10 @@ export function useListingSelection({
     }));
     // The progress bar stays visible while the seller selects other work.
     exitSelecting();
+    const version = selectionVersion.current;
     const result = await bulk.start(ids, titles, "rewrite", drops);
     if (!result) return;
-    if (result.failed.length > 0) {
+    if (result.failed.length > 0 && selectionVersion.current === version) {
       setPickedIds(new Set(result.failed.map((item) => item.id)));
       setSelecting(true);
     }

@@ -1,18 +1,30 @@
-import { useDeferredValue, useLayoutEffect, useRef, useState } from "react";
+import { useDeferredValue, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRightIcon } from "lucide-react";
 import { api } from "../api/client";
 import { IDLE_POLL_MS, pollMs } from "../api/polling";
 import { isBrowserLinkClick, listingHref } from "../app/openListing";
+import { useWorkspaceRuntime } from "../app/runtime";
+import { listingCanRegenerate } from "../bulkRegenerate";
 import { suggestionKindLabel } from "./SuggestionsPanel";
 import { WorkspacePage, PageHeader, Panel, PageError, PageSkeleton, rowButtonClassName } from "./WorkspacePage";
-import { ListingThumb } from "./sidebar/ListingBits";
+import { ListingThumb, SelectCheckbox } from "./sidebar/ListingBits";
+import { BulkSelectionDialogs } from "./sidebar/BulkSelection";
 import { displayCoverUrl } from "./sidebar/coverSrc";
+import type { Listing } from "./sidebar/listingShelves";
+import { useListingSelection } from "./sidebar/useListingSelection";
+import type { BulkRegenerate } from "./useBulkRegenerate";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 
 /** Kept mounted when a listing is opened so search, scroll and return focus survive. */
-export function SuggestionsPage({ active, onOpenListing }: { active: boolean; onOpenListing: (id: string) => void }) {
+export function SuggestionsPage({ active, onOpenListing, conversations, bulk }: {
+  active: boolean;
+  onOpenListing: (id: string) => void;
+  conversations: readonly Listing[] | undefined;
+  bulk: BulkRegenerate;
+}) {
+  const { features } = useWorkspaceRuntime();
   const { data, isPending, error, refetch, isFetching } = useQuery({
     queryKey: ["suggestions"], queryFn: api.suggestions.list, enabled: active,
     refetchInterval: active ? () => pollMs(IDLE_POLL_MS) : false,
@@ -21,6 +33,18 @@ export function SuggestionsPage({ active, onOpenListing }: { active: boolean; on
   const needle = useDeferredValue(search.trim().toLowerCase());
   const suggestions = data?.suggestions ?? [];
   const visible = suggestions.filter(item => `${item.title} ${item.reason}`.toLowerCase().includes(needle));
+  const listingsById = useMemo(() => new Map(conversations?.map(item => [item.id, item])), [conversations]);
+  const pendingIds = new Set(bulk.pendingIds);
+  const eligibleIds = features.has("bulk_regenerate") ? visible
+    .filter(item => {
+      const listing = listingsById.get(item.conversation_id);
+      return listing && !pendingIds.has(listing.id) && listingCanRegenerate(listing);
+    })
+    .map(item => item.conversation_id) : [];
+  const eligible = new Set(eligibleIds);
+  const selection = useListingSelection({ eligibleIds, listingsById, suggestions, bulk });
+  const selectedCount = selection.selectedIds.size;
+  const run = bulk.run;
   const container = useRef<HTMLDivElement>(null);
   const returnId = useRef<string | null>(null);
   const returnScroll = useRef(0);
@@ -48,17 +72,50 @@ export function SuggestionsPage({ active, onOpenListing }: { active: boolean; on
       <WorkspacePage role="region" aria-label="Suggested listings">
         <PageHeader title="Suggestions" description="Review older listings worth relisting, ranked by age, recent sales and season." />
         <div className="flex flex-col gap-3">
-          <Input type="search" aria-label="Search suggestions" placeholder="Search suggestions" value={search} onChange={event => setSearch(event.target.value)} />
+          <Input type="search" aria-label="Search suggestions" placeholder="Search suggestions" value={search} onChange={event => {
+            setSearch(event.target.value);
+            selection.exitSelecting();
+          }} />
           {data && <p role="status" className="text-xs text-muted-foreground tabular-nums">{visible.length} of {suggestions.length} suggestions · Highest priority first</p>}
         </div>
         {isPending && !error && <PageSkeleton label="Loading suggestions" />}
         {error && <div className="space-y-3"><PageError message={`Could not load suggestions: ${error.message}`} /><Button variant="outline" disabled={isFetching} onClick={() => void refetch()}>Try again</Button></div>}
         {data && visible.length === 0 && <p className="text-sm text-muted-foreground">{suggestions.length ? "No suggestions match your search." : "No suggestions right now. Your listings will appear here when there is something to review."}</p>}
+        {(eligibleIds.length > 0 || run) && (
+          <div role="region" aria-label="Suggestion actions" className="sticky top-0 z-10 flex flex-col gap-2 border-b border-border bg-background py-2">
+            {eligibleIds.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <p role="status" className="mr-auto text-sm text-muted-foreground tabular-nums">{selectedCount} selected</p>
+                <Button variant="outline" className="min-h-11" onClick={selection.toggleSelectAll}>
+                  {selectedCount === eligibleIds.length ? "Clear selection" : "Select all shown"}
+                </Button>
+                <Button className="min-h-11" disabled={selectedCount === 0 || needle !== search.trim().toLowerCase()}
+                  onClick={() => void selection.regenerateSelected()}>Regenerate selected</Button>
+              </div>
+            )}
+            {run && (
+              <div className="flex flex-wrap items-center gap-2">
+                <p role="status" className="mr-auto text-sm text-muted-foreground">{run.finished} of {run.total} finished</p>
+                <Button variant="outline" className="min-h-11" disabled={run.cancelRequested} onClick={bulk.cancel}>
+                  {run.cancelRequested ? "Finishing…" : "Stop batch"}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
         {visible.length > 0 && <Panel>
           <ul aria-label="Recommendations" className="divide-y divide-border/50">
-            {visible.map(item => <li key={item.conversation_id}>
+            {visible.map(item => <li key={item.conversation_id} className="flex items-stretch">
+              {eligibleIds.length > 0 && (
+                <div className="flex w-11 shrink-0 items-center justify-center">
+                  {eligible.has(item.conversation_id) && (
+                    <SelectCheckbox label={`Select ${item.title}`} checked={selection.selectedIds.has(item.conversation_id)}
+                      onToggle={shift => selection.toggleSelect(item.conversation_id, shift, eligibleIds)} />
+                  )}
+                </div>
+              )}
               <a href={listingHref(item.conversation_id)} data-suggestion-id={item.conversation_id}
-                className={`${rowButtonClassName} min-h-24 no-underline`}
+                className={`${rowButtonClassName} min-h-24 flex-1 no-underline`}
                 onClick={event => {
                   if (isBrowserLinkClick(event)) return;
                   event.preventDefault();
@@ -84,6 +141,7 @@ export function SuggestionsPage({ active, onOpenListing }: { active: boolean; on
           </ul>
         </Panel>}
       </WorkspacePage>
+      {active && <BulkSelectionDialogs selection={selection} onOpenListing={onOpenListing} />}
     </div>
   );
 }
