@@ -8,6 +8,7 @@ and devices to the next Machine before open requests finish draining.
 from __future__ import annotations
 
 import socket
+import sys
 from types import FrameType
 
 import uvicorn
@@ -25,16 +26,36 @@ def dual_stack_socket(port: int) -> socket.socket:
 
 
 class HostedServer(uvicorn.Server):
+    def __init__(self, config: uvicorn.Config) -> None:
+        super().__init__(config)
+        self.worker_failed = False
+
     def handle_exit(self, sig: int, frame: FrameType | None) -> None:
         process_handoff.begin_draining()
         super().handle_exit(sig, frame)
 
+    def exit_on_worker_failure(self, _exc: BaseException | None = None) -> None:
+        # Fly checks route and gate deploys, but do not restart a running Machine
+        # until its process exits. Drain leases and exit non-zero so Fly restarts it.
+        self.worker_failed = True
+        process_handoff.begin_draining()
+        self.should_exit = True
+
 
 def main() -> None:
+    from anteroom import hosted
+
     config = uvicorn.Config(
         'anteroom.hosted:app', access_log=False, timeout_graceful_shutdown=120,
     )
-    HostedServer(config).run(sockets=[dual_stack_socket(8080)])
+    server = HostedServer(config)
+    hosted.set_worker_stopped_handler(server.exit_on_worker_failure)
+    try:
+        server.run(sockets=[dual_stack_socket(8080)])
+    finally:
+        hosted.set_worker_stopped_handler(None)
+    if server.worker_failed:
+        sys.exit(1)
 
 
 if __name__ == '__main__':

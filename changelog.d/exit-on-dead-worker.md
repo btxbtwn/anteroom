@@ -1,0 +1,1 @@
+- Hosted background worker now exits with a non-zero status if its draft loop stops unexpectedly so Fly automatically restarts it instead of leaving queued drafts and assistant answers stalled.

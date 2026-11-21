@@ -55,6 +55,14 @@ http_log = logging.getLogger("anteroom.http")
 # few threads keep up with every request the Machine serves.
 AUTH_THREADS = 4
 
+_on_worker_stopped: Callable[[BaseException | None], None] | None = None
+
+
+def set_worker_stopped_handler(handler: Callable[[BaseException | None], None] | None) -> None:
+    """Register the server callback invoked if the draft worker stops outside shutdown."""
+    global _on_worker_stopped
+    _on_worker_stopped = handler
+
 
 def _skip_client_warning(scope, route, status: int, *, fly_replay: bool) -> bool:
     """Client/routing 4xx responses that are routine and should not alert the operator."""
@@ -349,6 +357,22 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             background_worker.register(queue.ASSISTANT, answer_task)
             # Drafts are claimed row by row, so every Machine may run this worker.
             _, worker = start_background(background_worker.serve(engine, stopping), 'anteroom-drafts')
+
+            def _watch_worker(done_future) -> None:
+                if stopping.is_set() or process_handoff.draining():
+                    return
+                exc: BaseException | None = None
+                if not done_future.cancelled():
+                    exc = done_future.exception()
+                logging.getLogger(__name__).critical(
+                    'Background draft worker stopped outside shutdown; requesting process exit so Fly restarts this Machine',
+                    exc_info=exc,
+                )
+                handler = _on_worker_stopped
+                if handler is not None:
+                    handler(exc)
+
+            worker.add_done_callback(_watch_worker)
             starts[process_handoff.LEASE] = scheduler_set([
                 # Automations still submit regenerations through the same durable queue.
                 (lambda: hosted_automation_scheduler.serve(engine), 'anteroom-automations'),
@@ -568,8 +592,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             "progress_listener": task_signals.health(),
         }
         if app.state.background_worker_enabled and worker is not None and worker.done():
-            # The draft loop died: fail the check so Fly restarts this Machine
-            # instead of leaving queued drafts waiting on it.
+            # The draft loop died: fail the check while the process drains and exits
+            # non-zero so Fly routes away immediately and restarts this Machine.
             return JSONResponse({**body, "status": "worker_stopped"}, status_code=503)
         return body
 
