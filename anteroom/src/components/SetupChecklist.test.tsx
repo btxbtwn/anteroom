@@ -58,4 +58,38 @@ describe("hosted first-run checklist", () => {
     expect(html).not.toContain("Open Connections");
     expect(html).toContain("configure an AI provider key before generating");
   });
+
+  it("shows loading and retryable error states instead of assuming marketplaces are disconnected", () => {
+    const loadingHtml = renderToStaticMarkup(
+      <HostedSetupChecklistView
+        managedAI
+        providerConfigured
+        connectionsStatus="loading"
+        ebayConnected={false}
+        etsyConnected={false}
+        onOpenProviders={() => {}}
+        onOpenConnections={() => {}}
+        onCreate={() => {}}
+      />,
+    );
+    expect(loadingHtml).toContain("Checking eBay and Etsy connections");
+    expect(loadingHtml).not.toContain("Sign in directly from your browser");
+
+    const errorHtml = renderToStaticMarkup(
+      <HostedSetupChecklistView
+        managedAI
+        providerConfigured
+        connectionsStatus="error"
+        ebayConnected={false}
+        etsyConnected={false}
+        onOpenProviders={() => {}}
+        onOpenConnections={() => {}}
+        onRetryConnections={() => {}}
+        onCreate={() => {}}
+      />,
+    );
+    expect(errorHtml).toContain("Could not check eBay and Etsy connections.");
+    expect(errorHtml).toContain("Retry");
+    expect(errorHtml).toContain("Open Connections");
+  });
 });

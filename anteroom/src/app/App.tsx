@@ -781,6 +781,18 @@ export function App() {
             activeView={activeView}
             settingsSection={settingsSection}
             mobileOpen={!isMobile || mobileListOpen}
+            emptyState={
+              isMobile && activeView === "listings" && !selectedConvId && !needsSetup && runtime.hosted && status !== undefined && conversations !== undefined && conversations.length === 0 ? (
+                <HostedSetupChecklist
+                  managedAI={runtime.features.has("managed_ai")}
+                  providerConfigured={providerConfigured}
+                  creating={createConv.isPending}
+                  onOpenProviders={openProviders}
+                  onOpenConnections={openConnections}
+                  onCreate={createListing}
+                />
+              ) : undefined
+            }
             onSearch={openSidebarForSearch}
             onSelect={openListing}
             onDelete={deleteListing}
@@ -935,7 +947,7 @@ export function App() {
                     onStartGuide={() => setSetupGuideOpen(true)}
                     onCreate={createListing}
                   />
-                ) : runtime.hosted && status !== undefined && conversations !== undefined && conversations.length === 0 ? (
+                ) : !isMobile && runtime.hosted && status !== undefined && conversations !== undefined && conversations.length === 0 ? (
                   <HostedSetupChecklist
                     managedAI={runtime.features.has("managed_ai")}
                     providerConfigured={providerConfigured}

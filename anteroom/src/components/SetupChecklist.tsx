@@ -21,15 +21,20 @@ type SetupChecklistProps = {
 type HostedSetupChecklistViewProps = {
   managedAI: boolean;
   providerConfigured: boolean;
+  connectionsStatus?: "loading" | "error" | "ready";
   ebayConnected: boolean;
   etsyConnected: boolean;
   creating?: boolean;
   onOpenProviders: () => void;
   onOpenConnections: () => void;
+  onRetryConnections?: () => void;
   onCreate: () => void;
 };
 
-type HostedSetupChecklistProps = Omit<HostedSetupChecklistViewProps, "ebayConnected" | "etsyConnected">;
+type HostedSetupChecklistProps = Omit<
+  HostedSetupChecklistViewProps,
+  "connectionsStatus" | "ebayConnected" | "etsyConnected" | "onRetryConnections"
+>;
 
 function Step({
   index,
@@ -72,11 +77,13 @@ function Note({ children }: { children: ReactNode }) {
 export function HostedSetupChecklistView({
   managedAI,
   providerConfigured,
+  connectionsStatus = "ready",
   ebayConnected,
   etsyConnected,
   creating,
   onOpenProviders,
   onOpenConnections,
+  onRetryConnections,
   onCreate,
 }: HostedSetupChecklistViewProps) {
   let stepNumber = 1;
@@ -84,14 +91,19 @@ export function HostedSetupChecklistView({
   const directStep = stepNumber++;
   const chromeStep = stepNumber++;
   const createStep = stepNumber++;
-  const directDone = ebayConnected || etsyConnected;
-  const directNote = ebayConnected && etsyConnected
-    ? "eBay and Etsy connected."
-    : ebayConnected
-      ? "eBay connected. You can also connect Etsy anytime in Settings."
-      : etsyConnected
-        ? "Etsy connected. You can also connect eBay anytime in Settings."
-        : "Sign in directly from your browser — no extension needed for eBay or Etsy.";
+  const directDone = connectionsStatus === "ready" && (ebayConnected || etsyConnected);
+  const directNote = connectionsStatus === "loading"
+    ? "Checking eBay and Etsy connections…"
+    : connectionsStatus === "error"
+      ? "Could not check eBay and Etsy connections."
+      : ebayConnected && etsyConnected
+        ? "eBay and Etsy connected."
+        : ebayConnected
+          ? "eBay connected. You can also connect Etsy anytime in Settings."
+          : etsyConnected
+            ? "Etsy connected. You can also connect eBay anytime in Settings."
+            : "Sign in directly from your browser — no extension needed for eBay or Etsy.";
+  const showOpenConnections = connectionsStatus !== "ready" || !(ebayConnected && etsyConnected);
 
   return (
     <Empty className="flex-1 overflow-y-auto">
@@ -118,8 +130,13 @@ export function HostedSetupChecklistView({
           ) : null}
           <Step index={directStep} done={directDone} label="Connect eBay or Etsy in Settings.">
             <Note>{directNote}</Note>
-            {!(ebayConnected && etsyConnected) ? (
+            {showOpenConnections ? (
               <div className="mt-2.5 flex flex-wrap gap-2">
+                {connectionsStatus === "error" && onRetryConnections ? (
+                  <Button type="button" variant="outline" size="sm" onClick={onRetryConnections}>
+                    Retry
+                  </Button>
+                ) : null}
                 <Button type="button" variant="outline" size="sm" onClick={onOpenConnections}>
                   Open Connections
                 </Button>
@@ -157,17 +174,21 @@ export function HostedSetupChecklistView({
 
 /** Queries the seller's direct marketplace connections for the hosted onboarding checklist. */
 export function HostedSetupChecklist(props: HostedSetupChecklistProps) {
-  const { data } = useQuery({
+  const { data, isPending, isError, refetch } = useQuery({
     queryKey: ["direct-connections"],
     queryFn: api.directConnections.status,
     staleTime: 30_000,
     retry: false,
   });
+  // Preserve cached results during background refreshes; only report loading or error when no data exists yet.
+  const connectionsStatus = data !== undefined ? "ready" : isError ? "error" : isPending ? "loading" : "ready";
   return (
     <HostedSetupChecklistView
       {...props}
+      connectionsStatus={connectionsStatus}
       ebayConnected={Boolean(data?.accounts?.ebay?.connected)}
       etsyConnected={Boolean(data?.accounts?.etsy?.connected)}
+      onRetryConnections={() => { void refetch(); }}
     />
   );
 }
