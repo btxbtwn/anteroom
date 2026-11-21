@@ -74,8 +74,9 @@ LISTING_BATCH = 200
 # What the whole prompt may cost on a large shop, in tokens (about 3.5 characters each). The tests hold a
 # shop of hundreds of listings to it, so a new section cannot quietly bring every row back.
 PROMPT_TOKEN_BUDGET = 20_000
-# Lookups one question may run, and what one may cost and return.
+# Lookups one question may run (rounds, and blocks per round), and what one may cost and return.
 MAX_LOOKUPS = 6
+LOOKUPS_PER_ROUND = 3
 LOOKUP_SECONDS = 5.0
 LOOKUP_ROWS = 200
 LOOKUP_CHARS = 24_000
@@ -134,10 +135,11 @@ INSTRUCTIONS = (
 
 LOOKUP_INSTRUCTIONS = (
     "Looking things up: the shop is also loaded into a SQLite database. When the summary does not already "
-    "answer the question, reply with nothing but one ```sql block holding a single SELECT. Make its first line "
-    "a comment saying in plain words what you are looking up, like `-- sales by size`. Anteroom runs it and "
-    "replies with up to {rows} rows, so filter, aggregate, or ORDER BY with a LIMIT. You may do this up to "
-    "{limit} times for one question, then answer. Never show SQL or mention the database to the seller.\n"
+    "answer the question, reply with nothing but one ```sql block holding a single SELECT, or up to {per_round} "
+    "```sql blocks, each one SELECT, when the figures are independent. Make each block's first line "
+    "a comment saying in plain words what you are looking up, like `-- sales by size`. Anteroom runs them and "
+    "replies with up to {rows} rows each, so filter, aggregate, or ORDER BY with a LIMIT. You may do this up to "
+    "{limit} rounds for one question, then answer. Never show SQL or mention the database to the seller.\n"
     "Lookup tables, all of them, with every column:\n{schema}\n"
     "Dates are YYYY-MM-DD text. Amounts are numbers; NULL means not recorded. `margin` is profit as a percent of "
     "revenue over the sales with a cost recorded (`profit_known`); `median_days` is days from listing to sale.\n"
@@ -163,10 +165,10 @@ LOOKUP_INSTRUCTIONS = (
     "Every lookup answers: rows, \"0 rows matched\" (with the closest real values in that column when any exist), or "
     "\"Lookup ... failed: <reason>\". Read that reply; when a lookup failed or matched nothing, say so or try a "
     "corrected query using a listed value only if it names the same thing, and never fill the gap with a guess.\n"
-    "Seeing a box's photos: reply with nothing but one ```view_box_media block listing the box ids from the "
-    "sourcing_boxes table (or the summary's box table), one per line. Anteroom fetches each box's product page now "
-    "and replies with its photos and frames from its video as images, saying which images belong to which box and "
-    "which boxes could not be viewed and why. It counts as one of the lookups.\n"
+    "Seeing a box's photos: include a ```view_box_media block (alone or alongside ```sql blocks, within the "
+    "{per_round}-block limit) listing the box ids from the sourcing_boxes table (or the summary's box table), "
+    "one per line. Anteroom fetches each box's product page now and replies with its photos and frames from its "
+    "video as images, saying which images belong to which box and which boxes could not be viewed and why.\n"
 )
 
 CHANGES_INSTRUCTIONS = (
@@ -686,7 +688,9 @@ def build_messages(db: Session, question: str, shop: Shop, thread_id: str | None
     if not earlier or earlier[-1] != {"role": "user", "content": question}:
         earlier.append({"role": "user", "content": question})
     # The instructions lead so a provider's prefix cache still hits when the figures move.
-    lookups = LOOKUP_INSTRUCTIONS.format(limit=MAX_LOOKUPS, rows=LOOKUP_ROWS, schema=lookup_schema())
+    lookups = LOOKUP_INSTRUCTIONS.format(
+        limit=MAX_LOOKUPS, per_round=LOOKUPS_PER_ROUND, rows=LOOKUP_ROWS, schema=lookup_schema(),
+    )
     system = (
         f"{INSTRUCTIONS}\n{lookups}\n"
         f"{CHANGES_INSTRUCTIONS.format(limit=assistant_changes.MAX_CHANGES)}\n"
@@ -794,8 +798,8 @@ async def answer(
                         lead, written = "", True
         finally:
             timing.round_ms[-1] = elapsed_ms(round_started)
-        lookup = find_lookup(reply)
-        if lookup is None:
+        lookups = find_lookups(reply)
+        if not lookups:
             words, memory, changes, automation = assistant_memory.peel(reply)
             if memory is not None and not words.strip() and not written:
                 words = "I'll remember that."
@@ -809,7 +813,7 @@ async def answer(
             if automation is not None:
                 yield "automation", automation
             return
-        before = assistant_memory.visible_text(reply[:lookup.start]).rstrip()
+        before = assistant_memory.visible_text(reply[:lookups[0].start]).rstrip()
         if len(before) > released:
             piece = links.clean(before[released:])
             if piece.strip():
@@ -818,13 +822,18 @@ async def answer(
         if used == MAX_LOOKUPS:
             yield "error", "The assistant kept looking things up without answering. Ask again, or ask something narrower."
             return
-        yield "status", lookup_label(lookup)
-        lookup_started = time.monotonic()
-        timing.lookups += 1
-        try:
-            result = await run_any_lookup(lookup, shop, viewed)
-        finally:
-            timing.lookup_ms = min(TIMING_CAP_MS, timing.lookup_ms + elapsed_ms(lookup_started))
+        batch = lookups[:LOOKUPS_PER_ROUND]
+        skipped = len(lookups) - len(batch)
+        results: list[str | list[dict[str, Any]]] = []
+        for item in batch:
+            yield "status", lookup_label(item)
+            lookup_started = time.monotonic()
+            timing.lookups += 1
+            try:
+                results.append(await run_any_lookup(item, shop, viewed))
+            finally:
+                timing.lookup_ms = min(TIMING_CAP_MS, timing.lookup_ms + elapsed_ms(lookup_started))
+        result = _combined(batch, results, skipped)
         texts = [result] if isinstance(result, str) else [part["text"] for part in result if part.get("type") == "text"]
         links.allow(texts)
         if used == MAX_LOOKUPS - 1:
@@ -833,7 +842,39 @@ async def answer(
                 result += last
             else:
                 result[0] = {"type": "text", "text": result[0]["text"] + last}
-        messages += [{"role": "assistant", "content": reply[:lookup.end]}, {"role": "user", "content": result}]
+        messages += [{"role": "assistant", "content": reply[:lookups[-1].end]}, {"role": "user", "content": result}]
+
+
+def _lookup_heading(lookup: Lookup) -> str:
+    if lookup.kind == "media":
+        return "box photos"
+    first = lookup.body.lstrip().splitlines()[0].strip() if lookup.body.strip() else ""
+    words = first[2:].strip(" .") if first.startswith("--") else ""
+    return words[:80] if words else _lookup_name(lookup.body)
+
+
+def _combined(
+    batch: list[Lookup], results: list[str | list[dict[str, Any]]], skipped: int,
+) -> str | list[dict[str, Any]]:
+    if len(batch) == 1 and not skipped:
+        return results[0]
+    sections: list[str] = []
+    images: list[dict[str, Any]] = []
+    total = len(batch)
+    for index, (lookup, item_result) in enumerate(zip(batch, results, strict=True), 1):
+        header = f"Lookup {index} of {total} ({_lookup_heading(lookup)}):"
+        if isinstance(item_result, str):
+            body = item_result
+        else:
+            text_parts = [part["text"] for part in item_result if part.get("type") == "text"]
+            images.extend(part for part in item_result if part.get("type") != "text")
+            body = "\n".join(text_parts)
+        sections.append(f"{header}\n{body}")
+    if skipped:
+        noun = "lookup was" if skipped == 1 else "lookups were"
+        sections.append(f"{skipped} more {noun} not run: at most {LOOKUPS_PER_ROUND} run at once.")
+    combined_text = "\n\n".join(sections)
+    return [{"type": "text", "text": combined_text}, *images] if images else combined_text
 
 
 def _visible(reply: str) -> str:
@@ -863,9 +904,10 @@ def _visible(reply: str) -> str:
     return shown[:-hold] if hold else shown
 
 
-def find_lookup(reply: str) -> Lookup | None:
-    """The first lookup block in a reply, wherever it sits, or None when the reply is an answer."""
+def find_lookups(reply: str) -> list[Lookup]:
+    """Every lookup block in a reply, in order, or an empty list when the reply is an answer."""
     opening = len(reply) - len(reply.lstrip())
+    found: list[Lookup] = []
     for match in _FENCED.finditer(reply):
         language = match.group(1).lower()
         body = match.group(2).strip()
@@ -873,8 +915,14 @@ def find_lookup(reply: str) -> Lookup | None:
         if kind is None and not language and match.start() == opening and _SELECTISH.match(body):
             kind = "sql"
         if kind is not None:
-            return Lookup(kind=kind, body=body, start=match.start(), end=match.end())
-    return None
+            found.append(Lookup(kind=kind, body=body, start=match.start(), end=match.end()))
+    return found
+
+
+def find_lookup(reply: str) -> Lookup | None:
+    """The first lookup block in a reply, wherever it sits, or None when the reply is an answer."""
+    found = find_lookups(reply)
+    return found[0] if found else None
 
 
 def lookup_sql(reply: str) -> str | None:

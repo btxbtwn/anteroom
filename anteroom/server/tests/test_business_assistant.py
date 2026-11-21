@@ -1719,5 +1719,124 @@ def test_zero_row_lookup_suggests_closest_whitelisted_values(workspace):
         shop.close()
 
 
+def test_multiple_sql_lookups_run_in_one_round(workspace, monkeypatch):
+    db, client = workspace
+    seed(db)
+    two_blocks = (
+        f"{FENCE}sql\n-- sold sizes\nSELECT size, count(*) FROM listings WHERE status = 'sold' GROUP BY size\n{FENCE}\n"
+        f"{FENCE}sql\n-- active coats\nSELECT title, asking FROM listings WHERE status = 'active'\n{FENCE}"
+    )
+    provider, response = ask_through(client, monkeypatch, (two_blocks,), ("Size 34 sold and the coat is $120.",))
+
+    assert len(provider.calls) == 2
+    assert "event: status\ndata: Looking up sold sizes…" in response
+    assert "event: status\ndata: Looking up active coats…" in response
+    assert "SELECT" not in response and "Size 34 sold and the coat is $120." in response
+    assert provider.calls[1][-1] == {
+        "role": "user",
+        "content": (
+            "Lookup 1 of 2 (sold sizes):\n"
+            "Lookup result (1 rows):\nsize | count(*)\n34 | 1\n\n"
+            "Lookup 2 of 2 (active coats):\n"
+            "Lookup result (1 rows):\ntitle | asking\nCarhartt | Chore Coat | 120.0"
+        ),
+    }
+
+
+def test_more_than_three_lookups_in_one_round_are_capped(workspace):
+    db, _client = workspace
+    seed(db)
+    four_blocks = "\n".join(
+        f"{FENCE}sql\n-- query {n}\nSELECT {n} AS n\n{FENCE}" for n in range(1, 5)
+    )
+    provider = Provider((four_blocks,), ("Done.",))
+    shop = business_assistant.read_shop(db, now=NOW)
+    timing = business_assistant.AnswerTiming()
+    try:
+        async def collect():
+            return [event async for event in business_assistant.answer(
+                provider, [{"role": "user", "content": "Check four things"}], shop, timing=timing,
+            )]
+        events = asyncio.run(collect())
+    finally:
+        shop.close()
+
+    assert len(provider.calls) == 2
+    assert timing.lookups == 3
+    statuses = [text for kind, text in events if kind == "status"]
+    assert statuses == ["Looking up query 1…", "Looking up query 2…", "Looking up query 3…"]
+    fed_back = provider.calls[1][-1]["content"]
+    assert "Lookup 3 of 3 (query 3):" in fed_back
+    assert "Lookup 4 of" not in fed_back
+    assert "1 more lookup was not run: at most 3 run at once." in fed_back
+
+
+def test_sql_and_box_media_lookups_combine_text_then_images(workspace, monkeypatch):
+    from anteroom.services import box_media
+
+    db, _client = workspace
+    seed(db)
+    base_shop = business_assistant.read_shop(db, now=NOW)
+    sourcing_row = {
+        "id": "raghouse:1", "store": "Raghouse", "title": "Vintage Tees 20 pcs",
+        "url": "https://raghouse.example/lot/1",
+    }
+    shop = business_assistant.Shop(
+        brief=base_shop.brief,
+        tables={**base_shop.tables, "sourcing_boxes": [sourcing_row]},
+    )
+
+    async def fake_view_boxes(chosen):
+        return [
+            box_media.BoxView(
+                box_id=row["id"], title=row["title"], store=row["store"], url=row["url"],
+                images=[("photo 1 of 1", "data:image/jpeg;base64,AAAA")], photos_on_page=1,
+            )
+            for row in chosen
+        ]
+
+    monkeypatch.setattr(box_media, "view_boxes", fake_view_boxes)
+    mixed = (
+        f"{FENCE}sql\n-- total listings\nSELECT count(*) AS total FROM listings\n{FENCE}\n"
+        f"{FENCE}view_box_media\nraghouse:1\n{FENCE}"
+    )
+    provider = Provider((mixed,), ("Looked at both.",))
+    try:
+        async def collect():
+            return [event async for event in business_assistant.answer(
+                provider, [{"role": "user", "content": "Check listings and photos"}], shop,
+            )]
+        events = asyncio.run(collect())
+    finally:
+        shop.close()
+        base_shop.close()
+
+    statuses = [text for kind, text in events if kind == "status"]
+    assert statuses == ["Looking up total listings…", "Looking at the box photos…"]
+    fed_back = provider.calls[1][-1]["content"]
+    assert isinstance(fed_back, list)
+    assert fed_back[0]["type"] == "text"
+    assert "Lookup 1 of 2 (total listings):" in fed_back[0]["text"]
+    assert "Lookup 2 of 2 (box photos):" in fed_back[0]["text"]
+    assert any(part.get("type") == "image_url" for part in fed_back[1:])
+
+
+def test_failing_and_good_lookups_in_one_round_both_report(workspace, monkeypatch):
+    db, client = workspace
+    seed(db)
+    blocks = (
+        f"{FENCE}sql\n-- broken query\nSELECT nope FROM listings\n{FENCE}\n"
+        f"{FENCE}sql\n-- listing count\nSELECT count(*) FROM listings\n{FENCE}"
+    )
+    provider, response = ask_through(client, monkeypatch, (blocks,), ("There are 3 listings.",))
+
+    assert len(provider.calls) == 2
+    assert "There are 3 listings." in response
+    fed_back = provider.calls[1][-1]["content"]
+    assert "Lookup 1 of 2 (broken query):\nLookup listings failed: no such column: nope." in fed_back
+    assert "Lookup 2 of 2 (listing count):\nLookup result (1 rows):\ncount(*)\n3" in fed_back
+
+
+
 
 
