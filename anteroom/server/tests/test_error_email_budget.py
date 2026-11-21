@@ -57,6 +57,27 @@ def test_muted_group_counts_occurrences_and_resumes_at_expiry(store):
     assert group['note'] == 'Investigating'
 
 
+def test_tick_resumes_queued_mail_at_mute_expiry_without_a_new_occurrence(store):
+    sent, now = [], [100.0]
+    delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=10, clock=lambda: now[0])
+    item = report()
+    delivery.add(item)
+    assert store.triage('ERROR', item['fingerprint'], status='muted', muted_until=200, note='Investigating')
+    muted = store.list_groups('muted')[0]
+
+    now[0] = 199
+    delivery.tick()
+    assert not sent
+    assert delivery.status()['pending'] == 1
+    assert store.list_groups('muted') == [muted]
+
+    now[0] = 200
+    delivery.tick()
+    assert len(sent) == 1 and '1 occurrences' in sent[0][1]
+    assert delivery.status()['pending'] == 0
+    assert store.list_groups('open') == [dict(muted, status='open', muted_until=None)]
+
+
 def test_resolved_group_only_alerts_on_newer_release(store):
     sent = []
     delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=10, clock=lambda: 100)

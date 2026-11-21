@@ -94,6 +94,12 @@ class EmailTransaction:
             self.connection.execute(self.groups.insert().values(fingerprint=key, **values))
         self.dirty = True
 
+    def reopen_expired_queued_mutes(self, now):
+        groups = self.groups
+        self.connection.execute(update(groups).where(
+            groups.c.status == 'muted', groups.c.muted_until <= now, groups.c.due <= now
+        ).values(status='open', muted_until=None))
+
     def due_groups(self, now, *, warning, limit, first_alert=False, sent_before=None):
         query = select(self.groups.c.fingerprint, self.groups.c.payload).where(
             self.groups.c.status == 'open', self.groups.c.warning == warning, self.groups.c.due <= now)
