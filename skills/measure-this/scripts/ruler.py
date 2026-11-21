@@ -64,18 +64,26 @@ class Stick:
         return math.hypot(self.x2 - self.x1, self.y2 - self.y1)
 
 
-def load(path: Path, *, max_side: int | None = MAX_SIDE) -> Image.Image:
+def _load_with_scale(path: Path, *, max_side: int | None = MAX_SIDE) -> tuple[Image.Image, float, float]:
     with warnings.catch_warnings():
         warnings.simplefilter("error", Image.DecompressionBombWarning)
         with Image.open(path) as image:
             if image.width * image.height > MAX_PIXELS:
                 raise ValueError(f"Photo exceeds maximum pixel count ({MAX_PIXELS})")
+            orig_w, orig_h = image.size
+            if image.getexif().get(274) in (5, 6, 7, 8):
+                orig_w, orig_h = orig_h, orig_w
             if max_side:
                 image.draft("RGB", (max_side, max_side))
             upright = ImageOps.exif_transpose(image)
             if max_side and max(upright.size) > max_side:
                 upright.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
-            return upright.convert("RGB")
+            rgb = upright.convert("RGB")
+            return rgb, rgb.width / orig_w, rgb.height / orig_h
+
+
+def load(path: Path, *, max_side: int | None = MAX_SIDE) -> Image.Image:
+    return _load_with_scale(path, max_side=max_side)[0]
 
 
 def wood_mask(image: Image.Image) -> np.ndarray:
@@ -280,12 +288,24 @@ def crop(
     *,
     image: Image.Image | None = None,
 ) -> dict:
-    image = image if image is not None else load(photo)
+    if image is not None:
+        scale_x = scale_y = 1.0
+    else:
+        image, scale_x, scale_y = _load_with_scale(photo)
     if lines:
+        scale = (scale_x + scale_y) / 2
         sticks = []
         for line in lines:
             x1, y1, x2, y2, *rest = (float(part) for part in line.split(","))
-            sticks.append(Stick(x1, y1, x2, y2, width=rest[0] if rest else max(image.size) * 0.05))
+            sticks.append(
+                Stick(
+                    x1 * scale_x,
+                    y1 * scale_y,
+                    x2 * scale_x,
+                    y2 * scale_y,
+                    width=(rest[0] * scale) if rest else max(image.size) * 0.05,
+                )
+            )
     else:
         sticks = find_sticks(image)
     out.mkdir(parents=True, exist_ok=True)

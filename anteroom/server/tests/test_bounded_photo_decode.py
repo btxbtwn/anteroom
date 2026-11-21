@@ -187,7 +187,16 @@ def test_ruler_load_and_measure_read_enforce_pixel_cap_and_max_side(tmp_path):
     assert measure_read.find_ruler_photos([huge_path], tmp_path / "out") == []
 
     tall_path = tmp_path / "tall.png"
-    tall_path.write_bytes(_png(5000, 3000, "RGB"))
+    tall_path.write_bytes(_png(6000, 4500, "RGB"))
     loaded = module.load(tall_path)
     assert max(loaded.size) == module.MAX_SIDE
+
+    # Manual --line coordinates are in original photo pixels; y=4000 in a 6000x4500
+    # photo must scale into the resized 4096x3072 frame rather than falling outside it.
+    report = module.crop(tall_path, tmp_path / "manual", ["500,4000,5500,4000,200"], set())
+    assert report["size"] == [4096, 3072]
+    stick_line = report["sticks"][0]["line"]
+    assert 0 < stick_line[1] < 3072
+    assert abs(stick_line[1] - round(4000 * (3072 / 4500))) <= 1
+
 
