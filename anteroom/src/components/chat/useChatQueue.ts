@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import type { ConversationActivity } from "../../api/types";
 import {
   enqueueChatMessage,
   newQueuedChatMessage,
@@ -13,6 +11,8 @@ import { getLive } from "./liveChatStore";
 interface Options {
   convId: string;
   busy: boolean;
+  /** Background listing work (a field fill after a save). A held follow-up waits for it. */
+  serverBusy: boolean;
   sendMessage: (text: string) => Promise<boolean>;
   queuedMessage: string | null | undefined;
   onQueuedMessageConsumed: (() => void) | undefined;
@@ -23,6 +23,7 @@ interface Options {
 export function useChatQueue({
   convId,
   busy,
+  serverBusy,
   sendMessage,
   queuedMessage,
   onQueuedMessageConsumed,
@@ -32,7 +33,6 @@ export function useChatQueue({
   // composer queue: hold them client-side and send when the turn settles.
   const [pendingQueue, setPendingQueue] = useState<QueuedChatMessage[]>([]);
   const drainLockRef = useRef(false);
-  const queryClient = useQueryClient();
 
   useEffect(() => {
     setPendingQueue([]);
@@ -48,17 +48,12 @@ export function useChatQueue({
     pinChatToBottom();
   }, [queuedMessage, onQueuedMessageConsumed, pinChatToBottom]);
 
+  // serverBusy is a dependency, not a cache read: the fill a chat save starts
+  // ends after the reply does, and the held follow-up must send when it ends.
   useEffect(() => {
-    if (busy || pendingQueue.length === 0 || drainLockRef.current) return;
+    if (busy || serverBusy || pendingQueue.length === 0 || drainLockRef.current) return;
     const liveState = getLive(convId);
-    if (
-      liveState.streaming
-      || liveState.generating
-      || liveState.resetting
-      || queryClient.getQueryData<ConversationActivity>(["activity", convId])?.busy
-    ) {
-      return;
-    }
+    if (liveState.streaming || liveState.generating || liveState.resetting) return;
     const { next, rest } = takeNextChatMessage(pendingQueue);
     if (!next) return;
     drainLockRef.current = true;
@@ -70,7 +65,7 @@ export function useChatQueue({
     }).finally(() => {
       drainLockRef.current = false;
     });
-  }, [busy, pendingQueue, sendMessage, convId, queryClient]);
+  }, [busy, serverBusy, pendingQueue, sendMessage, convId]);
 
   const enqueue = useCallback((message: QueuedChatMessage) => {
     setPendingQueue((queue) => enqueueChatMessage(queue, message));

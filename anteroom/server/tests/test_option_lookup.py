@@ -137,7 +137,8 @@ def test_declares_field_targets_before_editing_and_keeps_protocol_out_of_answer(
         {'path': 'ebay_specifics.Size', 'label': 'Size'},
         {'path': 'ebay_specifics.Brand', 'label': 'Brand'},
     ]}})
-    provider = Provider(['{"_field_targets":["ebay_specifics.Size"]}', 'Saved size 36.'])
+    saved = 'Saved size 36.\n```json\n[{"op":"replace","path":"/ebay_specifics/Size","value":"36"}]\n```'
+    provider = Provider(['{"_field_targets":["ebay_specifics.Size"]}', saved])
     targets = []
 
     async def collect():
@@ -145,7 +146,7 @@ def test_declares_field_targets_before_editing_and_keeps_protocol_out_of_answer(
             provider, [{'role': 'user', 'content': 'Change the eBay size to 36'}], catalog,
             on_targets=targets.append)]
 
-    assert asyncio.run(collect()) == ['Saved size 36.']
+    assert asyncio.run(collect()) == [saved]
     assert targets == [('ebay_specifics.Size',)]
     assert 'Field targets acknowledged' in provider.messages[1][-1]['content']
 
@@ -192,15 +193,16 @@ def test_target_handshake_is_removed_after_acknowledgement():
 
 def test_repeated_targets_do_not_expand_the_accepted_edit_scope():
     catalog = lookup.OptionCatalog({'ebay': {'fields': [{'path': 'size'}, {'path': 'brand'}]}})
+    saved = 'Saved size 36.\n```json\n[{"op":"replace","path":"/size","value":"36"}]\n```'
     provider = Provider(['{"_field_targets":["size"]}',
-                         '{"_field_targets":["brand"]}', 'Saved size 36.'])
+                         '{"_field_targets":["brand"]}', saved])
     targets = []
 
     async def collect():
         return [chunk async for chunk in lookup.chat_with_options(
             provider, [], catalog, on_targets=targets.append)]
 
-    assert asyncio.run(collect()) == ['Saved size 36.']
+    assert asyncio.run(collect()) == [saved]
     assert targets == [('size',)]
     assert 'already acknowledged' in provider.messages[2][-1]['content']
 
@@ -228,14 +230,16 @@ def test_targets_rules_override_the_no_json_only_reply_rule():
 
 def test_field_targets_inside_prose_or_a_fence_are_accepted():
     reply = 'I will move it.\n```json\n{"_field_targets":["category_path","department"]}\n```'
-    answer, targets, _provider = run_targets([reply, 'Moved it to Men.'])
-    assert answer == ['Moved it to Men.']
+    moved = 'Moved it to Men.\n```json\n[{"op":"replace","path":"/department","value":"Men"}]\n```'
+    answer, targets, _provider = run_targets([reply, moved])
+    assert answer == [moved]
     assert targets == [('category_path', 'department')]
 
 
 def test_json_patch_pointer_targets_are_accepted_as_field_paths():
-    answer, targets, _provider = run_targets(['{"_field_targets":["/category_path","/department"]}', 'Moved.'])
-    assert answer == ['Moved.']
+    moved = 'Moved.\n```json\n[{"op":"replace","path":"/department","value":"Men"}]\n```'
+    answer, targets, _provider = run_targets(['{"_field_targets":["/category_path","/department"]}', moved])
+    assert answer == [moved]
     assert targets == [('category_path', 'department')]
 
 
@@ -255,3 +259,24 @@ def test_undeclared_edits_stop_quickly_with_a_clear_message():
     edit = 'Moved.\n```json\n[{"op":"replace","path":"/department","value":"Men"}]\n```'
     with pytest.raises(RuntimeError, match="which fields it would change"):
         run_targets([edit] * 20)
+
+
+def test_declared_fields_answered_in_prose_are_asked_for_their_json_once():
+    # Production: Ask chat declared Depop Style, then replied "I have completed the
+    # request using the acknowledged fields." with no JSON, so nothing was saved.
+    patch = ('Set Style to Retro and Streetwear.\n```json\n'
+             '[{"op":"replace","path":"/depop_specifics/style","value":["retro","streetwear"]}]\n```')
+    answer, targets, provider = run_targets(
+        ['{"_field_targets":["depop_specifics.style"]}',
+         'I have completed the request using the acknowledged fields.', patch],
+        rows=[{'path': 'depop_specifics.style'}])
+    assert answer == [patch]
+    assert targets == [('depop_specifics.style',)]
+    assert 'nothing was saved' in provider.messages[2][-1]['content']
+
+
+def test_a_second_prose_answer_is_kept_when_no_value_is_supported():
+    answer, _targets, provider = run_targets(
+        ['{"_field_targets":["department"]}', 'Done.', 'The photos do not show the department.'])
+    assert answer == ['The photos do not show the department.']
+    assert len(provider.messages) == 3
