@@ -9,6 +9,7 @@ from typing import Any
 
 from anteroom.services.ebay_fields import (
     ebay_optional_blank,
+    ebay_optional_keys,
     ebay_optional_raw,
     ebay_season_haystack,
 )
@@ -22,7 +23,6 @@ from anteroom.models.listing_values import (
     text_value,
 )
 from anteroom.models.schema import (
-    EBAY_YEAR_KEYS,
     _scalar_text,
 )
 
@@ -400,13 +400,18 @@ def etsy_when_raw(etsy: dict[str, Any], listing: dict[str, Any] | None = None) -
 
 
 def ebay_year_manufactured(listing: dict[str, Any] | None) -> str:
+    """eBay's Year Manufactured under any spelling, flat or in category_specifics, skipping blanks.
+
+    eBay's native form saves it as "Year Manufactured"; the listing JSON as yearManufactured.
+    """
     ebay = (listing or {}).get("ebay_specifics")
     if not isinstance(ebay, dict):
         return ""
-    for key in EBAY_YEAR_KEYS:
-        text = _scalar_text(ebay.get(key))
-        if text:
-            return text
+    for block in (ebay, ebay.get("category_specifics")):
+        for name in ebay_optional_keys(block, "yearManufactured"):
+            text = _scalar_text(block.get(name))
+            if text:
+                return text
     return ""
 
 

@@ -11,7 +11,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from anteroom.database import json_value
-from anteroom.models.schema import EBAY_YEAR_KEYS
 from anteroom.models.conversation import (
     Conversation,
     Message,
@@ -30,6 +29,7 @@ from anteroom.models.job import (
 )
 from anteroom.models.listing import Listing, ListingRevision
 from anteroom.models.registry import FieldRegistry
+from anteroom.models.schema import EBAY_YEAR_KEYS
 
 # Keys the extension sends with a step result that are only useful while the
 # message is being handled: the item, the discovered schema, the fill log and

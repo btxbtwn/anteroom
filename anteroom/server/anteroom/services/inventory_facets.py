@@ -4,10 +4,10 @@ from __future__ import annotations
 import json
 from typing import Any
 from sqlalchemy.orm import Session
+from anteroom.models.schema import EBAY_YEAR_KEYS
 from anteroom.repositories.queries import ConversationRepo
 
-def _facet(sku: Any, price: Any, etsy: Any = None, *years: Any) -> dict[str, Any]:
-    from anteroom.models.schema import EBAY_YEAR_KEYS
+def _facet(sku: Any, price: Any, etsy: Any, *years: Any) -> dict[str, Any]:
     from anteroom.services.etsy_fields import etsy_eligible
 
     text = str(sku or "").strip()

@@ -67,6 +67,11 @@ class EtsyEligibleTest(unittest.TestCase):
         self.assertTrue(etsy_eligible(dated))
         self.assertEqual(etsy_when_raw({}, dated), "2000-2009")
         self.assertEqual(etsy_when_to_store("2000-2009", dated), "2000 - 2006 (Vintage)")
+        # Any spelling, flat or nested, and a blank spelling does not hide a filled one.
+        for ebay in ({"Year manufactured": "1988"}, {"category_specifics": {"Year Manufactured": "1988"}},
+                     {"yearManufactured": "", "Year Manufactured": "1988"}):
+            with self.subTest(ebay=ebay):
+                self.assertEqual(etsy_when_raw({}, listing(ebay_specifics=ebay)), "1988")
 
     def test_handmade_supplies_and_digital_are_allowed(self):
         self.assertTrue(etsy_eligible(listing({**MODERN, "who_made": "I did"})))
