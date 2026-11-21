@@ -185,3 +185,59 @@ def test_generation_submissions_are_rate_limited_per_seller(migration_engine, jw
         # Reconnecting to a draft never counts, and Bob has his own allowance.
         assert client.post(f'/api/conversations/{draft}/generate?resume=true', headers=alice).status_code == 200
         assert client.post(f'/api/conversations/{bobs}/generate', headers=bob).status_code == 400
+
+
+def test_browser_error_reports_are_rate_limited_per_seller(jwks, signing_keys, caplog):  # noqa: F811
+    payload = {'kind': 'crash', 'message': 'Boom', 'path': '/inventory'}
+    with TestClient(create_app(PROJECT_URL)) as client:
+        client.app.state.error_report_limit = SellerRateLimit(burst=2, per_second=0.001)
+        alice, bob = headers(signing_keys), headers(signing_keys, BOB)
+        with caplog.at_level('ERROR', logger='anteroom.browser'):
+            assert client.post('/api/error-reports', headers=alice, json=payload).status_code == 202
+            assert client.post('/api/error-reports', headers=alice, json=payload).status_code == 202
+            limited = client.post('/api/error-reports', headers=alice, json=payload)
+            assert limited.status_code == 429
+            assert limited.headers['Retry-After']
+            # Another seller keeps an independent allowance.
+            assert client.post('/api/error-reports', headers=bob, json=payload).status_code == 202
+        # Only the 3 accepted reports were logged.
+        assert len(caplog.records) == 3
+
+
+def test_hosted_vision_and_automation_routes_are_rate_limited_per_seller(jwks, signing_keys, monkeypatch):  # noqa: F811
+    monkeypatch.setattr('anteroom.routes.measurements.get_photo_provider', lambda: None)
+    image = io.BytesIO()
+    Image.new('RGB', (8, 8), 'red').save(image, 'JPEG')
+    raw = image.getvalue()
+
+    with TestClient(create_app(PROJECT_URL)) as client:
+        alice, bob = headers(signing_keys), headers(signing_keys, BOB)
+
+        # Unsaved measurement & size-tag uploads share the per-seller submission bucket.
+        client.app.state.submission_limit = SellerRateLimit(burst=1, per_second=0.001)
+        files = [('files', ('a.jpg', raw, 'image/jpeg'))]
+        assert client.post('/api/measurements/read', headers=alice, files=files, data={'garment': 'top'}).status_code == 503
+        limited = client.post('/api/measurements/read', headers=alice, files=files, data={'garment': 'top'})
+        assert limited.status_code == 429
+        assert limited.headers['Retry-After']
+        assert client.post('/api/size-tags/read', headers=alice, files=files).status_code == 429
+        # Bob still has his own token.
+        assert client.post('/api/size-tags/read', headers=bob, files=files).status_code == 503
+
+        # Saved-listing measurement & size-tag routes also enforce the per-seller bucket.
+        client.app.state.submission_limit = SellerRateLimit(burst=1, per_second=0.001)
+        assert client.post('/api/conversations/draft-1/measurements/read', headers=alice, json={'garment': 'top'}).status_code == 503
+        limited_saved = client.post('/api/conversations/draft-1/measurements/read', headers=alice, json={'garment': 'top'})
+        assert limited_saved.status_code == 429
+        assert limited_saved.headers['Retry-After']
+        assert client.post('/api/conversations/draft-1/size-tags/read', headers=alice).status_code == 429
+
+        # Automation draft & manual run enforce the per-seller bucket before reaching the handler.
+        client.app.state.submission_limit = SellerRateLimit(burst=0, per_second=0.001)
+        limited_draft = client.post('/api/automations/draft', headers=alice, json={'instruction': 'Lower prices by 5%'})
+        assert limited_draft.status_code == 429
+        assert limited_draft.headers['Retry-After']
+        limited_run = client.post('/api/automations/auto-1/run', headers=alice)
+        assert limited_run.status_code == 429
+        assert limited_run.headers['Retry-After']
+

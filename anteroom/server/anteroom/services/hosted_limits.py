@@ -284,6 +284,12 @@ ENQUEUE_PER_SECOND = 1.0
 MAX_TRACKED_SELLERS = 4096
 
 
+# Browser crash reports: plenty for a burst of real errors, stops a stuck tab
+# or abusive session from flooding logs and operator alert capacity.
+ERROR_REPORT_BURST = 30
+ERROR_REPORT_PER_SECOND = 0.5
+
+
 class SellerRateLimit:
     """A token bucket per seller for submitting background work."""
 
@@ -308,3 +314,18 @@ class SellerRateLimit:
             wait = max(1, int((1 - tokens) / self._rate + 0.999))
             raise HTTPException(429, 'Too many requests in a short time. Try again in a moment.',
                                 headers={'Retry-After': str(wait)})
+
+
+def limit_seller_submissions(request: Request) -> None:
+    """Apply the hosted app's per-seller submission bucket when running hosted."""
+    limiter = getattr(request.app.state, 'submission_limit', None)
+    if limiter is None:
+        return
+    from anteroom.services.service_context import current
+    context = current()
+    if context is not None:
+        limiter.take(context.seller_id)
+        return
+    seller = getattr(request.state, 'seller', None)
+    if seller is not None:
+        limiter.take(seller.user_id)

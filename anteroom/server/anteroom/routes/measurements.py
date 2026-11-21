@@ -18,7 +18,12 @@ from anteroom.repositories.queries import ConversationRepo
 from anteroom.routes.api_contract import NOT_FOUND, SIZE_TAG_READ_ERRORS, SizeTagReadResult
 from anteroom.services import hosted_photos, measure_read, size_tag_read
 from anteroom.services.hosted_database import SellerDatabaseSession, in_seller_session
-from anteroom.services.hosted_limits import bounded_route_class, release_upload_slot, stream_upload_to_path
+from anteroom.services.hosted_limits import (
+    bounded_route_class,
+    limit_seller_submissions,
+    release_upload_slot,
+    stream_upload_to_path,
+)
 from anteroom.services.listing_provider import get_photo_provider
 from anteroom.services.photo_store import photo_store
 
@@ -120,6 +125,7 @@ async def _read_size_tag(provider, paths: list[Path]) -> dict:
 @_hosted_upload_router.post("/api/measurements/read")
 async def read_measurements(request: Request, files: list[UploadFile] = File(...), garment: str = Form(...)):
     """Suggest an item's measurements from photos not saved yet (bulk upload). Saves nothing."""
+    limit_seller_submissions(request)
     provider = _provider(garment)
     with tempfile.TemporaryDirectory(prefix="measure-upload-") as workdir:
         paths = await _write_uploads(files, workdir)
@@ -132,6 +138,7 @@ async def read_measurements(request: Request, files: list[UploadFile] = File(...
 @_hosted_upload_router.post("/api/size-tags/read", response_model=SizeTagReadResult, responses=SIZE_TAG_READ_ERRORS)
 async def read_size_tags(request: Request, files: list[UploadFile] = File(...)):
     """Suggest an item's clothing size from its size tag in photos not saved yet (bulk upload). Saves nothing."""
+    limit_seller_submissions(request)
     provider = _photo_provider("size tags")
     with tempfile.TemporaryDirectory(prefix="size-tag-upload-") as workdir:
         paths = await _write_uploads(files, workdir)
@@ -184,6 +191,7 @@ async def _download_hosted_photos(workdir: str, keys: list[str], token: str) -> 
 @hosted_router.post("/api/conversations/{conv_id}/measurements/read")
 async def read_hosted_saved_measurements(conv_id: str, body: ReadSavedRequest, request: Request):
     """The hosted read of a saved listing: its photos come from private storage. Saves nothing."""
+    limit_seller_submissions(request)
     provider = _provider(body.garment)
     keys = await in_seller_session(request, _hosted_photo_keys, conv_id)
     token = request.headers["authorization"].partition(" ")[2]
@@ -199,6 +207,7 @@ async def read_hosted_saved_measurements(conv_id: str, body: ReadSavedRequest, r
 )
 async def read_hosted_saved_size_tags(conv_id: str, request: Request):
     """The hosted size-tag read of a saved listing: its photos come from private storage. Saves nothing."""
+    limit_seller_submissions(request)
     provider, keys = await in_seller_session(request, _hosted_size_tag_inputs, conv_id)
     token = request.headers["authorization"].partition(" ")[2]
     with tempfile.TemporaryDirectory(prefix="size-tag-saved-") as workdir:
