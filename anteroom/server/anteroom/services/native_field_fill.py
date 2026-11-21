@@ -27,7 +27,7 @@ from anteroom.services import native_contract
 
 log = logging.getLogger("anteroom.native_field_fill")
 
-MARKETS = ("ebay", "poshmark", "mercari", "depop")
+MARKETS = native_contract.MARKETS
 NAMES = {"ebay": "eBay", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "etsy": "Etsy"}
 CATEGORY_PATHS = {f"direct_category_ids.{market}" for market in MARKETS}
 
@@ -70,6 +70,8 @@ def fillable_rows(form: dict, market: str, listing: dict, *, evidence: str = "")
         if not path.startswith(prefix) or row.get("locked") or (not options and not strict):
             continue
         if not native_contract.item_field(row, market) or (not strict and not _empty(row.get("value"))):
+            continue
+        if market == "etsy" and fold_key(str(row.get("label") or "")) in _FROM_GENERAL:
             continue
         if row.get("input_type") in {"note", "badge", "photos", "inventory", "variations"}:
             continue
@@ -194,6 +196,21 @@ def validated_values(reply: dict, rows: dict[str, dict], *, evidence: str | None
     return accepted
 
 
+def _clear_etsy_property_aliases(bucket: dict, want: str, *, keep: str | None = None) -> None:
+    """Drop differently-spelled Etsy property keys from category_specifics and top-level etsy_specifics."""
+    from anteroom.services.etsy_listings import _NOT_PROPERTIES, _key
+
+    nested = bucket.get("category_specifics")
+    if isinstance(nested, dict):
+        nested = dict(nested)
+        for alias in [name for name in nested if name != keep and fold_key(name) == want]:
+            del nested[alias]
+        bucket["category_specifics"] = nested
+    for alias in [name for name, val in bucket.items()
+                  if not isinstance(val, dict) and _key(name) not in _NOT_PROPERTIES and fold_key(name) == want]:
+        del bucket[alias]
+
+
 def write_value(listing: dict, path: str, value: Any) -> None:
     """Store a form value the way the editor does, replacing a differently spelled copy of the key."""
     parts = path.split(".")
@@ -206,6 +223,16 @@ def write_value(listing: dict, path: str, value: Any) -> None:
         bucket[parts[1]] = value
         listing[parts[0]] = bucket
         return
+    if len(parts) == 3 and parts[0] == "etsy_specifics" and parts[1] == "category_specifics":
+        bucket = listing.get("etsy_specifics")
+        bucket = dict(bucket) if isinstance(bucket, dict) else {}
+        _clear_etsy_property_aliases(bucket, fold_key(parts[2]), keep=parts[2])
+        nested = bucket.get("category_specifics")
+        nested = dict(nested) if isinstance(nested, dict) else {}
+        nested[parts[2]] = value
+        bucket["category_specifics"] = nested
+        listing["etsy_specifics"] = bucket
+        return
     set_path(listing, path, value)
 
 
@@ -216,6 +243,12 @@ def clear_value(listing: dict, path: str) -> None:
     (size, brand) from answering it. Only the seller's own edit stores one.
     """
     parts = path.split(".")
+    if len(parts) == 3 and parts[0] == "etsy_specifics" and parts[1] == "category_specifics":
+        bucket = listing.get("etsy_specifics")
+        if not isinstance(bucket, dict):
+            return
+        _clear_etsy_property_aliases(bucket, fold_key(parts[2]))
+        return
     parent = get_path(listing, ".".join(parts[:-1]))
     if not isinstance(parent, dict):
         return
@@ -264,7 +297,7 @@ async def load_forms(conv_id: str, markets: Iterable[str] = MARKETS) -> dict[str
         except Exception as exc:  # noqa: BLE001 - one marketplace's form never stops the others
             log.info("No %s form to fill for %s: %s", market, conv_id, exc)
             continue
-        if isinstance(form, dict) and form.get("known") is not False:
+        if isinstance(form, dict) and form.get("known") is not False and not form.get("properties_unavailable"):
             forms[market] = form
     return forms
 
@@ -398,8 +431,9 @@ def _record_forms(db: Session, conv_id: str, revision_id: str, saved: dict, form
             value = row.get("value")
             if path in CATEGORY_PATHS and form.get("category_id") and not get_path(listing, path) and not _empty(value):
                 write_value(listing, path, str(form["category_id"]))
-            sale_field = row.get("locked") or native_contract.SALE_FIELDS.search(path.split("_specifics.", 1)[-1].casefold())
+            sale_field = row.get("locked") or native_contract.is_sale_field(path)
             if (path.startswith(f"{market}_specifics.") and ".package." not in path and sale_field
+                    and not (market == "etsy" and row.get("locked"))
                     and path not in CATEGORY_PATHS and not _empty(value) and not native_contract.value_error(row, value)):
                 write_value(listing, path, value)
     listing[native_contract.KEY] = {**choice_lists.compact_contracts(listing.get(native_contract.KEY) or {}),
@@ -664,7 +698,7 @@ async def fill_etsy_attributes(conv_id: str, provider, *, evidence: str, photos:
     if inputs is None:
         return None
     fingerprint, revision_id, listing = inputs
-    if fingerprint != photos:
+    if fingerprint != photos or "etsy" in (listing.get(native_contract.KEY) or {}):
         return None
     try:
         form = await editor_form(conv_id, "etsy", revision_id)
@@ -722,7 +756,7 @@ def _category(listing: dict, market: str) -> str:
 
 def changed_categories(before: dict, after: dict) -> set[str]:
     """Marketplaces whose chosen category is new in this save."""
-    changed = {market for market in (*MARKETS, "etsy")
+    changed = {market for market in MARKETS
                if _category(after, market) and _category(after, market) != _category(before, market)}
     for market, contract in (before.get(native_contract.KEY) or {}).items():
         fields = contract.get("fields") or []

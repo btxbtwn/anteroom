@@ -1068,3 +1068,129 @@ class CategoryFillLocksTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen_dbs, [None])
         db.close()
         engine.dispose()
+
+
+class EtsyNativeFieldFillTest(unittest.IsolatedAsyncioTestCase):
+    def _etsy_form(self, **extra):
+        return {
+            "marketplace": "etsy",
+            "native": True,
+            "known": True,
+            "page_labels": True,
+            "category_id": "482",
+            "fields": [
+                {"path": "direct_category_ids.etsy", "label": "Category", "required": True,
+                 "selection_only": True, "value": "482",
+                 "options": ["Clothing > Men's Clothing > Shirts & Tees > T-shirts"],
+                 "option_values": {"Clothing > Men's Clothing > Shirts & Tees > T-shirts": "482"}},
+                {"path": "etsy_specifics.listingType", "label": "What type of item is it?",
+                 "locked": True, "value": "Physical item"},
+                {"path": "etsy_specifics.shipping_profile_id", "label": "Shipping option",
+                 "locked": True, "value": "Not chosen yet"},
+                {"path": "etsy_specifics.return_policy_id", "label": "Returns and exchanges",
+                 "locked": True, "value": "Chosen in Settings"},
+                {"path": "etsy_specifics.readiness_state_id", "label": "Processing profile",
+                 "locked": True, "value": "Not chosen yet"},
+                {"path": "etsy_specifics.itemWeight", "label": "Item weight",
+                 "locked": True, "value": "8 oz"},
+                {"path": "etsy_specifics.itemSize", "label": "Item size (when packed)",
+                 "locked": True, "value": "10 × 8 × 2 in"},
+                {"path": "etsy_specifics.whoMade", "label": "Who made it?", "required": True,
+                 "selection_only": True, "value": "Another company or person",
+                 "options": ["I did", "A member of my shop", "Another company or person"]},
+                {"path": "etsy_specifics.whatIsIt", "label": "What is it?", "required": True,
+                 "selection_only": True, "value": "A finished product",
+                 "options": ["A finished product", "A supply or tool to make things"]},
+                {"path": "etsy_specifics.whenMade", "label": "When was it made?", "required": True,
+                 "selection_only": True, "value": "1990s (Vintage)",
+                 "options": ["2020 - 2026 (Recently)", "1990s (Vintage)"]},
+                {"path": "etsy_specifics.renewalOption", "label": "Renewal options",
+                 "selection_only": True, "value": "Manual",
+                 "options": ["Automatic", "Manual"]},
+                row("etsy_specifics.category_specifics.Clothing style", "Clothing style",
+                    ["Athletic", "Minimalist", "Streetwear"]),
+                row("etsy_specifics.category_specifics.Graphic", "Graphic",
+                    ["Brand & logo", "Nature", "Text"]),
+                row("etsy_specifics.category_specifics.Sleeve length", "Sleeve length",
+                    ["Short sleeve", "Long sleeve"]),
+            ],
+            **extra,
+        }
+
+    async def test_record_forms_skips_locked_etsy_display_rows_and_load_forms_skips_unavailable(self):
+        engine = memory_engine()
+        Base.metadata.create_all(engine)
+        self.enterContext(worker_sessions(engine))
+        db = sessionmaker(bind=engine)()
+        conv = ConversationRepo(db).create(title="Tee")
+        listing_persistence.save_revision(db, conv.id, {
+            "title": "Vintage 90s Tee",
+            "direct_category_ids": {"etsy": "482"},
+            "etsy_specifics": {},
+        }, source="model")
+        form = self._etsy_form()
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"etsy": form})):
+            contracts = await native_field_fill.record_forms(conv.id, {"etsy"})
+        self.assertIn("etsy", contracts)
+        self.assertNotIn("unavailable", contracts["etsy"])
+        current = ListingRepo(db).get_current(conv.id)
+        saved = ListingRepo(db).get_revision(current.current_revision_id).listing_json
+        etsy = saved["etsy_specifics"]
+        for locked_key in ("shipping_profile_id", "return_policy_id", "readiness_state_id",
+                           "itemWeight", "itemSize", "listingType"):
+            self.assertNotIn(locked_key, etsy)
+        self.assertEqual(etsy["whoMade"], "Another company or person")
+        self.assertEqual(etsy["renewalOption"], "Manual")
+
+        with patch("anteroom.services.native_editor.editor_form",
+                   AsyncMock(return_value=self._etsy_form(properties_unavailable=True))):
+            loaded = await native_field_fill.load_forms(conv.id, {"etsy"})
+        self.assertEqual(loaded, {})
+        db.close()
+        engine.dispose()
+
+    async def test_etsy_strict_fill_validates_attributes_clears_legacy_aliases_and_keeps_made_fields(self):
+        from anteroom.services import native_contract
+
+        engine = memory_engine()
+        Base.metadata.create_all(engine)
+        self.enterContext(worker_sessions(engine))
+        db = sessionmaker(bind=engine)()
+        conv = ConversationRepo(db).create(title="Graphic Tee")
+        form = self._etsy_form()
+        seed_listing = {
+            "title": "Vintage 90s Graphic Tee",
+            "direct_category_ids": {"etsy": "482"},
+            "etsy_specifics": {
+                "whoMade": "Another company or person",
+                "whatIsIt": "A finished product",
+                "whenMade": "1990s (Vintage)",
+                "renewalOption": "Manual",
+                "clothingStyle": "Casual",
+                "category_specifics": {"Graphic": "Graphic Print"},
+            },
+        }
+        seed_listing[native_contract.KEY] = native_contract.capture(seed_listing, {"etsy": form}, ["etsy"])
+        listing_persistence.save_revision(db, conv.id, seed_listing, source="native_schema")
+        evidence = "Vintage 1990s streetwear tee with short sleeve and brand logo print."
+        reply = json.dumps({"fields": {
+            "etsy_specifics.category_specifics.Clothing style": {"value": "Streetwear", "evidence": "streetwear tee"},
+            "etsy_specifics.category_specifics.Graphic": {"value": "Graphic Print", "evidence": "brand logo print"},
+            "etsy_specifics.category_specifics.Sleeve length": {"value": "Short sleeve", "evidence": "short sleeve"},
+        }})
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"etsy": form})), \
+                patch("anteroom.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
+            updated = await fill_native_fields(conv.id, object(), evidence=evidence, markets={"etsy"})
+        etsy = updated["etsy_specifics"]
+        self.assertEqual(etsy["whoMade"], "Another company or person")
+        self.assertEqual(etsy["whatIsIt"], "A finished product")
+        self.assertEqual(etsy["whenMade"], "1990s (Vintage)")
+        self.assertEqual(etsy["renewalOption"], "Manual")
+        self.assertNotIn("clothingStyle", etsy)
+        # Valid Etsy choices are kept; invalid "Graphic Print" is rejected and cleared.
+        self.assertEqual(etsy["category_specifics"], {
+            "Clothing style": "Streetwear",
+            "Sleeve length": "Short sleeve",
+        })
+        db.close()
+        engine.dispose()

@@ -204,4 +204,5 @@ async def editor_form(snapshot: dict) -> dict:
     if category and not known:
         notes.append("This Etsy category is not in Anteroom's list. Choose the most specific category again.")
     return {"marketplace": "etsy", "native": True, "known": not category or known, "page_labels": True,
-            "category_id": category if known else "", "fields": rows, "notes": notes}
+            "category_id": category if known else "", "fields": rows, "notes": notes,
+            **({"properties_unavailable": True} if property_note else {})}

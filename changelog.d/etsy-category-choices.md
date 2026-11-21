@@ -1,0 +1,1 @@
+- Etsy draft generation uses the selected category’s choices and leaves unavailable options out of the draft.
