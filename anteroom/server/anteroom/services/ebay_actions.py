@@ -615,7 +615,9 @@ async def execute(action_id: str, kind: str, payload: dict) -> dict:
             await asyncio.shield(in_worker_session(_settle, action_id, state, None))
             return {"state": state, "id": action_id, "message": message}
     except BaseException as exc:
-        definite = isinstance(exc, EbayFailure) and exc.status in (400, 401, 403, 404, 409, 422, 429) and completed == 0
+        # A top-level conflict can arrive after eBay has processed some ads.
+        definite = (isinstance(exc, EbayFailure) and exc.status in (400, 401, 403, 404, 409, 422, 429)
+                    and completed == 0 and not (kind == "ad" and exc.status == 409))
         # Shielded: a dropped request must not leave the action marked as sending.
         await asyncio.shield(in_worker_session(_settle, action_id, "failed" if definite else "unknown", None))
         if isinstance(exc, asyncio.CancelledError):

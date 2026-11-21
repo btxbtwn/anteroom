@@ -642,3 +642,13 @@ def test_capped_ad_inventory_is_never_offered_or_used_for_confirmation(workspace
         response = workspace.client.post("/api/ebay/actions/preview", json={"kind": "ad", "payload": payload})
     assert response.status_code == 422
     assert not workspace.remote.writes
+
+
+def test_first_ad_batch_http_conflict_requires_reconciliation(workspace):
+    payload = action_cases()["ad"]
+    review = preview(workspace, "ad", payload)
+    workspace.remote.write_error = 409
+    response = confirm(workspace, review, "ad", payload)
+    assert response.json()["state"] == "unknown"
+    assert workspace.client.post("/api/ebay/actions/preview", json={"kind": "ad", "payload": payload}).status_code == 409
+    assert len(workspace.remote.writes) == 1
