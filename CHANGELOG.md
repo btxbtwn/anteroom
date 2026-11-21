@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1085 — 2026-11-21
+
+- Select suggested listings and regenerate them together from the Suggestions page.
+
 ## 0.1.1084 — 2026-11-21
 
 - Measure browser checks so future CI changes can keep the same test coverage.
