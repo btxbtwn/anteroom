@@ -742,3 +742,59 @@ def test_active_job_polls_skip_the_listing_snapshot(cloud, signing_keys):  # noq
     job_reads = [statement for statement in statements if 'FROM jobs' in statement]
     assert job_reads
     assert not any('listing_snapshot' in statement for statement in job_reads), job_reads
+
+
+def test_delete_draft_photo_removes_source_object_too(monkeypatch):
+    """Deleting an edited draft photo deletes both its edited stored key and its original source key."""
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+    from sqlalchemy import create_engine
+
+    from anteroom.database import Base, load_models
+    from anteroom.models.conversation import Conversation, Photo
+    from anteroom.routes import hosted_photos as hosted_photos_route
+
+    load_models()
+    engine = create_engine('sqlite://')
+    Base.metadata.create_all(engine)
+    draft_id = 'draft000src1'
+    stored_key = hosted_photos.new_key(USER_ID, draft_id)
+    source_key = hosted_photos.new_key(USER_ID, draft_id)
+    with Session(engine) as db:
+        db.add(Conversation(id=draft_id, user_id=USER_ID, title='Jacket', status='draft'))
+        db.flush()
+        db.add(Photo(
+            id='photo000src1',
+            conversation_id=draft_id,
+            user_id=USER_ID,
+            original_filename='jacket.jpg',
+            stored_filename=stored_key,
+            source_filename=source_key,
+            mime_type='image/jpeg',
+            size_bytes=123,
+        ))
+        db.commit()
+
+    deleted: list[str] = []
+
+    def fake_storage_call(method, key, token, data=None):
+        assert method == 'DELETE' and token == 'tok-123'
+        deleted.append(key)
+        if len(deleted) == 1:
+            raise HTTPException(503, 'Temporary outage on first key')
+        return b''
+
+    monkeypatch.setattr(hosted_photos, 'storage_call', fake_storage_call)
+    fake_request = SimpleNamespace(headers={'authorization': 'Bearer tok-123'})
+
+    try:
+        with Session(engine) as db:
+            db.user_id = USER_ID
+            response = hosted_photos_route.delete_photo(draft_id, 'photo000src1', fake_request, db)
+            assert response.status_code == 204
+            assert db.get(Photo, 'photo000src1') is None
+    finally:
+        engine.dispose()
+
+    assert set(deleted) == {stored_key, source_key}
+
