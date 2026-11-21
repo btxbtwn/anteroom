@@ -670,6 +670,21 @@ def test_incomplete_terminal_ad_inventory_is_rejected(workspace, returned):
     assert not workspace.remote.writes
 
 
+def test_overlapping_ad_inventory_pages_are_rejected(workspace):
+    payload = action_cases()["ad"]
+    review = preview(workspace, "ad", payload)
+    # Two full pages report 400 rows, but the page boundary repeats an ID.
+    workspace.remote.active_items = [
+        (str(int(ITEM_ID) + i), str(i)) for i in [*range(200), *range(199, 399)]
+    ]
+    expected = {"detail": "eBay returned an incomplete active listings page. Refresh and try again."}
+    read = workspace.client.get("/api/ebay/read/advertising-listings")
+    assert read.status_code == 502 and read.json() == expected
+    result = confirm(workspace, review, "ad", payload)
+    assert result.status_code == 502 and result.json() == expected
+    assert not workspace.remote.writes
+
+
 def test_empty_ad_inventory_is_valid(workspace):
     workspace.remote.active_items = []
     assert workspace.client.get("/api/ebay/read/advertising-listings").json() == {"rows": []}

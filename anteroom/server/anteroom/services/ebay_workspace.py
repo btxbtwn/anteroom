@@ -233,6 +233,7 @@ async def advertising_listings(client: EbayClient) -> dict[str, str]:
     page_number = 1
     count = 0
     reported_total: int | None = None
+    seen_ids: set[str] = set()
     listings: dict[str, str] = {}
     incomplete = "eBay returned an incomplete active listings page. Refresh and try again."
     while True:
@@ -254,6 +255,10 @@ async def advertising_listings(client: EbayClient) -> dict[str, str]:
             reported_total = total
         for item in items:
             identifier = item.findtext("e:ItemID", namespaces=NS) or ""
+            if identifier:
+                if identifier in seen_ids:
+                    raise EbayFailure(incomplete)
+                seen_ids.add(identifier)
             price = item.find("e:SellingStatus/e:CurrentPrice", NS)
             site = item.findtext("e:Site", namespaces=NS)
             listing_type = item.findtext("e:ListingType", namespaces=NS)
