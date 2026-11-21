@@ -1,5 +1,7 @@
 import { Fragment, useRef, useEffect, useCallback } from "react";
-import { usePhotosUploading } from "../photoUploads";
+import { useQueryClient } from "@tanstack/react-query";
+import { api } from "../api/client";
+import { photosUploading, usePhotosUploading } from "../photoUploads";
 import { newQueuedChatMessage } from "./chatMessageQueue";
 import { CiteSelectionToolbar } from "./CiteSelectionToolbar";
 import { type ChatCitation } from "./chatCitations";
@@ -10,6 +12,7 @@ import { assistantDisplayText, extractJson, isListingJson, isStreamError } from 
 import { useComposerImages } from "./chat/ComposerAttachments";
 import { useComposerDraftText } from "./chat/composerDrafts";
 import { ChatComposer } from "./chat/ChatComposer";
+import { uploadComposerDraftPhotos } from "./chat/composerDraftPhotos";
 import { StreamErrorPanel, UnfinishedGenerationPanel } from "./chat/ChatErrors";
 import { ChatMessage } from "./chat/ChatMessage";
 import { ChatTranscript } from "./chat/ChatTranscript";
@@ -44,6 +47,7 @@ function messageRowPadding(m: Message): string {
 }
 
 export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onStatusChange }: Props) {
+  const queryClient = useQueryClient();
   const uploadingPhotos = usePhotosUploading(convId);
   const draftKey = `listing:${convId}`;
 
@@ -104,6 +108,14 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     return true;
   }, []);
 
+  const hasPhotos = Boolean(photos && photos.length > 0);
+  const draftHasNoPhotos = photos !== undefined && photos.length === 0;
+  const hasMessages = Boolean(messages && messages.length > 0);
+  const hasListingJson = Boolean(messages?.some((m) => {
+    const json = extractJson(m.text);
+    return Boolean(json && isListingJson(json));
+  }) || (listing?.listing && isListingJson(JSON.stringify(listing.listing))));
+
   const handleSend = useCallback(() => {
     const text = input.trim();
     const attached = images.images;
@@ -119,20 +131,45 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
       pinChatToBottom();
       return;
     }
+    // When a draft has no listing photos yet, images attached in chat become
+    // its listing photos so phone sellers can start a listing directly from Chat.
+    if (draftHasNoPhotos && attached.length > 0) {
+      if (uploadingPhotos || photosUploading(convId)) return;
+      void uploadComposerDraftPhotos(attached, text, hasListingJson, {
+        uploadPhotos: (files) => api.conversations.uploadPhotos(convId, files),
+        invalidatePhotos: async () => {
+          await queryClient.invalidateQueries({ queryKey: ["photos", convId] });
+          void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+        },
+        clearImages: images.clear,
+        setError: images.setError,
+        sendMessage: (note) => { void sendMessage(note); },
+        generate: () => { void handleGenerate(); },
+      });
+      return;
+    }
     void (async () => {
       const uploads = attached.length ? await images.prepare(attached) : [];
       if (uploads === null) return;
       images.clear(attached.map((image) => image.id));
       void sendMessage(text, uploads.length ? { attachments: uploads } : undefined);
     })();
-  }, [busy, serverBusy, input, setInput, sendMessage, pinChatToBottom, enqueue, images]);
-
-  const hasPhotos = Boolean(photos && photos.length > 0);
-  const hasMessages = Boolean(messages && messages.length > 0);
-  const hasListingJson = Boolean(messages?.some((m) => {
-    const json = extractJson(m.text);
-    return Boolean(json && isListingJson(json));
-  }) || (listing?.listing && isListingJson(JSON.stringify(listing.listing))));
+  }, [
+    busy,
+    serverBusy,
+    input,
+    setInput,
+    sendMessage,
+    handleGenerate,
+    pinChatToBottom,
+    enqueue,
+    images,
+    draftHasNoPhotos,
+    uploadingPhotos,
+    convId,
+    queryClient,
+    hasListingJson,
+  ]);
   const streamFailed = isStreamError(streamText);
   const streamVisible = streamFailed ? "" : assistantDisplayText(streamText);
   // Persist finishes (and messages refetch) before the SSE stream is cleared —
