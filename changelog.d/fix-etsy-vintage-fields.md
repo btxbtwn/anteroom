@@ -1,1 +1,0 @@
-- Use the eBay Year Manufactured to fill Etsy's When was it made, so vintage items no longer show "May not qualify" for Etsy.

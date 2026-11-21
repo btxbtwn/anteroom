@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1094 — 2026-11-21
+
+- Use the eBay Year Manufactured to fill Etsy's When was it made, so vintage items no longer show "May not qualify" for Etsy.
+
 ## 0.1.1093 — 2026-11-21
 
 - Promote selected or all active eBay listings at one ad rate from Marketing → Advertising.
