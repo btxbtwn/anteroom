@@ -189,7 +189,7 @@ class ChatMeasurementsTest(unittest.TestCase):
     def test_legacy_shorts_measurements_preserved_when_updating_pants(self):
         ConversationRepo(self.db).write_notes(
             self.conv.id,
-            json.dumps({"garment": "shorts", "measurements": {"shorts": {"waist": "32", "inseam": "7"}}}),
+            json.dumps({"garment": "shorts", "measurements": {"shorts": {"waist": 32, "inseam": 7}}}),
         )
         reply = 'Added rise.\n```json\n' + json.dumps({
             "fields": [{"path": "measurements.pants.rise", "value": "11"}],
@@ -321,6 +321,101 @@ class ChatMeasurementsTest(unittest.TestCase):
         self.assertEqual(notes["descriptionMeasurements"], 'Hem 21"')
         latest = ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json
         self.assertEqual(latest["package_dimensions_in"], "12x8x4")
+
+    def test_missing_fields_reports_only_normalized_accepted_measurements(self):
+        reply = "```json\n" + json.dumps({"missing_fields": [
+            {"marketplace": "General", "field": "Pit to Pit", "value": '16.5"'},
+            {"marketplace": "General", "field": "Sleeve", "value": "unknown"},
+            {"marketplace": "General", "field": "Other measurements", "value": "out of scope"},
+        ]}) + "\n```"
+        token = activity.edit_fields.set(("measurements.top.pitToPit", "measurements.top.sleeve"))
+        try:
+            with patch("anteroom.services.fill_log.FillLogService.record_generated_values") as record:
+                _, saved = apply_listing_payload(self.db, self.conv.id, reply)
+                record.assert_called_once_with(self.conv.id, [
+                    {"marketplace": "general", "field": "Pit to Pit", "value": "16.5"},
+                ])
+        finally:
+            activity.edit_fields.reset(token)
+        self.assertTrue(saved)
+        summary = ConversationRepo(self.db).get_messages(self.conv.id)[-1].text
+        self.assertIn("16.5", summary)
+        self.assertNotIn("Sleeve", summary)
+        self.assertNotIn("Other measurements", summary)
+
+    def test_unrelated_or_rejected_measurements_do_not_clear_depop(self):
+        depop = {"unit": "in", "values": [{"id": "pit_to_pit", "value": "16"}]}
+        listing_persistence.save_revision(
+            self.db, self.conv.id, {**self.listing, "depop_specifics": {"measurements": depop}}, "test",
+        )
+        for scope, payload in (
+            (None, {"missing_fields": [
+                {"marketplace": "General", "field": "Other measurements", "value": "Hem 21"},
+                {"marketplace": "General", "field": "Description", "value": "New description"},
+            ]}),
+            (("measurements.top.sleeve", "description"), [
+                {"op": "remove", "path": "/measurements/top/pitToPit"},
+                {"op": "replace", "path": "/measurements/top/sleeve", "value": "unknown"},
+                {"op": "replace", "path": "/description", "value": "Another description"},
+            ]),
+        ):
+            with self.subTest(scope=scope):
+                token = activity.edit_fields.set(scope)
+                try:
+                    _, saved = apply_listing_payload(self.db, self.conv.id, "```json\n" + json.dumps(payload) + "\n```")
+                finally:
+                    activity.edit_fields.reset(token)
+                self.assertTrue(saved)
+                latest = ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json
+                self.assertEqual(latest["depop_specifics"]["measurements"], depop)
+                self.assertNotIn("measurements", self._notes())
+
+    def test_garment_selection_and_clear_with_mixed_updates(self):
+        listing_persistence.save_revision(
+            self.db, self.conv.id, {**self.listing, "category_path": "Men > Pants > Jeans"}, "test",
+        )
+        for selected in ("skirt", "top"):
+            reply = "```json\n" + json.dumps({"fields": [
+                {"path": "measurements.garment", "value": selected},
+            ]}) + "\n```"
+            self.assertTrue(apply_listing_payload(self.db, self.conv.id, reply)[1])
+            self.assertEqual(self._general_fields()["measurements.garment"]["value"], selected)
+        reply = "```json\n" + json.dumps({"fields": [
+            {"path": "measurements.garment", "value": "", "clear": True},
+            {"path": "measurements.pants.inseam", "value": "27"},
+        ]}) + "\n```"
+        self.assertTrue(apply_listing_payload(self.db, self.conv.id, reply)[1])
+        notes = self._notes()
+        self.assertEqual(notes["garment"], "")
+        self.assertEqual(notes["measurements"]["pants"]["inseam"], "27")
+        self.assertEqual(self._general_fields()["measurements.garment"]["value"], "pants")
+
+    def test_stale_mixed_refinement_preserves_newer_revision_and_rolls_back_notes(self):
+        from anteroom.services import chat_listing
+
+        competing = {
+            **self.listing, "description": "Seller's newer description",
+            "depop_specifics": {"measurements": {"unit": "in", "values": [{"id": "pit_to_pit", "value": "18"}]}},
+        }
+        conv_id = self.conv.id
+
+        def save_competing_then_apply_notes(*args, **kwargs):
+            with sessionmaker(bind=self.engine)() as seller_db:
+                listing_persistence.save_revision(seller_db, conv_id, competing, "test")
+            return apply_notes(*args, **kwargs)
+
+        apply_notes = chat_listing._apply_measurement_notes
+        reply = "```json\n" + json.dumps([
+            {"op": "replace", "path": "/measurements/top/pitToPit", "value": "16"},
+            {"op": "replace", "path": "/description", "value": "Stale description"},
+        ]) + "\n```"
+        with patch.object(chat_listing, "_apply_measurement_notes", side_effect=save_competing_then_apply_notes):
+            self.assertFalse(apply_listing_payload(self.db, conv_id, reply)[1])
+        self.assertNotIn("measurements", self._notes())
+        revisions = ListingRepo(self.db).get_revisions(conv_id)
+        self.assertEqual(len(revisions), 2)
+        self.assertEqual(revisions[0].listing_json, competing)
+        self.assertIn("listing changed", ConversationRepo(self.db).get_messages(conv_id)[-1].text)
 
     def test_mixed_field_command_rolls_back_notes_when_listing_save_conflicts(self):
         from anteroom.repositories.queries import RevisionConflict

@@ -64,6 +64,7 @@ def _patched_sku_keys(operations: list[dict]) -> set[str]:
 def save_listing_revision(
     db: Session, conv_id: str, listing: dict, *, operations: list[dict] | None = None,
     sku_keys: set[str] | frozenset[str] = frozenset(),
+    expected_revision_id: str | None = None, depop_notes: dict | None = None,
 ) -> dict:
     """Save chat output. ``sku_keys`` names the SKUs ("sku", "depop_specifics")
     the seller's request set field by field; every other SKU stays the seller's."""
@@ -102,12 +103,15 @@ def save_listing_revision(
         normalize_listing_dropdowns(candidate)
 
     preserving_locks(stamped, _normalize)
-    parent_id = revisions[0].id if revisions else None
+    if expected_revision_id is None:
+        expected_revision_id = revisions[0].id if revisions else ""
     revision = listing_persistence.save_revision(db,
         conv_id,
         stamped,
         source="model_refinement",
-        parent_revision_id=parent_id,
+        parent_revision_id=expected_revision_id or None,
+        expected_revision_id=expected_revision_id,
+        depop_notes=depop_notes,
     )
     _sync_category_override(db, conv_id, revision.listing_json)
     return revision.listing_json
@@ -119,6 +123,24 @@ def _stamp_learned_fields(db: Session, listing: dict) -> dict:
     if isinstance(listing, dict):
         RegistryService(db).merge_learned_fields(listing)
     return listing
+
+
+def _save_chat_candidate(db: Session, conv_id: str, listing: dict, **kwargs) -> dict | None:
+    from anteroom.repositories.queries import RevisionConflict
+
+    try:
+        return save_listing_revision(db, conv_id, listing, **kwargs)
+    except RevisionConflict as exc:
+        db.rollback()
+        _system_note(db, conv_id, str(exc))
+        return None
+
+
+def _sync_chat_depop(listing: dict, notes: dict | None) -> None:
+    from anteroom.services.depop_measurements import sync_depop_measurements
+
+    if notes is not None:
+        sync_depop_measurements(listing, notes, clear_empty=True)
 
 
 def _save_missing_fields(db: Session, conv_id: str, missing_fields: list[dict], *, user_message: str = "") -> bool:
@@ -149,7 +171,7 @@ def _save_missing_fields(db: Session, conv_id: str, missing_fields: list[dict], 
     current_notes = conv.notes if conv else None
     updated = copy.deepcopy(revisions[0].listing_json)
     measurement_updates: list[tuple[str, object, bool]] = []
-    measurement_fields: list[dict] = []
+    measurement_fields: dict[str, dict] = {}
     listing_missing_fields: list[dict] = []
     accepted = []
     rejected = []
@@ -163,7 +185,7 @@ def _save_missing_fields(db: Session, conv_id: str, missing_fields: list[dict], 
         if mpath:
             raw_value = field.get("value")
             measurement_updates.append((mpath, raw_value, raw_value in ("", None, [])))
-            measurement_fields.append(field)
+            measurement_fields[mpath] = field
         else:
             listing_missing_fields.append(field)
     for field in listing_missing_fields:
@@ -177,21 +199,12 @@ def _save_missing_fields(db: Session, conv_id: str, missing_fields: list[dict], 
             continue
         updated = candidate
         accepted.append(field)
-    notes_saved = False
-    if measurement_updates:
-        notes_saved = _apply_measurement_notes(
-            db, conv_id, measurement_updates, updated, commit=not listing_missing_fields,
-        )
-        if notes_saved:
-            accepted = [*measurement_fields, *accepted]
+    applied, depop_notes = _apply_measurement_notes(
+        db, conv_id, measurement_updates, updated, commit=not listing_missing_fields,
+    )
+    accepted = [{**measurement_fields[path], "value": value} for path, value in applied.items()] + accepted
     if listing_missing_fields:
-        if notes_saved:
-            conv = ConversationRepo(db).get(conv_id)
-            if conv:
-                from anteroom.services.depop_measurements import sync_depop_measurements
-                from anteroom.services.vendoo_import import parse_notes
-
-                sync_depop_measurements(updated, parse_notes(conv.notes), clear_empty=True)
+        _sync_chat_depop(updated, depop_notes)
         from anteroom.services.seller_overrides import preserving_locks
 
         def _normalize(candidate: dict) -> None:
@@ -211,7 +224,11 @@ def _save_missing_fields(db: Session, conv_id: str, missing_fields: list[dict], 
             "sku" if field.get("marketplace", "general") in {"", "general", "unknown"} else f"{field['marketplace']}_specifics"
             for field in accepted if field in listing_missing_fields and field_lookup_key(field.get("field") or "") == "sku"
         } if _seller_asked_for_sku(user_message) else set()
-        save_listing_revision(db, conv_id, updated, sku_keys=sku_keys)
+        if _save_chat_candidate(
+            db, conv_id, updated, sku_keys=sku_keys,
+            expected_revision_id=revisions[0].id, depop_notes=depop_notes,
+        ) is None:
+            return False
     if accepted:
         FillLogService(db).record_generated_values(conv_id, accepted)
 
@@ -289,30 +306,35 @@ def _apply_measurement_notes(
     listing: dict | None,
     *,
     commit: bool,
-) -> bool:
+) -> tuple[dict[str, str], dict | None]:
     from anteroom.services import activity
     from anteroom.services.general_measurements import (
         canonical_measurement_path,
         note_changes_for_measurement_updates,
     )
-    from anteroom.services.vendoo_import import merge_note_changes
+    from anteroom.services.depop_measurements import depop_measurements_from_notes
+    from anteroom.services.vendoo_import import merge_note_changes, parse_notes
 
     scope = activity.edit_fields.get()
     if scope is not None:
         allowed = {canonical_measurement_path(path) or path for path in scope}
         updates = [item for item in updates if item[0] in allowed]
     if not updates:
-        return False
+        return {}, None
     repo = ConversationRepo(db)
     conv = repo.get(conv_id)
     if not conv:
-        return False
+        return {}, None
     db.refresh(conv, with_for_update=True)
-    changes = note_changes_for_measurement_updates(updates, conv.notes, listing)
+    changes, applied = note_changes_for_measurement_updates(updates, conv.notes, listing)
     if not changes:
-        return False
-    repo.write_notes(conv_id, merge_note_changes(conv.notes, changes), commit=commit)
-    return True
+        return {}, None
+    merged = merge_note_changes(conv.notes, changes)
+    notes = parse_notes(merged)
+    before = depop_measurements_from_notes(parse_notes(conv.notes))
+    after = depop_measurements_from_notes(notes)
+    repo.write_notes(conv_id, merged, commit=commit)
+    return applied, notes if before != after else None
 
 
 def _reject_best_offer(db: Session, conv_id: str, listing: dict) -> bool:
@@ -356,7 +378,8 @@ def apply_listing_payload(
         revisions = ListingRepo(db).get_revisions(conv_id)
         latest_listing = revisions[0].listing_json if revisions and isinstance(revisions[0].listing_json, dict) else None
         if not listing_commands:
-            if not _apply_measurement_notes(db, conv_id, measurement_updates, latest_listing, commit=True):
+            applied, _ = _apply_measurement_notes(db, conv_id, measurement_updates, latest_listing, commit=True)
+            if not applied:
                 ConversationRepo(db).add_message(
                     conv_id, "system", "No proposed field changes were accepted.", provider="system", model="",
                 )
@@ -373,9 +396,8 @@ def apply_listing_payload(
         from anteroom.repositories.queries import RevisionConflict
 
         try:
-            if measurement_updates:
-                _apply_measurement_notes(db, conv_id, measurement_updates, updated, commit=False)
-            save_listing_edit(conv_id, updated, db, expected_revision_id=revisions[0].id)
+            _, depop_notes = _apply_measurement_notes(db, conv_id, measurement_updates, updated, commit=False)
+            save_listing_edit(conv_id, updated, db, expected_revision_id=revisions[0].id, depop_notes=depop_notes)
         except RevisionConflict as exc:
             db.rollback()
             ConversationRepo(db).add_message(conv_id, "system", str(exc), provider="system", model="")
@@ -412,7 +434,8 @@ def apply_listing_payload(
         revisions = lr.get_revisions(conv_id)
         latest_listing = revisions[0].listing_json if revisions and isinstance(revisions[0].listing_json, dict) else None
         if not listing_ops:
-            if not _apply_measurement_notes(db, conv_id, measurement_ops, latest_listing, commit=True):
+            applied, _ = _apply_measurement_notes(db, conv_id, measurement_ops, latest_listing, commit=True)
+            if not applied:
                 return None, False
             ConversationRepo(db).add_message(
                 conv_id,
@@ -427,16 +450,14 @@ def apply_listing_payload(
         updated = apply_json_patch(dict(latest_listing), listing_ops)
         if _reject_best_offer(db, conv_id, updated):
             return parsed_ops, False
-        if measurement_ops:
-            _apply_measurement_notes(db, conv_id, measurement_ops, updated, commit=False)
-            conv = ConversationRepo(db).get(conv_id)
-            if conv:
-                from anteroom.services.depop_measurements import sync_depop_measurements
-                from anteroom.services.vendoo_import import parse_notes
-
-                sync_depop_measurements(updated, parse_notes(conv.notes), clear_empty=True)
+        _, depop_notes = _apply_measurement_notes(db, conv_id, measurement_ops, updated, commit=False)
+        _sync_chat_depop(updated, depop_notes)
         sku_keys = _patched_sku_keys(listing_ops) if _seller_asked_for_sku(user_message) else set()
-        save_listing_revision(db, conv_id, updated, operations=listing_ops, sku_keys=sku_keys)
+        if _save_chat_candidate(
+            db, conv_id, updated, operations=listing_ops, sku_keys=sku_keys,
+            expected_revision_id=revisions[0].id, depop_notes=depop_notes,
+        ) is None:
+            return parsed_ops, False
         ConversationRepo(db).add_message(
             conv_id,
             "system",
@@ -450,7 +471,9 @@ def apply_listing_payload(
     if parsed:
         if _reject_best_offer(db, conv_id, parsed):
             return None, False
-        saved = save_listing_revision(db, conv_id, parsed)
+        saved = _save_chat_candidate(db, conv_id, parsed)
+        if saved is None:
+            return None, False
         ConversationRepo(db).add_message(
             conv_id,
             "system",
@@ -466,9 +489,11 @@ def _system_note(db: Session, conv_id: str, text: str) -> None:
     ConversationRepo(db).add_message(conv_id, "system", text, provider="system", model="")
 
 
-def _save_repaired_listing(db: Session, conv_id: str, repaired: dict) -> None:
-    save_listing_revision(db, conv_id, repaired)
+def _save_repaired_listing(db: Session, conv_id: str, repaired: dict) -> bool:
+    if _save_chat_candidate(db, conv_id, repaired) is None:
+        return False
     _system_note(db, conv_id, "Repaired malformed listing JSON and saved it for review.")
+    return True
 
 
 async def apply_listing_payload_with_repair(
@@ -480,6 +505,7 @@ async def apply_listing_payload_with_repair(
 ) -> tuple[list[dict] | None, bool]:
     from anteroom.database import in_worker_session
     from anteroom.services.fill_log import (
+        extract_missing_fields,
         is_missing_fields_request,
         looks_like_missing_fields_attempt,
         repair_missing_fields,
@@ -489,6 +515,10 @@ async def apply_listing_payload_with_repair(
         lambda db: apply_listing_payload(db, conv_id, full_text, user_message=user_message))
     if saved:
         return operations, True
+    # A recognized payload that lost a revision race must not be rebuilt and
+    # retried against a newer listing as if its JSON were malformed.
+    if operations or extract_missing_fields(full_text):
+        return operations, False
 
     ask_fields = is_missing_fields_request(user_message)
     if ask_fields or looks_like_missing_fields_attempt(full_text):
@@ -510,8 +540,7 @@ async def apply_listing_payload_with_repair(
     repaired = await repair_listing_json(provider, full_text)
     if not repaired:
         return None, False
-    await in_worker_session(_save_repaired_listing, conv_id, repaired)
-    return None, True
+    return None, await in_worker_session(_save_repaired_listing, conv_id, repaired)
 
 
 def _settle_chat_status(db: Session, conv_id: str) -> None:

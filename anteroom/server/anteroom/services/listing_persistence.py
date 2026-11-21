@@ -107,7 +107,7 @@ def _drop_fixed_marketplace_errors(db: Session, conv_id: str, before: dict, afte
             row.error = row.error_code = row.error_fields = row.marketplace_message = None
 
 
-def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None, *, expected_revision_id: str | None = None, commit: bool = True, use_saved_defaults: bool = False) -> ListingRevision:
+def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None, *, expected_revision_id: str | None = None, commit: bool = True, use_saved_defaults: bool = False, depop_notes: dict | None = None) -> ListingRevision:
     """Save atomically; an empty expected id means no listing may exist yet."""
     repo = ListingRepo(db)
     from anteroom.services.native_field_fill import (
@@ -123,16 +123,7 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
 
     scope = activity.edit_fields.get()
     if scope is not None and source in FILL_ON_SOURCES:
-        from anteroom.services.general_measurements import is_garment_measurement_path
-
-        scope_notes = None
-        if any(is_garment_measurement_path(path) for path in scope):
-            from anteroom.repositories.queries import ConversationRepo
-            from anteroom.services.vendoo_import import parse_notes
-
-            conv = ConversationRepo(db).get(conv_id)
-            scope_notes = parse_notes(conv.notes if conv else None)
-        listing_json = activity.scoped_listing(before, listing_json, scope, notes=scope_notes)
+        listing_json = activity.scoped_listing(before, listing_json, scope, notes=depop_notes)
     from anteroom.services import choice_lists, native_contract
 
     if source != "native_schema" and (native_contract.KEY in before or use_saved_defaults):

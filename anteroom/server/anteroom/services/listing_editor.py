@@ -70,7 +70,7 @@ def prepared_listing(previous: dict, listing: dict, *, notes: dict | None = None
     return updated
 
 
-def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: str = "user_form", expected_revision_id: str | None = None, commit: bool = True):
+def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: str = "user_form", expected_revision_id: str | None = None, commit: bool = True, depop_notes: dict | None = None):
 
     conv_repo = ConversationRepo(db)
     conv = conv_repo.get(conv_id)
@@ -131,6 +131,7 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
         parent_revision_id=current.current_revision_id if current else None,
         expected_revision_id=expected_revision_id,
         commit=commit,
+        depop_notes=depop_notes,
     )
 
     from anteroom.services.seller_overrides import notes_for_listing_edits

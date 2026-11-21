@@ -121,15 +121,9 @@ def active_garment(listing: dict[str, Any] | None, notes: dict[str, Any]) -> str
     """Mirror itemDetailsData.ts chooseGarment so chat sees the same active tab as the editor."""
     saved = normalize_garment(notes.get("garment"))
     values = _stored_measurements(notes)
-    typed = [garment for garment, _, _ in GARMENT_SPECS if values[garment]]
-    if typed:
-        if saved and saved in typed:
-            return saved
-        return saved or typed[0]
-    guess = _guess_garment(listing)
-    if guess != "top":
-        return guess
-    return saved or "top"
+    if saved and (notes.get("garmentExplicit") is True or saved != "top" or any(values.values())):
+        return saved
+    return next((garment for garment, _, _ in GARMENT_SPECS if values[garment]), None) or _guess_garment(listing)
 
 
 def measurement_form_fields(listing: dict[str, Any] | None, raw_notes: str | None) -> list[dict[str, Any]]:
@@ -221,25 +215,24 @@ def note_changes_for_measurement_updates(
     updates: list[tuple[str, Any, bool]],
     existing_notes: str | None,
     listing: dict[str, Any] | None,
-) -> dict[str, Any]:
-    """Convert canonical measurement updates into a merge_note_changes payload."""
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """Return note changes and the final normalized values for accepted paths."""
     notes = parse_notes(existing_notes)
     raw_measurements = notes.get("measurements")
     existing_measurements = raw_measurements if isinstance(raw_measurements, dict) else {}
     changes: dict[str, Any] = {}
     measurement_changes: dict[str, dict[str, str]] = {}
-    explicit_garment: str | None = None
+    applied: dict[str, str] = {}
     nonempty_garments: set[str] = set()
 
     for path, value, is_clear in updates:
         if path == "measurements.garment":
-            if not is_clear:
-                garment = normalize_garment(value)
-                if garment:
-                    explicit_garment = garment
+            garment = "" if is_clear else normalize_garment(value)
+            if garment is not None:
+                applied[path] = garment
             continue
         if path == "measurements.other":
-            changes["descriptionMeasurements"] = "" if is_clear else str(value or "").strip()
+            applied[path] = changes["descriptionMeasurements"] = "" if is_clear else str(value or "").strip()
             continue
         parts = path.split(".")
         if len(parts) != 3 or parts[0] != "measurements":
@@ -257,23 +250,21 @@ def note_changes_for_measurement_updates(
             and "pants" not in existing_measurements
             and isinstance(existing_measurements.get("shorts"), dict)
         ):
-            for key, _label in _GARMENT_FIELDS["pants"]:
-                prior = existing_measurements["shorts"].get(key)
-                if isinstance(prior, str) and prior:
-                    bucket[key] = prior
-        bucket[field_key] = cleaned
+            bucket.update(_stored_measurements(notes)["pants"])
+        bucket[field_key] = applied[path] = cleaned
         if cleaned:
             nonempty_garments.add(garment)
 
     if measurement_changes:
         changes["measurements"] = measurement_changes
-    if explicit_garment:
-        changes["garment"] = explicit_garment
+    if "measurements.garment" in applied:
+        changes["garment"] = applied["measurements.garment"]
+        changes["garmentExplicit"] = bool(changes["garment"])
     elif len(nonempty_garments) == 1:
         changes["garment"] = next(iter(nonempty_garments))
     elif measurement_changes and normalize_garment(notes.get("garment")) is None:
         changes["garment"] = active_garment(listing, notes)
-    return changes
+    return changes, applied
 
 
 _UNAMBIGUOUS_MISSING_FIELD_LABELS: dict[str, str] = {

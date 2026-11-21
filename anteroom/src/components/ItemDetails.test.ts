@@ -65,6 +65,10 @@ describe("the garment measured", () => {
     // A garment saved by an earlier notes edit, before any measurement, was only the default.
     expect(parseNotes(JSON.stringify({ garment: "top", measurements: {} }), undefined, jeans).garment).toBe("pants");
   });
+  it("keeps a saved skirt or explicitly selected Top before measurements are typed", () => {
+    expect(parseNotes(JSON.stringify({ garment: "skirt", measurements: {} }), undefined, jeans).garment).toBe("skirt");
+    expect(parseNotes(JSON.stringify({ garment: "top", garmentExplicit: true }), undefined, jeans).garment).toBe("top");
+  });
   it("uses the title when there is no category", () => {
     expect(parseNotes(null, undefined, { title: "Levi's 505 jeans" }).garment).toBe("pants");
   });
