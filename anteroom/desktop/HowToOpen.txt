@@ -7,20 +7,22 @@ Anteroom
    Anteroom is signed with a Developer ID and notarized by Apple, so it opens
    like any other app. macOS asks once to confirm you want to open an app
    downloaded from the internet.
-3. In Settings, sign in with ChatGPT or paste a Xiaomi MiMo API key.
-4. Click Connect Chrome. Anteroom opens Vendoo in your everyday Chrome.
-5. Load the listing extension once:
-   Copy the exact folder path from Settings → Connections in Anteroom.
-   In Chrome open chrome://extensions, turn on Developer mode, and click Load unpacked.
-   Press Control-Shift-G (⌘⇧G) to search for the folder, paste the path, click Go, then Open.
-6. Sign in to Vendoo in that Chrome window, then create a listing.
+3. In Settings → AI, sign in with ChatGPT or Claude, or paste an API key.
+4. In Settings → Connections, connect eBay or Etsy directly.
+5. Optional (for Poshmark, Mercari, and Depop): install Anteroom Bridge from the
+   Chrome Web Store:
+     https://chromewebstore.google.com/detail/empinkdlhndpfoigoipbiiofaeepcheo
+   Then click Connect Chrome in Settings → Connections and sign in to your
+   marketplaces in Chrome.
+6. Create a listing and drop in your photos.
 
 Already used an earlier Anteroom? The first time this version starts, macOS
 may ask once for your Mac login password so Anteroom can keep reading your
 saved sign-ins. Enter it and choose Always Allow. Earlier versions were signed
 with a different certificate; after this one, updates no longer ask.
 
-Needs macOS 13+ and Google Chrome. Photos, listings, drafts, hidden fields,
-settings, fill logs, and app logs stay on this Mac in:
+Needs macOS 13+ (and desktop Google Chrome for Poshmark, Mercari, and Depop).
+Photos, listings, drafts, hidden fields, settings, fill logs, and app logs stay
+on this Mac in:
   ~/Library/Application Support/Anteroom
 API keys stay in macOS Keychain (same Mac, not inside that folder).

@@ -62,7 +62,14 @@ export function ChromeConnection({ account }: { account: BrowserAccount }) {
     setExpanded(open);
   }}>
     <PopoverPopup anchor={anchor} align="end" sideOffset={8} width="md" touchBackdrop>
-      <div className="connection-help" role="status">{notice.message.map(line => <p key={line}>{line}</p>)}</div>
+      <div className="connection-help" role="status">
+        {notice.message.map(line => <p key={line}>{line}</p>)}
+        {notice.action ? (
+          <a className="connection-help-link" href={notice.action.href} target="_blank" rel="noopener noreferrer">
+            {notice.action.label}
+          </a>
+        ) : null}
+      </div>
     </PopoverPopup>
   </Popover></div>;
 }

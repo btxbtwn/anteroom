@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
+import { CHROME_WEB_STORE_URL } from "../api/chromeBridge";
 import { api } from "../api/client";
 import { cn } from "../lib/utils";
-import { Button } from "./ui/button";
+import { Button, buttonVariants } from "./ui/button";
 import { Kbd } from "./ui/kbd";
 
 export function ExtensionLoadPath({
@@ -46,21 +47,40 @@ export function ExtensionLoadPath({
       {hideHint ? (
         pathRow
       ) : (
-        <ol className="flex list-decimal flex-col gap-1.5 ps-5 marker:text-muted-foreground">
-          <li>
-            Copy this folder path:
-            {pathRow}
-          </li>
-          <li>
-            In Chrome, open <code className="font-mono text-xs">chrome://extensions</code>.
-          </li>
-          <li>Turn on Developer mode (top right).</li>
-          <li>Click Load unpacked.</li>
-          <li>
-            Press <Kbd>Control-Shift-G</Kbd> (<Kbd>⌘⇧G</Kbd>) to search for the folder.
-          </li>
-          <li>Paste the path, click Go, then Open.</li>
-        </ol>
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <a
+              className={buttonVariants({ variant: "outline", size: "xs" })}
+              href={CHROME_WEB_STORE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <ExternalLinkIcon />
+              Install from Chrome Web Store
+            </a>
+            <span className="text-xs text-muted-foreground">Recommended for most sellers.</span>
+          </div>
+          <details className="text-xs text-muted-foreground">
+            <summary className="cursor-pointer select-none hover:text-foreground">
+              Or load from this Mac’s folder (Developer mode)
+            </summary>
+            <ol className="mt-2 flex list-decimal flex-col gap-1.5 ps-5 text-sm text-foreground/90 marker:text-muted-foreground">
+              <li>
+                Copy this folder path:
+                {pathRow}
+              </li>
+              <li>
+                In Chrome, open <code className="font-mono text-xs">chrome://extensions</code>.
+              </li>
+              <li>Turn on Developer mode (top right).</li>
+              <li>Click Load unpacked.</li>
+              <li>
+                Press <Kbd>Control-Shift-G</Kbd> (<Kbd>⌘⇧G</Kbd>) to search for the folder.
+              </li>
+              <li>Paste the path, click Go, then Open.</li>
+            </ol>
+          </details>
+        </div>
       )}
     </div>
   );

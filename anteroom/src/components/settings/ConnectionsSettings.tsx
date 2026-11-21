@@ -4,6 +4,7 @@ import { BUSY_POLL_MS, EXTENSION_STATUS_POLL_MS, IDLE_POLL_MS, pollMs } from "..
 import { extensionConnection } from "../ExtensionStatus";
 import { StatusDot } from "../StatusDot";
 import { CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
+import { CHROME_WEB_STORE_URL } from "../../api/chromeBridge";
 import { api } from "../../api/client";
 import type { DirectAccountStatus, DirectMarketplace } from "../../api/directConnections";
 import {
@@ -387,6 +388,16 @@ function HostedChromeSessions({ salesSwitch, checks }: {
       <SettingsRow
         title="Where the sign-in lives"
         description="Depop, Poshmark and Mercari stay signed in through Bridge’s Chrome; Anteroom only checks whether each is signed in."
+        control={
+          <Button
+            size="xs"
+            variant="outline"
+            render={<a href={CHROME_WEB_STORE_URL} target="_blank" rel="noopener noreferrer" />}
+          >
+            <ExternalLinkIcon />
+            Chrome Web Store
+          </Button>
+        }
       >
         {sessions.isError ? <SettingsNote>{sessions.error.message}</SettingsNote> : null}
       </SettingsRow>
@@ -533,13 +544,25 @@ export function ConnectionsSettings() {
         <ExtensionConnectionRow />
         <SettingsRow
           title="Chrome"
-          description="Optional for creating drafts and eBay or Etsy. Connect desktop Chrome with Bridge for Poshmark, Mercari and Depop actions."
-          control={<ConnectChromeButton className={buttonVariants({ size: "xs", variant: "outline" })} />}
+          description="Optional for creating drafts and eBay or Etsy. Install Anteroom Bridge from the Chrome Web Store and connect desktop Chrome for Poshmark, Mercari and Depop actions."
+          control={
+            <span className="flex flex-wrap items-center justify-end gap-2">
+              <Button
+                size="xs"
+                variant="outline"
+                render={<a href={CHROME_WEB_STORE_URL} target="_blank" rel="noopener noreferrer" />}
+              >
+                <ExternalLinkIcon />
+                Chrome Web Store
+              </Button>
+              <ConnectChromeButton className={buttonVariants({ size: "xs", variant: "outline" })} />
+            </span>
+          }
         />
         <SettingsRow
           id="extension-folder"
-          title="Listing extension folder"
-          description="In chrome://extensions, turn on Developer mode, click Load unpacked, press ⌘⇧G, paste this path and choose Open."
+          title="Listing extension folder (Developer mode)"
+          description="Only needed if loading unpacked instead of the Chrome Web Store: in chrome://extensions, turn on Developer mode, click Load unpacked, press ⌘⇧G, paste this path and choose Open."
         >
           <ExtensionLoadPath compact hideHint />
         </SettingsRow>
