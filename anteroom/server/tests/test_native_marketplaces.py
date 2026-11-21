@@ -735,6 +735,23 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         self.assertEqual(self.actions(), ["save_draft", "save_draft", "list"])
         self.assertEqual(self.bridge.call_args.args[2]["draft_url"], draft)
 
+    def test_poshmark_draft_sends_the_inventory_status_id_for_a_saved_label(self):
+        listing = {**LISTING, "poshmark_specifics": {"availability": "For Sale"}}
+        self.rev = listing_persistence.save_revision(self.db, self.conv.id, listing, "model")
+        self.bridge.return_value = {
+            "ok": True, "state": "draft", "draft_url": "https://poshmark.com/edit-listing/6adc371572e62463d992ffef",
+        }
+
+        response = self.client.post(f"{self.base}/poshmark/draft", json={"revision_id": self.rev.id})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.run_jobs()
+
+        payload = self.bridge.call_args.args[2]
+        self.assertFalse(payload["confirm"])
+        self.assertEqual(payload["listing"]["poshmark_specifics"]["availability"], "available")
+        self.db.expire_all()
+        self.assertEqual(self.rev.listing_json["poshmark_specifics"]["availability"], "For Sale")
+
     def test_poshmark_draft_links_reject_other_hosts_queries_and_invalid_ids(self):
         draft = "https://poshmark.com/edit-listing/6adc371572e62463d992ffef"
         self.assertEqual(native.draft_url("poshmark", draft), draft)

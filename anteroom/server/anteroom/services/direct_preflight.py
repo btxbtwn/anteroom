@@ -101,6 +101,10 @@ def prepare(db: Session, conv, listing_json: dict, marketplace: str) -> dict:
     from anteroom.services.seller_overrides import apply_marketplace_overrides
 
     apply_marketplace_overrides(snapshot, marketplace)
+    if marketplace == "poshmark":
+        from anteroom.services.poshmark_form import use_availability_id
+
+        use_availability_id(snapshot)
     snapshot = attach_form(snapshot, marketplace, db=db)
     return snapshot
 
