@@ -59,19 +59,28 @@ def save_sourcing(owner, *, age=None, snapshot_format=box_scout.SNAPSHOT_FORMAT,
 
 
 def test_only_the_trusted_login_lists_sellers_whose_sourcing_refresh_is_due(cloud):  # noqa: F811
+    from anteroom.services import user_settings
+
     _client, engine = cloud
     sellers = {name: str(uuid.uuid4()) for name in
-               ('fresh', 'stale', 'new_plan', 'no_buy_list', 'no_zip', 'old_format', 'future', 'never_opened')}
+               ('fresh', 'stale', 'new_plan', 'no_buy_list', 'no_zip', 'inherited_zip',
+                'non_contiguous_zip', 'old_format', 'future', 'never_opened')}
     save_sourcing(sellers['fresh'], age=timedelta(hours=1))
     save_sourcing(sellers['stale'], age=box_scout.REFRESH_INTERVAL + timedelta(minutes=1))
     save_sourcing(sellers['new_plan'], age=timedelta(hours=1), budget=450.0)
     save_sourcing(sellers['no_buy_list'])
     save_sourcing(sellers['no_zip'], zip='')
+    save_sourcing(sellers['inherited_zip'], zip='')
+    with use(for_seller(sellers['inherited_zip'])):
+        user_settings.set_ships_from_zip('60601')
+    save_sourcing(sellers['non_contiguous_zip'], zip='')
+    with use(for_seller(sellers['non_contiguous_zip'])):
+        user_settings.set_ships_from_zip('96815')
     save_sourcing(sellers['old_format'], age=timedelta(hours=1), snapshot_format=box_scout.SNAPSHOT_FORMAT - 1)
     save_sourcing(sellers['future'], age=-timedelta(hours=1))
 
     due = set(hosted_sourcing_scheduler.due_owners(engine))
-    assert due == {sellers[name] for name in ('stale', 'new_plan', 'no_buy_list', 'old_format', 'future')}
+    assert due == {sellers[name] for name in ('stale', 'new_plan', 'no_buy_list', 'inherited_zip', 'old_format', 'future')}
     # The list follows the Mac timer's own rule for every seller who has used Sourcing.
     for name, owner in sellers.items():
         if name != 'never_opened':
