@@ -1286,6 +1286,25 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         self.assertEqual(self.bridge.call_args_list[0].args[2]["draft_url"], URLS["depop"])
         self.assertIsNone(self.bridge.call_args_list[1].args[2]["draft_url"])
 
+    def test_uncertain_depop_publish_with_missing_draft_text_is_never_replayed(self):
+        draft = URLS["depop"]
+        self.bridge.return_value = {"ok": True, "state": "draft", "draft_url": draft}
+        saved = self.client.post(f"{self.base}/depop/draft", json={"revision_id": self.rev.id})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.run_jobs()
+        self.bridge.reset_mock()
+        self.bridge.side_effect = [
+            {"ok": False, "safe_to_retry": False, "error_code": "uncertain",
+             "error": "Depop could not confirm the publish result.", "marketplace_message": "Could not find draft"},
+            {"ok": True, "state": "draft", "draft_url": draft},
+            self.published("depop"),
+        ]
+        record = self.list("depop")
+        self.assertEqual(self.actions(), ["publish"])
+        self.assertEqual((record["state"], record["error_code"]), ("unknown", "uncertain"))
+        self.assertEqual(record["draft_url"], draft)
+        self.assertIsNone(record.get("listing_url"))
+
     def test_listing_links_are_validated_for_every_marketplace(self):
         self.bridge.side_effect = [{"ok": True, "state": "draft", "draft_url": URLS["mercari"]},
                                    {"ok": True, "state": "published", "draft_url": URLS["mercari"], "listing_url": "https://www.mercari.com/us/search/"}]
@@ -1368,6 +1387,33 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
 
 
 
+
+    def test_depop_check_with_a_404_and_remaining_draft_keeps_listing_blocked(self):
+        draft = URLS["depop"]
+        unknown = {
+            "ok": False, "safe_to_retry": False, "error_code": "uncertain", "draft_url": draft,
+            "error": "Depop still has this draft. Open it in Depop’s Selling Hub to check for a listing error.",
+            "marketplace_message": "publish status: HTTP 404; draft: still in drafts",
+        }
+        self.bridge.side_effect = [
+            {"ok": True, "state": "draft", "draft_url": draft},
+            unknown,
+            {"finished": True, "result": unknown},
+        ]
+        record = self.list("depop")
+        self.assertEqual(record["state"], "unknown")
+        checked = self.client.post(f"{self.base}/depop/check")
+        self.assertEqual(checked.status_code, 200, checked.text)
+        result = checked.json()
+        self.assertEqual((result["state"], result["error_code"]), ("unknown", "uncertain"))
+        self.assertEqual(result["draft_url"], draft)
+        self.assertIsNone(result.get("listing_url"))
+        self.assertEqual(result["marketplace_message"], unknown["marketplace_message"])
+        blocked = self.client.post(f"{self.base}/depop/list", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(blocked.status_code, 409, blocked.text)
+        self.assertEqual([call.args[1] for call in self.bridge.call_args_list],
+                         ["marketplace.execute", "marketplace.execute", "marketplace.result"])
+        self.assertEqual(self.actions(), ["save_draft", "publish"])
 
     def test_a_check_that_answers_after_the_seller_added_the_link_keeps_the_link(self):
         # Production, 2026-11-18: Depop's publish was unconfirmed, a Check was asking
