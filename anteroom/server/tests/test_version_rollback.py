@@ -162,14 +162,98 @@ def test_install_version_needs_the_reviewed_snapshot_for_an_older_layout(monkeyp
     for key, value in {"status": "idle", "download_percent": None, "sha": None, "error": None}.items():
         monkeypatch.setitem(updates._operation_state, key, value)
     monkeypatch.setattr(updates, "is_packaged", lambda: True)
-    monkeypatch.setattr(packaged_updates, "fetch_version_build_info", lambda tag: {"schema_revision": "older"})
+    monkeypatch.setattr(packaged_updates, "fetch_version_build_info", lambda tag: {"version": "0.1.1060", "schema_revision": "older"})
     monkeypatch.setattr(schema_migrations, "needs_older_database", lambda revision, engine=None: True)
     installed = []
     monkeypatch.setattr(packaged_updates, "install_packaged_version", lambda *a, **k: installed.append(a))
     with pytest.raises(updates.UpdateBlocked, match="earlier backup"):
-        updates.install_version("studio-macos-v0.1.594-aaa1111", None)
+        updates.install_version("studio-macos-v0.1.1060-aaa1111", None)
     assert installed == []
     assert updates.update_progress()["status"] == "error"
+
+
+@pytest.mark.parametrize(
+    ("tag", "metadata_version"),
+    [
+        ("studio-macos-v0.1.1053-aaa1111", "0.1.1053"),
+        ("studio-macos-v0.1.1053-aaa1111", "0.1.1060"),
+        ("studio-macos-v0.1.1060-aaa1111", "0.1.1053"),
+    ],
+)
+def test_version_plan_blocks_builds_before_database_rename(monkeypatch, tag, metadata_version):
+    monkeypatch.setattr(
+        packaged_updates,
+        "fetch_version_build_info",
+        lambda _tag: {"version": metadata_version, "title": "Pre-rename", "schema_revision": head_revision()},
+    )
+    plan = updates.version_plan(tag)
+    assert plan["action"] == "blocked"
+    assert "0.1.1054" in plan["reason"]
+
+
+def test_version_plan_allows_builds_from_database_rename_onward(monkeypatch):
+    monkeypatch.setattr(
+        packaged_updates,
+        "fetch_version_build_info",
+        lambda tag: {"version": "0.1.1054", "title": "Post-rename", "schema_revision": head_revision()},
+    )
+    monkeypatch.setattr(schema_migrations, "rollback_plan", lambda revision: {"action": "keep"})
+    plan = updates.version_plan("studio-macos-v0.1.1054-bbb2222")
+    assert plan["action"] == "keep"
+
+
+@pytest.mark.parametrize(
+    ("tag", "metadata_version"),
+    [
+        ("studio-macos-v0.1.1053-aaa1111", "0.1.1053"),
+        ("studio-macos-v0.1.1053-aaa1111", "0.1.1060"),
+        ("studio-macos-v0.1.1060-aaa1111", "0.1.1053"),
+    ],
+)
+def test_install_version_blocks_builds_before_database_rename(monkeypatch, tag, metadata_version):
+    for key, value in {"status": "idle", "download_percent": None, "sha": None, "error": None}.items():
+        monkeypatch.setitem(updates._operation_state, key, value)
+    monkeypatch.setattr(updates, "is_packaged", lambda: True)
+    monkeypatch.setattr(
+        packaged_updates,
+        "fetch_version_build_info",
+        lambda _tag: {"version": metadata_version, "schema_revision": head_revision()},
+    )
+    installed = []
+    monkeypatch.setattr(packaged_updates, "install_packaged_version", lambda *a, **k: installed.append(a))
+    with pytest.raises(updates.UpdateBlocked, match="0.1.1054"):
+        updates.install_version(tag, None)
+    assert installed == []
+    assert updates.update_progress()["status"] == "error"
+
+
+def test_install_version_route_skips_cancelling_jobs_when_blocked(monkeypatch):
+    import asyncio
+    from fastapi import HTTPException
+    from anteroom.routes import updates as updates_route
+
+    monkeypatch.setattr(updates, "is_packaged", lambda: True)
+    monkeypatch.setattr(
+        packaged_updates,
+        "fetch_version_build_info",
+        lambda _tag: {"version": "0.1.1053", "title": "Pre-rename", "schema_revision": head_revision()},
+    )
+    cancelled = []
+
+    async def fake_in_worker_session(fn):
+        cancelled.append(fn)
+        return 0
+
+    monkeypatch.setattr(updates_route, "in_worker_session", fake_in_worker_session)
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            updates_route.install_version(
+                updates_route.InstallVersionRequest(tag="studio-macos-v0.1.1053-aaa1111")
+            )
+        )
+    assert exc_info.value.status_code == 409
+    assert "0.1.1054" in exc_info.value.detail
+    assert cancelled == []
 
 
 def test_replacer_puts_the_restored_database_in_place(tmp_path, monkeypatch):
