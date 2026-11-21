@@ -63,6 +63,8 @@ LONGEST_LISTED = 15
 LATEST_SALES = 10
 SIZING_ROWS = 10
 PRICE_CHANGE_ROWS = 10
+AD_ROWS = 10
+EVENT_ROWS = 10
 TOP_GROUPS = 12
 OVER_TIME_BUCKETS = 24
 # Listings read per statement for a question: a few megabytes, well inside the
@@ -243,7 +245,10 @@ CHANGE_COLUMNS = ("listing_id", "changed_on", "old_price", "new_price")
 BOX_COLUMNS = (
     "id", "store", "title", "price", "shipping", "pieces", "unsellable", "sellable", "unsellable_rate",
     "cost_per_piece", "bought_at", "spent", "listings", "listed", "sold", "returned", "profit", "roi",
-    "sell_through", "unsold_asking", "median_days", "asp", "sold_premium",
+    "sell_through", "sell_through_by_age", "unsold_asking", "median_days", "asp", "sold_premium",
+)
+BOXES_SHOWN_COLUMNS = (
+    "id", "store", "title", "bought_at", "spent", "pieces", "listed", "sold", "profit", "roi", "sell_through",
 )
 AD_COLUMNS = (
     "marketplace", "start_date", "end_date", "spend", "clicks", "orders", "revenue", "roas", "cost_per_click", "notes",
@@ -554,11 +559,11 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
         _listing_summary(records),
         _sizing_rows(records),
         _price_change_rows(changes),
-        _section("Wholesale boxes bought, and what each has returned", box_results),
+        _box_rows(box_results),
         _sourcing(sourcing_state, tab_boxes, clock),
         _sourcing_box_rows(tab_boxes),
-        _section("Ad spend the seller recorded", ads),
-        _section("Sale events", events),
+        _ad_rows(ads),
+        _event_rows(events),
         automation_lines,
         _section("Sourcing checks (is this worth buying?)", {
             "track_record": scout_record,
@@ -1276,6 +1281,41 @@ def _price_change_rows(changes: list[dict[str, Any]]) -> str:
         title, note, " | ".join(CHANGE_COLUMNS),
         *(_line(change, CHANGE_COLUMNS) for change in changes[:PRICE_CHANGE_ROWS]),
     ])
+
+
+def _box_rows(box_results: dict[str, Any]) -> str:
+    """Bought wholesale boxes: per-store totals in full, and the latest boxes as a table."""
+    bought = list(box_results.get("boxes") or [])
+    stores = box_results.get("stores") or []
+    if not bought and not stores:
+        return "--- Wholesale boxes bought, and what each has returned ---\nNothing recorded."
+    ordered = sorted(bought, key=lambda box: (box.get("bought_at") or "", str(box.get("id") or "")), reverse=True)
+    shown = ordered[:TOP_BOXES]
+    note = "Newest first; the `boxes` lookup table has every box and every column."
+    if len(ordered) > TOP_BOXES:
+        note = (
+            f"Only the latest {TOP_BOXES} of {len(ordered)} boxes are shown; "
+            "the `boxes` lookup table has every box and every column."
+        )
+    parts = []
+    if stores:
+        parts.append(_section("Wholesale boxes by store", stores))
+    parts.append(_table("Wholesale boxes bought, and what each has returned", note, BOXES_SHOWN_COLUMNS, shown))
+    return "\n\n".join(parts)
+
+
+def _ad_rows(ads: list[dict[str, Any]]) -> str:
+    note = "Most recent ad spend entries recorded."
+    if len(ads) > AD_ROWS:
+        note = f"Only the latest {AD_ROWS} of {len(ads)} entries are shown; the `ad_spend` lookup table has every one."
+    return _table("Ad spend the seller recorded", note, AD_COLUMNS, ads[:AD_ROWS])
+
+
+def _event_rows(events: list[dict[str, Any]]) -> str:
+    note = "Most recent sale events recorded."
+    if len(events) > EVENT_ROWS:
+        note = f"Only the latest {EVENT_ROWS} of {len(events)} events are shown; the `sale_events` lookup table has every one."
+    return _table("Sale events", note, EVENT_COLUMNS, events[:EVENT_ROWS])
 
 
 def _sourcing(state: dict, tab_boxes: list[dict[str, Any]], now: datetime) -> str:

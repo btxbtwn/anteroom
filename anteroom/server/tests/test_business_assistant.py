@@ -104,7 +104,9 @@ def test_the_brief_summarizes_the_shop_and_points_to_the_rows(workspace):
         assert f"--- {heading}" in brief
     assert "\n30d | 1 | 48 | 32 | 1 | " in brief.split("--- Sales by range ---")[1]
     assert "\n30d Levi's | 1 | 48 | 32 | 1 | " in brief.split("--- Brands ---")[1]
-    assert '"store":"Raghouse"' in brief and '"spend":31.0' in brief
+    assert '"store":"Raghouse"' in brief.split("--- Wholesale boxes by store ---")[1]
+    assert "| Raghouse | Mixed denim |" in brief.split("--- Wholesale boxes bought")[1]
+    assert "etsy | 2026-09-01 | 2026-09-30 | 31" in brief.split("--- Ad spend the seller recorded ---")[1]
     assert "No sourcing check has finished yet" in brief.split("--- Sourcing buy list ---")[1]
     assert "--- Best boxes on the Sourcing tab (0 of 0) ---\nNo boxes in the last sourcing check." in brief
     assert "What the seller says" not in brief
@@ -1577,4 +1579,69 @@ def test_listing_details_has_one_row_per_listing_including_drafts(workspace):
         assert f"{coat.id}" in business_assistant.run_lookup(shop.lookups, "SELECT listing_id FROM listing_details")
     finally:
         shop.close()
+
+
+def test_boxes_ads_and_events_stay_capped_in_the_brief(workspace):
+    from datetime import timedelta
+
+    from anteroom.models.sale_event import SaleEvent
+
+    db, _client = workspace
+    small = business_assistant.read_shop(db, now=NOW)
+    try:
+        small_len = len(small.brief)
+    finally:
+        small.close()
+
+    for n in range(80):
+        boxes.create_box(
+            db,
+            store=f"Supplier {n % 4}",
+            title=f"Wholesale Lot Number {n}",
+            price=100 + n,
+            shipping=15,
+            pieces=20,
+            bought_at=NOW - timedelta(days=80 - n),
+        )
+    for n in range(40):
+        start = date(2026, 1, 1) + timedelta(days=n * 5)
+        db.add(AdSpend(
+            marketplace=("ebay", "poshmark", "etsy")[n % 3],
+            start_date=start,
+            end_date=start + timedelta(days=4),
+            spend=20.0 + n,
+            notes=f"Campaign note {n}",
+        ))
+    for n in range(30):
+        start = date(2026, 1, 1) + timedelta(days=n * 7)
+        db.add(SaleEvent(
+            title=f"Promo Event {n}",
+            marketplace="ebay",
+            start_date=start,
+            end_date=start + timedelta(days=3),
+            timezone="UTC",
+            discount_percent=15.0,
+            items=[],
+            status="ended",
+            notes=f"Event note {n}",
+        ))
+    db.commit()
+
+    big = business_assistant.read_shop(db, now=NOW)
+    try:
+        assert len(big.brief) < small_len + 10_000
+        assert "Only the latest 15 of 80 boxes are shown" in big.brief
+        assert "Wholesale Lot Number 79" in big.brief
+        assert "Wholesale Lot Number 0" not in big.brief
+        assert "Only the latest 10 of 40 entries are shown" in big.brief
+        assert "Only the latest 10 of 30 events are shown" in big.brief
+        assert business_assistant.run_lookup(big.lookups, "SELECT count(*) FROM boxes").endswith("\n80")
+        assert business_assistant.run_lookup(big.lookups, "SELECT count(*) FROM ad_spend").endswith("\n40")
+        assert business_assistant.run_lookup(big.lookups, "SELECT count(*) FROM sale_events").endswith("\n30")
+        assert "sell_through_by_age" in business_assistant.run_lookup(
+            big.lookups, "SELECT sell_through_by_age FROM boxes LIMIT 1",
+        )
+    finally:
+        big.close()
+
 
