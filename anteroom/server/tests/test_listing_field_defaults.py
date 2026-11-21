@@ -339,10 +339,10 @@ def test_without_saved_defaults_the_models_answers_stay(settings_file):
     assert user_settings.clear_mercari_answers_with_defaults(listing) is False
 
 
-@pytest.mark.parametrize("refresh_etsy_form", [False, True])
+@pytest.mark.parametrize("etsy_form_state", ["absent", "available", "unavailable", "unavailable_locked"])
 @pytest.mark.parametrize("mercari_form_state", ["available", "unavailable", "unavailable_locked"])
 def test_a_generated_listing_keeps_the_saved_defaults_over_the_models_answers(
-    settings_file, refresh_etsy_form, mercari_form_state,
+    settings_file, etsy_form_state, mercari_form_state,
 ):
     import json
 
@@ -350,11 +350,12 @@ def test_a_generated_listing_keeps_the_saved_defaults_over_the_models_answers(
     from sqlalchemy.orm import sessionmaker
 
     from anteroom.database import Base
-    from anteroom.repositories.queries import ConversationRepo
+    from anteroom.repositories.queries import ConversationRepo, ListingRepo
     from anteroom.services import etsy_listings, listing_persistence, mercari_form, native_contract, native_editor
 
     user_settings.set_listing_field_default("etsy_specifics.whoMade", "Another company or person")
     user_settings.set_listing_field_default("etsy_specifics.whatIsIt", "A supply or tool to make things")
+    user_settings.set_listing_field_default("etsy_specifics.renewalOption", "Manual")
     user_settings.set_listing_field_default(SHOEBOX, "yes")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -369,12 +370,16 @@ def test_a_generated_listing_keeps_the_saved_defaults_over_the_models_answers(
             seed["mercari_specifics"] = {"package": {"pounds": 1, "fitsShoebox": "no"}}
         locked = mercari_form_state == "unavailable_locked"
         if locked:
-            seed["seller_fields"] = [SHOEBOX]
-        seed[native_contract.KEY] = native_contract.capture(
-            seed, form, ["mercari"],
-        )
+            seed.setdefault("seller_fields", []).append(SHOEBOX)
+        markets = ["mercari"]
+        if etsy_form_state.startswith("unavailable"):
+            markets.append("etsy")
+            seed["etsy_specifics"] = {"renewalOption": "Automatic", "materials": ["cotton"]}
+        if etsy_form_state == "unavailable_locked":
+            seed.setdefault("seller_fields", []).append("etsy_specifics.renewalOption")
+        seed[native_contract.KEY] = native_contract.capture(seed, form, markets)
         revision = listing_persistence.save_revision(db, conv.id, seed, source="native_schema")
-        if refresh_etsy_form:
+        if etsy_form_state == "available":
             form = asyncio.run(etsy_form.editor_form(seed))
             native_editor.save_refreshed_form(db, conv.id, "etsy", revision.id, form)
         generated = {
@@ -386,9 +391,14 @@ def test_a_generated_listing_keeps_the_saved_defaults_over_the_models_answers(
             db, conv.id, json.dumps(generated), provider_name="test", model_name="test", parsed=generated,
         )
         assert saved is not None
-        who, what = ("whoMade", "whatIsIt") if refresh_etsy_form else ("who_made", "what_is")
+        who, what = ("whoMade", "whatIsIt") if etsy_form_state == "available" else ("who_made", "what_is")
         assert saved["etsy_specifics"][who] == "Another company or person"
         assert saved["etsy_specifics"][what] == "A supply or tool to make things"
+        if etsy_form_state.startswith("unavailable"):
+            assert saved["etsy_specifics"]["materials"] == ["cotton"]
+            assert saved[native_contract.KEY]["etsy"] == {"unavailable": True}
+        expected_renewal = "Automatic" if etsy_form_state == "unavailable_locked" else "Manual"
+        assert saved["etsy_specifics"]["renewalOption"] == expected_renewal
         fields = etsy_listings.draft_fields(saved, creating=True)
         assert fields["who_made"] == "someone_else"
         assert fields["is_supply"] == "true"
@@ -396,7 +406,12 @@ def test_a_generated_listing_keeps_the_saved_defaults_over_the_models_answers(
         assert package.get("fitsShoebox") == ("no" if locked else None)
         if mercari_form_state != "available":
             assert package["pounds"] == 1
-        attached = native_form.attach_form(saved, "mercari")
+        db.expire_all()
+        repo = ListingRepo(db)
+        persisted = repo.get_revision(repo.get_current(conv.id).current_revision_id).listing_json
+        assert persisted["etsy_specifics"] == saved["etsy_specifics"]
+        assert persisted.get("mercari_specifics") == saved.get("mercari_specifics")
+        attached = native_form.attach_form(persisted, "mercari")
         assert attached["mercari_specifics"]["package"]["fitsShoebox"] == ("no" if locked else "yes")
     finally:
         db.close()

@@ -1750,20 +1750,17 @@ def persist_generated_listing(
     if pinned_size:
         _follow_native_size_rows(listing, seed, sanitize_size_value(listing.get("size")) or pinned_size[0])
         _drop_unformed_size_ids(listing, seed)
-    from anteroom.services.user_settings import apply_etsy_listing_field_defaults, clear_mercari_answers_with_defaults
-
-    # Validate Etsy's stored answers against the captured form. For Mercari,
-    # clear preference fields after constraints can restore the prior answers.
-    apply_etsy_listing_field_defaults(listing, seed)
     constrain_generated(listing, seed)
-    clear_mercari_answers_with_defaults(listing, seed)
     cap_listing_description(listing)
     if revisions:
         from anteroom.services.seller_overrides import capture_locked, restore_locked, materialize_prices
 
         restore_locked(listing, capture_locked(revisions[0].listing_json))
         materialize_prices(listing)
-    listing_persistence.save_revision(db, conv_id, listing, source=source, expected_revision_id=expected_revision_id)
+    revision = listing_persistence.save_revision(
+        db, conv_id, listing, source=source, expected_revision_id=expected_revision_id, use_saved_defaults=True,
+    )
+    listing = revision.listing_json
 
     if announce:
         repo.add_message(
@@ -1854,10 +1851,12 @@ async def persist_generated_listing_with_repair(
         if isinstance(updated, dict) and updated:
             def finalize(db):
                 _check_photos(db, conv_id, expected_photo_fingerprint)
-                listing_persistence.save_revision(db, conv_id, updated, source="generation_finalize", expected_revision_id=expected_revision_id)
+                return listing_persistence.save_revision(
+                    db, conv_id, updated, source="generation_finalize", expected_revision_id=expected_revision_id,
+                    use_saved_defaults=True,
+                ).listing_json
 
-            await in_worker_session(finalize)
-            listing = updated
+            listing = await in_worker_session(finalize)
             finalized = True
 
     if final_announce:
