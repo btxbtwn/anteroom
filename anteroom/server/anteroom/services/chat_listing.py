@@ -323,8 +323,8 @@ def _apply_measurement_notes(
         return {}, None
     merged = merge_note_changes(conv.notes, changes)
     notes = parse_notes(merged)
-    before = depop_measurements_from_notes(parse_notes(conv.notes))
-    after = depop_measurements_from_notes(notes)
+    before = depop_measurements_from_notes(parse_notes(conv.notes), listing)
+    after = depop_measurements_from_notes(notes, listing)
     repo.write_notes(conv_id, merged, commit=commit)
     return applied, notes if before != after else None
 

@@ -401,15 +401,23 @@ class ChatMeasurementsTest(unittest.TestCase):
             ]}) + "\n```"
             self.assertTrue(apply_listing_payload(self.db, self.conv.id, reply)[1])
             self.assertEqual(self._general_fields()["measurements.garment"]["value"], selected)
+
+        ConversationRepo(self.db).write_notes(
+            self.conv.id, json.dumps({"garment": "pants", "measurements": {"pants": {"waist": "32"}}}),
+        )
         reply = "```json\n" + json.dumps({"fields": [
             {"path": "measurements.garment", "value": "", "clear": True},
             {"path": "measurements.pants.inseam", "value": "27"},
+            {"path": "description", "value": "Updated description"},
         ]}) + "\n```"
         self.assertTrue(apply_listing_payload(self.db, self.conv.id, reply)[1])
         notes = self._notes()
         self.assertEqual(notes["garment"], "")
         self.assertEqual(notes["measurements"]["pants"]["inseam"], "27")
         self.assertEqual(self._general_fields()["measurements.garment"]["value"], "pants")
+        saved = ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json
+        rows = saved["depop_specifics"]["measurements"]["values"]
+        self.assertEqual({row["id"]: row["value"] for row in rows}, {"waist": "32", "inseam": "27"})
 
     def test_stale_mixed_refinement_preserves_newer_revision_and_rolls_back_notes(self):
         from anteroom.services import chat_listing

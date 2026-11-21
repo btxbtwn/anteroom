@@ -88,7 +88,7 @@ def normalize_garment(value: object) -> str | None:
     return None
 
 
-def _stored_measurements(notes: dict[str, Any]) -> dict[str, dict[str, str]]:
+def stored_measurements(notes: dict[str, Any]) -> dict[str, dict[str, str]]:
     source = notes.get("measurements")
     raw = source if isinstance(source, dict) else {}
     out: dict[str, dict[str, str]] = {"top": {}, "pants": {}, "skirt": {}}
@@ -120,7 +120,7 @@ def _guess_garment(listing: dict[str, Any] | None) -> str:
 def active_garment(listing: dict[str, Any] | None, notes: dict[str, Any]) -> str:
     """Mirror itemDetailsData.ts chooseGarment so chat sees the same active tab as the editor."""
     saved = normalize_garment(notes.get("garment"))
-    values = _stored_measurements(notes)
+    values = stored_measurements(notes)
     if saved and (notes.get("garmentExplicit") is True or saved != "top" or any(values.values())):
         return saved
     return next((garment for garment, _, _ in GARMENT_SPECS if values[garment]), None) or _guess_garment(listing)
@@ -130,7 +130,7 @@ def measurement_form_fields(listing: dict[str, Any] | None, raw_notes: str | Non
     """General form's Measurements (in) rows, backed by Conversation.notes."""
     notes = parse_notes(raw_notes)
     garment = active_garment(listing, notes)
-    values = _stored_measurements(notes)
+    values = stored_measurements(notes)
     rows: list[dict[str, Any]] = [
         {
             "key": "measurements.garment",
@@ -250,7 +250,7 @@ def note_changes_for_measurement_updates(
             and "pants" not in existing_measurements
             and isinstance(existing_measurements.get("shorts"), dict)
         ):
-            bucket.update(_stored_measurements(notes)["pants"])
+            bucket.update(stored_measurements(notes)["pants"])
         bucket[field_key] = applied[path] = cleaned
         if cleaned:
             nonempty_garments.add(garment)
