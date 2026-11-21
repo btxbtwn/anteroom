@@ -1,0 +1,1 @@
+- Added per-device rate limiting to the Cloudflare relay's eBay research endpoint so one busy or runaway client cannot exhaust shared eBay API quota for other sellers.

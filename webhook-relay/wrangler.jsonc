@@ -16,9 +16,11 @@
   ],
   // Device registration: 5 per minute per IP.
   // eBay signing-key lookups that miss the cache: 10 per minute per IP.
+  // eBay Browse/research lookups proxied through the shared app key: 60 per minute per device.
   "ratelimits": [
     { "name": "REGISTRATION_LIMITER", "namespace_id": "1001", "simple": { "limit": 5, "period": 60 } },
-    { "name": "EBAY_KEY_LIMITER", "namespace_id": "1002", "simple": { "limit": 10, "period": 60 } }
+    { "name": "EBAY_KEY_LIMITER", "namespace_id": "1002", "simple": { "limit": 10, "period": 60 } },
+    { "name": "EBAY_RESEARCH_LIMITER", "namespace_id": "1003", "simple": { "limit": 60, "period": 60 } }
   ],
   "vars": {
     // "production" or "sandbox".
