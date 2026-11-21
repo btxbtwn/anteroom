@@ -189,7 +189,7 @@ def save_refreshed_form(db: Session, conv_id: str, marketplace: str, revision_id
     from anteroom.repositories.queries import RevisionConflict
     from anteroom.services import listing_persistence, native_contract
 
-    if form.get("known") is False or not form.get("fields"):
+    if form.get("known") is False or form.get("properties_unavailable") or not form.get("fields"):
         raise NativeMarketplaceError(502, "The marketplace fields could not be loaded. Your saved listing is unchanged.")
     db.expire_all()
     repo = ListingRepo(db)

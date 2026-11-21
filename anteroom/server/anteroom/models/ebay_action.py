@@ -1,10 +1,10 @@
-"""Receipts and fingerprints only; no buyer details or message bodies."""
+"""Action receipts and ad reconciliation targets; no buyer details or message bodies."""
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Index, String, text
+from sqlalchemy import JSON, DateTime, Index, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from anteroom.database import Base
@@ -27,6 +27,7 @@ class EbayAction(SellerOwned, Base):
     account_id: Mapped[str] = mapped_column(String, nullable=False)
     kind: Mapped[str] = mapped_column(String, nullable=False)
     resource_id: Mapped[str] = mapped_column(String, nullable=False)
+    ad_listing_ids: Mapped[list[str] | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     fingerprint: Mapped[str] = mapped_column(String, nullable=False)
     state: Mapped[str] = mapped_column(String, nullable=False, default="preview")
     receipt_id: Mapped[str | None] = mapped_column(String, nullable=True)

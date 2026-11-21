@@ -330,7 +330,7 @@ test('a Depop publish that has not started yet is waited for, not called a refus
     && new URL(request.url).pathname === '/presentation/api/v1/drafts/products/').length, 1);
 });
 
-test('a Depop publish job that ended without posting names its reason and leaves the draft to retry', async () => {
+test('a Depop publish job that rejects a duplicate SKU leaves the same draft available to fix', async () => {
   const { c, requests, payload } = page();
   c.chrome.storage.local.get = async () => ({});
   c.marketplaceSleep = async () => {};
@@ -339,9 +339,9 @@ test('a Depop publish job that ended without posting names its reason and leaves
   c.fetch = async (url, options = {}) => {
     requests.push({ url, ...options });
     const { pathname } = new URL(url);
-    if (pathname.endsWith('/status/')) {
+    if (pathname === '/presentation/api/v1/drafts/products/job-1/status/') {
       return reply(200, { count_by_status: { COMPLETE: 0, PENDING: 0, FAILED: 1 },
-        errors: [{ message: 'This listing needs a shipping method.' }] });
+        errors: [{ message: 'SKU is invalid: SKU must be unique' }] });
     }
     if (options.method === 'POST' && pathname === '/presentation/api/v1/drafts/products/') return reply(200, { id: 'job-1' });
     return reply(200, draft);
@@ -353,8 +353,10 @@ test('a Depop publish job that ended without posting names its reason and leaves
   assert.equal(result.ok, false);
   assert.equal(result.safe_to_retry, true);
   assert.equal(result.error_code, 'rejected');
-  assert.match(result.error, /Depop could not publish this listing\. This listing needs a shipping method\./);
+  assert.match(result.error, /Use a new SKU or clear it/);
+  assert.equal(result.marketplace_message, 'SKU is invalid: SKU must be unique');
   assert.equal(result.draft_url, DRAFT);
+  assert.equal(requests.filter(request => request.method === 'POST').length, 1);
 });
 
 test('Depop publish failures recover nested SKU validation without writing', async () => {
@@ -363,10 +365,12 @@ test('Depop publish failures recover nested SKU validation without writing', asy
     const validation = { errors: { sku: ['SKU is invalid: SKU must be unique'] } };
     c.fetch = async (url, options = {}) => {
       assert.ok(!options.method || options.method === 'GET');
-      if (new URL(url).pathname.endsWith('/status/')) return reply(200, {
+      const path = new URL(url).pathname;
+      if (path === '/presentation/api/v1/drafts/products/job-1/status/') return reply(200, {
         count_by_status: { FAILED: 1, COMPLETE: 0, PENDING: 0 },
         ...(!onDraft ? validation : {}),
       });
+      if (path.endsWith('/status/')) return reply(404, '');
       return reply(200, { description: 'Private draft', ...validation });
     };
     const result = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1' });
@@ -387,10 +391,32 @@ test('a count-only Depop failure stays a refusal if reading its draft fails', as
   assert.equal(result.reason, undefined);
 });
 
+test('contradictory Depop publish counts leave the result unsettled', async () => {
+  const { c, payload } = page();
+  for (const counts of [{ PENDING: 1, FAILED: 1 }, { COMPLETE: 1, FAILED: 1 }, { FAILED: 2 }]) {
+    const requests = [];
+    c.fetch = async url => {
+      const { pathname } = new URL(url);
+      requests.push(pathname);
+      return reply(200, { count_by_status: counts });
+    };
+    const result = await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-1' });
+    assert.equal(result.failed, false, JSON.stringify(counts));
+    assert.equal(result.complete, false, JSON.stringify(counts));
+    assert.deepEqual(requests, ['/presentation/api/v1/drafts/products/job-1/status/']);
+  }
+});
+
 test('Depop validation extraction excludes unrelated draft data', () => {
   const { c } = page();
   assert.equal(c.depopValidationReason({ description: 'private', address: 'private',
     errors: { sku: ['SKU must be unique'] } }), 'SKU must be unique');
+});
+
+test('separate Depop validation messages do not combine into a duplicate SKU', () => {
+  const { c } = page();
+  const reason = c.depopValidationReason({ errors: { sku: 'Missing SKU', tags: 'Must be unique' } });
+  assert.equal(call(c, 'depopSkuTaken', reason), false);
 });
 
 test('a completed Depop publish without a slug uses the one matching selling listing', async () => {
@@ -454,7 +480,7 @@ test('two Depop inventory rows for one listing do not pick a link', async () => 
 // Production, 2026-11-17 and 2026-11-18: Depop posted the item, then its publish
 // status read answered a bodiless HTTP 404 on every read, and Anteroom reported
 // "Depop refused the request (HTTP 404)" with the listing live.
-function publishWithStatus404(c, payload, { draftAfterPost, shopRows }) {
+function depopPublishFixture(c, payload, { draftAfterPost, shopRows, publishStatus = () => reply(404, '') }) {
   c.chrome.storage.local.get = async () => ({});
   c.marketplaceSleep = async () => {};
   const sent = { ...FULL, tags: [] };
@@ -464,7 +490,7 @@ function publishWithStatus404(c, payload, { draftAfterPost, shopRows }) {
   c.fetch = async (url, options = {}) => {
     const { pathname } = new URL(url);
     requests.push({ method: options.method || 'GET', pathname });
-    if (pathname.endsWith('/status/')) return reply(404, '');
+    if (pathname.endsWith('/status/')) return publishStatus();
     if (options.method === 'POST' && pathname === '/presentation/api/v1/drafts/products/') { posted = true; return reply(200, { id: 'job-1' }); }
     if (pathname === '/presentation/api/v1/drafts/123456/' && posted) return draftAfterPost();
     if (pathname === '/presentation/api/v1/users/me/') return reply(200, { id: 42 });
@@ -485,7 +511,7 @@ const publishPosts = requests => requests.filter(request => request.method === '
 
 test('a Depop publish whose status read answers 404 is confirmed by the posted product, not called a refusal', async () => {
   const { c, payload } = page();
-  const { requests, run } = publishWithStatus404(c, payload, {
+  const { requests, run } = depopPublishFixture(c, payload, {
     draftAfterPost: () => reply(404, { detail: 'Not found' }),
     shopRows: (sent, posted) => posted
       ? [{ slug: 'seller-corona-tee-5618', description: c.depopDescription(sent), price_amount: String(sent.price), user_id: 42 }] : [],
@@ -501,8 +527,11 @@ test('a Depop publish whose status read answers 404 is confirmed by the posted p
 test('a Depop publish whose status read answers 404 stays unconfirmed while its draft is still there', async () => {
   const { c, payload } = page();
   let draftReads = 0;
-  const { draft, requests, run } = publishWithStatus404(c, payload, {
-    draftAfterPost: () => { draftReads += 1; return reply(200, draft); },
+  const { draft, requests, run } = depopPublishFixture(c, payload, {
+    draftAfterPost: () => {
+      draftReads += 1;
+      return reply(200, { ...draft, errors: ['SKU contains an invalid character', 'Photo is already processing'] });
+    },
     shopRows: () => [],
   });
   const result = await run();
@@ -511,13 +540,53 @@ test('a Depop publish whose status read answers 404 stays unconfirmed while its 
   assert.equal(result.error_code, 'uncertain');
   assert.equal(result.draft_url, DRAFT);
   assert.doesNotMatch(result.error, /refused/);
+  assert.match(result.error, /Selling Hub/);
+  assert.equal(result.marketplace_message, 'publish status: HTTP 404; draft: still in drafts');
   assert.ok(draftReads > 1, 'the draft is re-read while Depop works through its queue');
+  assert.equal(publishPosts(requests), 1);
+});
+
+test('a Depop publish with a missing status surfaces a duplicate SKU on List and Check without reposting', async () => {
+  const { c, payload } = page();
+  const reason = 'SKU is invalid: SKU must be unique';
+  const { draft, requests, run } = depopPublishFixture(c, payload, {
+    draftAfterPost: () => reply(200, { ...draft, errors: { sku: [reason] } }),
+    shopRows: () => [],
+  });
+  const listed = await run();
+  const checked = await c.runDepopNative({ payload: {
+    ...payload, action: 'publish', publish_job_id: 'job-1', operation_id: 'abc123',
+  } }, true);
+  for (const result of [listed, checked]) {
+    assert.equal(result.ok, false);
+    assert.equal(result.safe_to_retry, false);
+    assert.equal(result.error_code, 'uncertain');
+    assert.equal(result.draft_url, DRAFT);
+    assert.match(result.error, /Use a new SKU or clear it/);
+    assert.equal(result.marketplace_message, reason);
+  }
+  assert.equal(publishPosts(requests), 1);
+});
+
+test('a missing-draft error during Depop publish recovery never enables a retry', async () => {
+  const { c, payload } = page();
+  let reads = 0;
+  const { requests, run } = depopPublishFixture(c, payload, {
+    publishStatus: () => reply(400, { message: ++reads === 1 ? 'Could not read the publish result' : 'Could not find draft' }),
+    shopRows: () => [],
+  });
+  const result = await run();
+  assert.equal(reads, 2);
+  assert.equal(result.ok, false);
+  assert.equal(result.safe_to_retry, false);
+  assert.equal(result.error_code, 'uncertain');
+  assert.equal(result.draft_url, DRAFT);
   assert.equal(publishPosts(requests), 1);
 });
 
 test('a Depop publish whose status read answers 404 and whose product cannot be found asks for the link, never a retry', async () => {
   const { c, payload } = page();
-  const { requests, run } = publishWithStatus404(c, payload, {
+  const { requests, run } = depopPublishFixture(c, payload, {
     draftAfterPost: () => reply(404, { detail: 'Could not find draft with id: 123456' }),
     // Another product of the seller's, not this listing.
     shopRows: () => [{ slug: 'other-item', description: 'Something else', price_amount: '9', user_id: 42 }],
@@ -537,7 +606,7 @@ test('a Depop publish whose status read answers 404 and whose product cannot be 
 test('a Depop publish whose status read answers 404 is not confirmed by an identical listing already live', async () => {
   const { c, payload } = page();
   const older = sent => ({ slug: 'seller-corona-tee-older-1111', description: c.depopDescription(sent), price_amount: String(sent.price), user_id: 42 });
-  const { requests, run } = publishWithStatus404(c, payload, {
+  const { requests, run } = depopPublishFixture(c, payload, {
     draftAfterPost: () => reply(404, { detail: 'Not found' }),
     // The same item listed earlier; Depop has not shown the new product yet.
     shopRows: sent => [older(sent)],
@@ -625,7 +694,7 @@ test('Depop publish evidence reads stop at their time budget and stay unconfirme
   assert.equal(status.complete, false);
   assert.equal(status.status_unavailable, true);
   assert.equal(status.listing_url, undefined);
-  assert.deepEqual(seen, ['/api/v3/drafts/products/job-1/status/']);
+  assert.deepEqual(seen, ['/presentation/api/v1/drafts/products/job-1/status/']);
 });
 
 test('a bodiless Depop refusal still names its step, method, path and status in the log, without ids', async () => {
@@ -636,7 +705,7 @@ test('a bodiless Depop refusal still names its step, method, path and status in 
   await c.depopApiAction('publish_status', { ...payload, publish_job_id: 'job-777', listing: {} });
   const line = logs.find(text => text.includes('path='));
   assert.ok(line, logs.join('\n'));
-  assert.match(line, /step=publish_status method=GET status=404 .*path=\/api\/v3\/drafts\/products\/\{id\}\/status\//);
+  assert.match(line, /step=publish_status method=GET status=404 .*path=\/presentation\/api\/v1\/drafts\/products\/\{id\}\/status\//);
   assert.doesNotMatch(logs.join('\n'), /job-777|123456/);
 });
 
@@ -857,6 +926,29 @@ test('a Depop save confirms the draft by reading it again when the first read fa
   assert.equal(result.state, 'draft');
   assert.equal(result.draft_url, DRAFT);
   assert.equal(readsAfterSave, 5);
+});
+
+test('a Depop save that loses its reply reports when the recovery read finds the draft gone', async () => {
+  const { c, msg } = newDraft();
+  msg.payload.draft_url = DRAFT;
+  let writes = 0;
+  c.fetch = async (url, options = {}) => {
+    if (new URL(url).pathname !== '/presentation/api/v1/drafts/123456/') return reply(200, {});
+    if (options.method === 'PUT') {
+      writes += 1;
+      throw new Error('Disconnected');
+    }
+    return writes
+      ? reply(404, { message: 'Could not find draft with id: 123456' })
+      : reply(200, { id: '123456', description: 'Private draft', price_amount: '12', pictures: [{ id: 789 }] });
+  };
+  withCatalog(c);
+  const result = await c.runDepopNative(msg);
+  assert.equal(writes, 1);
+  assert.equal(result.ok, false);
+  assert.equal(result.safe_to_retry, true);
+  assert.equal(result.draft_url, undefined);
+  assert.match(result.marketplace_message || '', /could not find draft/i);
 });
 
 test('a deleted Depop draft is replaced once and the missing link is not kept', async () => {
@@ -1815,7 +1907,7 @@ test('compactDepopShopBefore stores compact slugs and depopPublishEvidence match
   c.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
   c.fetch = async url => {
     const { pathname } = new URL(url);
-    if (pathname === '/api/v3/drafts/products/job-1/status/') return reply(404, {});
+    if (pathname === '/presentation/api/v1/drafts/products/job-1/status/') return reply(404, {});
     if (pathname === '/presentation/api/v1/drafts/123456/') return reply(404, {});
     if (pathname === '/presentation/api/v1/users/me/') return reply(200, { id: 42 });
     if (pathname.startsWith('/api/v1/shop/42/products/')) {

@@ -102,6 +102,8 @@ export interface ItemDetails {
   labels: string;
   cog: string;
   sku: string;
+  /** The clothing size on the tag (not the shipping package size); "0" is a size. */
+  size: string;
 }
 
 function parseNotesObject(notes: string | null | undefined): Record<string, unknown> {
@@ -153,6 +155,7 @@ export function parseItemDetails(notes: string | null | undefined, fallbackGarme
     labels: text(parsed.vendooLabels),
     cog: text(parsed.cog),
     sku: text(parsed.sku),
+    size: text(parsed.size),
   };
 }
 
@@ -164,6 +167,7 @@ export function notesWithItemDetails(notes: string | null | undefined, details: 
     vendooLabels: details.labels.trim(),
     cog: details.cog.trim(),
     sku: details.sku.trim(),
+    size: details.size.trim(),
     poshmarkOriginalPrice: "0",
   });
 }

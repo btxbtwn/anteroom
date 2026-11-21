@@ -47,7 +47,8 @@ def test_seller_can_remove_measurements_and_add_material():
     assert "Measurements:" not in body["description"]
     assert "Material:" in body["description"]
     enabled = [block["id"] for block in body["blocks"] if block["enabled"]]
-    assert enabled == ["vibe", "material", "flaws"]
+    assert enabled == ["vibe", "flaws", "material"]
+    assert body["description"].index("Flaws:") < body["description"].index("Material:")
     assert skill_formulas.description_formula_markers() == ()
     assert "Material:" in skill_formulas.listing_formula_rules()
     assert skill_formulas.description_lists_flaws() is True
@@ -201,6 +202,28 @@ def test_typed_headings_receive_seller_facts(flaws_label, measurements_label):
     )
 
 
+@pytest.mark.parametrize("indent", ["  ", "\t"])
+def test_indented_seller_fact_headings_are_replaced_in_place(indent):
+    from anteroom.services.listing_generate import apply_seller_description_facts
+    from anteroom.services.user_settings import set_listing_formulas
+
+    set_listing_formulas(description="{prose}\n\nMeasurements: {values}\n\nCare: {instructions}\n\nFlaws: {flaw}")
+    listing = {
+        "description": (
+            f"Cotton tee.\n\n{indent}Measurements: See photos\n\n"
+            f"Care: Machine wash cold.\n\n{indent}Flaws: None noted."
+        )
+    }
+    seller = {"descriptionMeasurements": "20 inches", "knownFlaws": "Small stain on hem"}
+
+    assert apply_seller_description_facts(listing, seller)
+    assert listing["description"] == (
+        f"Cotton tee.\n\n{indent}Measurements: 20 inches\n\n"
+        f"Care: Machine wash cold.\n\n{indent}Flaws: Small stain on hem. See photos for details."
+    )
+    assert not apply_seller_description_facts(listing, seller)
+
+
 def test_typed_material_is_required_but_catalog_material_is_optional():
     from anteroom.services.user_settings import set_listing_formulas
     from anteroom.services.validation import _description_follows_formula
@@ -237,3 +260,164 @@ def test_required_multiline_layout_is_preserved(template):
     set_listing_formulas(description=template)
     assert not _description_follows_formula("Soft black cotton tee. Measurements: 20 inches.")
     assert _description_follows_formula("Soft black cotton tee.\n\nMeasurements: 20 inches.")
+
+
+def test_reordered_description_blocks_persist_and_round_trip():
+    client = TestClient(app)
+    desired = ["measurements", "material", "vibe", "flaws"]
+    saved = client.put("/api/settings/formulas", json={"blocks": desired})
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    assert body["custom_description"] is False
+    assert body["default_blocks"] == ["vibe", "flaws", "measurements"]
+    assert [block["id"] for block in body["blocks"] if block["enabled"]] == desired
+    assert (
+        body["description"].index("Measurements:")
+        < body["description"].index("Material:")
+        < body["description"].index("{trendy vibe/style keyword sentence with period}")
+        < body["description"].index("Flaws:")
+    )
+    assert "in that order" in skill_formulas.listing_formula_rules()
+
+    reloaded = client.get("/api/settings/formulas").json()
+    assert reloaded["custom_description"] is False
+    assert reloaded["default_blocks"] == ["vibe", "flaws", "measurements"]
+    assert [block["id"] for block in reloaded["blocks"] if block["enabled"]] == desired
+
+    # Reordering only the default three still saves as a custom order, not the default string.
+    reordered_default = client.put("/api/settings/formulas", json={"blocks": ["measurements", "vibe", "flaws"]}).json()
+    assert reordered_default["description"] != ""
+    assert [block["id"] for block in reordered_default["blocks"] if block["enabled"]] == [
+        "measurements",
+        "vibe",
+        "flaws",
+    ]
+
+    # Saving the default blocks in default order clears custom description back to built-in default.
+    reset = client.put("/api/settings/formulas", json={"blocks": ["vibe", "flaws", "measurements"]}).json()
+    assert reset["description"] == ""
+    assert [block["id"] for block in reset["blocks"] if block["enabled"]] == ["vibe", "flaws", "measurements"]
+
+
+def test_duplicate_block_ids_deduplicate_preserving_first_position():
+    client = TestClient(app)
+    saved = client.put("/api/settings/formulas", json={"blocks": ["material", "vibe", "material", "flaws"]})
+    assert saved.status_code == 200, saved.text
+    enabled = [block["id"] for block in saved.json()["blocks"] if block["enabled"]]
+    assert enabled == ["material", "vibe", "flaws"]
+
+
+def test_match_description_blocks_rejects_duplicate_snippets():
+    snippet = next(b.snippet for b in skill_formulas.DESCRIPTION_BLOCKS if b.id == "vibe")
+    assert skill_formulas.match_description_blocks(f"{snippet}\n\n{snippet}") is None
+
+
+def test_seller_facts_respect_custom_section_order():
+    from anteroom.services.listing_generate import apply_seller_description_facts, ensure_physical_description
+    from anteroom.services.user_settings import set_listing_formulas
+
+    seller = {
+        "garment": "top",
+        "measurements": {"top": {"pitToPit": "20", "length": "26"}},
+        "knownFlaws": "small stain on hem",
+    }
+
+    # Measurements first: measurements, vibe, flaws — both when Flaws is present and when Flaws is absent.
+    set_listing_formulas(
+        description=skill_formulas.compile_description_blocks(["measurements", "vibe", "flaws"])
+    )
+    with_flaws = {"description": "Y2K black cotton tee with a soft wash.\n\nFlaws:\n- Small stain on hem."}
+    apply_seller_description_facts(with_flaws, seller)
+    assert with_flaws["description"].startswith('Measurements: Pit to pit: 20"; Length: 26"\n\nY2K black cotton tee')
+    assert (
+        with_flaws["description"].index("Measurements:")
+        < with_flaws["description"].index("Y2K black cotton tee")
+        < with_flaws["description"].index("Flaws:")
+    )
+
+    without_flaws = {"description": "Y2K black cotton tee with a soft wash."}
+    apply_seller_description_facts(without_flaws, {"garment": "top", "measurements": seller["measurements"]})
+    assert without_flaws["description"].startswith('Measurements: Pit to pit: 20"; Length: 26"\n\nY2K black cotton tee')
+
+    ensure_listing = {"description": "Y2K black cotton tee with a soft wash.\n\nFlaws:\n- Small stain on hem."}
+    assert ensure_physical_description(ensure_listing) is True
+    assert ensure_listing["description"].startswith("Measurements: See photos\n\nY2K black cotton tee")
+
+    # Intermediate attributes: vibe, flaws, material, measurements.
+    set_listing_formulas(
+        description=skill_formulas.compile_description_blocks(["vibe", "flaws", "material", "measurements"])
+    )
+    with_material = {
+        "description": 'Y2K black cotton tee.\n\nMaterial: 100% cotton.\n\nMeasurements: Pit to pit: 20"; Length: 26"'
+    }
+    apply_seller_description_facts(with_material, seller)
+    assert (
+        with_material["description"].index("Y2K black cotton tee.")
+        < with_material["description"].index("Flaws:")
+        < with_material["description"].index("Material:")
+        < with_material["description"].index("Measurements:")
+    )
+
+    # Material before Measurements before Vibe: material, measurements, vibe, flaws.
+    set_listing_formulas(
+        description=skill_formulas.compile_description_blocks(["material", "measurements", "vibe", "flaws"])
+    )
+    middle_measurements = {
+        "description": "Material: 100% cotton.\n\nY2K black cotton tee.\n\nFlaws:\n- Small stain on hem."
+    }
+    apply_seller_description_facts(middle_measurements, seller)
+    assert (
+        middle_measurements["description"].index("Material:")
+        < middle_measurements["description"].index("Measurements:")
+        < middle_measurements["description"].index("Y2K black cotton tee.")
+        < middle_measurements["description"].index("Flaws:")
+    )
+
+
+
+@pytest.mark.parametrize("gap", ["\n", "\n\n"])
+def test_missing_flaws_follow_single_newline_formula_headings(gap):
+    from anteroom.services.listing_generate import apply_seller_description_facts
+    from anteroom.services.user_settings import set_listing_formulas
+
+    set_listing_formulas(description="Item: {item}\nFlaws:\n- {flaw}\nMeasurements: {values}")
+    listing = {"description": f"Item: Cotton tee.{gap}Measurements: 20 inches"}
+
+    assert apply_seller_description_facts(listing, {"knownFlaws": "Small stain on hem"})
+    description = listing["description"]
+    assert description == "Item: Cotton tee.\nFlaws:\n- Small stain on hem\nSee photos for details.\nMeasurements: 20 inches"
+
+
+@pytest.mark.parametrize("footer", ["Thanks for looking.", "{closing sentence}"])
+def test_missing_measurements_come_between_distinct_prose_slots(footer):
+    from anteroom.services.listing_generate import ensure_physical_description
+    from anteroom.services.user_settings import set_listing_formulas
+
+    set_listing_formulas(description=f"{{intro}}\n\nMeasurements: {{values}}\n\n{footer}")
+    listing = {"description": "Cotton tee.\n\nThanks for looking."}
+
+    assert ensure_physical_description(listing)
+    assert listing["description"] == "Cotton tee.\n\nMeasurements: See photos\n\nThanks for looking."
+
+
+def test_literal_footer_anchors_measurements_when_intro_is_missing():
+    from anteroom.services.listing_generate import ensure_physical_description
+    from anteroom.services.user_settings import set_listing_formulas
+
+    set_listing_formulas(description="{intro}\n\nMeasurements: {values}\n\nThanks for looking.")
+    listing = {"description": "Thanks for looking."}
+
+    assert ensure_physical_description(listing)
+    assert listing["description"] == "Measurements: See photos\n\nThanks for looking."
+
+
+@pytest.mark.parametrize("indent", ["  ", "\t"])
+def test_missing_measurements_come_before_indented_heading(indent):
+    from anteroom.services.listing_generate import ensure_physical_description
+    from anteroom.services.user_settings import set_listing_formulas
+
+    set_listing_formulas(description="Item: {item}\n\nMeasurements: {values}\n\nCare: {instructions}")
+    listing = {"description": f"Item: Cotton tee.\n\n{indent}Care: Machine wash cold."}
+
+    assert ensure_physical_description(listing)
+    assert listing["description"] == f"Item: Cotton tee.\n\nMeasurements: See photos\n\n{indent}Care: Machine wash cold."

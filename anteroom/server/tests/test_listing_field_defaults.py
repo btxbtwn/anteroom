@@ -112,7 +112,7 @@ def test_vendoo_mercari_form_uses_the_saved_zip_for_ships_from(settings_file):
     assert form["specifics"]["mercariLocalInformation"] == "70125"
 
 
-def test_generation_fills_empty_etsy_who_and_what_from_saved_defaults(settings_file):
+def test_generation_answers_etsy_who_and_what_with_saved_defaults_over_the_model(settings_file):
     user_settings.set_listing_field_default(
         "etsy_specifics.whoMade", "Another company or person", "Another company or person",
     )
@@ -121,13 +121,31 @@ def test_generation_fills_empty_etsy_who_and_what_from_saved_defaults(settings_f
     )
 
     listing = {"title": "Tee", "etsy_specifics": {}}
-    assert listing_generate.apply_send_readiness_fixes(listing) is True
-    assert listing["etsy_specifics"]["who_made"] == "Another company or person"
-    assert listing["etsy_specifics"]["what_is"] == "A finished product"
+    assert user_settings.apply_etsy_listing_field_defaults(listing) is True
+    assert listing["etsy_specifics"] == {
+        "who_made": "Another company or person", "what_is": "A finished product",
+    }
 
-    listing["etsy_specifics"]["who_made"] = "I did"
-    assert user_settings.apply_listing_field_defaults(listing) is False
-    assert listing["etsy_specifics"]["who_made"] == "I did"
+    # The model's own guess, under any of its spellings, gives way to the default.
+    guessed = {"title": "Tee", "etsy_specifics": {
+        "who_made": "I did", "whoMadeIt": "I did", "whatIsIt": "A supply or tool to make things",
+    }}
+    assert user_settings.apply_etsy_listing_field_defaults(guessed) is True
+    assert guessed["etsy_specifics"] == {
+        "who_made": "Another company or person", "what_is": "A finished product",
+    }
+    assert user_settings.apply_etsy_listing_field_defaults(guessed) is False
+
+
+def test_a_value_the_seller_set_on_the_listing_wins_over_the_saved_default(settings_file):
+    user_settings.set_listing_field_default(
+        "etsy_specifics.whoMade", "Another company or person", "Another company or person",
+    )
+    seed = {"seller_fields": ["etsy_specifics.whoMade"]}
+
+    listing = {"etsy_specifics": {"whoMade": "I did"}}
+    assert user_settings.apply_etsy_listing_field_defaults(listing, seed) is False
+    assert listing["etsy_specifics"] == {"whoMade": "I did"}
 
 
 def test_etsy_form_starts_with_saved_who_and_what(settings_file):
@@ -156,24 +174,17 @@ def test_etsy_form_starts_with_saved_who_and_what(settings_file):
     assert own_rows["etsy_specifics.renewalOption"]["value"] == "Manual"
 
 
-def test_generation_fills_empty_etsy_renewal_from_saved_default(settings_file):
+def test_generation_answers_etsy_renewal_with_the_saved_default_over_the_model(settings_file):
     user_settings.set_listing_field_default("etsy_specifics.renewalOption", "Automatic", "Automatic")
 
     listing = {"title": "Tee", "etsy_specifics": {}}
-    assert listing_generate.apply_send_readiness_fixes(listing) is True
+    assert user_settings.apply_etsy_listing_field_defaults(listing) is True
     assert listing["etsy_specifics"]["renewalOption"] == "Automatic"
 
-    listing["etsy_specifics"]["renewalOption"] = "Manual"
-    assert user_settings.apply_listing_field_defaults(listing) is False
-    assert listing["etsy_specifics"]["renewalOption"] == "Manual"
-
-    explicit_false = {"title": "Tee", "etsy_specifics": {"should_auto_renew": False}}
-    assert user_settings.apply_listing_field_defaults(explicit_false) is False
-    assert "renewalOption" not in explicit_false["etsy_specifics"]
-
-    explicit_zero = {"title": "Tee", "etsy_specifics": {"should_auto_renew": 0}}
-    assert user_settings.apply_listing_field_defaults(explicit_zero) is False
-    assert "renewalOption" not in explicit_zero["etsy_specifics"]
+    for guess in ({"renewalOption": "Manual"}, {"should_auto_renew": False}, {"shouldAutoRenew": 0}):
+        guessed = {"title": "Tee", "etsy_specifics": dict(guess)}
+        assert user_settings.apply_etsy_listing_field_defaults(guessed) is True
+        assert guessed["etsy_specifics"] == {"renewalOption": "Automatic"}
 
 
 SHOEBOX = "mercari_specifics.package.fitsShoebox"
@@ -290,3 +301,140 @@ def test_mercari_editor_form_shows_the_saved_shoebox_answer_and_offers_the_bookm
     rows = {row["path"]: row for row in mercari_form.form(own)["fields"]}
     # #1303: a saved radio label reads as its value.
     assert rows[SHOEBOX]["value"] == "yes"
+
+
+def test_generation_drops_the_models_mercari_answers_where_the_seller_saved_defaults(settings_file):
+    user_settings.set_listing_field_default("mercari_specifics.shipsFrom", "70125")
+    user_settings.set_listing_field_default(
+        "mercari_specifics.shippingClassId", "2550", "USPS Ground Advantage",
+    )
+    user_settings.set_listing_field_default(SHOEBOX, "yes")
+
+    listing = {"mercari_specifics": {"shipsFrom": "90210", "shippingClassId": 17,
+                                     "package": {"pounds": 1, "fitsShoebox": "no"}}}
+    assert user_settings.clear_mercari_answers_with_defaults(listing) is True
+    assert listing["mercari_specifics"] == {"package": {"pounds": 1}}
+
+    snapshot = native_form.attach_form(listing, "mercari")
+    assert snapshot["mercari_specifics"]["shipsFrom"] == "70125"
+    assert snapshot["mercari_specifics"]["package"]["fitsShoebox"] == "yes"
+    assert snapshot["form"]["mercari_shipping_label"]["label"] == "USPS Ground Advantage"
+
+
+def test_mercari_answers_the_seller_set_on_the_listing_stay(settings_file):
+    user_settings.set_listing_field_default("mercari_specifics.shipsFrom", "70125")
+    user_settings.set_listing_field_default(SHOEBOX, "yes")
+    seed = {"seller_fields": ["mercari_specifics.shipsFrom", SHOEBOX]}
+
+    listing = {"mercari_specifics": {"shipsFrom": "90210", "package": {"fitsShoebox": "no"}}}
+    assert user_settings.clear_mercari_answers_with_defaults(listing, seed) is False
+    assert listing["mercari_specifics"] == {"shipsFrom": "90210", "package": {"fitsShoebox": "no"}}
+
+
+def test_without_saved_defaults_the_models_answers_stay(settings_file):
+    listing = {"etsy_specifics": {"who_made": "I did"},
+               "mercari_specifics": {"shipsFrom": "90210", "package": {"fitsShoebox": "no"}}}
+    assert user_settings.apply_etsy_listing_field_defaults(listing) is False
+    assert listing["etsy_specifics"] == {"who_made": "I did"}
+    assert user_settings.clear_mercari_answers_with_defaults(listing) is False
+
+
+@pytest.mark.parametrize("etsy_form_state", ["absent", "available", "unavailable", "unavailable_locked"])
+@pytest.mark.parametrize("mercari_form_state", ["available", "unavailable", "unavailable_locked"])
+def test_a_generated_listing_keeps_the_saved_defaults_over_the_models_answers(
+    settings_file, etsy_form_state, mercari_form_state,
+):
+    import json
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from anteroom.database import Base
+    from anteroom.repositories.queries import ConversationRepo, ListingRepo
+    from anteroom.services import etsy_listings, listing_persistence, mercari_form, native_contract, native_editor
+
+    user_settings.set_listing_field_default("etsy_specifics.whoMade", "Another company or person")
+    user_settings.set_listing_field_default("etsy_specifics.whatIsIt", "A supply or tool to make things")
+    user_settings.set_listing_field_default("etsy_specifics.renewalOption", "Manual")
+    user_settings.set_listing_field_default(SHOEBOX, "yes")
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine)()
+    try:
+        conv = ConversationRepo(db).create(title="Tee")
+        seed = {"title": "Tee"}
+        form = {}
+        if mercari_form_state == "available":
+            form["mercari"] = mercari_form.form(native_form.attach_form({}, "mercari"))
+        else:
+            seed["mercari_specifics"] = {"package": {"pounds": 1, "fitsShoebox": "no"}}
+        locked = mercari_form_state == "unavailable_locked"
+        if locked:
+            seed.setdefault("seller_fields", []).append(SHOEBOX)
+        markets = ["mercari"]
+        if etsy_form_state.startswith("unavailable"):
+            markets.append("etsy")
+            seed["etsy_specifics"] = {"renewalOption": "Automatic", "materials": ["cotton"]}
+        if etsy_form_state == "unavailable_locked":
+            seed.setdefault("seller_fields", []).append("etsy_specifics.renewalOption")
+        seed[native_contract.KEY] = native_contract.capture(seed, form, markets)
+        revision = listing_persistence.save_revision(db, conv.id, seed, source="native_schema")
+        if etsy_form_state == "available":
+            form = asyncio.run(etsy_form.editor_form(seed))
+            native_editor.save_refreshed_form(db, conv.id, "etsy", revision.id, form)
+        generated = {
+            "title": "Tee", "description": "Soft tee.", "brand": "Hanes", "condition": "Good", "size": "M",
+            "price": 18, "etsy_specifics": {"whoMade": "I did", "whatIsIt": "A finished product"},
+            "mercari_specifics": {"package": {"fitsShoebox": "no"}},
+        }
+        saved = listing_generate.persist_generated_listing(
+            db, conv.id, json.dumps(generated), provider_name="test", model_name="test", parsed=generated,
+        )
+        assert saved is not None
+        who, what = ("whoMade", "whatIsIt") if etsy_form_state == "available" else ("who_made", "what_is")
+        assert saved["etsy_specifics"][who] == "Another company or person"
+        assert saved["etsy_specifics"][what] == "A supply or tool to make things"
+        if etsy_form_state.startswith("unavailable"):
+            assert saved["etsy_specifics"]["materials"] == ["cotton"]
+            assert saved[native_contract.KEY]["etsy"] == {"unavailable": True}
+        expected_renewal = "Automatic" if etsy_form_state == "unavailable_locked" else "Manual"
+        assert saved["etsy_specifics"]["renewalOption"] == expected_renewal
+        fields = etsy_listings.draft_fields(saved, creating=True)
+        assert fields["who_made"] == "someone_else"
+        assert fields["is_supply"] == "true"
+        package = (saved.get("mercari_specifics") or {}).get("package") or {}
+        assert package.get("fitsShoebox") == ("no" if locked else None)
+        if mercari_form_state != "available":
+            assert package["pounds"] == 1
+        db.expire_all()
+        repo = ListingRepo(db)
+        persisted = repo.get_revision(repo.get_current(conv.id).current_revision_id).listing_json
+        assert persisted["etsy_specifics"] == saved["etsy_specifics"]
+        assert persisted.get("mercari_specifics") == saved.get("mercari_specifics")
+        attached = native_form.attach_form(persisted, "mercari")
+        assert attached["mercari_specifics"]["package"]["fitsShoebox"] == ("no" if locked else "yes")
+    finally:
+        db.close()
+        engine.dispose()
+
+
+@pytest.mark.parametrize("answer", ["yes", "no"])
+def test_a_form_saved_before_the_shoebox_default_fills_in_is_not_stale(settings_file, answer):
+    """Capture reads the saved listing; preflight and List read it after attach_form
+    answers the shoebox question from the default. Both are the same choice."""
+    from anteroom.services import native_contract
+
+    user_settings.set_listing_field_default(SHOEBOX, answer)
+    listing = {"title": "Tee", "category_path": "Men > Tops > T-shirts",
+               "direct_category_ids": {"mercari": "303"}, "weight_oz": 8,
+               "mercari_specifics": {"shippingMethod": "MERCARI"}}
+    fields = [{"path": "mercari_specifics.package.fitsShoebox", "label": "Will your item fit in a shoebox?",
+               "required": True, "options": ["Yes", "No"]}]
+    listing[native_contract.KEY] = native_contract.capture(
+        listing, {"mercari": {"category_id": "303", "fields": fields}}, ["mercari"])
+
+    checked = native_form.attach_form(native_contract.copy_listing(listing), "mercari")
+
+    stale = "The form's category or dependent choices changed. Reload its fields before listing."
+    assert stale not in [gap["message"] for gap in native_contract.gaps(checked, "mercari")]
+    assert native_contract.editor_form(listing, "mercari") is not None

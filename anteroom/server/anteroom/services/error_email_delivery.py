@@ -1,43 +1,134 @@
 """Shared, durable operator mail budget and outbox. No seller operation runs here."""
+import re
 import smtplib
 import time
 import uuid
+from datetime import datetime
+from typing import Any
+
+from anteroom.repositories.error_email import LIFECYCLE_ACTIVE, report_release
 
 DAY = 86400
-DIGEST_INTERVAL = 3600
+ERROR_DIGEST_INTERVAL = 3600
+WARNING_DIGEST_INTERVAL = 86400
 HOURLY_CAP = 60
 MAX_GROUPS_PER_EMAIL = 20
 
 
+def _postgres_safe(value: Any) -> Any:
+    """Postgres text and JSONB reject NUL characters."""
+    if isinstance(value, str):
+        return value.replace('\x00', '�')
+    if isinstance(value, dict):
+        return {_postgres_safe(key): _postgres_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_postgres_safe(item) for item in value]
+    return value
+
+
+def _release_order(release):
+    if not release:
+        return None
+    tag = release.rsplit('/', 1)[-1].rsplit(':', 1)[-1]
+    # App version and the hosted workflow's vVERSION-SHA image labels.
+    if version := re.fullmatch(r'v?(\d+)\.(\d+)\.(\d+)(?:-[a-f\d]{8})?', tag):
+        return 'version', tuple(map(int, version.groups()))
+    if deploy := re.fullmatch(r'deployment-([0-7][0-9A-HJKMNP-TV-Z]{25})', tag):
+        return 'fly', tuple(map(ord, deploy[1]))
+    return None
+
+
+def _is_newer_release(incoming, resolved):
+    current, previous = _release_order(incoming), _release_order(resolved)
+    return bool(current and previous and current[0] == previous[0] and current[1] > previous[1])
+
+
+def _warning_deadline(state, active):
+    hourly = state.get('digest_after')
+    if not active:
+        return hourly
+    if 'warning_digest_after' in state:
+        return state['warning_digest_after']
+    # The previous gate was one hour after the last digest or first queued warning.
+    return hourly + WARNING_DIGEST_INTERVAL - 3600 if hourly is not None else None
+
+
 class EmailDelivery:
-    def __init__(self, store, send, *, daily_limit: int, clock=time.time):
+    def __init__(self, store, send, *, daily_limit: int, clock=time.time, enable_lifecycle: bool = True):
         self.store, self.send, self.clock = store, send, clock
         self.daily_limit = max(0, daily_limit)
+        self.enable_lifecycle = enable_lifecycle
+
+    def _lifecycle_active(self, transaction):
+        # The first opted-in sender activates the policy for every upgraded
+        # sender under the same lock used to reserve mail.
+        if self.enable_lifecycle and not transaction.state.get(LIFECYCLE_ACTIVE):
+            transaction.seed_pending_issues()
+            transaction.state[LIFECYCLE_ACTIVE] = True
+        return transaction.state.get(LIFECYCLE_ACTIVE, False)
 
     def add(self, report):
-        now = self.clock()
+        report = _postgres_safe(report)
         with self.store.transaction() as transaction:
             state = transaction.state
+            active = self._lifecycle_active(transaction)
+            now = self.clock()
             fingerprint = report['severity'] + ':' + report['fingerprint']
-            group, last = transaction.get_group(fingerprint)
+            issue = transaction.get_issue(fingerprint)
+            group, last = (issue.payload, issue.last_sent) if issue else (None, None)
+            occurred = datetime.fromisoformat(report['occurred_at']).timestamp()
+            release = report_release(report)
+            warning = report['severity'] == 'WARNING'
+            updates = dict(occurrence_count=max(issue.occurrence_count if issue else 0, group['count'] if group else 0) + 1,
+                           first_seen=min(issue.first_seen, occurred) if issue and issue.first_seen is not None else occurred,
+                           last_seen=max(issue.last_seen, occurred) if issue and issue.last_seen is not None else occurred,
+                           headline=report['title'], last_release=release) if active else {}
+            regression = active and issue and issue.status == 'resolved' and _is_newer_release(release, issue.resolved_release)
+            expired = (active and issue and issue.status == 'muted'
+                       and issue.muted_until is not None and now >= issue.muted_until)
+            if issue and issue.status != 'open' and not (regression or expired):
+                transaction.record_issue(fingerprint, **updates)
+                return
+            if regression or expired:
+                updates.update(status='open', resolved_at=None, muted_until=None)
             if group:
                 group['count'] += 1
                 group['report'] = report
             else:
-                warning = report['severity'] == 'WARNING'
-                due = (max(now, state.setdefault('digest_after', now + DIGEST_INTERVAL)) if warning
-                       else max(now, last + DIGEST_INTERVAL) if last is not None else now)
+                if warning:
+                    deadline = _warning_deadline(state, active)
+                    if deadline is None:
+                        gate = 'warning_digest_after' if active else 'digest_after'
+                        interval = WARNING_DIGEST_INTERVAL if active else 3600
+                        deadline = state[gate] = now + interval
+                    due = max(now, deadline)
+                else:
+                    due = max(now, last + ERROR_DIGEST_INTERVAL) if last is not None else now
                 group = {'report': report, 'count': 1, 'first': report['occurred_at'], 'due': due}
-            transaction.put_group(fingerprint, group, last)
+            if not warning and (regression or expired):
+                # An older SMTP reservation may still be completing.
+                group['priority_token'] = uuid.uuid4().hex
+                group['due'], last = now, None
+                if regression:
+                    group['regressed_from'] = issue.resolved_release
+                    group['regression_report'] = report
+            transaction.put_group(fingerprint, group, last, **updates)
 
     def tick(self):
         if not self.daily_limit:
+            # An operator can use triage even when SMTP has no configured budget.
+            if self.enable_lifecycle:
+                with self.store.transaction() as transaction:
+                    self._lifecycle_active(transaction)
+                self.enable_lifecycle = False
             return
         from anteroom.services.error_alerts import render_email
 
-        now = self.clock()
         with self.store.transaction() as transaction:
             state = transaction.state
+            active = self._lifecycle_active(transaction)
+            now = self.clock()
+            warning_interval = WARNING_DIGEST_INTERVAL if active else 3600
             attempts = state['attempts'] = [t for t in state.get('attempts', []) if t > now - DAY]
             transaction.expire_sent(now - DAY)
             if (len(attempts) >= self.daily_limit
@@ -50,24 +141,36 @@ class EmailDelivery:
             # Reserve at least one slot for errors whenever the budget permits.
             reserve = max(1, self.daily_limit // 4)
             selected = errors
-            if not errors and len(attempts) < self.daily_limit - reserve and state.get('digest_after', 0) <= now:
+            if not errors and len(attempts) < self.daily_limit - reserve and (_warning_deadline(state, active) or 0) <= now:
                 selected = transaction.due_groups(now, warning=True, limit=MAX_GROUPS_PER_EMAIL)
             repeats = not selected and state.get('error_digest_after', 0) <= now
             if repeats:
                 errors = transaction.due_groups(now, warning=False, limit=MAX_GROUPS_PER_EMAIL,
-                                                sent_before=now - DIGEST_INTERVAL)
+                                                sent_before=now - ERROR_DIGEST_INTERVAL)
                 selected = errors
             if not selected:
                 return
             # Reserve before SMTP, including failures and uncertain crash outcomes.
             # No network call holds this transaction or a database connection.
+            now = self.clock()
             attempts.append(now)
             token = uuid.uuid4().hex
             state['lease'] = token
             state['lease_until'] = now + 120
         count = sum(group['count'] for group in selected.values())
-        sections = [render_email(group['report'], group['count'] - 1, group['first']) for group in selected.values()]
+        sections = []
+        for group in selected.values():
+            report = group.get('regression_report', group['report'])
+            title, section = render_email(_postgres_safe(report), group['count'] - 1, group['first'])
+            if previous := group.get('regressed_from'):
+                section = f'Previously resolved on release {previous}\n\n{section}'
+                if report != group['report']:
+                    _, latest = render_email(_postgres_safe(group['report']), 0, None)
+                    section += f'\n\nLatest occurrence\n-----------------\n{latest}'
+            sections.append((title, section))
         subject = sections[0][0] if len(selected) == 1 and errors else f'[Anteroom hosted] {"Errors" if errors else "Warnings"}: {count} occurrences'
+        if any(group.get('regressed_from') for group in selected.values()):
+            subject = '[Regression] ' + subject
         body = f'{count} occurrences in {len(selected)} groups\n\n' + '\n\n'.join(body for _, body in sections)
         failure = None
         try:
@@ -97,19 +200,26 @@ class EmailDelivery:
                 state['last_error'] = None
                 state['failure'] = None
                 for key, sent in selected.items():
-                    current, _last = transaction.get_group(key)
+                    current, last = transaction.get_group(key)
                     remaining = current['count'] - sent['count']
+                    superseded = current.get('priority_token') != sent.get('priority_token')
                     if remaining:
                         current['count'] = remaining
-                        current['due'] = now + DIGEST_INTERVAL
-                    transaction.put_group(key, current if remaining else None, now)
+                        if not superseded:
+                            current.pop('regressed_from', None)
+                            current.pop('regression_report', None)
+                            current.pop('priority_token', None)
+                            interval = warning_interval if not errors else ERROR_DIGEST_INTERVAL
+                            current['due'] = now + interval
+                    transaction.put_group(key, current if remaining else None, last if superseded else now)
                 if not errors:
-                    state['digest_after'] = now + DIGEST_INTERVAL
+                    gate = 'warning_digest_after' if active else 'digest_after'
+                    state[gate] = now + warning_interval
                 elif repeats:
-                    state['error_digest_after'] = now + DIGEST_INTERVAL
+                    state['error_digest_after'] = now + ERROR_DIGEST_INTERVAL
                 else:
                     # New fingerprints must not keep sliding the repeat deadline.
-                    state.setdefault('error_digest_after', now + DIGEST_INTERVAL)
+                    state.setdefault('error_digest_after', now + ERROR_DIGEST_INTERVAL)
 
     def status(self):
         state, pending = self.store.summary()

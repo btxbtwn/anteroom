@@ -59,6 +59,6 @@ it("starts from the current description sections and lists the extras", () => {
   expect(html).toContain("Measurements");
   expect(html).toContain("{trendy vibe/style keyword sentence with period}");
   expect(html).not.toContain("Material: {fiber from the label}");
-  expect(html).toContain('aria-label="Vibe"');
-  expect(html).toContain('aria-label="Material"');
+  expect(html).toContain('aria-label="Drag to reorder Vibe"');
+  expect(html).toContain('aria-label="Add Material"');
 });

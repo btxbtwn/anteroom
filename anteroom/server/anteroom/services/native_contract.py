@@ -16,11 +16,12 @@ from anteroom.services.seller_overrides import CANONICAL_PRICE, get_path, is_loc
 
 KEY = "_native_forms"
 EVIDENCE_KEY = "_native_field_evidence"
-MARKETS = ("ebay", "poshmark", "mercari", "depop")
+MARKETS = ("ebay", "poshmark", "mercari", "depop", "etsy")
 SALE_FIELDS = re.compile(
     r"price|ship|parcel|package|quantity|sku|categor|worldwide|offer|format|duration|store|inventor"
     r"|variation|zip|location|condition|title|description|brand|hashtag|tags|charity|donation"
     r"|availab|smartsell|smartpricing|boost|sellernotes|polic"
+    r"|whomade|whatisit|whenmade|renewaloption"
 )
 _SCHEMA_KEYS = ("path", "key", "label", "required", "multi", "selection_only", "options", "option_values",
                 "choice_list", "max_values", "max_length", "min_value", "max_value", "step", "input_type", "locked",
@@ -49,10 +50,17 @@ def path_of(row: dict) -> str:
     return str(row.get("path") or row.get("key") or "")
 
 
+def is_sale_field(path: str) -> bool:
+    """Whether a marketplace specifics path holds listing/account/sale config rather than item attributes."""
+    if path.startswith("etsy_specifics.category_specifics."):
+        return False
+    return bool(SALE_FIELDS.search(path.split("_specifics.", 1)[-1].casefold()))
+
+
 def item_field(row: dict, market: str) -> bool:
     path = path_of(row)
     return (path.startswith(f"{market}_specifics.") and not row.get("locked")
-            and not SALE_FIELDS.search(path.split("_specifics.", 1)[-1].casefold())
+            and not is_sale_field(path)
             and row.get("input_type") not in {"note", "badge", "photos", "inventory", "variations"})
 
 
@@ -76,6 +84,9 @@ def _input_paths(market: str, fields: list[dict]) -> set[str]:
                for rule in rules}
     paths.update(path_of(row) for row in fields if row.get("label") in parents)
     if market == "mercari":
+        paths.discard("brand")
+        paths.discard("mercari_specifics.brand")
+        paths.discard("mercari_specifics.noBrand")
         paths.update(("mercari_specifics.package", "mercari_specifics.shippingMethod", "weight_lb", "weight_oz",
                       "package_dimensions_in", "mercari_specifics.smartPricing.enabled"))
     if market == "ebay":
@@ -113,13 +124,23 @@ def inputs(listing: dict, market: str, fields: list[dict]) -> dict:
     result = _raw_inputs(listing, market, fields)
     # Posting applies marketplace overrides before checking this contract. Compare
     # the same effective choices when capturing the unprepared listing revision.
-    result["brand"] = marketplace_text(listing, market, "brand")
+    if "brand" in result:
+        result["brand"] = marketplace_text(listing, market, "brand")
     from anteroom.models.schema import ListingSchema
 
     from anteroom.services.seller_overrides import followed_entry
 
     condition = followed_entry(listing, market, "condition")
     result["condition"] = condition[1] if condition is not None else ListingSchema.validate_condition(listing.get("condition"))
+    if market == "mercari":
+        # Preflight and List answer an unanswered shoebox question from the
+        # seller's default (attach_form). Capture reads the saved listing
+        # without it, so compare the answer both will send.
+        from anteroom.services.user_settings import apply_mercari_shoebox_default
+
+        effective = {"mercari_specifics": {"package": copy.deepcopy(result.get("mercari_specifics.package"))}}
+        if apply_mercari_shoebox_default(effective):
+            result["mercari_specifics.package"] = effective["mercari_specifics"]["package"]
     return result
 
 
@@ -174,6 +195,8 @@ def _condition_inputs(value: dict, market: str, fields: list[dict]) -> dict:
                     if str(label).strip().casefold() == condition:
                         result["condition"] = str(native_id)
     if market == "mercari":
+        for key in ("brand", "mercari_specifics.brand", "mercari_specifics.noBrand"):
+            result.pop(key, None)
         for key in ("weight_lb", "weight_oz"):
             if key in result:
                 result[key] = _zero_empty_number(result[key])
@@ -246,7 +269,7 @@ def capture(listing: dict, forms: dict[str, dict], markets) -> dict:
     contracts = {}
     for market in markets:
         form = forms.get(market)
-        if not form or form.get("known") is False or not form.get("fields"):
+        if not form or form.get("known") is False or form.get("properties_unavailable") or not form.get("fields"):
             contracts[market] = {"unavailable": True}
             continue
         compacted = choice_lists.compact_fields(
@@ -466,6 +489,70 @@ def _market_of(path: str, rows: dict[str, dict]) -> str:
     return ""
 
 
+_ETSY_FIELD_ALIASES = {
+    "whomade": "etsy_specifics.whoMade",
+    "whomadeit": "etsy_specifics.whoMade",
+    "whatis": "etsy_specifics.whatIsIt",
+    "whatisit": "etsy_specifics.whatIsIt",
+    "whenmade": "etsy_specifics.whenMade",
+    "whenwasitmade": "etsy_specifics.whenMade",
+    "renewaloption": "etsy_specifics.renewalOption",
+    "shouldautorenew": "etsy_specifics.renewalOption",
+}
+
+
+def _etsy_native_path(path: str, rows: dict[str, dict]) -> str | None:
+    """Map legacy Etsy keys (who_made, what_is, top-level attributes) onto the native form's row path."""
+    if not path.startswith("etsy_specifics."):
+        return None
+    if path in rows:
+        return path
+    rest = path.removeprefix("etsy_specifics.")
+    if "." not in rest:
+        mapped = _ETSY_FIELD_ALIASES.get(_fold(rest))
+        if mapped and mapped in rows:
+            return mapped
+        leaf = rest
+    elif rest.startswith("category_specifics."):
+        leaf = rest.removeprefix("category_specifics.")
+    else:
+        return None
+    if "." in leaf:
+        return None
+    wanted = _fold(leaf)
+    if not wanted:
+        return None
+    for name, row in rows.items():
+        if not name.startswith("etsy_specifics.category_specifics."):
+            continue
+        if _fold(name.rsplit(".", 1)[-1]) == wanted or _fold(row.get("label") or "") == wanted:
+            return name
+    return None
+
+
+def _etsy_canonical_value(path: str, row: dict, value) -> str | None:
+    """Map Etsy's known code/alias spellings for who/what/when/renewal to the dropdown label."""
+    if path not in {"etsy_specifics.whoMade", "etsy_specifics.whatIsIt",
+                    "etsy_specifics.whenMade", "etsy_specifics.renewalOption"}:
+        return None
+    if isinstance(value, (list, dict)) or value in (None, ""):
+        return None
+    options = [str(option) for option in row.get("options") or []]
+    if not options or str(value) in options:
+        return None
+    from anteroom.services.etsy_fields import _canonical_etsy_when, etsy_renewal_raw, etsy_what_raw, etsy_who_raw
+
+    if path == "etsy_specifics.whoMade":
+        mapped = etsy_who_raw({"who_made": value})
+    elif path == "etsy_specifics.whatIsIt":
+        mapped = etsy_what_raw({"what_is": value})
+    elif path == "etsy_specifics.whenMade":
+        mapped = _canonical_etsy_when(str(value))
+    else:
+        mapped = etsy_renewal_raw({"renewalOption": value})
+    return mapped if mapped and mapped in options else None
+
+
 def _row_values(listing: dict, market: str, path: str, rows: dict[str, dict]) -> list:
     """Every value this listing stores for ``path``, whatever its spelling.
 
@@ -475,14 +562,15 @@ def _row_values(listing: dict, market: str, path: str, rows: dict[str, dict]) ->
     """
     found = [get_path(listing, path)]
     want = _fold(path)
-    prefix = f"{market}_specifics."
-    block = listing.get(f"{market}_specifics")
+    prefix = f"{market}_specifics"
+    block = listing.get(prefix)
     if not isinstance(block, dict):
         return found
     for stored, value in _leaves(block, prefix, set(rows)):
-        if stored in rows or _fold(stored) != want:
+        if stored in rows:
             continue
-        found.append(value)
+        if _fold(stored) == want or (market == "etsy" and _etsy_native_path(stored, rows) == path):
+            found.append(value)
     return found
 
 
@@ -521,12 +609,28 @@ def _size_spelling(row: dict, value) -> str | None:
     return size_choice(value, options)
 
 
-def constrain_generated(listing: dict, seed: dict, *, freeze_categories: bool = True, keep_evidence: bool = False) -> dict:
+def _form_unavailable(contract: object) -> bool:
+    return not isinstance(contract, dict) or bool(contract.get("unavailable")) or not contract.get("fields")
+
+
+def constrain_generated(
+    listing: dict, seed: dict, *, freeze_categories: bool = True, keep_evidence: bool = False,
+    use_saved_defaults: bool = False,
+) -> dict:
     """Discard model-invented paths and invalid answers; preserve server-owned contracts."""
+    from anteroom.services.user_settings import apply_etsy_listing_field_defaults, clear_mercari_answers_with_defaults
+
     contracts = seed.get(KEY)
+    # Captured rows validate Etsy defaults like any other answer. If an Etsy
+    # capture failed, apply defaults after the previous answers are restored.
+    restore_etsy = isinstance(contracts, dict) and "etsy" in contracts and _form_unavailable(contracts["etsy"])
+    if use_saved_defaults and not restore_etsy:
+        apply_etsy_listing_field_defaults(listing, seed)
     if not isinstance(contracts, dict):
         listing.pop(KEY, None)
         listing.pop(EVIDENCE_KEY, None)
+        if use_saved_defaults:
+            clear_mercari_answers_with_defaults(listing, seed)
         return listing
     from anteroom.services import choice_lists
 
@@ -545,7 +649,7 @@ def constrain_generated(listing: dict, seed: dict, *, freeze_categories: bool = 
     for market, contract in contracts.items():
         prefix = f"{market}_specifics"
         block = listing.get(prefix)
-        if not isinstance(contract, dict) or contract.get("unavailable") or not contract.get("fields"):
+        if _form_unavailable(contract):
             # A form that could not be loaded is unknown, not one with no
             # fields: nothing here can be checked. Keep the answers already
             # saved (seed) and drop anything new, which no form has checked.
@@ -560,6 +664,9 @@ def constrain_generated(listing: dict, seed: dict, *, freeze_categories: bool = 
             continue
         rows = {path_of(row): row for row in contract.get("fields") or []}
         for path, value in list(_leaves(block, prefix, set(rows))):
+            if is_locked(seed, path):
+                set_path(listing, path, copy.deepcopy(get_path(seed, path)))
+                continue
             if market == "ebay" and path not in rows:
                 native_path = next((name for name in rows if _fold(name) == _fold(path)), None)
                 if native_path:
@@ -570,11 +677,26 @@ def constrain_generated(listing: dict, seed: dict, *, freeze_categories: bool = 
                         set_path(listing, native_path, value)
                     path = native_path
                     value = get_path(listing, path)
+            elif market == "etsy" and path not in rows:
+                native_path = _etsy_native_path(path, rows)
+                if native_path:
+                    # Fold legacy snake_case and top-level Etsy attributes onto
+                    # their native form rows so invalid choices are still dropped.
+                    _remove(listing, path)
+                    if get_path(listing, native_path) in (None, "", [], {}):
+                        set_path(listing, native_path, value)
+                    path = native_path
+                    value = get_path(listing, path)
             if path in rows:
                 spelling = _size_spelling(rows[path], value)
                 if spelling is not None:
                     set_path(listing, path, spelling)
                     value = spelling
+                if market == "etsy":
+                    canonical = _etsy_canonical_value(path, rows[path], value)
+                    if canonical is not None:
+                        set_path(listing, path, canonical)
+                        value = canonical
             if is_locked(seed, path):
                 set_path(listing, path, copy.deepcopy(get_path(seed, path)))
             elif path not in rows or value_error({**applicable_row(rows[path], listing, list(rows.values())), "required": False}, value):
@@ -584,6 +706,12 @@ def constrain_generated(listing: dict, seed: dict, *, freeze_categories: bool = 
             value = get_path(seed, path)
             if value is not None:
                 set_path(listing, path, copy.deepcopy(value))
+    if use_saved_defaults:
+        if restore_etsy:
+            apply_etsy_listing_field_defaults(listing, seed)
+        # These are supplied by the form from Settings, so clear any unlocked
+        # answers after constraints have had a chance to restore them.
+        clear_mercari_answers_with_defaults(listing, seed)
     return listing
 
 
@@ -605,7 +733,7 @@ def gaps(listing: dict, market: str) -> list[dict]:
     for path, value in _leaves(listing.get(f"{market}_specifics") or {}, f"{market}_specifics", set(rows)):
         if path == CANONICAL_PRICE.get(market) and "price" in rows:
             continue
-        if path in rows or _fold(path) in folded or value in (None, "", [], {}):
+        if path in rows or _fold(path) in folded or (market == "etsy" and _etsy_native_path(path, rows)) or value in (None, "", [], {}):
             continue
         # A value this form no longer has a row for is left out of the send; it
         # does not stop the listing. The seller reads it, and can clear it.
@@ -639,15 +767,15 @@ def gaps(listing: dict, market: str) -> list[dict]:
             # empty in any way that stops the listing.
             found.append(gap(path, f"{row.get('label') or path}: Uses the account's own choice.", blocking=False))
             continue
+        if market == "etsy":
+            canonical = _etsy_canonical_value(path, row, value)
+            if canonical is not None:
+                value = canonical
+        if path == "mercari_specifics.brand":
+            from anteroom.services.mercari_form import resolve_brand
+
+            value = resolve_brand(listing)[0]
         error = value_error(applicable_row(row, listing, fields), value)
-        if error == NOT_AN_OPTION and path == "mercari_specifics.brand":
-            # This catalog is a dated copy. List checks Mercari's current brand
-            # list and sends no brand only when Mercari has no match, so a name
-            # missing here is said, not refused.
-            found.append(gap(path, f"Brand: “{value}” isn't in Anteroom's copy of Mercari's brand list. When you "
-                                   "list, Anteroom checks Mercari's current list and uses No brand if Mercari "
-                                   "doesn't have it.", blocking=False, label=row.get("label")))
-            continue
         if error:
             # A policy or location with no stored answer is chosen from the
             # account at List. Missing one here does not stop the listing, so it
@@ -684,6 +812,8 @@ _SETTINGS_CHOICES = {"ebay_specifics.fulfillmentPolicyId": "fulfillment_policy_i
                      "ebay_specifics.paymentPolicyId": "payment_policy_id",
                      "ebay_specifics.returnPolicyId": "return_policy_id",
                      "ebay_specifics.merchantLocationKey": "merchant_location_key"}
+_ETSY_SAVED_DEFAULTS = frozenset({"etsy_specifics.whoMade", "etsy_specifics.whatIsIt",
+                                  "etsy_specifics.renewalOption"})
 
 
 def _mercari_label(listing: dict, row: dict, path: str, value: Any) -> tuple[str | None, bool, Any]:
@@ -720,6 +850,15 @@ def settings_answer(listing: dict, path: str) -> str | None:
     List already falls back to these defaults; pre-flight reads the same choice
     so a policy set once in Settings is not reported as an empty row.
     """
+    if path in _ETSY_SAVED_DEFAULTS:
+        from anteroom.services.etsy_fields import DEFAULT_ETSY_RENEWAL
+        from anteroom.services.user_settings import get_listing_field_defaults
+
+        saved = get_listing_field_defaults()
+        chosen = str((saved.get(path) or {}).get("label") or "").strip()
+        if chosen:
+            return chosen
+        return DEFAULT_ETSY_RENEWAL if path == "etsy_specifics.renewalOption" else None
     setting = _SETTINGS_CHOICES.get(path)
     if not setting:
         return None
@@ -730,6 +869,10 @@ def settings_answer(listing: dict, path: str) -> str | None:
 
 def _followed_text(listing: dict, market: str, name: str) -> str:
     """The title, description or brand a form follows, as that marketplace takes it."""
+    if market == "mercari" and name == "brand":
+        from anteroom.services.mercari_form import resolve_brand
+
+        return resolve_brand(listing)[0]
     value = marketplace_text(listing, market, name)
     if market == "depop" and name == "brand":
         from anteroom.services.depop_form import listed_brand
@@ -793,6 +936,10 @@ def shared_answer(listing: dict, row: dict, market: str, path: str) -> Any:
     if market == "mercari":
         specifics = listing.get("mercari_specifics")
         specifics = specifics if isinstance(specifics, dict) else {}
+        if path == "mercari_specifics.noBrand" and "noBrand" not in specifics:
+            from anteroom.services.mercari_form import resolve_brand
+
+            return resolve_brand(listing)[1]
         if path == "mercari_specifics.condition" and "condition" not in specifics:
             from anteroom.services.mercari_form import general_condition
 
@@ -809,6 +956,41 @@ def shared_answer(listing: dict, row: dict, market: str, path: str) -> Any:
             from anteroom.services.poshmark_form import general_condition
 
             return general_condition(listing) or None
+    if market == "etsy":
+        specifics = listing.get("etsy_specifics")
+        specifics = specifics if isinstance(specifics, dict) else {}
+        if path == "etsy_specifics.whenMade" and not any(
+                _fold(key) in {"whenmade", "whenwasitmade"} for key in specifics):
+            from anteroom.services.etsy_fields import etsy_when_raw, etsy_when_to_store
+
+            when = etsy_when_raw(specifics, listing)
+            if when:
+                options = [str(opt) for opt in row.get("options") or []]
+                mapped = etsy_when_to_store(when, listing, options)
+                if mapped and (not options or mapped in options):
+                    return mapped
+        if path.startswith("etsy_specifics.category_specifics."):
+            nested = specifics.get("category_specifics")
+            nested = nested if isinstance(nested, dict) else {}
+            folded = _fold(row.get("label") or name)
+            if folded in {"primarycolor", "secondarycolor"} and not any(
+                    _fold(key) == folded for key in (*nested, *specifics)):
+                raw = (listing.get("primaryColor") or listing.get("color")) if folded == "primarycolor" else listing.get("secondaryColor")
+                if raw not in (None, "", [], {}):
+                    from anteroom.services.etsy_listings import _match
+
+                    choices = [{"label": str(opt)} for opt in row.get("options") or []]
+                    values = raw if isinstance(raw, list) else str(raw).split(",")
+                    matched: list[str] = []
+                    for part in values:
+                        text = str(part or "").strip()
+                        if not text:
+                            continue
+                        hit = _match(text, choices) if choices else {"label": text}
+                        if hit and hit["label"] not in matched:
+                            matched.append(hit["label"])
+                    if matched:
+                        return matched if row.get("multi") else matched[0]
     return None
 
 
@@ -819,11 +1001,19 @@ def invalidate_dependents(previous: dict, listing: dict) -> None:
         # Invalidate for this edit, even if the saved form is still stale from
         # an earlier edit. Form freshness is checked separately by gaps().
         changed = changed_inputs(listing, market, fields, inputs(previous, market, fields))
-        if not changed:
+        cleared_by_edit = {
+            path
+            for row in fields
+            if row.get("clears")
+            and _answered(get_path(previous, path_of(row))) != _answered(get_path(listing, path_of(row)))
+            for path in row.get("clears") or []
+        }
+        if not changed and not cleared_by_edit:
             continue
         category_changed = any("categor" in path.casefold() for path in changed)
         clear = {path_of(row) for row in fields if category_changed and row.get("category_specific")}
         clear.update(path for row in fields if path_of(row) in changed for path in row.get("clears") or [])
+        clear.update(cleared_by_edit)
         changed_labels = {row.get("label") for row in fields if path_of(row) in changed}
         clear.update(path_of(row) for row in fields for rules in (row.get("value_constraints") or {}).values()
                      for rule in rules if rule.get("parentName") in changed_labels)

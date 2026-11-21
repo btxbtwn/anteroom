@@ -26,7 +26,6 @@ const DEPOP_PAGE_RULES = [
   [17017, '^https://webapi\\.depop\\.com/presentation/api/v1/shops/\\d+/products/by-status/(sold|selling|onsale)/'],
   [17018, '^https://webapi\\.depop\\.com/api/v1/addresses/'],
   [17019, '^https://webapi\\.depop\\.com/api/v1/shipping-providers/'],
-  [17020, '^https://webapi\\.depop\\.com/api/v3/drafts/products/'],
   [17022, '^https://webapi\\.depop\\.com/api/v1/shop/\\d+/products/'],
   [17023, '^https://webapi\\.depop\\.com/presentation/api/v1/offers/'],
 ];

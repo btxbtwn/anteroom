@@ -69,7 +69,8 @@ struct EbayActionTests {
         // Advertising and email.
         let campaign = try EbayActions.campaign(now: now).payload(["name": "Fall", "bid_percent": "2.5", "start": "2026-11-03T09:00"])
         precondition(campaign["bid_percent"] == .string("2.5") && campaign["start"] != nil)
-        precondition(EbayActions.advertise(campaign: "c", listing: "l").context == ["campaign_id": .string("c"), "listing_id": .string("l")])
+        let ad = try EbayActions.advertise(campaign: "c", listing: "123456789012").payload(["bid_percent": "2"])
+        precondition(ad == ["campaign_id": .string("c"), "listing_ids": .array([.string("123456789012")]), "bid_percent": .string("2")])
         let report = EbayActions.adReport("c", now: now).initialValues()
         precondition(report["start"] == "2026-09-26" && report["end"] == "2026-10-25")
         let email = EbayActions.storeEmail(listings: ["a"], audiences: ["VIP"], now: now)

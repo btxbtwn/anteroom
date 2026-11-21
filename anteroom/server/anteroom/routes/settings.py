@@ -1051,6 +1051,7 @@ def _listing_formulas_payload() -> dict:
         DEFAULT_TITLE_FORMULA,
         DESCRIPTION_BLOCKS,
         NO_SECTION_DESCRIPTION,
+        default_description_block_ids,
         description_block_selection,
     )
     from anteroom.services.user_settings import get_listing_formulas
@@ -1058,11 +1059,17 @@ def _listing_formulas_payload() -> dict:
     custom = get_listing_formulas()
     enabled, custom_description = description_block_selection(custom.get("description", ""))
     chosen = set(enabled)
+    by_id = {block.id: block for block in DESCRIPTION_BLOCKS}
+    ordered_blocks = [
+        *(by_id[block_id] for block_id in enabled if block_id in by_id),
+        *(block for block in DESCRIPTION_BLOCKS if block.id not in chosen),
+    ]
     return {
         "title": custom.get("title", ""),
         "description": custom.get("description", ""),
         "default_title": DEFAULT_TITLE_FORMULA,
         "default_description": DEFAULT_DESCRIPTION_FORMULA,
+        "default_blocks": list(default_description_block_ids()),
         "empty_description": NO_SECTION_DESCRIPTION,
         "custom_description": custom_description,
         "blocks": [
@@ -1074,7 +1081,7 @@ def _listing_formulas_payload() -> dict:
                 "default": block.default,
                 "enabled": block.id in chosen,
             }
-            for block in DESCRIPTION_BLOCKS
+            for block in ordered_blocks
         ],
     }
 

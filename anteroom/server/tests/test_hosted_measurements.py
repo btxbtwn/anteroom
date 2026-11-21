@@ -79,3 +79,43 @@ def test_a_saved_listing_is_read_from_its_own_photos_in_order(cloud, signing_key
     assert answer.status_code == 200, answer.text
     assert answer.json()['measurements']['waist']['value'] == 16
     assert read_bytes == list(stored.values())
+
+
+def test_a_saved_listing_reads_its_size_tag_from_its_own_photos_in_order(cloud, signing_keys, monkeypatch):  # noqa: F811
+    client, _engine = cloud
+    alice, bob = headers(signing_keys), headers(signing_keys, BOB)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'Coat'}).json()['id']
+    stored = {}
+
+    def storage(method, key, token, data=None):
+        if method == 'POST':
+            stored[key] = data
+        return stored.get(key, b'')
+
+    class Provider:
+        async def vision_chat(self, messages):
+            yield ''
+
+    read_bytes = []
+
+    async def read(_provider, paths):
+        read_bytes.extend(path.read_bytes() for path in paths)
+        return {'photos_read': len(paths), 'status': 'accepted', 'size': 'M', 'sizes': ['M']}
+
+    monkeypatch.setattr(hosted_photos, 'storage_call', storage)
+    for data in (_photo(), _photo()):
+        assert client.post(f'/api/drafts/{identity}/photos', headers=alice, content=data).status_code == 201
+    path = f'/api/conversations/{identity}/size-tags/read'
+
+    # Unmocked provider lookup reads HostedSettingsStore from Postgres; must stay off the event loop.
+    assert client.post(path, headers=alice).status_code == 503
+
+    monkeypatch.setattr('anteroom.routes.measurements.get_photo_provider', Provider)
+    monkeypatch.setattr('anteroom.routes.measurements.size_tag_read.read_size_tag', read)
+
+    assert client.post(path).status_code == 401
+    assert client.post(path, headers=bob).status_code == 404
+    answer = client.post(path, headers=alice)
+    assert answer.status_code == 200, answer.text
+    assert answer.json() == {'photos_read': 2, 'status': 'accepted', 'size': 'M', 'sizes': ['M']}
+    assert read_bytes == list(stored.values())

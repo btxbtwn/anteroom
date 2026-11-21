@@ -14,7 +14,13 @@ export default defineConfig({
   workers: 1,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? [["list"], ["html", { open: "never", outputFolder: "e2e/report" }]] : "list",
+  reporter: process.env.CI ? [
+    ["list"],
+    ["html", { open: "never", outputFolder: "e2e/report" }],
+    ...(process.env.SANDBOX_BROWSER_EVIDENCE_FILE
+      ? [["../.github/scripts/browser-evidence-reporter.mjs"] as [string]]
+      : []),
+  ] : "list",
   use: {
     baseURL: `http://127.0.0.1:${WEB_PORT}`,
     trace: "retain-on-failure",

@@ -163,3 +163,27 @@ class FormSchemaTest(unittest.TestCase):
             self.assertIn(marketplace, text)
         self.assertIn("- Source — Preloved", text)
         self.assertIn("- Occasion — Casual", text)
+
+    def test_form_schema_prompt_reads_direct_etsy_category_when_not_excluded(self):
+        direct_listing = {
+            "title": "Speedway Graphic Tee",
+            "direct_category_ids": {"etsy": "482"},
+        }
+        etsy_props = [
+            {"name": "Clothing style", "required": False, "usage": "",
+             "values": [{"label": "Minimalist"}, {"label": "Streetwear"}]},
+        ]
+
+        def load_rows(marketplace, category_id):
+            if marketplace == "etsy_properties" and category_id == "482":
+                return etsy_props
+            return None
+
+        with mock.patch("anteroom.services.category_fields.load_rows", side_effect=load_rows), \
+                mock.patch("anteroom.services.category_fields.load_fields", return_value={}):
+            text = form_schema_prompt(direct_listing)
+            excluded = form_schema_prompt(direct_listing, exclude={"etsy"})
+
+        self.assertIn("etsy", text)
+        self.assertIn("- Clothing style — Minimalist, Streetwear", text)
+        self.assertEqual(excluded, "")

@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from anteroom.database import get_db
-from anteroom.routes.api_contract import OfferAnalyticsResponse
+from anteroom.routes.api_contract import OfferAnalyticsResponse, OfferLogResponse
 from anteroom.services.inventory_analytics import inventory_analytics
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
@@ -262,3 +262,21 @@ def get_offer_analytics(
         raise HTTPException(status_code=400, detail="Choose valid dates within 366 days and a valid time zone.") from exc
     response.headers["Cache-Control"] = "no-store"
     return OfferAnalyticsResponse.model_validate(payload)
+
+
+@router.get("/offers/log", response_model=OfferLogResponse)
+def get_offer_log(
+    response: Response,
+    before: str | None = Query(None, max_length=200),
+    limit: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db, scope="function"),
+):
+    """Every offer that reached a marketplace, newest first."""
+    from anteroom.services.offer_analytics import offer_log
+
+    try:
+        payload = offer_log(db, limit=limit, before=before)
+    except (ValueError, OverflowError) as exc:
+        raise HTTPException(status_code=400, detail="Reload the offer log and try again.") from exc
+    response.headers["Cache-Control"] = "no-store"
+    return OfferLogResponse.model_validate(payload)

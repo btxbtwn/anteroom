@@ -23,6 +23,9 @@ describe("queryKeyMatchesTopic", () => {
     expect(queryKeyMatchesTopic("assistant", ["assistant", "threads"])).toBe(true);
     expect(queryKeyMatchesTopic("sales", ["marketplace-sales"])).toBe(true);
     expect(queryKeyMatchesTopic("automations", ["promotion-automations"])).toBe(true);
+    // A send that finishes updates the offer card and an open offer log.
+    expect(queryKeyMatchesTopic("automations", ["offer-log"])).toBe(true);
+    expect(queryKeyMatchesTopic("automations", ["offer-analytics", "2026-11-16"])).toBe(true);
     expect(queryKeyMatchesTopic("sourcing", ["sourcing"])).toBe(true);
   });
 

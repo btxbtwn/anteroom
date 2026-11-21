@@ -433,6 +433,9 @@ final class ListingEditorModel {
     /// listing value when it fits the field, else the form's own value.
     func value(_ field: NativeField) -> JSONValue? {
         if field.locked { return field.value }
+        if field.path == "mercari_specifics.brand", current(at: "mercari_specifics.noBrand") == .bool(true) {
+            return .string("")
+        }
         if let edit = pending[field.path] { return edit }
         if let saved = document.value(at: field.path), saved != .null, saved != .string(""), fits(field, saved) {
             return saved
@@ -444,9 +447,12 @@ final class ListingEditorModel {
         guard !field.locked else { return }
         pending[field.path] = value
         // A new category or similar choice empties the fields that depend on it.
+        let booleanPaths = Set(forms.values.flatMap(\.fields).filter { $0.inputType == "boolean" }.map(\.path))
         for dependent in field.clears {
             pending[dependent] = dependent.hasSuffix(".attributes") ? .object([:])
-                : dependent.hasSuffix(".inventoryRows") ? .array([]) : .string("")
+                : dependent.hasSuffix(".inventoryRows") ? .array([])
+                : (booleanPaths.contains(dependent) || dependent == "mercari_specifics.noBrand") ? .bool(false)
+                : .string("")
         }
     }
 

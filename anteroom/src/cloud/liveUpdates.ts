@@ -32,7 +32,7 @@ export const TOPIC_QUERY_KEYS: Record<string, readonly string[]> = {
   sales: ["marketplace-sales", "sales-ledger", "sale-calendar", "sale-detection", "analytics", "conversations"],
   automations: [
     "automations", "automation-approvals", "automation-gaps", "promotion-automations", "promotions",
-    "promotion-floors", "ebay-offers", "price-drop-preview",
+    "promotion-floors", "ebay-offers", "price-drop-preview", "offer-analytics", "offer-log",
   ],
   sourcing: ["sourcing", "boxes", "scout"],
 };

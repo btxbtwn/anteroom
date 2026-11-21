@@ -456,7 +456,9 @@ def _finish_inputs(db, conv_id: str, expected_revision_id: str | None) -> str | 
     return _photos_fingerprint(db, conv_id)
 
 
-def _finish_summary(db, conv_id: str, listing: dict, repaired: bool) -> None:
+def _finish_summary(db, conv_id: str, listing: dict, repaired: bool, expected_photo_fingerprint: str) -> None:
+    if _photos_fingerprint(db, conv_id) != expected_photo_fingerprint:
+        raise RevisionConflict("Photos changed while preparing marketplace fields")
     ConversationRepo(db).add_message(
         conv_id,
         "system",
@@ -517,10 +519,17 @@ async def _finish_generation_background(
         await check_photos()
 
         async def fill_native():
-            from anteroom.services.native_field_fill import fill_native_fields
+            from anteroom.services.marketplaces import get_selected_marketplaces
+            from anteroom.services.native_field_fill import fill_etsy_attributes, fill_native_fields
 
             async with live_trace.agent("native-fields", "Marketplace category fields") as agent, model_slots.slot():
-                filled = await fill_native_fields(conv_id, provider, evidence=evidence)
+                filled = await fill_native_fields(conv_id, provider, evidence=evidence,
+                                                  expected_photo_fingerprint=expected_photo_fingerprint)
+                selected = await asyncio.to_thread(get_selected_marketplaces)
+                await check_photos()
+                if "etsy" in selected:
+                    filled = await fill_etsy_attributes(conv_id, provider, evidence=evidence,
+                                                          photos=expected_photo_fingerprint) or filled
                 agent.result("Filled category fields" if filled else "No category fields to fill")
                 return filled
 
@@ -533,8 +542,11 @@ async def _finish_generation_background(
         outcome = "incomplete" if _validation_blockers(copy.deepcopy(current)) else "done"
         # Posted only now: said before the fill, it reported fields as empty
         # and "Send when ready" while chat was still filling them.
-        await in_worker_session(_finish_summary, conv_id, copy.deepcopy(current), repaired)
+        await in_worker_session(
+            _finish_summary, conv_id, copy.deepcopy(current), repaired, expected_photo_fingerprint,
+        )
     except RevisionConflict:
+        outcome = "superseded"
         log.info("discarding stale generation finish for %s", conv_id)
     except TaskStopped:
         # The seller cancelled: an expected end. The draft keeps its saved state,

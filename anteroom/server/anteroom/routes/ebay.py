@@ -16,7 +16,7 @@ from anteroom.services.marketplace_accounts import SignInRequired
 
 router = APIRouter(prefix="/api/ebay", tags=["ebay"])
 Section = Literal["traffic", "finances", "payouts", "inbox", "messages", "feedback", "orders", "order", "disputes", "dispute",
-                  "campaigns", "promotions", "promotion-reports", "ad-reports", "ad-report", "emails", "audiences", "inventory", "offers", "policies", "locations", "categories", "aspects", "research", "activity"]
+                  "campaigns", "advertising-listings", "promotions", "promotion-reports", "ad-reports", "ad-report", "emails", "audiences", "inventory", "offers", "policies", "locations", "categories", "aspects", "research", "activity"]
 
 
 def failure(exc: Exception) -> HTTPException:
@@ -187,6 +187,7 @@ def checked(action_id: str, body: Checked, db: Session = Depends(get_db, scope="
         if not action or action.account_id != identity()[0] or action.state != "unknown":
             raise EbayFailure("This action does not need a result check.", 409)
         action.state = "checked"
+        action.ad_listing_ids = None
         db.commit()
         return {"ok": True}
     except (EbayFailure, SignInRequired) as exc:

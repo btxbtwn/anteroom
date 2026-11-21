@@ -79,7 +79,10 @@ def test_upgrade_keeps_all_keyed_records_and_matches_models(migration_engine):  
     names = [name for name, _ in CASES]
     before = read_rows(engine, names)
     schema_migrations.ensure_schema(engine)
-    assert read_rows(engine, names) == before
+    after = read_rows(engine, names)
+    for row in after["ebay_actions"]:
+        assert row.pop("ad_listing_ids") is None
+    assert after == before
     with engine.connect() as connection:
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
     for name, values in CASES:

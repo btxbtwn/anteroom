@@ -262,6 +262,30 @@ export interface OfferAnalyticsResponse {
   marketplaces: OfferAnalyticsMarketplace[];
 }
 
+export interface OfferLogEntry {
+  id: string;
+  marketplace: string;
+  title: string | null;
+  listing_id: string;
+  sent_at: string;
+  /** sent, sending, unconfirmed (no reply; check the marketplace), checked or failed. */
+  status: string;
+  price_cents: number | null;
+  offer_price_cents: number | null;
+  /** Buyers the marketplace said it sent the offer to; null when it did not say. */
+  recipients: number | null;
+  confirmation: string | null;
+  /** Likes (Depop: eligible likers) read before sending; not a recipient count. */
+  like_count: number | null;
+  note: string | null;
+}
+
+export interface OfferLogResponse {
+  entries: OfferLogEntry[];
+  /** Pass as ``before`` for the next, older page; null on the last page. */
+  next_before: string | null;
+}
+
 export interface PhotoEdits {
   rotate?: 0 | 90 | 180 | 270;
   straighten?: number;

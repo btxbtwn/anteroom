@@ -479,6 +479,44 @@ struct OfferAnalyticsResponse: Codable, Hashable, Sendable {
     }
 }
 
+struct OfferLogEntry: Identifiable, Codable, Hashable, Sendable {
+    var id: String
+    var marketplace: String
+    var title: String?
+    var listingID: String
+    var sentAt: String
+    /// sent, sending, unconfirmed (no reply; check the marketplace), checked or failed.
+    var status: String
+    var priceCents: Int?
+    var offerPriceCents: Int?
+    /// Buyers the marketplace said it sent the offer to; null when it did not say.
+    var recipients: Int?
+    var confirmation: String?
+    /// Likes (Depop: eligible likers) read before sending; not a recipient count.
+    var likeCount: Int?
+    var note: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, marketplace, title, status, recipients, confirmation, note
+        case listingID = "listing_id"
+        case sentAt = "sent_at"
+        case priceCents = "price_cents"
+        case offerPriceCents = "offer_price_cents"
+        case likeCount = "like_count"
+    }
+}
+
+struct OfferLogResponse: Codable, Hashable, Sendable {
+    var entries: [OfferLogEntry]
+    /// Pass as ``before`` for the next, older page; null on the last page.
+    var nextBefore: String?
+
+    enum CodingKeys: String, CodingKey {
+        case entries
+        case nextBefore = "next_before"
+    }
+}
+
 struct PhotoEdits: Codable, Hashable, Sendable {
     /// One of: 0, 90, 180, 270.
     var rotate: Int = 0

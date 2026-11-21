@@ -95,17 +95,19 @@ def _last_sqlite_change(tmp_path, monkeypatch):
 
     from anteroom.services.schema_migrations import alembic_config
 
-    pending = []
-    for script in ScriptDirectory.from_config(alembic_config()).walk_revisions():
-        pending.insert(0, script.revision)
-        previous = script.down_revision
-        assert isinstance(previous, str)
+    scripts = ScriptDirectory.from_config(alembic_config())
+    newest_first = list(scripts.walk_revisions())
+    # Each revision can represent a release, including either parent of a merge.
+    for candidate in newest_first[1:]:
+        previous = candidate.revision
         folder = tmp_path / previous
         folder.mkdir()
         path = _migrated_database(folder, monkeypatch, previous)
         drift = inspect_database(path)
         if not drift.clean:
-            return drift, path, previous, tuple(pending)
+            applied = {script.revision for script in scripts.walk_revisions(head=previous)}
+            pending = tuple(script.revision for script in reversed(newest_first) if script.revision not in applied)
+            return drift, path, previous, pending
     raise AssertionError('no revision changes the SQLite schema')
 
 
