@@ -15,7 +15,7 @@ async function deletePoshmark(id, deadline) {
     catch (error) { if (gone(error)) return null; throw error; }
   };
   const post = await read('read');
-  if (!post) return { ok: true, state: 'deleted', already: true };
+  if (!post) return { ok: true, state: 'deleted', already: true, marketplace_message: error.marketplace_message };
   if (String(post.creator_id) !== account.user_id) throw marketplaceError('This Poshmark listing belongs to another account.');
   const sold = (post.inventory?.size_quantities || []).some(entry => Number(entry.quantity_sold) > 0);
   if (sold || post.status === 'archived' || ['sold_out', 'not_available'].includes(post.inventory?.status)) {
@@ -33,7 +33,7 @@ async function deleteMercari(id, deadline) {
   try { item = await readMercariItem(id, deadline); }
   catch (error) {
     // Mercari answers the read of a deleted item with this refusal (2026-11-20).
-    if (error.code === 'rejected' && MERCARI_GONE.test(error.marketplace_message || '')) return { ok: true, state: 'deleted', already: true };
+    if (error.code === 'rejected' && MERCARI_GONE.test(error.marketplace_message || '')) return { ok: true, state: 'deleted', already: true, marketplace_message: error.marketplace_message };
     throw error;
   }
   // cancel / admin_cancel is the item status once it is gone.

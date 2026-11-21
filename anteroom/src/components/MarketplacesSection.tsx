@@ -188,9 +188,13 @@ export function rowStatus(marketplace: Marketplace, live: MarketplaceListing | u
     return { tone: "attention", label: "Unconfirmed", detail: draft.error || "Check the result before trying again.", said };
   }
   if (live?.state === "deleting") return { tone: "busy", label: "Delisting…" };
-  if (live?.state === "deleted") return draft?.error
-    ? { tone: "failed", label: "Not listed", detail: draft.error, said }
-    : { tone: "neutral", label: "Delisted" };
+  if (live?.state === "deleted") {
+    if (draft?.error) return { tone: "failed", label: "Not listed", detail: draft.error, said };
+    // The marketplace no longer had it: something else removed it, such as Vendoo or the seller.
+    if (live.already_gone) return { tone: "neutral", label: "Already gone", detail: `${marketplaceName(marketplace)} no longer had this listing when Anteroom went to delist it.`,
+      said: live.marketplace_message ? `${marketplaceName(marketplace)} said: ${live.marketplace_message}` : null };
+    return { tone: "neutral", label: "Delisted" };
+  }
   if (live?.state === "failed") {
     return { tone: "failed", label: "Not delisted", href: live.url ?? undefined, hrefLabel: "View", detail: live.error,
       said: live.marketplace_message ? `${marketplaceName(marketplace)} said: ${live.marketplace_message}` : null };

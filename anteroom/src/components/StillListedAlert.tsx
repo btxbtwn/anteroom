@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { CircleAlertIcon } from "lucide-react";
 import { api } from "../api/client";
 import type { StillListedItem } from "../api/directConnections";
@@ -20,6 +21,14 @@ export function stillListedLine(item: StillListedItem): string {
   return `Sold on ${marketplaceName(item.soldOn)}, still on ${where}${failed ? ` (${failed === 1 ? "delist failed" : `${failed} delists failed`})` : ""}`;
 }
 
+export function stillListedFooter(items: StillListedItem[], autodelist: boolean): string {
+  if (!autodelist) return "Open each item and delist it under Marketplaces.";
+  const changed = items.some((item) => !item.detected || item.stillListed.some((entry) => !entry.followed));
+  return changed
+    ? "Anteroom keeps trying the listings each sale left up. A listing marked by hand or put up after the sale is yours to delist under Marketplaces."
+    : "Anteroom keeps trying to delist them. Open an item to see why a delist failed.";
+}
+
 /** Sold items still listed on another marketplace, until each is delisted or marked not listed. */
 export function StillListedAlert({ onOpen }: { onOpen: (convId: string) => void }) {
   const { data } = useQuery({
@@ -27,9 +36,10 @@ export function StillListedAlert({ onOpen }: { onOpen: (convId: string) => void 
     queryFn: ({ signal }) => api.marketplaceSales.stillListed({ signal }),
     refetchInterval: () => pollMs(STILL_LISTED_POLL_MS),
   });
+  const [all, setAll] = useState(false);
   const items = data?.items ?? [];
   if (!items.length) return null;
-  const more = items.length - SHOWN;
+  const more = all ? 0 : items.length - SHOWN;
   return (
     <Alert variant="error" role="alert" className="mx-(--sidebar-content-inset) shrink-0">
       <CircleAlertIcon />
@@ -38,7 +48,7 @@ export function StillListedAlert({ onOpen }: { onOpen: (convId: string) => void 
       </AlertTitle>
       <AlertDescription className="gap-1.5">
         <ul className="flex flex-col gap-1">
-          {items.slice(0, SHOWN).map((item) => (
+          {(all ? items : items.slice(0, SHOWN)).map((item) => (
             <li key={item.conversationId}>
               <button type="button" className="text-left underline-offset-2 hover:underline" onClick={() => onOpen(item.conversationId)}>
                 <span className="font-medium text-foreground">{item.title || "Untitled item"}</span>
@@ -47,12 +57,12 @@ export function StillListedAlert({ onOpen }: { onOpen: (convId: string) => void 
             </li>
           ))}
         </ul>
-        {more > 0 ? <p className="text-xs">and {more} more</p> : null}
-        <p className="text-xs">
-          {data?.autodelist
-            ? "Anteroom keeps trying to delist them. Open an item to see why a delist failed."
-            : "Open each item and delist it under Marketplaces."}
-        </p>
+        {more > 0 ? (
+          <button type="button" className="self-start text-xs underline underline-offset-2" onClick={() => setAll(true)}>
+            Show {more} more
+          </button>
+        ) : null}
+        <p className="text-xs">{stillListedFooter(items, Boolean(data?.autodelist))}</p>
       </AlertDescription>
     </Alert>
   );

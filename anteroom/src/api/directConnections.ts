@@ -67,8 +67,13 @@ export interface StillListedItem {
   soldAt: string | null;
   /** True when a marketplace reported the sale; false for the seller's Mark as sold. */
   detected: boolean;
+  /** Anteroom recorded which listings this sale left up elsewhere. */
+  pinned: boolean;
   stillListed: {
     marketplace: string;
+    listingId: string;
+    /** The listing this sale left up; false for one put up after the sale, which Anteroom never delists on its own. */
+    followed: boolean;
     state: "live" | "failed" | "deleting";
     error: string | null;
     at: string | null;

@@ -266,6 +266,35 @@ def _record(db: Session, conv_id: str, marketplace: str, value: dict) -> None:
     _store(db, conv_id, "marketplaceDelists", marketplace, value)
 
 
+SALE_PINS = "saleDelistTargets"
+
+
+def sale_pins(notes: dict) -> dict[str, dict[str, str]]:
+    """The listing each sale left up on each other marketplace, by sale ID."""
+    pins = {}
+    for sale_id, pin in _notes_dict(notes, SALE_PINS).items():
+        targets = pin.get("targets") if isinstance(pin, dict) else None
+        if isinstance(targets, dict):
+            pins[sale_id] = {name: str(item) for name, item in targets.items() if isinstance(item, str) and item}
+    return pins
+
+
+def pin_sale(db: Session, conv_id: str, sale_id: str, targets: dict[str, str]) -> dict[str, str]:
+    """Record once which listings a sale left up elsewhere, and return what is recorded.
+
+    The first record stands: a listing put up later, such as a relist, is never added to it.
+    """
+    conv = _locked_conversation(db, conv_id)
+    pinned = sale_pins(parse_notes(conv.notes)).get(sale_id)
+    if pinned is not None:
+        db.rollback()
+        return pinned
+    pins = _notes_dict(parse_notes(conv.notes), SALE_PINS)
+    conv.notes = merge_notes(conv.notes, {SALE_PINS: {**pins, sale_id: {"targets": targets, "at": _now()}}})
+    db.commit()
+    return targets
+
+
 def _forget_deleted_listing(db: Session, conv_id: str, marketplace: str, deleted_id: str | None) -> None:
     """A confirmed delete of Anteroom's listing leaves nothing live, so its record rests as Mark as not listed leaves it.
 
@@ -430,8 +459,14 @@ def _failure_text(marketplace: str, exc: Exception) -> str:
     return str(exc) or "The marketplace did not confirm the delete. Delist again to check; it is safe to repeat."
 
 
-async def delist(conv_id: str, marketplaces: list[str], confirm: bool) -> dict:
+async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expected: dict[str, str] | None = None,
+                 sale_id: str | None = None) -> dict:
     """Delete the named listings. Runs as a job holding the automation slot, so no Send starts into Chrome meanwhile.
+
+    ``expected`` pins the listing ID to delete on each marketplace: when one names
+    another listing now, such as a relist, nothing is deleted. ``sale_id`` names the
+    sale a delist after a sale follows: once that order is no longer paid, or the
+    item has stock again, nothing is deleted.
 
     Each database step runs on a worker thread with its own session; none is open while
     eBay, Etsy or Chrome answers.
@@ -440,7 +475,7 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool) -> dict:
 
     from anteroom.database import in_worker_session
 
-    names, known, job_id = await in_worker_session(_open_delist, conv_id, marketplaces, confirm)
+    names, known, job_id = await in_worker_session(_open_delist, conv_id, marketplaces, confirm, expected, sale_id)
     job = SimpleNamespace(id=job_id)
     failed = False
     try:
@@ -461,8 +496,11 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool) -> dict:
                 gone = _mercari_gone(name, result)
                 if result.get("ok") is True and result.get("state") == "deleted" or gone:
                     # Already absent is a reconciliation of the listing, never evidence of a sale.
+                    # Who removed it is not known: only that the marketplace no longer has it.
                     already = gone or result.get("already") is True
-                    await in_worker_session(_deleted, conv_id, name, {**base, "already": True} if already else base)
+                    await in_worker_session(_deleted, conv_id, name, {
+                        **base, "already": True, "marketplace_message": scrub(result.get("marketplace_message")),
+                    } if already else base)
                 else:
                     failed = True
                     await in_worker_session(_record, conv_id, name, {
@@ -502,7 +540,8 @@ def _mercari_gone(name: str, result: dict) -> bool:
     return name == "mercari" and result.get("error_code") == "rejected" and message == "item is no longer available"
 
 
-def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bool) -> tuple[list[str], dict, str]:
+def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bool,
+                 expected: dict[str, str] | None = None, sale_id: str | None = None) -> tuple[list[str], dict, str]:
     from anteroom.services.extension_connection import current_extension
 
     from anteroom.services import listing_mode
@@ -520,6 +559,17 @@ def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
             raise DelistError(409, f"Anteroom has no {name} listing link for this item.")
         if entry["sold_here"]:
             raise DelistError(409, f"This item sold on {name}. That listing is never deleted.")
+    changed = [name for name in names if expected is not None and known[name]["listing_id"] != expected.get(name)]
+    if changed:
+        raise DelistError(409, f"The {', '.join(changed)} listing changed. Nothing was delisted.", reason="listing_changed")
+    if sale_id is not None:
+        from anteroom.services.sale_inventory import stock_after_sale
+
+        sale = db.get(MarketplaceSale, sale_id)
+        if (sale is None or str(sale.conversation_id) != conv_id or sale.order_status not in PAID_STATUSES
+                or stock_after_sale(db, conv_id, sale.marketplace, sale.listing_id)["status"] != "sold_out"):
+            raise DelistError(409, "The sale changed: it is no longer paid or the item has stock. Nothing was delisted.",
+                              reason="sale_changed")
     if BROWSER_MARKETPLACES & set(names) and not current_extension().connected:
         raise DelistError(409, "Connect Chrome first.")
     repo = JobRepo(db)

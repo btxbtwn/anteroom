@@ -135,6 +135,8 @@ class SaleDelistFollowupTest(unittest.TestCase):
         self.assertEqual(followup.retry_after(1), timedelta(minutes=5))
         self.assertEqual(followup.retry_after(2), timedelta(minutes=10))
         self.assertEqual(followup.retry_after(10), timedelta(hours=1))
+        # Hundreds of failed tries stay at the cap instead of overflowing.
+        self.assertEqual(followup.retry_after(400), timedelta(hours=1))
 
     def test_nothing_is_delisted_unless_the_seller_turned_it_on(self):
         self._sold()
@@ -149,6 +151,91 @@ class SaleDelistFollowupTest(unittest.TestCase):
         [item] = self._still()
         self.assertFalse(item["detected"])
         self._run()
+        self.ebay.assert_not_awaited()
+        self.assertEqual(self.bridge.await_count, 0)
+
+    def _relist_on_mercari(self, new_id="m99999999999", minutes_after=5):
+        """Anteroom lists the item on Mercari again, after the sale, under a new listing ID."""
+        from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
+
+        when = datetime.now(UTC).replace(tzinfo=None) + timedelta(minutes=minutes_after)
+        MarketplaceListingRepo(self.db).save(self.conv.id, "mercari", {
+            "state": "published", "listing_url": f"https://www.mercari.com/us/item/{new_id}", "listing_id": new_id,
+            "listed_at": when})
+        self.db.commit()
+
+    def test_a_listing_put_up_after_the_sale_is_shown_but_never_delisted(self):
+        self._sold()
+        self._relist_on_mercari()
+        [item] = self._still()
+        mercari = next(entry for entry in item["stillListed"] if entry["marketplace"] == "mercari")
+        self.assertEqual((mercari["listingId"], mercari["followed"]), ("m99999999999", False))
+        self._run()
+        touched = sorted(call.args[2]["marketplace"] for call in self.bridge.call_args_list)
+        self.assertEqual(touched, ["poshmark"])
+        self.assertEqual(self._states()["mercari"], "live")
+
+    def test_retries_stay_on_the_listing_the_sale_left_even_after_a_relist(self):
+        self._sold()
+        self._fail(["ebay", "etsy", "poshmark", "mercari"])
+        # The first sweep pins what the sale left up; nothing is due yet.
+        self._run()
+        self.db.expire_all()
+        pins = parse_notes(self.conv.notes)["saleDelistTargets"]
+        [pin] = pins.values()
+        self.assertEqual(pin["targets"]["mercari"], "m70565754838")
+        # Mercari is relisted under a new ID before the retry is due.
+        self._relist_on_mercari(minutes_after=-1)
+        self._age_records(6)
+        self.bridge.reset_mock()
+        self.bridge.side_effect = None
+        self.bridge.return_value = {"ok": True, "state": "deleted"}
+        self.ebay.return_value = self.etsy.return_value = {"ok": True, "state": "deleted"}
+        self._run()
+        touched = sorted(call.args[2]["marketplace"] for call in self.bridge.call_args_list)
+        self.assertEqual(touched, ["poshmark"])
+        [item] = self._still()
+        self.assertEqual([(e["marketplace"], e["followed"]) for e in item["stillListed"]], [("mercari", False)])
+
+    def test_turning_the_setting_off_stops_the_next_delist_in_the_same_sweep(self):
+        self._sold()
+        followup._next.clear()
+        followup._running.clear()
+        with patch.object(followup, "_enabled", side_effect=[True, False]):
+            asyncio.run(followup.run(session_factory=sessionmaker(bind=self.db.get_bind())))
+        self.ebay.assert_not_awaited()
+        self.assertEqual(self.bridge.await_count, 0)
+
+    def test_pins_are_kept_while_the_setting_is_off_so_turning_it_on_later_skips_relists(self):
+        self._sold()
+        self._run(autodelist=False)
+        self._relist_on_mercari(minutes_after=-1)
+        self._run()
+        touched = sorted(call.args[2]["marketplace"] for call in self.bridge.call_args_list)
+        self.assertEqual(touched, ["poshmark"])
+        self.assertEqual(self._states()["mercari"], "live")
+
+    def test_an_in_person_sale_is_alerted_but_never_delisted_automatically(self):
+        self._sold(marketplace="other", listing_id=None, source="seller")
+        [item] = self._still()
+        self.assertEqual((item["soldOn"], item["detected"]), ("other", False))
+        self.assertEqual({entry["marketplace"] for entry in item["stillListed"]}, set(delist_tests.URLS))
+        self._run()
+        self.ebay.assert_not_awaited()
+        self.assertEqual(self.bridge.await_count, 0)
+
+    def test_a_sale_refunded_before_its_delist_starts_deletes_nothing(self):
+        sale_id = self._sold()
+        self.db.expire_all()
+        due = followup._sweep(self.db, act=True)
+        self.assertEqual([(conv, sale) for conv, sale, _targets in due], [(self.conv.id, sale_id)])
+        # The order is refunded after the sweep chose it, before its delist starts.
+        self.db.get(MarketplaceSale, sale_id).order_status = "refunded"
+        self.db.commit()
+        [(conv_id, _sale, targets)] = due
+        with self.assertLogs("anteroom.sale_delist_followup", level="INFO") as logs:
+            asyncio.run(followup._follow(conv_id, sale_id, targets))
+        self.assertTrue(any("sale changed" in line for line in logs.output), logs.output)
         self.ebay.assert_not_awaited()
         self.assertEqual(self.bridge.await_count, 0)
 

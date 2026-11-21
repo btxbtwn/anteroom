@@ -13,10 +13,10 @@ test("a sold item still listed elsewhere is alerted in the sidebar and explained
     if (/\/marketplace-listings\/delist|\/marketplace-sales\/.+\/dismiss/.test(request.url())) mutations.push(request.url());
   });
   await page.route("**/api/marketplace-sales/still-listed", route => route.fulfill({ json: { autodelist: true, items: [{
-    conversationId: id, title, saleId: "sale-1", soldOn: "poshmark", soldAt: "2026-11-14T22:00:00", detected: true,
+    conversationId: id, title, saleId: "sale-1", soldOn: "poshmark", soldAt: "2026-11-14T22:00:00", detected: true, pinned: true,
     stillListed: [
-      { marketplace: "ebay", state: "failed", error: "Sign in to eBay again.", at: null, attempts: 2, url: null },
-      { marketplace: "mercari", state: "live", error: null, at: null, attempts: 0, url: null },
+      { marketplace: "ebay", listingId: "377507697747", followed: true, state: "failed", error: "Sign in to eBay again.", at: null, attempts: 2, url: null },
+      { marketplace: "mercari", listingId: "m70565754838", followed: true, state: "live", error: null, at: null, attempts: 0, url: null },
     ],
   }] } }));
   await page.route(/\/api\/marketplace-sales\?/, route => {

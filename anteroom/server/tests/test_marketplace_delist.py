@@ -499,11 +499,24 @@ class MarketplaceDelistTest(unittest.TestCase):
         body = self.client.post(f"{self.base}/delist", json={"marketplaces": ["mercari"], "confirm": True}).json()
         self.assertEqual(body["mercari"]["state"], "deleted")
         self.assertTrue(body["mercari"]["already_gone"])
+        # The record keeps Mercari's words; it does not say who removed the listing.
+        self.assertEqual(body["mercari"]["marketplace_message"], "Item is no longer available")
         self.assertFalse(body["mercari"]["sold_here"])
         self.assertTrue(body["depop"]["sold_here"])
         # The Depop sale stands and nothing records a Mercari sale or order.
         self.assertEqual(self._sales(), sales)
         self.assertEqual(self._status(), "sold")
+
+    def test_a_delist_pinned_to_a_listing_that_changed_deletes_nothing(self):
+        from anteroom.services import marketplace_delist
+
+        with self.assertRaises(marketplace_delist.DelistError) as caught:
+            asyncio.run(marketplace_delist.delist(self.conv.id, ["mercari", "ebay"], confirm=True,
+                                                  expected={"mercari": "m11111111111", "ebay": "377507697747"}))
+        self.assertEqual((caught.exception.status_code, caught.exception.reason), (409, "listing_changed"))
+        self.assertEqual(self.bridge.await_count, 0)
+        self.ebay.assert_not_awaited()
+        self.assertEqual(set(self._states().values()), {"live"})
 
     def test_mercari_no_longer_available_on_an_unsold_item_creates_no_sale(self):
         self._answer_by_marketplace({"mercari": self.MERCARI_GONE})

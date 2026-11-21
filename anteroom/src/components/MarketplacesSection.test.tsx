@@ -580,6 +580,10 @@ describe("marketplaces section", () => {
     expect(refused.said).toBe("Poshmark said: Your minimum price is too low");
     expect(rowStatus("mercari", { ...live, state: "deleted" }, undefined, "current", true).label).toBe("Delisted");
     expect(rowStatus("depop", { ...live, state: "deleted", url: "https://www.depop.com/products/x/", listing_id: "x" }, undefined, "current", true).label).toBe("Delisted");
+    // Already gone says only that the marketplace no longer had it, never who removed it.
+    const gone = rowStatus("mercari", { ...live, state: "deleted", already_gone: true, marketplace_message: "Item is no longer available" }, undefined, "current", true);
+    expect(gone).toMatchObject({ tone: "neutral", label: "Already gone", detail: "Mercari no longer had this listing when Anteroom went to delist it." });
+    expect(gone.said).toBe("Mercari said: Item is no longer available");
     expect(render({}, { depop: { ...live, url: "https://www.depop.com/products/x/", listing_id: "x" } })).not.toContain("Delist everywhere…");
     expect(render({}, { mercari: live, depop: { ...live, url: "https://www.depop.com/products/y/", listing_id: "y" } })).toContain("Delist everywhere…");
     expect(deletable({ ...live, state: "failed" })).toBe(true);

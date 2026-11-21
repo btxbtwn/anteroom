@@ -113,6 +113,8 @@ test('Mercari refusing the read with "Item is no longer available" means the lis
   const s = mercari({ errors: [{ message: 'Item is no longer available' }] });
   const result = await s.run();
   assert.deepEqual([result.ok, result.state, result.already], [true, 'deleted', true]);
+  // Mercari's own words are kept for the record; who removed it is not known.
+  assert.equal(result.marketplace_message, 'Item is no longer available');
   assert.deepEqual(s.operations, ['sellFetchItemsDetails']);
   // Any other refusal of the read is still the seller's to check.
   const other = await mercari({ errors: [{ message: 'Something went wrong' }] }).run();

@@ -9,6 +9,8 @@ export interface MarketplaceListing {
   /** The marketplace's own words when a delist failed. */
   marketplace_message?: string | null;
   at?: string | null;
+  /** The marketplace no longer had the listing when Anteroom went to delist it; who removed it isn't known. */
+  already_gone?: boolean;
 }
 /** What reading this item's live listings found just now: a sale it had not recorded yet, if any. */
 export interface SalesCheck {
