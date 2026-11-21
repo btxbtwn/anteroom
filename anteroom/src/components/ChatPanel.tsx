@@ -1,5 +1,7 @@
-import { Fragment, useRef, useEffect, useCallback } from "react";
-import { usePhotosUploading } from "../photoUploads";
+import { Fragment, useRef, useEffect, useLayoutEffect, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { api } from "../api/client";
+import { photosUploading, usePhotosUploading } from "../photoUploads";
 import { newQueuedChatMessage } from "./chatMessageQueue";
 import { CiteSelectionToolbar } from "./CiteSelectionToolbar";
 import { type ChatCitation } from "./chatCitations";
@@ -8,8 +10,9 @@ import { type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { currentPhaseIndex } from "./liveTrace";
 import { assistantDisplayText, extractJson, isListingJson, isStreamError } from "./chat/assistantDisplay";
 import { useComposerImages } from "./chat/ComposerAttachments";
-import { useComposerDraftText } from "./chat/composerDrafts";
+import { getComposerDraft, setComposerListingPhotoBatch, useComposerDraftText } from "./chat/composerDrafts";
 import { ChatComposer } from "./chat/ChatComposer";
+import { decideComposerImageRoute, uploadComposerDraftPhotos } from "./chat/composerDraftPhotos";
 import { StreamErrorPanel, UnfinishedGenerationPanel } from "./chat/ChatErrors";
 import { ChatMessage } from "./chat/ChatMessage";
 import { ChatTranscript } from "./chat/ChatTranscript";
@@ -17,6 +20,7 @@ import { FoldedTurnRow, LiveWork } from "./chat/LiveWork";
 import { QueuedMessages } from "./chat/QueuedMessages";
 import { AssistantMessageRow } from "./chat/TimelineRows";
 import { WorkingRow } from "./chat/TimelineRows";
+import { getLive } from "./chat/liveChatStore";
 import { useChatQueue } from "./chat/useChatQueue";
 import { useChatScroll } from "./chat/useChatScroll";
 import { useChatServerState } from "./chat/useChatServerState";
@@ -27,7 +31,7 @@ import { RegenerateListingButton } from "./ClearListingButton";
 import { Button } from "./ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
 import { Spinner } from "./ui/spinner";
-import type { Message } from "../api/types";
+import type { ConversationActivity, ListingDocument, Message } from "../api/types";
 import type { ListingChatStatus } from "./ListingChatPopup";
 
 interface Props {
@@ -44,6 +48,7 @@ function messageRowPadding(m: Message): string {
 }
 
 export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onStatusChange }: Props) {
+  const queryClient = useQueryClient();
   const uploadingPhotos = usePhotosUploading(convId);
   const draftKey = `listing:${convId}`;
 
@@ -89,11 +94,15 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     streamText,
   });
   const serverBusy = Boolean(activity?.busy);
+  const sendQueuedMessage = useCallback(
+    (text: string) => sendMessage(text, { preserveInput: true }),
+    [sendMessage],
+  );
   const { pendingQueue, enqueue, handleRemoveQueued } = useChatQueue({
     convId,
     busy,
     serverBusy,
-    sendMessage,
+    sendMessage: sendQueuedMessage,
     queuedMessage,
     onQueuedMessageConsumed,
     pinChatToBottom,
@@ -104,20 +113,165 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     return true;
   }, []);
 
+  const hasPhotos = Boolean(photos && photos.length > 0);
+  const hasMessages = Boolean(messages && messages.length > 0);
+  const checkListingCopy = useCallback(
+    (currentMessages: readonly Message[] | undefined, currentListing: ListingDocument | undefined) =>
+      Boolean(
+        currentMessages?.some((m) => {
+          const json = extractJson(m.text);
+          return Boolean(json && isListingJson(json));
+        }) || (currentListing?.listing && isListingJson(JSON.stringify(currentListing.listing))),
+      ),
+    [],
+  );
+  const hasListingJson = checkListingCopy(messages, listing);
+  const hasListingJsonRef = useRef(hasListingJson);
+  useLayoutEffect(() => { hasListingJsonRef.current = hasListingJson; }, [hasListingJson]);
+
+  const hasCurrentListingCopy = useCallback(async () => {
+    if (hasListingJsonRef.current) return true;
+    const latestMessages = queryClient.getQueryData<Message[]>(["messages", convId]);
+    let latestListing = queryClient.getQueryData<ListingDocument>(["listing", convId]);
+    if (checkListingCopy(latestMessages, latestListing)) return true;
+    const listingState = queryClient.getQueryState(["listing", convId]);
+    if (latestListing === undefined && listingState) {
+      if (listingState.status === "error") return true;
+      if (listingState.fetchStatus === "fetching" && api.listings?.get) {
+        try {
+          latestListing = await queryClient.ensureQueryData({
+            queryKey: ["listing", convId],
+            queryFn: ({ signal }) => api.listings.get(convId, { signal }),
+          });
+        } catch {
+          return true;
+        }
+      }
+    }
+    return hasListingJsonRef.current || checkListingCopy(
+      queryClient.getQueryData<Message[]>(["messages", convId]) ?? latestMessages,
+      latestListing,
+    );
+  }, [checkListingCopy, convId, queryClient]);
+
+  const finishPhotoSend = useCallback(async () => {
+    const live = getLive(convId);
+    const pending = live.pendingPhotoSend;
+    if (!pending || pending.running) return;
+    const chatRunning = () => live.streaming || live.generating || live.resetting
+      || Boolean(queryClient.getQueryData<ConversationActivity>(["activity", convId])?.busy);
+    if (chatRunning() || photosUploading(convId)) {
+      pending.deferred = true;
+      return;
+    }
+
+    pending.running = true;
+    try {
+      if (pending.text) {
+        if (await sendQueuedMessage(pending.text)
+          && live.pendingPhotoSend === pending) {
+          live.pendingPhotoSend = null;
+        }
+        return;
+      }
+
+      while (live.pendingPhotoSend === pending) {
+        const lastChatEnd = live.lastWorkEndedAtMs;
+        // A completed reply can save copy before its query refresh finishes.
+        if (pending.deferred) {
+          try {
+            await Promise.all(["messages", "listing"].map((key) =>
+              queryClient.refetchQueries({ queryKey: [key, convId], type: "active" }, {
+                cancelRefetch: false, throwOnError: true,
+              })));
+          } catch {
+            // If we cannot confirm the draft is empty, leave any saved copy alone.
+            if (live.pendingPhotoSend === pending) live.pendingPhotoSend = null;
+            return;
+          }
+        }
+        const hasCopy = await hasCurrentListingCopy();
+        if (live.pendingPhotoSend !== pending) return;
+        if (chatRunning() || photosUploading(convId)) {
+          pending.deferred = true;
+          return;
+        }
+        if (live.lastWorkEndedAtMs !== lastChatEnd) {
+          pending.deferred = true;
+          continue;
+        }
+        live.pendingPhotoSend = null;
+        if (!hasCopy) void handleGenerate();
+      }
+    } finally {
+      pending.running = false;
+    }
+  }, [convId, handleGenerate, hasCurrentListingCopy, queryClient, sendQueuedMessage]);
+
+  useEffect(() => {
+    if (!busy && !serverBusy && !uploadingPhotos) void finishPhotoSend();
+  }, [busy, serverBusy, uploadingPhotos, finishPhotoSend]);
+
   const handleSend = useCallback(() => {
     const text = input.trim();
     const attached = images.images;
     if (!text && !attached.length) return;
+    const listingPhotoBatch = getComposerDraft(draftKey).listingPhotoBatch;
+    if (listingPhotoBatch === "uploading") return;
     // sendMessage refuses while background work runs, so hold the message instead of dropping it.
     if (busy || serverBusy) {
       if (attached.length) {
         images.setError("Images go with the next message once the current run finishes.");
         return;
       }
+      setComposerListingPhotoBatch(draftKey, undefined);
       enqueue(newQueuedChatMessage(text));
       setInput("");
       pinChatToBottom();
       return;
+    }
+    // When a draft has no listing photos yet, images attached in chat become
+    // its listing photos. Wait for the photos query before choosing a route,
+    // and keep listing-photo intent when a partial upload adds photos.
+    if (attached.length > 0) {
+      const route = decideComposerImageRoute(photos?.length, listingPhotoBatch);
+      if (route === "busy") return;
+      if (route === "wait") {
+        if (queryClient.getQueryState(["photos", convId])?.fetchStatus !== "fetching") {
+          void queryClient.refetchQueries({ queryKey: ["photos", convId], type: "active" });
+        }
+        images.setError("Still loading this item’s photos — try again in a moment.");
+        return;
+      }
+      if (route === "listing_photos") {
+        const live = getLive(convId);
+        if (uploadingPhotos || photosUploading(convId) || live.pendingPhotoSend) return;
+        const lastChatEnd = live.lastWorkEndedAtMs;
+        setComposerListingPhotoBatch(draftKey, "uploading");
+        void uploadComposerDraftPhotos(attached, {
+          uploadPhoto: (file) => api.conversations.uploadListingPhoto(convId, file),
+          invalidatePhotos: async () => {
+            await queryClient.invalidateQueries({ queryKey: ["photos", convId] });
+            void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+          },
+          clearImages: images.clear,
+          setError: images.setError,
+        }).then((complete) => {
+          if (getComposerDraft(draftKey).listingPhotoBatch === "uploading") {
+            setComposerListingPhotoBatch(draftKey, complete ? undefined : "retry");
+            if (complete) {
+              live.pendingPhotoSend = {
+                text, running: false, deferred: live.lastWorkEndedAtMs !== lastChatEnd,
+              };
+              if (text) setInput((current) => current === input ? "" : current);
+              void finishPhotoSend();
+            }
+          }
+        });
+        return;
+      }
+    } else {
+      setComposerListingPhotoBatch(draftKey, undefined);
     }
     void (async () => {
       const uploads = attached.length ? await images.prepare(attached) : [];
@@ -125,14 +279,22 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
       images.clear(attached.map((image) => image.id));
       void sendMessage(text, uploads.length ? { attachments: uploads } : undefined);
     })();
-  }, [busy, serverBusy, input, setInput, sendMessage, pinChatToBottom, enqueue, images]);
-
-  const hasPhotos = Boolean(photos && photos.length > 0);
-  const hasMessages = Boolean(messages && messages.length > 0);
-  const hasListingJson = Boolean(messages?.some((m) => {
-    const json = extractJson(m.text);
-    return Boolean(json && isListingJson(json));
-  }) || (listing?.listing && isListingJson(JSON.stringify(listing.listing))));
+  }, [
+    busy,
+    serverBusy,
+    input,
+    setInput,
+    sendMessage,
+    finishPhotoSend,
+    pinChatToBottom,
+    enqueue,
+    images,
+    photos,
+    draftKey,
+    uploadingPhotos,
+    convId,
+    queryClient,
+  ]);
   const streamFailed = isStreamError(streamText);
   const streamVisible = streamFailed ? "" : assistantDisplayText(streamText);
   // Persist finishes (and messages refetch) before the SSE stream is cleared —
