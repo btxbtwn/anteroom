@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1117 — 2026-11-21
+
+- Hosted web and iPhone sign-in screens now offer a "Resend confirmation email" button after signup confirmation or when signing in before confirming an email address.
+
 ## 0.1.1116 — 2026-11-21
 
 - Hosted database deploys now repair an invalid `ix_listing_promotions_rule_recent` index left behind by an interrupted concurrent index build instead of failing subsequent deploys.
