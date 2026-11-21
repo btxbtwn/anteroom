@@ -28,6 +28,7 @@ with SessionLocal() as db:
 `;
 
 let acceptedRequests = 0;
+let poshmarkSent = 0;
 let originalTheme: string | undefined;
 let sandboxVerified = false;
 let fixturesSeeded = false;
@@ -40,7 +41,10 @@ test.beforeAll(async ({ request }) => {
   originalTheme = (await (await request.get("/api/settings/ui")).json()).theme;
   const today = new Date().toISOString().slice(0, 10);
   const baseline = await (await request.get(`/api/analytics/offers?start=${today}&end=${today}&timezone=UTC`)).json();
-  acceptedRequests = baseline.marketplaces.find((row: { marketplace: string }) => row.marketplace === "poshmark").accepted_requests + 1;
+  const poshmark = baseline.marketplaces.find((row: { marketplace: string }) => row.marketplace === "poshmark");
+  acceptedRequests = poshmark.accepted_requests + 1;
+  // Offers sent counts every accepted send, including the sandbox's sample sends without a receipt.
+  poshmarkSent = poshmark.confirmed_sends + poshmark.accepted_requests + poshmark.completed_jobs + poshmark.unverified + 1;
   execFileSync(".venv/bin/python", ["-c", seed], { env: { ...process.env,
     PYTHONPATH: "server", ANTEROOM_DATA_DIR: sandboxDir, ANTEROOM_DATABASE_URL: "", ANTEROOM_HOSTED: "0", ANTEROOM_SANDBOX: "1" } });
   fixturesSeeded = true;
@@ -85,8 +89,8 @@ for (const theme of ["light", "dark"]) {
     for (const marketplace of ["eBay", "Mercari"]) {
       await expect(group(marketplace).getByText("1 offer with no marketplace receipt saved", { exact: true })).toBeVisible();
     }
-    await expect(group("Poshmark").getByText(`${acceptedRequests} ${acceptedRequests === 1 ? "offer" : "offers"} sent`, { exact: true })).toBeVisible();
-    await expect(group("Poshmark").getByText(/^Poshmark accepted (it|all \d+) but doesn't say how many likers got each offer$/)).toBeVisible();
+    await expect(group("Poshmark").getByText(`${poshmarkSent} ${poshmarkSent === 1 ? "offer" : "offers"} sent`, { exact: true })).toBeVisible();
+    await expect(group("Poshmark").getByText(`Poshmark accepted ${acceptedRequests === 1 ? "it" : `all ${acceptedRequests}`} but doesn't say how many likers got each offer`, { exact: true })).toBeVisible();
     await expect(group("Depop").getByText("Depop finished it but doesn't say how many likers got each offer", { exact: true })).toBeVisible();
     await expect(section.getByText("Not available")).toHaveCount(0);
     await expect(section.getByText(/Sales from offers aren't counted/)).toBeVisible();

@@ -65,7 +65,7 @@ struct OfferActivitySection: View {
         } header: {
             Text("Offer activity")
         } footer: {
-            Text("Each offer is one listing's offer to its likers or watchers, so one buyer can count more than once. Listings that were checked and skipped aren't counted, and neither are eBay offers from before Anteroom recorded send dates.")
+            Text("Each offer is one listing's offer to its likers or watchers, so one buyer can count more than once. Listings that were checked and skipped aren't counted, and neither are offers sent on eBay before Anteroom recorded send dates.")
         }
         .task(id: "\(dates.0)/\(dates.1)/\(TimeZone.current.identifier)/\(refreshToken)") {
             data = nil

@@ -71,7 +71,7 @@ export function OfferAnalytics() {
     {dates.start > dates.end ? <PageError message="Choose a start on or before the end." /> : null}
     {query.error ? <PageError message={`Could not read offer activity: ${(query.error as Error).message}`} /> : null}
     {query.isLoading ? <Skeleton className="h-48" /> : query.data ? <OfferEvidence data={query.data} /> : null}
-    <PageNote>Each offer is one listing's offer to its likers or watchers, so one buyer can count more than once. Listings that were checked and skipped aren't counted, and neither are eBay offers from before Anteroom recorded send dates.</PageNote>
+    <PageNote>Each offer is one listing's offer to its likers or watchers, so one buyer can count more than once. Listings that were checked and skipped aren't counted, and neither are offers sent on eBay before Anteroom recorded send dates.</PageNote>
     <PageNote>Sales from offers aren't counted: marketplaces don't say which offer led to a sale.</PageNote>
     <OfferLog open={logOpen} onOpenChange={setLogOpen} />
   </PageSection>;
