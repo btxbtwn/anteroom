@@ -65,3 +65,51 @@ def test_one_sellers_failed_tick_does_not_stop_the_clock(monkeypatch):
     # Both sellers keep being ticked after Alice's failure, and a finished tick can start again.
     assert started.count("alice") > 1
     assert started.count("bob") > 1
+
+
+def test_concurrent_seller_ticks_are_bounded_and_drain_without_waiting_for_next_poll(monkeypatch):
+    owners = [f"seller-{i}" for i in range(8)]
+    active = 0
+    peak_active = 0
+    finished: list[str] = []
+    all_done = asyncio.Event()
+
+    async def run_owner(owner):
+        nonlocal active, peak_active
+        active += 1
+        peak_active = max(peak_active, active)
+        try:
+            await asyncio.sleep(0.02)
+        finally:
+            active -= 1
+            finished.append(owner)
+            if len(finished) >= len(owners):
+                all_done.set()
+
+    # Large tick interval ensures queued sellers run as slots free up rather than waiting 60s.
+    monkeypatch.setattr(scheduler, "TICK_SECONDS", 60)
+    monkeypatch.setattr(scheduler, "due_owners", lambda _engine: list(owners))
+    monkeypatch.setattr(scheduler, "run_owner", run_owner)
+
+    async def scenario():
+        clock = asyncio.create_task(scheduler.serve(object(), max_concurrency=3))
+        try:
+            await asyncio.wait_for(all_done.wait(), timeout=2.0)
+        finally:
+            clock.cancel()
+            await asyncio.gather(clock, return_exceptions=True)
+
+    asyncio.run(scenario())
+    assert peak_active == 3
+    assert set(finished) == set(owners)
+
+
+def test_scheduler_concurrency_env_validation(monkeypatch):
+    monkeypatch.delenv("ANTEROOM_AUTOMATION_CONCURRENCY", raising=False)
+    assert scheduler._scheduler_concurrency() == scheduler.DEFAULT_SCHEDULER_CONCURRENCY
+    monkeypatch.setenv("ANTEROOM_AUTOMATION_CONCURRENCY", "6")
+    assert scheduler._scheduler_concurrency() == 6
+    monkeypatch.setenv("ANTEROOM_AUTOMATION_CONCURRENCY", "0")
+    assert scheduler._scheduler_concurrency() == 1
+    monkeypatch.setenv("ANTEROOM_AUTOMATION_CONCURRENCY", "not-a-number")
+    assert scheduler._scheduler_concurrency() == scheduler.DEFAULT_SCHEDULER_CONCURRENCY
