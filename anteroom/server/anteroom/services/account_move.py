@@ -11,7 +11,6 @@ and scheduled edits run once, from the account.
 from __future__ import annotations
 
 import json
-import re
 import threading
 import time
 from datetime import UTC, date, datetime
@@ -27,7 +26,6 @@ from anteroom.config import DATA_DIR, HOSTED_URL
 BATCH_ROWS = 200
 BATCH_BYTES = 2 * 1024 * 1024
 MARKER = Path(DATA_DIR) / "account-move.json"
-_VENDOO_LABEL_ID = re.compile(r"[A-Za-z0-9]{20}")
 
 _lock = threading.Lock()
 _progress: dict = {"state": "idle"}
@@ -89,12 +87,9 @@ def _carry_vendoo_labels(record: dict, labels: object, names: dict[str, str]) ->
     for value in labels:
         if not isinstance(value, str) or not (label := value.strip()):
             continue
-        if label in names:
-            label = names[label]
-        elif _VENDOO_LABEL_ID.fullmatch(label) and label != label.lower() and label != label.upper():
-            # Keep unknown codes in the copied revision history.
-            continue
-        recovered.append(label)
+        # Legacy revisions store IDs and names together. Only the catalog
+        # identifies a value as an ID; keep unmapped values as saved.
+        recovered.append(names.get(label, label))
     if recovered:
         notes["vendooLabels"] = ", ".join(dict.fromkeys(recovered))
         record["notes"] = json.dumps(notes)

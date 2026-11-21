@@ -189,8 +189,11 @@ def test_move_restores_legacy_vendoo_labels_from_the_current_listing(cloud, mac,
     catalog.write_text(json.dumps({'by_id': {'aBcDeFgHiJkLmNoP1234': 'Bin 4'}}))
     monkeypatch.setattr(account_move, 'DATA_DIR', str(catalog.parent))
     monkeypatch.setattr(account_move, 'local_secrets', lambda slots: {})
+    seller_label = 'WinterCollectionSale'
+    unmapped_id = 'qRsTuVwXyZaBcDeF5678'
     cases = {
-        'legacy': ({'vendooItemId': 'old-import', 'sellerNotes': 'Keep me'}, ['Bin 4', 'Winter']),
+        'legacy': ({'vendooItemId': 'old-import', 'sellerNotes': 'Keep me'},
+                   ['Bin 4', 'Winter', seller_label, unmapped_id]),
         'edited': ({'vendooItemId': 'edited-import', 'vendooLabels': 'Seller edit'}, ['Seller edit']),
         'cleared': ({'vendooItemId': 'cleared-import', 'vendooLabels': ''}, []),
         'local': ({'sellerNotes': 'Created locally'}, []),
@@ -203,7 +206,7 @@ def test_move_restores_legacy_vendoo_labels_from_the_current_listing(cloud, mac,
                 ListingRevision(id=f'{item}-old', conversation_id=item, source='vendoo_import',
                                 listing_json={'labels': ['Old label']}),
                 ListingRevision(id=f'{item}-current', conversation_id=item, source='vendoo_import',
-                                listing_json={'labels': ['aBcDeFgHiJkLmNoP1234', 'Winter', 'qRsTuVwXyZaBcDeF5678']}),
+                                listing_json={'labels': ['aBcDeFgHiJkLmNoP1234', 'Winter', seller_label, unmapped_id]}),
             ])
         db.commit()
 
@@ -215,7 +218,9 @@ def test_move_restores_legacy_vendoo_labels_from_the_current_listing(cloud, mac,
         assert inventory[item]['vendoo_labels'] == labels
     detail = client.get('/api/conversations/legacy', headers=alice)
     assert detail.status_code == 200
-    assert json.loads(detail.json()['notes']) == {**cases['legacy'][0], 'vendooLabels': 'Bin 4, Winter'}
+    assert json.loads(detail.json()['notes']) == {
+        **cases['legacy'][0], 'vendooLabels': f'Bin 4, Winter, {seller_label}, {unmapped_id}',
+    }
     with Session(mac[0]) as db:
         assert db.scalar(select(Conversation.notes).where(Conversation.id == 'legacy')) == json.dumps(cases['legacy'][0])
 
