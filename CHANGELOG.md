@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1121 — 2026-11-21
+
+- iPhone and iPad Settings now include a Connections screen to connect, reconnect, or disconnect eBay and Etsy accounts directly via OAuth.
+
 ## 0.1.1120 — 2026-11-21
 
 - Rolling back to packaged Mac builds older than `0.1.1054` (before the `anteroom.db` database rename) is now refused with an explanation instead of opening an empty inventory.

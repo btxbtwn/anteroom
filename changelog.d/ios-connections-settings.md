@@ -1,1 +1,0 @@
-- iPhone and iPad Settings now include a Connections screen to connect, reconnect, or disconnect eBay and Etsy accounts directly via OAuth.
