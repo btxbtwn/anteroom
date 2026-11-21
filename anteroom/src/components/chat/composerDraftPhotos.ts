@@ -1,4 +1,23 @@
 import type { ComposerImage } from "./ComposerAttachments";
+import type { ComposerDraft } from "./composerDrafts";
+
+export type ComposerImageRoute = "busy" | "wait" | "listing_photos" | "chat_attachments";
+
+/**
+ * Decide how chat-composer images should be routed when the seller presses Send.
+ * Keeps images in the composer while the draft's photos query is still loading,
+ * promotes them to listing photos on empty drafts (or active retry batches), and
+ * otherwise sends them as reference chat attachments.
+ */
+export function decideComposerImageRoute(
+  photosCount: number | undefined,
+  listingPhotoBatch: ComposerDraft["listingPhotoBatch"],
+): ComposerImageRoute {
+  if (listingPhotoBatch === "uploading") return "busy";
+  if (listingPhotoBatch === "retry") return "listing_photos";
+  if (photosCount === undefined) return "wait";
+  return photosCount === 0 ? "listing_photos" : "chat_attachments";
+}
 
 export interface DraftPhotoUploadDeps {
   uploadPhoto: (file: File) => Promise<void>;
@@ -7,16 +26,17 @@ export interface DraftPhotoUploadDeps {
   setError: (message: string) => void;
   sendMessage: (text: string) => unknown;
   generate: () => unknown;
+  hasListingCopy: () => boolean | Promise<boolean>;
 }
 
 /**
  * Promote chat-composer images to the draft's listing photos when the draft has
- * none yet, then kick off generation or send the seller's accompanying note.
+ * none yet, then kick off generation (only if the draft still has no listing
+ * copy after upload completes) or send the seller's accompanying note.
  */
 export async function uploadComposerDraftPhotos(
   attached: readonly ComposerImage[],
   text: string,
-  hasListingJson: boolean,
   deps: DraftPhotoUploadDeps,
 ): Promise<boolean> {
   const uploadedIds: string[] = [];
@@ -44,7 +64,7 @@ export async function uploadComposerDraftPhotos(
   }
   if (text) {
     deps.sendMessage(text);
-  } else if (!hasListingJson) {
+  } else if (!(await deps.hasListingCopy())) {
     deps.generate();
   }
   return true;

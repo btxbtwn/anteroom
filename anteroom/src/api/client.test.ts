@@ -55,15 +55,16 @@ it("keeps acknowledged hosted writes off the composer retry path after a later r
       setError: vi.fn(),
       sendMessage: vi.fn(),
       generate: vi.fn(),
+      hasListingCopy: () => false,
     };
 
-    expect(await uploadComposerDraftPhotos(attached, "", false, deps)).toBe(false);
+    expect(await uploadComposerDraftPhotos(attached, "", deps)).toBe(false);
     expect(attached).toEqual([second]);
     expect(deps.invalidatePhotos).toHaveBeenCalledTimes(1);
     expect(deps.setError).toHaveBeenCalledWith(expect.stringContaining("Photos were saved"));
     expect(deps.generate).not.toHaveBeenCalled();
 
-    expect(await uploadComposerDraftPhotos(attached, "", false, deps)).toBe(true);
+    expect(await uploadComposerDraftPhotos(attached, "", deps)).toBe(true);
     expect(attached).toEqual([]);
     expect(deps.generate).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls.map(([, options]) => [options.method, options.body])).toEqual([

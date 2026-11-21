@@ -12,7 +12,7 @@ import { assistantDisplayText, extractJson, isListingJson, isStreamError } from 
 import { useComposerImages } from "./chat/ComposerAttachments";
 import { getComposerDraft, setComposerListingPhotoBatch, useComposerDraftText } from "./chat/composerDrafts";
 import { ChatComposer } from "./chat/ChatComposer";
-import { uploadComposerDraftPhotos } from "./chat/composerDraftPhotos";
+import { decideComposerImageRoute, uploadComposerDraftPhotos } from "./chat/composerDraftPhotos";
 import { StreamErrorPanel, UnfinishedGenerationPanel } from "./chat/ChatErrors";
 import { ChatMessage } from "./chat/ChatMessage";
 import { ChatTranscript } from "./chat/ChatTranscript";
@@ -30,7 +30,7 @@ import { RegenerateListingButton } from "./ClearListingButton";
 import { Button } from "./ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
 import { Spinner } from "./ui/spinner";
-import type { Message } from "../api/types";
+import type { ListingDocument, Message } from "../api/types";
 import type { ListingChatStatus } from "./ListingChatPopup";
 
 interface Props {
@@ -109,12 +109,18 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
   }, []);
 
   const hasPhotos = Boolean(photos && photos.length > 0);
-  const draftHasNoPhotos = photos !== undefined && photos.length === 0;
   const hasMessages = Boolean(messages && messages.length > 0);
-  const hasListingJson = Boolean(messages?.some((m) => {
-    const json = extractJson(m.text);
-    return Boolean(json && isListingJson(json));
-  }) || (listing?.listing && isListingJson(JSON.stringify(listing.listing))));
+  const checkListingCopy = useCallback(
+    (currentMessages: readonly Message[] | undefined, currentListing: ListingDocument | undefined) =>
+      Boolean(
+        currentMessages?.some((m) => {
+          const json = extractJson(m.text);
+          return Boolean(json && isListingJson(json));
+        }) || (currentListing?.listing && isListingJson(JSON.stringify(currentListing.listing))),
+      ),
+    [],
+  );
+  const hasListingJson = checkListingCopy(messages, listing);
 
   const handleSend = useCallback(() => {
     const text = input.trim();
@@ -135,28 +141,61 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
       return;
     }
     // When a draft has no listing photos yet, images attached in chat become
-    // its listing photos. Keep that intent when a partial upload adds photos.
-    if ((draftHasNoPhotos || listingPhotoBatch) && attached.length > 0) {
-      if (uploadingPhotos || photosUploading(convId)) return;
-      setComposerListingPhotoBatch(draftKey, "uploading");
-      void uploadComposerDraftPhotos(attached, text, hasListingJson, {
-        uploadPhoto: (file) => api.conversations.uploadListingPhoto(convId, file),
-        invalidatePhotos: async () => {
-          await queryClient.invalidateQueries({ queryKey: ["photos", convId] });
-          void queryClient.invalidateQueries({ queryKey: ["conversations"] });
-        },
-        clearImages: images.clear,
-        setError: images.setError,
-        sendMessage: (note) => { void sendMessage(note); },
-        generate: () => { void handleGenerate(); },
-      }).then((complete) => {
-        if (getComposerDraft(draftKey).listingPhotoBatch === "uploading") {
-          setComposerListingPhotoBatch(draftKey, complete ? undefined : "retry");
+    // its listing photos. Wait for the photos query before choosing a route,
+    // and keep listing-photo intent when a partial upload adds photos.
+    if (attached.length > 0) {
+      const route = decideComposerImageRoute(photos?.length, listingPhotoBatch);
+      if (route === "busy") return;
+      if (route === "wait") {
+        if (queryClient.getQueryState(["photos", convId])?.fetchStatus !== "fetching") {
+          void queryClient.refetchQueries({ queryKey: ["photos", convId], type: "active" });
         }
-      });
-      return;
+        images.setError("Still loading this item’s photos — try again in a moment.");
+        return;
+      }
+      if (route === "listing_photos") {
+        if (uploadingPhotos || photosUploading(convId)) return;
+        setComposerListingPhotoBatch(draftKey, "uploading");
+        void uploadComposerDraftPhotos(attached, text, {
+          uploadPhoto: (file) => api.conversations.uploadListingPhoto(convId, file),
+          invalidatePhotos: async () => {
+            await queryClient.invalidateQueries({ queryKey: ["photos", convId] });
+            void queryClient.invalidateQueries({ queryKey: ["conversations"] });
+          },
+          clearImages: images.clear,
+          setError: images.setError,
+          sendMessage: (note) => { void sendMessage(note); },
+          generate: () => { void handleGenerate(); },
+          hasListingCopy: async () => {
+            const latestMessages = queryClient.getQueryData<Message[]>(["messages", convId]);
+            let latestListing = queryClient.getQueryData<ListingDocument>(["listing", convId]);
+            if (checkListingCopy(latestMessages, latestListing)) return true;
+            if (latestListing === undefined) {
+              try {
+                latestListing = await queryClient.ensureQueryData({
+                  queryKey: ["listing", convId],
+                  queryFn: ({ signal }) => api.listings.get(convId, { signal }),
+                });
+              } catch {
+                // If listing state cannot be confirmed absent, preserve any existing copy.
+                return true;
+              }
+            }
+            return checkListingCopy(
+              queryClient.getQueryData<Message[]>(["messages", convId]) ?? latestMessages,
+              latestListing,
+            );
+          },
+        }).then((complete) => {
+          if (getComposerDraft(draftKey).listingPhotoBatch === "uploading") {
+            setComposerListingPhotoBatch(draftKey, complete ? undefined : "retry");
+          }
+        });
+        return;
+      }
+    } else {
+      setComposerListingPhotoBatch(draftKey, undefined);
     }
-    if (!attached.length) setComposerListingPhotoBatch(draftKey, undefined);
     void (async () => {
       const uploads = attached.length ? await images.prepare(attached) : [];
       if (uploads === null) return;
@@ -173,12 +212,12 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     pinChatToBottom,
     enqueue,
     images,
-    draftHasNoPhotos,
+    photos,
     draftKey,
     uploadingPhotos,
     convId,
     queryClient,
-    hasListingJson,
+    checkListingCopy,
   ]);
   const streamFailed = isStreamError(streamText);
   const streamVisible = streamFailed ? "" : assistantDisplayText(streamText);
