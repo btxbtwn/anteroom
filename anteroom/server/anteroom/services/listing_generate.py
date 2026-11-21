@@ -1161,10 +1161,6 @@ def apply_send_readiness_fixes(listing: dict) -> bool:
         if location:
             listing["zipCode"] = location
             changed = True
-    from anteroom.services.user_settings import apply_listing_field_defaults
-
-    if apply_listing_field_defaults(listing):
-        changed = True
     return changed
 
 
@@ -1754,6 +1750,11 @@ def persist_generated_listing(
     if pinned_size:
         _follow_native_size_rows(listing, seed, sanitize_size_value(listing.get("size")) or pinned_size[0])
         _drop_unformed_size_ids(listing, seed)
+    # The seller's saved field defaults over the model's answers, after its
+    # native blocks are back in place; a value the seller set here still wins.
+    from anteroom.services.user_settings import apply_listing_field_defaults
+
+    apply_listing_field_defaults(listing, seed)
     constrain_generated(listing, seed)
     cap_listing_description(listing)
     if revisions:
