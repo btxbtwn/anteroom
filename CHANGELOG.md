@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1103 — 2026-11-21
+
+- Hosted category search now shares the public marketplace category index across accounts instead of rebuilding and storing a separate copy per seller, speeding up draft generation and reducing memory use.
+
 ## 0.1.1102 — 2026-11-21
 
 - Added per-seller rate limiting to hosted measurement and size-tag photo reads, automation drafts and manual runs, and browser error reports so one busy or stuck session cannot flood shared capacity.
