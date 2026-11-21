@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1109 — 2026-11-21
+
+- Enabled Settings → Help on the web app with hosted-appropriate how-to guides (filtering desktop-only topics) and added a Support and legal section with direct support, privacy, and terms links.
+
 ## 0.1.1108 — 2026-11-21
 
 - Directs sellers to install or update Anteroom Bridge directly from the Chrome Web Store across the hosted web app, desktop Settings, onboarding checklist, and macOS setup instructions.
