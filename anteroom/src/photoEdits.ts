@@ -1,30 +1,4 @@
-/**
- * The photo editor's recipe and crop geometry. The server renders the recipe
- * (services/photo_edits.py); these helpers only shape it in the editor.
- */
-import type { CropBox, PhotoEdits } from "./api/types";
-
-/** Edits with every adjustment set, as the editor works on them. The server
- * may leave out an adjustment at its default; withDefaults fills it in. */
-export type EditRecipe = Required<PhotoEdits>;
-
-export const NO_EDITS: EditRecipe = {
-  rotate: 0,
-  straighten: 0,
-  crop: null,
-  exposure: 0,
-  brightness: 0,
-  contrast: 0,
-  background: null,
-};
-
-export function withDefaults(edits: PhotoEdits | null | undefined): EditRecipe {
-  return { ...NO_EDITS, ...edits };
-}
-
-export function sameEdits(a: PhotoEdits, b: PhotoEdits): boolean {
-  return JSON.stringify(withDefaults(a)) === JSON.stringify(withDefaults(b));
-}
+import type { CropBox } from "./api/types";
 
 /** Width over height; null leaves the crop free. */
 export type CropAspect = number | null;
@@ -40,17 +14,6 @@ export const CROP_ASPECTS: { id: string; label: string; aspect: CropAspect }[] =
 
 const MIN_SIDE = 0.05;
 const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
-
-/** The turn the server applies: a further quarter turn clockwise moves the crop with the picture. */
-export function turnEdits(edits: EditRecipe, degrees: 90 | -90): EditRecipe {
-  const turns = degrees === 90 ? 1 : 3;
-  let crop = edits.crop;
-  for (let i = 0; i < turns; i += 1) {
-    if (crop) crop = { x: Math.max(0, 1 - crop.y - crop.height), y: crop.x, width: crop.height, height: crop.width };
-  }
-  const rotate = (((edits.rotate + degrees) % 360) + 360) % 360;
-  return { ...edits, rotate: rotate as EditRecipe["rotate"], crop };
-}
 
 /** The largest centred crop of ``aspect`` in a frame ``frameAspect`` wide per unit of height. */
 export function centeredCrop(aspect: number, frameAspect: number): CropBox {
@@ -103,15 +66,4 @@ export function dragCrop(
     width,
     height,
   };
-}
-
-/** What changed, in the seller's words, for the editor's summary line. */
-export function describeEdits(edits: PhotoEdits | null | undefined): string[] {
-  const e = withDefaults(edits);
-  const parts: string[] = [];
-  if (e.crop) parts.push("cropped");
-  if (e.rotate || e.straighten) parts.push("rotated");
-  if (e.exposure || e.brightness || e.contrast) parts.push("adjusted");
-  if (e.background) parts.push("background removed");
-  return parts;
 }

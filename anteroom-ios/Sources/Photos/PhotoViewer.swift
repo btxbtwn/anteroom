@@ -1,8 +1,6 @@
 import SwiftUI
 
-/// Full-size photos, one page each, with the desktop photo editor's actions:
-/// rotate, adjust, reset to the original, and delete. Each change saves
-/// immediately, like the desktop editor.
+/// Full-size photos with crop, rotation, revert and delete actions.
 struct PhotoViewer: View {
     let api: AnteroomAPI
     let listingID: String
@@ -14,7 +12,7 @@ struct PhotoViewer: View {
     @Environment(\.dismiss) private var dismiss
     @State private var busy = false
     @State private var error: String?
-    @State private var adjusting: ListingPhoto?
+    @State private var cropping: ListingPhoto?
     @State private var confirmDelete = false
 
     var body: some View {
@@ -37,7 +35,7 @@ struct PhotoViewer: View {
                     Spacer()
                     Button("Rotate right", systemImage: "rotate.right") { rotate(90) }
                     Spacer()
-                    Button("Edit", systemImage: "slider.horizontal.3") { adjusting = current }
+                    Button("Crop photo", systemImage: "crop") { cropping = current }
                     Spacer()
                     Menu("More", systemImage: "ellipsis.circle") {
                         Button("Revert to original", systemImage: "arrow.uturn.backward") { reset() }
@@ -56,8 +54,8 @@ struct PhotoViewer: View {
             .confirmationDialog("Delete this photo?", isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("Delete photo", role: .destructive) { delete() }
             }
-            .sheet(item: $adjusting) { photo in
-                PhotoAdjustSheet(api: api, listingID: listingID, photo: photo) { replace($0) }
+            .sheet(item: $cropping) { photo in
+                PhotoCropSheet(api: api, listingID: listingID, photo: photo) { replace($0) }
             }
         }
     }
@@ -157,24 +155,16 @@ private struct FullPhoto: View {
     }
 }
 
-/// The desktop photo editor (PhotoEditor.tsx): Crop, Adjust and Background,
-/// previewed by the server from the original upload before anything is saved.
-struct PhotoAdjustSheet: View {
+struct PhotoCropSheet: View {
     let api: AnteroomAPI
     let listingID: String
     let photo: ListingPhoto
     let onSaved: (ListingPhoto) -> Void
 
-    private static let backgrounds: [(color: String, label: String)] = [
-        ("#ffffff", "White"), ("#f4f4f5", "Light grey"), ("#e8e0d5", "Linen"), ("#000000", "Black"),
-    ]
-
     @Environment(\.dismiss) private var dismiss
     @State private var edits: PhotoEdits
-    @State private var tool = "crop"
     @State private var aspectID = "free"
     @State private var preview: UIImage?
-    @State private var rendering = false
     @State private var saving = false
     @State private var error: String?
     @State private var dragStart: CropBox?
@@ -196,19 +186,7 @@ struct PhotoAdjustSheet: View {
                             .frame(height: 280)
                             .listRowInsets(EdgeInsets())
                     }
-                    Section {
-                        Picker("Tool", selection: $tool) {
-                            Text("Crop").tag("crop")
-                            Text("Adjust").tag("adjust")
-                            Text("Background").tag("background")
-                        }
-                        .pickerStyle(.segmented)
-                    }
-                    switch tool {
-                    case "crop": cropControls
-                    case "background": backgroundControls
-                    default: adjustControls
-                    }
+                    cropControls
                     if let error {
                         Section { Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(WorkspaceStyle.destructive) }
                     }
@@ -216,7 +194,7 @@ struct PhotoAdjustSheet: View {
                 .listRowBackground(WorkspaceStyle.surface)
             }
             .workspaceGroupedList()
-            .navigationTitle("Edit photo")
+            .navigationTitle("Crop photo")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(saving) }
@@ -224,19 +202,19 @@ struct PhotoAdjustSheet: View {
                     if saving {
                         ProgressView()
                     } else {
-                        Button("Save") { save() }.fontWeight(.semibold).disabled(edits == (photo.edits ?? PhotoEdits()))
+                        Button("Save") { save() }.fontWeight(.semibold).disabled(preview == nil || edits.crop == photo.edits?.crop)
                     }
                 }
             }
-            .task(id: "\(tool == "crop")|\(renderKey)") {
-                // Wait for a slider or drag to settle before asking for a new render.
-                do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
-                rendering = true
-                defer { rendering = false }
+            .task {
                 do {
-                    let data = try await api.previewPhotoEdits(listingID: listingID, photoID: photo.id, edits: renderEdits, crop: tool != "crop")
-                    preview = UIImage(data: data)
-                    error = nil
+                    let data = try await api.previewPhotoEdits(
+                        listingID: listingID, photoID: photo.id, edits: photo.edits ?? PhotoEdits(), crop: false
+                    )
+                    preview = await Task.detached(priority: .userInitiated) {
+                        PhotoPreparer.thumbnail(from: data, maxPixels: 2400)
+                    }.value
+                    if preview == nil { error = "Couldn't load this photo" }
                 } catch is CancellationError {
                 } catch {
                     self.error = error.localizedDescription
@@ -244,19 +222,6 @@ struct PhotoAdjustSheet: View {
             }
         }
         .interactiveDismissDisabled(saving)
-    }
-
-    /// While cropping, the whole frame is rendered and the crop is drawn on it.
-    private var renderEdits: PhotoEdits {
-        guard tool == "crop" else { return edits }
-        var whole = edits
-        whole.crop = nil
-        return whole
-    }
-
-    private var renderKey: String {
-        let e = renderEdits
-        return "\(e.rotate)|\(e.straighten)|\(e.exposure)|\(e.brightness)|\(e.contrast)|\(e.background ?? "")|\(String(describing: e.crop))"
     }
 
     @ViewBuilder
@@ -269,18 +234,13 @@ struct PhotoAdjustSheet: View {
                     ZStack(alignment: .topLeading) {
                         Image(uiImage: preview).resizable().scaledToFit()
                             .frame(width: fitted.width, height: fitted.height)
-                        if tool == "crop" { cropOverlay(size: fitted) }
+                        cropOverlay(size: fitted)
                     }
                     .frame(width: fitted.width, height: fitted.height)
                     .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
                 }
-            } else {
+            } else if error == nil {
                 ProgressView().tint(.white)
-            }
-            if rendering && preview != nil {
-                Text(edits.background != nil && tool == "background" ? "Cutting out the item…" : "Updating…")
-                    .font(.caption).padding(6).background(.regularMaterial, in: Capsule())
-                    .frame(maxHeight: .infinity, alignment: .bottom).padding(8)
             }
         }
         .accessibilityLabel("Preview")
@@ -349,12 +309,7 @@ struct PhotoAdjustSheet: View {
                 ForEach(CropMath.aspects, id: \.id) { Text($0.label).tag($0.id) }
             }
             .pickerStyle(.segmented)
-            HStack {
-                Button("Rotate left", systemImage: "rotate.left") { turn(-90) }
-                Spacer()
-                Button("Rotate right", systemImage: "rotate.right") { turn(90) }
-            }
-            .buttonStyle(.borderless)
+            .disabled(preview == nil)
             if edits.crop != nil {
                 Button("Clear crop") {
                     edits.crop = nil
@@ -364,82 +319,6 @@ struct PhotoAdjustSheet: View {
         } footer: {
             Text("Drag the box or its corners. Edits always start from your original photo, so you can revert at any time.")
         }
-    }
-
-    @ViewBuilder
-    private var adjustControls: some View {
-        Section {
-            slider("Straighten", value: $edits.straighten, range: -45...45, unit: "°")
-            slider("Exposure", value: $edits.exposure, range: -2...2, unit: "")
-            slider("Brightness", value: $edits.brightness, range: -100...100, unit: "")
-            slider("Contrast", value: $edits.contrast, range: -100...100, unit: "")
-        } footer: {
-            Text("Edits always start from your original photo, so you can revert at any time.")
-        }
-    }
-
-    @ViewBuilder
-    private var backgroundControls: some View {
-        Section {
-            Button {
-                edits.background = nil
-            } label: {
-                HStack {
-                    Text("Original").foregroundStyle(.primary)
-                    Spacer()
-                    if edits.background == nil { Image(systemName: "checkmark").foregroundStyle(WorkspaceStyle.accent) }
-                }
-            }
-            ForEach(Self.backgrounds, id: \.color) { option in
-                Button {
-                    edits.background = option.color
-                } label: {
-                    HStack {
-                        RoundedRectangle(cornerRadius: 4).fill(Color(hex: option.color))
-                            .overlay(RoundedRectangle(cornerRadius: 4).stroke(WorkspaceStyle.border))
-                            .frame(width: 22, height: 22)
-                        Text(option.label).foregroundStyle(.primary)
-                        Spacer()
-                        if edits.background == option.color { Image(systemName: "checkmark").foregroundStyle(WorkspaceStyle.accent) }
-                    }
-                }
-                .accessibilityLabel("\(option.label) background")
-            }
-            ColorPicker("Other colour", selection: Binding(
-                get: { Color(hex: edits.background ?? "#ffffff") },
-                set: { edits.background = $0.hexString }
-            ), supportsOpacity: false)
-        } header: {
-            Text("Behind the item")
-        } footer: {
-            Text("Cuts out the item and puts a plain colour behind it.")
-        }
-    }
-
-    private func turn(_ degrees: Int) {
-        edits.rotate = ((edits.rotate + degrees) % 360 + 360) % 360
-        // The crop turns with the picture (PhotoEdits.turned on the server).
-        if var crop = edits.crop {
-            let turns = ((degrees / 90) % 4 + 4) % 4
-            for _ in 0..<turns {
-                crop = .init(x: max(0, 1 - crop.y - crop.height), y: crop.x, width: crop.height, height: crop.width)
-            }
-            edits.crop = crop
-        }
-    }
-
-    private func slider(_ label: String, value: Binding<Double>, range: ClosedRange<Double>, unit: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(label)
-                Spacer()
-                Text(value.wrappedValue.formatted(.number.precision(.fractionLength(0...1))) + unit)
-                    .monospacedDigit().foregroundStyle(.secondary)
-            }
-            Slider(value: value, in: range)
-                .accessibilityLabel(label)
-        }
-        .frame(minHeight: 44)
     }
 
     private func save() {
@@ -454,23 +333,6 @@ struct PhotoAdjustSheet: View {
                 self.error = error.localizedDescription
             }
         }
-    }
-}
-
-extension Color {
-    /// `#rrggbb`.
-    init(hex: String) {
-        let value = UInt32(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0xFFFFFF
-        self.init(red: Double((value >> 16) & 255) / 255, green: Double((value >> 8) & 255) / 255, blue: Double(value & 255) / 255)
-    }
-
-    /// `#rrggbb` for the server's background colour.
-    var hexString: String {
-        let resolved = UIColor(self)
-        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
-        resolved.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
-        func byte(_ value: CGFloat) -> Int { Int((max(0, min(1, value)) * 255).rounded()) }
-        return String(format: "#%02x%02x%02x", byte(red), byte(green), byte(blue))
     }
 }
 

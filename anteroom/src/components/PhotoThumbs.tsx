@@ -5,7 +5,7 @@ import { PhotoLoadFailure, StudioImage } from "./StudioImage";
  * (MIT, (c) 2026 T3 Tools Inc.): a media dialog with corner close, side
  * navigation and a caption line under the image.
  */
-import { ArrowLeftIcon, ArrowRightIcon, ChevronLeftIcon, ChevronRightIcon, PlusIcon, RotateCcwIcon, RotateCwIcon, SlidersHorizontalIcon, Trash2Icon, XIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, ChevronLeftIcon, ChevronRightIcon, CropIcon, PlusIcon, RotateCcwIcon, RotateCwIcon, Trash2Icon, Undo2Icon, XIcon } from "lucide-react";
 import { useState, type ComponentProps, type KeyboardEvent } from "react";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
@@ -192,8 +192,8 @@ export function PhotoLightbox({
   turns = 0,
   rotating = false,
   onRotate,
-  onEdit,
-  edited = false,
+  onCrop,
+  onRevert,
   error,
   onStep,
   onMove,
@@ -207,10 +207,9 @@ export function PhotoLightbox({
   turns?: number;
   rotating?: boolean;
   onRotate?: (degrees: 90 | -90) => void;
-  /** Opens the photo editor for the photo shown. */
-  onEdit?: () => void;
-  /** The photo shown is an edit of a kept original. */
-  edited?: boolean;
+  onCrop?: () => void;
+  /** Restores the kept upload for a photo with saved changes. */
+  onRevert?: () => void;
   /** Keep operation failures visible while the modal hides the photo tray. */
   error?: string | null;
   onStep: (index: number) => void;
@@ -291,12 +290,18 @@ export function PhotoLightbox({
             {onRotate && <Button variant="overlay" size="icon-micro" onClick={() => onRotate(90)} disabled={rotating} aria-label="Rotate right" title="Rotate right">
               <RotateCwIcon />
             </Button>}
-            {onEdit ? (
-              <Button variant="overlay" size="micro" className="ms-1" onClick={onEdit} disabled={rotating} title="Crop, adjust or remove the background">
-                <SlidersHorizontalIcon />
-                {edited ? "Edited" : "Edit"}
+            {onCrop && (
+              <Button variant="overlay" size="icon-micro" className="ms-2" onClick={onCrop} disabled={rotating}
+                aria-label="Crop photo" title="Crop photo">
+                <CropIcon />
               </Button>
-            ) : null}
+            )}
+            {onRevert && (
+              <Button variant="overlay" size="icon-micro" className="ms-2" onClick={onRevert} disabled={rotating}
+                aria-label="Revert to original" title="Revert to original">
+                <Undo2Icon />
+              </Button>
+            )}
           </div>
           {error && <p role="alert" className="mt-2 max-w-full rounded-lg bg-background px-3 py-2 text-center text-destructive-foreground text-sm">{error}</p>}
           {onMove || onRemove ? (
