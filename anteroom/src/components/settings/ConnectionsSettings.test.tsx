@@ -183,4 +183,19 @@ describe("Connections settings", () => {
     expect(html).toContain("https://chromewebstore.google.com/detail/empinkdlhndpfoigoipbiiofaeepcheo");
     expect(html).toContain("Chrome Web Store");
   });
+
+  it("disables the autodelist switch until sale detection loads and shows load errors", () => {
+    const base = useQuery.getMockImplementation()!;
+    useQuery.mockImplementation((options: { queryKey: string[] }) => {
+      if (options.queryKey[0] === "sale-detection") {
+        return { data: undefined, error: new Error("Could not load sale detection settings.") };
+      }
+      return base(options);
+    });
+    const html = renderToStaticMarkup(
+      <WorkspaceRuntimeProvider value={{ ...desktopRuntime, hosted: true }}><ConnectionsSettings /></WorkspaceRuntimeProvider>,
+    );
+    expect(html).toContain("Could not load sale detection settings.");
+    expect(html).toMatch(/aria-label="Delist the other marketplaces when something sells"[^>]*disabled|disabled[^>]*aria-label="Delist the other marketplaces when something sells"/);
+  });
 });

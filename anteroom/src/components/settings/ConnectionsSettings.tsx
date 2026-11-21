@@ -463,16 +463,23 @@ function MarketplaceSection() {
       description="When something sells, take it off the other marketplaces it’s still listed on; a delist that doesn’t go through is tried again for two weeks after the sale, and the sidebar alerts you while a sold item is still listed."
       control={
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          {saveAutodelist.isPending ? (
+            <span role="status" className="inline-flex items-center gap-1">
+              <Spinner size="sm" tone="muted" />
+              Saving…
+            </span>
+          ) : null}
           <Switch
             size="sm"
             checked={detection.data?.autodelist === true}
-            disabled={saveAutodelist.isPending}
+            disabled={saveAutodelist.isPending || detection.data === undefined}
             aria-label="Delist the other marketplaces when something sells"
             onCheckedChange={(checked) => saveAutodelist.mutate(checked)}
           />
         </span>
       }
     >
+      {detection.error ? <SettingsNote tone="error">{detection.error.message}</SettingsNote> : null}
       {saveAutodelist.error ? <SettingsNote tone="error">{saveAutodelist.error.message}</SettingsNote> : null}
     </SettingsRow>
   );
