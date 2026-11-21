@@ -28,6 +28,8 @@ final class MarketplaceQuickEditModel {
     /// flushed on blur, Done, Next draft, Open form, or List.
     var drafts = QuickEditDraftBuffer()
 
+    var hasUnsavedTextDrafts: Bool { !drafts.isEmpty }
+
     /// FIFO mutex serializing all saves on the main actor without polling or spinning.
     @ObservationIgnored private let saveGate = MainActorSerialGate()
     /// Monotonic counters preventing an older in-flight `load()` from overwriting a newer save.
@@ -145,6 +147,7 @@ final class MarketplaceQuickEditModel {
             case .success(let doc):
                 document = doc.listing
                 revisionID = doc.currentRevisionID
+                saveError = nil
             case .failure(let error) where error.isCancellation:
                 return
             case .failure(let error):
@@ -199,7 +202,10 @@ final class MarketplaceQuickEditModel {
         draftVersion: Int,
         onSaved: @escaping () async -> ListingSheetRow?
     ) async -> Bool {
-        guard let document else { return false }
+        guard let document else {
+            saveError = "Listing hasn't finished loading yet."
+            return false
+        }
         let f = field(for: column)
         let booleanPaths = Set(fieldsByPath.values.filter { $0.inputType == "boolean" }.map(\.path))
         guard let updated = MarketplaceSheetRules.applyEdit(
@@ -214,6 +220,9 @@ final class MarketplaceQuickEditModel {
             disabled: formDisabled,
             booleanFieldPaths: booleanPaths
         ) else {
+            saveError = formDisabled
+                ? "\(Marketplaces.name(marketplace)) fields are read-only on this workspace."
+                : "This field is currently locked while being updated in chat."
             return false
         }
 
@@ -238,12 +247,13 @@ final class MarketplaceQuickEditModel {
                     let independent = MarketplaceSheetRules.independentFields(refreshed.fields, marketplace: marketplace)
                     fieldsByPath = Dictionary(independent.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
                     formError = nil
-                } catch let error where error.isCancellation {
-                    throw error
                 } catch {
-                    // Never keep stale dependent choices from the previous category.
+                    // Never keep stale dependent choices from the previous category,
+                    // even if the refresh was cancelled; the category PUT itself succeeded.
                     fieldsByPath = [:]
-                    formError = error.localizedDescription
+                    formError = error.isCancellation
+                        ? "Category saved, but updated choices did not finish loading."
+                        : error.localizedDescription
                 }
             }
             if let refreshedRow = await onSaved() {
@@ -257,6 +267,7 @@ final class MarketplaceQuickEditModel {
                     activity = refreshedActivity
                 }
             } else {
+                saveError = "This listing changed on another device. Reload or discard your unsaved changes."
                 hasConflict = true
             }
             return false
@@ -266,25 +277,56 @@ final class MarketplaceQuickEditModel {
         }
     }
 
+    /// Discards all uncommitted typed drafts and clears save errors so the seller is never trapped.
+    func discardDrafts() {
+        drafts.removeAll()
+        saveError = nil
+        hasConflict = false
+    }
+
+    /// Refreshes agent locks and retries saving any pending typed drafts.
+    @discardableResult
+    func retryPendingSaves(
+        columns: [MarketplaceSheetColumn],
+        onSaved: @escaping () async -> ListingSheetRow?
+    ) async -> Bool {
+        await saveGate.withLock {
+            isSaving = true
+            let refreshedActivity = try? await api.activity(listingID)
+            isSaving = false
+            if let refreshedActivity {
+                activity = refreshedActivity
+            }
+            return await flushPendingTextUnlocked(columns: columns, onSaved: onSaved)
+        }
+    }
+
     /// Commits any pending typed text/number drafts before blur, close, advance, or List.
     @discardableResult
     func flushPendingText(columns: [MarketplaceSheetColumn], onSaved: @escaping () async -> ListingSheetRow?) async -> Bool {
         await saveGate.withLock {
-            for column in columns {
-                // Re-check in case newer text was typed into this column while its save ran.
-                while let snap = drafts.snapshot(for: column.key) {
-                    let ok = await performCommit(
-                        column: column,
-                        value: .string(snap.text),
-                        companion: [:],
-                        draftVersion: snap.version,
-                        onSaved: onSaved
-                    )
-                    if !ok { return false }
-                }
-            }
-            return true
+            await flushPendingTextUnlocked(columns: columns, onSaved: onSaved)
         }
+    }
+
+    private func flushPendingTextUnlocked(
+        columns: [MarketplaceSheetColumn],
+        onSaved: @escaping () async -> ListingSheetRow?
+    ) async -> Bool {
+        for column in columns {
+            // Re-check in case newer text was typed into this column while its save ran.
+            while let snap = drafts.snapshot(for: column.key) {
+                let ok = await performCommit(
+                    column: column,
+                    value: .string(snap.text),
+                    companion: [:],
+                    draftVersion: snap.version,
+                    onSaved: onSaved
+                )
+                if !ok { return false }
+            }
+        }
+        return true
     }
 }
 
@@ -396,69 +438,111 @@ struct MarketplaceQuickEditSheet: View {
         )
     }
 
+    @ViewBuilder
+    private var sheetScrollContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            headerCard
+            if let loadError = model.loadError {
+                errorBanner(title: "Couldn't load listing", message: loadError)
+            }
+            if let formError = model.formError {
+                errorBanner(
+                    title: "Could not load \(Marketplaces.name(marketplace)) choices",
+                    message: formError
+                )
+            }
+            if sheetRowIsStale {
+                staleRowBanner
+            }
+            if model.formDisabled {
+                Label("\(Marketplaces.name(marketplace)) fields are read-only on this workspace.", systemImage: "lock")
+                    .font(.footnote)
+                    .foregroundStyle(WorkspaceStyle.mutedText)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .workspacePanel(radius: WorkspaceStyle.controlRadius)
+            }
+            if let saveError = model.saveError {
+                saveErrorBanner(saveError)
+            }
+            if let listError {
+                Label(listError, systemImage: "exclamationmark.triangle")
+                    .font(.footnote)
+                    .foregroundStyle(WorkspaceStyle.destructive)
+            }
+            if model.isLoading && model.document == nil {
+                ProgressView("Loading \(Marketplaces.name(marketplace))…")
+                    .frame(maxWidth: .infinity, minHeight: 160)
+            } else if model.document != nil {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(orderedColumns) { column in
+                        fieldRow(for: column)
+                    }
+                }
+            }
+        }
+        .padding(16)
+    }
+
+    private var staleRowBanner: some View {
+        HStack(spacing: 10) {
+            Label("Saved, but status could not refresh yet.", systemImage: "arrow.clockwise")
+                .font(.footnote)
+                .foregroundStyle(WorkspaceStyle.mutedText)
+            Spacer()
+            Button("Refresh") {
+                Task {
+                    let row = await onSaved()
+                    model.updateSheetRow(row)
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .workspacePanel(radius: WorkspaceStyle.controlRadius)
+    }
+
+    private func saveErrorBanner(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(message, systemImage: "exclamationmark.triangle")
+                .font(.footnote)
+                .foregroundStyle(WorkspaceStyle.destructive)
+            if model.hasUnsavedTextDrafts {
+                HStack(spacing: 8) {
+                    Button("Retry save") {
+                        Task {
+                            let ok = await model.retryPendingSaves(
+                                columns: orderedColumns,
+                                onSaved: onSaved
+                            )
+                            if ok { focusedColumnKey = nil }
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(model.isSaving)
+
+                    Button("Discard changes", role: .destructive) {
+                        model.discardDrafts()
+                        focusedColumnKey = nil
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(model.isSaving)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .workspacePanel(radius: WorkspaceStyle.controlRadius)
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    headerCard
-                    if let loadError = model.loadError {
-                        errorBanner(title: "Couldn't load listing", message: loadError)
-                    }
-                    if let formError = model.formError {
-                        errorBanner(
-                            title: "Could not load \(Marketplaces.name(marketplace)) choices",
-                            message: formError
-                        )
-                    }
-                    if sheetRowIsStale {
-                        HStack(spacing: 10) {
-                            Label("Saved, but status could not refresh yet.", systemImage: "arrow.clockwise")
-                                .font(.footnote)
-                                .foregroundStyle(WorkspaceStyle.mutedText)
-                            Spacer()
-                            Button("Refresh") {
-                                Task {
-                                    let row = await onSaved()
-                                    model.updateSheetRow(row)
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                        .padding(12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .workspacePanel(radius: WorkspaceStyle.controlRadius)
-                    }
-                    if model.formDisabled {
-                        Label("\(Marketplaces.name(marketplace)) fields are read-only on this workspace.", systemImage: "lock")
-                            .font(.footnote)
-                            .foregroundStyle(WorkspaceStyle.mutedText)
-                            .padding(12)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .workspacePanel(radius: WorkspaceStyle.controlRadius)
-                    }
-                    if let saveError = model.saveError {
-                        Label(saveError, systemImage: "exclamationmark.triangle")
-                            .font(.footnote)
-                            .foregroundStyle(WorkspaceStyle.destructive)
-                    }
-                    if let listError {
-                        Label(listError, systemImage: "exclamationmark.triangle")
-                            .font(.footnote)
-                            .foregroundStyle(WorkspaceStyle.destructive)
-                    }
-                    if model.isLoading && model.document == nil {
-                        ProgressView("Loading \(Marketplaces.name(marketplace))…")
-                            .frame(maxWidth: .infinity, minHeight: 160)
-                    } else if model.document != nil {
-                        VStack(alignment: .leading, spacing: 14) {
-                            ForEach(orderedColumns) { column in
-                                fieldRow(for: column)
-                            }
-                        }
-                    }
-                }
-                .padding(16)
+                sheetScrollContent
             }
             .background(WorkspaceStyle.background)
             .scrollDismissesKeyboard(.interactively)
@@ -512,6 +596,12 @@ struct MarketplaceQuickEditSheet: View {
             }
             .alert("Changed on another device", isPresented: $model.hasConflict) {
                 Button("Reload") { Task { await model.load(preserveDrafts: true) } }
+                if model.hasUnsavedTextDrafts {
+                    Button("Discard changes", role: .destructive) {
+                        model.discardDrafts()
+                        focusedColumnKey = nil
+                    }
+                }
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This listing changed since you opened Quick Edit. Reload to get the latest version.")

@@ -211,14 +211,26 @@ enum MarketplaceSheetRules {
         }
     }
 
-    /// Matches the web's `agentFieldLocked`: blocks edits while the listing
-    /// assistant is writing that field or any parent/child path of it.
+    /// Matches the web's `agentFieldLocked`: normalizes each dot-separated segment
+    /// (lowercased ASCII alphanumerics) and blocks edits while the listing assistant
+    /// is writing that field or any parent/child path of it.
     static func isAgentLocked(_ path: String, lockedFields: [String]) -> Bool {
         guard !lockedFields.isEmpty else { return false }
-        let normalizedPath = path.lowercased()
+        func normalize(_ value: String) -> String {
+            value
+                .lowercased()
+                .split(separator: ".", omittingEmptySubsequences: false)
+                .map { segment in
+                    String(segment.filter { $0.isASCII && ($0.isLetter || $0.isNumber) })
+                }
+                .joined(separator: ".")
+        }
+        let normalizedPath = normalize(path)
         for rawLocked in lockedFields {
-            let locked = rawLocked.lowercased()
-            if locked == "*" || locked == normalizedPath { return true }
+            if rawLocked == "*" { return true }
+            let locked = normalize(rawLocked)
+            guard !locked.isEmpty else { continue }
+            if locked == normalizedPath { return true }
             if normalizedPath.hasPrefix(locked + ".") || locked.hasPrefix(normalizedPath + ".") { return true }
         }
         return false

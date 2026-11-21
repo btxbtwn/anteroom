@@ -531,7 +531,7 @@ describe("MarketplaceSheetEditor", () => {
       },
     };
 
-    vi.spyOn(api.listings, "get").mockResolvedValue(draftDoc);
+    const getSpy = vi.spyOn(api.listings, "get").mockResolvedValue(draftDoc);
     vi.spyOn(api.conversations, "activity").mockResolvedValue(IDLE_ACTIVITY);
     vi.spyOn(api.nativeMarketplaces, "form").mockResolvedValue(DEPOP_FORM);
     vi.spyOn(api.listings, "update").mockRejectedValue(new Error("Save failed"));
@@ -568,6 +568,12 @@ describe("MarketplaceSheetEditor", () => {
       expect(document.body.textContent).toContain("List on Depop for $27?");
 
       // Simulate external drift to rev-2 / $40 -> confirmation must invalidate.
+      const draftDocRev2: ListingDocument = {
+        ...draftDoc,
+        current_revision_id: "rev-2",
+        listing: { ...draftDoc.listing, depop_specifics: { price: 40, condition: "used_good" } },
+      };
+      getSpy.mockResolvedValue(draftDocRev2);
       const readyRowRev2: ListingSheetRow = {
         ...readyRowRev1,
         revision_id: "rev-2",
@@ -577,11 +583,7 @@ describe("MarketplaceSheetEditor", () => {
         },
       };
       await act(() => {
-        client.setQueryData<ListingDocument>(["listing", "conv-guard"], {
-          ...draftDoc,
-          current_revision_id: "rev-2",
-          listing: { ...draftDoc.listing, depop_specifics: { price: 40, condition: "used_good" } },
-        });
+        client.setQueryData<ListingDocument>(["listing", "conv-guard"], draftDocRev2);
         root.render(
           <QueryClientProvider client={client}>
             <WorkspaceRuntimeProvider value={LOCAL_RUNTIME}>
@@ -619,6 +621,47 @@ describe("MarketplaceSheetEditor", () => {
       ) as HTMLButtonElement | undefined;
       expect(listBtnAfterFailure).toBeDefined();
       expect(listBtnAfterFailure!.disabled).toBe(true);
+
+      // Discard changes clears the unsaved draft and re-enables List.
+      const discardBtn = [...document.querySelectorAll("button")].find(
+        (b) => b.textContent?.trim() === "Discard changes",
+      );
+      expect(discardBtn).toBeDefined();
+      await act(() => {
+        discardBtn!.click();
+      });
+      await flushMicrotasks();
+      expect(document.body.textContent).not.toContain("Save failed");
+      const listBtnAfterDiscard = [...document.querySelectorAll("button")].find(
+        (b) => b.textContent?.trim() === "List",
+      ) as HTMLButtonElement | undefined;
+      expect(listBtnAfterDiscard).toBeDefined();
+      expect(listBtnAfterDiscard!.disabled).toBe(false);
+
+      // Fail again, then use Retry save once the server recovers.
+      saveSpy
+        .mockRejectedValueOnce(new Error("Offline"))
+        .mockImplementationOnce(async (_id, listing) => mockSaveResult(listing, "rev-3"));
+      const input2 = document.querySelector<HTMLInputElement>('input[data-listing-field="depop_specifics.price"]');
+      expect(input2).not.toBeNull();
+      await act(() => {
+        input2!.focus();
+        setInputValue(input2!, "21");
+        input2!.blur();
+      });
+      await flushMicrotasks();
+      expect(document.body.textContent).toContain("Offline");
+
+      const retryBtn = [...document.querySelectorAll("button")].find(
+        (b) => b.textContent?.trim() === "Retry save",
+      );
+      expect(retryBtn).toBeDefined();
+      await act(() => {
+        retryBtn!.click();
+      });
+      await flushMicrotasks();
+      expect(saveSpy).toHaveBeenCalledTimes(3);
+      expect(document.body.textContent).not.toContain("Offline");
     } finally {
       await act(() => root.unmount());
     }

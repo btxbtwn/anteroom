@@ -472,6 +472,11 @@ struct MarketplaceSheetTests {
         precondition(secondSnap.text == "27.50")
         drafts.clear("price", ifVersionMatches: secondSnap.version)
         precondition(drafts["price"] == nil && drafts.isEmpty)
+        // Discarding unsaved drafts clears everything cleanly.
+        drafts.set("19", for: "price")
+        precondition(!drafts.isEmpty)
+        drafts.removeAll()
+        precondition(drafts.isEmpty && drafts["price"] == nil)
 
         // 3. Boolean dependent clears write .bool(false) rather than "".
         let mercariBrandForm = try decode(NativeForm.self, #"""
@@ -506,20 +511,47 @@ struct MarketplaceSheetTests {
         precondition(mercariUpdated?.value(at: "mercari_specifics.noBrand") == .bool(false))
         precondition(mercariUpdated?.value(at: "mercari_specifics.customBool") == .bool(false))
 
-        // 4. Case-insensitive agent locks + secondary path lock enforcement (companion & clears).
+        // 4. Case/segment-normalized agent locks + secondary path lock enforcement (companion & clears).
         precondition(MarketplaceSheetRules.isAgentLocked("ebay_specifics.Size", lockedFields: ["ebay_specifics.size"]))
         precondition(MarketplaceSheetRules.isAgentLocked("ebay_specifics.size", lockedFields: ["EBAY_SPECIFICS"]))
-        // Locked companion path blocks category save.
+        precondition(MarketplaceSheetRules.isAgentLocked("depop_specifics.shipping_cost", lockedFields: ["depopSpecifics.shippingCost"]))
+        // Locked companion path blocks category save using an actual Etsy category field.
+        let etsyCategoryForm = try decode(NativeForm.self, #"""
+        {
+          "marketplace": "etsy",
+          "fields": [
+            {
+              "key": "category",
+              "path": "direct_category_ids.etsy",
+              "label": "Category",
+              "options": ["Clothing > Tops"],
+              "option_values": {"Clothing > Tops": "1234"}
+            }
+          ]
+        }
+        """#)
         precondition(MarketplaceSheetRules.applyEdit(
             to: [:],
             marketplace: "etsy",
-            field: mercariBrandForm.fields[0],
+            field: etsyCategoryForm.fields[0],
             columnKey: "direct_category_ids.etsy",
             columnKind: .category,
             value: .string("Clothing > Tops"),
             companion: ["direct_category_ids.etsy_path": .string("Clothing > Tops")],
             lockedFields: ["direct_category_ids.etsy_path"]
         ) == nil)
+        // Without the companion lock, the Etsy category edit succeeds.
+        let etsyAllowed = MarketplaceSheetRules.applyEdit(
+            to: [:],
+            marketplace: "etsy",
+            field: etsyCategoryForm.fields[0],
+            columnKey: "direct_category_ids.etsy",
+            columnKind: .category,
+            value: .string("Clothing > Tops"),
+            companion: ["direct_category_ids.etsy_path": .string("Clothing > Tops")]
+        )
+        precondition(etsyAllowed?.value(at: "direct_category_ids.etsy") == .string("1234"))
+        precondition(etsyAllowed?.value(at: "direct_category_ids.etsy_path") == .string("Clothing > Tops"))
         // Locked cleared dependent blocks edit.
         precondition(MarketplaceSheetRules.applyEdit(
             to: mercariDoc,

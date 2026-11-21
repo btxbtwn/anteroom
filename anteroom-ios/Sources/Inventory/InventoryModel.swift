@@ -216,7 +216,12 @@ final class InventoryModel {
             } catch let failure where failure.isCancellation {
                 return
             } catch {
-                sheetFailedListings[marketplace] = Array(needed[start...])
+                var merged = sheetFailedListings[marketplace] ?? []
+                var seen = Set(merged.map(\.id))
+                for item in needed[start...] where seen.insert(item.id).inserted {
+                    merged.append(item)
+                }
+                sheetFailedListings[marketplace] = merged
                 sheetErrors[marketplace] = error.localizedDescription
                 break
             }
