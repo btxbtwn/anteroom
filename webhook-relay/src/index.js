@@ -41,10 +41,10 @@ const MAX_BODY_BYTES = 64 * 1024;
 // eBay image search: an ~11 MB base64 image plus its JSON wrapper.
 const MAX_RESEARCH_BODY_BYTES = 11_100_000;
 
-function json(body, status = 200) {
+function json(body, status = 200, extraHeaders = undefined) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "content-type": "application/json", "cache-control": "no-store" },
+    headers: { "content-type": "application/json", "cache-control": "no-store", ...extraHeaders },
   });
 }
 
@@ -418,6 +418,12 @@ async function handleStudio(request, env, url, deviceId) {
     if (!ebayConfigured(env)) return json({ error: "eBay is not configured" }, 503);
     const accounts = await directory(env).accountsForDevice(deviceId);
     if (!accounts.some((account) => account.marketplace === "ebay")) return json({ error: "connect eBay first" }, 403);
+    if (env.EBAY_RESEARCH_LIMITER) {
+      const { success } = await env.EBAY_RESEARCH_LIMITER.limit({ key: deviceId });
+      if (!success) {
+        return json({ error: "too many research requests, try again in a minute" }, 429, { "retry-after": "60" });
+      }
+    }
     const body = await readBody(request, MAX_RESEARCH_BODY_BYTES);
     if (body === null) return json({ error: "image too large" }, 413);
     let input;

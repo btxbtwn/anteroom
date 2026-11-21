@@ -495,6 +495,21 @@ describe("eBay", () => {
     expect(calls.filter((call) => call.url.includes("/destination") && call.method === "PUT")).toHaveLength(0);
   });
 
+  it("rate-limits eBay research per device before calling upstream eBay APIs", async () => {
+    const device = await register();
+    await connectEbay(device.token, "seller-research-limit");
+    const limit = vi.spyOn(env.EBAY_RESEARCH_LIMITER, "limit").mockResolvedValue({ success: false });
+    const before = calls.length;
+    const response = await relay(
+      "/studio/ebay/research",
+      authed(device.token, { method: "POST", body: JSON.stringify({ operation: "search", params: { q: "coat" } }) }),
+    );
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("60");
+    expect(limit).toHaveBeenCalledWith({ key: device.deviceId });
+    expect(calls.length).toBe(before);
+  });
+
   it("signs in, subscribes the seller to sales, and routes their orders to their device", async () => {
     const a = await register();
     const b = await register();
