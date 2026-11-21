@@ -54,4 +54,36 @@ export interface MarketplaceSale {
   title: string | null;
   /** Other marketplace listings still present, from direct records and saved links. */
   listedElsewhere: string[];
+  /** Why a delist of another marketplace did not confirm, by marketplace. */
+  delistErrors?: Record<string, string>;
+}
+
+/** A recently sold-out item Anteroom still has listed on another marketplace. */
+export interface StillListedItem {
+  conversationId: string;
+  title: string | null;
+  saleId: string;
+  soldOn: string;
+  soldAt: string | null;
+  /** True when a marketplace reported the sale; false for the seller's Mark as sold. */
+  detected: boolean;
+  /** Anteroom recorded which listings this sale left up elsewhere. */
+  pinned: boolean;
+  stillListed: {
+    marketplace: string;
+    listingId: string;
+    /** The listing this sale left up; false for one put up after the sale, which Anteroom never delists on its own. */
+    followed: boolean;
+    state: "live" | "failed" | "deleting";
+    error: string | null;
+    at: string | null;
+    attempts: number;
+    url: string | null;
+  }[];
+}
+
+export interface StillListedResponse {
+  items: StillListedItem[];
+  /** The seller turned on Delist the other marketplaces: Anteroom keeps retrying. */
+  autodelist: boolean;
 }

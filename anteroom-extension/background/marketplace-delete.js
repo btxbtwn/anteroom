@@ -3,6 +3,7 @@
 // delete whose reply was lost is safe to repeat. Requests come from each
 // marketplace's own web client (read 2026-10-24).
 const DELETE_DEADLINE_MS = 60000;
+const MERCARI_GONE = /^Item is no longer available\.?$/i;
 
 async function deletePoshmark(id, deadline) {
   const account = await poshmarkAccount();
@@ -10,25 +11,34 @@ async function deletePoshmark(id, deadline) {
   // Poshmark answers errors with HTTP 200 and an error body.
   const gone = error => ['PostRemovedError', 'NotFoundError'].includes(error?.marketplace_type);
   const read = async step => {
-    try { return await client.call('GET', `/vm-rest/posts/${id}?app_type=web`, undefined, { step, what: 'the read' }); }
-    catch (error) { if (gone(error)) return null; throw error; }
+    try { return { post: await client.call('GET', `/vm-rest/posts/${id}?app_type=web`, undefined, { step, what: 'the read' }) }; }
+    catch (error) {
+      if (gone(error)) return { post: null, message: error.marketplace_message };
+      throw error;
+    }
   };
-  const post = await read('read');
-  if (!post) return { ok: true, state: 'deleted', already: true };
+  const { post, message } = await read('read');
+  if (!post) return { ok: true, state: 'deleted', already: true, marketplace_message: message };
   if (String(post.creator_id) !== account.user_id) throw marketplaceError('This Poshmark listing belongs to another account.');
   const sold = (post.inventory?.size_quantities || []).some(entry => Number(entry.quantity_sold) > 0);
   if (sold || post.status === 'archived' || ['sold_out', 'not_available'].includes(post.inventory?.status)) {
     throw marketplaceError('This Poshmark listing has sold. It was not deleted.');
   }
   await client.call('DELETE', `/vm-rest/posts/${id}?app_type=web`, undefined, { step: 'delete', what: 'the delete' });
-  if (await read('read-back')) throw marketplaceError('Poshmark has not confirmed the delete. Delist again to check.', { code: 'uncertain', rejected: false });
+  if ((await read('read-back')).post) throw marketplaceError('Poshmark has not confirmed the delete. Delist again to check.', { code: 'uncertain', rejected: false });
   return { ok: true, state: 'deleted' };
 }
 
 async function deleteMercari(id, deadline) {
   mercariSession = null;
   const session = await mercariCurrentSession(deadline);
-  const item = await readMercariItem(id, deadline);
+  let item;
+  try { item = await readMercariItem(id, deadline); }
+  catch (error) {
+    // Mercari answers the read of a deleted item with this refusal (2026-11-20).
+    if (error.code === 'rejected' && MERCARI_GONE.test(error.marketplace_message || '')) return { ok: true, state: 'deleted', already: true, marketplace_message: error.marketplace_message };
+    throw error;
+  }
   // cancel / admin_cancel is the item status once it is gone.
   if (['cancel', 'admin_cancel'].includes(item.status)) return { ok: true, state: 'deleted', already: true };
   if (String(item.seller?.id ?? '') !== String(session.user.userId)) {

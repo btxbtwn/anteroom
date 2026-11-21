@@ -28,13 +28,15 @@ export function SaleNotice({ sale }: { sale: MarketplaceSale }) {
   const reversed = sale.orderStatus === "cancelled" || sale.orderStatus === "refunded" || sale.orderStatus === "cancellation_pending";
   const exhausted = !reversed && sale.stockStatus === "sold_out";
   const elsewhere = listJoin(sale.listedElsewhere.map(marketplaceName));
+  const failures = Object.entries(sale.delistErrors ?? {});
+  const stranded = exhausted && sale.listedElsewhere.length > 0;
   const done = useMutation({
     mutationFn: () => api.marketplaceSales.dismiss(sale.id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["marketplace-sales"] }),
   });
 
   return (
-    <Alert variant={reversed ? "warning" : "success"} role="status" controlAlignment="first-line" className="mx-3 mt-2.5 shrink-0">
+    <Alert variant={reversed || (stranded && failures.length) ? "warning" : "success"} role="status" controlAlignment="first-line" className="mx-3 mt-2.5 shrink-0">
       <BadgeDollarSignIcon />
       <AlertTitle>
         {sale.orderStatus === "cancelled" ? "Cancelled" : sale.orderStatus === "refunded" ? "Refunded" : sale.orderStatus === "cancellation_pending" ? "Cancellation pending" : "Sold"} on {soldOn}
@@ -53,7 +55,16 @@ export function SaleNotice({ sale }: { sale: MarketplaceSale }) {
                 ? `Anteroom still has listings on ${elsewhere}.`
                 : "Anteroom has no other marketplace listings recorded."}
         </p>
-        {exhausted && sale.listedElsewhere.length ? (
+        {stranded && failures.length ? (
+          <ul className="flex flex-col gap-0.5 text-xs">
+            {failures.map(([name, error]) => (
+              <li key={name}>
+                <strong>{marketplaceName(name)}</strong> did not confirm the delist: {error}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {stranded ? (
           <p className="text-xs">
             Take it down under <strong>Marketplaces</strong> below: select {elsewhere} and choose <strong>Delist selected…</strong>.
           </p>

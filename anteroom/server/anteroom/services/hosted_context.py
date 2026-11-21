@@ -87,9 +87,22 @@ class HostedSettingsStore:
     def load(self, db) -> dict:
         """Take the snapshot through a session the caller already holds, unless it is taken."""
         if self._snapshot is None:
-            value = db.scalar(select(UserPreference.value).where(UserPreference.key == 'settings'))
-            self._snapshot = value if isinstance(value, dict) else {}
+            self._snapshot = self._read_saved(db)
         return self._snapshot
+
+    @staticmethod
+    def _read_saved(db) -> dict:
+        value = db.scalar(select(UserPreference.value).where(UserPreference.key == 'settings'))
+        return value if isinstance(value, dict) else {}
+
+    def read_fresh(self) -> dict:
+        """Read current seller authorization without altering this execution's snapshot."""
+        active = self._reusable_session()
+        if active is not None and active.in_transaction():
+            with active.no_autoflush:
+                return self._read_saved(active)
+        with self.sessions() as db:
+            return self._read_saved(db)
 
     def write(self, payload):
         def replace(current):

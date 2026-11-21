@@ -142,6 +142,10 @@ def _sale_out(sale: MarketplaceSale, conv: Conversation | None, listings: dict, 
         "conversationId": sale.conversation_id,
         "title": conv.title if conv else None,
         "listedElsewhere": _other_marketplaces(listings, sale.marketplace),
+        # Why a delist of another marketplace did not confirm, by marketplace.
+        "delistErrors": {name: entry.get("error") or "The marketplace did not confirm the delete."
+                         for name, entry in sorted(listings.items())
+                         if name != sale.marketplace and entry.get("state") == "failed" and not entry.get("sold_here")},
         "vendooUrl": vendoo_binding(conv.notes).get("vendooUrl") if conv else None,
     }
 
@@ -185,6 +189,15 @@ def list_sales(background_tasks: BackgroundTasks, state: str | None = "new", con
     # once, rather than re-querying inventory for every line in the response.
     listings = {conv_id: marketplace_delist.listings(db, conv_id) for conv_id in convs}
     return _sales_response(db, sales, convs, listings)
+
+
+@router.get("/api/marketplace-sales/still-listed")
+def still_listed(db: Session = Depends(get_db, scope="function")):
+    """Items sold in the last two weeks that Anteroom still has listed on another marketplace."""
+    from anteroom.services import sale_delist_followup
+    from anteroom.services.user_settings import autodelist_enabled
+
+    return {"items": sale_delist_followup.still_listed(db), "autodelist": autodelist_enabled()}
 
 
 class RecoverRequest(BaseModel):

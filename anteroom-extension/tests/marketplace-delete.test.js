@@ -53,8 +53,10 @@ test('Poshmark never deletes a sold or foreign listing, and a gone one is alread
     assert.equal((await c.runMarketplaceDelete({ marketplace: 'poshmark', listing_id: POST, confirm: true })).ok, false);
     assert.ok(!requests.some(r => r.startsWith('DELETE')));
   }
-  const { c, requests } = worker({ [`GET ${posh}`]: [200, { error: { errorType: 'NotFoundError' } }] });
-  assert.equal((await c.runMarketplaceDelete({ marketplace: 'poshmark', listing_id: POST, confirm: true })).already, true);
+  const message = 'This listing was removed.';
+  const { c, requests } = worker({ [`GET ${posh}`]: [200, { error: { errorType: 'NotFoundError', message } }] });
+  const result = await c.runMarketplaceDelete({ marketplace: 'poshmark', listing_id: POST, confirm: true });
+  assert.deepEqual({ ...result }, { ok: true, state: 'deleted', already: true, marketplace_message: message });
   assert.ok(!requests.some(r => r.startsWith('DELETE')));
 });
 
@@ -107,6 +109,19 @@ test('Mercari never deletes a sold or foreign listing, and a cancelled one is al
     assert.equal((await s.run()).already, true, status);
     assert.deepEqual(s.operations, ['sellFetchItemsDetails']);
   }
+});
+
+test('Mercari refusing the read with "Item is no longer available" means the listing is already gone', async () => {
+  const s = mercari({ errors: [{ message: 'Item is no longer available' }] });
+  const result = await s.run();
+  assert.deepEqual([result.ok, result.state, result.already], [true, 'deleted', true]);
+  // Mercari's own words are kept for the record; who removed it is not known.
+  assert.equal(result.marketplace_message, 'Item is no longer available');
+  assert.deepEqual(s.operations, ['sellFetchItemsDetails']);
+  // Any other refusal of the read is still the seller's to check.
+  const other = await mercari({ errors: [{ message: 'Something went wrong' }] }).run();
+  assert.equal(other.ok, false);
+  assert.equal(other.already, undefined);
 });
 
 test('a refused delete carries the marketplace\'s own words and is safe to repeat', async () => {

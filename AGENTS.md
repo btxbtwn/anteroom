@@ -25,7 +25,14 @@ a retry, or as a side effect of any other action. Delist after a sale is the one
 Connections, off by default), a detected sale delists that item on the seller's other
 marketplaces where it is live, without a per-sale confirmation. It never delists the
 marketplace that sold, cancelled or refunded orders, or items with stock left, and the
-public privacy policy describes it. No other automatic delist is allowed.
+public privacy policy describes it. A post-sale delist that does not confirm is tried again
+on a widening schedule (`services/sale_delist_followup.py`, seller request 2026-11-21) for
+sales from the last two weeks, and every sold item still listed elsewhere is shown as an
+alert whether or not the setting is on. Those retries only reach the listing IDs each sale
+left up, pinned the first time the sale is seen; a relist or any listing that changed since is
+shown, never delisted automatically, and the setting is read again before each delist. A
+listing a marketplace reports already gone is recorded as absent, without saying who removed
+it, never as a sale. No other automatic delist is allowed.
 
 ## Source of Truth
 

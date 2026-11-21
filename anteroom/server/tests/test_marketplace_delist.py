@@ -487,6 +487,96 @@ class MarketplaceDelistTest(unittest.TestCase):
         self.assertEqual(self._row()["removed_marketplaces"], [])
 
 
+    # Mercari refuses the read of a deleted item with "Item is no longer available"
+    # (hosted 0.1.1075). That reconciles the listing as absent; it is never a sale.
+    MERCARI_GONE = {"ok": False, "error": "Mercari refused the request.", "error_code": "rejected",
+                    "safe_to_retry": True, "marketplace_message": "Item is no longer available"}
+
+    def test_mercari_no_longer_available_reads_already_gone_and_never_a_sale(self):
+        self._sold_on_depop_with_imported_snapshot()
+        sales = self._sales()
+        self._answer_by_marketplace({"mercari": self.MERCARI_GONE})
+        body = self.client.post(f"{self.base}/delist", json={"marketplaces": ["mercari"], "confirm": True}).json()
+        self.assertEqual(body["mercari"]["state"], "deleted")
+        self.assertTrue(body["mercari"]["already_gone"])
+        # The record keeps Mercari's words; it does not say who removed the listing.
+        self.assertEqual(body["mercari"]["marketplace_message"], "Item is no longer available")
+        self.assertFalse(body["mercari"]["sold_here"])
+        self.assertTrue(body["depop"]["sold_here"])
+        # The Depop sale stands and nothing records a Mercari sale or order.
+        self.assertEqual(self._sales(), sales)
+        self.assertEqual(self._status(), "sold")
+
+    def test_a_delist_pinned_to_a_listing_that_changed_deletes_nothing(self):
+        from anteroom.services import marketplace_delist
+
+        with self.assertRaises(marketplace_delist.DelistError) as caught:
+            asyncio.run(marketplace_delist.delist(self.conv.id, ["mercari", "ebay"], confirm=True,
+                                                  expected={"mercari": "m11111111111", "ebay": "377507697747"}))
+        self.assertEqual((caught.exception.status_code, caught.exception.reason), (409, "listing_changed"))
+        self.assertEqual(self.bridge.await_count, 0)
+        self.ebay.assert_not_awaited()
+        self.assertEqual(set(self._states().values()), {"live"})
+
+    def test_mercari_no_longer_available_on_an_unsold_item_creates_no_sale(self):
+        self._answer_by_marketplace({"mercari": self.MERCARI_GONE})
+        body = self.client.post(f"{self.base}/delist", json={"marketplaces": ["mercari"], "confirm": True}).json()
+        self.assertEqual(body["mercari"]["state"], "deleted")
+        self.assertFalse(body["mercari"]["sold_here"])
+        self.assertEqual(self._sales(), [])
+        self.assertNotEqual(self._status(), "sold")
+
+    def test_only_mercaris_exact_refusal_reads_already_gone(self):
+        from anteroom.services.browser_bridge import BrowserBridgeError
+
+        cases = {
+            # Active: the delete reached Mercari and it did not confirm.
+            "active, unconfirmed": {"ok": False, "error": "Mercari did not confirm the delete.", "error_code": "rejected",
+                                    "marketplace_message": "status trading"},
+            "sold": {"ok": False, "error": "This Mercari listing is not on sale (sold_out). It was not deleted.",
+                     "error_code": "rejected"},
+            "wrong account": {"ok": False, "error": "This Mercari listing belongs to another account. It was not deleted.",
+                              "error_code": "rejected"},
+            "signed out, same words": {**self.MERCARI_GONE, "error_code": "signed_out"},
+            "uncertain, same words": {**self.MERCARI_GONE, "error_code": "uncertain"},
+            "unknown refusal": {**self.MERCARI_GONE, "marketplace_message": "Item is no longer available for offers"},
+            "no message": {**self.MERCARI_GONE, "marketplace_message": None},
+        }
+        for label, answer in cases.items():
+            self._answer_by_marketplace({"mercari": answer})
+            body = self.client.post(f"{self.base}/delist", json={"marketplaces": ["mercari"], "confirm": True}).json()
+            self.assertEqual(body["mercari"]["state"], "failed", label)
+            self.assertFalse(body["mercari"]["already_gone"], label)
+        # A timeout or lost reply from Chrome is never "already gone".
+        self.bridge.side_effect = BrowserBridgeError("Chrome did not answer.")
+        body = self.client.post(f"{self.base}/delist", json={"marketplaces": ["mercari"], "confirm": True}).json()
+        self.assertEqual(body["mercari"]["state"], "failed")
+        # The same words from another marketplace are that marketplace's to explain.
+        self._answer_by_marketplace({"poshmark": self.MERCARI_GONE})
+        body = self.client.post(f"{self.base}/delist", json={"marketplaces": ["poshmark"], "confirm": True}).json()
+        self.assertEqual(body["poshmark"]["state"], "failed")
+        self.assertEqual(self._sales(), [])
+
+    def test_each_failed_try_counts_and_a_confirmed_one_settles(self):
+        self._answer_by_marketplace({"mercari": {"ok": False, "error": "Mercari could not reach its own service.", "error_code": "network"}})
+        for attempt in (1, 2, 3):
+            body = self.client.post(f"{self.base}/delist", json={"marketplaces": ["mercari"], "confirm": True}).json()
+            self.assertEqual((body["mercari"]["state"], body["mercari"]["attempts"]), ("failed", attempt))
+        self._answer_by_marketplace({"mercari": {"ok": True, "state": "deleted"}})
+        body = self.client.post(f"{self.base}/delist", json={"marketplaces": ["mercari"], "confirm": True}).json()
+        self.assertEqual(body["mercari"]["state"], "deleted")
+        self.assertFalse(body["mercari"]["already_gone"])
+
+    def test_a_sale_reports_why_each_other_delist_failed(self):
+        self._sold_on_depop_with_imported_snapshot()
+        self.ebay.side_effect = RuntimeError("Sign in to eBay again.")
+        self.client.post(f"{self.base}/delist", json={"marketplaces": ["ebay", "etsy"], "confirm": True})
+        sale = self.client.get("/api/marketplace-sales", params={"conversation_id": self.conv.id}).json()["sales"][0]
+        self.assertEqual(sale["delistErrors"], {"ebay": "Sign in to eBay again."})
+        self.assertIn("ebay", sale["listedElsewhere"])
+        self.assertNotIn("etsy", sale["listedElsewhere"])
+
+
 class MarketplaceStepsTest(unittest.IsolatedAsyncioTestCase):
     async def test_etsy_checks_the_shop_then_deletes(self):
         from anteroom.services import marketplace_delist as d

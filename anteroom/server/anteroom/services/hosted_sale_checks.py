@@ -8,7 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from anteroom.services import chrome_sales, order_history
+from anteroom.services import chrome_sales, order_history, sale_delist_followup
 from anteroom.services.hosted_browser_relay import ready_sellers
 from anteroom.services.hosted_context import for_seller
 from anteroom.services.service_context import use
@@ -20,6 +20,7 @@ async def check_seller(seller: str) -> None:
     try:
         with use(for_seller(seller)):
             await chrome_sales.check_due()
+            sale_delist_followup.start()
     except asyncio.CancelledError:
         raise
     except Exception:  # noqa: BLE001 - a failed seller must not stop other checks
