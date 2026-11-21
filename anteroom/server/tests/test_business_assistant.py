@@ -1501,3 +1501,36 @@ def test_the_copy_is_built_off_the_event_loop(workspace, monkeypatch):
 
     asyncio.run(exercise())
     assert built_on_loop == [False, False]
+
+
+def test_sold_listings_skip_the_size_audit(workspace, monkeypatch):
+    from anteroom.services import size_audit
+
+    db, _client = workspace
+    sold_item = add_listing(
+        db, "Sold Shorts M",
+        {"price": 25, "size": "M", "ebay_specifics": {"size": "34"}, "poshmark_specifics": {"size": "L"}},
+        sold(25, "ebay", "2026-08-01T00:00:00+00:00", "2026-09-10T00:00:00+00:00"),
+    )
+    add_listing(
+        db, "Active Shorts M",
+        {"price": 25, "size": "M", "ebay_specifics": {"size": "34"}},
+        {"vendooStatus": "active"},
+    )
+    audited: list[str] = []
+    real = size_audit.size_problems
+
+    def tracked(listing, photo):
+        audited.append(str(listing.get("title") or ""))
+        return real(listing, photo)
+
+    monkeypatch.setattr(size_audit, "size_problems", tracked)
+    shop = business_assistant.read_shop(db, now=NOW)
+    try:
+        assert audited == ["Active Shorts M"]
+        result = business_assistant.run_lookup(
+            shop.lookups, f"SELECT size_issue FROM listings WHERE id = '{sold_item.id}'",
+        )
+        assert result == "Lookup result (1 rows):\nsize_issue\n"
+    finally:
+        shop.close()

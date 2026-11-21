@@ -142,7 +142,7 @@ LOOKUP_INSTRUCTIONS = (
     "one; `listed_on` is where it is cross-listed, `sold_on` where it sold, and `box` the id of the bought box it "
     "came from (`boxes.id`). `form_sizes` is the size each marketplace form holds, `photo_size` the size read "
     "from the photos and where it was read, and `size_issue` why the sizing needs a look (NULL when nothing "
-    "stands out). `details` is the listing's full JSON, including each marketplace's fields; read it with "
+    "stands out, and for sold listings). `details` is the listing's full JSON, including each marketplace's fields; read it with "
     "json_extract(details, '$.ebay_specifics'). `category` is the Analytics category; a kind of piece is best "
     "matched on the title too, like title LIKE '%jacket%'.\n"
     "`boxes` is the wholesale boxes the seller bought and what each returned; `price_changes` each asking-price "
@@ -1090,7 +1090,7 @@ def _records(db: Session, rows: list[AnalyticsItem], now: datetime) -> list[dict
             "shipping_credit": item.shipping_credit if sold else None,
             "form_sizes": ", ".join(f"{name}: {size}" for name, size in size_audit.form_sizes(listing).items()) or None,
             "photo_size": photo_sizes.get(item.conversation_id),
-            "size_issue": size_audit.size_problems(listing, photo_sizes.get(item.conversation_id)),
+            "size_issue": None if sold else size_audit.size_problems(listing, photo_sizes.get(item.conversation_id)),
             "description": _text(listing.get("description")),
             "details": json.dumps(listing, default=str) if listing else None,
         })
