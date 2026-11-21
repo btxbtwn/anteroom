@@ -64,6 +64,17 @@ struct ConnectionsSettingsTests {
         let etsyNoLabel = DirectConnectionStatusPresentation.make(marketplace: .etsy, account: connectedNoLabel["etsy"])
         check(etsyNoLabel.statusLabel == "Connected", "blank label should fall back to Connected")
 
+        let reconnecting = decodeAccounts("""
+        {
+          "accounts": {
+            "ebay": { "connected": true, "pending": true, "label": "vintage_closet" }
+          }
+        }
+        """)
+        let ebayReconnecting = DirectConnectionStatusPresentation.make(marketplace: .ebay, account: reconnecting["ebay"])
+        check(ebayReconnecting.tone == .connected, "reconnecting eBay should stay connected")
+        check(ebayReconnecting.canCancelPending && ebayReconnecting.canDisconnect, "reconnecting eBay should keep both Cancel sign-in and Disconnect available")
+
         if failures > 0 {
             exit(1)
         }

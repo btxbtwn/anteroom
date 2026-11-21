@@ -53,7 +53,7 @@ struct DirectConnectionStatusPresentation: Equatable, Sendable {
                 tone: .connected,
                 statusLabel: statusLabel,
                 primaryActionTitle: "Reconnect \(marketplace.name)",
-                canCancelPending: false,
+                canCancelPending: account?.pending == true,
                 canDisconnect: true,
                 errorMessage: nonEmptyError
             )

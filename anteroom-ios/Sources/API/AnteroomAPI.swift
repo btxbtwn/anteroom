@@ -620,10 +620,15 @@ final class AnteroomAPI: Sendable {
 
     /// Starts eBay or Etsy sign-in. The seller approves on the page this returns, and
     /// Safari comes back to the app, which finishes with `finishMarketplaceSignIn`.
-    func connectMarketplace(_ marketplace: String) async throws -> URL {
+    func connectMarketplace(_ marketplace: String, features: [String]? = nil) async throws -> URL {
+        struct ConnectBody: Encodable {
+            let client = "app"
+            let features: [String]?
+        }
         struct Payload: Decodable { let authorizeUrl: String }
         let payload: Payload = try await decode(
-            request("POST", "api/marketplace-accounts/\(marketplace)/connect", json: ["client": "app"])
+            request("POST", "api/marketplace-accounts/\(marketplace)/connect",
+                    json: ConnectBody(features: features))
         )
         guard let url = URL(string: payload.authorizeUrl), url.scheme == "https" else {
             throw APIError(status: 0, message: "Marketplace sign-in didn't return a page to open.")
@@ -1080,12 +1085,7 @@ final class AnteroomAPI: Sendable {
 
     /// Start eBay sign-in for the chosen tool groups; returns the page the seller opens.
     func connectEbay(features: [String]) async throws -> URL {
-        struct Answer: Decodable { let authorizeUrl: String }
-        let answer: Answer = try await decode(request("POST", "api/marketplace-accounts/ebay/connect", json: ["features": features]))
-        guard let url = URL(string: answer.authorizeUrl), url.scheme == "https" else {
-            throw APIError(status: 0, message: "eBay sign-in didn't return a page to open.")
-        }
-        return url
+        try await connectMarketplace("ebay", features: features)
     }
 
     /// One page of an eBay section, read with the seller's own eBay account.

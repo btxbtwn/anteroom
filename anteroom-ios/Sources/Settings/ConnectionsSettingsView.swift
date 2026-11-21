@@ -18,10 +18,12 @@ struct ConnectionsSettingsView: View {
     @State private var accounts: [String: DirectConnections.Account] = [:]
     @State private var loaded = false
     @State private var loading = false
+    @State private var loadGeneration = 0
     @State private var loadError: String?
     @State private var busyAction: BusyAction?
     @State private var actionErrors: [DirectConnectionMarketplace: String] = [:]
     @State private var confirmDisconnect: DirectConnectionMarketplace?
+    @State private var showEbaySheet = false
 
     var body: some View {
         Form {
@@ -61,6 +63,11 @@ struct ConnectionsSettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .refreshable { await load() }
+        .sheet(isPresented: $showEbaySheet) {
+            EbayConnectionSheet(api: api, account: accounts["ebay"], allowRestart: true) {
+                Task { await load() }
+            }
+        }
         .alert(
             "Disconnect \(confirmDisconnect?.name ?? "marketplace")?",
             isPresented: Binding(
@@ -102,7 +109,13 @@ struct ConnectionsSettingsView: View {
                     .foregroundStyle(WorkspaceStyle.destructive)
             }
             Button {
-                Task { await connect(marketplace) }
+                if marketplace == .ebay {
+                    actionErrors[.ebay] = nil
+                    loadGeneration += 1
+                    showEbaySheet = true
+                } else {
+                    Task { await connect(marketplace) }
+                }
             } label: {
                 if busyAction == .connect(marketplace) {
                     HStack(spacing: 8) {
@@ -166,19 +179,28 @@ struct ConnectionsSettingsView: View {
     }
 
     private func load() async {
+        loadGeneration += 1
+        let generation = loadGeneration
         loading = true
-        defer { loading = false }
+        defer {
+            if generation == loadGeneration {
+                loading = false
+            }
+        }
         do {
             let response = try await api.marketplaceAccounts()
+            guard generation == loadGeneration else { return }
             accounts = response.accounts
             loadError = nil
             loaded = true
         } catch {
+            guard generation == loadGeneration else { return }
             loadError = error.localizedDescription
         }
     }
 
     private func connect(_ marketplace: DirectConnectionMarketplace) async {
+        loadGeneration += 1
         busyAction = .connect(marketplace)
         actionErrors[marketplace] = nil
         defer { busyAction = nil }
@@ -192,6 +214,7 @@ struct ConnectionsSettingsView: View {
     }
 
     private func cancelPending(_ marketplace: DirectConnectionMarketplace) async {
+        loadGeneration += 1
         busyAction = .cancel(marketplace)
         actionErrors[marketplace] = nil
         defer { busyAction = nil }
@@ -204,6 +227,7 @@ struct ConnectionsSettingsView: View {
     }
 
     private func disconnect(_ marketplace: DirectConnectionMarketplace) async {
+        loadGeneration += 1
         busyAction = .disconnect(marketplace)
         actionErrors[marketplace] = nil
         defer { busyAction = nil }
