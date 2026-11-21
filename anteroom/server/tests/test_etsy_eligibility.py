@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from datetime import date
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -22,7 +23,10 @@ from anteroom.models.listing import Listing, ListingRevision
 from anteroom.services import inventory_facets, listing_persistence, schema_migrations
 from anteroom.database import Base, get_db, load_models
 from anteroom.main import app
-from anteroom.services.etsy_fields import etsy_eligible, etsy_when_raw, etsy_when_to_store
+from anteroom.services.etsy_fields import (
+    _canonical_etsy_when, etsy_eligible, etsy_when_is_unclear, etsy_when_options, etsy_when_raw, etsy_when_to_store,
+    etsy_when_unclear_note, resolve_etsy_when,
+)
 from anteroom.repositories.queries import ConversationRepo, ListingRepo
 from anteroom.services.etsy_audit import etsy_not_allowed_live
 from anteroom.services.vendoo_marketplace_fields import _etsy_when_code
@@ -64,12 +68,11 @@ class EtsyEligibleTest(unittest.TestCase):
         self.assertTrue(etsy_eligible(listing({"who_made": "someone_else"}, ebay_specifics={"yearManufactured": "1988"})))
 
     def test_the_ebay_form_year_dates_an_item_with_no_etsy_answer(self):
-        # eBay's native form saves the aspect under its own name. A generated
-        # NASCAR tee had only this, and Etsy called it modern resale.
-        dated = listing(ebay_specifics={"Year Manufactured": "2000-2009", "Vintage": "Yes"})
+        # eBay's native form saves the aspect under its own name.
+        dated = listing(ebay_specifics={"Year Manufactured": "1995"})
         self.assertTrue(etsy_eligible(dated))
-        self.assertEqual(etsy_when_raw({}, dated), "2000-2009")
-        self.assertEqual(etsy_when_to_store("2000-2009", dated), "2000 - 2006 (Vintage)")
+        self.assertEqual(etsy_when_raw({}, dated), "1995")
+        self.assertEqual(etsy_when_to_store("1995", dated), "1990s (Vintage)")
         # Any spelling, flat or nested, and a blank spelling does not hide a filled one.
         for ebay in ({"Year manufactured": "1988"}, {"category_specifics": {"Year Manufactured": "1988"}},
                      {"yearManufactured": "", "Year Manufactured": "1988"}):
@@ -81,6 +84,60 @@ class EtsyEligibleTest(unittest.TestCase):
         self.assertTrue(etsy_eligible(listing({**MODERN, "who_made": "collective"})))
         self.assertTrue(etsy_eligible(listing({**MODERN, "what_is": "A supply or tool to make things"})))
         self.assertTrue(etsy_eligible(listing({**MODERN, "listing_type": "Digital files"})))
+
+
+class EtsyUnclearWhenTest(unittest.TestCase):
+    """A range on both sides of Etsy's 20-year vintage line dates nothing.
+
+    eBay's "2000-2009" used to become "2000 - 2006 (Vintage)", so an item made
+    in 2008 was told to Etsy as vintage. Etsy removes such listings.
+    """
+
+    UNCLEAR = ("2000-2009", "2000 - 2009", "2000s", "early 2000s", "1995 to 2010")
+
+    def test_a_range_across_the_cutoff_is_left_blank(self):
+        options = etsy_when_options()
+        for text in self.UNCLEAR:
+            with self.subTest(text=text):
+                self.assertTrue(etsy_when_is_unclear(text, today=date(2026, 11, 21)))
+                self.assertEqual(resolve_etsy_when(text, options), "")
+                self.assertEqual(etsy_when_to_store(text, {}, options), "")
+                self.assertEqual(_canonical_etsy_when(text), "")
+
+    def test_clear_dates_and_etsy_ranges_still_resolve(self):
+        options = etsy_when_options()
+        cases = {
+            "1988": "1980s (Vintage)",
+            "1990s": "1990s (Vintage)",
+            "2000 - 2006 (Vintage)": "2000 - 2006 (Vintage)",
+            "2007 - 2009 (Recently)": "2007 - 2009 (Recently)",
+            "Before 2007 (Vintage)": "Before 2007 (Vintage)",
+            "2015": "2010 - 2019 (Recently)",
+            "2010s": "2010 - 2019 (Recently)",
+        }
+        for text, label in cases.items():
+            with self.subTest(text=text):
+                self.assertFalse(etsy_when_is_unclear(text, today=date(2026, 11, 21)))
+                self.assertEqual(resolve_etsy_when(text, options), label)
+
+    def test_the_cutoff_moves_with_the_year(self):
+        # Vintage is 20 years old: the first non-vintage year is 2007 in 2026, 2009 in 2028.
+        self.assertTrue(etsy_when_is_unclear("2000-2007", today=date(2026, 1, 1)))
+        self.assertFalse(etsy_when_is_unclear("2000-2008", today=date(2029, 1, 1)))
+        self.assertTrue(etsy_when_is_unclear("2000-2009", today=date(2028, 1, 1)))
+
+    def test_an_unclear_ebay_year_does_not_make_the_item_vintage(self):
+        nascar = listing(ebay_specifics={"Year Manufactured": "2000-2009", "Vintage": "Yes"})
+        self.assertFalse(etsy_eligible(nascar))
+        # An Etsy answer that dates it still counts.
+        self.assertTrue(etsy_eligible({**nascar, "etsy_specifics": {"when_made": "Before 2007 (Vintage)"}}))
+
+    def test_the_etsy_tab_says_why_it_is_blank(self):
+        note = etsy_when_unclear_note("2000-2009", today=date(2026, 11, 21))
+        self.assertIn("2000-2009", note)
+        self.assertIn("2007", note)
+        self.assertEqual(etsy_when_unclear_note("1988", today=date(2026, 11, 21)), "")
+        self.assertEqual(etsy_when_unclear_note("", today=date(2026, 11, 21)), "")
 
 
 class EtsyWhenCodeTest(unittest.TestCase):
@@ -132,7 +189,7 @@ class NotAllowedReportTest(unittest.TestCase):
             **live, "vendooDates": {"listedByMarketplace": {"etsy": "2026-08-01T00:00:00+00:00"}},
         })
         self.add("Vintage Cardigan", VINTAGE, live)
-        self.add("NASCAR Tee", {}, live, ebay_specifics={"Year Manufactured": "2000-2009"})
+        self.add("NASCAR Tee", {}, live, ebay_specifics={"Year Manufactured": "1995"})
         self.add("Sold on Etsy", MODERN, {**live, "vendooDates": {"soldByMarketplace": {"etsy": "2026-09-01"}}})
         self.add("Not on Etsy", MODERN, {"vendooMarketplaces": ["ebay"]})
         self.add("Never synced", MODERN, {})

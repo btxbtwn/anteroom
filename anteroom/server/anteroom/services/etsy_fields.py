@@ -206,7 +206,6 @@ ETSY_WHEN_ALIASES = (
     ("2010s", "2010 - 2019 (Recently)"),
     ("2007 - 2009", "2007 - 2009 (Recently)"),
     ("2000 - 2006", "2000 - 2006 (Vintage)"),
-    ("2000s", "2000 - 2006 (Vintage)"),
     ("before 2007", "Before 2007 (Vintage)"),
     ("1990s", "1990s (Vintage)"),
     ("1980s", "1980s (Vintage)"),
@@ -337,9 +336,42 @@ def _normalize_when_text(text: str) -> str:
     return re.sub(r"\s+", " ", spaced).strip().lower()
 
 
+def _first_recent_year(today: date | None = None) -> int:
+    """The first year Etsy does not call vintage (20 years old): 2007 in 2026."""
+    return (today or date.today()).year - 19
+
+
+_WHEN_SPAN = re.compile(r"\b(1[7-9]\d{2}|20\d{2})\s*(?:-|–|—|to|through)\s*(1[7-9]\d{2}|20\d{2})\b", re.IGNORECASE)
+_WHEN_DECADE = re.compile(r"\b(1[7-9]\d|20\d)0s\b", re.IGNORECASE)
+
+
+def etsy_when_is_unclear(text: str, today: date | None = None) -> bool:
+    """Whether a when-made answer spans Etsy's vintage line, so it cannot say vintage or recent.
+
+    eBay's "2000-2009", "the 2000s" or "1995 to 2010" may be either side. Such
+    an answer dates nothing: guessing vintage lists a modern piece that Etsy
+    removes, and guessing recent hides a vintage one.
+    """
+    raw = str(text or "")
+    cutoff = _first_recent_year(today)
+    spans = [(int(start), int(end)) for start, end in _WHEN_SPAN.findall(raw)]
+    spans += [(int(decade) * 10, int(decade) * 10 + 9) for decade in _WHEN_DECADE.findall(raw)]
+    return any(min(span) < cutoff <= max(span) for span in spans)
+
+
+def etsy_when_unclear_note(text: str, today: date | None = None) -> str:
+    """The Etsy tab's reason for an empty When was it made?, or "" when the answer is clear."""
+    raw = str(text or "").strip()
+    if not raw or not etsy_when_is_unclear(raw, today):
+        return ""
+    cutoff = _first_recent_year(today)
+    return (f'When was it made? is blank: "{raw}" could be before or after {cutoff}, and Etsy calls only '
+            f"items made before {cutoff} vintage. Choose the date range that fits.")
+
+
 def _canonical_etsy_when(value: str) -> str:
     raw = str(value or "").strip()
-    if not raw:
+    if not raw or etsy_when_is_unclear(raw):
         return ""
     normalized = _normalize_when_text(raw)
     if normalized in UNKNOWN_ETSY_WHEN or _is_non_vintage_phrase(raw):
@@ -488,7 +520,7 @@ def etsy_renewal_raw(etsy: dict[str, Any]) -> str:
 
 def resolve_etsy_when(raw: str, options: list[str]) -> str:
     text = str(raw or "").strip()
-    if not text:
+    if not text or etsy_when_is_unclear(text):
         return ""
     mapped = _canonical_etsy_when(text)
     allowed = options or [mapped, DEFAULT_ETSY_WHEN]

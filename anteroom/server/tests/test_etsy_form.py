@@ -148,6 +148,17 @@ def test_a_new_draft_opens_an_empty_etsy_form(studio):
     studio.properties.assert_not_awaited()
 
 
+def test_an_unclear_ebay_year_leaves_when_made_blank_and_says_why(studio):
+    # eBay's "2000-2009" spans Etsy's vintage line, so it dates nothing on Etsy.
+    etsy = {key: value for key, value in studio.listing["etsy_specifics"].items() if key != "whenMade"}
+    listing = {**studio.listing, "etsy_specifics": etsy, "ebay_specifics": {"Year Manufactured": "2000-2009"}}
+    revision = listing_persistence.save_revision(studio.db, studio.conv.id, listing, "test")
+    form = native_editor.read_form(studio.db, studio.conv.id, "etsy", revision.id)
+    rows = {row["path"]: row for row in form["fields"]}
+    assert rows["etsy_specifics.whenMade"]["value"] == ""
+    assert any("2000-2009" in note and "When was it made?" in note for note in form["notes"])
+
+
 def test_an_unknown_etsy_category_is_named_not_replaced(studio):
     listing = {**studio.listing, "direct_category_ids": {"etsy": "999999999"}}
     revision = listing_persistence.save_revision(studio.db, studio.conv.id, listing, "test")

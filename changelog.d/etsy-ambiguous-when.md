@@ -1,0 +1,1 @@
+- Leave Etsy's When was it made? blank when the only date is a range on both sides of Etsy's vintage cutoff, such as eBay's 2000-2009, and say why in the Etsy tab, instead of calling the item vintage.
