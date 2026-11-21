@@ -285,3 +285,32 @@ def test_offer_log_endpoint_rejects_a_bad_cursor():
         assert response.json() == {'entries': [], 'next_before': None}
         assert client.get('/api/analytics/offers/log?before=nonsense').status_code == 400
         assert client.get('/api/analytics/offers/log?limit=500').status_code == 422
+
+
+def test_offer_log_pages_through_equal_send_times_across_both_journals():
+    from anteroom.models.ebay_offer import EbayOfferAttempt, EbayOfferRule
+    from anteroom.services.offer_analytics import offer_log
+    engine = create_engine('sqlite://')
+    Base.metadata.create_all(engine)
+    at = datetime(2026, 11, 20, 12)
+    with Session(engine) as db:
+        rule = EbayOfferRule(account_id='account', listing_id='ebay-1', discount_percent=10, minimum_price_cents=100)
+        db.add(rule)
+        db.flush()
+        # Every send at the same instant: only the ID orders them, and ties cross page boundaries.
+        for id_ in ('b', 'd'):
+            db.add(EbayOfferAttempt(id=id_, rule_id=rule.id, current_price_cents=1000, offer_price_cents=900,
+                discount_percent=10, minimum_price_cents=100, state='sent', recipient_count=1,
+                created_at=at, sent_at=at, expires_at=at))
+        for id_ in ('a', 'c', 'e'):
+            db.add(ListingPromotion(id=id_, batch_id='batch', marketplace='depop', action='offer', listing_id=id_,
+                state='done', confirmation='job_completed', created_at=at, sent_at=at, expires_at=at))
+        db.commit()
+        seen, before = [], None
+        while True:
+            page = offer_log(db, limit=2, before=before)
+            seen += [entry['id'] for entry in page['entries']]
+            before = page['next_before']
+            if before is None:
+                break
+    assert seen == ['e', 'd', 'c', 'b', 'a']
