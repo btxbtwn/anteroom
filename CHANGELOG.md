@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1108 — 2026-11-21
+
+- Directs sellers to install or update Anteroom Bridge directly from the Chrome Web Store across the hosted web app, desktop Settings, onboarding checklist, and macOS setup instructions.
+
 ## 0.1.1107 — 2026-11-21
 
 - Wholesale box sourcing now defaults to your configured ships-from ZIP (or prompts for your 5-digit US ZIP code) instead of defaulting to New Orleans, LA (`70115`).
