@@ -62,7 +62,7 @@ class FillableRowsTest(unittest.TestCase):
         # Filled (Body fit), locked (Fit), sale rows (price, package) and brand are left alone.
         self.assertEqual(paths, ["depop_specifics.attributes.bottom-fit", "depop_specifics.age"])
 
-    def test_legacy_etsy_fill_skips_the_seller_locked_attribute_group(self):
+    def test_native_etsy_fill_skips_the_seller_locked_attribute_group(self):
         from anteroom.services.seller_overrides import lock_seller_edits
 
         sleeve = "etsy_specifics.category_specifics.Sleeve length"
@@ -74,7 +74,7 @@ class FillableRowsTest(unittest.TestCase):
             row(materials, "Materials", ["Cotton"]),
         ]}
         previous = {"etsy_specifics": {"category_specifics": {"Sleeve length": "Short sleeve"}}}
-        edited = {"etsy_specifics": {"category_specifics": {"Sleeve length": ""}}}
+        edited = {"_native_forms": {}, "etsy_specifics": {"category_specifics": {"Sleeve length": ""}}}
         self.assertEqual([r["path"] for r in fillable_rows(form, "etsy", edited)], [sleeve, graphic, materials])
         lock_seller_edits(previous, edited)
         self.assertEqual([r["path"] for r in fillable_rows(form, "etsy", edited)], [materials])
@@ -181,8 +181,8 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         photos = photo_fingerprint([])
         category = row("direct_category_ids.etsy", "Category", ["Clothing"], value="482",
                        option_values={"Clothing": "482"})
-        path = "etsy_specifics.category_specifics.Sleeve length"
-        form = {"fields": [category, row(path, "Sleeve length", ["Short sleeve"])]}
+        path = "etsy_specifics.materials"
+        form = {"fields": [category, row(path, "Materials", ["Cotton"])]}
         loads = 0
 
         async def load_forms(*_args):
@@ -193,19 +193,18 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
                 self.db.commit()
             return {"etsy": form}
 
-        ask = AsyncMock(return_value=json.dumps({"fields": {path: "Short sleeve"}}))
+        ask = AsyncMock(return_value=json.dumps({"fields": {path: "Cotton"}}))
         with patch.object(native_field_fill, "load_forms", load_forms), \
                 patch("anteroom.services.listing_generate.collect_provider_text", ask), \
                 patch("anteroom.services.listing_provider.get_listing_provider", return_value=object()), \
-                patch.object(native_field_fill, "_category_fill_evidence", return_value=(photos, "short sleeves")) as read_evidence:
+                patch.object(native_field_fill, "_category_fill_evidence", return_value=(photos, "cotton")) as read_evidence:
             await native_field_fill._fill_after_category(self.conv.id, {"etsy"})
             ask.assert_not_awaited()
             self.assertNotIn("etsy_specifics", self._current().listing_json)
             read_evidence.return_value = (photo_fingerprint(ConversationRepo(self.db).get_photos(self.conv.id)),
-                                          "short sleeves")
+                                          "cotton")
             await native_field_fill._fill_after_category(self.conv.id, {"etsy"})
-            self.assertEqual(self._current().listing_json["etsy_specifics"]["category_specifics"],
-                             {"Sleeve length": "Short sleeve"})
+            self.assertEqual(self._current().listing_json["etsy_specifics"], {"materials": "Cotton"})
 
     async def test_recording_a_changed_etsy_form_keeps_seller_locked_answers(self):
         listing = {"title": "Tee", "seller_fields": ["etsy_specifics.category_specifics"],
@@ -803,6 +802,22 @@ class EtsyAttributesTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(shown["Sleeve length"], "Short sleeve")
         self.assertEqual(shown["Primary color"], "White")
         self.assertEqual(shown["Neckline"], "")
+
+    async def test_category_refill_requires_evidence_for_legacy_etsy_attributes(self):
+        evidence = "White tee with short sleeves"
+        path = "etsy_specifics.category_specifics.Sleeve length"
+        ask = AsyncMock(return_value=json.dumps({"fields": {path: "Long sleeve"}}))
+        with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"etsy": self._form(self._current())})), \
+                patch("anteroom.services.native_editor.editor_form", self.editor_form), \
+                patch("anteroom.services.listing_generate.collect_provider_text", ask), \
+                patch("anteroom.services.listing_provider.get_listing_provider", return_value=object()), \
+                patch.object(native_field_fill, "_category_fill_evidence", return_value=(self.photos, evidence)):
+            await native_field_fill._fill_after_category(self.conv.id, {"etsy"})
+            self.assertFalse(self._current().get("etsy_specifics", {}).get("category_specifics"))
+            ask.return_value = json.dumps({"fields": {path: {"value": "Short sleeve", "evidence": "short sleeves"}}})
+            await native_field_fill._fill_after_category(self.conv.id, {"etsy"})
+
+        self.assertEqual(self._current()["etsy_specifics"]["category_specifics"], {"Sleeve length": "Short sleeve"})
 
     def test_general_colors_and_a_seller_edited_attribute_group_are_not_filled(self):
         listing = {"seller_fields": ["etsy_specifics.category_specifics.Holiday"]}

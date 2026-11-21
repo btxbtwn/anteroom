@@ -72,7 +72,8 @@ def fillable_rows(form: dict, market: str, listing: dict, *, evidence: str = "")
             continue
         if not native_contract.item_field(row, market) or (not strict and not _empty(row.get("value"))):
             continue
-        if etsy_attributes_locked and path.startswith(ETSY_ATTRIBUTES):
+        # Legacy Etsy attributes go through fill_etsy_attributes for quote validation.
+        if market == "etsy" and path.startswith(ETSY_ATTRIBUTES) and (not strict or etsy_attributes_locked):
             continue
         if market == "etsy" and fold_key(str(row.get("label") or "")) in _FROM_GENERAL:
             continue
