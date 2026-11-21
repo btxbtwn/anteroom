@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1089 — 2026-11-21
+
+- Add the clothing Size tag field and Read size tags to the bulk Regenerate review dialog, matching bulk upload so sellers can enter, check or read tag sizes from saved photos before rewriting listings.
+
 ## 0.1.1088 — 2026-11-21
 
 - Etsy draft generation uses the selected category’s choices and leaves unavailable options out of the draft.
