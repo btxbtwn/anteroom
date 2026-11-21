@@ -565,33 +565,45 @@ def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
         raise DelistError(400, "Confirm the delist before anything is deleted.")
     if not names or any(name not in MARKETPLACES for name in names):
         raise DelistError(400, "Name the marketplaces to delist.")
-    known = listings(db, conv_id)
-    for name in names:
-        entry = known.get(name)
-        if not entry or not entry["listing_id"]:
-            raise DelistError(409, f"Anteroom has no {name} listing link for this item.")
-        if entry["sold_here"]:
-            raise DelistError(409, f"This item sold on {name}. That listing is never deleted.")
-    changed = [name for name in names if expected is not None and known[name]["listing_id"] != expected.get(name)]
-    if changed:
-        raise DelistError(409, f"The {', '.join(changed)} listing changed. Nothing was delisted.", reason="listing_changed")
-    if sale_id is not None:
-        from anteroom.services.sale_delist_followup import WINDOW
-        from anteroom.services.sale_inventory import stock_after_sale
-
-        sale = db.get(MarketplaceSale, sale_id)
-        sold_at = _time(sale.sold_at or sale.received_at) if sale else None
-        if (sale is None or str(sale.conversation_id) != conv_id or sale.source != "marketplace"
-                or sale.order_status not in PAID_STATUSES or sale.marketplace in names
-                or sold_at is None or sold_at < datetime.now(UTC) - WINDOW
-                or stock_after_sale(db, conv_id, sale.marketplace, sale.listing_id)["status"] != "sold_out"):
-            raise DelistError(409, "The sale changed: it is no longer paid or the item has stock. Nothing was delisted.",
-                              reason="sale_changed")
-    if BROWSER_MARKETPLACES & set(names) and not current_extension().connected:
-        raise DelistError(409, "Connect Chrome first.")
-    repo = JobRepo(db)
-    listing = ListingRepo(db).get_current(conv_id)
     with listing_mode.guard(db, "direct"):
+        known = listings(db, conv_id)
+        for name in names:
+            entry = known.get(name)
+            if not entry or not entry["listing_id"]:
+                raise DelistError(409, f"Anteroom has no {name} listing link for this item.")
+            if entry["sold_here"]:
+                raise DelistError(409, f"This item sold on {name}. That listing is never deleted.")
+        changed = [name for name in names if expected is not None and known[name]["listing_id"] != expected.get(name)]
+        if changed:
+            raise DelistError(409, f"The {', '.join(changed)} listing changed. Nothing was delisted.", reason="listing_changed")
+        sold_at = None
+        if sale_id is not None:
+            from anteroom.services.sale_delist_followup import WINDOW
+            from anteroom.services.sale_inventory import stock_after_sale
+
+            sale = db.get(MarketplaceSale, sale_id)
+            sold_at = _time(sale.sold_at or sale.received_at) if sale else None
+            if (sale is None or str(sale.conversation_id) != conv_id or sale.source != "marketplace"
+                    or sale.order_status not in PAID_STATUSES or sale.marketplace in names
+                    or sold_at is None or sold_at < datetime.now(UTC) - WINDOW
+                    or stock_after_sale(db, conv_id, sale.marketplace, sale.listing_id)["status"] != "sold_out"):
+                raise DelistError(409, "The sale changed: it is no longer paid or the item has stock. Nothing was delisted.",
+                                  reason="sale_changed")
+        if BROWSER_MARKETPLACES & set(names) and not current_extension().connected:
+            raise DelistError(409, "Connect Chrome first.")
+        repo = JobRepo(db)
+        listing = ListingRepo(db).get_current(conv_id)
+        if sale_id is not None:
+            from anteroom.services.sale_delist_followup import _went_up_after
+
+            # A seller can mark a listing live again after the sweep selected it.
+            conv = db.get(Conversation, conv_id, populate_existing=True)
+            notes = parse_notes(conv.notes if conv else None)
+            marks = _notes_dict(notes, "marketplaceMarks")
+            native = MarketplaceListingRepo(db).for_conversation(conv_id)
+            if any(_went_up_after(name, known[name]["listing_id"], native, marks, sold_at) for name in names):
+                raise DelistError(409, "A marketplace listing was listed again after the sale. Nothing was delisted.",
+                                  reason="listing_changed")
         if repo.get_active():
             raise DelistError(409, "Another automation job is queued or running. Wait for it to finish.")
         job = repo.create(conv_id, listing.current_revision_id if listing else "", {"delist": names},

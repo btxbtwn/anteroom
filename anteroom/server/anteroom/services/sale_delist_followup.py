@@ -134,8 +134,8 @@ def still_listed(db: Session) -> list[dict]:
                     or entry.get("state") == "deleted"):
                 continue
             item_id = str(entry["listing_id"])
-            followed = (pinned.get(name) == item_id if pinned is not None
-                        else not _went_up_after(name, item_id, native, marks, sold_at))
+            followed = ((pinned is None or pinned.get(name) == item_id)
+                        and not _went_up_after(name, item_id, native, marks, sold_at))
             left.append({"marketplace": name, "listingId": item_id, "state": entry.get("state"),
                          "error": entry.get("error"), "at": entry.get("at"), "attempts": entry.get("attempts") or 0,
                          "url": entry.get("url"), "followed": followed})
@@ -162,7 +162,7 @@ def _sweep(db: Session, *, act: bool) -> list[tuple[str, str, dict[str, str]]]:
             targets = {entry["marketplace"]: entry["listingId"] for entry in item["stillListed"] if entry["followed"]}
             pinned = pin_sale(db, item["conversationId"], item["saleId"], targets)
             for entry in item["stillListed"]:
-                entry["followed"] = pinned.get(entry["marketplace"]) == entry["listingId"]
+                entry["followed"] = entry["followed"] and pinned.get(entry["marketplace"]) == entry["listingId"]
     if not act:
         return []
     busy = {job.conversation_id for job in JobRepo(db).get_running()

@@ -52,3 +52,23 @@ test("a sold item still listed elsewhere is alerted in the sidebar and explained
   // Seeing the alert never delists or dismisses anything.
   expect(mutations).toEqual([]);
 });
+
+test("the expanded desktop alert scrolls to the last sold item", async ({ page, phone }) => {
+  test.skip(phone, "the phone sidebar already scrolls as a whole");
+  const items = Array.from({ length: 40 }, (_, index) => ({
+    conversationId: `sold-${index}`, title: `Sold item ${index + 1}`, soldOn: "poshmark",
+    detected: true, stillListed: [{ marketplace: "ebay", state: "live", followed: true }],
+  }));
+  await page.route("**/api/marketplace-sales/still-listed", route => route.fulfill({
+    json: { autodelist: true, items },
+  }));
+  await page.goto("/");
+  const alert = page.getByRole("alert").filter({ hasText: "40 sold items are still listed" });
+  await alert.getByRole("button", { name: "Show 37 more" }).click();
+  const list = alert.getByRole("list");
+  const last = list.getByRole("button", { name: /Sold item 40/ });
+  await expect(last).not.toBeInViewport();
+  await list.hover();
+  await page.mouse.wheel(0, 3000);
+  await expect(last).toBeInViewport();
+});

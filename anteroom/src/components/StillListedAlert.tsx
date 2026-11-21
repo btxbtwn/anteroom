@@ -47,7 +47,7 @@ export function StillListedAlert({ onOpen }: { onOpen: (convId: string) => void 
         {items.length === 1 ? "A sold item is still listed" : `${items.length} sold items are still listed`}
       </AlertTitle>
       <AlertDescription className="gap-1.5">
-        <ul className="flex flex-col gap-1">
+        <ul className={all ? "flex flex-col gap-1 min-[901px]:max-h-[40dvh] min-[901px]:overflow-y-auto" : "flex flex-col gap-1"}>
           {(all ? items : items.slice(0, SHOWN)).map((item) => (
             <li key={item.conversationId}>
               <button type="button" className="text-left underline-offset-2 hover:underline" onClick={() => onOpen(item.conversationId)}>

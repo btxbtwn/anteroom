@@ -206,6 +206,23 @@ class SaleDelistFollowupTest(unittest.TestCase):
         self.ebay.assert_not_awaited()
         self.assertEqual(self.bridge.await_count, 0)
 
+    def test_a_new_listed_mark_revokes_the_pin_even_when_the_listing_id_is_the_same(self):
+        sale_id = self._sold()
+        followup._sweep(self.db, act=False)
+        response = self.client.post(f"{self.base}/mercari/mark", json={
+            "state": "listed", "url": self._urls()["mercari"],
+        })
+        self.assertEqual(response.status_code, 200, response.text)
+        [item] = self._still()
+        entries = {entry["marketplace"]: entry for entry in item["stillListed"]}
+        self.assertFalse(entries["mercari"]["followed"])
+        self.assertTrue(entries["poshmark"]["followed"])
+        # An earlier sweep might already have selected this ID before the mark.
+        with self.assertLogs("anteroom.sale_delist_followup", level="INFO") as logs:
+            asyncio.run(followup._follow(self.conv.id, sale_id, {"mercari": entries["mercari"]["listingId"]}))
+        self.assertTrue(any("listed again" in line for line in logs.output), logs.output)
+        self.bridge.assert_not_awaited()
+
     def test_pins_are_kept_while_the_setting_is_off_so_turning_it_on_later_skips_relists(self):
         self._sold()
         self._run(autodelist=False)

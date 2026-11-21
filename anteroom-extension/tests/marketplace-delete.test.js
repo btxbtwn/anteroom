@@ -53,8 +53,10 @@ test('Poshmark never deletes a sold or foreign listing, and a gone one is alread
     assert.equal((await c.runMarketplaceDelete({ marketplace: 'poshmark', listing_id: POST, confirm: true })).ok, false);
     assert.ok(!requests.some(r => r.startsWith('DELETE')));
   }
-  const { c, requests } = worker({ [`GET ${posh}`]: [200, { error: { errorType: 'NotFoundError' } }] });
-  assert.equal((await c.runMarketplaceDelete({ marketplace: 'poshmark', listing_id: POST, confirm: true })).already, true);
+  const message = 'This listing was removed.';
+  const { c, requests } = worker({ [`GET ${posh}`]: [200, { error: { errorType: 'NotFoundError', message } }] });
+  const result = await c.runMarketplaceDelete({ marketplace: 'poshmark', listing_id: POST, confirm: true });
+  assert.deepEqual({ ...result }, { ok: true, state: 'deleted', already: true, marketplace_message: message });
   assert.ok(!requests.some(r => r.startsWith('DELETE')));
 });
 

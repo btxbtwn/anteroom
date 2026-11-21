@@ -11,18 +11,21 @@ async function deletePoshmark(id, deadline) {
   // Poshmark answers errors with HTTP 200 and an error body.
   const gone = error => ['PostRemovedError', 'NotFoundError'].includes(error?.marketplace_type);
   const read = async step => {
-    try { return await client.call('GET', `/vm-rest/posts/${id}?app_type=web`, undefined, { step, what: 'the read' }); }
-    catch (error) { if (gone(error)) return null; throw error; }
+    try { return { post: await client.call('GET', `/vm-rest/posts/${id}?app_type=web`, undefined, { step, what: 'the read' }) }; }
+    catch (error) {
+      if (gone(error)) return { post: null, message: error.marketplace_message };
+      throw error;
+    }
   };
-  const post = await read('read');
-  if (!post) return { ok: true, state: 'deleted', already: true, marketplace_message: error.marketplace_message };
+  const { post, message } = await read('read');
+  if (!post) return { ok: true, state: 'deleted', already: true, marketplace_message: message };
   if (String(post.creator_id) !== account.user_id) throw marketplaceError('This Poshmark listing belongs to another account.');
   const sold = (post.inventory?.size_quantities || []).some(entry => Number(entry.quantity_sold) > 0);
   if (sold || post.status === 'archived' || ['sold_out', 'not_available'].includes(post.inventory?.status)) {
     throw marketplaceError('This Poshmark listing has sold. It was not deleted.');
   }
   await client.call('DELETE', `/vm-rest/posts/${id}?app_type=web`, undefined, { step: 'delete', what: 'the delete' });
-  if (await read('read-back')) throw marketplaceError('Poshmark has not confirmed the delete. Delist again to check.', { code: 'uncertain', rejected: false });
+  if ((await read('read-back')).post) throw marketplaceError('Poshmark has not confirmed the delete. Delist again to check.', { code: 'uncertain', rejected: false });
   return { ok: true, state: 'deleted' };
 }
 
