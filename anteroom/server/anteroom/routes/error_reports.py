@@ -113,11 +113,14 @@ class BrowserFailure(BaseModel):
     release: str | None = Field(default=None, max_length=50)
 
 
-@router.post("", status_code=202)
-def report(body: BrowserFailure, request: Request):
+def _limit_error_reports(request: Request) -> None:
     limiter = getattr(request.app.state, "error_report_limit", None)
     seller = getattr(request.state, "seller", None)
     if limiter is not None and seller is not None:
         limiter.take(seller.user_id)
+
+
+@router.post("", status_code=202, dependencies=[Depends(_limit_error_reports)])
+def report(body: BrowserFailure):
     log.error("Browser %s: %s", body.kind, body.message[:200], extra={"browser": body.model_dump()})
     return {"accepted": True}
