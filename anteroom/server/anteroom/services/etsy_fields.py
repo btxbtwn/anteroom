@@ -16,6 +16,7 @@ from anteroom.services.ebay_fields import (
 from anteroom.models.listing_values import (
     as_mapping,
     canonical_option,
+    collapse_option,
     dropdown_field_options,
     dropdown_options,
     infer_known_option,
@@ -362,11 +363,20 @@ def etsy_when_is_unclear(text: str, today: date | None = None) -> bool:
 def etsy_when_unclear_note(text: str, today: date | None = None) -> str:
     """The Etsy tab's reason for an empty When was it made?, or "" when the answer is clear."""
     raw = str(text or "").strip()
-    if not raw or not etsy_when_is_unclear(raw, today) or canonical_option(raw, etsy_when_options()):
+    if not raw or not etsy_when_is_unclear(raw, today) or _is_etsy_when_label(raw):
         return ""
     cutoff = _first_recent_year(today)
     return (f'When was it made? is blank: "{raw}" could be before or after {cutoff}, and Etsy calls only '
             f"items made before {cutoff} vintage. Choose the date range that fits.")
+
+
+def _is_etsy_when_label(text: str, options: list[str] | None = None) -> bool:
+    """Whether the whole answer is one of Etsy's When made labels (spacing and dashes aside).
+
+    The complete label, suffix included: "2000 - 2006 (possibly 2000-2009)" is free text.
+    """
+    answer = collapse_option(text)
+    return any(answer == collapse_option(option) for option in (options if options else etsy_when_options()))
 
 
 def _unclear_answer(text: str, options: list[str] | None = None) -> bool:
@@ -375,9 +385,7 @@ def _unclear_answer(text: str, options: list[str] | None = None) -> bool:
     Etsy's labels are its answers, not guesses: a saved "2007 - 2009 (Recently)"
     keeps meaning that range after the cutoff moves past 2007 in January.
     """
-    if not etsy_when_is_unclear(text):
-        return False
-    return canonical_option(text, options if options else etsy_when_options()) is None
+    return etsy_when_is_unclear(text) and not _is_etsy_when_label(text, options)
 
 
 def _canonical_etsy_when(value: str) -> str:

@@ -134,6 +134,14 @@ class EtsyUnclearWhenTest(unittest.TestCase):
             self.assertEqual(_canonical_etsy_when("2007 - 2009 (Recently)"), "2007 - 2009 (Recently)")
             self.assertEqual(etsy_when_unclear_note("2007 - 2009 (Recently)"), "")
             self.assertEqual(resolve_etsy_when("2000-2009", etsy_when_options()), "")
+            # Only the complete label is Etsy's answer: a bare 2007-2009 now spans the cutoff.
+            self.assertEqual(resolve_etsy_when("2007-2009", etsy_when_options()), "")
+
+    def test_free_text_that_starts_like_an_etsy_label_is_not_one(self):
+        text = "2000 - 2006 (possibly 2000-2009)"
+        self.assertEqual(resolve_etsy_when(text, etsy_when_options()), "")
+        self.assertEqual(_canonical_etsy_when(text), "")
+        self.assertIn(text, etsy_when_unclear_note(text))
 
     def test_the_cutoff_moves_with_the_year(self):
         # Vintage is 20 years old: the first non-vintage year is 2007 in 2026, 2009 in 2028.
