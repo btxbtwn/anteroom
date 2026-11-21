@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -65,10 +65,24 @@ test("reporter includes only hashes and approved attempt metadata", (t) => {
     location: { file: join(directory, sentinel) }, expectedStatus: "passed",
     results: [{ ...attempt("passed"), error: sentinel, stdout: [sentinel] }],
   }] });
+  const key = join(directory, "identity-key");
+  reporter.onEnd({ status: "passed" });
+  assert.throws(() => readFileSync(output), { code: "ENOENT" });
+  writeFileSync(key, Buffer.alloc(32, 1));
   reporter.onEnd({ status: "interrupted" });
   assert.throws(() => readFileSync(output), { code: "ENOENT" });
   reporter.onEnd({ status: "passed" });
   const evidence = readFileSync(output, "utf8");
   assert.ok(!evidence.includes(sentinel));
-  assert.deepEqual(JSON.parse(evidence)[0].attempts, [attempt("passed")]);
+  const first = JSON.parse(evidence)[0];
+  assert.deepEqual(first.attempts, [attempt("passed")]);
+  for (const byte of [1, 2]) {
+    writeFileSync(key, Buffer.alloc(32, byte));
+    const nextOutput = join(directory, `probe-${byte}.json`);
+    process.env.SANDBOX_BROWSER_EVIDENCE_FILE = nextOutput;
+    reporter.onEnd({ status: "passed" });
+    const next = JSON.parse(readFileSync(nextOutput))[0];
+    assert.equal(next.id === first.id, byte === 1);
+    assert.equal(next.file === first.file, byte === 1);
+  }
 });

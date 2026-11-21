@@ -73,7 +73,8 @@ function main(directory) {
   const sha = git("rev-parse", "HEAD");
   const { GITHUB_SHA, GITHUB_RUN_ID, GITHUB_RUN_ATTEMPT, ImageOS, ImageVersion } = process.env;
   if (sha !== GITHUB_SHA || !/^[1-9]\d*$/.test(GITHUB_RUN_ID)
-    || !/^[1-9]\d*$/.test(GITHUB_RUN_ATTEMPT) || !ImageOS || !ImageVersion) {
+    || !/^[1-9]\d*$/.test(GITHUB_RUN_ATTEMPT) || !/^[a-zA-Z0-9._-]{1,40}$/.test(ImageOS ?? "")
+    || !/^[a-zA-Z0-9._-]{1,40}$/.test(ImageVersion ?? "")) {
     throw new Error("Missing or mismatched browser evidence provenance");
   }
   const npmLock = readFileSync("package-lock.json");

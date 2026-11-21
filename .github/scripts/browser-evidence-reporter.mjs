@@ -1,8 +1,6 @@
-import { createHash } from "node:crypto";
-import { writeFileSync } from "node:fs";
-import { relative } from "node:path";
-
-const hash = (value) => createHash("sha256").update(value).digest("hex");
+import { createHmac } from "node:crypto";
+import { readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 
 export default class BrowserEvidenceReporter {
   printsToStdio() {
@@ -23,10 +21,13 @@ export default class BrowserEvidenceReporter {
     if (!output || result.status !== "passed" || this.hadError || !this.tests?.length) return;
 
     try {
+      const key = readFileSync(join(dirname(output), "identity-key"));
+      if (key.length !== 32) throw new Error("Invalid evidence key");
+      const hash = (kind, value) => createHmac("sha256", key).update(kind + "\0" + value).digest("hex");
       const cases = this.tests.map((test) => ({
-        id: hash(test.id),
+        id: hash("case", test.id),
         project: test.parent.project().name,
-        file: hash(relative(this.root, test.location.file).split("\\").join("/")),
+        file: hash("file", relative(this.root, test.location.file).split("\\").join("/")),
         expected: test.expectedStatus,
         attempts: test.results.map(({ status, duration, retry }) => ({ status, duration, retry })),
       }));

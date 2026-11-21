@@ -262,7 +262,11 @@ jobs:
         id: browser-evidence-dir
         if: matrix.suite.name == 'sandbox'
         continue-on-error: true
-        run: mkdir "$RUNNER_TEMP/sandbox-browser-evidence"
+        run: |
+          umask 077
+          directory="$RUNNER_TEMP/sandbox-browser-evidence"
+          mkdir "$directory"
+          node -e 'process.stdout.write(require("node:crypto").randomBytes(32))' > "$directory/identity-key"
       - name: Compile Bridge network rules in Chromium
         if: matrix.suite.name == 'sandbox'
         run: node scripts/check-bridge-network.mjs
@@ -282,7 +286,10 @@ jobs:
           directory="$RUNNER_TEMP/sandbox-browser-evidence"
           reporter=../.github/scripts/browser-evidence-reporter.mjs
           output() {
-            SANDBOX_BROWSER_EVIDENCE_FILE="$directory/$1.json" npm run e2e -- --list --reporter="$reporter" --output="$directory/list-output" "${@:2}"
+            SANDBOX_BROWSER_EVIDENCE_FILE="$directory/$1.json" npm run e2e -- --list --reporter="$reporter" --output="$directory/list-output" "${@:2}" >/dev/null 2>&1 || {
+              echo "Sandbox collection failed for $1." >&2
+              return 1
+            }
           }
           output full
           output shard-1 --shard=1/2

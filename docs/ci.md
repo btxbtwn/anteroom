@@ -235,11 +235,12 @@ desktop Chromium, phone Chromium and phone WebKit. The ordinary sandbox and
 hosted test commands still decide the browser check result. Missing, failed or
 inconsistent measurements leave the optional profile unavailable.
 
-The seven-day profile records hashed Playwright case and file identities,
+The seven-day profile records keyed hashes of Playwright case and file identities,
 project names, retry outcomes, skips, expected failures, attempt durations and
-checkout, lock and runner provenance. These hashes are identifiers and can be
-guessed. Runtime-derived sensitive test titles must stay out of public evidence,
-even when hashed. Install steps expose Python, npm, browser OS dependencies and
+checkout, lock and runner provenance. The private key stays on the runner.
+Identities match within one job. A later cross-job experiment needs its own
+identity contract. Runtime-derived sensitive titles must stay out of public
+evidence even when hashed. Install steps expose Python, npm, browser OS dependencies and
 browser download timings separately for both jobs.
 
 For a later hosted A/B, use the same frozen source, locks, toolchain and runner
