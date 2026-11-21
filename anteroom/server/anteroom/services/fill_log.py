@@ -583,6 +583,8 @@ def write_values_into_listing(listing: dict, patches: list[dict]) -> dict:
         specifics_key = f"{marketplace}_specifics"
         specifics = dict(updated.get(specifics_key) or {})
         canonical = label_to_json_key(lookup) or label_to_json_key(key) or label_to_json_key(field) or field
+        if marketplace == "mercari" and (lookup in {"no brand", "no brand not sure", "nobrand"} or squash_field_key(canonical) == "nobrand"):
+            canonical = "noBrand"
         squashed = squash_field_key(canonical)
         for alias in list(specifics):
             if alias == canonical:
@@ -596,8 +598,18 @@ def write_values_into_listing(listing: dict, patches: list[dict]) -> dict:
                 specifics.pop(alias, None)
         if _is_clear(value):
             specifics.pop(canonical, None)
+        elif marketplace == "mercari" and canonical == "noBrand":
+            checked = value if isinstance(value, bool) else str(value).strip().casefold() in {"true", "yes", "1"}
+            specifics["noBrand"] = checked
+            if checked:
+                specifics.pop("brand", None)
         else:
             specifics[canonical] = value
+            if marketplace == "mercari" and canonical == "brand":
+                from anteroom.services.mercari_form import is_no_brand
+
+                if isinstance(value, str) and value.strip() and not is_no_brand(value):
+                    specifics["noBrand"] = False
         updated[specifics_key] = specifics
         if marketplace == "ebay" and lookup == "department":
             updated["department"] = value

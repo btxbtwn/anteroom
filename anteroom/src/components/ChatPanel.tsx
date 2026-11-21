@@ -88,9 +88,11 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     lastSendText,
     streamText,
   });
+  const serverBusy = Boolean(activity?.busy);
   const { pendingQueue, enqueue, handleRemoveQueued } = useChatQueue({
     convId,
     busy,
+    serverBusy,
     sendMessage,
     queuedMessage,
     onQueuedMessageConsumed,
@@ -106,7 +108,8 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     const text = input.trim();
     const attached = images.images;
     if (!text && !attached.length) return;
-    if (busy) {
+    // sendMessage refuses while background work runs, so hold the message instead of dropping it.
+    if (busy || serverBusy) {
       if (attached.length) {
         images.setError("Images go with the next message once the current run finishes.");
         return;
@@ -122,7 +125,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
       images.clear(attached.map((image) => image.id));
       void sendMessage(text, uploads.length ? { attachments: uploads } : undefined);
     })();
-  }, [busy, input, setInput, sendMessage, pinChatToBottom, enqueue, images]);
+  }, [busy, serverBusy, input, setInput, sendMessage, pinChatToBottom, enqueue, images]);
 
   const hasPhotos = Boolean(photos && photos.length > 0);
   const hasMessages = Boolean(messages && messages.length > 0);

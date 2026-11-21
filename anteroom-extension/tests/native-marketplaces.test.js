@@ -66,7 +66,7 @@ test('a finished Depop publish without a link reads the public product URL', asy
   s.context.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
   s.context.fetch = async url => {
     const { pathname } = new URL(url);
-    if (pathname === '/api/v3/drafts/products/job-1/status/') {
+    if (pathname === '/presentation/api/v1/drafts/products/job-1/status/') {
       return reply(200, { count_by_status: { COMPLETE: 1, PENDING: 0 }, products: [{ slug: 'seller-columbia-xl', draft_id: '123456' }] });
     }
     throw new Error(pathname);
@@ -76,6 +76,41 @@ test('a finished Depop publish without a link reads the public product URL', asy
   await s.context.handleNativeMarketplaceMessage(s.msg);
   assert.equal(s.replies[0].result.listing_url, 'https://www.depop.com/products/seller-columbia-xl/');
   assert.equal(s.stored.native_operation_abc123.result.listing_url, 'https://www.depop.com/products/seller-columbia-xl/');
+});
+
+test('checking a Depop publish with a 404 and a remaining draft never replays it', async () => {
+  const s = setup('depop');
+  const draft = 'https://www.depop.com/sellinghub/drafts/edit/123456/';
+  const context = { ...s.msg.payload, action: 'publish', draft_url: draft };
+  s.stored.native_operation_abc123 = {
+    finished: true, publish_job_id: 'job-1', context,
+    result: { ok: false, safe_to_retry: false, error_code: 'uncertain', draft_url: draft },
+  };
+  s.context.chrome.cookies = { get: async () => ({ value: 'private-session' }) };
+  s.context.marketplaceSleep = async () => {};
+  const requests = [];
+  s.context.fetch = async (url, options) => {
+    const { pathname } = new URL(url);
+    requests.push({ method: options.method, pathname });
+    if (pathname === '/presentation/api/v1/drafts/products/job-1/status/') return reply(404, '');
+    if (pathname === '/presentation/api/v1/drafts/123456/') return reply(200, { id: '123456' });
+    throw new Error(pathname);
+  };
+  const check = { ...s.msg, type: 'marketplace.result', payload: { operation_id: 'abc123', context } };
+  await s.context.handleNativeMarketplaceMessage(check);
+  // Even a redelivery of the original confirmed request must use the journal.
+  await s.context.handleNativeMarketplaceMessage({ ...s.msg, payload: { ...context, confirm: true } });
+  const [checked, redelivered] = s.replies;
+  assert.equal(checked.finished, true);
+  assert.equal(checked.result.ok, false);
+  assert.equal(checked.result.safe_to_retry, false);
+  assert.equal(checked.result.error_code, 'uncertain');
+  assert.equal(checked.result.draft_url, draft);
+  assert.equal(checked.result.listing_url, undefined);
+  assert.equal(checked.result.marketplace_message, 'publish status: HTTP 404; draft: still in drafts');
+  assert.deepEqual(redelivered, checked.result);
+  assert.ok(requests.some(({ pathname }) => pathname === '/presentation/api/v1/drafts/123456/'));
+  assert.ok(requests.every(({ method }) => method === 'GET'));
 });
 
 test('another running job blocks native work', async () => {

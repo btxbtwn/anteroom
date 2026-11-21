@@ -291,7 +291,7 @@ enum EbayActions {
     static func advertise(campaign: String, listing: String) -> EbayAction {
         EbayAction(title: "Advertise selected listing", kind: "ad",
                    fields: [EbayActionField(name: "bid_percent", label: "Ad rate (%)", kind: .number, initial: "2")],
-                   context: ["campaign_id": .string(campaign), "listing_id": .string(listing)],
+                   context: ["campaign_id": .string(campaign), "listing_ids": .array([.string(listing)])],
                    note: "Select exactly one listing for this ad.")
     }
 

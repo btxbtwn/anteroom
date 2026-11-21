@@ -54,11 +54,12 @@ describe("notesWithMeasurements", () => {
 });
 
 describe("parseItemDetails and notesWithItemDetails", () => {
-  it("reads the saved garment, measurements, labels, COG and SKU", () => {
+  it("reads the saved garment, measurements, labels, COG, SKU and tag size", () => {
     const notes = JSON.stringify({
       garment: "pants",
       cog: "3.5",
       sku: "LV-1",
+      size: "32 x 30",
       vendooLabels: "To List, Bin 4",
       measurements: { pants: { waist: "16", inseam: 30 } },
     });
@@ -68,7 +69,10 @@ describe("parseItemDetails and notesWithItemDetails", () => {
       labels: "To List, Bin 4",
       cog: "3.5",
       sku: "LV-1",
+      size: "32 x 30",
     });
+    expect(parseItemDetails(JSON.stringify({ size: 0 }), "top").size).toBe("0");
+    expect(parseItemDetails(JSON.stringify({ size: "0" }), "top").size).toBe("0");
   });
 
   it("fills blank measurements from the ones the listing's description carried", () => {
@@ -88,17 +92,18 @@ describe("parseItemDetails and notesWithItemDetails", () => {
   });
 
   it("falls back to the guessed garment for empty or plain notes", () => {
-    expect(parseItemDetails(null, "skirt")).toMatchObject({ garment: "skirt", measurements: {}, labels: "" });
+    expect(parseItemDetails(null, "skirt")).toMatchObject({ garment: "skirt", measurements: {}, labels: "", size: "" });
     expect(parseItemDetails("just text", "top").garment).toBe("top");
   });
 
-  it("writes the reviewed details and keeps other note fields", () => {
-    const next = JSON.parse(notesWithItemDetails(JSON.stringify({ flaws: "small stain" }), {
+  it("writes the reviewed details including tag size and keeps other note fields", () => {
+    const next = JSON.parse(notesWithItemDetails(JSON.stringify({ flaws: "small stain", size: "M" }), {
       garment: "top",
       measurements: { pitToPit: "22", length: "" },
       labels: " Bin 2 ",
       cog: "4",
       sku: "",
+      size: " 0 ",
     }));
     expect(next).toEqual({
       flaws: "small stain",
@@ -107,7 +112,18 @@ describe("parseItemDetails and notesWithItemDetails", () => {
       vendooLabels: "Bin 2",
       cog: "4",
       sku: "",
+      size: "0",
       poshmarkOriginalPrice: "0",
     });
+
+    const cleared = JSON.parse(notesWithItemDetails(JSON.stringify({ size: "M" }), {
+      garment: "top",
+      measurements: {},
+      labels: "",
+      cog: "",
+      sku: "",
+      size: "",
+    }));
+    expect(cleared.size).toBe("");
   });
 });

@@ -1,6 +1,8 @@
 """A local HTTP stand-in using eBay's documented response shapes."""
 import gzip
 import json
+from html import escape
+import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse
 
@@ -76,7 +78,7 @@ class WorkspaceEbay(BaseHTTPRequestHandler):
         elif path == "/sell/marketing/v1/ad_campaign":
             body = {"total": 1, "campaigns": [{"campaignId": "campaign-1", "campaignName": "Coat campaign", "campaignStatus": "RUNNING"}]}
         elif path == "/sell/marketing/v1/ad_campaign/campaign-1":
-            body = {"campaignId": "campaign-1", "campaignName": "Coat campaign", "campaignStatus": "RUNNING", "fundingStrategy": {"fundingModel": "COST_PER_SALE", "bidPercentage": "2"}}
+            body = {"campaignId": "campaign-1", "campaignName": "Coat campaign", "campaignStatus": "RUNNING", "marketplaceId": "EBAY_US", "fundingStrategy": {"fundingModel": "COST_PER_SALE", "bidPercentage": "2"}}
         elif path == "/sell/marketing/v1/ad_campaign/campaign-1/ad":
             body = {"total": 1, "ads": [{"adId": "ad-1", "listingId": ITEM_ID, "bidPercentage": "2"}]}
         elif path == "/sell/marketing/v1/item_price_markdown/promo-1%40EBAY_US":
@@ -142,6 +144,22 @@ class WorkspaceEbay(BaseHTTPRequestHandler):
         state = self.server.state
         path = urlparse(self.path).path
         raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        if path == "/ws/api.dll" and self.headers["X-EBAY-API-CALL-NAME"] == "GetMyeBaySelling":
+            pagination = ET.fromstring(raw).find(".//{*}Pagination")
+            page_size = int(pagination.findtext("{*}EntriesPerPage"))
+            page_number = int(pagination.findtext("{*}PageNumber"))
+            listings = getattr(state, "active_items", [(ITEM_ID, "Test wool coat"), ("123456789013", "Test jeans")])
+            offset = (page_number - 1) * page_size
+            pages = (len(listings) + page_size - 1) // page_size
+            items = "".join(f"""<Item><ItemID>{identifier}</ItemID><Title>{escape(title)}</Title>
+                <ListingType>FixedPriceItem</ListingType>
+                <SellingStatus><CurrentPrice currencyID="USD">50.00</CurrentPrice></SellingStatus></Item>"""
+                for identifier, title in listings[offset:offset + page_size])
+            self.reply(200, f"""<GetMyeBaySellingResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack>
+                <ActiveList><PaginationResult><TotalNumberOfPages>{getattr(state, "active_pages", pages)}</TotalNumberOfPages>
+                <TotalNumberOfEntries>{getattr(state, "active_total", len(listings))}</TotalNumberOfEntries></PaginationResult>
+                <ItemArray>{items}</ItemArray></ActiveList></GetMyeBaySellingResponse>""".encode())
+            return
         if path == "/ws/api.dll" and self.headers["X-EBAY-API-CALL-NAME"] == "GetItem":
             content = f'''<GetItemResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack><Item>
             <ItemID>{ITEM_ID}</ItemID><Title>Test wool coat</Title><Description>A wool coat</Description><Site>US</Site>
@@ -156,14 +174,19 @@ class WorkspaceEbay(BaseHTTPRequestHandler):
         multipart = "multipart/form-data" in self.headers.get("Content-Type", "")
         payload = {"multipart": True, "bytes": len(raw)} if multipart else None if path == "/ws/api.dll" else json.loads(raw) if raw else {}
         state.writes.append((self.command, path, payload))
-        if state.write_error:
-            self.reply(state.write_error, {"errors": [{"errorId": 999, "message": "PRIVATE ERROR ECHO"}]})
+        error = getattr(state, "write_errors", {}).get(len(state.writes), state.write_error)
+        if error:
+            self.reply(error, {"errors": [{"errorId": 999, "message": "PRIVATE ERROR ECHO"}]})
             return
         if path in getattr(state, "write_results", {}):
             self.reply(200, state.write_results[path])
             return
         if path == "/ws/api.dll":
             self.reply(200, b'<ReviseFixedPriceItemResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack></ReviseFixedPriceItemResponse>')
+        elif path.endswith("/bulk_create_ads_by_listing_id"):
+            self.reply(200, {"responses": [
+                {"listingId": entry["listingId"], "statusCode": 200, "adId": "ad-1"} for entry in payload["requests"]
+            ]})
         elif path.endswith("/bulk_update_price_quantity"):
             self.reply(200, {"responses": [{"statusCode": 200}]})
         elif path.startswith("/sell/inventory/v1/inventory_item/"):

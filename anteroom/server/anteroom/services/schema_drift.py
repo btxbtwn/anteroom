@@ -163,9 +163,10 @@ def inspect_database(path: str | Path | None = None) -> Drift:
         scripts.get_revision(revision)
     except CommandError:
         return replace(drift, revision=revision, newer_revision=True)
+    # Like Alembic upgrade, include unapplied sibling branches of a merge.
     pending = [
         script.revision
-        for script in scripts.iterate_revisions(head_revision(), revision)
+        for script in scripts.iterate_revisions(head_revision(), revision, implicit_base=True)
         if script.revision != revision
     ]
 

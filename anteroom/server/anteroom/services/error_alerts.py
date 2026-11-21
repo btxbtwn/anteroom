@@ -7,7 +7,7 @@ for which request (method, route template, request id) and seller id. Browser
 crashes arrive through ``routes/error_reports.py`` and are reported the same way.
 
 Reports group by severity and fingerprint. A durable shared outbox batches
-warnings hourly, groups repeated errors for 15 minutes, and reserves every
+warnings daily, groups repeated errors hourly, and reserves every
 SMTP attempt against a configured rolling 24-hour budget before sending.
 
 Messages and stacks pass through ``redaction.redact``; SQL parameters are
@@ -165,7 +165,7 @@ def build_report(record: logging.LogRecord) -> dict[str, Any]:
         "browser": {k: browser.get(k) for k in ("kind", "path", "user_agent", "release")} if browser else None,
         "environment": {
             "service": "hosted" if os.environ.get("FLY_APP_NAME") else "local",
-            "release": app_version(),
+            "release": current_release(),
             "machine": os.environ.get("FLY_MACHINE_ID"),
             "region": os.environ.get("FLY_REGION"),
             "process_role": os.environ.get("ANTEROOM_PROCESS_ROLE", "all"),
@@ -176,6 +176,10 @@ def build_report(record: logging.LogRecord) -> dict[str, Any]:
         "stack": stack,
         "database_pool": database_pool,
     }
+
+
+def current_release() -> str:
+    return (os.environ.get("ANTEROOM_RELEASE") or os.environ.get("FLY_IMAGE_REF") or app_version())[:255]
 
 
 def render_email(report: dict[str, Any], repeats: int, first_seen: str | None) -> tuple[str, str]:
@@ -246,7 +250,8 @@ class AlertHandler(logging.Handler):
 
         self.delivery = EmailDelivery(store or EmailStore(engine), send, clock=clock,
                                       daily_limit=int(os.environ.get('ANTEROOM_ERROR_EMAIL_DAILY_LIMIT', '0'))
-                                      if daily_limit is None else daily_limit)
+                                      if daily_limit is None else daily_limit,
+                                      enable_lifecycle=os.environ.get('ANTEROOM_ERROR_EMAIL_LIFECYCLE') == '1')
         self.pending: queue.Queue = queue.Queue(maxsize=500)
         self.dropped = 0
         self.stopping = threading.Event()

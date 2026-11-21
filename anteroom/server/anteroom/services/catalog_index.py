@@ -176,14 +176,19 @@ def _extension_script_files() -> list[Path]:
 
 
 def fingerprint(db: Session) -> dict[str, Any]:
+    """Cheap catalog version for index rebuild checks.
+
+    Uses each tree's stored ``content_hash`` instead of counting leaves.
+    Leaf counts scan tens of thousands of shared rows; under bulk regenerate
+    they hit the hosted 15s statement timeout and abort generation.
+    """
     trees = {}
     for marketplace in MARKETPLACES:
         tree = db.get(CategoryTree, marketplace)
-        leaves = _leaf_query(db).filter_by(marketplace=marketplace).count()
         trees[marketplace] = {
             "status": tree.status if tree else "missing",
             "updated_at": tree.updated_at.isoformat() if tree and tree.updated_at else None,
-            "leaves": leaves,
+            "content_hash": tree.content_hash if tree else None,
         }
     return {
         "trees": trees,
@@ -513,6 +518,21 @@ def _index_docs(docs: Path):
         return None
 
 
+def _category_trees_version(
+    fp_trees: dict[str, Any], rows: list[tuple[str, str, str, str]],
+) -> str:
+    """Version the leaf index from tree metadata and the leaf ids being written.
+
+    ``fingerprint`` stays cheap (content_hash). An explicit rebuild after a
+    node write still refreshes when the leaf set changed, even if a test or
+    writer left content_hash alone.
+    """
+    return json.dumps({
+        "trees": fp_trees,
+        "ids": sorted((marketplace, category_id) for marketplace, category_id, _path, _label in rows),
+    }, sort_keys=True)
+
+
 def _category_index(rows: list[tuple[str, str, str, str]], trees_text: str):
     """The category-leaf index: from memory, else from disk, else built and saved.
 
@@ -566,7 +586,10 @@ def _build_unlocked(snapshot: CatalogSnapshot) -> dict[str, Any]:
     moment readers wait, and that wait is a pointer swap.
     """
     fp = snapshot.fingerprint
-    categories = _category_index(snapshot.category_rows, json.dumps(fp["trees"], sort_keys=True))
+    categories = _category_index(
+        snapshot.category_rows,
+        _category_trees_version(fp["trees"], snapshot.category_rows),
+    )
     docs = _write_catalog_docs(snapshot.schema_rows)
     try:
         index = _merged(categories, _index_docs(docs))

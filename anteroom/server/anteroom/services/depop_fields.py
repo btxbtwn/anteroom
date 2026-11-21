@@ -332,6 +332,13 @@ def _infer_depop_parcel_size(listing: dict) -> str:
     return "Extra large"
 
 
+def depop_default_source(listing: dict) -> str:
+    """Depop's Source when nobody chose one: Vintage when the listing says so, else Preloved."""
+    ebay = listing.get("ebay_specifics")
+    hay = ebay_season_haystack(listing, ebay if isinstance(ebay, dict) else {})
+    return "Vintage" if re.search(r"\b(?:vintage|deadstock|y2k|90s|80s|70s)\b", hay) else "Preloved"
+
+
 def depop_default_age(listing: dict) -> str:
     """Depop's Age when nobody chose one: a decade the listing names, else Modern."""
     ebay = listing.get("ebay_specifics")
@@ -354,7 +361,6 @@ def ensure_depop_category_optionals(listing: dict) -> bool:
     if not isinstance(ebay, dict):
         ebay = {}
     changed = False
-    hay = ebay_season_haystack(listing, ebay)
 
     def set_key(key: str, value: Any) -> None:
         nonlocal depop, changed
@@ -368,8 +374,7 @@ def ensure_depop_category_optionals(listing: dict) -> bool:
         changed = True
 
     if ebay_optional_blank(depop.get("source")):
-        source = "Vintage" if re.search(r"\b(?:vintage|deadstock|y2k|90s|80s|70s)\b", hay) else "Preloved"
-        set_key("source", source)
+        set_key("source", depop_default_source(listing))
 
     if ebay_optional_blank(depop.get("age")):
         set_key("age", depop_default_age(listing))

@@ -70,7 +70,7 @@ def prepared_listing(previous: dict, listing: dict, *, notes: dict | None = None
     return updated
 
 
-def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: str = "user_form", expected_revision_id: str | None = None, commit: bool = True):
+def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: str = "user_form", expected_revision_id: str | None = None, commit: bool = True, depop_notes: dict | None = None):
 
     conv_repo = ConversationRepo(db)
     conv = conv_repo.get(conv_id)
@@ -102,7 +102,9 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
             raise HTTPException(409, "The agent is editing: " + ", ".join(sorted(set(locked))))
     from anteroom.services.vendoo_import import parse_notes
 
-    listing_data = prepared_listing(previous_json, listing_data, notes=parse_notes(conv.notes))
+    # Chat applies accepted changes to inherited measurements after native edits are locked.
+    notes = parse_notes(conv.notes) if depop_notes is None else None
+    listing_data = prepared_listing(previous_json, listing_data, notes=notes)
     from anteroom.services.agent_categories import map_general_category
 
     map_general_category(db, previous_json, listing_data)
@@ -131,6 +133,7 @@ def save_listing_edit(conv_id: str, listing_data: dict, db: Session, *, source: 
         parent_revision_id=current.current_revision_id if current else None,
         expected_revision_id=expected_revision_id,
         commit=commit,
+        depop_notes=depop_notes,
     )
 
     from anteroom.services.seller_overrides import notes_for_listing_edits

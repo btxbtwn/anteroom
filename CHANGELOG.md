@@ -6,6 +6,86 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1094 — 2026-11-21
+
+- Use the eBay Year Manufactured to fill Etsy's When was it made, so vintage items no longer show "May not qualify" for Etsy.
+
+## 0.1.1093 — 2026-11-21
+
+- Promote selected or all active eBay listings at one ad rate from Marketing → Advertising.
+
+## 0.1.1092 — 2026-11-21
+
+- Moving your listings from the Mac to your Anteroom account carries over the Vendoo label names saved on older listings, even when Item Details is blank.
+
+## 0.1.1091 — 2026-11-21
+
+- Operators can resolve, mute, and reopen error groups. Errors that return on a newer release alert again, and warnings arrive in a daily digest.
+
+## 0.1.1090 — 2026-11-21
+
+- Show Depop’s duplicate-SKU error when Depop reports it. Keep uncertain publishes blocked from retrying while you check the result.
+- Clear the saved Depop draft link when a save check confirms the draft is missing.
+
+## 0.1.1089 — 2026-11-21
+
+- Add the clothing Size tag field and Read size tags to the bulk Regenerate review dialog, matching bulk upload so sellers can enter, check or read tag sizes from saved photos before rewriting listings.
+
+## 0.1.1088 — 2026-11-21
+
+- Etsy draft generation uses the selected category’s choices and leaves unavailable options out of the draft.
+
+## 0.1.1087 — 2026-11-21
+
+- Build your description formula by dragging attributes into the order you want, dragging them out to remove them, or using the add, move, and remove controls.
+
+## 0.1.1086 — 2026-11-21
+
+- Let listing chat see and edit the General tab's Measurements (in) fields (garment type, garment measurements, and other measurements) directly.
+
+## 0.1.1085 — 2026-11-21
+
+- Select suggested listings and regenerate them together from the Suggestions page.
+
+## 0.1.1084 — 2026-11-21
+
+- Measure browser checks so future CI changes can keep the same test coverage.
+
+## 0.1.1083 — 2026-11-21
+
+- Open Mercari listing forms and checks for older drafts saved with a Smart Pricing toggle.
+
+## 0.1.1082 — 2026-11-21
+
+- Stop bulk Regenerate from failing when category lookup times out under load.
+
+## 0.1.1081 — 2026-11-21
+
+- Mercari checks “No brand / Not sure” when there’s no matching brand. You or the agent can change it directly, and choosing a brand clears the checkbox.
+
+## 0.1.1080 — 2026-11-21
+
+- Mercari no longer says "The form's category or dependent choices changed" on every listing once a shoebox answer is saved as a default.
+- Reload fields appears when a reload fails for that marketplace or Mercari shipping choices could not load.
+
+## 0.1.1079 — 2026-11-21
+
+- Always fill Depop's Source, Age and Style when filling marketplace fields, instead of leaving them blank.
+- Ask chat no longer says it finished a field without actually saving a value.
+- A message queued in chat now sends once the listing finishes its background work, instead of waiting forever.
+
+## 0.1.1078 — 2026-11-21
+
+- Fix Poshmark refusing a listing as an invalid inventory status when its Availability was saved as "For Sale".
+
+## 0.1.1077 — 2026-11-21
+
+- Generated listings now always use the defaults you saved (Etsy who made it, what it is and renewal; Mercari ships-from ZIP, shipping label and shoebox answer) instead of the model picking its own. A value you set on a listing yourself still wins.
+
+## 0.1.1076 — 2026-11-21
+
+- Generating a listing now fills Etsy's attributes (sleeve length, neckline, pattern and the rest) from the photos and your notes, and fills them again when you change the Etsy category. Only answers the evidence supports are kept, and attributes you set yourself are left alone.
+
 ## 0.1.1075 — 2026-11-20
 
 - Keep clicking between pages and drafts responsive under load by prioritizing active navigation and saves ahead of background prefetches and thumbnails, canceling stale prefetches when you switch pages, and collapsing the listing editor's opening reads into a single request.

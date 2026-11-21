@@ -1,5 +1,6 @@
 import { ListingTemplatesSettings } from "./ListingTemplatesSettings";
 import { InventorySettings } from "./InventorySettings";
+import { DescriptionBuilder } from "./DescriptionBuilder";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
@@ -313,16 +314,6 @@ function HiddenFieldsSection() {
 
 type FormulaDraft = { title: string; description: string; blockIds: string[] | null };
 
-function descriptionPreview(
-  blocks: { id: string; snippet: string }[],
-  ids: string[],
-  empty: string,
-): string {
-  const chosen = new Set(ids);
-  const parts = blocks.filter((block) => chosen.has(block.id)).map((block) => block.snippet);
-  return parts.length ? parts.join("\n\n") : empty;
-}
-
 function sameIds(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((id, index) => id === right[index]);
 }
@@ -341,7 +332,8 @@ function ListingFormulasSection() {
   const serverTitle = data ? data.title || defaultTitle : "";
   const serverDescription = data ? data.description || defaultDescription : "";
   const serverBlockIds = (blocks ?? []).filter((block) => block.enabled).map((block) => block.id);
-  const defaultBlockIds = (blocks ?? []).filter((block) => block.default).map((block) => block.id);
+  const defaultBlockIds =
+    data?.default_blocks ?? (blocks ?? []).filter((block) => block.default).map((block) => block.id);
   const title = draft?.title ?? serverTitle;
   const description = draft?.description ?? serverDescription;
   const blockIds = draft?.blockIds ?? (data?.custom_description ? null : blocks ? serverBlockIds : null);
@@ -374,29 +366,21 @@ function ListingFormulasSection() {
   };
 
   const editTitle = (nextTitle: string) => setDraft({ title: nextTitle, description, blockIds });
-
-  const toggleBlock = (id: string, checked: boolean) => {
-    const current = blockIds ?? serverBlockIds;
-    const next = new Set(current);
-    if (checked) next.add(id);
-    else next.delete(id);
-    const ordered = (blocks ?? []).map((block) => block.id).filter((blockId) => next.has(blockId));
-    setDraft({ title, description, blockIds: ordered });
-  };
+  const editBlocks = (nextBlocks: string[]) => setDraft({ title, description, blockIds: nextBlocks });
 
   return (
     <SettingsSection id="listing-formulas" title="Listing formulas">
       <SettingsRow
         title="Title and description"
-        description="New listings follow the title and the description sections you leave on. The current formula starts on."
+        description="New listings follow the title and the description attributes in the order you set. The current formula starts active."
       >
         {isPending ? (
           <LoadingNote>Loading formulas</LoadingNote>
         ) : isError ? (
           <SettingsNote tone="error">{(error as Error).message || "Could not load formulas"}</SettingsNote>
         ) : (
-          <div className="grid gap-3">
-            <Label className="grid gap-1 text-xs font-normal text-muted-foreground">
+          <div className="grid min-w-0 gap-3">
+            <Label className="grid min-w-0 gap-1 text-xs font-normal text-muted-foreground">
               Title
               <Input
                 size="sm"
@@ -408,7 +392,7 @@ function ListingFormulasSection() {
               />
             </Label>
             {blocks ? (
-              <div className="grid gap-2">
+              <div className="grid min-w-0 gap-2">
                 {!usingBlocks ? (
                   <Label className="grid gap-1 text-xs font-normal text-muted-foreground">
                     Description
@@ -423,41 +407,24 @@ function ListingFormulasSection() {
                     />
                   </Label>
                 ) : (
-                  <>
-                    <span className="text-xs text-muted-foreground">Description</span>
+                  <div className="grid gap-0.5">
+                    <span className="text-xs font-medium text-muted-foreground">Description</span>
                     <p className="text-xs text-muted-foreground">
-                      Turn a section off to drop it, or on to add it. A section is left out of a listing when the item does not have that fact.
+                      Drag attributes into the order you want, or drag them out to remove. Sections with no facts are left out.
                     </p>
-                  </>
+                  </div>
                 )}
                 {data?.custom_description && draft?.blockIds == null ? (
-                  <SettingsNote>This description was typed in. Turn a section on or off to replace it with the list.</SettingsNote>
+                  <SettingsNote>This description was typed in. Drag or add an attribute below to switch to the builder.</SettingsNote>
                 ) : null}
-                <div className="divide-y divide-border/50 overflow-hidden rounded-lg border border-border/60" role="group" aria-label="Description sections">
-                  {blocks.map((block) => (
-                    <Label
-                      key={block.id}
-                      className="flex min-h-11 cursor-pointer items-center gap-3 bg-background px-3 py-2 font-normal"
-                    >
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm text-foreground">{block.label}</span>
-                        <span className="block text-xs text-muted-foreground">{block.detail}</span>
-                      </span>
-                      <Switch
-                        size="sm"
-                        checked={(blockIds ?? serverBlockIds).includes(block.id)}
-                        disabled={saveMutation.isPending}
-                        aria-label={block.label}
-                        onCheckedChange={(checked) => toggleBlock(block.id, checked)}
-                      />
-                    </Label>
-                  ))}
-                </div>
-                {usingBlocks ? (
-                  <pre className="overflow-x-auto whitespace-pre-wrap rounded-lg border border-border/60 bg-muted/40 p-3 font-mono text-xs text-foreground">
-                    {descriptionPreview(blocks, blockIds ?? [], data?.empty_description || "")}
-                  </pre>
-                ) : null}
+                <DescriptionBuilder
+                  blocks={blocks}
+                  blockIds={blockIds ?? []}
+                  emptyDescription={data?.empty_description || ""}
+                  showPreview={usingBlocks}
+                  disabled={saveMutation.isPending}
+                  onChange={editBlocks}
+                />
               </div>
             ) : (
               <Label className="grid gap-1 text-xs font-normal text-muted-foreground">

@@ -41,6 +41,23 @@ def _category_index() -> tuple[frozenset[str], dict[str, str]]:
     return values, unique_leaves
 
 
+AVAILABILITY_PATH = "poshmark_specifics.availability"
+
+
+def use_availability_id(listing: dict) -> None:
+    """Store Availability as Poshmark's id. A draft may hold the label the form
+    shows (``For Sale``); Poshmark rejects that as an invalid inventory status."""
+    specifics = listing.get("poshmark_specifics")
+    if not isinstance(specifics, dict) or not isinstance(specifics.get("availability"), str):
+        return
+    row = next(row for row in catalog()["fields"] if row["path"] == AVAILABILITY_PATH)
+    wanted = specifics["availability"].strip().casefold()
+    for label, native_id in row["option_values"].items():
+        if wanted in (label.casefold(), native_id.casefold()):
+            specifics["availability"] = native_id
+            return
+
+
 def _multiple(listing: dict) -> bool:
     def many(value):
         try:
