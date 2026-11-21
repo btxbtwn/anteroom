@@ -1,0 +1,1 @@
+- Fix Poshmark refusing a listing as an invalid inventory status when its Availability was saved as "For Sale".
