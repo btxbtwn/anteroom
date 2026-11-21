@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1124 — 2026-11-21
+
+- Show a first-run onboarding checklist on hosted web before a seller creates their first listing, guiding marketplace connections (eBay, Etsy, and optional Chrome Bridge), AI setup when bringing your own key, and creating the first draft.
+
 ## 0.1.1123 — 2026-11-21
 
 - Hosted: deleting an edited draft photo now removes both its edited file and original source photo from storage.
