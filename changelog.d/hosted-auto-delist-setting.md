@@ -1,1 +1,0 @@
-- Hosted web Settings → Connections now shows the "Delist the other marketplaces" auto-delist toggle alongside sale detection, matching desktop.
