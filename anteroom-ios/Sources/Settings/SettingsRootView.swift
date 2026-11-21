@@ -163,6 +163,9 @@ struct AboutSettingsSection: View {
         Section("About") {
             LabeledContent("Version", value: version)
             NavigationLink("What's new") { ChangelogView(api: api) }
+            Link("Privacy Policy", destination: AppConfig.privacyURL)
+            Link("Terms of Service", destination: AppConfig.termsURL)
+            Link("Contact Support", destination: AppConfig.supportEmailURL)
         }
     }
 

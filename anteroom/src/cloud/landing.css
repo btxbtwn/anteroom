@@ -355,6 +355,7 @@
 
 .landing-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -367,6 +368,22 @@
 
 .landing-footer .landing-brand {
   font-size: 20px;
+}
+
+.landing-footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px;
+}
+
+.landing-footer-links a {
+  color: var(--muted-foreground);
+  transition: color 0.15s ease;
+}
+
+.landing-footer-links a:hover {
+  color: var(--foreground);
 }
 
 @media (max-width: 860px) {

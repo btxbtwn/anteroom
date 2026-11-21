@@ -81,6 +81,12 @@ struct SignInView: View {
                     }
                 }
                 .font(.subheadline)
+                HStack(spacing: 16) {
+                    Link("Terms", destination: AppConfig.termsURL)
+                    Link("Privacy Policy", destination: AppConfig.privacyURL)
+                }
+                .font(.footnote)
+                .foregroundStyle(.secondary)
             }
             .frame(maxWidth: 480)
             .padding(24)

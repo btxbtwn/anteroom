@@ -67,5 +67,15 @@ it("signup instructions name only the supported browser marketplaces", () => {
     for (const name of ["Poshmark", "Mercari", "Depop"]) expect(html).toContain(name);
     expect(html).not.toContain("Vinted");
     expect(html).not.toContain("Sellwild");
+    expect(html).toContain('href="/terms"');
+    expect(html).toContain('href="/privacy"');
   } finally { window.history.replaceState(null, "", before); }
+});
+
+it("links Privacy, Terms, and Support from the landing page footer", async () => {
+  const { Landing } = await import("./Landing");
+  const html = renderToStaticMarkup(<Landing />);
+  expect(html).toContain('href="/privacy"');
+  expect(html).toContain('href="/terms"');
+  expect(html).toContain('href="mailto:support@myanteroom.com"');
 });

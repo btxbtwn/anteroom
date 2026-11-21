@@ -109,6 +109,11 @@ export function Landing() {
 
       <footer className="landing-footer">
         <span className="landing-brand">Anteroom</span>
+        <nav className="landing-footer-links" aria-label="Legal and support">
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+          <a href="mailto:support@myanteroom.com">Support</a>
+        </nav>
         <span>Web · iOS · Desktop</span>
       </footer>
     </div>

@@ -32,3 +32,5 @@ def test_hosted_image_carries_the_favicon_the_server_serves():
     assert '!anteroom/public/favicon.png' in dockerignore
     assert 'web_dir / "privacy.html"' in hosted
     assert '!anteroom/public/privacy.html' in dockerignore
+    assert 'web_dir / "terms.html"' in hosted
+    assert '!anteroom/public/terms.html' in dockerignore
