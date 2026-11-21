@@ -78,6 +78,7 @@ def test_public_web_assets_do_not_expose_data_routes(jwks, tmp_path):  # noqa: F
     (tmp_path/'favicon.png').write_bytes(b'\x89PNG')
     (tmp_path/'privacy.html').write_text('<!doctype html><title>Privacy</title>')
     (tmp_path/'terms.html').write_text('<!doctype html><title>Terms</title>')
+    (tmp_path/'robots.txt').write_text('User-agent: *\nAllow: /\n')
     with TestClient(create_app(PROJECT_URL, web_dir=Path(tmp_path))) as client:
         assert client.get('/').status_code == 200
         # The browser fetches the tab icon without a session.
@@ -93,6 +94,9 @@ def test_public_web_assets_do_not_expose_data_routes(jwks, tmp_path):  # noqa: F
         assert terms.status_code == 200
         assert terms.headers['content-type'].startswith('text/html')
         assert client.get('/terms.html').status_code == 401
+        robots = client.get('/robots.txt')
+        assert robots.status_code == 200
+        assert robots.headers['content-type'].startswith('text/plain')
         assert client.head('/').status_code == 405  # GET-only index, no SPA fallback.
         assert client.get('/assets/cloud.js').status_code == 200
         for path in ['/api/drafts','/api/account','/api/conversations','/docs','/cloud.html','/api/health/']:
