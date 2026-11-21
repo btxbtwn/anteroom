@@ -24,6 +24,8 @@ class FingerprintRecheckTest(unittest.TestCase):
             catalog._state().index = object()
             catalog._state().fingerprint = json.dumps(self.fp, sort_keys=True)
             catalog._state().stale = False
+            catalog._SHARED_CATEGORIES.root = str(catalog.category_index_dir())
+            catalog._SHARED_CATEGORIES.trees_fp = json.dumps(self.fp["trees"], sort_keys=True)
         meta = MagicMock()
         meta.is_file.return_value = True
         meta.read_text.return_value = catalog._state().fingerprint
@@ -51,6 +53,16 @@ class FingerprintRecheckTest(unittest.TestCase):
             catalog.ensure_catalog_index(MagicMock())
             catalog.ensure_catalog_index(MagicMock())
         self.assertEqual(fingerprint.call_count, 2)
+
+    def test_stale_shared_trees_trigger_rebuild_even_when_seller_fingerprint_matches(self):
+        with catalog._INDEX_LOCK:
+            catalog._SHARED_CATEGORIES.trees_fp = '{"ebay": {"content_hash": "old"}}'
+        with (
+            patch.object(catalog, "fingerprint", return_value=self.fp),
+            patch.object(catalog, "rebuild_catalog_index", return_value={"ok": True}) as rebuild,
+        ):
+            catalog.ensure_catalog_index(MagicMock())
+        rebuild.assert_called_once()
 
 
 class FingerprintQueryTest(unittest.TestCase):

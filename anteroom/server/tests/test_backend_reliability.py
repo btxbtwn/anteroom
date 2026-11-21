@@ -45,7 +45,7 @@ def test_the_hosted_catalog_build_has_a_deadline(tmp_path, monkeypatch):
 
     with use(for_seller(str(uuid4()))):
         with pytest.raises(catalog_index.subprocess.TimeoutExpired):
-            catalog_index.build_catalog_index(catalog_index.CatalogSnapshot({"trees": {}}, [], []))
+            catalog_index.build_catalog_index(lambda: catalog_index.CatalogSnapshot({"trees": {}}, [], []))
     assert seen["timeout"] == catalog_index.HOSTED_BUILD_TIMEOUT_SEC
 
 

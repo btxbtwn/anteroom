@@ -12,8 +12,10 @@ import sys
 import tempfile
 import threading
 import time
-from dataclasses import asdict, dataclass
+import uuid
+from collections.abc import Callable
 from contextvars import copy_context
+from dataclasses import asdict, dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -34,16 +36,30 @@ _INDEX_LOCK = threading.RLock()
 # lock across that freezes the event loop (Regenerate sits on "Clearing…").
 _REBUILD_LOCK = threading.Lock()
 _rebuild_gate = threading.Lock()
-# Index contents can include seller-observed schemas, so hosted executions
-# own their in-memory state as well as their materialized files.
+
+
+# Public category trees (CategoryTree / CategoryTreeNode) are identical for
+# every seller, so keep one shared Semble index in memory and on disk instead
+# of duplicating ~31k category leaves per hosted seller.
+@dataclass
+class _SharedCategoryState:
+    index: Any = None
+    fingerprint: str | None = None
+    trees_fp: str | None = None
+    root: str | None = None
+
+
+_SHARED_CATEGORIES = _SharedCategoryState()
+
+
+# Docs index contents can include seller-observed CategorySchema rows, so
+# hosted executions keep their own docs state and materialized docs dir.
 @dataclass
 class CatalogIndexState:
     index: Any = None
     fingerprint: str | None = None
     stale: bool = False
     checked_at: float = 0.0
-    categories: Any = None
-    category_fingerprint: str | None = None
     rebuilding: bool = False
 
 
@@ -59,6 +75,10 @@ def _state() -> CatalogIndexState:
             raise RuntimeError('Seller execution has no catalog state')
         return context.catalog
     return _LOCAL_STATE
+
+
+def _shared_catalog_root() -> Path:
+    return user_data_root() / 'catalog-index'
 
 
 def _catalog_root() -> Path:
@@ -100,18 +120,18 @@ _FORM_MARKETPLACE = {
 
 
 def catalog_docs_dir() -> Path:
-    """Schema, option, skill and fill docs."""
+    """Seller-scoped schema, option, skill and fill docs."""
     return _catalog_root() / "docs"
 
 
 def category_docs_dir() -> Path:
-    """One doc per category leaf, kept apart so it can be indexed once."""
-    return _catalog_root() / "category-docs"
+    """One doc per public category leaf, shared across sellers and indexed once."""
+    return _shared_catalog_root() / "category-docs"
 
 
 def category_index_dir() -> Path:
-    """The saved Semble index of ``category_docs_dir``."""
-    return _catalog_root() / "categories.semble"
+    """The saved Semble index of ``category_docs_dir``, shared across sellers."""
+    return _shared_catalog_root() / "categories.semble"
 
 
 def catalog_meta_path() -> Path:
@@ -133,8 +153,9 @@ def reset_catalog_index_cache() -> None:
         _state().index = None
         _state().fingerprint = None
         _state().stale = True
-        _state().categories = None
-        _state().category_fingerprint = None
+        _SHARED_CATEGORIES.index = None
+        _SHARED_CATEGORIES.fingerprint = None
+        _SHARED_CATEGORIES.root = None
 
 
 def _safe_stem(value: str) -> str:
@@ -491,21 +512,58 @@ def _load_semble_index(docs: Path):
     return SembleIndex.from_path(str(docs), content=ContentType.DOCS)
 
 
-def _index_needs_rebuild(fp_text: str) -> bool:
+def _has_shared_categories() -> bool:
+    """Caller holds ``_INDEX_LOCK``."""
+    return (
+        _SHARED_CATEGORIES.index is not None
+        and _SHARED_CATEGORIES.root == str(category_index_dir())
+    )
+
+
+def _index_needs_rebuild(fp_text: str, trees_fp_text: str | None = None) -> bool:
     """Caller holds ``_INDEX_LOCK``."""
     meta = catalog_meta_path()
     cached = meta.read_text(encoding="utf-8") if meta.is_file() else None
-    return _state().stale or _state().index is None or _state().fingerprint != fp_text or cached != fp_text
+    has_index = _state().index is not None or _has_shared_categories()
+    if _state().stale or not has_index or _state().fingerprint != fp_text or cached != fp_text:
+        return True
+    if trees_fp_text is not None and (
+        _SHARED_CATEGORIES.root != str(category_index_dir())
+        or _SHARED_CATEGORIES.trees_fp != trees_fp_text
+    ):
+        return True
+    return False
 
 
-def _publish_index(index, fp_text: str) -> None:
-
+def _publish_index(
+    index,
+    fp_text: str,
+    *,
+    categories: Any = None,
+    category_fingerprint: str | None = None,
+    category_root: str | None = None,
+    mark_current: bool = True,
+) -> None:
     with _INDEX_LOCK:
         _state().index = index
-        _state().fingerprint = fp_text
-        _state().stale = False
-        catalog_meta_path().parent.mkdir(parents=True, exist_ok=True)
-        catalog_meta_path().write_text(fp_text, encoding="utf-8")
+        if mark_current:
+            _state().fingerprint = fp_text
+            _state().stale = False
+            catalog_meta_path().parent.mkdir(parents=True, exist_ok=True)
+            catalog_meta_path().write_text(fp_text, encoding="utf-8")
+        else:
+            _state().stale = True
+            _state().checked_at = 0.0
+        if category_fingerprint is not None:
+            _SHARED_CATEGORIES.index = categories
+            _SHARED_CATEGORIES.fingerprint = category_fingerprint
+            try:
+                _SHARED_CATEGORIES.trees_fp = json.dumps(
+                    json.loads(category_fingerprint).get("trees", {}), sort_keys=True,
+                )
+            except (ValueError, AttributeError):
+                _SHARED_CATEGORIES.trees_fp = None
+            _SHARED_CATEGORIES.root = category_root or str(category_index_dir())
 
 
 def _index_docs(docs: Path):
@@ -521,92 +579,146 @@ def _index_docs(docs: Path):
 def _category_trees_version(
     fp_trees: dict[str, Any], rows: list[tuple[str, str, str, str]],
 ) -> str:
-    """Version the leaf index from tree metadata and the leaf ids being written.
+    """Version the leaf index from tree metadata and a compact digest of the leaves.
 
     ``fingerprint`` stays cheap (content_hash). An explicit rebuild after a
-    node write still refreshes when the leaf set changed, even if a test or
-    writer left content_hash alone.
+    node write still refreshes when leaf ids, paths, or labels changed, even if
+    a test or writer left content_hash alone.
     """
+    digest = hashlib.sha256()
+    for marketplace, category_id, path, label in sorted(rows):
+        digest.update(f"{marketplace}\x00{category_id}\x00{path}\x00{label}\n".encode())
     return json.dumps({
         "trees": fp_trees,
-        "ids": sorted((marketplace, category_id) for marketplace, category_id, _path, _label in rows),
+        "leaves_sha256": digest.hexdigest(),
+        "leaf_count": len(rows),
     }, sort_keys=True)
 
 
+def _load_saved_category_index(saved: Path, trees_text: str) -> tuple[Any, bool]:
+    """Load a matching published index, recovering a backup if promotion stopped early."""
+    # Staging was never published. Only the backup can replace an absent canonical index.
+    candidates = (saved,) if saved.exists() else saved.parent.glob(".categories-semble-old-*")
+    for candidate in candidates:
+        try:
+            stamp = candidate / "studio-fingerprint.json"
+            if not (stamp.is_file() and stamp.read_text(encoding="utf-8") == trees_text):
+                continue
+            from semble import SembleIndex
+
+            index = SembleIndex.load_from_disk(candidate)
+        except Exception:
+            log.warning("saved category index unreadable at %s", candidate, exc_info=True)
+            continue
+        if candidate != saved:
+            try:
+                candidate.rename(saved)
+            except OSError:
+                log.warning("could not restore category index backup at %s", candidate, exc_info=True)
+        return index, True
+    return None, False
+
+
+def _save_category_index(index, saved: Path, trees_text: str) -> None:
+    """Promote a complete index while keeping the previous index available for recovery."""
+    saved.parent.mkdir(parents=True, exist_ok=True)
+    # The rebuild lock (held by the parent for hosted builds) serializes promotions.
+    orphaned = list(saved.parent.glob(".categories-semble-*"))
+    staging = Path(tempfile.mkdtemp(prefix=".categories-semble-", dir=saved.parent))
+    backup: Path | None = None
+    try:
+        index.save(staging)
+        (staging / "studio-fingerprint.json").write_text(trees_text, encoding="utf-8")
+        if saved.exists():
+            backup = saved.parent / f".categories-semble-old-{uuid.uuid4().hex}"
+            saved.rename(backup)
+        staging.rename(saved)
+    except Exception:
+        if backup is not None and backup.exists() and not saved.exists():
+            backup.rename(saved)
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    if backup is not None:
+        orphaned.append(backup)
+    for artifact in orphaned:
+        shutil.rmtree(artifact, ignore_errors=True)
+
+
+def _reuse_shared_categories(saved: Path, trees_text: str) -> tuple[Any, bool]:
+    """Reuse the shared category index from memory or disk when up to date.
+
+    Returns ``(categories, needs_build)``.
+    """
+    saved_root = str(saved)
+    with _INDEX_LOCK:
+        if _SHARED_CATEGORIES.root == saved_root and _SHARED_CATEGORIES.fingerprint == trees_text:
+            return _SHARED_CATEGORIES.index, False
+    loaded, hit = _load_saved_category_index(saved, trees_text)
+    if hit:
+        return loaded, False
+    return None, True
+
+
 def _category_index(rows: list[tuple[str, str, str, str]], trees_text: str):
-    """The category-leaf index: from memory, else from disk, else built and saved.
+    """The shared category-leaf index: from memory, else from disk, else built and saved.
 
     Caller holds ``_REBUILD_LOCK``.
     """
-
-    if _state().category_fingerprint == trees_text:
-        return _state().categories
     saved = category_index_dir()
-    stamp = saved / "studio-fingerprint.json"
-    index = None
-    if stamp.is_file() and stamp.read_text(encoding="utf-8") == trees_text:
-        try:
-            from semble import SembleIndex
-
-            index = SembleIndex.load_from_disk(saved)
-        except Exception:
-            log.warning("saved category index unreadable; rebuilding", exc_info=True)
-    if index is None:
-        index = _index_docs(_write_category_docs(rows))
+    cached, needs_build = _reuse_shared_categories(saved, trees_text)
+    if not needs_build:
+        return cached
+    if not rows:
         shutil.rmtree(saved, ignore_errors=True)
-        if index is not None:
-            try:
-                index.save(saved)
-                stamp.write_text(trees_text, encoding="utf-8")
-            except Exception:
-                log.warning("could not save category index", exc_info=True)
-    _state().categories, _state().category_fingerprint = index, trees_text
+        return None
+    index = _index_docs(_write_category_docs(rows))
+    if index is not None:
+        try:
+            _save_category_index(index, saved, trees_text)
+        except Exception:
+            log.warning("could not save category index", exc_info=True)
     return index
-
-
-def _merged(category_index, catalog_index):
-    if category_index is None or catalog_index is None:
-        return category_index or catalog_index
-    from semble import SembleIndex
-
-    return SembleIndex.merge([
-        (str(category_docs_dir()), category_index),
-        (str(catalog_docs_dir()), catalog_index),
-    ])
 
 
 def catalog_snapshot(db: Session) -> CatalogSnapshot:
     return CatalogSnapshot(fingerprint(db), _category_rows(db), _schema_rows(db))
 
 
-def _build_unlocked(snapshot: CatalogSnapshot) -> dict[str, Any]:
+def _build_unlocked(
+    snapshot: CatalogSnapshot,
+    *,
+    build_categories: bool = True,
+    category_count: int | None = None,
+) -> dict[str, Any]:
     """Materialize and tokenize without holding the reader lock or a connection.
 
     Caller holds ``_REBUILD_LOCK``. Publishing the finished index is the only
     moment readers wait, and that wait is a pointer swap.
     """
     fp = snapshot.fingerprint
-    categories = _category_index(
-        snapshot.category_rows,
-        _category_trees_version(fp["trees"], snapshot.category_rows),
-    )
+    saved_root = str(category_index_dir())
+    trees_text = _category_trees_version(fp.get("trees", {}), snapshot.category_rows) if build_categories else None
+    categories = _category_index(snapshot.category_rows, trees_text) if build_categories and trees_text is not None else None
     docs = _write_catalog_docs(snapshot.schema_rows)
-    try:
-        index = _merged(categories, _index_docs(docs))
-    except Exception:
-        log.exception("failed to merge catalog indexes; using lexical fallback")
-        index = None
+    docs_index = _index_docs(docs)
     fp_text = json.dumps(fp, sort_keys=True)
-    _publish_index(index, fp_text)
+    # Never stamp a failed Semble build on non-empty rows as up-to-date.
+    categories_failed = build_categories and bool(snapshot.category_rows) and categories is None
+    publish_cat_fp = trees_text if build_categories and trees_text is not None and not categories_failed else None
+    _publish_index(
+        docs_index,
+        fp_text,
+        categories=categories,
+        category_fingerprint=publish_cat_fp,
+        category_root=saved_root,
+        mark_current=not categories_failed,
+    )
     counts = {
-        name: sum(1 for _ in (root / name).rglob("*.md")) if (root / name).exists() else 0
-        for root, name in (
-            (category_docs_dir(), "categories"),
-            (docs, "schemas"),
-            (docs, "options"),
-            (docs, "skills"),
-            (docs, "fill"),
-        )
+        "categories": len(snapshot.category_rows) if category_count is None else category_count,
+        **{
+            name: sum(1 for _ in (docs / name).rglob("*.md")) if (docs / name).exists() else 0
+            for name in ("schemas", "options", "skills", "fill")
+        },
     }
     log.info("catalog index rebuilt: %s", counts)
     return {"ok": True, "fingerprint": fp, "docs": str(docs), "counts": counts}
@@ -614,13 +726,16 @@ def _build_unlocked(snapshot: CatalogSnapshot) -> dict[str, Any]:
 
 def rebuild_catalog_index(db: Session) -> dict[str, Any]:
     """Export catalog/skill/fill docs and rebuild the Semble index."""
-    return build_catalog_index(catalog_snapshot(db))
+    return build_catalog_index(lambda: catalog_snapshot(db))
 
 
-def build_catalog_index(snapshot: CatalogSnapshot) -> dict[str, Any]:
+def build_catalog_index(read_snapshot: Callable[[], CatalogSnapshot]) -> dict[str, Any]:
+    from anteroom.services.service_context import current
+
     with _REBUILD_LOCK:
-        from anteroom.services.service_context import current
-
+        # A queued build must read after the previous publication so it cannot
+        # replace the shared category index with a snapshot from before it waited.
+        snapshot = read_snapshot()
         context = current()
         if context is not None:
             return _build_hosted(snapshot, context.seller_id)
@@ -640,21 +755,61 @@ def _build_hosted(snapshot: CatalogSnapshot, owner: str) -> dict[str, Any]:
     The child receives plain catalog data, never a session, token or lease.
     Keeping its Python interpreter separate prevents tokenization from holding
     the API's GIL. The OS also gives interactive work priority on one vCPU.
+    The public category-leaf index is built once per tree version and shared
+    in memory and on disk across hosted sellers; only seller-scoped docs are
+    built per seller.
     """
-    from semble import SembleIndex
+    saved = category_index_dir()
+    saved_root = str(saved)
+    trees_text = _category_trees_version(snapshot.fingerprint.get("trees", {}), snapshot.category_rows)
+    categories, build_categories = _reuse_shared_categories(saved, trees_text)
 
     root = _catalog_root()
     root.mkdir(parents=True, exist_ok=True)
+    worker_input = {
+        'fingerprint': snapshot.fingerprint,
+        'category_rows': snapshot.category_rows if build_categories else [],
+        'category_count': len(snapshot.category_rows),
+        'schema_rows': [asdict(row) for row in snapshot.schema_rows],
+        'build_categories': build_categories,
+    }
     with tempfile.TemporaryDirectory(prefix='build-', dir=root) as directory:
         output = Path(directory)
         subprocess.run(
             [sys.executable, '-m', 'anteroom.services.catalog_index_worker', owner, directory],
-            input=json.dumps(asdict(snapshot)), text=True, check=True,
+            input=json.dumps(worker_input), text=True, check=True,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=HOSTED_BUILD_TIMEOUT_SEC,
         )
         result = json.loads((output / 'result.json').read_text())
-        index = SembleIndex.load_from_disk(output / 'index') if result.pop('indexed') else None
-        _publish_index(index, json.dumps(snapshot.fingerprint, sort_keys=True))
+        docs_indexed = bool(result.pop('indexed'))
+        result.pop('categories_indexed', None)
+        docs_index = None
+        if docs_indexed:
+            from semble import SembleIndex
+
+            docs_index = SembleIndex.load_from_disk(output / 'index')
+        publish_cat_fp: str | None = trees_text
+        categories_failed = False
+        if build_categories:
+            if not snapshot.category_rows:
+                categories = None
+            else:
+                loaded, hit = _load_saved_category_index(saved, trees_text)
+                if hit:
+                    categories = loaded
+                else:
+                    # Save or tokenization failed; keep any previous shared index
+                    # intact and leave seller state stale so the next check retries.
+                    publish_cat_fp = None
+                    categories_failed = True
+        _publish_index(
+            docs_index,
+            json.dumps(snapshot.fingerprint, sort_keys=True),
+            categories=categories,
+            category_fingerprint=publish_cat_fp,
+            category_root=saved_root,
+            mark_current=not categories_failed,
+        )
         return result
 
 
@@ -666,15 +821,16 @@ def _kick_rebuild() -> None:
             return
         _state().rebuilding = True
 
+    def read_snapshot() -> CatalogSnapshot:
+        from anteroom.database import SessionLocal
+
+        with SessionLocal() as session:
+            return catalog_snapshot(session)
+
     def run() -> None:
-
         try:
-            from anteroom.database import SessionLocal
-
-            with SessionLocal() as session:
-                snapshot = catalog_snapshot(session)
-            # The session is closed: the slow part runs without a pooled connection.
-            build_catalog_index(snapshot)
+            # The session closes before the slow build starts.
+            build_catalog_index(read_snapshot)
         except Exception:
             log.exception("catalog index rebuild failed")
         finally:
@@ -697,15 +853,17 @@ def ensure_catalog_index(db: Session) -> dict[str, Any]:
     with _INDEX_LOCK:
         recently_matched = (
             not _state().stale
-            and _state().index is not None
+            and _state().fingerprint is not None
+            and (_state().index is not None or _has_shared_categories())
             and time.monotonic() - _state().checked_at < FINGERPRINT_RECHECK_SEC
         )
     if recently_matched:
         return {"ok": True, "rebuilt": False}
     fp = fingerprint(db)
     fp_text = json.dumps(fp, sort_keys=True)
+    trees_fp_text = json.dumps(fp.get("trees", {}), sort_keys=True)
     with _INDEX_LOCK:
-        needs = _index_needs_rebuild(fp_text)
+        needs = _index_needs_rebuild(fp_text, trees_fp_text)
         if not needs:
             _state().checked_at = time.monotonic()
     if not needs:
@@ -1035,16 +1193,37 @@ def search_catalog(
         ensure_catalog_index(db)
 
     with _INDEX_LOCK:
-        index = _state().index
+        docs_index = _state().index
+        cat_index = _SHARED_CATEGORIES.index if _has_shared_categories() else None
+    indexes = []
+    if kind == "category":
+        if cat_index is not None:
+            indexes.append(cat_index)
+        elif docs_index is not None:
+            indexes.append(docs_index)
+    elif kind == "all":
+        if cat_index is not None:
+            indexes.append(cat_index)
+        if docs_index is not None:
+            indexes.append(docs_index)
+    elif docs_index is not None:
+        indexes.append(docs_index)
+
     results: list[dict] = []
     seen: set[tuple[str, str, str]] = set()
+    failed_indexes: set[int] = set()
 
-    if index is not None:
-        try:
-            raw = index.search(query, top_k=max(top_k * 4, top_k))
-        except Exception:
-            log.exception("semble catalog search failed; using lexical fallback")
-            raw = []
+    if indexes:
+        raw = []
+        fetch_k = max(top_k * 4, top_k)
+        for index in indexes:
+            try:
+                raw.extend(index.search(query, top_k=fetch_k))
+            except Exception:
+                failed_indexes.add(id(index))
+                log.exception("semble catalog search failed; using lexical fallback")
+        if len(indexes) > 1:
+            raw.sort(key=lambda item: -float(getattr(item, "score", 0.0) or 0.0))
         for item in raw:
             chunk = getattr(item, "chunk", None)
             content = getattr(chunk, "content", "") if chunk is not None else ""
@@ -1065,7 +1244,36 @@ def search_catalog(
             verified["score"] = float(getattr(item, "score", 0.0) or 0.0)
             results.append(verified)
             if len(results) >= top_k:
-                return results
+                break
+
+    if kind == "all" and results:
+        missing_docs = docs_index is None or id(docs_index) in failed_indexes
+        missing_categories = cat_index is None or id(cat_index) in failed_indexes
+        if missing_docs or missing_categories:
+            supplement: list[dict] = []
+            if missing_categories:
+                supplement.extend(_lexical_fallback(
+                    db, query, marketplace=marketplace, kind="category", top_k=top_k, path_prefix=path_prefix,
+                ))
+            if missing_docs:
+                supplement.extend(_lexical_fallback(
+                    db, query, marketplace=marketplace, kind="schema", top_k=top_k, path_prefix=path_prefix,
+                ))
+                supplement.extend(_lexical_docs(
+                    query, marketplace=marketplace, kind="all", top_k=top_k,
+                ))
+            for verified in supplement:
+                key = (
+                    verified["kind"],
+                    verified.get("marketplace") or "",
+                    verified.get("id") or verified.get("path") or "",
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                results.append(verified)
+                if len(results) >= top_k:
+                    break
 
     if not results:
         return _lexical_fallback(

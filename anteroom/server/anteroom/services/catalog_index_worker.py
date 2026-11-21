@@ -20,9 +20,15 @@ def main():
         raw['fingerprint'], raw['category_rows'],
         [catalog_index._SchemaRow(**row) for row in raw['schema_rows']],
     )
+    build_categories = bool(raw.get('build_categories', True))
+    category_count = int(raw.get('category_count', len(snapshot.category_rows)))
     output = Path(directory)
     with use(for_seller(owner)):
-        result = catalog_index._build_unlocked(snapshot)
+        result = catalog_index._build_unlocked(
+            snapshot,
+            build_categories=build_categories,
+            category_count=category_count,
+        )
         index = catalog_index._state().index
         if index is not None:
             index.save(output / 'index')

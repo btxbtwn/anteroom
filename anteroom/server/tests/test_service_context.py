@@ -94,13 +94,13 @@ def test_catalog_state_files_and_rebuild_threads_keep_their_execution_owner(monk
         rebuilt.append((session, service_context.current().seller_id, catalog.catalog_docs_dir()))
         return 'alice-snapshot'
 
-    def build(snap):
+    def build(snap, _owner):
         assert snap == 'alice-snapshot'
         catalog._state().index = 'alice-observed-schema'
         finished.set()
 
     monkeypatch.setattr(catalog, 'catalog_snapshot', snapshot)
-    monkeypatch.setattr(catalog, 'build_catalog_index', build)
+    monkeypatch.setattr(catalog, '_build_hosted', build)
     with service_context.use(replace(alice, session_factory=lambda: nullcontext('alice-session'))):
         alice_path = catalog.catalog_docs_dir()
         catalog._kick_rebuild()
@@ -133,13 +133,13 @@ def test_catalog_rebuild_returns_its_connection_before_the_slow_build(monkeypatc
         finally:
             session_open.pop()
 
-    def build(snapshot):
+    def build(snapshot, _owner):
         assert snapshot == 'snapshot'
         assert not session_open, 'built while holding a database session'
         built.set()
 
     monkeypatch.setattr(catalog, 'catalog_snapshot', lambda db: 'snapshot')
-    monkeypatch.setattr(catalog, 'build_catalog_index', build)
+    monkeypatch.setattr(catalog, '_build_hosted', build)
     with service_context.use(replace(seller, session_factory=session)):
         catalog._kick_rebuild()
         assert built.wait(2)
