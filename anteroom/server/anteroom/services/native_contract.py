@@ -489,6 +489,11 @@ def _market_of(path: str, rows: dict[str, dict]) -> str:
     return ""
 
 
+# Etsy keys List sends (etsy_listings.list_fields) that Etsy's form has no row
+# for: styles are unconfirmed on the current page (etsy-native-form.json,
+# not_offered), so no captured form can check them. Keep the model's answer.
+_ETSY_SENT_WITHOUT_ROW = frozenset({"etsy_specifics.styles", "etsy_specifics.style"})
+
 _ETSY_FIELD_ALIASES = {
     "whomade": "etsy_specifics.whoMade",
     "whomadeit": "etsy_specifics.whoMade",
@@ -699,6 +704,8 @@ def constrain_generated(
                         value = canonical
             if is_locked(seed, path):
                 set_path(listing, path, copy.deepcopy(get_path(seed, path)))
+            elif market == "etsy" and path in _ETSY_SENT_WITHOUT_ROW and path not in rows:
+                continue
             elif path not in rows or value_error({**applicable_row(rows[path], listing, list(rows.values())), "required": False}, value):
                 _remove(listing, path)
     for path in locked_paths(seed):

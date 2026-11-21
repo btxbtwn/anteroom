@@ -1,0 +1,1 @@
+- Styles the listing writer picks for Etsy are kept once Etsy's form is saved with the listing, so List sends them.
