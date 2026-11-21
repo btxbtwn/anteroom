@@ -1,0 +1,1 @@
+- Moving your listings from the Mac to your Anteroom account carries over the Vendoo label names saved on older listings, even when Item Details is blank.

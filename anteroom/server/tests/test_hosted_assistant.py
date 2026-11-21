@@ -270,7 +270,7 @@ def test_shop_snapshot_waits_for_the_sales_archive_lock_outside_a_transaction(
     import time
     from test_business_assistant import NOW, add_listing
     from anteroom.database import SessionLocal
-    from anteroom.services import business_assistant, hosted_database, vendoo_sales_archive
+    from anteroom.services import business_assistant, hosted_database, scout, vendoo_sales_archive
     from anteroom.services.hosted_context import for_seller
     from anteroom.services.service_context import use
 
@@ -306,6 +306,15 @@ def test_shop_snapshot_waits_for_the_sales_archive_lock_outside_a_transaction(
             db.commit()
             monkeypatch.setattr(hosted_database, 'IDLE_IN_TRANSACTION_TIMEOUT', '150ms')
             monkeypatch.setattr(vendoo_sales_archive, '_archive_lock', HeldByAnotherThread())
+            outcomes = scout.outcomes
+
+            def read_scout(session, rows):
+                # The preceding sales-event read must not leave an idle transaction
+                # for Postgres to kill if work is delayed before Scout starts.
+                assert not session.in_transaction()
+                return outcomes(session, rows)
+
+            monkeypatch.setattr(scout, 'outcomes', read_scout)
             shop = business_assistant.read_shop(db, now=NOW)
             assert 'Coat M' in business_assistant.run_lookup(shop.lookups, 'SELECT title FROM listings')
             shop.lookups.close()
