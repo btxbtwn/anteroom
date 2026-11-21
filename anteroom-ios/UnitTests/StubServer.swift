@@ -28,10 +28,13 @@ final class StubProtocol: URLProtocol {
         }
 
         func nextResponder(recording request: URLRequest) -> @Sendable (URLRequest) -> Reply {
-            lock.withLock {
+            // Spell out the closure's type: Xcode 26.6's type checker gives up
+            // on the inferred form ("failed to produce diagnostic").
+            lock.withLock { () -> @Sendable (URLRequest) -> Reply in
                 recorded.append(request)
                 let index = min(recorded.count - 1, replies.count - 1)
-                return index >= 0 ? replies[index] : { _ in Reply(status: 500, body: "") }
+                if index >= 0 { return replies[index] }
+                return { @Sendable _ in Reply(status: 500, body: "") }
             }
         }
     }
