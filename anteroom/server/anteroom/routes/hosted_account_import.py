@@ -20,7 +20,7 @@ from anteroom.services.hosted_limits import (
 MAX_ROWS_BYTES = 16 * 1024 * 1024
 MAX_CONFIG_BYTES = 1 * 1024 * 1024
 # Keep Storage HTTP I/O off the event loop's default executor (shared with DB work)
-# while still permitting parallel same-seller photo migration (4 concurrent uploads).
+# while permitting multiple sellers' photo migrations to upload concurrently.
 STORAGE_UPLOAD_SLOTS = 12
 _storage_executor = ThreadPoolExecutor(max_workers=STORAGE_UPLOAD_SLOTS, thread_name_prefix='import-storage')
 _storage_semaphores: WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = WeakKeyDictionary()
@@ -107,10 +107,10 @@ def pending_photos(db=Depends(get_import_db, scope="function")):
 
 @router.post('/photos/{photo_id}/{field}')
 async def photo(photo_id: str, field: str, request: Request):
-    # Guard memory globally (allowing parallel same-seller photo migration up to
-    # UploadSlots capacity) and release before Storage HTTP I/O so slow Storage
-    # calls never stall or 429 concurrent account-move uploads.
-    async with hold_upload_slot(request, per_seller=False):
+    # Cap each seller to one memory slot during body read and normalization so
+    # one migrating seller cannot starve other sellers, while releasing before
+    # Storage HTTP I/O still lets 4 same-seller uploads overlap in Storage.
+    async with hold_upload_slot(request, per_seller=True):
         data = await read_bounded_body(
             request,
             hosted_photos.MAX_BYTES,

@@ -460,6 +460,72 @@ def test_hosted_account_import_allows_four_concurrent_same_seller_photo_uploads(
     asyncio.run(exercise())
 
 
+def test_hosted_account_import_photo_slots_do_not_starve_other_sellers(monkeypatch):
+    app = FastAPI()
+    app.state.upload_slots = UploadSlots(total=2, wait=0.15)
+
+    @app.middleware("http")
+    async def attach_seller(request: Request, call_next):
+        seller_id = request.headers["x-seller"]
+        request.state.seller = SimpleNamespace(user_id=seller_id)
+        with use(SimpleNamespace(seller_id=seller_id)):  # type: ignore[arg-type]
+            return await call_next(request)
+
+    app.include_router(hosted_account_import.router)
+
+    alice_entered = asyncio.Event()
+    release_alice = asyncio.Event()
+
+    async def gated_in_seller_session(request, fn, *args):
+        if fn is account_import.photo_to_import:
+            if request.state.seller.user_id == "seller-alice":
+                alice_entered.set()
+                await release_alice.wait()
+            return f"draft-{args[0]}"
+        return True
+
+    monkeypatch.setattr(hosted_account_import, "in_seller_session", gated_in_seller_session)
+    monkeypatch.setattr(hosted_photos, "normalize", lambda raw: (raw, 100, 100))
+    monkeypatch.setattr(hosted_photos, "new_key", lambda user_id, draft_id: f"{user_id}/{draft_id}.jpg")
+    monkeypatch.setattr(hosted_photos, "storage_call", lambda *_a, **_k: None)
+
+    async def exercise():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            # Alice starts two concurrent photo imports; per_seller=True keeps her to 1 global slot.
+            alice_one = asyncio.create_task(
+                client.post(
+                    "/api/account-import/photos/a1/stored",
+                    content=b"fake-jpg",
+                    headers={"Authorization": "Bearer test-jwt", "x-seller": "seller-alice"},
+                )
+            )
+            await asyncio.wait_for(alice_entered.wait(), timeout=2.0)
+            alice_two = asyncio.create_task(
+                client.post(
+                    "/api/account-import/photos/a2/stored",
+                    content=b"fake-jpg",
+                    headers={"Authorization": "Bearer test-jwt", "x-seller": "seller-alice"},
+                )
+            )
+            await asyncio.sleep(0.02)
+            # Bob must still get the second global slot immediately instead of 503.
+            bob = await client.post(
+                "/api/account-import/photos/b1/stored",
+                content=b"fake-jpg",
+                headers={"Authorization": "Bearer test-jwt", "x-seller": "seller-bob"},
+            )
+            assert bob.status_code == 200
+            assert bob.json() == {"copied": True}
+
+            release_alice.set()
+            r1, r2 = await asyncio.gather(alice_one, alice_two)
+            assert r1.status_code == 200
+            assert r2.status_code == 200
+
+    asyncio.run(exercise())
+
+
 def test_relay_inference_and_workspace_body_caps(monkeypatch):
     app = FastAPI()
     app.include_router(hosted_browser_relay.router)
