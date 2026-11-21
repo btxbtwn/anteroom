@@ -1,1 +1,0 @@
-- Generating a listing now fills Etsy's attributes (sleeve length, neckline, pattern and the rest) from the photos and your notes, and fills them again when you change the Etsy category. Only answers the evidence supports are kept, and attributes you set yourself are left alone.
