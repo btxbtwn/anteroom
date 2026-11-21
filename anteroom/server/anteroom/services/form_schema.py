@@ -121,9 +121,16 @@ def form_schema_prompt(listing: dict | None, *, exclude=()) -> str:
     if not isinstance(listing, dict):
         return ""
     from anteroom.services.category_fields import listing_category_ids, load_fields, load_rows
+    from anteroom.services.direct_categories import direct_category_id
 
+    category_ids = dict(listing_category_ids(listing))
+    for marketplace in ("ebay", "etsy"):
+        if marketplace not in category_ids:
+            direct = direct_category_id(listing, marketplace)
+            if direct:
+                category_ids[marketplace] = direct
     lines: list[str] = []
-    for marketplace, category_id in listing_category_ids(listing).items():
+    for marketplace, category_id in category_ids.items():
         if marketplace in exclude:
             continue
         rows = _cached_form_rows(marketplace, category_id, listing, load_fields, load_rows)

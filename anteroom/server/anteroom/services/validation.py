@@ -891,6 +891,8 @@ def validate_listing(
     for market in payload.get("_native_forms") or {}:
         if market not in selected_set:
             continue
+        if market == "etsy" and not etsy_eligible(payload):
+            continue
         for item in native_form_gaps(payload, market):
             if not any(error["field"] == item["field"] for error in result.errors):
                 add_issue(result, item["field"], item["message"])

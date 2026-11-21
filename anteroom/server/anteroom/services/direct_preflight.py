@@ -210,11 +210,13 @@ def gaps(snapshot: dict, marketplace: str, context: Context | None = None) -> li
     for module in RULE_MODULES:
         importlib.import_module(module)
     context = context or Context()
-    found = [*(item for check in _REQUIREMENTS.get(marketplace, []) for item in check(snapshot, context)),
-             *_unresolved(snapshot, marketplace)]
+    found = [item for check in _REQUIREMENTS.get(marketplace, []) for item in check(snapshot, context)]
+    from anteroom.services.etsy_fields import etsy_eligible
     from anteroom.services.native_contract import gaps as native_form_gaps
 
-    found.extend(native_form_gaps(snapshot, marketplace))
+    if marketplace != "etsy" or etsy_eligible(snapshot):
+        found.extend(_unresolved(snapshot, marketplace))
+        found.extend(native_form_gaps(snapshot, marketplace))
     found.extend(_empty_form_rows(snapshot, marketplace))
     # One missing answer is said once. The module checks and the captured form
     # both name the same field, and the form's own row is the less informative
@@ -232,14 +234,23 @@ def gaps(snapshot: dict, marketplace: str, context: Context | None = None) -> li
 # A marketplace form's copy of a shared field follows General until the seller
 # edits it on that form, so both paths name one answer.
 _FOLLOWED = frozenset({"title", "description", "brand", "department"})
+_SAME_ALIASES = {
+    "etsy_specifics.who_made": "etsy_specifics.whoMade",
+    "etsy_specifics.what_is": "etsy_specifics.whatIsIt",
+    "etsy_specifics.when_made": "etsy_specifics.whenMade",
+    "etsy_specifics.renewal_option": "etsy_specifics.renewalOption",
+}
 
 
 def same_answer(field: str) -> str:
     """The key two reports of one missing answer share."""
-    head, _, leaf = str(field).rpartition(".")
+    text = str(field)
+    if text in _SAME_ALIASES:
+        return _SAME_ALIASES[text]
+    head, _, leaf = text.rpartition(".")
     if leaf in _FOLLOWED and head.endswith("_specifics"):
         return leaf
-    return str(field)
+    return text
 
 
 def _generic(message: str) -> bool:
