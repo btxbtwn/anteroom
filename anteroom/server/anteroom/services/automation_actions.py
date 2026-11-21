@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from anteroom.database import in_worker_session
 from anteroom.repositories.queries import JobRepo
+from anteroom.services.automation_scheduler import db_slot
 from anteroom.services.automations import DOWN_STATE, AutomationBusy
 
 log = logging.getLogger("anteroom.automations")
@@ -26,6 +27,11 @@ IDLE_TIMEOUT_S = 8 * 60
 # Chrome, a marketplace or a model.
 
 
+async def _db_work(work, /, *args):
+    async with db_slot():
+        return await in_worker_session(work, *args)
+
+
 def _active_job(db: Session) -> bool:
     return bool(JobRepo(db).get_active())
 
@@ -33,7 +39,7 @@ def _active_job(db: Session) -> bool:
 async def perform(item: dict, action: dict, marketplaces: list[str], revision_id: str | None, *, confirm: bool = False) -> dict:
     if action["type"] in {"delist", "relist"} and confirm is not True:
         return {"ok": False, "error": "Review and confirm this item’s marketplace action first."}
-    if await in_worker_session(_active_job):
+    if await _db_work(_active_job):
         raise AutomationBusy()
     kind = action["type"]
     if kind == "delist":
@@ -91,7 +97,7 @@ async def publish_revision(conv_id: str, marketplaces: list[str], revision_id: s
         return {"ok": False, "error": "Name the marketplaces. An automation does not publish everywhere by default."}
     if not revision_id:
         return {"ok": False, "error": "Publish needs the listing that was just saved."}
-    live, fresh = await in_worker_session(_partition, conv_id, marketplaces)
+    live, fresh = await _db_work(_partition, conv_id, marketplaces)
     detail: list[dict] = []
     down: list[str] = []
     errors: dict[str, str] = {}
@@ -195,7 +201,7 @@ async def _native_one(conv_id: str, name: str, revision_id: str, kind: str) -> d
             return {"ok": False, "marketplace": name, "error": str(exc)}
         if result.get("job_id") and not await _wait_for_job(result["job_id"]):
             return stalled
-    job = await in_worker_session(_job_outcome, result["job_id"]) if result.get("job_id") else None
+    job = await _db_work(_job_outcome, result["job_id"]) if result.get("job_id") else None
     # A refused start keeps the record's state (a live listing stays published), so its error decides.
     refused = job is None and (result.get("error") or result.get("state") not in {"published", "pending_review"})
     if (job is not None and job[0] != "completed") or refused:
@@ -285,13 +291,13 @@ async def _regenerate_queued(conv_id: str) -> dict:
         task = db.get(BackgroundTask, task_id)
         return (task.status, task.error) if task else ("failed", None)
 
-    queued = await in_worker_session(enqueue)
+    queued = await _db_work(enqueue)
     if "task_id" not in queued:
         return queued
     task_id = queued["task_id"]
     deadline = asyncio.get_running_loop().time() + IDLE_TIMEOUT_S
     while True:
-        status, error = await in_worker_session(task_state)
+        status, error = await _db_work(task_state)
         if status not in queue.ACTIVE:
             return {"ok": True} if status == "completed" else {"ok": False, "error": error or "Regenerate did not finish."}
         if asyncio.get_running_loop().time() > deadline:
@@ -354,7 +360,7 @@ def _job_running(db: Session, job_id: str) -> bool:
 async def _wait_while(check, *args) -> bool:
     """Poll ``check(db, *args)`` until it is false. Each poll has its own short session."""
     deadline = asyncio.get_running_loop().time() + IDLE_TIMEOUT_S
-    while await in_worker_session(check, *args):
+    while await _db_work(check, *args):
         if asyncio.get_running_loop().time() > deadline:
             return False
         await asyncio.sleep(0.5)

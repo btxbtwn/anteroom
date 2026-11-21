@@ -65,3 +65,104 @@ def test_one_sellers_failed_tick_does_not_stop_the_clock(monkeypatch):
     # Both sellers keep being ticked after Alice's failure, and a finished tick can start again.
     assert started.count("alice") > 1
     assert started.count("bob") > 1
+
+
+def test_database_active_steps_are_bounded_across_concurrent_sellers(monkeypatch):
+    from anteroom.services.automation_scheduler import db_slot
+
+    owners = [f"seller-{i}" for i in range(8)]
+    active_db = 0
+    peak_db = 0
+    finished: list[str] = []
+    all_done = asyncio.Event()
+
+    async def run_owner(owner):
+        nonlocal active_db, peak_db
+        async with db_slot():
+            active_db += 1
+            peak_db = max(peak_db, active_db)
+            try:
+                await asyncio.sleep(0.02)
+            finally:
+                active_db -= 1
+        finished.append(owner)
+        if len(finished) >= len(owners):
+            all_done.set()
+
+    monkeypatch.setattr(scheduler, "TICK_SECONDS", 60)
+    monkeypatch.setattr(scheduler, "due_owners", lambda _engine: list(owners))
+    monkeypatch.setattr(scheduler, "run_owner", run_owner)
+
+    async def scenario():
+        clock = asyncio.create_task(scheduler.serve(object(), max_concurrency=3))
+        try:
+            await asyncio.wait_for(all_done.wait(), timeout=2.0)
+        finally:
+            clock.cancel()
+            await asyncio.gather(clock, return_exceptions=True)
+
+    asyncio.run(scenario())
+    assert peak_db == 3
+    assert set(finished) == set(owners)
+
+
+def test_waiting_regenerations_above_concurrency_limit_do_not_block_other_sellers(monkeypatch):
+    from anteroom.services import automation_scheduler as auto_sched
+
+    slow_owners = [f"slow-{i}" for i in range(5)]
+    fast_owner = "fast-seller"
+    regenerating: set[str] = set()
+    all_slow_waiting = asyncio.Event()
+    fast_finished = asyncio.Event()
+
+    async def fake_in_worker(work, *args):
+        if work is auto_sched._pending_items:
+            return [{"conversation_id": f"conv-{args[0]}"}]
+        if work is auto_sched._start_item:
+            return {"remote": {"type": "regenerate"}, "markets": []}
+        return {"outcome": {"ok": True}}
+
+    async def run_owner(owner):
+        if owner in slow_owners:
+            async def slow_executor(_item, _action, _markets, _rev):
+                regenerating.add(owner)
+                if len(regenerating) == len(slow_owners):
+                    all_slow_waiting.set()
+                await asyncio.Event().wait()
+
+            await auto_sched._execute_items(f"run-{owner}", f"auto-{owner}", auto_sched.datetime.now(auto_sched.UTC), slow_executor)
+            return
+
+        # Fast seller waits until all 5 slow sellers (> max_concurrency=2) are actively waiting on regenerate.
+        await all_slow_waiting.wait()
+        async with auto_sched.db_slot():
+            await asyncio.sleep(0.01)
+        fast_finished.set()
+
+    monkeypatch.setattr(auto_sched, "in_worker_session", fake_in_worker)
+    monkeypatch.setattr(scheduler, "TICK_SECONDS", 60)
+    monkeypatch.setattr(scheduler, "due_owners", lambda _engine: [*slow_owners, fast_owner])
+    monkeypatch.setattr(scheduler, "run_owner", run_owner)
+
+    async def scenario():
+        clock = asyncio.create_task(scheduler.serve(object(), max_concurrency=2))
+        try:
+            await asyncio.wait_for(fast_finished.wait(), timeout=2.0)
+        finally:
+            clock.cancel()
+            await asyncio.gather(clock, return_exceptions=True)
+
+    asyncio.run(scenario())
+    assert len(regenerating) == 5
+    assert fast_finished.is_set()
+
+
+def test_scheduler_concurrency_env_validation(monkeypatch):
+    monkeypatch.delenv("ANTEROOM_AUTOMATION_CONCURRENCY", raising=False)
+    assert scheduler._scheduler_concurrency() == scheduler.DEFAULT_SCHEDULER_CONCURRENCY
+    monkeypatch.setenv("ANTEROOM_AUTOMATION_CONCURRENCY", "6")
+    assert scheduler._scheduler_concurrency() == 6
+    monkeypatch.setenv("ANTEROOM_AUTOMATION_CONCURRENCY", "0")
+    assert scheduler._scheduler_concurrency() == 1
+    monkeypatch.setenv("ANTEROOM_AUTOMATION_CONCURRENCY", "not-a-number")
+    assert scheduler._scheduler_concurrency() == scheduler.DEFAULT_SCHEDULER_CONCURRENCY
