@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
+from sqlalchemy.orm import Session
+
+from anteroom.database import Base
+from anteroom.models.catalog import CategoryTree, CategoryTreeNode
 from anteroom.services import catalog_index as catalog
+from anteroom.services.category_tree import MARKETPLACES
+from worker_sessions import memory_engine, worker_sessions
 
 
 class FingerprintRecheckTest(unittest.TestCase):
@@ -43,6 +51,65 @@ class FingerprintRecheckTest(unittest.TestCase):
             catalog.ensure_catalog_index(MagicMock())
             catalog.ensure_catalog_index(MagicMock())
         self.assertEqual(fingerprint.call_count, 2)
+
+
+class FingerprintQueryTest(unittest.TestCase):
+    """Bulk regenerate calls fingerprint on every draft. Counting leaves scans
+    tens of thousands of shared rows and cancels under the hosted 15s timeout.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self._data = os.environ.get("ANTEROOM_DATA_DIR")
+        os.environ["ANTEROOM_DATA_DIR"] = self.tmp.name
+        catalog.reset_catalog_index_cache()
+        self.engine = memory_engine()
+        Base.metadata.create_all(self.engine)
+        self.enterContext(worker_sessions(self.engine))
+        self.db = Session(self.engine)
+        for marketplace in MARKETPLACES:
+            self.db.add(CategoryTree(
+                marketplace=marketplace,
+                status="complete",
+                roots_loaded=True,
+                content_hash=f"hash-{marketplace}",
+            ))
+            # Enough nodes that a leaf-count fingerprint would be expensive on
+            # hosted Postgres; the fingerprint must ignore them entirely.
+            for index in range(40):
+                self.db.add(CategoryTreeNode(
+                    marketplace=marketplace,
+                    category_id=f"{marketplace}-{index}",
+                    parent_id="__root",
+                    label=f"Leaf {index}",
+                    path=f"Root > Leaf {index}",
+                    is_leaf=True,
+                    has_children=False,
+                    children_loaded=True,
+                ))
+        self.db.commit()
+
+    def tearDown(self):
+        catalog.reset_catalog_index_cache()
+        self.db.close()
+        self.engine.dispose()
+        self.tmp.cleanup()
+        if self._data is None:
+            os.environ.pop("ANTEROOM_DATA_DIR", None)
+        else:
+            os.environ["ANTEROOM_DATA_DIR"] = self._data
+
+    def test_fingerprint_reads_tree_content_hash_without_counting_leaves(self):
+        with patch.object(
+            catalog, "_leaf_query", side_effect=AssertionError("must not count category leaves"),
+        ):
+            fp = catalog.fingerprint(self.db)
+        self.assertEqual(
+            {marketplace: info["content_hash"] for marketplace, info in fp["trees"].items()},
+            {marketplace: f"hash-{marketplace}" for marketplace in MARKETPLACES},
+        )
+        for info in fp["trees"].values():
+            self.assertNotIn("leaves", info)
 
 
 if __name__ == "__main__":
