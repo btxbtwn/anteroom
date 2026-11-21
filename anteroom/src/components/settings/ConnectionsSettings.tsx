@@ -455,6 +455,38 @@ function MarketplaceSection() {
   const listening = DIRECT_MARKETPLACES
     .filter((marketplace) => accounts?.[marketplace.id]?.connected && enabled(marketplace.id))
     .map((marketplace) => marketplace.name);
+  const autodelistRow = (
+    <SettingsRow
+      id="sale-autodelist"
+      inlineControl
+      title="Delist the other marketplaces"
+      description="When something sells, take it off the other marketplaces it’s still listed on; a delist that doesn’t go through is tried again for two weeks after the sale, and the sidebar alerts you while a sold item is still listed."
+      control={
+        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          {saveAutodelist.isPending ? (
+            <span role="status" className="inline-flex items-center gap-1">
+              <Spinner size="sm" tone="muted" aria-hidden role={undefined} />
+              Saving…
+            </span>
+          ) : null}
+          {detection.data === undefined ? (
+            detection.error ? <span>Unavailable</span> : <span role="status">Loading…</span>
+          ) : (
+            <Switch
+              size="sm"
+              checked={detection.data.autodelist === true}
+              disabled={saveAutodelist.isPending}
+              aria-label="Delist the other marketplaces when something sells"
+              onCheckedChange={(checked) => saveAutodelist.mutate(checked)}
+            />
+          )}
+        </span>
+      }
+    >
+      {detection.error ? <SettingsNote tone="error">{detection.error.message}</SettingsNote> : null}
+      {saveAutodelist.error ? <SettingsNote tone="error">{saveAutodelist.error.message}</SettingsNote> : null}
+    </SettingsRow>
+  );
   if (hosted) {
     return (
       <SettingsSection id="accounts" title="Accounts">
@@ -463,10 +495,15 @@ function MarketplaceSection() {
             salesSwitch={sessionWorkflows ? salesSwitch(marketplace.id, marketplace.name) : undefined} checkError={detection.data?.checks?.[marketplace.id]} />
         ))}
         <HostedChromeSessions salesSwitch={sessionWorkflows ? salesSwitch : undefined} checks={detection.data?.checks} />
-        {sessionWorkflows ? <SettingsRow id="sale-detection" title="Sale detection"
-          description="Chrome checks for sales while this browser is connected, and saved sales stay if orders can’t be read.">
-          {saveDetection.error ? <SettingsNote tone="error">{saveDetection.error.message}</SettingsNote> : null}
-        </SettingsRow> : null}
+        {sessionWorkflows ? (
+          <>
+            <SettingsRow id="sale-detection" title="Sale detection"
+              description="Chrome checks for sales while this browser is connected, and saved sales stay if orders can’t be read; nothing comes down unless Delist the other marketplaces is on.">
+              {saveDetection.error ? <SettingsNote tone="error">{saveDetection.error.message}</SettingsNote> : null}
+            </SettingsRow>
+            {autodelistRow}
+          </>
+        ) : null}
       </SettingsSection>
     );
   }
@@ -511,25 +548,7 @@ function MarketplaceSection() {
       >
         {saveDetection.error ? <SettingsNote tone="error">{saveDetection.error.message}</SettingsNote> : null}
       </SettingsRow>
-      <SettingsRow
-        id="sale-autodelist"
-        inlineControl
-        title="Delist the other marketplaces"
-        description="When something sells, take it off the other marketplaces it’s still listed on; a delist that doesn’t go through is tried again for two weeks after the sale, and the sidebar alerts you while a sold item is still listed."
-        control={
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Switch
-              size="sm"
-              checked={detection.data?.autodelist === true}
-              disabled={saveAutodelist.isPending}
-              aria-label="Delist the other marketplaces when something sells"
-              onCheckedChange={(checked) => saveAutodelist.mutate(checked)}
-            />
-          </span>
-        }
-      >
-        {saveAutodelist.error ? <SettingsNote tone="error">{saveAutodelist.error.message}</SettingsNote> : null}
-      </SettingsRow>
+      {autodelistRow}
     </SettingsSection>
   );
 }
