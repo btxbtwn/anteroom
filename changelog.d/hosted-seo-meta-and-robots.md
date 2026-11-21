@@ -1,0 +1,1 @@
+- Hosted web (`myanteroom.com`) now includes SEO, canonical, Open Graph, and Twitter Card metadata along with a public `/robots.txt`.

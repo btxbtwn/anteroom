@@ -28,6 +28,7 @@ anteroom/public/*
 !anteroom/public/favicon.png
 !anteroom/public/privacy.html
 !anteroom/public/terms.html
+!anteroom/public/robots.txt
 # The startup screen shows the app icon.
 !anteroom/desktop/
 anteroom/desktop/*

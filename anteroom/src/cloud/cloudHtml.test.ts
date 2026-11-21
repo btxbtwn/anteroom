@@ -28,3 +28,11 @@ it("points the startup splash logo at an icon Vite bundles into /assets", () => 
   expect(match?.[1]).toBe("/desktop/AppIcon.png");
   expect(appIconUrl).toContain("AppIcon.png");
 });
+
+it("publishes SEO, canonical, Open Graph, and Twitter metadata", () => {
+  expect(page).toContain('<meta name="description" content="');
+  expect(page).toContain('<link rel="canonical" href="https://myanteroom.com/" />');
+  expect(page).toContain('<meta property="og:title" content="Anteroom — One listing. Every storefront." />');
+  expect(page).toContain('<meta property="og:url" content="https://myanteroom.com/" />');
+  expect(page).toContain('<meta name="twitter:card" content="summary" />');
+});
