@@ -911,6 +911,10 @@ export function StructuredEditor({
   const activeAutoReloadError = nativeTab && autoReloadError && autoReloadError.market === tab && autoReloadError.revisionId === revisionId
     ? autoReloadError.message
     : null;
+  // Stale fields reload on their own. The button is only the retry after that
+  // automatic reload (or a retry) failed on this tab.
+  const showReload = nativeTab && (activeAutoReloadError !== null || reloadFields.isPending
+    || (reloadFields.isError && reloadFields.variables?.market === tab));
   const formStatus = reloadingThisTab
     ? "Reloading fields…"
     : nativeTab && !nativeQuery.data && (nativeQuery.isFetching || autoReloadingMarket !== null)
@@ -1118,7 +1122,7 @@ export function StructuredEditor({
     // Keyed by tab so switching marketplaces rebuilds the form instead of reusing rows.
     <fieldset ref={formRef} key={tab} disabled={disabled} aria-busy={disabled || undefined}
       aria-label={`${marketplaceName(tab)} listing fields`} className="@container flex min-w-0 flex-col border-0 p-0">
-      {nativeTab && <div className="flex justify-end py-2">
+      {showReload && <div className="flex justify-end py-2">
         <Button size="xs" variant="ghost" disabled={disabled || saving || hasDrafts || !revisionId || reloadFields.isPending || autoReloadingMarket !== null}
           onClick={() => { if (revisionId) reloadFields.mutate({ market: tab, revision: revisionId }); }}>
           {reloadingThisTab ? "Reloading fields…" : "Reload fields"}

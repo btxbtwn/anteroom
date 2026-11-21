@@ -120,6 +120,15 @@ def inputs(listing: dict, market: str, fields: list[dict]) -> dict:
 
     condition = followed_entry(listing, market, "condition")
     result["condition"] = condition[1] if condition is not None else ListingSchema.validate_condition(listing.get("condition"))
+    if market == "mercari":
+        # Preflight and List answer an unanswered shoebox question from the
+        # seller's default (attach_form). Capture reads the saved listing
+        # without it, so compare the answer both will send.
+        from anteroom.services.user_settings import apply_mercari_shoebox_default
+
+        effective = {"mercari_specifics": {"package": copy.deepcopy(result.get("mercari_specifics.package"))}}
+        if apply_mercari_shoebox_default(effective):
+            result["mercari_specifics.package"] = effective["mercari_specifics"]["package"]
     return result
 
 

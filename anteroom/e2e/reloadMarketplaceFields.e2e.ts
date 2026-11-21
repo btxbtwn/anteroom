@@ -1,6 +1,6 @@
 import { test, expect, createListing, openListing, openForm, titleBox } from "./fixtures";
 
-test("reload marketplace fields preserves answers and refreshes validation", async ({ page, request, phone }, info) => {
+test("Reload fields appears only to retry a failed automatic reload, and keeps answers", async ({ page, request, phone }, info) => {
   test.setTimeout(90_000);
   const title = `Reload fields ${info.project.name} ${Date.now()}`;
   const id = await createListing(request, title);
@@ -16,11 +16,22 @@ test("reload marketplace fields preserves answers and refreshes validation", asy
     expect(saved.ok(), await saved.text()).toBe(true);
     const before = await (await request.get(`/api/conversations/${id}/native-marketplaces/preflight`)).json();
     expect(before.marketplaces.mercari.gaps.some((gap: { message: string }) => gap.message.includes("Reload its fields"))).toBe(true);
+    // Automatic reloads fail until Mercari answers again; only then is Reload fields offered.
+    let mercariAnswers = false;
+    let refusedReloads = 0;
+    await page.route(`**/api/conversations/${id}/native-marketplaces/mercari/form/refresh`, async route => {
+      if (!mercariAnswers) {
+        refusedReloads += 1;
+        await route.fulfill({ status: 500, contentType: "application/json",
+          body: JSON.stringify({ detail: "Mercari did not answer." }) });
+      } else await route.continue();
+    });
     await openListing(page, phone, title);
     await expect(await titleBox(page, phone)).toBeVisible();
     await openForm(page, phone, "Mercari");
     const form = page.getByRole("group", { name: "Mercari listing fields" });
     const reload = form.getByRole("button", { name: "Reload fields", exact: true });
+    await expect(form.getByText("Mercari fields could not be reloaded", { exact: false })).toBeVisible();
     await expect(reload).toBeEnabled();
     // Hosted saves reject writes while chat owns the draft. The retained edit
     // must recover automatically and release Reload fields afterwards.
@@ -39,11 +50,14 @@ test("reload marketplace fields preserves answers and refreshes validation", asy
     await expect.poll(() => refused).toBe(true);
     await expect.poll(async () => (await (await request.get(`/api/conversations/${id}/listing`)).json()).listing.mercari_specifics.title)
       .toBe("Seller's updated Mercari title");
+    // The saved edit is a new revision; its automatic reload fails the same way.
+    await expect.poll(() => refusedReloads).toBeGreaterThanOrEqual(2);
     await expect(reload).toBeEnabled();
+    mercariAnswers = true;
     const refreshed = page.waitForResponse(response => response.url().endsWith(`/native-marketplaces/mercari/form/refresh`));
     await reload.click();
     expect((await refreshed).ok()).toBe(true);
-    await expect(reload).toBeEnabled();
+    await expect(reload).toHaveCount(0);
     await expect.poll(async () => {
       const body = await (await request.get(`/api/conversations/${id}/listing`)).json();
       return [body.listing.title, body.listing.mercari_specifics.title,
@@ -56,7 +70,8 @@ test("reload marketplace fields preserves answers and refreshes validation", asy
     await page.screenshot({ path: info.outputPath("reloaded-fields.png") });
     for (const market of ["eBay", "Poshmark", "Depop", "Etsy"]) {
       await openForm(page, phone, market);
-      await expect(page.getByRole("button", { name: "Reload fields", exact: true })).toBeEnabled();
+      await expect(page.getByRole("group", { name: `${market} listing fields` })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Reload fields", exact: true })).toHaveCount(0);
     }
   } finally {
     await request.delete(`/api/conversations/${id}`);
@@ -94,6 +109,7 @@ test("stale marketplace fields reload automatically without clicking Reload fiel
     expect(after.marketplaces.mercari.gaps.some((gap: { message: string }) => gap.message.includes("Reload its fields"))).toBe(false);
     await expect(form.getByText("The form's category or dependent choices changed.", { exact: false })).toHaveCount(0);
     await expect(form.getByRole("textbox", { name: "Title", exact: true })).toHaveValue("Seller's Mercari title");
+    await expect(form.getByRole("button", { name: "Reload fields", exact: true })).toHaveCount(0);
   } finally {
     await request.delete(`/api/conversations/${id}`);
   }
