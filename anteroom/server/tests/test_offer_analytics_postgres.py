@@ -113,3 +113,28 @@ def test_invalid_concurrent_index_is_rebuilt(pg_engine):
     with pg_engine.begin() as connection:
         connection.execute(text("INSERT INTO ebay_offer_attempts (id, rule_id, current_price_cents, offer_price_cents, discount_percent, minimum_price_cents, state, recipient_count, created_at, expires_at) VALUES ('old-worker', 'rule', 1000, 900, 10, 100, 'sent', 2, now(), now())"))
         assert connection.execute(text("SELECT sent_at FROM ebay_offer_attempts WHERE id = 'old-worker'")).scalar_one() is None
+
+
+def test_invalid_promotion_recent_index_is_rebuilt(pg_engine):
+    command.upgrade(config(pg_engine), 'd7be65e14c2f')
+    # A failed unique concurrent build leaves a real INVALID index behind.
+    with pg_engine.begin() as connection:
+        for key in ('one', 'two'):
+            connection.execute(text(
+                "INSERT INTO listing_promotions (id, batch_id, marketplace, action, listing_id, state, created_at, expires_at) "
+                "VALUES (:id, 'b', 'mercari', 'offer', 'l', 'done', now(), now())"
+            ), {'id': key})
+    with pg_engine.connect().execution_options(isolation_level='AUTOCOMMIT') as connection:
+        with pytest.raises(IntegrityError):
+            connection.execute(text(
+                'CREATE UNIQUE INDEX CONCURRENTLY ix_listing_promotions_rule_recent ON listing_promotions (user_id)'
+            ))
+        assert connection.execute(text(
+            "SELECT indisvalid FROM pg_index WHERE indexrelid = 'ix_listing_promotions_rule_recent'::regclass"
+        )).scalar_one() is False
+    command.upgrade(config(pg_engine), PREVIOUS)
+    with pg_engine.connect() as connection:
+        assert connection.execute(text(
+            "SELECT indisvalid AND NOT indisunique FROM pg_index WHERE indexrelid = 'ix_listing_promotions_rule_recent'::regclass"
+        )).scalar_one() is True
+        assert connection.execute(text('SELECT version_num FROM alembic_version')).scalar_one() == PREVIOUS
