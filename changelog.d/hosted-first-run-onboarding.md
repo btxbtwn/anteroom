@@ -1,0 +1,1 @@
+- Show a first-run onboarding checklist on hosted web before a seller creates their first listing, guiding marketplace connections (eBay, Etsy, and optional Chrome Bridge), AI setup when bringing your own key, and creating the first draft.

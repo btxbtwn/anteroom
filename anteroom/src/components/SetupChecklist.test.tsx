@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { SetupChecklist } from "./SetupChecklist";
+import { HostedSetupChecklistView, SetupChecklist } from "./SetupChecklist";
 
 vi.mock("./ConnectChromeButton", () => ({ ConnectChromeButton: () => <button>Connect Chrome</button> }));
 vi.mock("./ExtensionLoadPath", () => ({ ExtensionLoadPath: () => null }));
@@ -15,5 +15,84 @@ describe("setup without Chrome", () => {
     expect(html).not.toContain("Vinted");
     expect(html).not.toContain("Sellwild");
     expect(html).not.toMatch(/<button[^>]* disabled=""[^>]*>Create a listing/);
+  });
+});
+
+describe("hosted first-run checklist", () => {
+  it("omits the AI key step when managed AI is enabled and shows Connections + Chrome Bridge guidance", () => {
+    const html = renderToStaticMarkup(
+      <HostedSetupChecklistView
+        managedAI
+        providerConfigured
+        ebayConnected={false}
+        etsyConnected={false}
+        onOpenProviders={() => {}}
+        onOpenConnections={() => {}}
+        onCreate={() => {}}
+      />,
+    );
+    expect(html).not.toContain("Open AI settings");
+    expect(html).toContain("Connect eBay or Etsy in Settings.");
+    expect(html).toContain("Open Connections");
+    expect(html).toContain("Optional: connect Chrome with Anteroom Bridge");
+    expect(html).toContain("Create a listing");
+    expect(html).not.toContain("ChatGPT");
+    expect(html).not.toContain("MiMo");
+  });
+
+  it("includes the AI provider step when managed AI is off and hides Open Connections once both eBay and Etsy are connected", () => {
+    const html = renderToStaticMarkup(
+      <HostedSetupChecklistView
+        managedAI={false}
+        providerConfigured={false}
+        ebayConnected
+        etsyConnected
+        onOpenProviders={() => {}}
+        onOpenConnections={() => {}}
+        onCreate={() => {}}
+      />,
+    );
+    expect(html).toContain("Add an AI provider key to generate listings.");
+    expect(html).toContain("Open AI settings");
+    expect(html).toContain("eBay and Etsy connected.");
+    expect(html).not.toContain("Open Connections");
+    expect(html).toContain("configure an AI provider key before generating");
+  });
+
+  it("shows loading and retryable error states instead of assuming marketplaces are disconnected", () => {
+    const loadingHtml = renderToStaticMarkup(
+      <HostedSetupChecklistView
+        managedAI
+        providerConfigured
+        connectionsStatus="loading"
+        ebayConnected={false}
+        etsyConnected={false}
+        onOpenProviders={() => {}}
+        onOpenConnections={() => {}}
+        onCreate={() => {}}
+      />,
+    );
+    expect(loadingHtml).toContain("Checking eBay and Etsy connections");
+    expect(loadingHtml).not.toContain("Sign in directly from your browser");
+    expect(loadingHtml).not.toContain("Connect eBay or Etsy in Settings.");
+    expect(loadingHtml).not.toContain("Open Connections");
+
+    const errorHtml = renderToStaticMarkup(
+      <HostedSetupChecklistView
+        managedAI
+        providerConfigured
+        connectionsStatus="error"
+        ebayConnected={false}
+        etsyConnected={false}
+        onOpenProviders={() => {}}
+        onOpenConnections={() => {}}
+        onRetryConnections={() => {}}
+        onCreate={() => {}}
+      />,
+    );
+    expect(errorHtml).toContain("Could not check eBay and Etsy connections.");
+    expect(errorHtml).toContain("Retry");
+    expect(errorHtml).not.toContain("Connect eBay or Etsy in Settings.");
+    expect(errorHtml).not.toContain("Open Connections");
   });
 });
