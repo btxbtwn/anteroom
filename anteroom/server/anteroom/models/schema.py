@@ -6,9 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from anteroom.models.mercari_shipping import DEFAULT_SHIPPING_LABEL
 
-# The spellings of eBay's Year Manufactured that SQL projections read (SQL cannot
-# fold key spellings the way ``ebay_optional_keys`` does): the listing JSON field,
-# then eBay's own aspect name, which the native form saves.
+# Preferred spellings of eBay's Year Manufactured, in lookup order.
 EBAY_YEAR_KEYS = ("yearManufactured", "year_manufactured", "Year Manufactured")
 
 VALID_CONDITIONS = frozenset((

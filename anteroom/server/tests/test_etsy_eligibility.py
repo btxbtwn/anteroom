@@ -13,10 +13,13 @@ import unittest
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from anteroom.services import inventory_facets, listing_persistence
+from test_seller_ownership import migration_engine  # noqa: F401
+
+from anteroom.models.listing import Listing, ListingRevision
+from anteroom.services import inventory_facets, listing_persistence, schema_migrations
 from anteroom.database import Base, get_db, load_models
 from anteroom.main import app
 from anteroom.services.etsy_fields import etsy_eligible, etsy_when_raw, etsy_when_to_store
@@ -176,6 +179,40 @@ class NotAllowedReportTest(unittest.TestCase):
         self.assertEqual({conv.id: conv.notes for conv in self.convs.list_all()}, before)
         # There is no write side to this report.
         self.assertEqual(client.post("/api/etsy/not-allowed").status_code, 405)
+
+
+def test_projected_etsy_eligibility_matches_stored_legacy_listings(migration_engine):  # noqa: F811
+    schema_migrations.ensure_schema(migration_engine)
+    cases = (
+        ("Nested year", {"category_specifics": {"Year Manufactured": "1988"}}, True),
+        ("Variant year", {"YeAr-Manufactured": "1988"}, True),
+        ("Conflicting aliases", {"year_manufactured": "1988", "yearManufactured": "2022"}, False),
+        ("Blank preferred year", {"yearManufactured": "  ", "category_specifics": {"Year manufactured": "1988"}}, True),
+        ("Flat before nested", {"Year manufactured": "2022", "category_specifics": {"yearManufactured": "1988"}}, False),
+        ("Malformed nested block", {"category_specifics": ["1988"]}, False),
+    )
+    with Session(migration_engine) as db:
+        expected = {}
+        for title, specifics, eligible in cases:
+            conv = ConversationRepo(db).create(title=title, notes=json.dumps({"vendooMarketplaces": ["etsy"]}))
+            # Store the historical payload without the current save normalizer.
+            revision = ListingRevision(conversation_id=conv.id, source="test", listing_json=listing(
+                title=title, ebay_specifics=specifics,
+            ))
+            db.add(revision)
+            db.flush()
+            db.add(Listing(conversation_id=conv.id, current_revision_id=revision.id))
+            db.commit()
+            assert etsy_eligible(revision.listing_json) is eligible
+            expected[conv.id] = eligible
+
+        facets = inventory_facets.listing_facets(db)
+        assert {conv_id: facet["etsy_eligible"] for conv_id, facet in facets.items()} == expected
+        for conv_id, eligible in expected.items():
+            assert inventory_facets.listing_facet(db, conv_id)["etsy_eligible"] is eligible
+        assert {row["conversation_id"] for row in etsy_not_allowed_live(db)} == {
+            conv_id for conv_id, eligible in expected.items() if not eligible
+        }
 
 
 if __name__ == "__main__":

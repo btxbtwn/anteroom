@@ -408,7 +408,7 @@ def ebay_year_manufactured(listing: dict[str, Any] | None) -> str:
     for block in (ebay, ebay.get("category_specifics")):
         if not isinstance(block, dict):
             continue
-        # Match the projected rows' precedence before considering other spellings.
+        # Honor the standard aliases before considering other spellings.
         aliases = (name for name in ebay_optional_keys(block, EBAY_YEAR_KEYS[0]) if name not in EBAY_YEAR_KEYS)
         for name in (*EBAY_YEAR_KEYS, *aliases):
             text = _scalar_text(block.get(name))

@@ -29,7 +29,6 @@ from anteroom.models.job import (
 )
 from anteroom.models.listing import Listing, ListingRevision
 from anteroom.models.registry import FieldRegistry
-from anteroom.models.schema import EBAY_YEAR_KEYS
 
 # Keys the extension sends with a step result that are only useful while the
 # message is being handled: the item, the discovered schema, the fill log and
@@ -82,16 +81,9 @@ def _facet_columns() -> tuple:
         json_value(doc, "sku"),
         json_value(doc, "price"),
         json_value(doc, "etsy_specifics"),
-        *ebay_year_columns(doc),
+        # The shared Etsy reader recognizes historical keys inside this block.
+        json_value(doc, "ebay_specifics"),
     )
-
-
-def ebay_year_columns(doc) -> tuple:
-    """eBay's year under each key a listing may keep it in (``EBAY_YEAR_KEYS``), in that order.
-
-    Separate columns, not one coalesce: SQLite reads a missing key as JSON null, not SQL NULL.
-    """
-    return tuple(json_value(doc, f"ebay_specifics.{key}") for key in EBAY_YEAR_KEYS)
 
 
 class ConversationRepo:
