@@ -1,0 +1,1 @@
+- Build your description formula by dragging attributes into the order you want, dragging them out to remove them, or using the add, move, and remove controls.

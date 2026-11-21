@@ -1353,6 +1353,7 @@ export const api = {
         description: string;
         default_title: string;
         default_description: string;
+        default_blocks?: string[];
         empty_description?: string;
         custom_description?: boolean;
         blocks?: DescriptionFormulaBlock[];
@@ -1364,6 +1365,7 @@ export const api = {
         description: string;
         default_title: string;
         default_description: string;
+        default_blocks?: string[];
         empty_description?: string;
         custom_description?: boolean;
         blocks?: DescriptionFormulaBlock[];

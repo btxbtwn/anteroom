@@ -47,7 +47,8 @@ def test_seller_can_remove_measurements_and_add_material():
     assert "Measurements:" not in body["description"]
     assert "Material:" in body["description"]
     enabled = [block["id"] for block in body["blocks"] if block["enabled"]]
-    assert enabled == ["vibe", "material", "flaws"]
+    assert enabled == ["vibe", "flaws", "material"]
+    assert body["description"].index("Flaws:") < body["description"].index("Material:")
     assert skill_formulas.description_formula_markers() == ()
     assert "Material:" in skill_formulas.listing_formula_rules()
     assert skill_formulas.description_lists_flaws() is True
@@ -237,3 +238,80 @@ def test_required_multiline_layout_is_preserved(template):
     set_listing_formulas(description=template)
     assert not _description_follows_formula("Soft black cotton tee. Measurements: 20 inches.")
     assert _description_follows_formula("Soft black cotton tee.\n\nMeasurements: 20 inches.")
+
+
+def test_reordered_description_blocks_persist_and_round_trip():
+    client = TestClient(app)
+    desired = ["measurements", "material", "vibe", "flaws"]
+    saved = client.put("/api/settings/formulas", json={"blocks": desired})
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    assert body["custom_description"] is False
+    assert body["default_blocks"] == ["vibe", "flaws", "measurements"]
+    assert [block["id"] for block in body["blocks"] if block["enabled"]] == desired
+    assert (
+        body["description"].index("Measurements:")
+        < body["description"].index("Material:")
+        < body["description"].index("{trendy vibe/style keyword sentence with period}")
+        < body["description"].index("Flaws:")
+    )
+    assert "in that order" in skill_formulas.listing_formula_rules()
+
+    reloaded = client.get("/api/settings/formulas").json()
+    assert reloaded["custom_description"] is False
+    assert reloaded["default_blocks"] == ["vibe", "flaws", "measurements"]
+    assert [block["id"] for block in reloaded["blocks"] if block["enabled"]] == desired
+
+    # Reordering only the default three still saves as a custom order, not the default string.
+    reordered_default = client.put("/api/settings/formulas", json={"blocks": ["measurements", "vibe", "flaws"]}).json()
+    assert reordered_default["description"] != ""
+    assert [block["id"] for block in reordered_default["blocks"] if block["enabled"]] == [
+        "measurements",
+        "vibe",
+        "flaws",
+    ]
+
+    # Saving the default blocks in default order clears custom description back to built-in default.
+    reset = client.put("/api/settings/formulas", json={"blocks": ["vibe", "flaws", "measurements"]}).json()
+    assert reset["description"] == ""
+    assert [block["id"] for block in reset["blocks"] if block["enabled"]] == ["vibe", "flaws", "measurements"]
+
+
+def test_duplicate_block_ids_deduplicate_preserving_first_position():
+    client = TestClient(app)
+    saved = client.put("/api/settings/formulas", json={"blocks": ["material", "vibe", "material", "flaws"]})
+    assert saved.status_code == 200, saved.text
+    enabled = [block["id"] for block in saved.json()["blocks"] if block["enabled"]]
+    assert enabled == ["material", "vibe", "flaws"]
+
+
+def test_match_description_blocks_rejects_duplicate_snippets():
+    snippet = next(b.snippet for b in skill_formulas.DESCRIPTION_BLOCKS if b.id == "vibe")
+    assert skill_formulas.match_description_blocks(f"{snippet}\n\n{snippet}") is None
+
+
+def test_seller_facts_respect_custom_section_order():
+    from anteroom.services.listing_generate import apply_seller_description_facts
+    from anteroom.services.user_settings import set_listing_formulas
+
+    set_listing_formulas(
+        description=skill_formulas.compile_description_blocks(["vibe", "measurements", "flaws"])
+    )
+    seller = {
+        "garment": "top",
+        "measurements": {"top": {"pitToPit": "20", "length": "26"}},
+        "knownFlaws": "small stain on hem",
+    }
+    listing = {"description": 'Y2K black cotton tee.\n\nMeasurements: Pit to pit: 20"; Length: 26"'}
+    apply_seller_description_facts(listing, seller)
+    assert "small stain on hem" in listing["description"]
+    assert listing["description"].index("Measurements:") < listing["description"].index("Flaws:")
+
+    listing_missing_measurements = {"description": "Y2K black cotton tee.\n\nFlaws:\n- Small stain on hem."}
+    apply_seller_description_facts(listing_missing_measurements, seller)
+    assert 'Pit to pit: 20"' in listing_missing_measurements["description"]
+    assert (
+        listing_missing_measurements["description"].index("Measurements:")
+        < listing_missing_measurements["description"].index("Flaws:")
+    )
+

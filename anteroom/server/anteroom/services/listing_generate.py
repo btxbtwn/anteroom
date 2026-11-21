@@ -1345,7 +1345,11 @@ def apply_seller_description_facts(listing: dict, seller: dict) -> bool:
         set_description_block,
         without_see_photos,
     )
-    from anteroom.services.skill_formulas import description_has_section, description_lists_flaws
+    from anteroom.services.skill_formulas import (
+        description_has_section,
+        description_lists_flaws,
+        description_section_precedes,
+    )
 
     if not isinstance(listing, dict):
         return False
@@ -1356,19 +1360,31 @@ def apply_seller_description_facts(listing: dict, seller: dict) -> bool:
     seller_flaws = "; ".join(flaw_items(flaws))
     described = _comparable(description_block(updated, "flaws?"))
     flaws_label = "Flaws" if description_has_section("Flaws") else "Flaw"
+    measurements_label = "Measurements" if description_has_section("Measurements") else "Measurement"
+    flaws_before_measurements = description_section_precedes(flaws_label, measurements_label)
+    measurements_before_flaws = description_section_precedes(measurements_label, flaws_label)
     if seller_flaws and description_has_section(flaws_label) and _comparable(seller_flaws) not in described:
         block = render_flaws_block(flaws, as_list=description_lists_flaws())
         if block:
             block = block.replace("Flaws:", f"{flaws_label}:", 1)
-            updated = set_description_block(updated, "flaws?", block, before="measurements?")
+            updated = set_description_block(
+                updated,
+                "flaws?",
+                block,
+                before="measurements?" if flaws_before_measurements else "",
+            )
     measurements = _description_measurements(seller)
-    measurements_label = "Measurements" if description_has_section("Measurements") else "Measurement"
     if (
         measurements
         and description_has_section(measurements_label)
         and description_block(updated, "measurements?") != measurements.rstrip(".")
     ):
-        updated = set_description_block(updated, "measurements?", f"{measurements_label}: {measurements}")
+        updated = set_description_block(
+            updated,
+            "measurements?",
+            f"{measurements_label}: {measurements}",
+            before="flaws?" if measurements_before_flaws else "",
+        )
     if updated == desc:
         return False
     listing["description"] = updated

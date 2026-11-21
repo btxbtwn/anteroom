@@ -32,7 +32,7 @@ OPTIONAL_DESCRIPTION_MARKERS = frozenset({"flaws:"})
 # empty setting, which still means the built-in formula.
 NO_SECTION_DESCRIPTION = "{one short factual description with no labeled sections}"
 _SELLER_FORMULA_NOTE = (
-    "\n\nSeller description formula: follow the description template above exactly, "
+    "\n\nSeller description formula: follow the description template above exactly and in that order, "
     "including any section it adds and omitting any section it leaves out."
 )
 _STOCK_DESCRIPTION_LIMIT = (
@@ -218,6 +218,14 @@ def description_has_section(label: str) -> bool:
     return re.search(rf"(?im)^{re.escape(label)}\s*:", active_description_template()) is not None
 
 
+def description_section_precedes(first_label: str, second_label: str) -> bool:
+    """True when ``first_label:`` appears ahead of ``second_label:`` in the active formula."""
+    template = active_description_template()
+    first = re.search(rf"(?im)^{re.escape(first_label)}\s*:", template)
+    second = re.search(rf"(?im)^{re.escape(second_label)}\s*:", template)
+    return bool(first and second and first.start() < second.start())
+
+
 def _optional_description_markers(template: str) -> frozenset[str]:
     labels = set(OPTIONAL_DESCRIPTION_MARKERS)
     for block in DESCRIPTION_BLOCKS:
@@ -232,28 +240,40 @@ def default_description_block_ids() -> tuple[str, ...]:
     return tuple(block.id for block in DESCRIPTION_BLOCKS if block.default)
 
 
+_BLOCKS_BY_ID: dict[str, DescriptionBlock] = {block.id: block for block in DESCRIPTION_BLOCKS}
+_SNIPPET_TO_BLOCK_ID: dict[str, str] = {block.snippet: block.id for block in DESCRIPTION_BLOCKS}
+
+
 def compile_description_blocks(ids: list[str] | tuple[str, ...]) -> str:
-    """Join the chosen sections in catalog order. Unknown ids are rejected."""
-    known = {block.id for block in DESCRIPTION_BLOCKS}
-    unknown = [item for item in ids if item not in known]
-    if unknown:
-        raise ValueError(f"Unknown description section: {unknown[0]}")
-    chosen = set(ids)
-    parts = [block.snippet for block in DESCRIPTION_BLOCKS if block.id in chosen]
-    if not parts:
+    """Join the chosen sections in the seller's order. Unknown ids are rejected."""
+    ordered_ids: list[str] = []
+    seen: set[str] = set()
+    for item in ids:
+        if item not in _BLOCKS_BY_ID:
+            raise ValueError(f"Unknown description section: {item}")
+        if item not in seen:
+            seen.add(item)
+            ordered_ids.append(item)
+    if not ordered_ids:
         return NO_SECTION_DESCRIPTION
-    return "\n\n".join(parts)
+    return "\n\n".join(_BLOCKS_BY_ID[item].snippet for item in ordered_ids)
 
 
 def match_description_blocks(text: str) -> tuple[str, ...] | None:
-    """Block ids that compile to this formula, or None when it was typed freely."""
+    """Ordered block ids that compile to this formula, or None when it was typed freely."""
     stripped = text.strip()
     if stripped == NO_SECTION_DESCRIPTION:
         return ()
-    present = tuple(block.id for block in DESCRIPTION_BLOCKS if block.snippet in stripped)
-    if compile_description_blocks(present).strip() == stripped:
-        return present
-    return None
+    chunks = stripped.split("\n\n")
+    matched: list[str] = []
+    seen: set[str] = set()
+    for chunk in chunks:
+        block_id = _SNIPPET_TO_BLOCK_ID.get(chunk)
+        if block_id is None or block_id in seen:
+            return None
+        seen.add(block_id)
+        matched.append(block_id)
+    return tuple(matched)
 
 
 def description_block_selection(stored: str) -> tuple[tuple[str, ...], bool]:
