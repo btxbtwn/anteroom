@@ -13,7 +13,7 @@ const { uploadPhotos, handleGenerate, sendMessage } = vi.hoisted(() => ({
   sendMessage: vi.fn(),
 }));
 
-vi.mock("../api/client", () => ({ api: { conversations: { uploadPhotos } } }));
+vi.mock("../api/client", () => ({ api: { conversations: { uploadListingPhoto: uploadPhotos } } }));
 vi.mock("./chat/useChatServerState", () => ({
   useChatServerState: () => ({
     photos: uploadPhotos.mock.calls.length ? [{ id: "photo-1" }] : [],
@@ -80,13 +80,15 @@ describe("listing photo uploads from chat", () => {
     const correctedTag = new File(["corrected tag"], "tag.jpg", { type: "image/jpeg" });
     setComposerDraftImages(draftKey, [{ id: "front", file: front }, { id: "tag", file: tag }]);
     uploadPhotos
-      .mockResolvedValueOnce({ count: 1, photos: [{ original_filename: "front.jpg" }], errors: ["Try tag.jpg again."] })
-      .mockResolvedValueOnce({ count: 1 });
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("Try tag.jpg again."))
+      .mockResolvedValueOnce(undefined);
 
     await renderChat();
     await send();
 
-    expect(uploadPhotos).toHaveBeenNthCalledWith(1, "listing-a", [front, tag]);
+    expect(uploadPhotos).toHaveBeenNthCalledWith(1, "listing-a", front);
+    expect(uploadPhotos).toHaveBeenNthCalledWith(2, "listing-a", tag);
     expect(container.querySelector('[role="alert"]')?.textContent).toBe("Try tag.jpg again.");
     expect(getComposerDraft(draftKey).images.map((image) => image.id)).toEqual(["tag"]);
     expect(handleGenerate).not.toHaveBeenCalled();
@@ -100,7 +102,8 @@ describe("listing photo uploads from chat", () => {
     await renderChat();
     await send();
 
-    expect(uploadPhotos).toHaveBeenNthCalledWith(2, "listing-a", [replace ? correctedTag : tag]);
+    expect(uploadPhotos).toHaveBeenNthCalledWith(3, "listing-a", replace ? correctedTag : tag);
+    expect(uploadPhotos).toHaveBeenCalledTimes(3);
     expect(getComposerDraft(draftKey).images).toEqual([]);
     expect(handleGenerate).toHaveBeenCalledTimes(1);
     expect(sendMessage).not.toHaveBeenCalled();

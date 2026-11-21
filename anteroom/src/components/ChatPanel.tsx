@@ -140,7 +140,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
       if (uploadingPhotos || photosUploading(convId)) return;
       setComposerListingPhotoBatch(draftKey, "uploading");
       void uploadComposerDraftPhotos(attached, text, hasListingJson, {
-        uploadPhotos: (files) => api.conversations.uploadPhotos(convId, files),
+        uploadPhoto: (file) => api.conversations.uploadListingPhoto(convId, file),
         invalidatePhotos: async () => {
           await queryClient.invalidateQueries({ queryKey: ["photos", convId] });
           void queryClient.invalidateQueries({ queryKey: ["conversations"] });

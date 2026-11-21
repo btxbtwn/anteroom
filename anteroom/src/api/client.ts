@@ -493,6 +493,11 @@ async function refreshMarketplaceForm(
   }
 }
 
+function postHostedPhoto(convId: string, file: File, marketplace?: string): Promise<Response> {
+  const query = marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : "";
+  return studioFetch(`${BASE}/drafts/${encodeURIComponent(convId)}/photos${query}`, { method: "POST", body: file });
+}
+
 export const api = {
   vendooDraft: {
     check: (id: string) => request<VendooDraft>(`/conversations/${id}/vendoo-draft/check`, { method: "POST" }),
@@ -1061,13 +1066,27 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify(orderedIds),
       }),
+    // The composer needs the write acknowledgement, independent of the photo list read.
+    uploadListingPhoto: async (convId: string, file: File): Promise<void> => {
+      if (hasHostedApiSession()) {
+        await trackPhotoUpload(convId, async () => {
+          if (file.size > 10 * 1024 * 1024) throw new Error(`${file.name}: choose a photo smaller than 10 MB.`);
+          const response = await postHostedPhoto(convId, file);
+          if (!response.ok) throw new Error(`${file.name}: could not upload this photo.`);
+        });
+        return;
+      }
+      const result = await api.conversations.uploadPhotos(convId, [file]);
+      if (result.count !== 1) {
+        throw new Error(result.errors?.join("; ") || `${file.name}: could not upload this photo.`);
+      }
+    },
     uploadPhotos: (convId: string, files: File[], marketplace?: string): Promise<PhotoUploadResult> => trackPhotoUpload(convId, async () => {
       if (hasHostedApiSession()) return (async () => {
         const uploaded = new Map<string, string>(); const errors: string[] = [];
         for (const file of files) {
           if (file.size > 10 * 1024 * 1024) { errors.push(`${file.name}: choose a photo smaller than 10 MB.`); continue; }
-          const query = marketplace ? `?marketplace=${encodeURIComponent(marketplace)}` : "";
-          const response = await studioFetch(`${BASE}/drafts/${encodeURIComponent(convId)}/photos${query}`, { method: "POST", body: file });
+          const response = await postHostedPhoto(convId, file, marketplace);
           if (!response.ok) { errors.push(`${file.name}: could not upload this photo.`); continue; }
           uploaded.set((await response.json()).id, file.name);
         }

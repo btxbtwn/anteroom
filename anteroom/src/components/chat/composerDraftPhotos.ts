@@ -1,8 +1,7 @@
-import type { PhotoUploadResult } from "../../api/types";
 import type { ComposerImage } from "./ComposerAttachments";
 
 export interface DraftPhotoUploadDeps {
-  uploadPhotos: (files: File[]) => Promise<PhotoUploadResult>;
+  uploadPhoto: (file: File) => Promise<void>;
   invalidatePhotos: () => Promise<void>;
   clearImages: (ids: readonly string[]) => void;
   setError: (message: string) => void;
@@ -20,43 +19,33 @@ export async function uploadComposerDraftPhotos(
   hasListingJson: boolean,
   deps: DraftPhotoUploadDeps,
 ): Promise<boolean> {
-  try {
-    const result = await deps.uploadPhotos(attached.map((image) => image.file));
-    if (result.count > 0) {
+  const uploadedIds: string[] = [];
+  const errors: string[] = [];
+  for (const image of attached) {
+    try {
+      await deps.uploadPhoto(image.file);
+      uploadedIds.push(image.id);
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : `${image.file.name}: could not upload this photo.`);
+    }
+  }
+  if (uploadedIds.length) {
+    // A failed refresh must not put acknowledged writes back on the retry path.
+    deps.clearImages(uploadedIds);
+    try {
       await deps.invalidatePhotos();
+    } catch {
+      errors.push("Photos were saved, but the photo list could not be refreshed.");
     }
-    const errors = result.errors || [];
-    if (result.count === 0) {
-      deps.setError(errors.join("; ") || "Could not upload photos.");
-      return false;
-    }
-    if (errors.length) {
-      const uploadedCounts = new Map<string, number>();
-      for (const photo of result.photos || []) {
-        const name = photo.original_filename;
-        if (name) uploadedCounts.set(name, (uploadedCounts.get(name) ?? 0) + 1);
-      }
-      const uploadedIds: string[] = [];
-      for (const image of attached) {
-        const remaining = uploadedCounts.get(image.file.name) ?? 0;
-        if (remaining > 0) {
-          uploadedIds.push(image.id);
-          uploadedCounts.set(image.file.name, remaining - 1);
-        }
-      }
-      deps.clearImages(uploadedIds);
-      deps.setError(errors.join("; "));
-      return false;
-    }
-    deps.clearImages(attached.map((image) => image.id));
-    if (text) {
-      deps.sendMessage(text);
-    } else if (!hasListingJson) {
-      deps.generate();
-    }
-    return true;
-  } catch (err) {
-    deps.setError(err instanceof Error ? err.message : "Could not upload photos.");
+  }
+  if (errors.length || !uploadedIds.length) {
+    deps.setError(errors.join("; ") || "Could not upload photos.");
     return false;
   }
+  if (text) {
+    deps.sendMessage(text);
+  } else if (!hasListingJson) {
+    deps.generate();
+  }
+  return true;
 }
