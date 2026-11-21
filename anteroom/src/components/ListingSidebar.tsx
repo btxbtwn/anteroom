@@ -1,5 +1,5 @@
 import { useWorkspaceRuntime } from "../app/runtime";
-import { useCallback, useDeferredValue, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { IDLE_POLL_MS, pollMs } from "../api/polling";
@@ -65,6 +65,8 @@ interface Props {
   activeView: WorkspaceView;
   settingsSection: SettingsSectionId;
   mobileOpen?: boolean;
+  /** Optional custom empty state shown when the seller has zero listings (e.g. hosted phone onboarding). */
+  emptyState?: ReactNode;
   /** Phones: typing a search opens the listings drawer. */
   onSearch?: () => void;
   onSelect: (id: string) => void;
@@ -96,6 +98,7 @@ export function ListingSidebar({
   activeView,
   settingsSection,
   mobileOpen,
+  emptyState,
   onSearch,
   onSelect,
   onDelete,
@@ -435,7 +438,7 @@ export function ListingSidebar({
               <p role="alert" className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">Could not load listings. Retrying…</p>
             ) : <ListingRowsSkeleton />)}
             {conversations?.length === 0 && (
-              <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">No listings yet</p>
+              emptyState ?? <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">No listings yet</p>
             )}
             {conversations && conversations.length > 0 && shownListings.length === 0 && (
               <p className="px-2.5 py-6 text-center text-xs text-sidebar-muted-foreground">
