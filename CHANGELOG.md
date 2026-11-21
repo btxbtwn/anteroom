@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1090 — 2026-11-21
+
+- Show Depop’s duplicate-SKU error when Depop reports it. Keep uncertain publishes blocked from retrying while you check the result.
+- Clear the saved Depop draft link when a save check confirms the draft is missing.
+
 ## 0.1.1089 — 2026-11-21
 
 - Add the clothing Size tag field and Read size tags to the bulk Regenerate review dialog, matching bulk upload so sellers can enter, check or read tag sizes from saved photos before rewriting listings.

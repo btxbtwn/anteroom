@@ -1,2 +1,0 @@
-- Show Depop’s duplicate-SKU error when Depop reports it. Keep uncertain publishes blocked from retrying while you check the result.
-- Clear the saved Depop draft link when a save check confirms the draft is missing.
