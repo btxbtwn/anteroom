@@ -1372,7 +1372,7 @@ def apply_seller_description_facts(listing: dict, seller: dict) -> bool:
         block = render_flaws_block(flaws, as_list=description_lists_flaws())
         if block:
             block = block.replace("Flaws:", f"{flaws_label}:", 1)
-            if re.search(r"(?im)^flaws?\s*:", updated):
+            if re.search(r"(?im)^[ \t]*flaws?\s*:", updated):
                 updated = set_description_block(updated, "flaws?", block)
             else:
                 updated = insert_description_section(updated, flaws_label, block)
@@ -1383,7 +1383,7 @@ def apply_seller_description_facts(listing: dict, seller: dict) -> bool:
         and description_block(updated, "measurements?") != measurements.rstrip(".")
     ):
         measurements_block = f"{measurements_label}: {measurements}"
-        if re.search(r"(?im)^measurements?\s*:", updated):
+        if re.search(r"(?im)^[ \t]*measurements?\s*:", updated):
             updated = set_description_block(updated, "measurements?", measurements_block)
         else:
             updated = insert_description_section(updated, measurements_label, measurements_block)

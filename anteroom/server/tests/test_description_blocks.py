@@ -202,6 +202,28 @@ def test_typed_headings_receive_seller_facts(flaws_label, measurements_label):
     )
 
 
+@pytest.mark.parametrize("indent", ["  ", "\t"])
+def test_indented_seller_fact_headings_are_replaced_in_place(indent):
+    from anteroom.services.listing_generate import apply_seller_description_facts
+    from anteroom.services.user_settings import set_listing_formulas
+
+    set_listing_formulas(description="{prose}\n\nMeasurements: {values}\n\nCare: {instructions}\n\nFlaws: {flaw}")
+    listing = {
+        "description": (
+            f"Cotton tee.\n\n{indent}Measurements: See photos\n\n"
+            f"Care: Machine wash cold.\n\n{indent}Flaws: None noted."
+        )
+    }
+    seller = {"descriptionMeasurements": "20 inches", "knownFlaws": "Small stain on hem"}
+
+    assert apply_seller_description_facts(listing, seller)
+    assert listing["description"] == (
+        f"Cotton tee.\n\n{indent}Measurements: 20 inches\n\n"
+        f"Care: Machine wash cold.\n\n{indent}Flaws: Small stain on hem. See photos for details."
+    )
+    assert not apply_seller_description_facts(listing, seller)
+
+
 def test_typed_material_is_required_but_catalog_material_is_optional():
     from anteroom.services.user_settings import set_listing_formulas
     from anteroom.services.validation import _description_follows_formula
