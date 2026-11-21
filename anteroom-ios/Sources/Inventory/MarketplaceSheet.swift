@@ -215,9 +215,11 @@ enum MarketplaceSheetRules {
     /// assistant is writing that field or any parent/child path of it.
     static func isAgentLocked(_ path: String, lockedFields: [String]) -> Bool {
         guard !lockedFields.isEmpty else { return false }
-        for locked in lockedFields {
-            if locked == "*" || locked == path { return true }
-            if path.hasPrefix(locked + ".") || locked.hasPrefix(path + ".") { return true }
+        let normalizedPath = path.lowercased()
+        for rawLocked in lockedFields {
+            let locked = rawLocked.lowercased()
+            if locked == "*" || locked == normalizedPath { return true }
+            if normalizedPath.hasPrefix(locked + ".") || locked.hasPrefix(normalizedPath + ".") { return true }
         }
         return false
     }
@@ -248,12 +250,12 @@ enum MarketplaceSheetRules {
     /// Applies one Quick Edit change to a copy of `listing`, enforcing:
     /// - per-marketplace key isolation (never overwriting General `price`),
     /// - disabled / hosted read-only gating,
-    /// - agent field locks,
+    /// - agent field locks (on target, companion, and cleared dependent paths),
     /// - non-inherited field locks,
     /// - option label → stored value mapping,
     /// - numeric coercion,
     /// - companion paths (e.g. `direct_category_ids.ebay_path`),
-    /// - dependent field clears (`field.clears`).
+    /// - typed dependent field clears (`field.clears`).
     /// Returns `nil` if the edit is blocked.
     static func applyEdit(
         to listing: [String: JSONValue],
@@ -264,11 +266,13 @@ enum MarketplaceSheetRules {
         value: JSONValue,
         companion: [String: JSONValue] = [:],
         lockedFields: [String] = [],
-        disabled: Bool = false
+        disabled: Bool = false,
+        booleanFieldPaths: Set<String> = []
     ) -> [String: JSONValue]? {
         let targetPath = independentFieldKey(marketplace: marketplace, key: field?.path ?? columnKey)
         guard !disabled else { return nil }
-        guard !isAgentLocked(targetPath, lockedFields: lockedFields) else { return nil }
+        let touchedPaths = [targetPath] + Array(companion.keys) + (field?.clears ?? [])
+        guard !touchedPaths.contains(where: { isAgentLocked($0, lockedFields: lockedFields) }) else { return nil }
         if let field, field.locked, !isInheritedGeneralLock(locked: field.locked, help: field.help) {
             return nil
         }
@@ -305,7 +309,9 @@ enum MarketplaceSheetRules {
         }
         for dependent in field?.clears ?? [] {
             let empty: JSONValue = dependent.hasSuffix(".attributes") ? .object([:])
-                : dependent.hasSuffix(".inventoryRows") ? .array([]) : .string("")
+                : dependent.hasSuffix(".inventoryRows") ? .array([])
+                : (booleanFieldPaths.contains(dependent) || dependent == "mercari_specifics.noBrand") ? .bool(false)
+                : .string("")
             updated.set(empty, at: dependent)
         }
         return updated
@@ -367,14 +373,25 @@ enum MarketplaceSheetRules {
     }
 
     /// Per-marketplace price label for rows and List confirmations.
-    /// Preserves non-numeric eBay variation/auction labels when `cell.editable == false`.
+    /// Preserves non-numeric eBay variation/auction labels when `cell.editable == false`
+    /// and the sheet row matches the loaded document's revision.
     static func priceLabel(
         marketplace: String,
         sheetRow: ListingSheetRow?,
         document: [String: JSONValue]?,
-        fallbackPrice: Double?
+        fallbackPrice: Double?,
+        documentRevisionID: String? = nil
     ) -> String? {
-        if let cell = sheetRow?.cells?["price"] {
+        let sheetRowMatchesDocument: Bool = {
+            guard document != nil else { return true }
+            guard let docRev = documentRevisionID?.trimmingCharacters(in: .whitespacesAndNewlines), !docRev.isEmpty,
+                  let rowRev = sheetRow?.revisionID?.trimmingCharacters(in: .whitespacesAndNewlines), !rowRev.isEmpty else {
+                return true
+            }
+            return docRev == rowRev
+        }()
+
+        if sheetRowMatchesDocument, let cell = sheetRow?.cells?["price"] {
             let trimmed = cell.value.trimmingCharacters(in: .whitespacesAndNewlines)
             if !cell.editable && !trimmed.isEmpty {
                 return trimmed
@@ -384,7 +401,7 @@ enum MarketplaceSheetRules {
            let override = document.value(at: priceKey)?.number, override > 0 {
             return formatMoney(override)
         }
-        if let cell = sheetRow?.cells?["price"] {
+        if sheetRowMatchesDocument, let cell = sheetRow?.cells?["price"] {
             let trimmed = cell.value.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {
                 if let numeric = Double(trimmed), numeric.isFinite {
@@ -453,6 +470,7 @@ enum MarketplaceSheetRules {
     }
 
     /// Single source of truth for whether the row or Quick Edit sheet may offer `List`.
+    /// Requires a loaded, ready `sheetRow` whose revision matches `revisionID` when both are known.
     static func canListFromSheet(
         listing: ConversationSummary,
         status: MarketplaceSheetStatus,
@@ -463,8 +481,13 @@ enum MarketplaceSheetRules {
         guard listing.settledAt == nil else { return false }
         guard canAct else { return false }
         guard status.kind == .notListed || status.kind == .draft || status.kind == .delisted else { return false }
-        if let sheetRow, !sheetRow.ready { return false }
-        let rev = (revisionID ?? sheetRow?.revisionID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let sheetRow, sheetRow.ready else { return false }
+        let rowRev = (sheetRow.revisionID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let passedRev = (revisionID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !passedRev.isEmpty && !rowRev.isEmpty && passedRev != rowRev {
+            return false
+        }
+        let rev = !passedRev.isEmpty ? passedRev : rowRev
         return !rev.isEmpty
     }
 
@@ -550,5 +573,77 @@ enum MarketplaceSheetRules {
         case .array(let items): return items.allSatisfy { known.contains($0.text) }
         default: return known.contains(value.text)
         }
+    }
+}
+
+/// FIFO async mutex on the main actor.
+/// Waiters suspend on a continuation and resume one-by-one in arrival order
+/// with zero polling or spinning.
+@MainActor
+final class MainActorSerialGate {
+    private var locked = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        if !locked {
+            locked = true
+            return
+        }
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func release() {
+        if !waiters.isEmpty {
+            let next = waiters.removeFirst()
+            next.resume()
+        } else {
+            locked = false
+        }
+    }
+
+    func withLock<T>(_ operation: () async throws -> T) async rethrows -> T {
+        await acquire()
+        defer { release() }
+        return try await operation()
+    }
+}
+
+/// Tracks uncommitted Quick Edit text/number drafts with a per-column monotonic
+/// version so completing an earlier save never erases newer text typed while it
+/// was in flight.
+struct QuickEditDraftBuffer: Equatable, Sendable {
+    private(set) var values: [String: String] = [:]
+    private var versions: [String: Int] = [:]
+
+    var isEmpty: Bool { values.isEmpty }
+
+    subscript(_ key: String) -> String? {
+        values[key]
+    }
+
+    func version(for key: String) -> Int {
+        versions[key] ?? 0
+    }
+
+    mutating func set(_ text: String, for key: String) {
+        values[key] = text
+        versions[key, default: 0] += 1
+    }
+
+    func snapshot(for key: String) -> (text: String, version: Int)? {
+        guard let text = values[key] else { return nil }
+        return (text, versions[key] ?? 0)
+    }
+
+    mutating func clear(_ key: String, ifVersionMatches version: Int) {
+        if (versions[key] ?? 0) == version {
+            values.removeValue(forKey: key)
+        }
+    }
+
+    mutating func removeAll() {
+        values.removeAll()
     }
 }

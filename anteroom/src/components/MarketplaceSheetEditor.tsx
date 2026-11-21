@@ -176,15 +176,21 @@ function useSheetListingForm(convId: string | null, marketplace: NativeMarketpla
     [activityQuery.data?.locked_fields],
   );
 
+  const persistedListing: ListingData = useMemo(
+    () => docQuery.data?.listing ?? {},
+    [docQuery.data?.listing],
+  );
   const listing: ListingData = useMemo(
-    () => editState.draft ?? docQuery.data?.listing ?? {},
-    [editState.draft, docQuery.data?.listing],
+    () => editState.draft ?? persistedListing,
+    [editState.draft, persistedListing],
   );
   const revisionId = docQuery.data?.current_revision_id ?? null;
 
+  // Match ListingEditor: wait until in-flight/unpersisted edits settle before
+  // querying nativeForm so category changes are persisted before fetching dependent choices.
   const formQuery = useQuery({
-    ...nativeFormOptions(convId ?? "", marketplace, listing, revisionId),
-    enabled: Boolean(convId && docQuery.data),
+    ...nativeFormOptions(convId ?? "", marketplace, persistedListing, revisionId),
+    enabled: Boolean(convId && docQuery.data && !editState.saving && !editState.draft),
   });
 
   const fields = useMemo(
@@ -204,7 +210,13 @@ function useSheetListingForm(convId: string | null, marketplace: NativeMarketpla
   };
 
   const commitEbayCategory = (categoryId: string, path: string) => {
-    if (!edits || !docQuery.data || formDisabled || agentFieldLocked("direct_category_ids.ebay", agentLocks)) return;
+    if (
+      !edits
+      || !docQuery.data
+      || formDisabled
+      || agentFieldLocked("direct_category_ids.ebay", agentLocks)
+      || agentFieldLocked("direct_category_ids.ebay_path", agentLocks)
+    ) return;
     const updated = cloneListing(listing);
     setListingEditorValue(updated, "direct_category_ids.ebay", categoryId);
     setListingEditorValue(updated, "direct_category_ids.ebay_path", path);
@@ -222,6 +234,8 @@ function useSheetListingForm(convId: string | null, marketplace: NativeMarketpla
     agentLocks,
     commit,
     commitEbayCategory,
+    retrySave: () => edits?.retry(),
+    discardDraft: () => edits?.discard(),
   };
 }
 
@@ -739,10 +753,15 @@ export function MarketplaceQuickEditSheet({
     agentLocks,
     commit,
     commitEbayCategory,
+    retrySave,
+    discardDraft,
   } = useSheetListingForm(convId, marketplace);
   const targetKey = convId ? `${marketplace}:${convId}` : null;
-  const [confirmKey, setConfirmKey] = useState<string | null>(null);
-  const confirmingList = Boolean(targetKey && confirmKey === targetKey);
+  const [confirmSnapshot, setConfirmSnapshot] = useState<{
+    key: string;
+    revisionId: string;
+    priceLabel: string | null;
+  } | null>(null);
   const listMutation = useSheetListMutation(marketplace);
   const isListingThisRow = Boolean(
     listing && listMutation.isPending && listMutation.variables?.convId === listing.id,
@@ -756,8 +775,25 @@ export function MarketplaceQuickEditSheet({
   const marketLabel = marketplaceName(marketplace);
   const canAct = !runtime.hosted || runtime.actionMarketplaces.has(marketplace);
   const effectiveRevision = revisionId ?? sheetRow?.revision_id ?? null;
+  const hasUnsavedDraft = Boolean(editState.draft);
   const canList = canListFromSheet(listing, status, sheetRow, canAct, effectiveRevision);
-  const priceLabel = sheetPriceLabel(marketplace, sheetRow, docQuery.data ? docListing : null, listing?.price);
+  const priceLabel = sheetPriceLabel(
+    marketplace,
+    sheetRow,
+    docQuery.data ? docListing : null,
+    listing?.price,
+    docQuery.data ? revisionId : null,
+  );
+  const confirmingList = Boolean(
+    targetKey
+    && confirmSnapshot
+    && confirmSnapshot.key === targetKey
+    && confirmSnapshot.revisionId === effectiveRevision
+    && confirmSnapshot.priceLabel === priceLabel
+    && canList
+    && !editState.saving
+    && !hasUnsavedDraft,
+  );
   const loading = Boolean(listing) && (docQuery.isLoading || (formQuery.isLoading && !formQuery.data));
   const loadFailed = docQuery.isError || formQuery.isError;
 
@@ -806,9 +842,19 @@ export function MarketplaceQuickEditSheet({
 
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
               {editState.error ? (
-                <p className="mb-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive-foreground">
-                  {editState.error}
-                </p>
+                <div className="mb-3 flex flex-col gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive-foreground">
+                  <p>{editState.error}</p>
+                  {hasUnsavedDraft ? (
+                    <div className="flex items-center gap-2">
+                      <Button type="button" variant="outline" size="xs" disabled={editState.saving} onClick={retrySave}>
+                        Retry save
+                      </Button>
+                      <Button type="button" variant="ghost" size="xs" disabled={editState.saving} onClick={discardDraft}>
+                        Discard changes
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
               {loading ? (
                 <div
@@ -873,11 +919,13 @@ export function MarketplaceQuickEditSheet({
             </div>
 
             <div className="border-t border-border/60 bg-background px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
-              {confirmingList && effectiveRevision ? (
+              {confirmingList && confirmSnapshot ? (
                 <div className="flex flex-col gap-2.5">
                   <p className="text-xs text-foreground">
                     List on <span className="font-medium">{marketLabel}</span>
-                    {priceLabel ? <> for <span className="font-medium tabular-nums">{priceLabel}</span></> : null}?
+                    {confirmSnapshot.priceLabel ? (
+                      <> for <span className="font-medium tabular-nums">{confirmSnapshot.priceLabel}</span></>
+                    ) : null}?
                   </p>
                   <div className="flex items-center gap-2">
                     <Button
@@ -885,18 +933,25 @@ export function MarketplaceQuickEditSheet({
                       variant="outline"
                       className="min-h-11 flex-1"
                       disabled={isListingThisRow}
-                      onClick={() => setConfirmKey(null)}
+                      onClick={() => setConfirmSnapshot(null)}
                     >
                       Cancel
                     </Button>
                     <Button
                       type="button"
                       className="min-h-11 flex-1"
-                      disabled={isListingThisRow || editState.saving}
+                      disabled={isListingThisRow || editState.saving || hasUnsavedDraft}
                       onClick={() => {
+                        const submittedKey = confirmSnapshot.key;
+                        const submittedRev = confirmSnapshot.revisionId;
                         listMutation.mutate(
-                          { convId: listing.id, revisionId: effectiveRevision },
-                          { onSuccess: () => setConfirmKey(null) },
+                          { convId: listing.id, revisionId: submittedRev },
+                          {
+                            onSuccess: () =>
+                              setConfirmSnapshot((cur) =>
+                                cur?.key === submittedKey && cur?.revisionId === submittedRev ? null : cur,
+                              ),
+                          },
                         );
                       }}
                     >
@@ -943,8 +998,12 @@ export function MarketplaceQuickEditSheet({
                     <Button
                       type="button"
                       className="ms-auto min-h-11"
-                      disabled={editState.saving || isListingThisRow}
-                      onClick={() => setConfirmKey(targetKey)}
+                      disabled={editState.saving || hasUnsavedDraft || isListingThisRow}
+                      onClick={() => {
+                        if (targetKey && effectiveRevision) {
+                          setConfirmSnapshot({ key: targetKey, revisionId: effectiveRevision, priceLabel });
+                        }
+                      }}
                     >
                       {editState.saving ? "Saving…" : "List"}
                     </Button>

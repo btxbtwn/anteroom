@@ -221,7 +221,7 @@ struct InventoryView: View {
                         .foregroundStyle(WorkspaceStyle.mutedText)
                     Spacer()
                     Button("Retry") {
-                        Task { await model.loadSheet(marketplace: market, listings: initialWindow, force: true) }
+                        Task { await model.retryFailedSheet(marketplace: market, fallback: initialWindow) }
                     }
                     .font(.footnote.weight(.medium))
                 }

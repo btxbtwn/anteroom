@@ -6,13 +6,14 @@ import Foundation
 /// List confirmation pricing, and Quick Edit ordering / traversal.
 @main
 struct MarketplaceSheetTests {
-    static func main() throws {
+    static func main() async throws {
         try testPriceAndFieldIsolation()
         try testStructuredFieldsAndCompanionClears()
         try testAgentLocksAndHostedGating()
         try testPriceLabelAndConfirmation()
         try testRowStatusCanListOrderingAndTraversal()
         try testReviewRegressions()
+        try await testPr1745Regressions()
         print("MarketplaceSheetTests passed")
     }
 
@@ -415,6 +416,167 @@ struct MarketplaceSheetTests {
                 == ["ebay", "depop"]
         )
         precondition(!MarketplaceSheetRules.isFormDisabled(marketplace: "depop", runtime: desktop))
+    }
+
+    @MainActor
+    private static func testPr1745Regressions() async throws {
+        // 1. P1: MainActorSerialGate serializes concurrent main-actor saves in strict FIFO order without spinning.
+        let gate = MainActorSerialGate()
+        var events: [String] = []
+        var firstRelease: CheckedContinuation<Void, Never>?
+
+        let t1 = Task { @MainActor in
+            await gate.withLock {
+                events.append("start-1")
+                await withCheckedContinuation { continuation in
+                    firstRelease = continuation
+                }
+                events.append("end-1")
+            }
+        }
+        // Yield so t1 acquires the gate and suspends on firstRelease.
+        await Task.yield()
+
+        let t2 = Task { @MainActor in
+            await gate.withLock {
+                events.append("start-2")
+                await Task.yield()
+                events.append("end-2")
+            }
+        }
+        let t3 = Task { @MainActor in
+            await gate.withLock {
+                events.append("start-3")
+                events.append("end-3")
+            }
+        }
+        await Task.yield()
+        // Neither t2 nor t3 may have entered while t1 holds the gate.
+        precondition(events == ["start-1"])
+        firstRelease?.resume()
+        _ = await (t1.value, t2.value, t3.value)
+        precondition(events == ["start-1", "end-1", "start-2", "end-2", "start-3", "end-3"])
+
+        // 2. P2: QuickEditDraftBuffer preserves newer text typed while an earlier save was in flight.
+        var drafts = QuickEditDraftBuffer()
+        drafts.set("27", for: "price")
+        let firstSnap = drafts.snapshot(for: "price")!
+        precondition(firstSnap.text == "27")
+        // User types "27.50" while save for "27" is still in flight.
+        drafts.set("27.50", for: "price")
+        // Earlier save completes and tries to clear its submitted version — newer text survives.
+        drafts.clear("price", ifVersionMatches: firstSnap.version)
+        precondition(drafts["price"] == "27.50")
+        // Next save submits the latest version and clears cleanly.
+        let secondSnap = drafts.snapshot(for: "price")!
+        precondition(secondSnap.text == "27.50")
+        drafts.clear("price", ifVersionMatches: secondSnap.version)
+        precondition(drafts["price"] == nil && drafts.isEmpty)
+
+        // 3. Boolean dependent clears write .bool(false) rather than "".
+        let mercariBrandForm = try decode(NativeForm.self, #"""
+        {
+          "marketplace": "mercari",
+          "fields": [
+            {
+              "key": "brand",
+              "path": "mercari_specifics.brand",
+              "label": "Brand",
+              "options": ["Nike"],
+              "clears": ["mercari_specifics.noBrand", "mercari_specifics.customBool"]
+            }
+          ]
+        }
+        """#)
+        let mercariDoc: [String: JSONValue] = [
+            "mercari_specifics": .object([
+                "noBrand": .bool(true),
+                "customBool": .bool(true),
+            ]),
+        ]
+        let mercariUpdated = MarketplaceSheetRules.applyEdit(
+            to: mercariDoc,
+            marketplace: "mercari",
+            field: mercariBrandForm.fields[0],
+            columnKey: "mercari_specifics.brand",
+            columnKind: .select,
+            value: .string("Nike"),
+            booleanFieldPaths: ["mercari_specifics.customBool"]
+        )
+        precondition(mercariUpdated?.value(at: "mercari_specifics.noBrand") == .bool(false))
+        precondition(mercariUpdated?.value(at: "mercari_specifics.customBool") == .bool(false))
+
+        // 4. Case-insensitive agent locks + secondary path lock enforcement (companion & clears).
+        precondition(MarketplaceSheetRules.isAgentLocked("ebay_specifics.Size", lockedFields: ["ebay_specifics.size"]))
+        precondition(MarketplaceSheetRules.isAgentLocked("ebay_specifics.size", lockedFields: ["EBAY_SPECIFICS"]))
+        // Locked companion path blocks category save.
+        precondition(MarketplaceSheetRules.applyEdit(
+            to: [:],
+            marketplace: "etsy",
+            field: mercariBrandForm.fields[0],
+            columnKey: "direct_category_ids.etsy",
+            columnKind: .category,
+            value: .string("Clothing > Tops"),
+            companion: ["direct_category_ids.etsy_path": .string("Clothing > Tops")],
+            lockedFields: ["direct_category_ids.etsy_path"]
+        ) == nil)
+        // Locked cleared dependent blocks edit.
+        precondition(MarketplaceSheetRules.applyEdit(
+            to: mercariDoc,
+            marketplace: "mercari",
+            field: mercariBrandForm.fields[0],
+            columnKey: "mercari_specifics.brand",
+            columnKind: .select,
+            value: .string("Nike"),
+            lockedFields: ["mercari_specifics.noBrand"]
+        ) == nil)
+
+        // 5. canListFromSheet rejects nil sheetRow (even with revisionID) and mismatched revisions.
+        let draft = try decode(ConversationSummary.self, #"""
+        {"id": "d1", "title": "Jacket", "price": 32, "status": "draft", "inventory_status": "draft", "created_at": "2026-11-20T10:00:00Z", "updated_at": "2026-11-20T10:00:00Z"}
+        """#)
+        let readyRowRev1 = try decode(ListingSheetRow.self, #"""
+        {
+          "id": "d1",
+          "revision_id": "rev-1",
+          "ready": true,
+          "needs_load": false,
+          "cells": {
+            "price": {"value": "Variations ($18–$24)", "required": true, "missing": false, "rejected": false, "editable": false}
+          },
+          "missing": []
+        }
+        """#)
+        let notListed = MarketplaceSheetStatus(kind: .notListed, label: "Not listed", url: nil)
+        precondition(!MarketplaceSheetRules.canListFromSheet(
+            listing: draft, status: notListed, sheetRow: nil, canAct: true, revisionID: "rev-1"
+        ))
+        precondition(!MarketplaceSheetRules.canListFromSheet(
+            listing: draft, status: notListed, sheetRow: readyRowRev1, canAct: true, revisionID: "rev-2"
+        ))
+        precondition(MarketplaceSheetRules.canListFromSheet(
+            listing: draft, status: notListed, sheetRow: readyRowRev1, canAct: true, revisionID: "rev-1"
+        ))
+
+        // 6. priceLabel ignores stale sheetRow when documentRevisionID differs from sheetRow.revisionID.
+        let docRev2: [String: JSONValue] = [
+            "price": .int(32),
+            "ebay_specifics": .object(["price": .int(45)]),
+        ]
+        precondition(MarketplaceSheetRules.priceLabel(
+            marketplace: "ebay",
+            sheetRow: readyRowRev1,
+            document: docRev2,
+            fallbackPrice: 32,
+            documentRevisionID: "rev-2"
+        ) == "$45")
+        precondition(MarketplaceSheetRules.priceLabel(
+            marketplace: "ebay",
+            sheetRow: readyRowRev1,
+            document: docRev2,
+            fallbackPrice: 32,
+            documentRevisionID: "rev-1"
+        ) == "Variations ($18–$24)")
     }
 
     private static func decode<T: Decodable>(_ type: T.Type, _ json: String) throws -> T {

@@ -90,15 +90,34 @@ describe("nativeFieldCommit", () => {
     expect((posh?.poshmark_specifics as Record<string, unknown>)?.sizeSetId).toBe("standard-set");
   });
 
-  it("blocks edits when disabled, field-locked, agent-locked, or [object Object]", () => {
+  it("blocks edits when disabled, field-locked, agent-locked (including companion/clears/sizeSetId), or [object Object]", () => {
     const fields: CommitFieldSpec[] = [
       { key: "price", type: "number" },
       { key: "poshmark_specifics.earnings", locked: true },
+      { key: "direct_category_ids.etsy", clears: ["etsy_specifics.size"] },
+      { key: "poshmark_specifics.nativeSizeId" },
+      { key: "poshmark_specifics.sizeSetId", defaultValue: "standard-set" },
     ];
     expect(commitNativeField({}, fields, "price", "10", { disabled: true })).toBeNull();
     expect(commitNativeField({}, fields, "poshmark_specifics.earnings", "$8")).toBeNull();
     expect(commitNativeField({}, fields, "price", "10", { agentLocks: ["price"] })).toBeNull();
     expect(commitNativeField({}, fields, "price", "[object Object]")).toBeNull();
+    expect(
+      commitNativeField({}, fields, "direct_category_ids.etsy", "42", {
+        also: { "direct_category_ids.etsy_path": "Clothing > Tops" },
+        agentLocks: ["direct_category_ids.etsy_path"],
+      }),
+    ).toBeNull();
+    expect(
+      commitNativeField({}, fields, "direct_category_ids.etsy", "42", {
+        agentLocks: ["etsy_specifics.size"],
+      }),
+    ).toBeNull();
+    expect(
+      commitNativeField({}, fields, "poshmark_specifics.nativeSizeId", "M", {
+        agentLocks: ["poshmark_specifics.sizeSetId"],
+      }),
+    ).toBeNull();
   });
 
   it("reverse-maps stored option IDs to display labels", () => {

@@ -49,7 +49,9 @@ describe("marketplaceSheetConfig", () => {
       },
       missing: [],
     };
-    expect(sheetPriceLabel("ebay", variationRow, { price: 32 }, 32)).toBe("3 variations");
+    expect(sheetPriceLabel("ebay", variationRow, { price: 32 }, 32, "rev-2")).toBe("3 variations");
+    // Stale sheetRow (rev-2) must not override a newer document's price (rev-3).
+    expect(sheetPriceLabel("ebay", variationRow, { price: 32, ebay_specifics: { price: 45 } }, 32, "rev-3")).toBe("$45");
   });
 
   it("applies one consistent canListFromSheet rule across desktop and phone", () => {
@@ -60,11 +62,14 @@ describe("marketplaceSheetConfig", () => {
     expect(canListFromSheet(listing, { kind: "not_listed", label: "Not listed", url: null }, readyRow, true)).toBe(true);
     expect(canListFromSheet(listing, { kind: "draft", label: "Draft", url: null }, readyRow, true)).toBe(true);
     expect(canListFromSheet(listing, { kind: "delisted", label: "Delisted", url: null }, readyRow, true)).toBe(true);
+    expect(canListFromSheet(listing, { kind: "not_listed", label: "Not listed", url: null }, readyRow, true, "rev-1")).toBe(true);
 
     expect(canListFromSheet(listing, { kind: "needs", label: "Needs 1", url: null }, readyRow, true)).toBe(false);
     expect(canListFromSheet(listing, { kind: "failed", label: "Failed", url: null }, readyRow, true)).toBe(false);
     expect(canListFromSheet(listing, { kind: "listed", label: "Listed", url: null }, readyRow, true)).toBe(false);
     expect(canListFromSheet(listing, { kind: "not_listed", label: "Not listed", url: null }, unreadyRow, true)).toBe(false);
+    expect(canListFromSheet(listing, { kind: "not_listed", label: "Not listed", url: null }, undefined, true, "rev-1")).toBe(false);
+    expect(canListFromSheet(listing, { kind: "not_listed", label: "Not listed", url: null }, readyRow, true, "rev-2")).toBe(false);
     expect(canListFromSheet(listing, { kind: "not_listed", label: "Not listed", url: null }, readyRow, false)).toBe(false);
     expect(canListFromSheet({ ...listing, settled_at: "2026-01-01" }, { kind: "not_listed", label: "Not listed", url: null }, readyRow, true)).toBe(false);
   });

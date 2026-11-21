@@ -352,6 +352,7 @@ describe("MarketplaceSheetEditor", () => {
       // Ready row shows List -> confirm shows Depop's $27 (not General $32) and lists with rev-fresh.
       const priceOverrideRow: ListingSheetRow = {
         ...READY_SHEET_ROW,
+        revision_id: "rev-fresh",
         cells: {
           ...READY_SHEET_ROW.cells,
           price: { value: "27", raw: "27", required: true, missing: false, rejected: false, error: "", editable: true },
@@ -389,6 +390,235 @@ describe("MarketplaceSheetEditor", () => {
       await flushMicrotasks();
 
       expect(listSpy).toHaveBeenCalledWith("conv-1", "depop", "rev-fresh");
+    } finally {
+      await act(() => root.unmount());
+    }
+  });
+
+  it("waits for a category save to finish before fetching dependent nativeForm options (P2)", async () => {
+    const initialDoc: ListingDocument = {
+      ...SAMPLE_DOC,
+      conversation_id: "conv-cat",
+      current_revision_id: "rev-1",
+      listing: {
+        title: "Wool cardigan",
+        price: 32,
+        direct_category_ids: { depop: "cat-tops" },
+      },
+    };
+    const catListing: Listing = { ...LISTING_ROW, id: "conv-cat" };
+    const topsForm: MarketplaceForm = {
+      marketplace: "depop",
+      category_id: "cat-tops",
+      known: true,
+      fields: [
+        {
+          key: "category",
+          path: "direct_category_ids.depop",
+          label: "Category",
+          required: true,
+          locked: false,
+          multi: false,
+          selection_only: true,
+          options: ["Tops", "Shoes"],
+          option_values: { Tops: "cat-tops", Shoes: "cat-shoes" },
+          value: "cat-tops",
+        },
+        {
+          key: "size",
+          path: "depop_specifics.size",
+          label: "Size",
+          required: true,
+          locked: false,
+          multi: false,
+          selection_only: true,
+          options: ["S", "M", "L"],
+          value: "",
+        },
+      ],
+      notes: [],
+    };
+    const shoesForm: MarketplaceForm = {
+      ...topsForm,
+      category_id: "cat-shoes",
+      fields: [
+        topsForm.fields[0],
+        { ...topsForm.fields[1], options: ["US 8", "US 9", "US 10"] },
+      ],
+    };
+
+    vi.spyOn(api.listings, "get").mockResolvedValue(initialDoc);
+    vi.spyOn(api.conversations, "activity").mockResolvedValue(IDLE_ACTIVITY);
+    const formSpy = vi.spyOn(api.nativeMarketplaces, "form").mockImplementation(async (_id, _market, rev) =>
+      rev === "rev-2" ? shoesForm : topsForm,
+    );
+
+    let resolveSave!: (result: ListingSaveResult) => void;
+    const saveSpy = vi.spyOn(api.listings, "update").mockImplementation(
+      () => new Promise<ListingSaveResult>((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      await act(() => root.render(
+        <QueryClientProvider client={client}>
+          <WorkspaceRuntimeProvider value={LOCAL_RUNTIME}>
+            <MarketplaceQuickEditSheet
+              listing={catListing}
+              marketplace="depop"
+              sheetRow={READY_SHEET_ROW}
+              nextDraftId={null}
+              onClose={vi.fn()}
+              onSelectListing={vi.fn()}
+              onOpenListing={vi.fn()}
+            />
+          </WorkspaceRuntimeProvider>
+        </QueryClientProvider>,
+      ));
+      await flushMicrotasks();
+
+      expect(formSpy).toHaveBeenCalledTimes(1);
+      expect(formSpy).toHaveBeenLastCalledWith("conv-cat", "depop", "rev-1", expect.anything());
+
+      // Change category to Shoes while PUT is still in flight.
+      const selects = [...document.querySelectorAll<HTMLSelectElement>("select")];
+      const catSelect = selects.find((el) => [...el.options].some((o) => o.value === "Shoes"));
+      expect(catSelect).toBeDefined();
+      await act(() => {
+        catSelect!.value = "Shoes";
+        catSelect!.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await flushMicrotasks();
+
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+      // Must NOT have queried nativeForm before the category PUT finishes.
+      expect(formSpy).toHaveBeenCalledTimes(1);
+
+      // Now finish the category save -> rev-2 -> nativeForm fetches with rev-2 and loads shoe sizes.
+      await act(async () => {
+        resolveSave(mockSaveResult(saveSpy.mock.calls[0][1], "rev-2"));
+      });
+      await flushMicrotasks();
+
+      expect(formSpy).toHaveBeenCalledTimes(2);
+      expect(formSpy).toHaveBeenLastCalledWith("conv-cat", "depop", "rev-2", expect.anything());
+      expect(document.body.textContent).toContain("US 9");
+    } finally {
+      await act(() => root.unmount());
+    }
+  });
+
+  it("blocks List when an unsaved draft remains after a failed save and invalidates confirmation on drift", async () => {
+    const draftDoc: ListingDocument = {
+      ...SAMPLE_DOC,
+      conversation_id: "conv-guard",
+      current_revision_id: "rev-1",
+      listing: { title: "Wool cardigan", price: 32, depop_specifics: { price: 27, condition: "used_good" } },
+    };
+    const guardListing: Listing = { ...LISTING_ROW, id: "conv-guard" };
+    const readyRowRev1: ListingSheetRow = {
+      ...READY_SHEET_ROW,
+      revision_id: "rev-1",
+      cells: {
+        ...READY_SHEET_ROW.cells,
+        price: { value: "27", raw: "27", required: true, missing: false, rejected: false, error: "", editable: true },
+      },
+    };
+
+    vi.spyOn(api.listings, "get").mockResolvedValue(draftDoc);
+    vi.spyOn(api.conversations, "activity").mockResolvedValue(IDLE_ACTIVITY);
+    vi.spyOn(api.nativeMarketplaces, "form").mockResolvedValue(DEPOP_FORM);
+    vi.spyOn(api.listings, "update").mockRejectedValue(new Error("Save failed"));
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    try {
+      await act(() => root.render(
+        <QueryClientProvider client={client}>
+          <WorkspaceRuntimeProvider value={LOCAL_RUNTIME}>
+            <MarketplaceQuickEditSheet
+              listing={guardListing}
+              marketplace="depop"
+              sheetRow={readyRowRev1}
+              nextDraftId={null}
+              onClose={vi.fn()}
+              onSelectListing={vi.fn()}
+              onOpenListing={vi.fn()}
+            />
+          </WorkspaceRuntimeProvider>
+        </QueryClientProvider>,
+      ));
+      await flushMicrotasks();
+
+      // Open List confirmation at rev-1 / $27.
+      const listBtn = [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === "List");
+      expect(listBtn).toBeDefined();
+      await act(() => {
+        listBtn!.click();
+      });
+      expect(document.body.textContent).toContain("List on Depop for $27?");
+
+      // Simulate external drift to rev-2 / $40 -> confirmation must invalidate.
+      const readyRowRev2: ListingSheetRow = {
+        ...readyRowRev1,
+        revision_id: "rev-2",
+        cells: {
+          ...readyRowRev1.cells,
+          price: { value: "40", raw: "40", required: true, missing: false, rejected: false, error: "", editable: true },
+        },
+      };
+      await act(() => {
+        client.setQueryData<ListingDocument>(["listing", "conv-guard"], {
+          ...draftDoc,
+          current_revision_id: "rev-2",
+          listing: { ...draftDoc.listing, depop_specifics: { price: 40, condition: "used_good" } },
+        });
+        root.render(
+          <QueryClientProvider client={client}>
+            <WorkspaceRuntimeProvider value={LOCAL_RUNTIME}>
+              <MarketplaceQuickEditSheet
+                listing={guardListing}
+                marketplace="depop"
+                sheetRow={readyRowRev2}
+                nextDraftId={null}
+                onClose={vi.fn()}
+                onSelectListing={vi.fn()}
+                onOpenListing={vi.fn()}
+              />
+            </WorkspaceRuntimeProvider>
+          </QueryClientProvider>,
+        );
+      });
+      await flushMicrotasks();
+      expect(document.body.textContent).not.toContain("List on Depop for $27?");
+
+      // Now trigger a failed edit -> unsaved draft remains -> List button must be disabled.
+      const saveSpy = vi.spyOn(api.listings, "update").mockRejectedValue(new Error("Save failed"));
+      const input = document.querySelector<HTMLInputElement>('input[data-listing-field="depop_specifics.price"]');
+      expect(input).not.toBeNull();
+      await act(() => {
+        input!.focus();
+        setInputValue(input!, "19");
+        input!.blur();
+      });
+      await flushMicrotasks();
+
+      expect(saveSpy).toHaveBeenCalledTimes(1);
+      expect(document.body.textContent).toContain("Save failed");
+      const listBtnAfterFailure = [...document.querySelectorAll("button")].find(
+        (b) => b.textContent?.trim() === "List",
+      ) as HTMLButtonElement | undefined;
+      expect(listBtnAfterFailure).toBeDefined();
+      expect(listBtnAfterFailure!.disabled).toBe(true);
     } finally {
       await act(() => root.unmount());
     }

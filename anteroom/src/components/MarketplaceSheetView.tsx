@@ -583,9 +583,15 @@ export function MarketplaceSheetView({
               isListing={isListingConfirm}
               onCancel={() => setConfirmList(null)}
               onConfirm={(revisionId) => {
+                const submittedId = confirmList.listing.id;
                 listMutation.mutate(
-                  { convId: confirmList.listing.id, revisionId },
-                  { onSuccess: () => setConfirmList(null) },
+                  { convId: submittedId, revisionId },
+                  {
+                    onSuccess: () =>
+                      setConfirmList((cur) =>
+                        cur?.listing.id === submittedId && cur?.revisionId === revisionId ? null : cur,
+                      ),
+                  },
                 );
               }}
             />
@@ -650,11 +656,13 @@ function SheetStatusAction({
   const editState = useSyncExternalStore(edits.subscribe, edits.getSnapshot, edits.getSnapshot);
   const cachedDoc = queryClient.getQueryData<ListingDocument>(["listing", listing.id]);
   const effectiveRevision = cachedDoc?.current_revision_id ?? sheetRow?.revision_id ?? null;
+  const hasUnsavedDraft = Boolean(editState.draft);
   const priceLabel = sheetPriceLabel(
     marketplace,
     sheetRow,
     editState.draft ?? cachedDoc?.listing,
     listing.price,
+    cachedDoc?.current_revision_id ?? null,
   );
   const canList = canListFromSheet(listing, status, sheetRow, canAct, effectiveRevision);
   const variant = BADGE_VARIANT[status.kind];
@@ -698,7 +706,7 @@ function SheetStatusAction({
         type="button"
         size={mode === "phone" ? "sm" : "xs"}
         className={mode === "phone" ? "min-h-11 px-3" : undefined}
-        disabled={pending || editState.saving}
+        disabled={pending || editState.saving || hasUnsavedDraft}
         onClick={(event) => onListClick(event.currentTarget, effectiveRevision, priceLabel)}
       >
         {editState.saving ? "Saving…" : "List"}
@@ -747,10 +755,21 @@ function DesktopConfirmListBody({
   const edits = useMemo(() => listingEdits(queryClient, confirmList.listing.id), [queryClient, confirmList.listing.id]);
   const editState = useSyncExternalStore(edits.subscribe, edits.getSnapshot, edits.getSnapshot);
   const cachedDoc = queryClient.getQueryData<ListingDocument>(["listing", confirmList.listing.id]);
-  const latestRevision = cachedDoc?.current_revision_id ?? confirmList.revisionId;
-  const priceLabel =
-    sheetPriceLabel(marketplace, sheetRow, editState.draft ?? cachedDoc?.listing, confirmList.listing.price)
-    ?? confirmList.priceLabel;
+  const liveRevision = cachedDoc?.current_revision_id ?? sheetRow?.revision_id ?? confirmList.revisionId;
+  const livePrice = sheetPriceLabel(
+    marketplace,
+    sheetRow,
+    editState.draft ?? cachedDoc?.listing,
+    confirmList.listing.price,
+    cachedDoc?.current_revision_id ?? null,
+  );
+  const hasUnsavedDraft = Boolean(editState.draft);
+  const snapshotDrifted =
+    liveRevision !== confirmList.revisionId
+    || (sheetRow !== undefined && sheetRow.ready === false)
+    || (livePrice !== null && confirmList.priceLabel !== null && livePrice !== confirmList.priceLabel)
+    || hasUnsavedDraft;
+  const priceLabel = confirmList.priceLabel;
 
   return (
     <div className="flex flex-col gap-2.5 px-3 py-2">
@@ -761,6 +780,11 @@ function DesktopConfirmListBody({
           <> for <span className="font-medium tabular-nums">{priceLabel}</span></>
         ) : null}?
       </p>
+      {snapshotDrifted && !isListing && !editState.saving ? (
+        <p className="text-xs text-warning-foreground">
+          This listing changed. Cancel and click List again to review the latest details.
+        </p>
+      ) : null}
       <div className="flex items-center justify-end gap-1.5">
         <Button
           type="button"
@@ -774,8 +798,8 @@ function DesktopConfirmListBody({
         <Button
           type="button"
           size="xs"
-          disabled={isListing || editState.saving}
-          onClick={() => onConfirm(latestRevision)}
+          disabled={isListing || editState.saving || snapshotDrifted}
+          onClick={() => onConfirm(confirmList.revisionId)}
         >
           {isListing || editState.saving ? <Spinner size="sm" /> : <CheckIcon className="size-3.5" />}
           {editState.saving ? "Saving…" : `List on ${marketLabel}`}

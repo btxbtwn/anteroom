@@ -61,7 +61,13 @@ export function commitNativeField(
 ): ListingData | null {
   const { also = {}, agentLocks = [], disabled = false } = options;
   const field = fields.find((entry) => entry.key === key);
-  if (disabled || agentFieldLocked(key, agentLocks) || field?.locked) return null;
+  const touchedPaths = [
+    key,
+    ...Object.keys(also),
+    ...(key === "poshmark_specifics.nativeSizeId" ? ["poshmark_specifics.sizeSetId"] : []),
+    ...(field?.clears ?? []),
+  ];
+  if (disabled || field?.locked || touchedPaths.some((path) => agentFieldLocked(path, agentLocks))) return null;
   if (typeof value === "string" && value.trim() === "[object Object]") return null;
 
   const updated = cloneListing(listing);

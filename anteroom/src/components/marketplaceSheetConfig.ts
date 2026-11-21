@@ -102,8 +102,14 @@ export function sheetPriceLabel(
   sheetRow: ListingSheetRow | undefined,
   docListing?: ListingData | null,
   fallbackPrice?: number | null,
+  docRevisionId?: string | null,
 ): string | null {
-  const priceCell = sheetRow?.cells?.price;
+  const sheetRowMatchesDoc =
+    !docListing
+    || !docRevisionId
+    || !sheetRow?.revision_id
+    || sheetRow.revision_id === docRevisionId;
+  const priceCell = sheetRowMatchesDoc ? sheetRow?.cells?.price : undefined;
   const cellText = priceCell?.value?.trim() ?? "";
   if (priceCell?.editable === false && cellText) {
     return cellText;
@@ -136,9 +142,12 @@ export function canListFromSheet(
   revisionId?: string | null,
 ): boolean {
   if (!listing || listing.settled_at || !canAct || !status) return false;
-  const effectiveRevision = revisionId ?? sheetRow?.revision_id ?? null;
+  if (!sheetRow || !sheetRow.ready) return false;
+  const rowRev = sheetRow.revision_id?.trim() ?? "";
+  const passedRev = revisionId?.trim() ?? "";
+  if (passedRev && rowRev && passedRev !== rowRev) return false;
+  const effectiveRevision = passedRev || rowRev;
   if (!effectiveRevision) return false;
-  if (sheetRow && sheetRow.ready === false) return false;
   return status.kind === "not_listed" || status.kind === "draft" || status.kind === "delisted";
 }
 

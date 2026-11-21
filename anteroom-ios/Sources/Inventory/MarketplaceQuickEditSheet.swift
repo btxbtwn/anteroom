@@ -24,11 +24,16 @@ final class MarketplaceQuickEditModel {
     private(set) var formError: String?
     var saveError: String?
     var hasConflict = false
-    /// Uncommitted text/number input drafts keyed by column key, flushed on blur, Done, Next draft or List.
-    var draftText: [String: String] = [:]
+    /// Uncommitted text/number input drafts keyed by column key with per-column versions,
+    /// flushed on blur, Done, Next draft, Open form, or List.
+    var drafts = QuickEditDraftBuffer()
 
-    /// Serializes saves so rapid edits never build on a stale revisionID.
-    @ObservationIgnored private var inFlightSave: Task<Void, Never>?
+    /// FIFO mutex serializing all saves on the main actor without polling or spinning.
+    @ObservationIgnored private let saveGate = MainActorSerialGate()
+    /// Monotonic counters preventing an older in-flight `load()` from overwriting a newer save.
+    @ObservationIgnored private var loadGeneration = 0
+    @ObservationIgnored private var saveGeneration = 0
+    @ObservationIgnored private var categorySaveGeneration = 0
 
     init(api: AnteroomAPI, listingID: String, marketplace: String, runtime: WorkspaceRuntime?) {
         self.api = api
@@ -50,21 +55,32 @@ final class MarketplaceQuickEditModel {
         return fieldsByPath[rewritten] ?? fieldsByPath[column.key]
     }
 
+    private func touchedPaths(for column: MarketplaceSheetColumn) -> [String] {
+        let f = field(for: column)
+        let targetPath = MarketplaceSheetRules.independentFieldKey(marketplace: marketplace, key: f?.path ?? column.key)
+        var paths = [targetPath]
+        if let companionPath = MarketplaceSheetRules.categoryPathKey(for: column.key) {
+            paths.append(companionPath)
+        }
+        if let clears = f?.clears {
+            paths.append(contentsOf: clears)
+        }
+        return paths
+    }
+
     func isLocked(_ column: MarketplaceSheetColumn) -> Bool {
         if formDisabled { return true }
-        let targetPath = MarketplaceSheetRules.independentFieldKey(marketplace: marketplace, key: field(for: column)?.path ?? column.key)
-        if MarketplaceSheetRules.isAgentLocked(targetPath, lockedFields: agentLocks) { return true }
+        if isAgentLocked(column) { return true }
         if let f = field(for: column), f.locked { return true }
         return false
     }
 
     func isAgentLocked(_ column: MarketplaceSheetColumn) -> Bool {
-        let targetPath = MarketplaceSheetRules.independentFieldKey(marketplace: marketplace, key: field(for: column)?.path ?? column.key)
-        return MarketplaceSheetRules.isAgentLocked(targetPath, lockedFields: agentLocks)
+        touchedPaths(for: column).contains { MarketplaceSheetRules.isAgentLocked($0, lockedFields: agentLocks) }
     }
 
     func displayText(for column: MarketplaceSheetColumn, cell: ListingSheetCell?) -> String {
-        if let typed = draftText[column.key] { return typed }
+        if let typed = drafts[column.key] { return typed }
         if let document, let pathKey = MarketplaceSheetRules.categoryPathKey(for: column.key),
            let storedPath = document.value(at: pathKey)?.text, !storedPath.isEmpty {
             return storedPath
@@ -91,15 +107,24 @@ final class MarketplaceQuickEditModel {
     }
 
     func load(preserveDrafts: Bool = false) async {
+        loadGeneration += 1
+        let startLoadGen = loadGeneration
+        let startSaveGen = saveGeneration
+        let startCategoryGen = categorySaveGeneration
+
         isLoading = true
         loadError = nil
         formError = nil
         saveError = nil
         hasConflict = false
         if !preserveDrafts {
-            draftText = [:]
+            drafts.removeAll()
         }
-        defer { isLoading = false }
+        defer {
+            if loadGeneration == startLoadGen {
+                isLoading = false
+            }
+        }
 
         async let docRead: Result<ListingDocument, Error> = {
             do { return .success(try await api.listing(listingID)) }
@@ -112,31 +137,40 @@ final class MarketplaceQuickEditModel {
         async let activityRead = try? api.activity(listingID)
 
         let (docResult, formResult, loadedActivity) = await (docRead, formRead, activityRead)
+        guard loadGeneration == startLoadGen else { return }
         if let loadedActivity { activity = loadedActivity }
 
-        switch docResult {
-        case .success(let doc):
-            document = doc.listing
-            revisionID = doc.currentRevisionID
-        case .failure(let error) where error.isCancellation:
-            return
-        case .failure(let error):
-            loadError = error.localizedDescription
+        if saveGeneration == startSaveGen {
+            switch docResult {
+            case .success(let doc):
+                document = doc.listing
+                revisionID = doc.currentRevisionID
+            case .failure(let error) where error.isCancellation:
+                return
+            case .failure(let error):
+                loadError = error.localizedDescription
+            }
         }
 
-        switch formResult {
-        case .success(let form):
-            let independent = MarketplaceSheetRules.independentFields(form.fields, marketplace: marketplace)
-            var map: [String: NativeField] = [:]
-            for f in independent { map[f.path] = f }
-            fieldsByPath = map
-            formError = nil
-        case .failure(let error) where error.isCancellation:
-            return
-        case .failure(let error):
-            fieldsByPath = [:]
-            formError = error.localizedDescription
+        if categorySaveGeneration == startCategoryGen {
+            switch formResult {
+            case .success(let form):
+                let independent = MarketplaceSheetRules.independentFields(form.fields, marketplace: marketplace)
+                var map: [String: NativeField] = [:]
+                for f in independent { map[f.path] = f }
+                fieldsByPath = map
+                formError = nil
+            case .failure(let error) where error.isCancellation:
+                return
+            case .failure(let error):
+                fieldsByPath = [:]
+                formError = error.localizedDescription
+            }
         }
+    }
+
+    func updateSheetRow(_ row: ListingSheetRow?) {
+        if let row { latestSheetRow = row }
     }
 
     @discardableResult
@@ -146,29 +180,28 @@ final class MarketplaceQuickEditModel {
         companion: [String: JSONValue] = [:],
         onSaved: @escaping () async -> ListingSheetRow?
     ) async -> Bool {
-        // Wait for any prior save to finish so we always build on the newest document and revisionID.
-        while let prior = inFlightSave {
-            await prior.value
+        let capturedVersion = drafts.version(for: column.key)
+        return await saveGate.withLock {
+            await performCommit(
+                column: column,
+                value: value,
+                companion: companion,
+                draftVersion: capturedVersion,
+                onSaved: onSaved
+            )
         }
-
-        var succeeded = false
-        let task = Task { @MainActor in
-            succeeded = await performCommit(column: column, value: value, companion: companion, onSaved: onSaved)
-        }
-        inFlightSave = task
-        await task.value
-        if inFlightSave == task { inFlightSave = nil }
-        return succeeded
     }
 
     private func performCommit(
         column: MarketplaceSheetColumn,
         value: JSONValue,
         companion: [String: JSONValue],
+        draftVersion: Int,
         onSaved: @escaping () async -> ListingSheetRow?
     ) async -> Bool {
         guard let document else { return false }
         let f = field(for: column)
+        let booleanPaths = Set(fieldsByPath.values.filter { $0.inputType == "boolean" }.map(\.path))
         guard let updated = MarketplaceSheetRules.applyEdit(
             to: document,
             marketplace: marketplace,
@@ -178,7 +211,8 @@ final class MarketplaceQuickEditModel {
             value: value,
             companion: companion,
             lockedFields: agentLocks,
-            disabled: formDisabled
+            disabled: formDisabled,
+            booleanFieldPaths: booleanPaths
         ) else {
             return false
         }
@@ -193,13 +227,23 @@ final class MarketplaceQuickEditModel {
             )
             self.document = result.listing
             self.revisionID = result.revisionID
-            draftText.removeValue(forKey: column.key)
+            saveGeneration += 1
+            // Only clear the draft if the seller didn't type newer text while this save was in flight.
+            drafts.clear(column.key, ifVersionMatches: draftVersion)
             // Reload native form if category changed so dependent options update.
             if column.kind == .category {
-                if let refreshed = try? await api.nativeForm(listingID, marketplace: marketplace) {
+                categorySaveGeneration += 1
+                do {
+                    let refreshed = try await api.nativeForm(listingID, marketplace: marketplace)
                     let independent = MarketplaceSheetRules.independentFields(refreshed.fields, marketplace: marketplace)
                     fieldsByPath = Dictionary(independent.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
                     formError = nil
+                } catch let error where error.isCancellation {
+                    throw error
+                } catch {
+                    // Never keep stale dependent choices from the previous category.
+                    fieldsByPath = [:]
+                    formError = error.localizedDescription
                 }
             }
             if let refreshedRow = await onSaved() {
@@ -225,15 +269,22 @@ final class MarketplaceQuickEditModel {
     /// Commits any pending typed text/number drafts before blur, close, advance, or List.
     @discardableResult
     func flushPendingText(columns: [MarketplaceSheetColumn], onSaved: @escaping () async -> ListingSheetRow?) async -> Bool {
-        for column in columns {
-            while let prior = inFlightSave {
-                await prior.value
+        await saveGate.withLock {
+            for column in columns {
+                // Re-check in case newer text was typed into this column while its save ran.
+                while let snap = drafts.snapshot(for: column.key) {
+                    let ok = await performCommit(
+                        column: column,
+                        value: .string(snap.text),
+                        companion: [:],
+                        draftVersion: snap.version,
+                        onSaved: onSaved
+                    )
+                    if !ok { return false }
+                }
             }
-            guard let text = draftText[column.key] else { continue }
-            let ok = await commit(column: column, value: .string(text), onSaved: onSaved)
-            if !ok { return false }
+            return true
         }
-        return true
     }
 }
 
@@ -261,6 +312,7 @@ struct MarketplaceQuickEditSheet: View {
     @State private var multiPickingColumn: MarketplaceSheetColumn?
     @State private var pickingEbayCategory: MarketplaceSheetColumn?
     @State private var confirmingList: SellerConfirmationRequest?
+    @State private var confirmingListRevisionID: String?
     @State private var listError: String?
 
     init(
@@ -299,6 +351,14 @@ struct MarketplaceQuickEditSheet: View {
         model.latestSheetRow ?? sheetRow
     }
 
+    private var sheetRowIsStale: Bool {
+        guard let docRev = model.revisionID, !docRev.isEmpty,
+              let rowRev = effectiveSheetRow?.revisionID, !rowRev.isEmpty else {
+            return false
+        }
+        return docRev != rowRev
+    }
+
     private var orderedColumns: [MarketplaceSheetColumn] {
         MarketplaceSheetRules.orderedQuickEditColumns(marketplace: marketplace, sheetRow: effectiveSheetRow)
     }
@@ -331,7 +391,8 @@ struct MarketplaceQuickEditSheet: View {
             marketplace: marketplace,
             sheetRow: effectiveSheetRow,
             document: model.document,
-            fallbackPrice: listing.price
+            fallbackPrice: listing.price,
+            documentRevisionID: model.revisionID
         )
     }
 
@@ -348,6 +409,25 @@ struct MarketplaceQuickEditSheet: View {
                             title: "Could not load \(Marketplaces.name(marketplace)) choices",
                             message: formError
                         )
+                    }
+                    if sheetRowIsStale {
+                        HStack(spacing: 10) {
+                            Label("Saved, but status could not refresh yet.", systemImage: "arrow.clockwise")
+                                .font(.footnote)
+                                .foregroundStyle(WorkspaceStyle.mutedText)
+                            Spacer()
+                            Button("Refresh") {
+                                Task {
+                                    let row = await onSaved()
+                                    model.updateSheetRow(row)
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .workspacePanel(radius: WorkspaceStyle.controlRadius)
                     }
                     if model.formDisabled {
                         Label("\(Marketplaces.name(marketplace)) fields are read-only on this workspace.", systemImage: "lock")
@@ -419,10 +499,15 @@ struct MarketplaceQuickEditSheet: View {
             }
             .onChange(of: focusedColumnKey) { previous, current in
                 guard let previous, previous != current,
-                      model.draftText[previous] != nil,
+                      model.drafts[previous] != nil,
                       let column = orderedColumns.first(where: { $0.key == previous }) else { return }
                 Task {
                     _ = await model.flushPendingText(columns: [column], onSaved: onSaved)
+                }
+            }
+            .onChange(of: confirmingList) { _, current in
+                if current == nil {
+                    confirmingListRevisionID = nil
                 }
             }
             .alert("Changed on another device", isPresented: $model.hasConflict) {
@@ -500,7 +585,15 @@ struct MarketplaceQuickEditSheet: View {
                 }
             }
             .sellerConfirmation($confirmingList) { confirmation in
-                guard let rev = activeRevisionID, !rev.isEmpty else { return }
+                let capturedRev = confirmingListRevisionID
+                confirmingListRevisionID = nil
+                guard let rev = capturedRev, !rev.isEmpty,
+                      rev == activeRevisionID,
+                      model.drafts.isEmpty,
+                      !model.isSaving else {
+                    listError = "This listing changed before you confirmed. Review the updated details and tap List again."
+                    return
+                }
                 Task {
                     switch await onListConfirmed(rev, confirmation) {
                     case .listed:
@@ -514,7 +607,7 @@ struct MarketplaceQuickEditSheet: View {
                 }
             }
         }
-        .interactiveDismissDisabled(!model.draftText.isEmpty || model.isSaving)
+        .interactiveDismissDisabled(!model.drafts.isEmpty || model.isSaving)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
     }
@@ -627,15 +720,11 @@ struct MarketplaceQuickEditSheet: View {
                     .lineLimit(2)
                 Spacer(minLength: 8)
                 Button("Open form") {
-                    focusedColumnKey = nil
-                    Task {
-                        _ = await model.flushPendingText(columns: orderedColumns, onSaved: onSaved)
-                        dismiss()
-                        onOpenFullForm()
-                    }
+                    openFullForm()
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .disabled(model.isSaving)
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -692,15 +781,11 @@ struct MarketplaceQuickEditSheet: View {
                         .foregroundStyle(shown.isEmpty ? WorkspaceStyle.mutedText : .primary)
                     Spacer()
                     Button("Open form") {
-                        focusedColumnKey = nil
-                        Task {
-                            _ = await model.flushPendingText(columns: orderedColumns, onSaved: onSaved)
-                            dismiss()
-                            onOpenFullForm()
-                        }
+                        openFullForm()
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                    .disabled(model.isSaving)
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -753,24 +838,28 @@ struct MarketplaceQuickEditSheet: View {
         .opacity(disabled ? 0.6 : 1)
     }
 
+    private func openFullForm() {
+        focusedColumnKey = nil
+        Task {
+            let ok = await model.flushPendingText(columns: orderedColumns, onSaved: onSaved)
+            if ok {
+                dismiss()
+                onOpenFullForm()
+            }
+        }
+    }
+
     private func textBinding(for column: MarketplaceSheetColumn, current: String) -> Binding<String> {
         Binding(
-            get: { model.draftText[column.key] ?? current },
-            set: { model.draftText[column.key] = $0 }
+            get: { model.drafts[column.key] ?? current },
+            set: { model.drafts.set($0, for: column.key) }
         )
     }
 
     private var footerBar: some View {
         HStack(spacing: 10) {
             Button("Open form") {
-                focusedColumnKey = nil
-                Task {
-                    let ok = await model.flushPendingText(columns: orderedColumns, onSaved: onSaved)
-                    if ok {
-                        dismiss()
-                        onOpenFullForm()
-                    }
-                }
+                openFullForm()
             }
             .buttonStyle(.bordered)
             .frame(minHeight: 44)
@@ -807,17 +896,21 @@ struct MarketplaceQuickEditSheet: View {
                             marketplace: marketplace,
                             sheetRow: latestRow
                         )
+                        let capturedRev = activeRevisionID
                         let stillReady = MarketplaceSheetRules.canListFromSheet(
                             listing: listing,
                             status: latestStatus,
                             sheetRow: latestRow,
                             canAct: canAct,
-                            revisionID: activeRevisionID
+                            revisionID: capturedRev
                         )
-                        guard stillReady else {
-                            listError = "Fill in the required \(Marketplaces.name(marketplace)) fields before listing."
+                        guard stillReady, let capturedRev, !capturedRev.isEmpty else {
+                            listError = sheetRowIsStale
+                                ? "Saved, but status could not refresh yet. Tap Refresh before listing."
+                                : "Fill in the required \(Marketplaces.name(marketplace)) fields before listing."
                             return
                         }
+                        confirmingListRevisionID = capturedRev
                         confirmingList = SellerConfirmationRequest.list(
                             title: listing.displayTitle,
                             marketplace: marketplace,
