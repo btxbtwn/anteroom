@@ -114,8 +114,12 @@ test("photos on a marketplace form reorder by dragging, with a mouse or a finger
     await moveCrop.press("Shift+ArrowUp");
     expect((await moveCrop.boundingBox())!.y).toBeLessThan(beforeMove);
     const beforeResize = (await moveCrop.boundingBox())!.width;
-    await crop.getByRole("button", { name: "Resize from bottom right" }).press("Shift+ArrowLeft");
-    expect((await moveCrop.boundingBox())!.width).toBeLessThan(beforeResize);
+    const corner = crop.getByRole("button", { name: "Resize from bottom right" });
+    await corner.press("Shift+ArrowLeft");
+    const afterHorizontal = (await moveCrop.boundingBox())!.width;
+    expect(afterHorizontal).toBeLessThan(beforeResize);
+    await corner.press("Shift+ArrowUp");
+    expect((await moveCrop.boundingBox())!.width).toBeLessThan(afterHorizontal);
     await crop.getByRole("button", { name: "Square" }).click();
     await info.attach("photo-crop", { body: await crop.screenshot(), contentType: "image/png" });
     const savedCrop = page.waitForResponse((response) =>

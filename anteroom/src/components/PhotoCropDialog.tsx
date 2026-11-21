@@ -214,7 +214,14 @@ function CropOverlay({ box, aspect, frameAspect, onChange }: {
     if (!offset) return;
     event.preventDefault();
     const step = event.shiftKey ? 0.05 : 0.01;
-    onChange(dragCrop(box, handle, offset[0] * step, offset[1] * step, aspect, frameAspect));
+    const [horizontal, dy] = offset;
+    let dx = horizontal;
+    if (aspect && handle !== "move" && dx === 0) {
+      // Preset resizing uses horizontal movement to derive both dimensions.
+      const sameDirection = handle === "nw" || handle === "se";
+      dx = dy * (sameDirection ? 1 : -1) * aspect / frameAspect;
+    }
+    onChange(dragCrop(box, handle, dx * step, dy * step, aspect, frameAspect));
   };
 
   return (
