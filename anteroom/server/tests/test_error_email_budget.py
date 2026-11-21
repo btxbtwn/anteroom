@@ -746,3 +746,93 @@ def test_crashed_repeat_reservation_preserves_lease_metadata_and_recovery(store)
     assert restarted.status()['pending'] == 0
     assert restarted.status()['used'] == 3
     assert store.read()['local_archive_discards'] == {'existing-operation': {'removed': 7}}
+
+
+def test_outbox_caps_pending_groups_evicts_warnings_for_errors_and_reports_overflow(store):
+    now, sent = [100.0], []
+    delivery = EmailDelivery(
+        store, lambda *args: sent.append(args), daily_limit=10, clock=lambda: now[0], max_pending_groups=3,
+    )
+    # Fill outbox with 3 distinct warnings.
+    w1, w2, w3 = (report(logging.WARNING, line=i) for i in (1, 2, 3))
+    delivery.add_many([w1, w1, w2, w3])
+    assert len(store.read()['groups']) == 3
+    assert delivery.status()['overflow_dropped'] == 0
+
+    # A 4th distinct warning is counted as overflow instead of growing the outbox.
+    delivery.add(report(logging.WARNING, line=4))
+    assert len(store.read()['groups']) == 3
+    assert delivery.status()['overflow_dropped'] == 1
+
+    # Updating an already-queued group still succeeds at the cap.
+    delivery.add(w2)
+    assert store.read()['groups']['WARNING:' + w2['fingerprint']]['count'] == 2
+    assert delivery.status()['overflow_dropped'] == 1
+
+    # An ERROR arriving at the cap evicts the oldest warning (w1, count=2) instead of dropping the error.
+    e1 = report(logging.ERROR, line=100)
+    delivery.add(e1)
+    groups = store.read()['groups']
+    assert len(groups) == 3
+    assert 'ERROR:' + e1['fingerprint'] in groups
+    assert 'WARNING:' + w1['fingerprint'] not in groups
+    assert delivery.status()['overflow_dropped'] == 3  # 1 dropped warning + 2 occurrences from evicted w1
+
+    # Sending the next email includes the overflow notice and clears the reported count.
+    delivery.tick()
+    assert len(sent) == 1
+    assert '3 additional alerts were omitted' in sent[0][1]
+    assert delivery.status()['overflow_dropped'] == 0
+
+
+def test_add_many_persists_a_burst_in_one_transaction(store):
+    tx_count = 0
+    original_tx = store.transaction
+
+    def counted_tx():
+        nonlocal tx_count
+        tx_count += 1
+        return original_tx()
+
+    store.transaction = counted_tx
+    delivery = EmailDelivery(store, lambda *args: None, daily_limit=0)
+    delivery.add_many([report(logging.ERROR, line=i) for i in range(15)])
+    assert tx_count == 1
+    assert delivery.status()['pending'] == 15
+
+
+def test_alert_handler_prefers_errors_over_warnings_when_queue_is_full(store):
+    import threading
+    from anteroom.services.error_alerts import AlertHandler
+
+    started = threading.Event()
+    release = threading.Event()
+    seen: list[list[dict]] = []
+
+    class BlockingDelivery:
+        def add_many(self, batch):
+            seen.append(list(batch))
+            started.set()
+            release.wait(2)
+
+        def tick(self):
+            return None
+
+    h = AlertHandler(lambda *args: None, store=store, daily_limit=0, max_queue=3)
+    h.delivery = BlockingDelivery()
+    try:
+        # First record triggers BlockingDelivery.add_many and parks the worker thread.
+        h.emit(logging.LogRecord('anteroom.jobs', logging.WARNING, '/jobs.py', 1, 'w0', (), None))
+        assert started.wait(2)
+        # Fill the 3-slot in-memory buffer with warnings, then emit a real ERROR.
+        for line in (2, 3, 4):
+            h.emit(logging.LogRecord('anteroom.jobs', logging.WARNING, '/jobs.py', line, f'w{line}', (), None))
+        h.emit(logging.LogRecord('anteroom.jobs', logging.ERROR, '/jobs.py', 99, 'boom', (), None))
+        assert h.dropped == 1
+        release.set()
+    finally:
+        h.close()
+
+    all_reports = [item for batch in seen for item in batch]
+    assert any(item['severity'] == 'ERROR' and item['message'] == 'boom' for item in all_reports)
+
