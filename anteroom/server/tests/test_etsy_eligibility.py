@@ -103,7 +103,7 @@ class EtsyUnclearWhenTest(unittest.TestCase):
     UNCLEAR = ("2000-2009", "2000 - 2009", "2000s", "early 2000s", "1995 to 2010",
                # Other ways people and eBay write the same span.
                "2000's", "2000’s", "2000-09", "2000 thru 2009", "2000 until 2009", "between 1995 and 2010",
-               "1995/2010", "1990s to 2010", "1999-present", "2003-now", "2009–2000")
+               "1995/2010", "1990s to 2010", "1990s to 2010s", "1999-present", "2003-now", "2009–2000")
 
     def test_a_range_across_the_cutoff_is_left_blank(self):
         options = etsy_when_options()
@@ -124,11 +124,16 @@ class EtsyUnclearWhenTest(unittest.TestCase):
             "Before 2007 (Vintage)": "Before 2007 (Vintage)",
             "2015": "2010 - 2019 (Recently)",
             "2010s": "2010 - 2019 (Recently)",
+            # A calendar date is one day, not the range 2000-2009.
+            "2000-09-03": "2000 - 2006 (Vintage)",
+            "2008/09/03": "2007 - 2009 (Recently)",
         }
         for text, label in cases.items():
             with self.subTest(text=text):
                 self.assertFalse(etsy_when_is_unclear(text, today=date(2026, 11, 21)))
                 self.assertEqual(resolve_etsy_when(text, options), label)
+        # Decades on both ends, all before the line: vintage, not unclear.
+        self.assertFalse(etsy_when_is_unclear("1980s to 1990s", today=date(2026, 11, 21)))
 
     def test_etsys_own_range_stays_an_answer_after_the_cutoff_moves(self):
         # In 2027 the cutoff is 2008, inside "2007 - 2009", but that label is Etsy's answer, not a guess.
@@ -152,6 +157,7 @@ class EtsyUnclearWhenTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(_etsy_when_code(text), "")
         self.assertEqual(_etsy_when_code("1988"), "1980s")
+        self.assertEqual(_etsy_when_code("2000-09-03"), "2000_2006")
         self.assertEqual(_etsy_when_code("2007 - 2009 (Recently)"), "2007_2009")
         self.assertEqual(_etsy_when_code(""), "2020_2026")
 

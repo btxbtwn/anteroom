@@ -48,6 +48,7 @@ from anteroom.services.etsy_fields import (
     etsy_who_raw,
     is_etsy_digital_listing,
     resolve_etsy_when,
+    etsy_when_unclear_note,
 )
 from anteroom.models.mercari_shipping import DEFAULT_SHIPPING_LABEL
 from anteroom.models.listing_values import (
@@ -855,6 +856,10 @@ def validate_listing(
             when = dropdown_when
         if not when:
             add_issue(result, "etsy_specifics.when_made", "Etsy when-made is required")
+        elif not dropdown_when:
+            # A range across the vintage line resolves to nothing: the seller picks the range.
+            add_issue(result, "etsy_specifics.when_made",
+                      etsy_when_unclear_note(when) or "Etsy when-made is not a current dropdown value")
         tags = as_list(etsy.get("tags"))
         if len(tags) > 13:
             add_issue(result, "etsy_specifics.tags", "Etsy allows at most 13 tags")

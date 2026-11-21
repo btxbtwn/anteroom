@@ -342,29 +342,36 @@ def _first_recent_year(today: date | None = None) -> int:
     return (today or date.today()).year - 19
 
 
-_WHEN_YEAR = r"(1[7-9]\d{2}|20\d{2})"
-# A start year or decade, a separator, then a year, a two-digit year or "now":
-# "2000-2009", "1990s to 2010", "between 1995 and 2010", "2000-09", "1999-present".
+# A start year or decade, a separator, then a year, a decade, a two-digit year
+# or "now": "2000-2009", "1990s to 2010s", "between 1995 and 2010", "2000-09",
+# "1999-present". Built from fixed pieces only; no input reaches the pattern.
 _WHEN_SPAN = re.compile(
-    _WHEN_YEAR + r"(?:['’]?s)?\s*(?:-|–|—|/|\bto\b|\bthrough\b|\bthru\b|\buntil\b|\btill\b|\band\b)\s*"
-    r"(?:" + _WHEN_YEAR + r"|(\d{2})|(present|now|today))\b",
+    r"(?P<start>1[7-9]\d{2}|20\d{2})(?P<start_s>['’]?s)?\s*"
+    r"(?:-|–|—|/|\bto\b|\bthrough\b|\bthru\b|\buntil\b|\btill\b|\band\b)\s*"
+    r"(?:(?P<end>1[7-9]\d{2}|20\d{2})(?P<end_s>['’]?s)?|(?P<short>\d{2})(?![-/.]\d)|(?P<now>present|now|today))\b",
     re.IGNORECASE,
 )
 _WHEN_DECADE = re.compile(r"\b(1[7-9]\d|20\d)0['’]?s\b", re.IGNORECASE)
 
 
+def _decade_end(year: int, plural: str | None) -> int:
+    """The last year a "1990s" covers; a bare year covers itself."""
+    return year + 9 if plural and year % 10 == 0 else year
+
+
 def _when_spans(text: str, today: date | None = None) -> list[tuple[int, int]]:
     spans = []
-    for start, end, short, _now in _WHEN_SPAN.findall(text):
-        first = int(start)
-        if end:
-            last = int(end)
-        elif short:
-            last = first // 100 * 100 + int(short)
+    for match in _WHEN_SPAN.finditer(text):
+        first = int(match["start"])
+        if match["end"]:
+            last = _decade_end(int(match["end"]), match["end_s"])
+        elif match["short"]:
+            last = first // 100 * 100 + int(match["short"])
             last += 100 if last < first else 0
         else:
             last = (today or date.today()).year
-        spans.append((first, last))
+        # Both ends of "1990s to 2010s" are decades: the span runs from the first year to the last.
+        spans.append((min(first, last), max(_decade_end(first, match["start_s"]), last)))
     spans += [(int(decade) * 10, int(decade) * 10 + 9) for decade in _WHEN_DECADE.findall(text)]
     return spans
 
