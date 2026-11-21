@@ -4,6 +4,7 @@ import { useState } from "react";
 export function DraftInput({
   value,
   label,
+  placeholder,
   prefix,
   suffix,
   width,
@@ -16,6 +17,7 @@ export function DraftInput({
 }: {
   value: string;
   label: string;
+  placeholder?: string;
   prefix?: string;
   suffix?: string;
   width: string;
@@ -47,6 +49,7 @@ export function DraftInput({
         type="text"
         inputMode={inputMode}
         maxLength={maxLength}
+        placeholder={placeholder}
         aria-label={label}
         value={draft}
         disabled={disabled}

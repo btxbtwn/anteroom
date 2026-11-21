@@ -90,6 +90,7 @@ export function isZip(text: string): boolean {
 }
 
 export function planNeedsUpdate(state: SourcingState): boolean {
+  if (!isZip(state.prefs.zip)) return false;
   const snapshot = state.snapshot;
   return !snapshot || Object.entries(snapshot.preferences).some(
     ([key, value]) => state.prefs[key as keyof typeof snapshot.preferences] !== value,

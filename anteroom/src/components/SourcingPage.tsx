@@ -129,6 +129,7 @@ function BoxSourcing({ onOpenListing }: Props) {
     store_picks: choice === "all" ? snapshot.store_picks : { [choice]: snapshot.store_picks[choice] ?? [] },
     lots: snapshot.lots.filter((lot) => choice === "all" || lot.store === choice),
   } : null;
+  const hasZip = !!data && isZip(data.prefs.zip);
   const refreshing = !!data && (data.refreshing || refresh.isPending);
   const failed = !!data?.refresh_error && !refreshing && !savePrefs.isPending;
   const updating = !!data && !failed && (refreshing || savePrefs.isPending || planNeedsUpdate(data));
@@ -145,6 +146,7 @@ function BoxSourcing({ onOpenListing }: Props) {
           <UpdateStatus
             snapshot={snapshot}
             refreshing={data.refreshing || refresh.isPending}
+            disabled={!hasZip}
             onRefresh={() => refresh.mutate()}
           />
         ) : null}
@@ -165,7 +167,18 @@ function BoxSourcing({ onOpenListing }: Props) {
         </div>
       ) : null}
 
-      {data && !snapshot && failed ? (
+      {data && !snapshot && !hasZip && !refreshing ? (
+        <Panel divided={false}>
+          <Empty size="compact">
+            <EmptyHeader>
+              <EmptyMedia variant="icon"><PackageSearchIcon aria-hidden /></EmptyMedia>
+              <EmptyTitle>Enter your shipping ZIP code</EmptyTitle>
+              <EmptyDescription>Set your 5-digit US ZIP code in Ship to above so Anteroom can estimate shipping and rank wholesale boxes for your location.</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        </Panel>
+      ) : null}
+      {data && !snapshot && hasZip && failed ? (
         <Panel divided={false}>
           <Empty size="compact">
             <EmptyHeader>
@@ -179,7 +192,7 @@ function BoxSourcing({ onOpenListing }: Props) {
           </Empty>
         </Panel>
       ) : null}
-      {data && !snapshot && !failed ? (
+      {data && !snapshot && hasZip && !failed ? (
         <Panel divided={false}>
           <Empty size="compact">
             <EmptyHeader>
@@ -222,10 +235,12 @@ function BoxSourcing({ onOpenListing }: Props) {
 function UpdateStatus({
   snapshot,
   refreshing,
+  disabled,
   onRefresh,
 }: {
   snapshot: SourcingSnapshot | null;
   refreshing: boolean;
+  disabled?: boolean;
   onRefresh: () => void;
 }) {
   if (refreshing) {
@@ -239,7 +254,7 @@ function UpdateStatus({
   return (
     <span className="inline-flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
       {snapshot ? `Updated ${clockTime(snapshot.updated_at)} · next ${clockTime(nextUpdate(snapshot.updated_at))}` : ""}
-      <Button variant="outline" size="xs" onClick={onRefresh}>Update now</Button>
+      <Button variant="outline" size="xs" disabled={disabled} onClick={onRefresh}>Update now</Button>
     </span>
   );
 }
@@ -277,6 +292,7 @@ function Settings({
           <DraftInput
             value={prefs.zip}
             label="ZIP code the boxes ship to"
+            placeholder="ZIP"
             width="5.5rem"
             inputMode="numeric"
             maxLength={5}

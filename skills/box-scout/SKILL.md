@@ -1,6 +1,6 @@
 ---
 name: box-scout
-description: Use when the user wants to know which wholesale clothing boxes, lots or bales to buy on raghouse.com, thriftvintagefashion.com or papercranewholesale.com: trending themes, a decent piece count and cost per piece, expected profit, with shipping estimated to New Orleans, LA 70115.
+description: Use when the user wants to know which wholesale clothing boxes, lots or bales to buy on raghouse.com, thriftvintagefashion.com or papercranewholesale.com: trending themes, a decent piece count and cost per piece, expected profit, with shipping estimated to the seller's destination ZIP.
 triggers:
   - "raghouse"
   - "thrift vintage fashion"
@@ -13,7 +13,7 @@ triggers:
 # Box Scout
 
 ## Purpose
-Decide which wholesale clothing lots to buy. Crawl Raghouse (Phoenix, AZ 85043), Thrift Vintage Fashion (Hialeah, FL 33016) and PaperCrane (a marketplace of vetted US sellers), estimate what each lot costs landed in New Orleans (70115), price what its pieces resell for, and return a buy list within a budget with a cart link per store.
+Decide which wholesale clothing lots to buy. Crawl Raghouse (Phoenix, AZ 85043), Thrift Vintage Fashion (Hialeah, FL 33016) and PaperCrane (a marketplace of vetted US sellers), estimate what each lot costs landed at the seller's destination ZIP, price what its pieces resell for, and return a buy list within a budget with a cart link per store.
 
 Anteroom's **Sourcing** page runs this same script on a timer and keeps the buy list ready. Use this skill when working outside Anteroom or when the seller asks in chat.
 
@@ -23,6 +23,7 @@ Raghouse and TVF are Shopify shops, so their public `/products.json` feeds list 
 
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
+| zip | string | Yes | 5-digit US ZIP code in the 48 contiguous states that boxes ship to. Ask the seller if not already known. |
 | budget | number | No | Most to spend this round. Default $300. |
 | min_roi | number | No | Minimum estimated profit ÷ purchase cost. Default 1.0 (100%). |
 | sell_through | number | No | Seller’s planned share of usable pieces that sell, 0–1. Default 0.5. This is not a measured probability. |
@@ -47,8 +48,9 @@ When seller sales history is available, compare recorded, dated actual single-it
 Search for what secondhand and vintage clothing is relevant on eBay, Poshmark, Depop and Mercari during that window. Turn it into 10–20 short lowercase terms spelled the way lot titles spell them: brands (`carhartt`, `harley`), eras (`y2k`, `90s`, `vintage`), themes (`cartoon`, `sports`, `western`) and garments (`fleece`, `flannel`).
 
 ### 2. List the themes to price
+Ask the seller for their 5-digit US shipping ZIP code if you do not already have it, then pass it with `--zip`:
 ```bash
-python3 skills/box-scout/scripts/scout.py --trend "carhartt,y2k,cartoon,..." --themes
+python3 skills/box-scout/scripts/scout.py --zip <seller-zip> --trend "carhartt,y2k,cartoon,..." --themes
 ```
 This prints the lot themes that most need a resale price, best demand first. A theme is the resale category one piece of the lot would be searched under: up to two style words, era first, and the garment, from the vocabulary in `scout.py` (`THEME_STYLES`, `THEME_GARMENTS`). Sorter names, bin names, seasons, sizes, pack counts and brand lists are dropped, so `Dirty White Graphic + Vintage + Concert Tees 57 pcs` becomes `vintage band t-shirts` and `Aerie Abercrombie Hollister American Eagle Aeropostale Sweatshirts & Joggers 23 pcs` becomes `brand name pants`. The garment is the last one named (`Crop Blouses` are blouses). Both stores together make about 175 themes instead of one per lot, so research can cover the whole catalog.
 
@@ -66,7 +68,7 @@ Outside Anteroom, write researched prices to a file keyed by the exact theme tex
 
 ### 4. Build the buy list
 ```bash
-python3 skills/box-scout/scripts/scout.py --trend "..." --resale resale.json --budget 300
+python3 skills/box-scout/scripts/scout.py --zip <seller-zip> --trend "..." --resale resale.json --budget 300
 ```
 For every in-stock lot the script computes:
 - **Ship est**: the store's carrier list rate for the lot's weight and zone, plus that carrier's residential surcharge and fuel surcharge, times the store's `ship_factor`. Raghouse is FedEx Ground (zone 6 from Phoenix to 70115). TVF is UPS Ground (zone 5 from Hialeah to 70115). Weights round up to the next pound. TVF lots with no weight are estimated from their piece count. Raghouse's factor is order #83897: FedEx charged $33.95 on a 29 lb box whose list estimate was $65.96. TVF is still list price.

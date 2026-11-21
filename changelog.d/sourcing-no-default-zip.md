@@ -1,0 +1,1 @@
+- Wholesale box sourcing now defaults to your configured ships-from ZIP (or prompts for your 5-digit US ZIP code) instead of defaulting to New Orleans, LA (`70115`).

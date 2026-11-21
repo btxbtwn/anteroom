@@ -313,6 +313,8 @@ def get_sourcing_evidence(theme: str = Query(min_length=1)):
 
 @router.post("/refresh", response_model=SourcingResponse)
 def refresh_sourcing():
+    if not box_scout.read_state()["prefs"]["zip"]:
+        raise HTTPException(status_code=422, detail="Enter a 5-digit US ZIP code first.")
     box_scout.refresh_in_background()
     return _response()
 
@@ -320,9 +322,10 @@ def refresh_sourcing():
 @router.put("/prefs", response_model=SourcingResponse)
 def update_sourcing_prefs(update: SourcingPrefsUpdate):
     try:
-        box_scout.set_prefs(**update.model_dump())
+        prefs = box_scout.set_prefs(**update.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    # Rebuild for the saved costs and selling window using the last store crawl.
-    box_scout.refresh_in_background(recrawl=False)
+    # Rebuild for the saved costs and selling window using the last store crawl once a destination ZIP is set.
+    if prefs["zip"]:
+        box_scout.refresh_in_background(recrawl=False)
     return _response()
