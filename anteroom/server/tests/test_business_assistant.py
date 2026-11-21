@@ -1677,4 +1677,47 @@ def test_median_aggregate_handles_numbers_nulls_empty_and_text(workspace):
         even_shop.close()
 
 
+def test_zero_row_lookup_suggests_closest_whitelisted_values(workspace):
+    db, _client = workspace
+    seed(db)
+    shop = business_assistant.read_shop(db, now=NOW)
+    try:
+        # Case-only difference on a whitelisted column gets a hint.
+        case_diff = business_assistant.run_lookup(
+            shop.lookups, "SELECT title FROM listings WHERE brand = 'levi''s'",
+        )
+        assert case_diff.startswith("Lookup result: 0 rows matched WHERE brand = 'levi''s'.\ntitle\n")
+        assert "Values in listings.brand closest to 'levi's': Levi's (1 row). Use one only if it names the same thing." in case_diff
+
+        # Close spelling on sales_by_brand resolves that table instead of listings.
+        by_brand = business_assistant.run_lookup(
+            shop.lookups, "SELECT * FROM sales_by_brand WHERE brand = 'levis'",
+        )
+        assert "Values in sales_by_brand.brand closest to 'levis': Levi's (" in by_brand
+
+        # Unrelated value gets no hint.
+        no_match = business_assistant.run_lookup(
+            shop.lookups, "SELECT title FROM listings WHERE size = '99'",
+        )
+        assert no_match == "Lookup result: 0 rows matched WHERE size = '99'.\ntitle"
+
+        # Non-whitelisted column (title) gets no hint.
+        non_whitelisted = business_assistant.run_lookup(
+            shop.lookups, "SELECT id FROM listings WHERE title = 'Levi''s 501'",
+        )
+        assert non_whitelisted == "Lookup result: 0 rows matched WHERE title = 'Levi''s 501'.\nid"
+
+        # A literal shaped like SQL injection cannot alter the hint query.
+        attack = business_assistant.run_lookup(
+            shop.lookups,
+            "SELECT title FROM listings WHERE brand = 'x'' UNION SELECT name FROM sqlite_master --'",
+        )
+        assert attack.startswith("Lookup result: 0 rows matched")
+        assert "sqlite_master" not in attack.split("\n", 2)[-1]
+        assert "Values in " not in attack
+    finally:
+        shop.close()
+
+
+
 

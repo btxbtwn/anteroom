@@ -24,6 +24,7 @@ a marketplace.
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 import logging
 import re
@@ -159,8 +160,9 @@ LOOKUP_INSTRUCTIONS = (
     "draws them, `position` 1 the oldest; range all reaches back to the first sale and range 12m is one row per "
     "calendar month.\n"
     "`median(column)` is available alongside `avg`, `sum`, `min`, `max`, and `count`.\n"
-    "Every lookup answers: rows, \"0 rows matched\", or \"Lookup ... failed: <reason>\". Read that reply; when a "
-    "lookup failed or matched nothing, say so or try a corrected query, and never fill the gap with a guess.\n"
+    "Every lookup answers: rows, \"0 rows matched\" (with the closest real values in that column when any exist), or "
+    "\"Lookup ... failed: <reason>\". Read that reply; when a lookup failed or matched nothing, say so or try a "
+    "corrected query using a listed value only if it names the same thing, and never fill the gap with a guess.\n"
     "Seeing a box's photos: reply with nothing but one ```view_box_media block listing the box ids from the "
     "sourcing_boxes table (or the summary's box table), one per line. Anteroom fetches each box's product page now "
     "and replies with its photos and frames from its video as images, saying which images belong to which box and "
@@ -289,6 +291,20 @@ _SELECTISH = re.compile(r"^(?:--|select\b|with\b)", re.IGNORECASE)
 _FROM_TABLE = re.compile(r"\bfrom\s+([A-Za-z_]+)", re.IGNORECASE)
 _WHERE = re.compile(r"\bwhere\b(.*?)(?:\bgroup\s+by\b|\border\s+by\b|\blimit\b|\bhaving\b|;|\Z)",
                     re.IGNORECASE | re.DOTALL)
+_FILTER_LITERAL = re.compile(
+    r"(?:\b[A-Za-z_][A-Za-z0-9_]*\.)?\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|like)\s*'((?:[^']|'')*)'",
+    re.IGNORECASE,
+)
+# Only these (table, column) pairs are ever queried for 0-row hints; identifiers come from here, never from SQL text.
+_HINT_COLUMNS: dict[str, frozenset[str]] = {
+    "listings": frozenset({"brand", "category", "size", "condition", "color", "sold_on", "status"}),
+    "sales_by_category": frozenset({"category"}),
+    "sales_by_brand": frozenset({"brand"}),
+    "sales_by_marketplace": frozenset({"marketplace"}),
+    "sourcing_boxes": frozenset({"store", "contents"}),
+}
+_HINT_MATCHES = 5
+_HINT_CHARS = 600
 _READ_ACTIONS = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION, sqlite3.SQLITE_RECURSIVE}
 
 
@@ -904,6 +920,87 @@ def _matched(sql: str) -> str:
     return f"WHERE {clause[:200]}" if clause else "the query"
 
 
+def _match_values(target: str, by_lower: dict[str, list[str]]) -> list[str]:
+    matches: list[str] = []
+
+    def add(value: str) -> None:
+        if value not in matches and len(matches) < _HINT_MATCHES:
+            matches.append(value)
+
+    for value in by_lower.get(target, ()):
+        add(value)
+    if len(target) >= 2:
+        for lower_val, values in by_lower.items():
+            if target in lower_val or (len(lower_val) >= 3 and lower_val in target):
+                for value in values:
+                    add(value)
+    for close in difflib.get_close_matches(target, list(by_lower), n=_HINT_MATCHES, cutoff=0.6):
+        for value in by_lower[close]:
+            add(value)
+    return matches
+
+
+def _closest_values(lookups: sqlite3.Connection, sql: str) -> str:
+    """When a SELECT matches 0 rows, suggest close real values for whitelisted filter columns."""
+    cleaned = re.sub(r"--[^\n]*", "", sql)
+    primary = _lookup_name(cleaned).lower()
+    seen: set[tuple[str, str, str]] = set()
+    lines: list[str] = []
+    used = 0
+    for match in _FILTER_LITERAL.finditer(cleaned):
+        col = match.group(1).lower()
+        needle = match.group(2).replace("''", "'").strip("%_").strip()
+        if not needle:
+            continue
+        table = primary if primary in _HINT_COLUMNS and col in _HINT_COLUMNS[primary] else (
+            "listings" if col in _HINT_COLUMNS["listings"] else None
+        )
+        if table is None:
+            continue
+        safe_table = next(name for name in _HINT_COLUMNS if name == table)
+        safe_col = next(name for name in _HINT_COLUMNS[safe_table] if name == col)
+        key = (safe_table, safe_col, needle.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            distinct = lookups.execute(
+                f"SELECT {safe_col}, count(*) FROM {safe_table} "
+                f"WHERE {safe_col} IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 500",
+            ).fetchall()
+        except sqlite3.Error:
+            continue
+        if not distinct:
+            continue
+        counts: dict[str, int] = {}
+        by_lower: dict[str, list[str]] = {}
+        for raw_val, count in distinct:
+            val = str(raw_val).replace("\n", " ")
+            counts[val] = int(count)
+            by_lower.setdefault(val.lower(), []).append(val)
+        if needle in counts:
+            continue
+        matches = _match_values(needle.lower(), by_lower)
+        if not matches:
+            continue
+        prefix = f"Values in {safe_table}.{safe_col} closest to '{needle}': "
+        suffix = ". Use one only if it names the same thing."
+        items: list[str] = []
+        for value in matches:
+            count = counts[value]
+            entry = f"{value} ({count} {'row' if count == 1 else 'rows'})"
+            candidate = prefix + ", ".join([*items, entry]) + suffix
+            if used + len(candidate) + (1 if lines else 0) > _HINT_CHARS:
+                break
+            items.append(entry)
+        if not items:
+            continue
+        line = prefix + ", ".join(items) + suffix
+        lines.append(line)
+        used += len(line) + (1 if len(lines) > 1 else 0)
+    return "\n".join(lines)
+
+
 def run_lookup(lookups: sqlite3.Connection, sql: str) -> str:
     """Run one SELECT over the in-memory copy and describe the result, or why there is none, as text."""
     sql = (sql or "").strip()
@@ -912,12 +1009,15 @@ def run_lookup(lookups: sqlite3.Connection, sql: str) -> str:
         return f"Lookup {name} failed: the sql block was empty. Put one SELECT in it."
     deadline = time.monotonic() + LOOKUP_SECONDS
     lookups.set_progress_handler(lambda: time.monotonic() > deadline, 10_000)
+    hints = ""
     try:
         cursor = lookups.execute(sql)
         if cursor.description is None:
             return f"Lookup {name} failed: only a single SELECT can be run."
         header = " | ".join(column[0] for column in cursor.description)
         rows = cursor.fetchmany(LOOKUP_ROWS + 1)
+        if not rows:
+            hints = _closest_values(lookups, sql)
     except sqlite3.Error as exc:
         reason = str(exc).strip() or type(exc).__name__
         if time.monotonic() > deadline:
@@ -932,7 +1032,8 @@ def run_lookup(lookups: sqlite3.Connection, sql: str) -> str:
     finally:
         lookups.set_progress_handler(None, 0)
     if not rows:
-        return f"Lookup result: 0 rows matched {_matched(sql)}.\n{header}"
+        base = f"Lookup result: 0 rows matched {_matched(sql)}.\n{header}"
+        return f"{base}\n{hints}" if hints else base
     lines: list[str] = []
     used = 0
     for row in rows[:LOOKUP_ROWS]:
