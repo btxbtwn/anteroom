@@ -1034,6 +1034,12 @@ struct ListingRowContent<Thumbnail: View>: View {
                 .font(.subheadline)
                 let logos = listing.rowLogos(selling: selling)
                 if !logos.isEmpty {
+                    let liveNames = logos.filter { !$0.sold }.map { Marketplaces.name($0.marketplace) }
+                    let soldNames = logos.filter(\.sold).map { Marketplaces.name($0.marketplace) }
+                    let logoLabel = [
+                        liveNames.isEmpty ? nil : "Listed on " + liveNames.joined(separator: ", "),
+                        soldNames.isEmpty ? nil : "Sold on " + soldNames.joined(separator: ", "),
+                    ].compactMap { $0 }.joined(separator: "; ")
                     HStack(spacing: 8) {
                         ForEach(logos, id: \.marketplace) { logo in
                             MarketplaceLogo(id: logo.marketplace).opacity(logo.sold ? 0.55 : 1)
@@ -1041,7 +1047,7 @@ struct ListingRowContent<Thumbnail: View>: View {
                     }
                     .padding(.top, 4)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Listed on " + logos.map { Marketplaces.name($0.marketplace) }.joined(separator: ", "))
+                    .accessibilityLabel(logoLabel)
                 }
             }
             Spacer(minLength: 0)

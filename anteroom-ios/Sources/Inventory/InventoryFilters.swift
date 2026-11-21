@@ -208,18 +208,19 @@ extension ConversationSummary {
 
     private var importedMarketplaces: Set<String> { Set(vendooMarketplaces.map(Self.canonical)) }
     private var removed: Set<String> { Set(removedMarketplaces.map(Self.canonical)) }
+    private var soldOn: Set<String> { Set(soldMarketplaces.map(Self.canonical)) }
 
     /// Each marketplace with something to say, in marketplace order: Anteroom's
     /// records, fields still needed, the imported history, sales and delists.
     func marketplaceBadges(missing: [String: [MissingField]] = [:]) -> [MarketplaceBadge] {
         let records = directRecords
-        let sold = vendooSoldDates
+        let sold = Set(vendooSoldDates.keys.map(Self.canonical)).union(soldOn)
         let ids = Set(records.keys).union(missing.filter { !$0.value.isEmpty }.keys)
-            .union(importedMarketplaces).union(removed).union(sold.keys)
+            .union(importedMarketplaces).union(removed).union(sold)
         return Marketplaces.sorted(ids).compactMap { id in
             MarketplaceBadge(marketplace: id, record: records[id], missing: missing[id] ?? [], basePrice: price,
                              imported: importedMarketplaces.contains(id), removed: removed.contains(id),
-                             sold: sold[id] != nil, importedURL: vendooListingURLs[id])
+                             sold: sold.contains(id), importedURL: vendooListingURLs[id])
         }
     }
 
@@ -235,11 +236,20 @@ extension ConversationSummary {
     }
 
     /// Where the listing is live: the imported history plus Anteroom's own
-    /// publishes, less what Anteroom delisted.
+    /// publishes, less what Anteroom delisted or recorded as sold.
     var liveMarketplaces: [String] {
         var seen = Set<String>()
         let imported = vendooMarketplaces.map(Self.canonical).filter { !removed.contains($0) }
-        return (imported + directMarketplaces).filter { seen.insert($0).inserted }
+        let direct = directMarketplaces.map(Self.canonical)
+        return (imported + direct).filter { !soldOn.contains($0) && seen.insert($0).inserted }
+    }
+
+    /// Marketplaces the listing carries for inventory filters: live there, or
+    /// sold there. A sold listing is not live, but the Sold tab still filters by
+    /// where it sold, and a sold item has nothing left to list there.
+    var filterMarketplaces: [String] {
+        var seen = Set<String>()
+        return (liveMarketplaces + soldMarketplaces.map(Self.canonical)).filter { seen.insert($0).inserted }
     }
 
     /// The marketplaces Anteroom can delist. The imported history also names
@@ -261,8 +271,8 @@ extension ConversationSummary {
 
     /// True when the listing is currently live on at least one marketplace.
     var hasLiveListing: Bool {
-        let sold = Set(soldMarketplaces.map(Self.canonical)).union(vendooSoldDates.keys.map(Self.canonical))
-        let live = liveMarketplaces.filter { !sold.contains(Self.canonical($0)) }
+        let importedSold = Set(vendooSoldDates.keys.map(Self.canonical))
+        let live = liveMarketplaces.filter { !importedSold.contains($0) }
         guard !live.isEmpty else { return false }
         if !removed.isEmpty, !live.contains(where: Self.delistable.contains) { return false }
         return true
@@ -330,7 +340,7 @@ enum InventoryQuery {
 
     static func matchesFilters(_ listing: ConversationSummary, _ filters: InventoryFilters) -> Bool {
         guard inTab(listing, filters.status) else { return false }
-        let listed = listing.liveMarketplaces
+        let listed = listing.filterMarketplaces
         if filters.notListed {
             if filters.marketplaces.isEmpty { return listed.isEmpty }
             return !filters.marketplaces.allSatisfy(listed.contains)
@@ -373,7 +383,7 @@ enum InventoryQuery {
     /// Settings order first, then any other marketplace the inventory uses. An
     /// unused marketplace is only offered when asking what is missing from it.
     static func marketplaceOptions(_ listings: [ConversationSummary], preferred: [String], includeUnused: Bool) -> [String] {
-        let used = Set(listings.flatMap(\.liveMarketplaces))
+        let used = Set(listings.flatMap(\.filterMarketplaces))
         let ordered = includeUnused ? preferred : preferred.filter(used.contains)
         return ordered + Marketplaces.sorted(used.subtracting(preferred))
     }
@@ -382,14 +392,14 @@ enum InventoryQuery {
     static func marketplaceCounts(_ listings: [ConversationSummary], options: [String], notListed: Bool) -> [String: Int] {
         var carried: [String: Int] = [:]
         for listing in listings {
-            for id in Set(listing.liveMarketplaces) { carried[id, default: 0] += 1 }
+            for id in Set(listing.filterMarketplaces) { carried[id, default: 0] += 1 }
         }
         guard notListed else { return carried }
         return Dictionary(uniqueKeysWithValues: options.map { ($0, listings.count - (carried[$0] ?? 0)) })
     }
 
     static func notListedCount(_ listings: [ConversationSummary]) -> Int {
-        listings.filter { $0.liveMarketplaces.isEmpty }.count
+        listings.filter { $0.filterMarketplaces.isEmpty }.count
     }
 
     static func compactCount(_ value: Int) -> String {
