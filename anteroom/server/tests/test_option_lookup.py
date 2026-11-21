@@ -280,3 +280,17 @@ def test_a_second_prose_answer_is_kept_when_no_value_is_supported():
         ['{"_field_targets":["department"]}', 'Done.', 'The photos do not show the department.'])
     assert answer == ['The photos do not show the department.']
     assert len(provider.messages) == 3
+
+
+@pytest.mark.parametrize("prose", ["Set Style to {Retro, Streetwear}.", "Set Style to [Retro]."])
+def test_braces_in_prose_are_not_mistaken_for_a_saved_change(prose):
+    answer, _targets, provider = run_targets(
+        ['{"_field_targets":["department"]}', prose, 'Moved.\n```json\n[]\n```'])
+    assert answer == ['Moved.\n```json\n[]\n```']
+    assert 'nothing was saved' in provider.messages[2][-1]['content']
+
+
+def test_an_empty_json_patch_is_a_complete_answer():
+    answer, _targets, provider = run_targets(['{"_field_targets":["department"]}', 'No change.\n```json\n[]\n```'])
+    assert answer == ['No change.\n```json\n[]\n```']
+    assert len(provider.messages) == 2

@@ -128,6 +128,17 @@ class WriteValueTest(unittest.TestCase):
         self.assertEqual(listing["depop_specifics"]["attributes"], {"material": ["denim"], "bottom-fit": ["ripped"]})
 
 
+class DepopTagFallbackTest(unittest.TestCase):
+    def test_style_fallback_uses_the_best_ranked_styles_this_form_offers(self):
+        # The top inferred styles (Retro, Streetwear, Casual) are not on this form;
+        # a lower-ranked one that is must still fill it.
+        style = row("depop_specifics.style", "Style", ["Indie", "Goth"], multi=True, max_values=3,
+                    option_values={"Indie": "indie", "Goth": "goth"})
+        listing = {"title": "Retro streetwear tee"}
+        native_field_fill._keep_depop_tags(listing, {"depop_specifics.style": style})
+        self.assertEqual(listing["depop_specifics"]["style"], ["indie"])
+
+
 class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.engine = memory_engine()
