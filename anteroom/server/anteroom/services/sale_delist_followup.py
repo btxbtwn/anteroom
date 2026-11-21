@@ -6,7 +6,7 @@ refuses or does not answer. This module finds each recently sold-out item that
 Anteroom still has listed on another marketplace (``still_listed``), so the
 app can alert the seller until it is resolved. When the seller turned on
 **Delist the other marketplaces**, ``run`` also delists those listings again,
-on a widening schedule, until each marketplace confirms it.
+on a widening schedule, for sales from the last two weeks.
 
 It acts only on a sale a marketplace reported, for an order still paid, and
 never on the marketplace that sold, an item with stock left, or a sale older
@@ -24,7 +24,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from anteroom.models.conversation import Conversation
-from anteroom.models.marketplace_sale import PAID_STATUSES, MarketplaceSale
+from anteroom.models.marketplace_sale import OTHER_MARKETPLACE, PAID_STATUSES, MarketplaceSale
 
 log = logging.getLogger("anteroom.sale_delist_followup")
 
@@ -65,7 +65,10 @@ def _iso(value: datetime | None) -> str | None:
 
 
 def retry_after(attempts: int) -> timedelta:
-    return min(FIRST_RETRY * 2 ** max(attempts - 1, 0), MAX_RETRY)
+    exponent = max(attempts - 1, 0)
+    if exponent >= (MAX_RETRY // FIRST_RETRY).bit_length():
+        return MAX_RETRY
+    return min(FIRST_RETRY * 2 ** exponent, MAX_RETRY)
 
 
 def still_listed(db: Session) -> list[dict]:
@@ -82,7 +85,8 @@ def still_listed(db: Session) -> list[dict]:
     found: dict[str, dict] = {}
     for sale in sales:
         conv_id = str(sale.conversation_id)
-        if conv_id in found or sale.marketplace not in MARKETPLACES:
+        if conv_id in found or (sale.marketplace not in MARKETPLACES
+                                and not (sale.source == "seller" and sale.marketplace == OTHER_MARKETPLACE)):
             continue
         if stock_after_sale(db, conv_id, sale.marketplace, sale.listing_id)["status"] != "sold_out":
             continue
@@ -104,7 +108,7 @@ def still_listed(db: Session) -> list[dict]:
     return list(found.values())
 
 
-def _due(db: Session) -> list[tuple[str, list[str]]]:
+def _due(db: Session) -> list[tuple[str, str, list[str]]]:
     """Items whose remaining listings are due another delist, and which ones."""
     from anteroom.repositories.queries import JobRepo
 
@@ -125,7 +129,7 @@ def _due(db: Session) -> list[tuple[str, list[str]]]:
             elif entry["state"] == "deleting" and (at is None or at + STALE_DELETING <= now):
                 names.append(entry["marketplace"])
         if names:
-            due.append((item["conversationId"], names))
+            due.append((item["conversationId"], item["saleId"], names))
     return due
 
 
@@ -174,8 +178,8 @@ async def run(*, session_factory=None) -> None:
             with session_factory() as db:
                 return _due(db)
 
-        for conv_id, names in await asyncio.to_thread(read_due):
-            await _follow(conv_id, names)
+        for conv_id, sale_id, names in await asyncio.to_thread(read_due):
+            await _follow(conv_id, sale_id, names)
     except asyncio.CancelledError:
         raise
     except Exception:  # noqa: BLE001 - the next sweep tries again
@@ -184,11 +188,11 @@ async def run(*, session_factory=None) -> None:
         _running.discard(key)
 
 
-async def _follow(conv_id: str, names: list[str]) -> None:
+async def _follow(conv_id: str, sale_id: str, names: list[str]) -> None:
     from anteroom.services.marketplace_delist import DelistError, delist
 
     try:
-        result = await delist(conv_id, names, confirm=True)
+        result = await delist(conv_id, names, confirm=True, followup_sale_id=sale_id)
     except DelistError as exc:
         # Chrome away, another job running, listing mode: nothing was tried.
         log.info("Delist after a sale waits for item %s on %s: %s", conv_id, ", ".join(names), exc)

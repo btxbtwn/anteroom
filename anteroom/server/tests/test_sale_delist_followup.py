@@ -9,6 +9,7 @@ from unittest.mock import patch
 from sqlalchemy.orm import sessionmaker
 
 from anteroom.models.marketplace_sale import MarketplaceSale
+from anteroom.services.marketplace_delist import DelistError, _open_delist
 from anteroom.services import sale_delist_followup as followup
 from anteroom.services.vendoo_import import merge_notes, parse_notes
 import test_marketplace_delist as delist_tests
@@ -134,7 +135,23 @@ class SaleDelistFollowupTest(unittest.TestCase):
     def test_the_gap_between_tries_widens_to_an_hour(self):
         self.assertEqual(followup.retry_after(1), timedelta(minutes=5))
         self.assertEqual(followup.retry_after(2), timedelta(minutes=10))
-        self.assertEqual(followup.retry_after(10), timedelta(hours=1))
+        self.assertEqual(followup.retry_after(3), timedelta(minutes=20))
+        self.assertEqual(followup.retry_after(4), timedelta(minutes=40))
+        for attempts in (5, 40, 10**6):
+            self.assertEqual(followup.retry_after(attempts), timedelta(hours=1))
+
+    def test_sale_is_rechecked_when_the_job_is_claimed(self):
+        sale_id = self._sold()
+        [(conv_id, _, names)] = followup._due(self.db)
+        sessions = sessionmaker(bind=self.db.get_bind())
+        with sessions() as worker_db:
+            with patch("anteroom.services.sale_inventory.stock_after_sale", return_value={"status": "remaining"}):
+                with self.assertRaisesRegex(DelistError, "no longer qualifies"):
+                    _open_delist(worker_db, conv_id, names, True, sale_id)
+        self.db.get(MarketplaceSale, sale_id).order_status = "refunded"
+        self.db.commit()
+        with sessions() as worker_db, self.assertRaisesRegex(DelistError, "no longer qualifies"):
+            _open_delist(worker_db, conv_id, names, True, sale_id)
 
     def test_nothing_is_delisted_unless_the_seller_turned_it_on(self):
         self._sold()
@@ -145,8 +162,10 @@ class SaleDelistFollowupTest(unittest.TestCase):
         self.assertEqual(len(self._still()), 1)
 
     def test_a_sale_the_seller_marked_is_reported_but_never_delisted_automatically(self):
-        self._sold(source="seller")
-        [item] = self._still()
+        self._sold(source="seller", marketplace="other", listing_id=None)
+        [item] = self.client.get("/api/marketplace-sales/still-listed").json()["items"]
+        self.assertEqual(item["soldOn"], "other")
+        self.assertIn("ebay", {entry["marketplace"] for entry in item["stillListed"]})
         self.assertFalse(item["detected"])
         self._run()
         self.ebay.assert_not_awaited()
@@ -155,6 +174,10 @@ class SaleDelistFollowupTest(unittest.TestCase):
     def test_a_failure_that_keeps_failing_alerts_the_operator_on_the_first_try(self):
         self._sold()
         self.ebay.side_effect = RuntimeError("Sign in to eBay again.")
-        with self.assertLogs("anteroom.sale_delist_followup", level="ERROR") as logs:
+        with self.assertLogs("anteroom", level="ERROR") as logs:
             self._run()
         self.assertTrue(any("still listed on ebay" in line for line in logs.output), logs.output)
+        self.assertFalse(any("anteroom.jobs" in line for line in logs.output), logs.output)
+        self._age_records(6)
+        with self.assertNoLogs("anteroom", level="WARNING"):
+            self._run()

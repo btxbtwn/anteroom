@@ -19,6 +19,7 @@ listed" one.
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime
 
 import httpx
@@ -430,7 +431,7 @@ def _failure_text(marketplace: str, exc: Exception) -> str:
     return str(exc) or "The marketplace did not confirm the delete. Delist again to check; it is safe to repeat."
 
 
-async def delist(conv_id: str, marketplaces: list[str], confirm: bool) -> dict:
+async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, followup_sale_id: str | None = None) -> dict:
     """Delete the named listings. Runs as a job holding the automation slot, so no Send starts into Chrome meanwhile.
 
     Each database step runs on a worker thread with its own session; none is open while
@@ -440,7 +441,7 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool) -> dict:
 
     from anteroom.database import in_worker_session
 
-    names, known, job_id = await in_worker_session(_open_delist, conv_id, marketplaces, confirm)
+    names, known, job_id = await in_worker_session(_open_delist, conv_id, marketplaces, confirm, followup_sale_id)
     job = SimpleNamespace(id=job_id)
     failed = False
     try:
@@ -476,7 +477,8 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool) -> dict:
                     "marketplace_message": _marketplace_message(name, exc)})
         await in_worker_session(lambda db: JobRepo(db).update_status(
             job_id, "failed" if failed else "completed", "native_delist",
-            error="A delist did not finish." if failed else None))
+            error="A delist did not finish." if failed else None,
+            failure_log_level=logging.INFO if followup_sale_id else logging.ERROR))
     except BaseException:
         await asyncio.shield(in_worker_session(lambda db: JobRepo(db).update_status(
             job_id, "failed", "native_delist", error="The delist stopped before it finished.")))
@@ -502,7 +504,8 @@ def _mercari_gone(name: str, result: dict) -> bool:
     return name == "mercari" and result.get("error_code") == "rejected" and message == "item is no longer available"
 
 
-def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bool) -> tuple[list[str], dict, str]:
+def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bool,
+                 followup_sale_id: str | None = None) -> tuple[list[str], dict, str]:
     from anteroom.services.extension_connection import current_extension
 
     from anteroom.services import listing_mode
@@ -525,6 +528,17 @@ def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
     repo = JobRepo(db)
     listing = ListingRepo(db).get_current(conv_id)
     with listing_mode.guard(db, "direct"):
+        if followup_sale_id is not None:
+            from anteroom.services.sale_delist_followup import WINDOW
+            from anteroom.services.sale_inventory import stock_after_sale
+
+            sale = db.get(MarketplaceSale, followup_sale_id)
+            if (sale is None or sale.conversation_id != conv_id or sale.source != "marketplace"
+                    or sale.order_status not in PAID_STATUSES or sale.marketplace in names
+                    or (stamp := _time(sale.sold_at or sale.received_at)) is None
+                    or stamp < datetime.now(UTC) - WINDOW
+                    or stock_after_sale(db, conv_id, sale.marketplace, sale.listing_id)["status"] != "sold_out"):
+                raise DelistError(409, "The sale no longer qualifies for automatic delisting.")
         if repo.get_active():
             raise DelistError(409, "Another automation job is queued or running. Wait for it to finish.")
         job = repo.create(conv_id, listing.current_revision_id if listing else "", {"delist": names},

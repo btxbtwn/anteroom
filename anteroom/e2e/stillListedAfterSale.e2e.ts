@@ -12,13 +12,20 @@ test("a sold item still listed elsewhere is alerted in the sidebar and explained
   page.on("request", request => {
     if (/\/marketplace-listings\/delist|\/marketplace-sales\/.+\/dismiss/.test(request.url())) mutations.push(request.url());
   });
-  await page.route("**/api/marketplace-sales/still-listed", route => route.fulfill({ json: { autodelist: true, items: [{
+  const detected = {
     conversationId: id, title, saleId: "sale-1", soldOn: "poshmark", soldAt: "2026-11-14T22:00:00", detected: true,
     stillListed: [
       { marketplace: "ebay", state: "failed", error: "Sign in to eBay again.", at: null, attempts: 2, url: null },
       { marketplace: "mercari", state: "live", error: null, at: null, attempts: 0, url: null },
     ],
-  }] } }));
+  };
+  const manuallySold = Array.from({ length: 3 }, (_, index) => ({
+    ...detected, conversationId: `manual-${index}`, saleId: `manual-sale-${index}`,
+    title: `In-person item ${index + 1}`, soldOn: "other", detected: false,
+  }));
+  await page.route("**/api/marketplace-sales/still-listed", route => route.fulfill({
+    json: { autodelist: true, items: [...manuallySold, detected] },
+  }));
   await page.route(/\/api\/marketplace-sales\?/, route => {
     const url = new URL(route.request().url());
     if (url.searchParams.get("conversation_id") !== id) return route.fulfill({ json: { sales: [] } });
@@ -35,10 +42,14 @@ test("a sold item still listed elsewhere is alerted in the sidebar and explained
     await page.getByRole("button", { name: "Open navigation" }).click();
     await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
   }
-  const alert = page.getByRole("alert").filter({ hasText: "A sold item is still listed" });
+  const alert = page.getByRole("alert").filter({ hasText: "4 sold items are still listed" });
   await expect(alert).toBeVisible({ timeout: 45_000 });
+  await expect(alert.getByRole("button", { name: /In-person item 1/ })).toContainText("Delist this item under Marketplaces.");
+  await expect(alert.getByRole("button", { name: /In-person item 1/ })).not.toContainText("Anteroom retries");
+  await expect(alert.getByRole("button", { name: new RegExp(title) })).toHaveCount(0);
+  await alert.getByRole("button", { name: "Show 1 more item" }).click();
   await expect(alert).toContainText("Sold on Poshmark, still on eBay and Mercari (delist failed)");
-  await expect(alert).toContainText("Anteroom keeps trying to delist them.");
+  await expect(alert).toContainText("Anteroom retries eligible delists for up to two weeks after the sale.");
   await page.screenshot({ path: info.outputPath("still-listed-sidebar.png") });
 
   await alert.getByRole("button", { name: new RegExp(title) }).click();

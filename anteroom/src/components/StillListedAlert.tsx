@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { CircleAlertIcon } from "lucide-react";
 import { api } from "../api/client";
@@ -20,8 +21,9 @@ export function stillListedLine(item: StillListedItem): string {
   return `Sold on ${marketplaceName(item.soldOn)}, still on ${where}${failed ? ` (${failed === 1 ? "delist failed" : `${failed} delists failed`})` : ""}`;
 }
 
-/** Sold items still listed on another marketplace, until each is delisted or marked not listed. */
+/** Recently sold items still listed on another marketplace. */
 export function StillListedAlert({ onOpen }: { onOpen: (convId: string) => void }) {
+  const [expanded, setExpanded] = useState(false);
   const { data } = useQuery({
     queryKey: ["marketplace-sales", "still-listed"],
     queryFn: ({ signal }) => api.marketplaceSales.stillListed({ signal }),
@@ -30,6 +32,7 @@ export function StillListedAlert({ onOpen }: { onOpen: (convId: string) => void 
   const items = data?.items ?? [];
   if (!items.length) return null;
   const more = items.length - SHOWN;
+  const shown = expanded ? items : items.slice(0, SHOWN);
   return (
     <Alert variant="error" role="alert" className="mx-(--sidebar-content-inset) shrink-0">
       <CircleAlertIcon />
@@ -37,22 +40,27 @@ export function StillListedAlert({ onOpen }: { onOpen: (convId: string) => void 
         {items.length === 1 ? "A sold item is still listed" : `${items.length} sold items are still listed`}
       </AlertTitle>
       <AlertDescription className="gap-1.5">
-        <ul className="flex flex-col gap-1">
-          {items.slice(0, SHOWN).map((item) => (
+        <ul className="flex max-h-60 flex-col gap-1 overflow-y-auto">
+          {shown.map((item) => (
             <li key={item.conversationId}>
               <button type="button" className="text-left underline-offset-2 hover:underline" onClick={() => onOpen(item.conversationId)}>
                 <span className="font-medium text-foreground">{item.title || "Untitled item"}</span>
                 <span className="block text-xs">{stillListedLine(item)}</span>
+                <span className="block text-xs">
+                  {data?.autodelist && item.detected
+                    ? "Anteroom retries eligible delists for up to two weeks after the sale."
+                    : "Delist this item under Marketplaces."}
+                </span>
               </button>
             </li>
           ))}
         </ul>
-        {more > 0 ? <p className="text-xs">and {more} more</p> : null}
-        <p className="text-xs">
-          {data?.autodelist
-            ? "Anteroom keeps trying to delist them. Open an item to see why a delist failed."
-            : "Open each item and delist it under Marketplaces."}
-        </p>
+        {more > 0 ? (
+          <button type="button" aria-expanded={expanded} className="self-start text-xs underline"
+            onClick={() => setExpanded((value) => !value)}>
+            {expanded ? "Show fewer items" : `Show ${more} more ${more === 1 ? "item" : "items"}`}
+          </button>
+        ) : null}
       </AlertDescription>
     </Alert>
   );
