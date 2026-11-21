@@ -214,19 +214,22 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
 
   // A size read from the photos may have come from the one removed: clear it for the seller
   // to read again or type, and ignore any reading of the earlier photos still in flight.
-  const handlePhotoRemoved = (id: string) => updateRow(id, (row) => {
-    const cleared: Partial<RowState> = row.sizeSuggested
-      ? { details: { ...row.details, size: "" }, sizeSuggested: false, sizeReview: true,
-        sizeNote: "A photo was removed, so the size read from it was cleared. Read size tags again or type the size." }
-      : row.sizeWarning
-        ? { sizeWarning: undefined, sizeReview: true,
-          sizeNote: "A photo was removed, so the earlier tag check no longer applies. Read size tags again or check the tag." }
-        : row.sizeNote === READING_SIZE_NOTE
-          ? { sizeReview: row.details.size.trim() === "",
-            sizeNote: "A photo was removed while reading. Read size tags again or type the size." }
-          : {};
-    return { ...row, ...cleared, photoSet: row.photoSet + 1 };
-  });
+  const handlePhotoRemoved = (id: string) => {
+    setAnnounceSizes(false);
+    updateRow(id, (row) => {
+      const cleared: Partial<RowState> = row.sizeSuggested
+        ? { details: { ...row.details, size: "" }, sizeSuggested: false, sizeReview: true,
+          sizeNote: "A photo was removed, so the size read from it was cleared. Read size tags again or type the size." }
+        : row.sizeWarning
+          ? { sizeWarning: undefined, sizeReview: true,
+            sizeNote: "A photo was removed, so the earlier tag check no longer applies. Read size tags again or check the tag." }
+          : row.sizeNote === READING_SIZE_NOTE
+            ? { sizeReview: row.details.size.trim() === "",
+              sizeNote: "A photo was removed while reading. Read size tags again or type the size." }
+            : {};
+      return { ...row, ...cleared, photoSet: row.photoSet + 1 };
+    });
+  };
 
   // The refs also guard actions fired before React renders the disabled buttons.
   const guardPhotoRemoval: GuardPhotoRemoval = async (remove) => {

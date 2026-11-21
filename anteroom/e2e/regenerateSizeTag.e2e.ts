@@ -21,21 +21,21 @@ test("regenerate review reads size tags, checks saved sizes and saves edits befo
   };
   const generated = new Set<string>();
 
-  await request.patch(`/api/conversations/${jeansId}`, {
-    data: { notes: JSON.stringify({ size: "34 x 30", sku: "JEANS-1" }) },
-  });
-
-  await page.route("**/api/conversations/*/size-tags/read", async (route) => {
-    const id = new URL(route.request().url()).pathname.split("/")[3]!;
-    await route.fulfill({ json: tags[id] });
-  });
-  await page.route("**/api/conversations/*/generate", async (route) => {
-    const id = new URL(route.request().url()).pathname.split("/")[3]!;
-    generated.add(id);
-    await route.fulfill({ contentType: "text/event-stream", body: 'data: {"title":"Rewritten draft"}\n\ndata: [DONE]\n\n' });
-  });
-
   try {
+    await request.patch(`/api/conversations/${jeansId}`, {
+      data: { notes: JSON.stringify({ size: "34 x 30", sku: "JEANS-1" }) },
+    });
+
+    await page.route("**/api/conversations/*/size-tags/read", async (route) => {
+      const id = new URL(route.request().url()).pathname.split("/")[3]!;
+      await route.fulfill({ json: tags[id] });
+    });
+    await page.route("**/api/conversations/*/generate", async (route) => {
+      const id = new URL(route.request().url()).pathname.split("/")[3]!;
+      generated.add(id);
+      await route.fulfill({ contentType: "text/event-stream", body: 'data: {"title":"Rewritten draft"}\n\ndata: [DONE]\n\n' });
+    });
+
     await page.goto("/");
     if (phone) {
       await page.getByRole("button", { name: "Open navigation" }).click();
@@ -72,14 +72,12 @@ test("regenerate review reads size tags, checks saved sizes and saves edits befo
     await expect.poll(() => generated.size, { timeout: 30_000 }).toBe(3);
 
     const saved = await Promise.all(ids.map(async (id) => (await request.get(`/api/conversations/${id}`)).json()));
-    const sizesById = Object.fromEntries(saved.map((conv) => [conv.id, JSON.parse(conv.notes).size]));
-    expect(sizesById).toEqual({
-      [shortsId]: "0",
-      [jeansId]: "34 x 30",
-      [teeId]: "M",
-    });
+    const notesById = Object.fromEntries(saved.map((conv) => [conv.id, JSON.parse(conv.notes)]));
+    expect(notesById[shortsId].size).toBe("0");
+    expect(notesById[jeansId]).toMatchObject({ size: "34 x 30", sku: "JEANS-1" });
+    expect(notesById[teeId].size).toBe("M");
   } finally {
     await page.unrouteAll({ behavior: "wait" });
-    for (const id of ids) await request.delete(`/api/conversations/${id}`);
+    await Promise.allSettled(ids.map((id) => request.delete(`/api/conversations/${id}`)));
   }
 });

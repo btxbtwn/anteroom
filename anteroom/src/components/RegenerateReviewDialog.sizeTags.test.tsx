@@ -272,3 +272,50 @@ it("keeps a size mismatch warning when a re-read fails or finds no tag", async (
     await act(async () => root.unmount());
   }
 });
+
+it("clears a previously saved tag size when emptied before rewriting", async () => {
+  const saved: Record<string, string> = {};
+  const { root, size, update, onRewrite } = await openDialog({
+    notesById: { "c-jeans": JSON.stringify({ size: "34 x 30", sku: "JEANS-1" }) },
+  });
+  update.mockImplementation(async (id, data) => {
+    saved[id] = data.notes || "";
+    return {} as Conversation;
+  });
+  try {
+    expect(size("Jeans").value).toBe("34 x 30");
+    await act(async () => setInput(size("Jeans"), ""));
+    await act(async () => {
+      document.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    await settle(() => expect(onRewrite).toHaveBeenCalledTimes(1));
+
+    expect(JSON.parse(saved["c-jeans"]!)).toMatchObject({ size: "", sku: "JEANS-1" });
+    expect(saved["c-shorts"]).toBeUndefined();
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
+it("keeps a size typed while reading and flags it when the tag disagrees", async () => {
+  const pending = deferred<SizeTagReadResult>();
+  vi.spyOn(api.sizeTags, "readSaved").mockImplementation(async (id) => (
+    id === "c-shorts" ? pending.promise : tagReads[id]!
+  ));
+  const { root, size, button } = await openDialog();
+  try {
+    await act(async () => button("Read size tags").click());
+    await act(async () => setInput(size("Shorts"), "2"));
+
+    await act(async () => pending.resolve({ photos_read: 1, status: "accepted", size: "0", sizes: ["0"] }));
+    await settle(() => expect(document.querySelector('[role="status"]')!.textContent).toContain("Size tags read."));
+
+    expect(size("Shorts").value).toBe("2");
+    expect(size("Shorts").className).not.toContain("is-suggested");
+    expect(size("Shorts").className).toContain("needs-review");
+    expect(document.getElementById(size("Shorts").getAttribute("aria-describedby")!)!.textContent)
+      .toBe("The tag reads 0. Check the size you typed.");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});

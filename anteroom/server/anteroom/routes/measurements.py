@@ -155,8 +155,7 @@ async def read_saved_measurements(conv_id: str, body: ReadSavedRequest):
 )
 async def read_saved_size_tags(conv_id: str):
     """Suggest a saved listing's clothing size from its size tag in its photos, in their order. Saves nothing."""
-    provider = _photo_provider("size tags")
-    filenames = await in_worker_session(_photo_filenames, conv_id)
+    provider, filenames = await in_worker_session(_saved_size_tag_inputs, conv_id)
     paths = await asyncio.to_thread(photo_store().local_paths, filenames)
     return await _read_size_tag(provider, paths)
 
@@ -166,6 +165,11 @@ def _photo_filenames(db: Session, conv_id: str) -> list[str]:
     if not repo.get(conv_id):
         raise HTTPException(404, "Conversation not found")
     return [photo.stored_filename for photo in repo.get_photos(conv_id)]
+
+
+def _saved_size_tag_inputs(db: Session, conv_id: str) -> tuple[object, list[str]]:
+    provider = _photo_provider("size tags")
+    return provider, _photo_filenames(db, conv_id)
 
 
 async def _download_hosted_photos(workdir: str, keys: list[str], token: str) -> list[Path]:
@@ -195,8 +199,7 @@ async def read_hosted_saved_measurements(conv_id: str, body: ReadSavedRequest, r
 )
 async def read_hosted_saved_size_tags(conv_id: str, request: Request):
     """The hosted size-tag read of a saved listing: its photos come from private storage. Saves nothing."""
-    provider = _photo_provider("size tags")
-    keys = await in_seller_session(request, _hosted_photo_keys, conv_id)
+    provider, keys = await in_seller_session(request, _hosted_size_tag_inputs, conv_id)
     token = request.headers["authorization"].partition(" ")[2]
     with tempfile.TemporaryDirectory(prefix="size-tag-saved-") as workdir:
         paths = await _download_hosted_photos(workdir, keys, token)
@@ -211,6 +214,11 @@ def _hosted_photo_keys(db: SellerDatabaseSession, conv_id: str) -> list[str]:
     for row in rows:
         hosted_photos.check_key(row.stored_filename, db.user_id, conv_id)
     return [row.stored_filename for row in rows]
+
+
+def _hosted_size_tag_inputs(db: SellerDatabaseSession, conv_id: str) -> tuple[object, list[str]]:
+    provider = _photo_provider("size tags")
+    return provider, _hosted_photo_keys(db, conv_id)
 
 
 router.include_router(_upload_router)
