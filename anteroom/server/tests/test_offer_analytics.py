@@ -185,3 +185,103 @@ def test_missing_receipt_does_not_inherit_positive_receipt_confirmation():
             assert rows[market]['confirmed_recipients'] == 2
             assert rows[market]['confirmed_sends'] == 1
             assert rows[market]['unverified'] == unverified
+
+
+def _log_fixture(db, now):
+    from anteroom.models.conversation import Conversation
+    from anteroom.models.ebay_offer import EbayOfferAttempt, EbayOfferRule
+    conv = Conversation(title='Columbia fleece')
+    db.add(conv)
+    db.flush()
+    rule = EbayOfferRule(account_id='account', listing_id='ebay-1', conversation_id=conv.id,
+        discount_percent=10, minimum_price_cents=100)
+    db.add(rule)
+    db.flush()
+    db.add(EbayOfferAttempt(id='e1', rule_id=rule.id, current_price_cents=2000, offer_price_cents=1800,
+        discount_percent=10, minimum_price_cents=100, state='sent', recipient_count=3,
+        created_at=now, sent_at=now - timedelta(minutes=1), expires_at=now))
+    # A reviewed eBay offer that was never sent is not in the log.
+    db.add(EbayOfferAttempt(id='e2', rule_id=rule.id, current_price_cents=2000, offer_price_cents=1800,
+        discount_percent=10, minimum_price_cents=100, state='preview', created_at=now, expires_at=now))
+    for id_, market, state, evidence, recipients, likes, minutes in [
+        ('p1', 'poshmark', 'done', 'request_accepted', None, 4, 5),
+        ('d1', 'depop', 'done', 'job_completed', None, 2, 0),
+        ('d2', 'depop', 'unknown', None, None, 1, 3),
+        ('m1', 'mercari', 'done', 'recipients_created', 5, 5, 2),
+        ('m2', 'mercari', 'failed', None, None, 5, 4),
+    ]:
+        db.add(ListingPromotion(id=id_, batch_id='batch', marketplace=market, action='offer', listing_id=f'{market}-1',
+            title=f'{market} item', price_cents=1000, offer_price_cents=900, state=state, confirmation=evidence,
+            recipient_count=recipients, like_count=likes, created_at=now, sent_at=now - timedelta(minutes=minutes),
+            expires_at=now, note='Chrome did not answer in time.' if state == 'unknown' else None))
+    # Skips, previews and shares were never sent as offers.
+    db.add(ListingPromotion(batch_id='batch', marketplace='depop', action='offer', listing_id='depop-2',
+        state='skipped', created_at=now, expires_at=now))
+    db.add(ListingPromotion(batch_id='batch', marketplace='poshmark', action='share', listing_id='poshmark-1',
+        state='done', created_at=now, sent_at=now, expires_at=now))
+    db.add(ListingPromotion(user_id='other', batch_id='private', marketplace='mercari', action='offer',
+        listing_id='private', state='done', created_at=now, sent_at=now, expires_at=now))
+    db.commit()
+
+
+def test_offer_log_lists_every_send_across_marketplaces_newest_first():
+    from anteroom.services.offer_analytics import offer_log
+    engine = create_engine('sqlite://')
+    Base.metadata.create_all(engine)
+    now = datetime(2026, 11, 20, 12)
+    with Session(engine) as db:
+        _log_fixture(db, now)
+        result = offer_log(db, limit=50)
+    entries = result['entries']
+    assert [entry['id'] for entry in entries] == ['d1', 'e1', 'm1', 'd2', 'm2', 'p1']
+    assert result['next_before'] is None
+    by_id = {entry['id']: entry for entry in entries}
+    assert by_id['e1'] == {'id': 'e1', 'marketplace': 'ebay', 'title': 'Columbia fleece', 'listing_id': 'ebay-1',
+        'sent_at': '2026-11-20T11:59:00Z', 'status': 'sent', 'price_cents': 2000, 'offer_price_cents': 1800,
+        'recipients': 3, 'confirmation': 'recipients_created', 'like_count': None, 'note': None}
+    assert by_id['d1']['status'] == 'sent' and by_id['d1']['recipients'] is None
+    assert by_id['d1']['confirmation'] == 'job_completed' and by_id['d1']['like_count'] == 2
+    assert by_id['d2']['status'] == 'unconfirmed'
+    assert by_id['m2']['status'] == 'failed'
+    assert by_id['m1']['recipients'] == 5
+
+
+def test_offer_log_pages_with_a_cursor_without_repeats():
+    from anteroom.services.offer_analytics import offer_log
+    engine = create_engine('sqlite://')
+    Base.metadata.create_all(engine)
+    now = datetime(2026, 11, 20, 12)
+    with Session(engine) as db:
+        _log_fixture(db, now)
+        seen, before = [], None
+        while True:
+            page = offer_log(db, limit=2, before=before)
+            assert len(page['entries']) <= 2
+            seen += [entry['id'] for entry in page['entries']]
+            before = page['next_before']
+            if before is None:
+                break
+    assert seen == ['d1', 'e1', 'm1', 'd2', 'm2', 'p1']
+
+
+def test_offer_log_endpoint_rejects_a_bad_cursor():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from anteroom.database import get_db
+    from anteroom.routes.analytics import router
+    from sqlalchemy.pool import StaticPool
+    engine = create_engine('sqlite://', connect_args={'check_same_thread': False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    app = FastAPI()
+    app.include_router(router)
+    def session():
+        with Session(engine) as db:
+            yield db
+    app.dependency_overrides[get_db] = session
+    with TestClient(app) as client:
+        response = client.get('/api/analytics/offers/log')
+        assert response.status_code == 200
+        assert response.headers['cache-control'] == 'no-store'
+        assert response.json() == {'entries': [], 'next_before': None}
+        assert client.get('/api/analytics/offers/log?before=nonsense').status_code == 400
+        assert client.get('/api/analytics/offers/log?limit=500').status_code == 422

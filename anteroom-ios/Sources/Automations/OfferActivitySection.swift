@@ -48,22 +48,24 @@ struct OfferActivitySection: View {
                 ForEach(data.marketplaces, id: \.marketplace) { row in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(Marketplaces.name(row.marketplace)).font(.subheadline.weight(.medium))
-                        Text(row.confirmedRecipients.map { "\($0) confirmed recipient offers" } ?? "Not available")
-                            .font(.subheadline).monospacedDigit()
-                        Text(detail(row)).font(.caption).foregroundStyle(.secondary)
-                        Text("\(row.unknown) unknown · \(row.unverified) unverified · \(row.failed) failed · \(row.pending) pending")
-                            .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                        Text(OfferActivityText.sent(row)).font(.subheadline).monospacedDigit()
+                        ForEach(OfferActivityText.reach(row), id: \.self) { line in
+                            Text(line).font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let problems = OfferActivityText.problems(row) {
+                            Text(problems).font(.caption).foregroundStyle(.orange).monospacedDigit()
+                        }
                     }
                 }
             } else {
                 ProgressView("Reading offer activity…")
             }
-            Text("Converted sales: Not available. Saved offers cannot be reliably linked to orders. A later sale of the same listing does not prove conversion.")
+            Text("Sales from offers aren't counted: marketplaces don't say which offer led to a sale.")
                 .font(.footnote).foregroundStyle(.secondary)
         } header: {
             Text("Offer activity")
         } footer: {
-            Text("Partial history: only recorded sends are included; previews, cooldown checks and skips are excluded. eBay history before send-date tracking is excluded. Counts are recipient offers, not unique buyers; repeat offers count again.")
+            Text("Each offer is one listing's offer to its likers or watchers, so one buyer can count more than once. Listings that were checked and skipped aren't counted, and neither are eBay offers from before Anteroom recorded send dates.")
         }
         .task(id: "\(dates.0)/\(dates.1)/\(TimeZone.current.identifier)/\(refreshToken)") {
             data = nil
@@ -80,12 +82,41 @@ struct OfferActivitySection: View {
             }
         }
     }
+}
 
-    private func detail(_ row: OfferAnalyticsMarketplace) -> String {
-        switch row.marketplace {
-        case "poshmark": "\(row.acceptedRequests) accepted requests · recipients not reported"
-        case "depop": "\(row.completedJobs) completed bulk jobs · recipients not reported"
-        default: "\(row.confirmedSends) confirmed sends with recipient counts"
+/// What each marketplace confirmed, in the same words as the web app.
+enum OfferActivityText {
+    private static func count(_ n: Int, _ one: String) -> String { "\(n) \(one)\(n == 1 ? "" : "s")" }
+
+    static func sent(_ row: OfferAnalyticsMarketplace) -> String {
+        let total = row.confirmedSends + row.acceptedRequests + row.completedJobs + row.unverified
+        return total == 1 ? "1 offer sent" : "\(total) offers sent"
+    }
+
+    static func reach(_ row: OfferAnalyticsMarketplace) -> [String] {
+        var lines: [String] = []
+        if let recipients = row.confirmedRecipients {
+            lines.append("Reached \(count(recipients, "buyer")), as \(Marketplaces.name(row.marketplace)) reported")
         }
+        if row.acceptedRequests > 0 {
+            let which = row.acceptedRequests == 1 ? "it" : "all \(row.acceptedRequests)"
+            lines.append("Poshmark accepted \(which) but doesn't say how many likers got each offer")
+        }
+        if row.completedJobs > 0 {
+            let which = row.completedJobs == 1 ? "it" : "all \(row.completedJobs)"
+            lines.append("Depop finished \(which) but doesn't say how many likers got each offer")
+        }
+        if row.unverified > 0 {
+            lines.append("\(count(row.unverified, "offer")) with no marketplace receipt saved")
+        }
+        return lines
+    }
+
+    static func problems(_ row: OfferAnalyticsMarketplace) -> String? {
+        var parts: [String] = []
+        if row.unknown > 0 { parts.append("\(row.unknown) not confirmed") }
+        if row.failed > 0 { parts.append("\(row.failed) failed") }
+        if row.pending > 0 { parts.append("\(row.pending) sending") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }

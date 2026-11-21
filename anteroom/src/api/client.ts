@@ -478,6 +478,8 @@ export const api = {
   analytics: {
     offers: (filters: { start: string; end: string; timezone: string }) =>
       request<import("./contract.gen").OfferAnalyticsResponse>(`/analytics/offers?${new URLSearchParams(filters)}`),
+    offerLog: (before?: string | null) =>
+      request<import("./contract.gen").OfferLogResponse>(`/analytics/offers/log${before ? `?${new URLSearchParams({ before })}` : ""}`),
     get: (range: AnalyticsRange, custom?: { start: string; end: string }) => {
       const params = new URLSearchParams({ range });
       if (custom) {
