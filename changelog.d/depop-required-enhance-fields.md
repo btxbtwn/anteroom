@@ -1,3 +1,0 @@
-- Always fill Depop's Source, Age and Style when filling marketplace fields, instead of leaving them blank.
-- Ask chat no longer says it finished a field without actually saving a value.
-- A message queued in chat now sends once the listing finishes its background work, instead of waiting forever.

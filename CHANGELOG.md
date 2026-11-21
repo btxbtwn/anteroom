@@ -6,6 +6,16 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1079 — 2026-11-21
+
+- Always fill Depop's Source, Age and Style when filling marketplace fields, instead of leaving them blank.
+- Ask chat no longer says it finished a field without actually saving a value.
+- A message queued in chat now sends once the listing finishes its background work, instead of waiting forever.
+
+## 0.1.1078 — 2026-11-21
+
+- Fix Poshmark refusing a listing as an invalid inventory status when its Availability was saved as "For Sale".
+
 ## 0.1.1077 — 2026-11-21
 
 - Generated listings now always use the defaults you saved (Etsy who made it, what it is and renewal; Mercari ships-from ZIP, shipping label and shoebox answer) instead of the model picking its own. A value you set on a listing yourself still wins.
