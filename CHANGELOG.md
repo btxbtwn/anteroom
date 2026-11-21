@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1116 — 2026-11-21
+
+- Hosted database deploys now repair an invalid `ix_listing_promotions_rule_recent` index left behind by an interrupted concurrent index build instead of failing subsequent deploys.
+
 ## 0.1.1115 — 2026-11-21
 
 - iPhone inventory rows now mark marketplaces where an item sold as Sold instead of Listed and exclude them from live marketplaces while keeping Sold-tab marketplace filtering working.
