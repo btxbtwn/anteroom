@@ -10,6 +10,16 @@ import type { Listing } from "./sidebar/listingShelves";
 import { MARKETPLACE_SHEET_COLUMNS } from "./marketplaceSheetConfig";
 import { DesktopCellPopover, MarketplaceQuickEditSheet } from "./MarketplaceSheetEditor";
 
+import { MarketplaceSheetView } from "./MarketplaceSheetView";
+import { readinessKey } from "./useInventoryReadiness";
+
+vi.mock("@tanstack/react-virtual", () => ({
+  useVirtualizer: () => ({
+    getVirtualItems: () => [{ key: "conv-1", index: 0, start: 0, size: 56 }],
+    getTotalSize: () => 56,
+  }),
+}));
+
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const LOCAL_RUNTIME: WorkspaceRuntime = {
@@ -425,6 +435,29 @@ describe("MarketplaceSheetEditor", () => {
       });
 
       expect(document.body.textContent).toContain("List on Depop for $27?");
+      const renderSession = (listing: Listing | null) => root.render(
+        <QueryClientProvider client={client}>
+          <WorkspaceRuntimeProvider value={LOCAL_RUNTIME}>
+            <MarketplaceQuickEditSheet
+              listing={listing}
+              marketplace="depop"
+              sheetRow={priceOverrideRow}
+              nextDraftId={null}
+              onClose={vi.fn()}
+              onSelectListing={vi.fn()}
+              onOpenListing={vi.fn()}
+            />
+          </WorkspaceRuntimeProvider>
+        </QueryClientProvider>,
+      );
+      await act(() => renderSession(null));
+      await act(() => renderSession(LISTING_ROW));
+      await flushMicrotasks();
+      const findButton = (text: string) => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === text);
+      expect(findButton("List on Depop")).toBeUndefined();
+      const reopenedList = findButton("List");
+      expect(reopenedList).toBeDefined();
+      await act(() => reopenedList!.click());
       const confirmBtn = [...document.querySelectorAll("button")].find((b) => b.textContent?.includes("List on Depop"));
       expect(confirmBtn).toBeDefined();
       await act(() => {
@@ -435,6 +468,48 @@ describe("MarketplaceSheetEditor", () => {
       expect(listSpy).toHaveBeenCalledWith("conv-1", "depop", "rev-fresh");
     } finally {
       await act(() => root.unmount());
+    }
+  });
+
+  it("blocks desktop List confirmation when the ready sheet row advances with the same price", async () => {
+    const listSpy = vi.spyOn(api.nativeMarketplaces, "list").mockResolvedValue({ state: "working" } as never);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(["listing", LISTING_ROW.id], SAMPLE_DOC);
+    const block = ["listing-sheet", "depop", [readinessKey(LISTING_ROW)]];
+    const setRow = (revision_id: string) => client.setQueryData(block, {
+      listings: { [LISTING_ROW.id]: { ...READY_SHEET_ROW, revision_id } },
+    });
+    setRow("rev-1");
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    try {
+      await act(() => root.render(
+        <QueryClientProvider client={client}>
+          <WorkspaceRuntimeProvider value={LOCAL_RUNTIME}>
+            <MarketplaceSheetView marketplace="depop" rows={[LISTING_ROW]} allCount={1}
+              needle="" emptyLabel="No listings" loading={false} loadFailed={false}
+              nameBySku={false} onOpenListing={vi.fn()} />
+          </WorkspaceRuntimeProvider>
+        </QueryClientProvider>,
+      ));
+      await flushMicrotasks();
+      const button = (label: string) => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === label);
+      const firstStep = button("List");
+      expect(firstStep).toBeDefined();
+      await act(() => firstStep!.click());
+      expect(button("List on Depop")?.disabled).toBe(false);
+
+      await act(() => { setRow("rev-2"); });
+      await flushMicrotasks();
+
+      const confirm = button("List on Depop");
+      expect(confirm?.disabled).toBe(true);
+      await act(() => confirm!.click());
+      expect(listSpy).not.toHaveBeenCalled();
+    } finally {
+      await act(() => root.unmount());
+      client.clear();
     }
   });
 

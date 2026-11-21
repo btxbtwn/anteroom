@@ -50,8 +50,10 @@ export function invalidateSheetForListing(client: QueryClient, id: string, marke
   void client.invalidateQueries({
     queryKey: marketplace ? ["listing-sheet", marketplace] : ["listing-sheet"],
     predicate: ({ queryKey }) => {
-      const ids = queryKey[2];
-      return typeof ids !== "string" || ids.split(",").includes(id);
+      const readinessKeys = queryKey[2];
+      // readinessKey encodes the listing ID before the first colon.
+      return Array.isArray(readinessKeys)
+        && readinessKeys.some((key) => typeof key === "string" && key.startsWith(`${id}:`));
     },
   });
 }

@@ -719,7 +719,7 @@ struct MarketplaceQuickEditSheet: View {
                 }
             }
             Spacer(minLength: 8)
-            if let priceLabel {
+            if let priceLabel = sheetPriceLabel(effectiveSheetRow) {
                 Text(priceLabel)
                     .font(.subheadline.weight(.semibold))
                     .monospacedDigit()

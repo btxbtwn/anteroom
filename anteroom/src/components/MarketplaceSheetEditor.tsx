@@ -755,6 +755,10 @@ export function MarketplaceQuickEditSheet({
     revisionId: string;
     priceLabel: string | null;
   } | null>(null);
+  // Closing or changing the target ends the confirmation session.
+  if (confirmSnapshot && confirmSnapshot.key !== targetKey) {
+    setConfirmSnapshot(null);
+  }
   const listMutation = useSheetListMutation(marketplace);
   const isListingThisRow = Boolean(
     listing && listMutation.isPending && listMutation.variables?.convId === listing.id,

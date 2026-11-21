@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { CheckIcon, ExternalLinkIcon, SquareArrowOutUpRightIcon } from "lucide-react";
 import { listingEdits } from "../api/listingEdits";
@@ -577,6 +577,8 @@ export function MarketplaceSheetView({
           {confirmList ? (
             <DesktopConfirmListBody
               confirmList={confirmList}
+              liveListing={rows.find((row) => row.id === confirmList.listing.id)}
+              canAct={canAct}
               sheetRow={sheetRows[confirmList.listing.id]}
               marketplace={marketplace}
               marketLabel={marketLabel}
@@ -736,6 +738,8 @@ function SheetStatusAction({
 
 function DesktopConfirmListBody({
   confirmList,
+  liveListing,
+  canAct,
   sheetRow,
   marketplace,
   marketLabel,
@@ -744,6 +748,8 @@ function DesktopConfirmListBody({
   onConfirm,
 }: {
   confirmList: ConfirmListTarget;
+  liveListing: Listing | undefined;
+  canAct: boolean;
   sheetRow: ListingSheetRow | undefined;
   marketplace: NativeMarketplace;
   marketLabel: string;
@@ -754,20 +760,25 @@ function DesktopConfirmListBody({
   const queryClient = useQueryClient();
   const edits = useMemo(() => listingEdits(queryClient, confirmList.listing.id), [queryClient, confirmList.listing.id]);
   const editState = useSyncExternalStore(edits.subscribe, edits.getSnapshot, edits.getSnapshot);
-  const cachedDoc = queryClient.getQueryData<ListingDocument>(["listing", confirmList.listing.id]);
-  const liveRevision = cachedDoc?.current_revision_id ?? sheetRow?.revision_id ?? confirmList.revisionId;
+  const { data: cachedDoc } = useQuery<ListingDocument>({
+    queryKey: ["listing", confirmList.listing.id],
+    queryFn: skipToken,
+  });
+  const liveRevision = cachedDoc?.current_revision_id ?? sheetRow?.revision_id ?? null;
+  const liveStatus = liveListing ? marketplaceCell(liveListing, marketplace, sheetMissingFields(sheetRow)) : null;
+  const canList = canListFromSheet(liveListing, liveStatus, sheetRow, canAct, liveRevision);
   const livePrice = sheetPriceLabel(
     marketplace,
     sheetRow,
     editState.draft ?? cachedDoc?.listing,
-    confirmList.listing.price,
+    liveListing?.price,
     cachedDoc?.current_revision_id ?? null,
   );
   const hasUnsavedDraft = Boolean(editState.draft);
   const snapshotDrifted =
     liveRevision !== confirmList.revisionId
-    || (sheetRow !== undefined && sheetRow.ready === false)
-    || (livePrice !== null && confirmList.priceLabel !== null && livePrice !== confirmList.priceLabel)
+    || !canList
+    || livePrice !== confirmList.priceLabel
     || hasUnsavedDraft;
   const priceLabel = confirmList.priceLabel;
 

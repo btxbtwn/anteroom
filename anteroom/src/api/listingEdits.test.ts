@@ -1,3 +1,4 @@
+import { readinessKey } from "../components/useInventoryReadiness";
 import { afterEach, expect, it, vi } from "vitest";
 import { api } from "./client";
 import { ApiRequestError } from "./transport";
@@ -41,8 +42,9 @@ it("waits for a draft task and saves retained edits against its latest revision"
 
 it("invalidates only sheet blocks containing the saved listing after the editor detaches", async () => {
   const { client, edits } = setup();
-  const savedBlocks = [["listing-sheet", "depop", "another,item"], ["listing-sheet", "ebay", "item"]];
-  const unrelatedBlock = ["listing-sheet", "depop", "item-suffix"];
+  const key = (id: string) => readinessKey({ id, updated_at: "2026-11-20T12:00:00Z", direct_records: {} });
+  const savedBlocks = [["listing-sheet", "depop", [key("another"), key("item")]], ["listing-sheet", "ebay", [key("item")]]];
+  const unrelatedBlock = ["listing-sheet", "depop", [key("item-suffix")]];
   for (const key of [...savedBlocks, unrelatedBlock]) client.setQueryData(key, {});
   let finish!: (value: ListingSaveResult) => void;
   vi.spyOn(api.listings, "update").mockReturnValue(new Promise(resolve => { finish = resolve; }));
