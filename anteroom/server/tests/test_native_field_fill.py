@@ -604,6 +604,136 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self._current().listing_json, {"title": "Seller's title"})
 
 
+class EtsyAttributesTest(unittest.IsolatedAsyncioTestCase):
+    """Etsy's category attributes (Sleeve length, Neckline, ...) are filled from the evidence like the other forms."""
+
+    PROPERTIES = [
+        {"id": 1, "name": "Primary color", "values": [{"id": 10, "label": "White"}, {"id": 11, "label": "Blue"}]},
+        {"id": 2, "name": "Sleeve length", "values": [{"id": 20, "label": "Short sleeve"}, {"id": 21, "label": "Long sleeve"}]},
+        {"id": 3, "name": "Neckline", "values": [{"id": 30, "label": "Crew neck"}, {"id": 31, "label": "V-neck"}]},
+        {"id": 4, "name": "Occasion", "values": [{"id": 40, "label": "Wedding"}]},
+        {"id": 5, "name": "Holiday", "values": [{"id": 50, "label": "Christmas"}]},
+    ]
+
+    def setUp(self):
+        self.engine = memory_engine()
+        Base.metadata.create_all(self.engine)
+        self.enterContext(worker_sessions(self.engine))
+        self.db = sessionmaker(bind=self.engine)()
+        self.conv = ConversationRepo(self.db).create(title="Tee")
+        self.repo = ListingRepo(self.db)
+        listing_persistence.save_revision(self.repo.db, self.conv.id, {
+            "title": "Hanes 90s Desert Storm tee", "primaryColor": "White", "direct_category_ids": {"etsy": "449"},
+            "seller_fields": ["etsy_specifics.category_specifics.Holiday"],
+        }, source="model")
+        from anteroom.services.listing_generate import photo_fingerprint
+
+        self.photos = photo_fingerprint(ConversationRepo(self.db).get_photos(self.conv.id))
+
+    def tearDown(self):
+        self.db.close()
+        self.engine.dispose()
+
+    def _current(self):
+        self.db.expire_all()
+        saved = self.repo.get_current(self.conv.id)
+        return self.repo.get_revision(saved.current_revision_id).listing_json
+
+    def _form(self, listing):
+        from anteroom.services import etsy_form
+
+        captured = next(row for row in etsy_form.catalog()["fields"] if row.get("input_type") == "category_properties")
+        return {"marketplace": "etsy", "native": True, "known": True, "category_id": "449",
+                "fields": etsy_form.property_rows(listing, self.PROPERTIES, captured)}
+
+    async def editor_form(self, conv_id, marketplace, revision_id, **_kwargs):
+        self.assertEqual(marketplace, "etsy")
+        return self._form(self._current())
+
+    async def test_empty_attributes_are_filled_only_with_evidence_backed_choices(self):
+        reply = json.dumps({"fields": {
+            "etsy_specifics.category_specifics.Sleeve length": {"value": "Short sleeve", "evidence": "short sleeves"},
+            "etsy_specifics.category_specifics.Neckline": {"value": "Crew neck", "evidence": "not in the evidence"},
+            "etsy_specifics.category_specifics.Occasion": {"value": "Birthday", "evidence": "crew neck"},
+            "etsy_specifics.category_specifics.Holiday": {"value": "Christmas", "evidence": "short sleeves"},
+        }})
+        prompts = []
+
+        async def provider_text(_provider, messages, **_kwargs):
+            prompts.append(messages[-1]["content"])
+            return reply
+
+        with patch("anteroom.services.native_editor.editor_form", self.editor_form), \
+                patch("anteroom.services.listing_generate.collect_provider_text", provider_text):
+            saved = await native_field_fill.fill_etsy_attributes(
+                self.conv.id, object(), evidence="White tee with short sleeves and a crew neck", photos=self.photos)
+        # Filled rows (Primary color from General) and the seller's own Holiday are not asked.
+        self.assertIn("Sleeve length", prompts[0])
+        self.assertNotIn("Primary color", prompts[0])
+        self.assertNotIn("Holiday", prompts[0])
+        self.assertEqual(saved, self._current())
+        # Unquoted (Neckline), off-list (Occasion) and seller-set (Holiday) answers are dropped.
+        self.assertEqual(saved["etsy_specifics"]["category_specifics"], {"Sleeve length": "Short sleeve"})
+        shown = {row["label"]: row["value"] for row in self._form(saved)["fields"]}
+        self.assertEqual(shown["Sleeve length"], "Short sleeve")
+        self.assertEqual(shown["Primary color"], "White")
+        self.assertEqual(shown["Neckline"], "")
+
+    def test_general_colors_and_a_seller_edited_attribute_group_are_not_filled(self):
+        listing = {"seller_fields": ["etsy_specifics.category_specifics.Holiday"]}
+        labels = [row["label"] for row in native_field_fill.etsy_attribute_rows(self._form({}), listing)]
+        self.assertEqual(labels, ["Sleeve length", "Neckline", "Occasion"])
+        # The seller edited an attribute in the Etsy tab: the group is theirs, blanks included.
+        edited = {"seller_fields": ["etsy_specifics.category_specifics"],
+                  "etsy_specifics": {"category_specifics": {"Neckline": ""}}}
+        self.assertEqual(native_field_fill.etsy_attribute_rows(self._form(edited), edited), [])
+
+    async def test_nothing_is_saved_when_no_answer_is_supported(self):
+        before = self._current()
+        with patch("anteroom.services.native_editor.editor_form", self.editor_form), \
+                patch("anteroom.services.listing_generate.collect_provider_text", AsyncMock(return_value='{"fields": {}}')):
+            self.assertIsNone(await native_field_fill.fill_etsy_attributes(
+                self.conv.id, object(), evidence="A tee", photos=self.photos))
+        self.assertEqual(self._current(), before)
+
+    async def test_evidence_about_other_photos_is_not_saved(self):
+        before = self._current()
+        provider = AsyncMock(return_value=json.dumps({"fields": {
+            "etsy_specifics.category_specifics.Sleeve length": {"value": "Short sleeve", "evidence": "short sleeves"}}}))
+        with patch("anteroom.services.native_editor.editor_form", self.editor_form), \
+                patch("anteroom.services.listing_generate.collect_provider_text", provider):
+            self.assertIsNone(await native_field_fill.fill_etsy_attributes(
+                self.conv.id, object(), evidence="short sleeves", photos="photos before a replacement"))
+        provider.assert_not_awaited()
+        self.assertEqual(self._current(), before)
+
+    async def test_an_earlier_answer_the_new_category_does_not_offer_is_refilled(self):
+        listing = {**self._current(), "etsy_specifics": {"category_specifics": {
+            "Sleeve length": "Cap sleeve", "Neckline": "Crew neck"}}}
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, source="native_fields")
+        rows = native_field_fill.etsy_attribute_rows(self._form(listing), listing)
+        # Neckline's answer is one of this category's choices; Sleeve length's is not, so List would drop it.
+        self.assertEqual([row["label"] for row in rows], ["Sleeve length", "Occasion"])
+        reply = json.dumps({"fields": {
+            "etsy_specifics.category_specifics.Sleeve length": {"value": "Short sleeve", "evidence": "short sleeves"}}})
+        with patch("anteroom.services.native_editor.editor_form", self.editor_form), \
+                patch("anteroom.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
+            saved = await native_field_fill.fill_etsy_attributes(
+                self.conv.id, object(), evidence="short sleeves", photos=self.photos)
+        self.assertEqual(saved["etsy_specifics"]["category_specifics"],
+                         {"Sleeve length": "Short sleeve", "Neckline": "Crew neck"})
+
+    async def test_an_unreadable_etsy_form_leaves_the_listing_alone(self):
+        before = self._current()
+        provider = AsyncMock()
+        with patch("anteroom.services.native_editor.editor_form", AsyncMock(side_effect=RuntimeError("Etsy down"))), \
+                patch("anteroom.services.listing_generate.collect_provider_text", provider):
+            self.assertIsNone(await native_field_fill.fill_etsy_attributes(
+                self.conv.id, object(), evidence="A tee", photos=self.photos))
+        provider.assert_not_awaited()
+        self.assertEqual(self._current(), before)
+
+
 class CategoryChangeTest(unittest.IsolatedAsyncioTestCase):
     """A category the seller picks later gets the same fill, for that marketplace only."""
 
@@ -646,6 +776,10 @@ class CategoryChangeTest(unittest.IsolatedAsyncioTestCase):
         before = {"direct_category_ids": {"depop": "a", "ebay": "1"}, "poshmark_specifics": {"nativeSizeId": "M"}}
         after = {"direct_category_ids": {"depop": "b", "ebay": "1", "mercari": ""}, "poshmark_specifics": {"nativeSizeId": "L"}}
         self.assertEqual(native_field_fill.changed_categories(before, after), {"depop"})
+
+    def test_a_new_etsy_category_refills_etsy_attributes(self):
+        before = {"direct_category_ids": {"etsy": "449"}}
+        self.assertEqual(native_field_fill.changed_categories(before, {"direct_category_ids": {"etsy": "450"}}), {"etsy"})
 
     async def test_a_new_category_fills_that_marketplace_only(self):
         self.save({"depop": "menswear_trousers"})

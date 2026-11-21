@@ -1161,10 +1161,6 @@ def apply_send_readiness_fixes(listing: dict) -> bool:
         if location:
             listing["zipCode"] = location
             changed = True
-    from anteroom.services.user_settings import apply_listing_field_defaults
-
-    if apply_listing_field_defaults(listing):
-        changed = True
     return changed
 
 
@@ -1761,7 +1757,10 @@ def persist_generated_listing(
 
         restore_locked(listing, capture_locked(revisions[0].listing_json))
         materialize_prices(listing)
-    listing_persistence.save_revision(db, conv_id, listing, source=source, expected_revision_id=expected_revision_id)
+    revision = listing_persistence.save_revision(
+        db, conv_id, listing, source=source, expected_revision_id=expected_revision_id, use_saved_defaults=True,
+    )
+    listing = revision.listing_json
 
     if announce:
         repo.add_message(
@@ -1852,10 +1851,12 @@ async def persist_generated_listing_with_repair(
         if isinstance(updated, dict) and updated:
             def finalize(db):
                 _check_photos(db, conv_id, expected_photo_fingerprint)
-                listing_persistence.save_revision(db, conv_id, updated, source="generation_finalize", expected_revision_id=expected_revision_id)
+                return listing_persistence.save_revision(
+                    db, conv_id, updated, source="generation_finalize", expected_revision_id=expected_revision_id,
+                    use_saved_defaults=True,
+                ).listing_json
 
-            await in_worker_session(finalize)
-            listing = updated
+            listing = await in_worker_session(finalize)
             finalized = True
 
     if final_announce:

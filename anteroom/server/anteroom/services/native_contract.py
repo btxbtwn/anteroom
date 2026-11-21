@@ -530,12 +530,28 @@ def _size_spelling(row: dict, value) -> str | None:
     return size_choice(value, options)
 
 
-def constrain_generated(listing: dict, seed: dict, *, freeze_categories: bool = True, keep_evidence: bool = False) -> dict:
+def _form_unavailable(contract: object) -> bool:
+    return not isinstance(contract, dict) or bool(contract.get("unavailable")) or not contract.get("fields")
+
+
+def constrain_generated(
+    listing: dict, seed: dict, *, freeze_categories: bool = True, keep_evidence: bool = False,
+    use_saved_defaults: bool = False,
+) -> dict:
     """Discard model-invented paths and invalid answers; preserve server-owned contracts."""
+    from anteroom.services.user_settings import apply_etsy_listing_field_defaults, clear_mercari_answers_with_defaults
+
     contracts = seed.get(KEY)
+    # Captured rows validate Etsy defaults like any other answer. If an Etsy
+    # capture failed, apply defaults after the previous answers are restored.
+    restore_etsy = isinstance(contracts, dict) and "etsy" in contracts and _form_unavailable(contracts["etsy"])
+    if use_saved_defaults and not restore_etsy:
+        apply_etsy_listing_field_defaults(listing, seed)
     if not isinstance(contracts, dict):
         listing.pop(KEY, None)
         listing.pop(EVIDENCE_KEY, None)
+        if use_saved_defaults:
+            clear_mercari_answers_with_defaults(listing, seed)
         return listing
     from anteroom.services import choice_lists
 
@@ -554,7 +570,7 @@ def constrain_generated(listing: dict, seed: dict, *, freeze_categories: bool = 
     for market, contract in contracts.items():
         prefix = f"{market}_specifics"
         block = listing.get(prefix)
-        if not isinstance(contract, dict) or contract.get("unavailable") or not contract.get("fields"):
+        if _form_unavailable(contract):
             # A form that could not be loaded is unknown, not one with no
             # fields: nothing here can be checked. Keep the answers already
             # saved (seed) and drop anything new, which no form has checked.
@@ -593,6 +609,12 @@ def constrain_generated(listing: dict, seed: dict, *, freeze_categories: bool = 
             value = get_path(seed, path)
             if value is not None:
                 set_path(listing, path, copy.deepcopy(value))
+    if use_saved_defaults:
+        if restore_etsy:
+            apply_etsy_listing_field_defaults(listing, seed)
+        # These are supplied by the form from Settings, so clear any unlocked
+        # answers after constraints have had a chance to restore them.
+        clear_mercari_answers_with_defaults(listing, seed)
     return listing
 
 

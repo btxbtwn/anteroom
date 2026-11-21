@@ -28,7 +28,7 @@ from anteroom.services import native_contract
 log = logging.getLogger("anteroom.native_field_fill")
 
 MARKETS = ("ebay", "poshmark", "mercari", "depop")
-NAMES = {"ebay": "eBay", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop"}
+NAMES = {"ebay": "eBay", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "etsy": "Etsy"}
 CATEGORY_PATHS = {f"direct_category_ids.{market}" for market in MARKETS}
 
 FILL_RULES = (
@@ -412,7 +412,6 @@ async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
                               markets: Iterable[str], categories: bool, required_only: bool = False) -> dict | None:
     """Save picks; a valid strict check returns its snapshot even when unchanged."""
     from anteroom.database import in_worker_session
-    from anteroom.services.listing_generate import collect_provider_text
 
     if provider is None:
         return None
@@ -457,11 +456,28 @@ async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
     if not rows_by_market:
         return None
     rows = {_path(row): row for market_rows in rows_by_market.values() for row in market_rows}
+    reply = await _ask(conv_id, provider, rows_by_market, forms, listing, evidence, strict=strict, categories=categories)
+    if reply is None:
+        return None
+    accepted = validated_values(reply, rows, evidence=evidence if strict else None)
+    if not accepted and not strict:
+        return None
+    return await in_worker_session(_save_fill, conv_id, revision_id, fingerprint, listing, forms, rows, reply,
+                                   accepted, strict, categories)
+
+
+async def _ask(conv_id: str, provider, rows_by_market: dict[str, list[dict]], forms: dict[str, dict], listing: dict,
+               evidence: str, *, strict: bool, categories: bool) -> dict | None:
+    """The model's answers for these form rows, or None (with a chat note) when it fails or replies unreadably."""
+    from anteroom.database import in_worker_session
+    from anteroom.services import activity
+    from anteroom.services.catalog_index import relevant_skill_rules
+    from anteroom.services.listing_generate import collect_provider_text
+
+    rows = [_path(row) for market_rows in rows_by_market.values() for row in market_rows]
     summary = {key: listing.get(key) for key in (
         "title", "description", "brand", "category_path", "department", "size", "primaryColor",
         "secondaryColor", "material", "condition") if not _empty(listing.get(key))}
-    from anteroom.services.catalog_index import relevant_skill_rules
-
     query = " ".join([*rows, str(summary.get("category_path") or "")])
     rules = await asyncio.to_thread(relevant_skill_rules, None, query, max_chars=40000)
     messages = [
@@ -480,8 +496,6 @@ async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
             f"--- Listing ---\n{json.dumps(summary, ensure_ascii=False)}"
         )},
     ]
-    from anteroom.services import activity
-
     work = activity.begin(conv_id, "Filling marketplace fields…")
     work.fields = tuple(rows)
     reply = None
@@ -489,7 +503,7 @@ async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
     try:
         from anteroom.services.option_lookup import OptionCatalog
 
-        catalog = OptionCatalog({market: {"fields": rows} for market, rows in rows_by_market.items()})
+        catalog = OptionCatalog({market: {"fields": market_rows} for market, market_rows in rows_by_market.items()})
         for attempt in range(2):
             text = await collect_provider_text(provider, messages, option_catalog=catalog)
             reply = _json_object(text)
@@ -521,11 +535,7 @@ async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
             "Your saved listing is unchanged. Ask chat to fill the remaining fields.",
         )
         return None
-    accepted = validated_values(reply, rows, evidence=evidence if strict else None)
-    if not accepted and not strict:
-        return None
-    return await in_worker_session(_save_fill, conv_id, revision_id, fingerprint, listing, forms, rows, reply,
-                                   accepted, strict, categories)
+    return reply
 
 
 def _save_fill(db: Session, conv_id: str, revision_id: str, fingerprint: str, listing: dict, forms: dict[str, dict],
@@ -581,6 +591,87 @@ def filled_message(accepted: dict[str, tuple[Any, list[str]]], rows: dict[str, d
     return "\n".join(lines)
 
 
+# --- Etsy's category attributes --------------------------------------------
+#
+# Etsy's tab is built locally (services/etsy_form.py) and has no captured
+# native contract: its other keys (styles, profiles, renewal) are read by List
+# as they are. Only its category attributes (Sleeve length, Neckline, ...) are
+# item facts, so they get the same evidence-checked fill as the other forms.
+
+ETSY_ATTRIBUTES = "etsy_specifics.category_specifics."
+
+
+# Etsy reads these from General's colors (etsy_listings._answers). A copy of
+# its own would stop the row following a later General edit.
+_FROM_GENERAL = frozenset(("primarycolor", "secondarycolor"))
+
+
+def _unanswered(row: dict) -> bool:
+    """Empty, or only an earlier automatic answer this category's choices do not offer (List drops it)."""
+    value = row.get("value")
+    if _empty(value):
+        return True
+    options = row.get("options") or []
+    if not row.get("selection_only") or not options:
+        return False
+    return not any(item in options for item in (value if isinstance(value, list) else [value]))
+
+
+def etsy_attribute_rows(form: dict, listing: dict) -> list[dict]:
+    """Etsy's unanswered category attributes the seller has not set.
+
+    Editing any attribute in the Etsy tab locks the whole attribute group
+    (``lock_seller_edits``), and generation then keeps it as the seller left
+    it, blanks included. The fill does the same.
+    """
+    if is_locked(listing, ETSY_ATTRIBUTES.rstrip(".")):
+        return []
+    return [row for row in form.get("fields") or []
+            if _path(row).startswith(ETSY_ATTRIBUTES) and row.get("category_specific") and _unanswered(row)
+            and fold_key(str(row.get("label") or "")) not in _FROM_GENERAL
+            and not row.get("locked") and not is_locked(listing, _path(row))
+            and not field_locked(listing, "etsy", _path(row).rsplit(".", 1)[-1])]
+
+
+async def fill_etsy_attributes(conv_id: str, provider, *, evidence: str, photos: str | None) -> dict | None:
+    """Fill Etsy's empty category attributes from the evidence. Returns the saved listing, or None when nothing changed.
+
+    ``photos`` is the fingerprint of the photos ``evidence`` describes: answers
+    are saved only while those are still the draft's photos.
+    """
+    from anteroom.database import in_worker_session
+    from anteroom.services.native_editor import editor_form
+
+    if provider is None:
+        return None
+    inputs = await in_worker_session(_fill_inputs, conv_id)
+    if inputs is None:
+        return None
+    fingerprint, revision_id, listing = inputs
+    if fingerprint != photos:
+        return None
+    try:
+        form = await editor_form(conv_id, "etsy", revision_id)
+    except Exception as exc:  # noqa: BLE001 - the other marketplaces' fields are already saved
+        log.info("No Etsy form to fill for %s: %s", conv_id, exc)
+        return None
+    if not isinstance(form, dict) or form.get("known") is False:
+        return None
+    candidates = etsy_attribute_rows(form, listing)
+    if not candidates:
+        return None
+    rows = {_path(row): row for row in candidates}
+    forms = {"etsy": form}
+    reply = await _ask(conv_id, provider, {"etsy": candidates}, forms, listing, evidence, strict=True, categories=False)
+    if reply is None:
+        return None
+    accepted = validated_values(reply, rows, evidence=evidence)
+    if not accepted:
+        return None
+    return await in_worker_session(_save_fill, conv_id, revision_id, fingerprint, listing, forms, rows, reply,
+                                   accepted, False, False)
+
+
 # --- A category the seller changes later -------------------------------------
 #
 # Generation fills every marketplace once. When the seller picks another
@@ -615,7 +706,7 @@ def _category(listing: dict, market: str) -> str:
 
 def changed_categories(before: dict, after: dict) -> set[str]:
     """Marketplaces whose chosen category is new in this save."""
-    changed = {market for market in MARKETS
+    changed = {market for market in (*MARKETS, "etsy")
                if _category(after, market) and _category(after, market) != _category(before, market)}
     for market, contract in (before.get(native_contract.KEY) or {}).items():
         fields = contract.get("fields") or []
@@ -675,14 +766,15 @@ def _finished(conv_id: str) -> None:
         _queue(conv_id, set())
 
 
-def _category_fill_evidence(db: Session, conv_id: str) -> str | None:
-    from anteroom.services.listing_generate import current_photo_analysis, seller_item_details
+def _category_fill_evidence(db: Session, conv_id: str) -> tuple[str, str] | None:
+    """The evidence for a category refill, with the fingerprint of the photos it describes."""
+    from anteroom.services.listing_generate import current_photo_analysis, photo_fingerprint, seller_item_details
 
     repo = ConversationRepo(db)
     conv = repo.get(conv_id)
     if conv is None:
         return None
-    return "\n\n".join(part for part in (
+    return photo_fingerprint(repo.get_photos(conv_id)), "\n\n".join(part for part in (
         current_photo_analysis(repo, conv_id) or "", seller_item_details(conv.notes),
         "Seller messages:\n" + "\n".join(message.text for message in repo.get_messages(conv_id)
                                             if message.role == "user" and message.text)) if part)
@@ -696,9 +788,14 @@ async def _fill_after_category(conv_id: str, markets: set[str]) -> None:
     if provider is None:
         return
     try:
-        evidence = await in_worker_session(_category_fill_evidence, conv_id)
-        if evidence is None:
+        read = await in_worker_session(_category_fill_evidence, conv_id)
+        if read is None:
             return
-        await fill_native_fields(conv_id, provider, evidence=evidence, markets=markets)
+        photos, evidence = read
+        native = markets & set(MARKETS)
+        if native:
+            await fill_native_fields(conv_id, provider, evidence=evidence, markets=native)
+        if "etsy" in markets:
+            await fill_etsy_attributes(conv_id, provider, evidence=evidence, photos=photos)
     except Exception:
         log.exception("category field fill failed for %s", conv_id)

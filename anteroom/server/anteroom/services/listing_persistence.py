@@ -107,7 +107,7 @@ def _drop_fixed_marketplace_errors(db: Session, conv_id: str, before: dict, afte
             row.error = row.error_code = row.error_fields = row.marketplace_message = None
 
 
-def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None, *, expected_revision_id: str | None = None, commit: bool = True) -> ListingRevision:
+def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, parent_revision_id: str | None = None, *, expected_revision_id: str | None = None, commit: bool = True, use_saved_defaults: bool = False) -> ListingRevision:
     """Save atomically; an empty expected id means no listing may exist yet."""
     repo = ListingRepo(db)
     from anteroom.services.native_field_fill import (
@@ -126,18 +126,19 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
         listing_json = activity.scoped_listing(before, listing_json, scope)
     from anteroom.services import choice_lists, native_contract
 
-    if source != "native_schema" and native_contract.KEY in before:
+    if source != "native_schema" and (native_contract.KEY in before or use_saved_defaults):
         listing_json = native_contract.copy_listing(listing_json)
-        if source in FILL_ON_SOURCES:
+        if source in FILL_ON_SOURCES and native_contract.KEY in before:
             listing_json[native_contract.KEY] = choice_lists.compact_contracts(before[native_contract.KEY])
             listing_json[native_contract.EVIDENCE_KEY] = copy.deepcopy(before.get(native_contract.EVIDENCE_KEY) or {})
             native_contract.invalidate_dependents(before, listing_json)
             if source != "user_form":
-                native_contract.constrain_generated(listing_json, before, freeze_categories=False)
+                native_contract.constrain_generated(listing_json, before, freeze_categories=False,
+                                                    use_saved_defaults=use_saved_defaults)
         else:
             native_contract.constrain_generated(listing_json, before, freeze_categories=source not in {
                 "native_fields", "native_categories", "vendoo_prepare", "category_analysis", "category_schema_cache"},
-                keep_evidence=source == "native_fields")
+                keep_evidence=source == "native_fields", use_saved_defaults=use_saved_defaults)
     elif native_contract.KEY in listing_json:
         compacted = choice_lists.compact_contracts(listing_json[native_contract.KEY])
         if compacted is not listing_json[native_contract.KEY]:

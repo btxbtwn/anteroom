@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1077 — 2026-11-21
+
+- Generated listings now always use the defaults you saved (Etsy who made it, what it is and renewal; Mercari ships-from ZIP, shipping label and shoebox answer) instead of the model picking its own. A value you set on a listing yourself still wins.
+
+## 0.1.1076 — 2026-11-21
+
+- Generating a listing now fills Etsy's attributes (sleeve length, neckline, pattern and the rest) from the photos and your notes, and fills them again when you change the Etsy category. Only answers the evidence supports are kept, and attributes you set yourself are left alone.
+
 ## 0.1.1075 — 2026-11-20
 
 - Keep clicking between pages and drafts responsive under load by prioritizing active navigation and saves ahead of background prefetches and thumbnails, canceling stale prefetches when you switch pages, and collapsing the listing editor's opening reads into a single request.
