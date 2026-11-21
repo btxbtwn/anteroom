@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1118 — 2026-11-21
+
+- Hosted web (`myanteroom.com`) now includes SEO, canonical, Open Graph, and Twitter Card metadata along with a public `/robots.txt`.
+
 ## 0.1.1117 — 2026-11-21
 
 - Hosted web and iPhone sign-in screens now offer a "Resend confirmation email" button after signup confirmation or when signing in before confirming an email address.
