@@ -1,1 +1,0 @@
-- Attaching photos in the listing chat composer on a draft with no photos yet now uploads them as the listing's photos and starts listing generation instead of leaving the draft with zero photos.

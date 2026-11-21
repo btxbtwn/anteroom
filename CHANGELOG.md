@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1125 — 2026-11-21
+
+- Attaching photos in the listing chat composer on a draft with no photos yet now uploads them as the listing's photos and starts listing generation instead of leaving the draft with zero photos.
+
 ## 0.1.1124 — 2026-11-21
 
 - Show a first-run onboarding checklist on hosted web before a seller creates their first listing, guiding marketplace connections (eBay, Etsy, and optional Chrome Bridge), AI setup when bringing your own key, and creating the first draft.
