@@ -1286,6 +1286,25 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         self.assertEqual(self.bridge.call_args_list[0].args[2]["draft_url"], URLS["depop"])
         self.assertIsNone(self.bridge.call_args_list[1].args[2]["draft_url"])
 
+    def test_uncertain_depop_publish_with_missing_draft_text_is_never_replayed(self):
+        draft = URLS["depop"]
+        self.bridge.return_value = {"ok": True, "state": "draft", "draft_url": draft}
+        saved = self.client.post(f"{self.base}/depop/draft", json={"revision_id": self.rev.id})
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.run_jobs()
+        self.bridge.reset_mock()
+        self.bridge.side_effect = [
+            {"ok": False, "safe_to_retry": False, "error_code": "uncertain",
+             "error": "Depop could not confirm the publish result.", "marketplace_message": "Could not find draft"},
+            {"ok": True, "state": "draft", "draft_url": draft},
+            self.published("depop"),
+        ]
+        record = self.list("depop")
+        self.assertEqual(self.actions(), ["publish"])
+        self.assertEqual((record["state"], record["error_code"]), ("unknown", "uncertain"))
+        self.assertEqual(record["draft_url"], draft)
+        self.assertIsNone(record.get("listing_url"))
+
     def test_listing_links_are_validated_for_every_marketplace(self):
         self.bridge.side_effect = [{"ok": True, "state": "draft", "draft_url": URLS["mercari"]},
                                    {"ok": True, "state": "published", "draft_url": URLS["mercari"], "listing_url": "https://www.mercari.com/us/search/"}]

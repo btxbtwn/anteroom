@@ -831,9 +831,9 @@ async def run_job(job_id: str, conv_id: str, marketplace: str, steps: list[str],
                     await _joined_worker_session(_store, conv_id, marketplace, {
                         "error": "Listed on Depop without Boost: Depop did not return the "
                                  "listing link. Turn Boost on with Update."})
-            # A confirmed List found the saved draft deleted. Save a new one, then list that, in this same job.
+            # A confirmed failure with a missing draft can create a replacement in this List.
             if (marketplace == "depop" and step == "publish" and "save_draft" not in steps
-                    and _draft_gone(record)):
+                    and record.get("state") == "not_saved" and _draft_gone(record)):
                 steps.extend(["save_draft", "publish"])
     except NativeMarketplaceError:
         # A newer action owns the record; leave it as that action wrote it.
