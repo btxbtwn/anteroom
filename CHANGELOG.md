@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1110 — 2026-11-21
+
+- Leave Etsy's When was it made? blank when the only date is a range on both sides of Etsy's vintage cutoff, such as eBay's 2000-2009, and say why in the Etsy tab, instead of calling the item vintage.
+
 ## 0.1.1109 — 2026-11-21
 
 - Enabled Settings → Help on the web app with hosted-appropriate how-to guides (filtering desktop-only topics) and added a Support and legal section with direct support, privacy, and terms links.
