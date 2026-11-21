@@ -29,6 +29,7 @@ struct NativeField: Decodable, Identifiable, Sendable {
     /// The same choices looked up by stored value, built once per list.
     private(set) var choices = ChoiceIndex(options: [], optionValues: [:])
     var inputType: String
+    var presentation: String?
     var help: String?
     var section: String?
     var half: Bool
@@ -55,7 +56,7 @@ struct NativeField: Decodable, Identifiable, Sendable {
     var id: String { key }
 
     enum CodingKeys: String, CodingKey {
-        case key, path, label, value, required, multi, options, help, section, locked, placeholder, clears, width, reveal, step
+        case key, path, label, value, required, multi, options, help, section, locked, placeholder, clears, width, reveal, step, presentation
         case minValue = "min_value"
         case variationAspects = "variation_aspects"
         case choiceList = "choice_list"
@@ -83,6 +84,7 @@ struct NativeField: Decodable, Identifiable, Sendable {
         options = try c.decodeIfPresent([String].self, forKey: .options) ?? []
         optionValues = try c.decodeIfPresent([String: String].self, forKey: .optionValues) ?? [:]
         inputType = try c.decodeIfPresent(String.self, forKey: .inputType) ?? "text"
+        presentation = try c.decodeIfPresent(String.self, forKey: .presentation)
         help = try c.decodeIfPresent(String.self, forKey: .help)
         section = try c.decodeIfPresent(String.self, forKey: .section)
         let width = try c.decodeIfPresent(String.self, forKey: .controlWidth) ?? c.decodeIfPresent(String.self, forKey: .width)

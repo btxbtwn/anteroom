@@ -475,8 +475,8 @@ export interface MarketplaceFormField {
   label_hidden?: boolean;
   /** Show the typed length beside the label, as "16/80". */
   counter?: boolean;
-  /** Choices shown as radio buttons (stacked, or in one row), or a switch shown as a button. */
-  presentation?: "radio" | "radio-row" | "button";
+  /** Choices shown as radio buttons (stacked, or in one row), or a boolean shown as a button or checkbox. */
+  presentation?: "radio" | "radio-row" | "button" | "checkbox";
   /** Choice label → the line the page shows under that choice. */
   option_help?: Record<string, string>;
   /** True when choosing a different category adds or removes this row. */

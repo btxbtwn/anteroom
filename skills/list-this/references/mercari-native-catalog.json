@@ -144843,6 +144843,21 @@
       "section": "Product info"
     },
     {
+      "key": "mercari_specifics.noBrand",
+      "path": "mercari_specifics.noBrand",
+      "label": "No brand / Not sure",
+      "required": false,
+      "multi": false,
+      "selection_only": false,
+      "options": [],
+      "input_type": "boolean",
+      "presentation": "checkbox",
+      "clears": [
+        "mercari_specifics.brand"
+      ],
+      "section": "Product info"
+    },
+    {
       "key": "mercari_specifics.condition",
       "path": "mercari_specifics.condition",
       "label": "Condition",

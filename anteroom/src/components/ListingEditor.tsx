@@ -49,6 +49,7 @@ import { categorySpecificFieldsStale, nativeFieldVisible, nativeFormCategoryKey,
 import { gapsByField, rowForField } from "./nativeFieldWarnings";
 import type { NativeMarketplace } from "../api/nativeMarketplaces";
 import { Button, InlineButton } from "./ui/button";
+import { Checkbox } from "./ui/checkbox";
 import { Input } from "./ui/input";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
 import { Spinner } from "./ui/spinner";
@@ -124,7 +125,7 @@ interface EditorField {
   saveAsDefault?: boolean;
   labelHidden?: boolean;
   counter?: boolean;
-  presentation?: "radio" | "radio-row" | "button";
+  presentation?: "radio" | "radio-row" | "button" | "checkbox";
   optionHelp?: Record<string, string>;
 }
 
@@ -893,8 +894,13 @@ export function StructuredEditor({
     if (key === "poshmark_specifics.nativeSizeId") {
       setListingEditorValue(updated, "poshmark_specifics.sizeSetId", fields.find((row) => row.key === "poshmark_specifics.sizeSetId")?.defaultValue || "");
     }
-    for (const dependent of field?.clears || []) setListingEditorValue(updated, dependent,
-      dependent.endsWith(".attributes") ? {} : dependent.endsWith(".inventoryRows") ? [] : "");
+    for (const dependent of field?.clears || []) {
+      const dependentField = fields.find((entry) => entry.key === dependent);
+      setListingEditorValue(updated, dependent,
+        dependent.endsWith(".attributes") ? {}
+          : dependent.endsWith(".inventoryRows") ? []
+          : dependentField?.type === "boolean" ? false : "");
+    }
     emitChange(updated);
   };
 
@@ -970,7 +976,7 @@ export function StructuredEditor({
   const multiSelectControl = (f: EditorField) => Boolean(f.multi)
     && !["inventory", "variations", "boolean", "textarea"].includes(String(f.type))
     && fieldLeaf(f.key) !== "description";
-  const control = (f: EditorField) => {
+  const control = (f: EditorField, tools: React.ReactNode) => {
     const id = `listing-field-${f.key}`;
     const locked = Boolean(disabled || f.locked || agentFieldLocked(f.key, agentLocks));
     // A format or shipping change narrows the choices. Show the choice that fits
@@ -1045,6 +1051,16 @@ export function StructuredEditor({
         f.key === "direct_category_ids.etsy" ? { "direct_category_ids.etsy_path": choice.label } : {})} />;
     if (f.type === "boolean" && f.presentation === "button") return <Toggle id={id} data-listing-field={f.key} variant="outline"
       className="w-full" pressed={text === "true"} disabled={locked} onPressedChange={(pressed) => commitField(f.key, pressed)}>{f.label}</Toggle>;
+    if (f.type === "boolean" && f.presentation === "checkbox") return (
+      <div className="flex items-center gap-2">
+        <FieldLabel className="mb-0 inline-flex min-h-11 cursor-pointer items-center gap-2">
+          <Checkbox id={id} data-listing-field={f.key} checked={text === "true"}
+            disabled={locked} onCheckedChange={(checked) => commitField(f.key, checked)} />
+          {f.label}
+        </FieldLabel>
+        {tools}
+      </div>
+    );
     if (f.type === "boolean") return <Switch id={id} data-listing-field={f.key} checked={text === "true"}
       disabled={locked} onCheckedChange={(checked) => commitField(f.key, checked)} />;
     if (f.type === "note") return null;
@@ -1203,7 +1219,7 @@ export function StructuredEditor({
                   `Fill or correct only ${marketplaceName(tab)} / ${f.label}${f.section ? ` (${f.section})` : ""} using the photos and seller evidence. Preserve all other fields.`,
                 ) : undefined;
                 const tools = source || ask ? <FieldTools label={f.label} source={source} onAsk={ask} /> : null;
-                const labelRow = f.type !== "cascade" && f.presentation !== "button" && Boolean(f.label);
+                const labelRow = f.type !== "cascade" && f.presentation !== "button" && f.presentation !== "checkbox" && Boolean(f.label);
                 return (
                 <React.Fragment key={f.key}>
                 {pageLayout && f.group && visible[index - 1]?.group !== f.group && (
@@ -1249,7 +1265,7 @@ export function StructuredEditor({
                       {tools}
                     </div>
                   ))}
-                  <div className={cn(f.controlWidth === "half" && "@xl:w-1/2")}>{control(f)}</div>
+                  <div className={cn(f.controlWidth === "half" && "@xl:w-1/2")}>{control(f, tools)}</div>
                   {suggestedCategory(listing, tab, f.key) && <p role="status" className="mt-1 flex flex-wrap items-baseline gap-x-2 text-xs text-warning-foreground">
                     <span>Suggested: check it. No exact {marketplaceName(tab)} match.</span>
                     {!disabled && !f.locked && <InlineButton type="button" className="text-xs" onClick={() => {
@@ -1258,7 +1274,7 @@ export function StructuredEditor({
                       emitChange(updated);
                     }}>Looks right</InlineButton>}
                   </p>}
-                  {!labelRow && tools && <div className="mt-1 flex">{tools}</div>}
+                  {!labelRow && !(f.type === "boolean" && f.presentation === "checkbox") && tools && <div className="mt-1 flex">{tools}</div>}
                   {f.help && f.type !== "photos" && !multiSelectControl(f) && <p className="mt-1 text-xs text-muted-foreground">{f.help}</p>}
                   {uniqueMarketplaceMessages(f.type === "photos" ? [] : fieldWarnings.get(f.key) ?? [], shownMessages).map((message) =>
                     <p key={message} role="alert" className="mt-1 text-xs text-warning-foreground">{message}</p>)}
@@ -1367,6 +1383,7 @@ function sourceValue(listing: ListingData | undefined, field: EditorField, tab: 
 
 /** What a control shows before it is mapped to a choice label. */
 export function editorFieldValue(listing: ListingData | undefined, field: EditorField, tab: string): unknown {
+  if (field.key === "mercari_specifics.brand" && getListingEditorValue(listing, "mercari_specifics.noBrand") === true) return "";
   // eBay's category control shows the breadcrumb. The id lives beside it.
   if (field.key === "direct_category_ids.ebay") return resolvedEditorValue(field, listing);
   // A locked row keeps the form's computed value, such as a generated SKU.

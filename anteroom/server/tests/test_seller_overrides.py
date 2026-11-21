@@ -192,6 +192,20 @@ class DepopStyleClearTest(unittest.TestCase):
         self.assertEqual(listing["mercari_specifics"]["brand"], "No Brand/Not sure")
         self.assertEqual(listing["brand"], "BRIGGS")
 
+    def test_setting_mercari_no_brand_coerces_boolean_and_syncs_brand(self):
+        listing = {"brand": "Nike", "mercari_specifics": {"brand": "Nike"}}
+        # CLI passes string "true"; it must store boolean True, clear Mercari's brand, and keep General's brand.
+        apply_field_updates(listing, [{"path": "mercari_specifics.noBrand", "value": "true"}])
+        self.assertIs(listing["mercari_specifics"]["noBrand"], True)
+        self.assertEqual(listing["mercari_specifics"].get("brand", ""), "")
+        self.assertEqual(listing["brand"], "Nike")
+        self.assertIn("mercari_specifics.noBrand", listing["seller_fields"])
+        # Picking a Mercari brand later clears the No brand checkbox.
+        apply_field_updates(listing, [{"path": "mercari_specifics.brand", "value": "Adidas"}])
+        self.assertEqual(listing["mercari_specifics"]["brand"], "Adidas")
+        self.assertIs(listing["mercari_specifics"]["noBrand"], False)
+        self.assertEqual(listing["brand"], "Nike")
+
 
 class DepopMeasurementsTest(unittest.TestCase):
     def test_stored_inches_become_depop_rows(self):

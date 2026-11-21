@@ -76,6 +76,9 @@ def _input_paths(market: str, fields: list[dict]) -> set[str]:
                for rule in rules}
     paths.update(path_of(row) for row in fields if row.get("label") in parents)
     if market == "mercari":
+        paths.discard("brand")
+        paths.discard("mercari_specifics.brand")
+        paths.discard("mercari_specifics.noBrand")
         paths.update(("mercari_specifics.package", "mercari_specifics.shippingMethod", "weight_lb", "weight_oz",
                       "package_dimensions_in", "mercari_specifics.smartPricing.enabled"))
     if market == "ebay":
@@ -113,7 +116,8 @@ def inputs(listing: dict, market: str, fields: list[dict]) -> dict:
     result = _raw_inputs(listing, market, fields)
     # Posting applies marketplace overrides before checking this contract. Compare
     # the same effective choices when capturing the unprepared listing revision.
-    result["brand"] = marketplace_text(listing, market, "brand")
+    if "brand" in result:
+        result["brand"] = marketplace_text(listing, market, "brand")
     from anteroom.models.schema import ListingSchema
 
     from anteroom.services.seller_overrides import followed_entry
@@ -183,6 +187,8 @@ def _condition_inputs(value: dict, market: str, fields: list[dict]) -> dict:
                     if str(label).strip().casefold() == condition:
                         result["condition"] = str(native_id)
     if market == "mercari":
+        for key in ("brand", "mercari_specifics.brand", "mercari_specifics.noBrand"):
+            result.pop(key, None)
         for key in ("weight_lb", "weight_oz"):
             if key in result:
                 result[key] = _zero_empty_number(result[key])
@@ -670,15 +676,11 @@ def gaps(listing: dict, market: str) -> list[dict]:
             # empty in any way that stops the listing.
             found.append(gap(path, f"{row.get('label') or path}: Uses the account's own choice.", blocking=False))
             continue
+        if path == "mercari_specifics.brand":
+            from anteroom.services.mercari_form import resolve_brand
+
+            value = resolve_brand(listing)[0]
         error = value_error(applicable_row(row, listing, fields), value)
-        if error == NOT_AN_OPTION and path == "mercari_specifics.brand":
-            # This catalog is a dated copy. List checks Mercari's current brand
-            # list and sends no brand only when Mercari has no match, so a name
-            # missing here is said, not refused.
-            found.append(gap(path, f"Brand: “{value}” isn't in Anteroom's copy of Mercari's brand list. When you "
-                                   "list, Anteroom checks Mercari's current list and uses No brand if Mercari "
-                                   "doesn't have it.", blocking=False, label=row.get("label")))
-            continue
         if error:
             # A policy or location with no stored answer is chosen from the
             # account at List. Missing one here does not stop the listing, so it
@@ -761,6 +763,10 @@ def settings_answer(listing: dict, path: str) -> str | None:
 
 def _followed_text(listing: dict, market: str, name: str) -> str:
     """The title, description or brand a form follows, as that marketplace takes it."""
+    if market == "mercari" and name == "brand":
+        from anteroom.services.mercari_form import resolve_brand
+
+        return resolve_brand(listing)[0]
     value = marketplace_text(listing, market, name)
     if market == "depop" and name == "brand":
         from anteroom.services.depop_form import listed_brand
@@ -824,6 +830,10 @@ def shared_answer(listing: dict, row: dict, market: str, path: str) -> Any:
     if market == "mercari":
         specifics = listing.get("mercari_specifics")
         specifics = specifics if isinstance(specifics, dict) else {}
+        if path == "mercari_specifics.noBrand" and "noBrand" not in specifics:
+            from anteroom.services.mercari_form import resolve_brand
+
+            return resolve_brand(listing)[1]
         if path == "mercari_specifics.condition" and "condition" not in specifics:
             from anteroom.services.mercari_form import general_condition
 
@@ -850,11 +860,19 @@ def invalidate_dependents(previous: dict, listing: dict) -> None:
         # Invalidate for this edit, even if the saved form is still stale from
         # an earlier edit. Form freshness is checked separately by gaps().
         changed = changed_inputs(listing, market, fields, inputs(previous, market, fields))
-        if not changed:
+        cleared_by_edit = {
+            path
+            for row in fields
+            if row.get("clears")
+            and _answered(get_path(previous, path_of(row))) != _answered(get_path(listing, path_of(row)))
+            for path in row.get("clears") or []
+        }
+        if not changed and not cleared_by_edit:
             continue
         category_changed = any("categor" in path.casefold() for path in changed)
         clear = {path_of(row) for row in fields if category_changed and row.get("category_specific")}
         clear.update(path for row in fields if path_of(row) in changed for path in row.get("clears") or [])
+        clear.update(cleared_by_edit)
         changed_labels = {row.get("label") for row in fields if path_of(row) in changed}
         clear.update(path_of(row) for row in fields for rules in (row.get("value_constraints") or {}).values()
                      for rule in rules if rule.get("parentName") in changed_labels)
