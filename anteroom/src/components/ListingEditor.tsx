@@ -1366,7 +1366,8 @@ function independentRows(rows: EditorField[], tab: string): EditorField[] {
 
 function marketplacePriceFollowsGeneral(listing: ListingData | undefined, field: EditorField, tab: string): boolean {
   const canonical = MARKETPLACE_PRICE_KEYS[tab];
-  const priceRow = field.key === canonical || (field.label.endsWith(" price") && field.key.includes("_specifics."));
+  const priceRow = field.key === canonical
+    || (field.label.endsWith(" price") && /^[^.]+_specifics\.[^.]+$/.test(field.key));
   if (!priceRow) return false;
   return !(Array.isArray(listing?.seller_fields) && listing.seller_fields.includes(field.key));
 }

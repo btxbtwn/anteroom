@@ -67,6 +67,23 @@ def test_a_first_edit_cannot_replace_a_revision_created_elsewhere(editor):
     assert ListingRepo(db).get_current(conv_id).current_revision_id == first.json()["revision_id"]
 
 
+@pytest.mark.parametrize(('enabled', 'minimum'), [(True, 21.25), (False, None), (True, None)])
+def test_mercari_minimum_edit_preserves_legacy_toggle(editor, enabled, minimum):
+    client, db, conv_id = editor
+    original = {'title': 'Coat', 'price': 40, 'mercari_specifics': {'smartPricing': enabled},
+                '_native_forms': {'mercari': {'fields': []}}}
+    revision = listing_persistence.save_revision(db, conv_id, original, 'user_form')
+    edited = deepcopy(original)
+    edited['mercari_specifics']['smartPricing'] = {'minimumPrice': minimum}
+    reply = client.put(f'/api/conversations/{conv_id}/listing', json={
+        'listing': edited, 'expected_revision_id': revision.id,
+    })
+    assert reply.status_code == 200, reply.text
+    saved = ListingRepo(db).get_revision(reply.json()['revision_id']).listing_json
+    assert saved['mercari_specifics']['smartPricing'] == {'enabled': enabled, 'minimumPrice': minimum}
+    assert saved['price'] == 40
+
+
 def test_a_placeholder_listing_accepts_its_first_revision_once(editor):
     from anteroom.models.listing import Listing
 

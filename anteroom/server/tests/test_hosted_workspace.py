@@ -14,6 +14,28 @@ from anteroom.models.listing import Listing, ListingRevision
 from anteroom.services import hosted_photos
 
 
+@pytest.mark.parametrize('enabled', [True, False])
+def test_mercari_minimum_edit_and_clear_preserve_legacy_toggle(cloud, signing_keys, enabled):  # noqa: F811
+    client, _engine = cloud
+    auth = headers(signing_keys)
+    identity = client.post('/api/conversations', headers=auth, json={'title': 'Coat'}).json()['id']
+    path = f'/api/conversations/{identity}/listing'
+    listing = {'title': 'Coat', 'price': 40, 'mercari_specifics': {'smartPricing': enabled}}
+    revision_id = ''
+    for smart, expected in (
+        (enabled, enabled),
+        ({'minimumPrice': 21.25}, {'enabled': enabled, 'minimumPrice': 21.25}),
+        ({'enabled': enabled, 'minimumPrice': None}, {'enabled': enabled, 'minimumPrice': None}),
+    ):
+        listing['mercari_specifics']['smartPricing'] = smart
+        response = client.put(path, headers=auth, json={'expected_revision_id': revision_id, 'listing': listing})
+        assert response.status_code == 200, response.text
+        revision_id = response.json()['revision_id']
+        saved = client.get(path, headers=auth).json()['listing']
+        assert saved['mercari_specifics']['smartPricing'] == expected
+        assert saved['price'] == 40
+
+
 def test_manual_general_changes_follow_across_marketplaces_and_keep_own_edits(cloud, signing_keys):  # noqa: F811
     from anteroom.services.seller_overrides import MARKETPLACES
 

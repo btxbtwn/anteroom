@@ -33,12 +33,14 @@ def prepared_listing(previous: dict, listing: dict, *, notes: dict | None = None
     from anteroom.services.chrome_catalog import keep_direct_categories
     from anteroom.services.depop_category import align_depop_category
     from anteroom.services.listing_generate import align_size_fields, sanitize_listing_sizes
+    from anteroom.services.mercari_form import preserve_smart_pricing_toggle
     from anteroom.services.seller_overrides import fold_key, is_price_path, lock_native_edits, prepare_user_listing, preserving_locks
 
     updated = copy.deepcopy(listing)
     reject_corrupt_listing(updated)
     keep_direct_categories(previous, updated)
     align_depop_category(updated, previous)
+    preserve_smart_pricing_toggle(previous, updated)
     native_blocks = {market: copy.deepcopy(updated.get(f"{market}_specifics") or {})
                      for market in updated.get("_native_forms") or {}}
     prepare_user_listing(previous, updated, notes=notes)
