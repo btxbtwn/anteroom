@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1120 — 2026-11-21
+
+- Rolling back to packaged Mac builds older than `0.1.1054` (before the `anteroom.db` database rename) is now refused with an explanation instead of opening an empty inventory.
+
 ## 0.1.1119 — 2026-11-21
 
 - Hosted web Settings → Connections now shows the "Delist the other marketplaces" auto-delist toggle alongside sale detection, matching desktop.

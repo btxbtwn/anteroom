@@ -1,1 +1,0 @@
-- Rolling back to packaged Mac builds older than `0.1.1054` (before the `anteroom.db` database rename) is now refused with an explanation instead of opening an empty inventory.
