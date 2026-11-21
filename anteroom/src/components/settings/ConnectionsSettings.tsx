@@ -465,17 +465,21 @@ function MarketplaceSection() {
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
           {saveAutodelist.isPending ? (
             <span role="status" className="inline-flex items-center gap-1">
-              <Spinner size="sm" tone="muted" />
+              <Spinner size="sm" tone="muted" aria-hidden role={undefined} />
               Saving…
             </span>
           ) : null}
-          <Switch
-            size="sm"
-            checked={detection.data?.autodelist === true}
-            disabled={saveAutodelist.isPending || detection.data === undefined}
-            aria-label="Delist the other marketplaces when something sells"
-            onCheckedChange={(checked) => saveAutodelist.mutate(checked)}
-          />
+          {detection.data === undefined ? (
+            detection.error ? <span>Unavailable</span> : <span role="status">Loading…</span>
+          ) : (
+            <Switch
+              size="sm"
+              checked={detection.data.autodelist === true}
+              disabled={saveAutodelist.isPending}
+              aria-label="Delist the other marketplaces when something sells"
+              onCheckedChange={(checked) => saveAutodelist.mutate(checked)}
+            />
+          )}
         </span>
       }
     >

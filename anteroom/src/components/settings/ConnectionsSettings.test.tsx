@@ -124,6 +124,10 @@ describe("Connections settings", () => {
   });
 
   it("on the web, shows Chrome sign-ins and seller-owned sale detection switches", () => {
+    const base = useQuery.getMockImplementation()!;
+    useQuery.mockImplementation((options) => options.queryKey[0] === "sale-detection"
+      ? { data: { autodelist: false } }
+      : base(options));
     const html = renderToStaticMarkup(
       <WorkspaceRuntimeProvider value={{ ...desktopRuntime, hosted: true }}><ConnectionsSettings /></WorkspaceRuntimeProvider>,
     );
@@ -184,7 +188,15 @@ describe("Connections settings", () => {
     expect(html).toContain("Chrome Web Store");
   });
 
-  it("disables the autodelist switch until sale detection loads and shows load errors", () => {
+  it("shows loading without an off switch while the saved autodelist preference is unknown", () => {
+    const html = renderToStaticMarkup(
+      <WorkspaceRuntimeProvider value={{ ...desktopRuntime, hosted: true }}><ConnectionsSettings /></WorkspaceRuntimeProvider>,
+    );
+    expect(html).toMatch(/role="status"[^>]*>Loading…<\/span>/);
+    expect(html).not.toContain('aria-label="Delist the other marketplaces when something sells"');
+  });
+
+  it("shows the load error without an off switch when the saved autodelist preference is unknown", () => {
     const base = useQuery.getMockImplementation()!;
     useQuery.mockImplementation((options: { queryKey: string[] }) => {
       if (options.queryKey[0] === "sale-detection") {
@@ -195,7 +207,29 @@ describe("Connections settings", () => {
     const html = renderToStaticMarkup(
       <WorkspaceRuntimeProvider value={{ ...desktopRuntime, hosted: true }}><ConnectionsSettings /></WorkspaceRuntimeProvider>,
     );
+    expect(html).toContain(">Unavailable</span>");
     expect(html).toContain("Could not load sale detection settings.");
-    expect(html).toMatch(/aria-label="Delist the other marketplaces when something sells"[^>]*disabled|disabled[^>]*aria-label="Delist the other marketplaces when something sells"/);
+    expect(html).not.toContain('aria-label="Delist the other marketplaces when something sells"');
+  });
+
+  it("shows the saved autodelist preference and indicates when it is saving", () => {
+    const base = useQuery.getMockImplementation()!;
+    useQuery.mockImplementation((options) => options.queryKey[0] === "sale-detection"
+      ? { data: { autodelist: true } }
+      : base(options));
+    const render = () => renderToStaticMarkup(
+      <WorkspaceRuntimeProvider value={{ ...desktopRuntime, hosted: true }}><ConnectionsSettings /></WorkspaceRuntimeProvider>,
+    );
+    const findSwitch = (html: string) => html.match(/<[^>]+aria-label="Delist the other marketplaces when something sells"[^>]*>/)?.[0];
+    const loaded = render();
+    expect(findSwitch(loaded)).toContain('aria-checked="true"');
+    expect(findSwitch(loaded)).not.toMatch(/\sdata-disabled(?:=|\s|>)/);
+    expect(loaded).not.toContain("Saving…");
+
+    useMutation.mockReturnValue({ mutate: vi.fn(), isPending: true, error: null });
+    const saving = render();
+    expect(findSwitch(saving)).toContain('aria-checked="true"');
+    expect(findSwitch(saving)).toMatch(/\sdata-disabled(?:=|\s|>)/);
+    expect(saving.slice(saving.indexOf('id="sale-autodelist"'))).toMatch(/role="status"[^>]*>.*?Saving…/);
   });
 });
