@@ -1645,3 +1645,36 @@ def test_boxes_ads_and_events_stay_capped_in_the_brief(workspace):
         big.close()
 
 
+def test_median_aggregate_handles_numbers_nulls_empty_and_text(workspace):
+    db, _client = workspace
+    seed(db)
+    # Seed asking prices: 15, 60, 120 -> median 60.
+    shop = business_assistant.read_shop(db, now=NOW)
+    try:
+        assert business_assistant.run_lookup(
+            shop.lookups, "SELECT median(asking) AS med FROM listings",
+        ) == "Lookup result (1 rows):\nmed\n60.0"
+        assert business_assistant.run_lookup(
+            shop.lookups, "SELECT median(asking) AS med FROM listings WHERE 1 = 0",
+        ) == "Lookup result (1 rows):\nmed\n"
+        assert business_assistant.run_lookup(
+            shop.lookups, "SELECT median(sold_for) AS med FROM listings WHERE status = 'draft'",
+        ) == "Lookup result (1 rows):\nmed\n"
+        assert business_assistant.run_lookup(
+            shop.lookups, "SELECT median(title) AS med FROM listings",
+        ) == "Lookup result (1 rows):\nmed\n"
+    finally:
+        shop.close()
+
+    add_listing(db, "Extra Shirt", {"price": 30}, {"vendooStatus": "active"})
+    even_shop = business_assistant.read_shop(db, now=NOW)
+    try:
+        # Asking prices: 15, 30, 60, 120 -> median 45.0.
+        assert business_assistant.run_lookup(
+            even_shop.lookups, "SELECT median(asking) AS med FROM listings",
+        ) == "Lookup result (1 rows):\nmed\n45.0"
+    finally:
+        even_shop.close()
+
+
+

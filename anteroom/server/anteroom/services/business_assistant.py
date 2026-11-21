@@ -158,6 +158,7 @@ LOOKUP_INSTRUCTIONS = (
     "`period` (30d, 90d, 12m, all). `sales_over_time` is each range's sales per `bucket`, as the Analytics chart "
     "draws them, `position` 1 the oldest; range all reaches back to the first sale and range 12m is one row per "
     "calendar month.\n"
+    "`median(column)` is available alongside `avg`, `sum`, `min`, `max`, and `count`.\n"
     "Every lookup answers: rows, \"0 rows matched\", or \"Lookup ... failed: <reason>\". Read that reply; when a "
     "lookup failed or matched nothing, say so or try a corrected query, and never fill the gap with a guess.\n"
     "Seeing a box's photos: reply with nothing but one ```view_box_media block listing the box ids from the "
@@ -1002,6 +1003,20 @@ async def view_box_media(shop: Shop, body: str, viewed: list[str]) -> str | list
     return [{"type": "text", "text": text}, *parts] if parts else text
 
 
+class _Median:
+    """SQLite aggregate returning the median of numeric values, ignoring NULLs and non-numbers."""
+
+    def __init__(self) -> None:
+        self._values: list[int | float] = []
+
+    def step(self, value: Any) -> None:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            self._values.append(value)
+
+    def finalize(self) -> int | float | None:
+        return statistics.median(self._values) if self._values else None
+
+
 def _lookup_database(tables: dict[str, list[dict[str, Any]]]) -> sqlite3.Connection:
     """A throwaway copy of the shop that a lookup can read and nothing else can reach."""
     # Lookups run on a worker thread, one at a time.
@@ -1013,6 +1028,7 @@ def _lookup_database(tables: dict[str, list[dict[str, Any]]]) -> sqlite3.Connect
             [[_cell(row.get(column)) for column in columns] for row in tables[name]],
         )
     lookups.commit()
+    lookups.create_aggregate("median", 1, _Median)
     # Reads only from here on: no ATTACH to a real database, no PRAGMA, no writes.
     lookups.set_authorizer(
         lambda action, *_details: sqlite3.SQLITE_OK if action in _READ_ACTIONS else sqlite3.SQLITE_DENY,
