@@ -481,7 +481,11 @@ export function StructuredEditor({
   const vendoo = useListingMode().data?.listing_mode === "vendoo";
   const nativeTab = !vendoo && DIRECT_FORM_MARKETS.has(tab);
   const [autoReloadingMarket, setAutoReloadingMarket] = React.useState<string | null>(null);
-  const [reloadErrors, setReloadErrors] = React.useState(() => new Map<string, string>());
+  const [reloadErrors, setReloadErrors] = React.useState(
+    () => new Map<string, { kind: "refresh" | "read"; message: string }>(),
+  );
+  const reloadErrorKey = `${convId}:${revisionId}:${tab}`;
+  const activeReloadError = reloadErrors.get(reloadErrorKey);
   // The form's rows come from the category. A price, brand, format, or shipping
   // edit must not start a new read: that used to drop every row until the form
   // answered, leaving only the marketplace price on screen. A new category,
@@ -497,6 +501,12 @@ export function StructuredEditor({
       return previous;
     },
   });
+  // A successful read recovers a saved form. It does not recover a failed refresh.
+  if (nativeTab && nativeQuery.isSuccess && !nativeQuery.isPlaceholderData && activeReloadError?.kind === "read") {
+    const next = new Map(reloadErrors);
+    next.delete(reloadErrorKey);
+    setReloadErrors(next);
+  }
   // Field checks appear beside the form as advice; the marketplace validates
   // the seller-confirmed List attempt.
   const preflight = useQuery({
@@ -787,7 +797,7 @@ export function StructuredEditor({
           const message = "Fields were saved, but the refreshed form could not be loaded.";
           setReloadErrors((current) => new Map(current).set(
             `${convId}:${result.revision_id}:${market}`,
-            [message, detail, "Press Reload fields to try again."].filter(Boolean).join(" ")));
+            { kind: "read", message: [message, detail, "Press Reload fields to try again."].filter(Boolean).join(" ") }));
           toastManager.add({ type: "error", title: message, description: detail });
         }
       }
@@ -796,7 +806,7 @@ export function StructuredEditor({
     },
     onError: (err: Error, { market, revision }) => {
       setReloadErrors((current) => new Map(current).set(
-        `${convId}:${revision}:${market}`, reloadFailureMessage(market, err)));
+        `${convId}:${revision}:${market}`, { kind: "refresh", message: reloadFailureMessage(market, err) }));
       toastManager.add({ type: "error", title: "Could not reload fields", description: err.message });
     },
   });
@@ -840,7 +850,7 @@ export function StructuredEditor({
         onMarketError: (market, error) => {
           if (controller.signal.aborted) return;
           setReloadErrors((current) => new Map(current).set(
-            `${convId}:${revisionId}:${market}`, reloadFailureMessage(market, error)));
+            `${convId}:${revisionId}:${market}`, { kind: "refresh", message: reloadFailureMessage(market, error) }));
         },
       },
     ).finally(() => {
@@ -926,7 +936,6 @@ export function StructuredEditor({
     : nativeQuery.error instanceof Error
       ? nativeQuery.error.message
       : "The marketplace form could not be loaded. Reopen the listing to try again.";
-  const activeReloadError = reloadErrors.get(`${convId}:${revisionId}:${tab}`) ?? null;
   // Stale fields reload on their own. A partial form can also need a retry
   // even when the request succeeded, e.g. when Mercari's quotes failed.
   // A form that could not load, or a revision still stale after its automatic
@@ -934,7 +943,7 @@ export function StructuredEditor({
   const staleHere = nativeTab && !preflight.isPlaceholderData && !preflight.isError
     && preflight.data?.revision_id === revisionId && staleFormMarketplaces(preflight.data, [tab]).length > 0;
   const autoReloadTried = Boolean(revisionId) && autoReloadAttemptedRef.current.keys.has(`${revisionId}:${tab}`);
-  const showReload = nativeTab && (retryingThisTab || activeReloadError !== null
+  const showReload = nativeTab && (retryingThisTab || activeReloadError !== undefined
     || (!nativeQuery.isPlaceholderData && nativeQuery.data?.reload_recommended === true)
     || (nativeQuery.isError && !nativeQuery.data)
     || (staleHere && autoReloadTried && autoReloadingMarket === null));
@@ -943,7 +952,7 @@ export function StructuredEditor({
     : nativeTab && !nativeQuery.data && (nativeQuery.isFetching || autoReloadingMarket !== null)
       ? "Loading the marketplace’s category fields and choices…"
       : activeReloadError
-        ? activeReloadError
+        ? activeReloadError.message
         : nativeTab && nativeQuery.isError && !nativeQuery.data
           ? formLoadError
           : categoryStale

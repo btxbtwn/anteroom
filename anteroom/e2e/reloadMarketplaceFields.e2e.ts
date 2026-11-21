@@ -207,76 +207,86 @@ test("a partial Mercari form offers a retry until shipping choices recover", asy
   }
 });
 
-test("a saved reload can be retried when reading the new revision fails", async ({ page, request, phone }, info) => {
-  const title = `Retry the refreshed form ${info.project.name} ${Date.now()}`;
-  const id = await createListing(request, title);
-  let releaseRead!: () => void;
-  const readBlocked = new Promise<void>(resolve => { releaseRead = resolve; });
-  try {
-    const listingUrl = `/api/conversations/${id}/listing`;
-    const saved = await request.put(listingUrl, { data: { expected_revision_id: "", listing: {
-      title, description: "Seller's description", price: 25,
-      direct_category_ids: { mercari: "2008" },
-      mercari_specifics: { title, shippingMethod: "SOYO" },
-      _native_forms: { mercari: { category_id: "old", page_labels: true,
-        inputs: { "direct_category_ids.mercari": "old" },
-        fields: [{ path: "direct_category_ids.mercari", label: "Category" }] } },
-    } } });
-    expect(saved.ok(), await saved.text()).toBe(true);
-    const originalRevision = (await (await request.get(listingUrl)).json()).current_revision_id;
-    const formUrl = `**/api/conversations/${id}/native-marketplaces/mercari/form`;
-    let failRefresh = true;
-    let failRead = true;
-    let refreshedRevision = "";
-    let lastRefreshInput = "";
-    let preflightReads = 0;
-    await page.route(`${formUrl}/refresh`, async route => {
-      lastRefreshInput = route.request().postDataJSON().revision_id;
-      if (failRefresh) {
-        await route.fulfill({ status: 500, json: { detail: "Mercari did not answer." } });
-        return;
-      }
-      const response = await route.fetch();
-      refreshedRevision = (await response.json()).revision_id;
-      await route.fulfill({ response });
-    });
-    await page.route(`${formUrl}?*`, async route => {
-      if (failRead && refreshedRevision && new URL(route.request().url()).searchParams.get("revision_id") === refreshedRevision) {
-        await readBlocked;
-        await route.fulfill({ status: 500, json: { detail: "Could not read the refreshed choices." } });
-      } else {
-        await route.continue();
-      }
-    });
-    await page.route(`**/api/conversations/${id}/native-marketplaces/preflight`, async route => {
-      const response = await route.fetch();
-      if (refreshedRevision && (await response.json()).revision_id === refreshedRevision) preflightReads += 1;
-      await route.fulfill({ response });
-    });
+for (const recovery of ["manual retry", "returning to the tab"]) {
+  test(`a saved reload recovers from a failed form read by ${recovery}`, async ({ page, request, phone }, info) => {
+    const title = `Retry the refreshed form ${info.project.name} ${Date.now()}`;
+    const id = await createListing(request, title);
+    let releaseRead!: () => void;
+    const readBlocked = new Promise<void>(resolve => { releaseRead = resolve; });
+    try {
+      const listingUrl = `/api/conversations/${id}/listing`;
+      const saved = await request.put(listingUrl, { data: { expected_revision_id: "", listing: {
+        title, description: "Seller's description", price: 25,
+        direct_category_ids: { mercari: "2008" },
+        mercari_specifics: { title, shippingMethod: "SOYO" },
+        _native_forms: { mercari: { category_id: "old", page_labels: true,
+          inputs: { "direct_category_ids.mercari": "old" },
+          fields: [{ path: "direct_category_ids.mercari", label: "Category" }] } },
+      } } });
+      expect(saved.ok(), await saved.text()).toBe(true);
+      const originalRevision = (await (await request.get(listingUrl)).json()).current_revision_id;
+      const formUrl = `**/api/conversations/${id}/native-marketplaces/mercari/form`;
+      let failRefresh = true;
+      let failRead = true;
+      let refreshedRevision = "";
+      let lastRefreshInput = "";
+      let preflightReads = 0;
+      await page.route(`${formUrl}/refresh`, async route => {
+        lastRefreshInput = route.request().postDataJSON().revision_id;
+        if (failRefresh) {
+          await route.fulfill({ status: 500, json: { detail: "Mercari did not answer." } });
+          return;
+        }
+        const response = await route.fetch();
+        refreshedRevision = (await response.json()).revision_id;
+        await route.fulfill({ response });
+      });
+      await page.route(`${formUrl}?*`, async route => {
+        if (failRead && refreshedRevision && new URL(route.request().url()).searchParams.get("revision_id") === refreshedRevision) {
+          await readBlocked;
+          await route.fulfill({ status: 500, json: { detail: "Could not read the refreshed choices." } });
+        } else {
+          await route.continue();
+        }
+      });
+      await page.route(`**/api/conversations/${id}/native-marketplaces/preflight`, async route => {
+        const response = await route.fetch();
+        if (refreshedRevision && (await response.json()).revision_id === refreshedRevision) preflightReads += 1;
+        await route.fulfill({ response });
+      });
 
-    await openListing(page, phone, title);
-    await openForm(page, phone, "Mercari");
-    const form = page.getByRole("group", { name: "Mercari listing fields" });
-    const retry = form.getByRole("button", { name: "Reload fields", exact: true });
-    await expect(retry).toBeEnabled();
-    failRefresh = false;
-    await retry.click();
-    await expect.poll(() => preflightReads).toBe(1);
-    expect(refreshedRevision).not.toBe(originalRevision);
-    releaseRead();
-    const status = form.getByRole("status").filter({ hasText: "Fields were saved, but the refreshed form could not be loaded." });
-    await expect(status).toBeVisible();
-    await expect(retry).toBeEnabled();
-    await expect.poll(() => preflightReads).toBeGreaterThan(1);
-    const retryRevision = refreshedRevision;
-    failRead = false;
-    await retry.click();
-    await expect(form.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(title);
-    await expect(form.getByRole("button", { name: /^Reload(?:ing)? fields/ })).toHaveCount(0);
-    await expect(status).toHaveCount(0);
-    expect(lastRefreshInput).toBe(retryRevision);
-  } finally {
-    releaseRead();
-    await request.delete(`/api/conversations/${id}`);
-  }
-});
+      await openListing(page, phone, title);
+      await openForm(page, phone, "Mercari");
+      const form = page.getByRole("group", { name: "Mercari listing fields" });
+      const retry = form.getByRole("button", { name: "Reload fields", exact: true });
+      await expect(retry).toBeEnabled();
+      failRefresh = false;
+      await retry.click();
+      await expect.poll(() => preflightReads).toBe(1);
+      expect(refreshedRevision).not.toBe(originalRevision);
+      releaseRead();
+      const status = form.getByRole("status").filter({ hasText: "Fields were saved, but the refreshed form could not be loaded." });
+      await expect(status).toBeVisible();
+      await expect(retry).toBeEnabled();
+      await expect.poll(() => preflightReads).toBeGreaterThan(1);
+      const retryRevision = refreshedRevision;
+      failRead = false;
+      if (recovery === "manual retry") {
+        await retry.click();
+      } else {
+        await openForm(page, phone, "Etsy");
+        const read = page.waitForResponse(res => res.url().includes("/mercari/form?")
+          && new URL(res.url()).searchParams.get("revision_id") === retryRevision && res.ok());
+        await openForm(page, phone, "Mercari");
+        await read;
+      }
+      await expect(form.getByRole("textbox", { name: "Title", exact: true })).toHaveValue(title);
+      await expect(status).toHaveCount(0);
+      await expect(form.getByRole("button", { name: /^Reload(?:ing)? fields/ })).toHaveCount(0);
+      expect(lastRefreshInput).toBe(recovery === "manual retry" ? retryRevision : originalRevision);
+    } finally {
+      releaseRead();
+      await request.delete(`/api/conversations/${id}`);
+    }
+  });
+}
