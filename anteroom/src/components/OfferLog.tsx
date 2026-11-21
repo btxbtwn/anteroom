@@ -1,5 +1,6 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { pollMs } from "../api/polling";
 import type { OfferLogEntry } from "../api/contract.gen";
 import { marketplaceName } from "./marketplaceNames";
 import { offerOutcome, offerPrice } from "./offerActivityFormat";
@@ -29,7 +30,8 @@ export function OfferLog({ open, onOpenChange }: { open: boolean; onOpenChange: 
     initialPageParam: null as string | null,
     getNextPageParam: (page) => page.next_before,
     enabled: open,
-    staleTime: 30_000,
+    // Live changes refresh it on the hosted app; polling covers the Mac app and a dropped feed.
+    refetchInterval: () => (open ? pollMs(30_000) : false),
   });
   const entries = log.data?.pages.flatMap((page) => page.entries) ?? [];
   return <Sheet open={open} onOpenChange={onOpenChange}>
