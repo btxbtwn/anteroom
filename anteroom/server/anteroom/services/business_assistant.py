@@ -1169,7 +1169,7 @@ class _Median:
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             self._values.append(value)
 
-    def finalize(self) -> int | float | None:
+    def finalize(self) -> Any:
         return statistics.median(self._values) if self._values else None
 
 
