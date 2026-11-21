@@ -49,12 +49,40 @@ export function applyReading(
 }
 
 /**
- * Run `work` over every item at once. Each reading is minutes of photo-model calls,
- * so reading two at a time kept a box of items waiting most of half an hour; the
- * server limits the memory-heavy photo search itself.
+ * Hosted uploads share one per-seller upload slot (`UploadSlots` waits up to
+ * 10 seconds before returning 429), and each read releases that slot before
+ * slow vision inference starts. Keeping two items in flight overlaps one
+ * item's upload with another's inference while keeping bursts small enough
+ * for upload-slot retry to absorb contention.
  */
-export async function readEach<T>(items: T[], work: (item: T) => Promise<void>): Promise<void> {
-  await Promise.all(items.map(work));
+export const HOSTED_UPLOAD_READ_CONCURRENCY = 2;
+
+/**
+ * Run `work` over every item, either all at once (local desktop) or with at
+ * most `concurrency` in flight at a time (hosted, so bulk reads do not pile
+ * every folder into the per-seller upload slot simultaneously). When `signal`
+ * aborts, no further queued items are started.
+ */
+export async function readEach<T>(
+  items: T[],
+  work: (item: T) => Promise<void>,
+  concurrency?: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!items.length || signal?.aborted) return;
+  const limit = concurrency && concurrency > 0 ? Math.min(Math.floor(concurrency), items.length) : items.length;
+  if (limit >= items.length && !signal) {
+    await Promise.all(items.map(work));
+    return;
+  }
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length && !signal?.aborted) {
+      const index = next++;
+      await work(items[index]!);
+    }
+  };
+  await Promise.all(Array.from({ length: limit }, worker));
 }
 
 /**

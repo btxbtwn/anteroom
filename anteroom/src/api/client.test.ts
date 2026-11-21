@@ -147,6 +147,78 @@ describe("Reading measurements from photos", () => {
     );
     expect(fetch).toHaveBeenCalledTimes(2);
   });
+
+  it("retries hosted upload-slot 429 and 503 busy responses after Retry-After", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi.fn()
+        .mockResolvedValueOnce(new Response(
+          JSON.stringify({ detail: "Another of your messages is still uploading. Try again when it finishes." }),
+          { status: 429, headers: { "Retry-After": "2" } },
+        ))
+        .mockResolvedValueOnce(new Response(
+          JSON.stringify({ detail: "Image uploads are busy right now. Try again in a moment." }),
+          { status: 503, headers: { "Retry-After": "3" } },
+        ))
+        .mockResolvedValueOnce(new Response(JSON.stringify(result)));
+      vi.stubGlobal("fetch", fetch);
+      const pending = api.measurements.read([photo()], "top");
+      await vi.advanceTimersByTimeAsync(1999);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(2999);
+      expect(fetch).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(pending).resolves.toEqual(result);
+      expect(fetch).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives up after 6 upload-slot busy retries and surfaces the server detail", async () => {
+    const busy = () => new Response(
+      JSON.stringify({ detail: "Another of your messages is still uploading. Try again when it finishes." }),
+      { status: 429, headers: { "Retry-After": "0" } },
+    );
+    const fetch = vi.fn().mockImplementation(async () => busy());
+    vi.stubGlobal("fetch", fetch);
+    await expect(api.measurements.read([photo()], "top")).rejects.toThrow("Another of your messages is still uploading.");
+    expect(fetch).toHaveBeenCalledTimes(7);
+  });
+
+  it("fails fast on a rate-limit 429 instead of treating it as an upload-slot wait", async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ detail: "Too many requests in a short time. Try again in a moment." }),
+      { status: 429, headers: { "Retry-After": "30" } },
+    ));
+    vi.stubGlobal("fetch", fetch);
+    await expect(api.measurements.read([photo()], "top")).rejects.toThrow("Too many requests in a short time.");
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops waiting and does not retry when aborted during Retry-After", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi.fn().mockResolvedValue(new Response(
+        JSON.stringify({ detail: "Another of your messages is still uploading. Try again when it finishes." }),
+        { status: 429, headers: { "Retry-After": "5" } },
+      ));
+      vi.stubGlobal("fetch", fetch);
+      const controller = new AbortController();
+      const pending = api.sizeTags.read([photo()], controller.signal);
+      const rejection = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      controller.abort();
+      await rejection;
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("Reading size tags from photos", () => {

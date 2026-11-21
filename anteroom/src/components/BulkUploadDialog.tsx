@@ -9,7 +9,7 @@ import { formatMoney } from "./analyticsFormat";
 import { BOXES_QUERY_KEY, boxStoreName } from "./boxPurchases";
 import { GARMENTS, garmentFields, guessGarment, type Garment } from "./garmentMeasurements";
 import { dragHasFiles, listingTitleForFolder, moveItem, type PhotoFolderGroup } from "../photoDrop";
-import { applyReading, readEach } from "../measurementReading";
+import { applyReading, HOSTED_UPLOAD_READ_CONCURRENCY, readEach } from "../measurementReading";
 import { applySizeTagReading } from "../sizeTagReading";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { StudioImage } from "./StudioImage";
@@ -94,7 +94,9 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
   const [previewUrls, setPreviewUrls] = useState<Map<File, string>>(() => new Map());
   const formRef = useRef<HTMLFormElement>(null);
   const cogRef = useRef<HTMLInputElement>(null);
+  const readAbortRef = useRef<AbortController | null>(null);
   const count = groups.length;
+  const uploadReadConcurrency = runtime.hosted ? HOSTED_UPLOAD_READ_CONCURRENCY : undefined;
 
   // Created and revoked in the same effect so StrictMode's remount gets fresh URLs.
   useEffect(() => {
@@ -102,6 +104,16 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
     setPreviewUrls(urls);
     return () => urls.forEach((url) => URL.revokeObjectURL(url));
   }, [initialGroups]);
+
+  // Abort in-flight bulk photo reads (and any Retry-After waits) when the dialog closes.
+  useEffect(() => {
+    const controller = new AbortController();
+    readAbortRef.current = controller;
+    return () => {
+      controller.abort();
+      if (readAbortRef.current === controller) readAbortRef.current = null;
+    };
+  }, []);
 
   const resetDrag = () => {
     setDragFrom(null);
@@ -124,13 +136,15 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
 
   // Fills blank measurement fields from each item's yardstick photos; typed values stay.
   const readMeasurements = async () => {
+    const signal = readAbortRef.current?.signal;
     const todo = groups.map((_, index) => index).filter((index) => groups[index]!.files.length);
     setReading({ done: 0, total: todo.length });
     await readEach(todo, async (index) => {
       const garment = rows[index]!.garment;
       setRow(index, { readNote: "Reading the yardstick…" });
       try {
-        const result = await api.measurements.read(groups[index]!.files, garment);
+        const result = await api.measurements.read(groups[index]!.files, garment, signal);
+        if (signal?.aborted) return;
         setRows((current) => current.map((row, i) => {
           if (i !== index || row.garment !== garment) return row;
           const outcome = applyReading(garment, row.measurements, result);
@@ -142,17 +156,19 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
           };
         }));
       } catch (error) {
+        if (signal?.aborted) return;
         const message = error instanceof Error ? error.message : "Reading failed.";
         setRow(index, { readNote: `${message} Your entered details are kept. You can enter measurements manually or try reading again.` });
       }
-      setReading((current) => current && { ...current, done: current.done + 1 });
-    });
-    setReading(null);
+      if (!signal?.aborted) setReading((current) => current && { ...current, done: current.done + 1 });
+    }, uploadReadConcurrency, signal);
+    if (!signal?.aborted) setReading(null);
   };
 
   // Fills a blank Size from each item's size tag; a typed size stays. A missing,
   // unreadable or conflicting tag is left for the seller, never guessed.
   const readSizeTags = async () => {
+    const signal = readAbortRef.current?.signal;
     const todo = groups.map((_, index) => index).filter((index) => groups[index]!.files.length);
     setSizeReading({ done: 0, total: todo.length });
     setAnnounceSizes(false);
@@ -160,7 +176,8 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
       const { photoSet } = rows[index]!;
       setRow(index, { sizeNote: READING_SIZE_NOTE });
       try {
-        const result = await api.sizeTags.read(groups[index]!.files);
+        const result = await api.sizeTags.read(groups[index]!.files, signal);
+        if (signal?.aborted) return;
         setRows((current) => current.map((row, i) => {
           if (i !== index || row.photoSet !== photoSet) return row;
           // A size an earlier reading filled is replaced, not treated as typed.
@@ -181,6 +198,7 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
           };
         }));
       } catch (error) {
+        if (signal?.aborted) return;
         const message = error instanceof Error ? error.message : "Reading failed.";
         setRows((current) => current.map((row, i) => {
           if (i !== index || row.photoSet !== photoSet) return row;
@@ -193,10 +211,12 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
           return { ...row, sizeNote: row.sizeWarning ? `${message} ${row.sizeWarning}` : message };
         }));
       }
-      setSizeReading((current) => current && { ...current, done: current.done + 1 });
-    });
-    setSizeReading(null);
-    setAnnounceSizes(true);
+      if (!signal?.aborted) setSizeReading((current) => current && { ...current, done: current.done + 1 });
+    }, uploadReadConcurrency, signal);
+    if (!signal?.aborted) {
+      setSizeReading(null);
+      setAnnounceSizes(true);
+    }
   };
 
   const rotate = (file: File, degrees: 90 | -90) => setTurns((current) => (

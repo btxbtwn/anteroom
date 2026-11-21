@@ -1,0 +1,1 @@
+- Pace hosted bulk photo reads, retry temporary upload-slot waits automatically (canceling cleanly if the dialog closes), and handle varied JSON formats when locating yardstick tiles.

@@ -153,6 +153,27 @@ async def ask_vision_json(provider, system: str, parts: list[dict]) -> dict:
     return _json_object("".join(text)) or {}
 
 
+def _int_value(value: object) -> int | None:
+    """Parse a positive integer photo/tile index, tolerating strings like '01'."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isascii() and text.isdigit():
+            return int(text)
+    return None
+
+
+def _stick_name(value: object) -> str | None:
+    """Normalize a stick identifier such as 'A', 'a', or 'Stick A'."""
+    if not isinstance(value, str):
+        return None
+    text = re.sub(r"^stick\s+", "", value.strip(), flags=re.IGNORECASE).strip()
+    return text.upper() or None
+
+
 async def _read_once(provider, photos: list[dict], garment: str, measures: list[str]) -> dict:
     """One independent read: find where each measurement ends, then read those tiles."""
     from anteroom.providers.xiaomi_mimo import encode_images
@@ -186,12 +207,25 @@ async def _read_once(provider, photos: list[dict], garment: str, measures: list[
         spot = located.get(measure)
         if not isinstance(spot, dict):
             continue
-        photo = by_number.get(spot.get("photo"))
-        stick = next((s for s in (photo or {}).get("sticks", []) if s["stick"] == spot.get("stick")), None)
+        photo_num = _int_value(spot.get("photo"))
+        stick_id = _stick_name(spot.get("stick"))
+        photo = by_number.get(photo_num) if photo_num is not None else None
+        stick = next(
+            (s for s in (photo or {}).get("sticks", []) if str(s["stick"]).upper() == stick_id),
+            None,
+        )
         if stick is None:
             continue
         assert photo is not None
-        picked = [n for n in spot.get("tiles") or [] if isinstance(n, int) and 1 <= n <= len(stick["tiles"])][:TILES_PER_MEASURE]
+        raw_tiles = spot.get("tiles")
+        candidates = raw_tiles if isinstance(raw_tiles, list) else ([raw_tiles] if raw_tiles is not None else [])
+        picked: list[int] = []
+        for raw in candidates:
+            tile_num = _int_value(raw)
+            if tile_num is not None and 1 <= tile_num <= len(stick["tiles"]) and tile_num not in picked:
+                picked.append(tile_num)
+            if len(picked) >= TILES_PER_MEASURE:
+                break
         if not picked:
             continue
         tiles = sorted({n + d for n in picked for d in (-1, 0, 1) if 1 <= n + d <= len(stick["tiles"])})

@@ -297,25 +297,61 @@ async function followAssistant(
   return { error };
 }
 
+const MAX_UPLOAD_BUSY_RETRIES = 6;
+const DEFAULT_UPLOAD_RETRY_MS = 5000;
+const MAX_UPLOAD_RETRY_MS = 15000;
+
+/**
+ * Only retry hosted `UploadSlots` contention (per-seller 429 "still uploading" or
+ * global 503 "uploads are busy" with `Retry-After`), never rate-limiter 429s or
+ * unexplained proxy 503s (which use the single restart retry below).
+ */
+function isUploadSlotBusy(status: number, detail: string, retryAfter: number | null): boolean {
+  if (status === 429) return /\bstill uploading\b/i.test(detail);
+  if (status === 503) return retryAfter !== null && /\buploads are busy\b/i.test(detail);
+  return false;
+}
+
 /**
  * Post photos not saved yet for a model to read. A read can take minutes, so a
- * deploy or restart can cut it off; that is tried once more. An error the server
- * explains (a model that failed) is not.
+ * deploy or restart can cut it off; that is tried once more. Hosted upload-slot
+ * busy responses wait `Retry-After` and retry a few times. Other errors the
+ * server explains (a model that failed, or a rate limit) fail fast.
  */
-async function readPhotos<T>(path: string, form: FormData, button: string): Promise<T> {
-  for (let attempt = 1; ; attempt++) {
+async function readPhotos<T>(path: string, form: FormData, button: string, signal?: AbortSignal): Promise<T> {
+  let restartAttempts = 0;
+  let busyAttempts = 0;
+  for (;;) {
+    if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
     let response: Response;
     try {
-      response = await studioFetch(`${BASE}${path}`, { method: "POST", body: form });
+      response = await studioFetch(`${BASE}${path}`, { method: "POST", body: form, signal });
     } catch (error) {
-      if (error instanceof TypeError && attempt === 1) continue;
+      if (signal?.aborted) throw error;
+      if (error instanceof TypeError && restartAttempts === 0) {
+        restartAttempts += 1;
+        continue;
+      }
       throw error;
     }
     const data = await response.json().catch(() => null);
     if (response.ok) return data as T;
-    const explained = typeof data?.detail === "string" && data.detail.trim();
-    if (!explained && response.status >= 500) {
-      if (attempt === 1) continue;
+    const detail = typeof data?.detail === "string" ? data.detail.trim() : "";
+    const retryAfter = retryAfterMs(response.headers.get("Retry-After"));
+    if (isUploadSlotBusy(response.status, detail, retryAfter)) {
+      if (busyAttempts < MAX_UPLOAD_BUSY_RETRIES) {
+        busyAttempts += 1;
+        const waitMs = Math.min(MAX_UPLOAD_RETRY_MS, retryAfter ?? DEFAULT_UPLOAD_RETRY_MS);
+        await sleepAbortable(waitMs, signal);
+        continue;
+      }
+      throw new Error(errorMessage(data, `Reading failed: ${response.status}`));
+    }
+    if (!detail && response.status >= 500) {
+      if (restartAttempts === 0) {
+        restartAttempts += 1;
+        continue;
+      }
       throw new Error(`The server restarted while reading. Press ${button} again.`);
     }
     throw new Error(errorMessage(data, `Reading failed: ${response.status}`));
@@ -495,11 +531,11 @@ export const api = {
   },
   measurements: {
     /** Suggest measurements from an item's yardstick photos. Nothing is saved. */
-    read: (files: File[], garment: string): Promise<MeasurementReadResult> => {
+    read: (files: File[], garment: string, signal?: AbortSignal): Promise<MeasurementReadResult> => {
       const form = new FormData();
       files.forEach((file) => form.append("files", file));
       form.append("garment", garment);
-      return readPhotos<MeasurementReadResult>("/measurements/read", form, "Read measurements");
+      return readPhotos<MeasurementReadResult>("/measurements/read", form, "Read measurements", signal);
     },
     /** The same, from a saved listing's photos. */
     readSaved: (convId: string, garment: string) =>
@@ -510,10 +546,10 @@ export const api = {
   },
   sizeTags: {
     /** Suggest an item's clothing size from the size tag in its photos. Nothing is saved. */
-    read: (files: File[]): Promise<SizeTagReadResult> => {
+    read: (files: File[], signal?: AbortSignal): Promise<SizeTagReadResult> => {
       const form = new FormData();
       files.forEach((file) => form.append("files", file));
-      return readPhotos<SizeTagReadResult>("/size-tags/read", form, "Read size tags");
+      return readPhotos<SizeTagReadResult>("/size-tags/read", form, "Read size tags", signal);
     },
     /** The same, from a saved listing's photos. */
     readSaved: (convId: string) =>

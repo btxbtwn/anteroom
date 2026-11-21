@@ -263,3 +263,69 @@ it("never shows the provider or model in reading notes", async () => {
     await act(async () => root.unmount());
   }
 });
+
+it("paces hosted bulk reads to two in flight and aborts them when the dialog unmounts", async () => {
+  const fiveGroups = ["Item 1", "Item 2", "Item 3", "Item 4", "Item 5"].map((folder) => ({
+    folder,
+    files: [new File(["x"], `${folder}.jpg`, { type: "image/jpeg" })],
+  }));
+  const hostedRuntime = { ...desktopRuntime, hosted: true };
+  vi.spyOn(api.boxes, "list").mockResolvedValue({ boxes: [] } as never);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  await act(async () => root.render(
+    <WorkspaceRuntimeProvider value={hostedRuntime}>
+      <QueryClientProvider client={client}>
+        <BulkUploadDialog groups={fiveGroups} onCancel={vi.fn()} onConfirm={vi.fn()} />
+      </QueryClientProvider>
+    </WorkspaceRuntimeProvider>,
+  ));
+  const button = (name: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === name)!;
+
+  let active = 0;
+  let peak = 0;
+  const signals: Array<AbortSignal | undefined> = [];
+  const pendingReads: Array<() => void> = [];
+  vi.spyOn(api.measurements, "read").mockImplementation((_files, _garment, signal) => {
+    signals.push(signal);
+    active += 1;
+    peak = Math.max(peak, active);
+    return new Promise((resolve) => {
+      pendingReads.push(() => {
+        active -= 1;
+        resolve({ photos_read: 1, measurements: { length: { status: "accepted", value: 27, reads: [27, 27] } } });
+      });
+    });
+  });
+
+  await act(async () => button("Read measurements").click());
+  expect(signals).toHaveLength(2);
+  expect(peak).toBe(2);
+
+  while (pendingReads.length) {
+    const finish = pendingReads.shift()!;
+    await act(async () => { finish(); });
+  }
+  expect(signals).toHaveLength(5);
+  expect(peak).toBe(2);
+
+  // Now start a hosted size-tag read, confirm only 2 start initially, and unmount mid-read.
+  const tagSignals: Array<AbortSignal | undefined> = [];
+  vi.spyOn(api.sizeTags, "read").mockImplementation((_files, signal) => {
+    tagSignals.push(signal);
+    return new Promise((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    });
+  });
+
+  await act(async () => button("Read size tags").click());
+  expect(tagSignals).toHaveLength(2);
+  expect(tagSignals.every((signal) => signal && !signal.aborted)).toBe(true);
+
+  await act(async () => root.unmount());
+  expect(tagSignals.every((signal) => signal?.aborted)).toBe(true);
+  // Remaining 3 queued items never start after unmount.
+  expect(tagSignals).toHaveLength(2);
+});
