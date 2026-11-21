@@ -489,6 +489,35 @@ def test_action_migration_preserves_previous_release_database(tmp_path):
     engine.dispose()
 
 
+@pytest.mark.parametrize("confirm_with_bulk_shape", [False, True])
+def test_installed_iphone_ad_payload_uses_the_same_review_and_confirmation(workspace, confirm_with_bulk_shape):
+    legacy = {"campaign_id": "campaign-1", "listing_id": ITEM_ID, "bid_percent": "2"}
+    bulk = {"campaign_id": "campaign-1", "listing_ids": [ITEM_ID], "bid_percent": "2"}
+    review = preview(workspace, "ad", legacy)
+    payload = bulk if confirm_with_bulk_shape else legacy
+    assert confirm(workspace, review, "ad", payload, confirm=False).status_code == 422
+    assert not workspace.remote.writes
+    response = confirm(workspace, review, "ad", payload)
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "sent"
+    assert workspace.remote.writes == [(
+        "POST", "/sell/marketing/v1/ad_campaign/campaign-1/bulk_create_ads_by_listing_id",
+        {"requests": [{"listingId": ITEM_ID, "bidPercentage": "2"}]},
+    )]
+
+
+@pytest.mark.parametrize("fields", [
+    {"listing_id": ITEM_ID, "listing_ids": [ITEM_ID]},
+    {"listing_id": "invalid"},
+    {"listing_id": ITEM_ID, "unexpected": True},
+])
+def test_invalid_legacy_ad_payloads_are_rejected(workspace, fields):
+    payload = {"campaign_id": "campaign-1", "bid_percent": "2", **fields}
+    response = workspace.client.post("/api/ebay/actions/preview", json={"kind": "ad", "payload": payload})
+    assert response.status_code == 422, response.text
+    assert not workspace.remote.writes
+
+
 def test_bulk_ads_use_active_ebay_inventory_and_explicit_confirmation(workspace):
     second_id = "123456789013"
     path = "/sell/marketing/v1/ad_campaign/campaign-1/bulk_create_ads_by_listing_id"

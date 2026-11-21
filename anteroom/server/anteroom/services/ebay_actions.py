@@ -248,6 +248,11 @@ async def owned_listing(client: EbayClient, listing_id: str) -> dict:
 async def prepare(client: EbayClient, kind: str, payload: dict) -> dict:
     if kind not in MODELS:
         raise EbayFailure("Unknown eBay action.", 422)
+    # Installed iPhone clients send listing_id. Remove this transition on
+    # 2027-02-21; updated clients send a one-element listing_ids array.
+    if kind == "ad" and "listing_id" in payload and "listing_ids" not in payload:
+        payload = payload.copy()
+        payload["listing_ids"] = [payload.pop("listing_id")]
     data = MODELS[kind].model_validate(payload).model_dump(mode="json")
     plan = {"kind": kind, "target": "", "summary": [], "operations": [], "context": {}, "grant": client.seller}
 
