@@ -324,9 +324,11 @@ def save_listing(identity: str, body: contract.ListingSave, db=Depends(get_selle
     if current and expected and before is None:
         raise HTTPException(409, 'This listing needs its revision link repaired before editing.')
     from anteroom.services.agent_categories import match_general_category
+    from anteroom.services.mercari_form import preserve_smart_pricing_toggle
     from anteroom.services.seller_overrides import prepare_user_listing
 
     previous = before.listing_json if before else {}
+    preserve_smart_pricing_toggle(previous, payload)
     prepare_user_listing(previous, payload)
     match_general_category(db, previous, payload)
     from anteroom.services.unsent_edits import normalized_listing_hash

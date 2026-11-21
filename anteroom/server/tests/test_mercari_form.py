@@ -56,10 +56,25 @@ class MercariFormTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(listing, before)
 
     def test_saved_boolean_smart_pricing_does_not_break_the_form(self):
-        listing = {'price': 20, 'mercari_specifics': {'smartPricing': True}}
-        fields = {row['path']: row for row in mercari_form.form(listing)['fields']}
-        self.assertIs(fields['mercari_specifics.smartPricing.enabled']['value'], True)
-        self.assertEqual(fields['mercari_specifics.smartPricing.minimumPrice']['value'], 17)
+        for enabled, minimum in ((True, 17), (False, '')):
+            with self.subTest(enabled=enabled):
+                listing = {'price': 20, 'mercari_specifics': {'smartPricing': enabled}}
+                fields = {row['path']: row for row in mercari_form.form(listing)['fields']}
+                self.assertIs(fields['mercari_specifics.smartPricing.enabled']['value'], enabled)
+                self.assertEqual(fields['mercari_specifics.smartPricing.minimumPrice']['value'], minimum)
+
+    def test_smart_pricing_minimum_only_defaults_when_absent(self):
+        for pricing, expected in (
+            ({'enabled': True}, 34),
+            ({'enabled': True, 'minimumPrice': None}, ''),
+            ({'enabled': True, 'minimumPrice': ''}, ''),
+            ({'enabled': True, 'minimumPrice': 21.25}, 21.25),
+        ):
+            with self.subTest(pricing=pricing):
+                rows = mercari_form.form({'price': 40, 'mercari_specifics': {'smartPricing': pricing}})['fields']
+                minimum = next(row for row in rows if row['path'] == 'mercari_specifics.smartPricing.minimumPrice')
+                self.assertEqual(minimum['value'], expected)
+                self.assertTrue(minimum['required'])
 
     def test_a_brand_missing_from_mercaris_list_checks_no_brand_and_clears_brand(self):
         # Walt Disney World / AM Tees: General brand is not in Mercari's brand list.

@@ -254,6 +254,15 @@ def match_size_id(listing: dict, category_or_sizes: str | dict | list[dict] | No
     return ""
 
 
+def preserve_smart_pricing_toggle(previous: dict, submitted: dict) -> None:
+    """Keep the old toggle when an editor saves just a nested minimum price."""
+    path = "mercari_specifics.smartPricing"
+    previous_toggle = get_path(previous, path)
+    pricing = get_path(submitted, path)
+    if isinstance(previous_toggle, bool) and isinstance(pricing, dict) and "minimumPrice" in pricing:
+        pricing.setdefault("enabled", previous_toggle)
+
+
 def form(listing: dict, shipping_classes: list[dict] | None = None, *, notes: list[str] | None = None) -> dict:
     from anteroom.services.native_editor import field
 
@@ -327,12 +336,16 @@ def form(listing: dict, shipping_classes: list[dict] | None = None, *, notes: li
         specifics.get("shipsFrom"), get_path(listing, "form.ships_from_zip"), listing.get("zipCode"),
         get_path(listing, "form.specifics.shipping.location")) if re.fullmatch(r"\d{5}", str(value or "").strip())), "")
     smart = specifics.get("smartPricing")
-    enabled = smart.get("enabled") is True if isinstance(smart, dict) else _number(price) >= 1
+    if isinstance(smart, dict):
+        enabled = smart.get("enabled") is True
+    else:
+        enabled = smart if isinstance(smart, bool) else _number(price) >= 1
+        smart = {}
+    suggested_minimum = math.floor(_number(price) * 0.85 + 0.5) if enabled else ""
+    minimum = smart.get("minimumPrice", suggested_minimum)
     fields["mercari_specifics.smartPricing.enabled"]["value"] = enabled
-    minimum = smart.get("minimumPrice") if isinstance(smart, dict) else None
     fields["mercari_specifics.smartPricing.minimumPrice"].update(
-        value=minimum if minimum not in (None, "") else math.floor(_number(price) * 0.85 + 0.5) if enabled else "",
-        required=enabled)
+        value="" if minimum is None else minimum, required=enabled)
     notes = list(notes or [])
     if category_id and not category:
         notes.append("This Mercari category is not in the native catalog. Reload the catalog before choosing its fields.")
