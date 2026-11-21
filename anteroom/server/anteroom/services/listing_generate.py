@@ -489,6 +489,8 @@ def _strip_description_sentences(listing: dict, pattern: re.Pattern[str]) -> boo
     def keep(part: str) -> bool:
         return bool(part.strip()) and not pattern.search(part)
 
+    structural_headings = ("flaws:", "measurements:")
+    opens_with_section = desc.lstrip().lower().startswith(structural_headings)
     kept_blocks: list[str] = []
     for block in re.split(r"\n\s*\n", desc):
         block = _PARENTHETICAL_RE.sub(
@@ -506,7 +508,7 @@ def _strip_description_sentences(listing: dict, pattern: re.Pattern[str]) -> boo
         sentences = _SENTENCE_SPLIT_RE.split(raw)
         # Flaws:/Measurements: blocks are structural; their labelled first
         # sentence stays, only trailing asides can go.
-        if raw.lower().startswith(("flaws:", "measurements:")):
+        if raw.lower().startswith(structural_headings):
             kept = [sentences[0], *filter(keep, sentences[1:])]
         else:
             kept = [part for part in sentences if keep(part)]
@@ -514,7 +516,7 @@ def _strip_description_sentences(listing: dict, pattern: re.Pattern[str]) -> boo
             kept_blocks.append(" ".join(part.strip() for part in kept))
     # Stripping can eat the whole vibe sentence; fall back to the title so the
     # description keeps its opening line.
-    if kept_blocks and kept_blocks[0].strip().lower().startswith(("flaws:", "measurements:")):
+    if not opens_with_section and kept_blocks and kept_blocks[0].lower().startswith(structural_headings):
         title = str(listing.get("title") or "").strip()
         kept_blocks.insert(0, f"{title}." if title else "Resale-ready item.")
     cleaned = "\n\n".join(block for block in kept_blocks if block.strip()).strip()
@@ -600,6 +602,8 @@ def ensure_physical_description(listing: dict) -> bool:
     from anteroom.services.skill_formulas import (
         DEFAULT_DESCRIPTION_FORMULA,
         description_formula_markers,
+        description_has_section,
+        insert_description_section,
     )
     from anteroom.services.user_settings import get_listing_formulas
 
@@ -618,7 +622,7 @@ def ensure_physical_description(listing: dict) -> bool:
         if bits:
             meas = "; ".join(re.sub(r"\s+", " ", bit).strip() for bit in bits)
 
-    # Prefer appending the missing Measurements block so existing vibe prose stays intact.
+    # Prefer inserting the missing Measurements block in formula order so existing vibe prose stays intact.
     # A seller-chosen formula is never rebuilt into the old three blocks.
     custom = get_listing_formulas().get("description", "")
     seller_chose = bool(custom.strip()) and custom.strip() != DEFAULT_DESCRIPTION_FORMULA.strip()
@@ -629,7 +633,10 @@ def ensure_physical_description(listing: dict) -> bool:
                 return False
             listing["description"] = repaired
             return True
-        listing["description"] = f"{desc.rstrip()}\n\nMeasurements: {meas}"
+        measurements_label = "Measurements" if description_has_section("Measurements") else "Measurement"
+        listing["description"] = insert_description_section(
+            desc, measurements_label, f"{measurements_label}: {meas}"
+        )
         return True
 
     title = str(listing.get("title") or "").strip()
@@ -1345,7 +1352,11 @@ def apply_seller_description_facts(listing: dict, seller: dict) -> bool:
         set_description_block,
         without_see_photos,
     )
-    from anteroom.services.skill_formulas import description_has_section, description_lists_flaws
+    from anteroom.services.skill_formulas import (
+        description_has_section,
+        description_lists_flaws,
+        insert_description_section,
+    )
 
     if not isinstance(listing, dict):
         return False
@@ -1356,19 +1367,26 @@ def apply_seller_description_facts(listing: dict, seller: dict) -> bool:
     seller_flaws = "; ".join(flaw_items(flaws))
     described = _comparable(description_block(updated, "flaws?"))
     flaws_label = "Flaws" if description_has_section("Flaws") else "Flaw"
+    measurements_label = "Measurements" if description_has_section("Measurements") else "Measurement"
     if seller_flaws and description_has_section(flaws_label) and _comparable(seller_flaws) not in described:
         block = render_flaws_block(flaws, as_list=description_lists_flaws())
         if block:
             block = block.replace("Flaws:", f"{flaws_label}:", 1)
-            updated = set_description_block(updated, "flaws?", block, before="measurements?")
+            if re.search(r"(?im)^[ \t]*flaws?\s*:", updated):
+                updated = set_description_block(updated, "flaws?", block)
+            else:
+                updated = insert_description_section(updated, flaws_label, block)
     measurements = _description_measurements(seller)
-    measurements_label = "Measurements" if description_has_section("Measurements") else "Measurement"
     if (
         measurements
         and description_has_section(measurements_label)
         and description_block(updated, "measurements?") != measurements.rstrip(".")
     ):
-        updated = set_description_block(updated, "measurements?", f"{measurements_label}: {measurements}")
+        measurements_block = f"{measurements_label}: {measurements}"
+        if re.search(r"(?im)^[ \t]*measurements?\s*:", updated):
+            updated = set_description_block(updated, "measurements?", measurements_block)
+        else:
+            updated = insert_description_section(updated, measurements_label, measurements_block)
     if updated == desc:
         return False
     listing["description"] = updated
