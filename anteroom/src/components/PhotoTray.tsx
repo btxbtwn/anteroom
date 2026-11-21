@@ -7,7 +7,7 @@ import type { ListingPhoto } from "../api/types";
 import { toastManager } from "./ui/toast";
 import { BulkUploadDialog } from "./BulkUploadDialog";
 import { InspectorSection } from "./ListingFormControls";
-import { PhotoEditor } from "./PhotoEditor";
+import { PhotoCropDialog } from "./PhotoCropDialog";
 import { PhotoLightbox, PhotoStrip, PhotoThumb } from "./PhotoThumbs";
 import { SortablePhoto, SortablePhotos } from "./SortablePhotos";
 import { useListingSessionActive } from "./listingSession";
@@ -63,17 +63,17 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
     queryClient.invalidateQueries({ queryKey: ["conversations"] });
   };
 
-  const rotateMutation = useMutation({
-    mutationFn: ({ photoId, degrees }: { photoId: string; degrees: 90 | -90 }) =>
-      api.conversations.rotatePhoto(convId, photoId, degrees),
+  const adjustPhotoMutation = useMutation({
+    mutationFn: ({ photoId, degrees }: { photoId: string; degrees: 90 | -90 | null }) =>
+      degrees === null ? api.conversations.resetPhoto(convId, photoId) : api.conversations.rotatePhoto(convId, photoId, degrees),
     onSuccess: replacePhoto,
-    onError: (err: Error) => setUploadError(err.message || "Rotate failed"),
+    onError: (err: Error) => setUploadError(err.message || "Could not change this photo"),
   });
-  const rotatingId = rotateMutation.isPending ? rotateMutation.variables?.photoId : null;
-  const rotate = (photoId: string, degrees: 90 | -90) => {
-    if (rotateMutation.isPending) return;
+  const rotatingId = adjustPhotoMutation.isPending ? adjustPhotoMutation.variables?.photoId : null;
+  const adjustPhoto = (photoId: string, degrees: 90 | -90 | null) => {
+    if (adjustPhotoMutation.isPending) return;
     setUploadError(null);
-    rotateMutation.mutate({ photoId, degrees });
+    adjustPhotoMutation.mutate({ photoId, degrees });
   };
 
   const reorderMutation = useMutation({
@@ -254,7 +254,7 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
                     dragging={dragging}
                     title={canReorder ? (touchScreen ? "Press and hold, then drag to set upload order" : "Drag to set upload order") : undefined}
                     onOpen={() => setPreviewId(p.id)}
-                    onRotate={runtime.features.has("photo_edits") ? () => rotate(p.id, 90) : undefined}
+                    onRotate={runtime.features.has("photo_edits") ? () => adjustPhoto(p.id, 90) : undefined}
                     rotating={rotatingId === p.id}
                     onRemove={() => deleteMutation.mutate(p.id)}
                     controlsInViewerOnTouch
@@ -270,13 +270,13 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
           urls={photos.map((photo) => photo.url)}
           index={previewIndex}
           error={uploadError}
-          rotating={rotateMutation.isPending}
-          onRotate={runtime.features.has("photo_edits") ? (degrees) => rotate(previewPhoto.id, degrees) : undefined}
-          edited={Boolean(previewPhoto.edits)}
-          onEdit={runtime.features.has("photo_edits") ? () => {
+          rotating={adjustPhotoMutation.isPending}
+          onRotate={runtime.features.has("photo_edits") ? (degrees) => adjustPhoto(previewPhoto.id, degrees) : undefined}
+          onCrop={runtime.features.has("photo_edits") ? () => {
             setEditingId(previewPhoto.id);
             setPreviewId(null);
           } : undefined}
+          onRevert={runtime.features.has("photo_edits") && previewPhoto.edits ? () => adjustPhoto(previewPhoto.id, null) : undefined}
           onStep={(next) => setPreviewId(photos[next].id)}
           onMove={(delta) => movePhoto(previewIndex, previewIndex + delta)}
           onRemove={() => {
@@ -288,7 +288,7 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
         />
       ) : null}
       {editingPhoto ? (
-        <PhotoEditor
+        <PhotoCropDialog
           key={editingPhoto.id}
           convId={convId}
           photo={editingPhoto}

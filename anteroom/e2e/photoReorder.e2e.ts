@@ -2,7 +2,7 @@ import { crc32, deflateSync } from "node:zlib";
 import type { Locator, Page } from "@playwright/test";
 import { expect, openForm, openListing, test } from "./fixtures";
 
-/** A 1x1 PNG of one color, so each upload is a different photo. */
+/** An 8x4 PNG of one color, so each upload is a different photo. */
 function png(red: number, green: number, blue: number): Buffer {
   const chunk = (type: string, data: Buffer) => {
     const body = Buffer.concat([Buffer.from(type), data]);
@@ -13,13 +13,14 @@ function png(red: number, green: number, blue: number): Buffer {
     return Buffer.concat([length, body, crc]);
   };
   const header = Buffer.alloc(13);
-  header.writeUInt32BE(1, 0);
-  header.writeUInt32BE(1, 4);
+  header.writeUInt32BE(8, 0);
+  header.writeUInt32BE(4, 4);
   header.set([8, 2, 0, 0, 0], 8);
+  const row = Buffer.from([0, ...Array.from({ length: 8 }, () => [red, green, blue]).flat()]);
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", header),
-    chunk("IDAT", deflateSync(Buffer.from([0, red, green, blue]))),
+    chunk("IDAT", deflateSync(Buffer.concat([row, row, row, row]))),
     chunk("IEND", Buffer.alloc(0)),
   ]);
 }
@@ -85,6 +86,27 @@ test("photos on a marketplace form reorder by dragging, with a mouse or a finger
     const viewer = page.getByRole("dialog");
     await viewer.getByRole("button", { name: "Earlier" }).click();
     await expect.poll(() => order(strip)).toEqual([second, third, first]);
+
+    await expect(viewer.getByRole("button", { name: "Edit", exact: true })).toHaveCount(0);
+    const revert = viewer.getByRole("button", { name: "Revert to original" });
+    await expect(revert).toHaveCount(0);
+    await viewer.getByRole("button", { name: "Rotate right" }).click();
+    await expect(revert).toBeEnabled();
+    await revert.click();
+    await expect(revert).toHaveCount(0);
+    await expect(viewer.getByRole("button", { name: "Rotate left" })).toBeEnabled();
+    await viewer.getByRole("button", { name: "Crop photo" }).click();
+    const crop = page.getByRole("dialog", { name: /^Crop photo/ });
+    await crop.getByRole("button", { name: "Square" }).click();
+    await info.attach("photo-crop", { body: await crop.screenshot(), contentType: "image/png" });
+    const savedCrop = page.waitForResponse((response) =>
+      response.request().method() === "PUT" && response.url().endsWith(`/photos/${third}/edits`),
+    );
+    await crop.getByRole("button", { name: "Save" }).click();
+    expect(await (await savedCrop).json()).toMatchObject({ width: 4, height: 4 });
+    await expect(revert).toBeEnabled();
+    await revert.click();
+    await expect(revert).toHaveCount(0);
   } finally {
     await request.delete(`/api/conversations/${id}`);
   }

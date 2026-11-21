@@ -20,10 +20,6 @@
   "src/components/MobileNav.tsx": {
     "arbitrary-text-size": 1
   },
-  "src/components/PhotoEditor.tsx": {
-    "gradient": 1,
-    "hardcoded-color": 5
-  },
   "src/components/PhotoThumbs.tsx": {
     "arbitrary-text-size": 2
   },

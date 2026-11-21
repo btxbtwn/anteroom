@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api } from "../api/client";
 import type { ListingPhoto } from "../api/types";
-import { PhotoEditor } from "./PhotoEditor";
+import { PhotoCropDialog } from "./PhotoCropDialog";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -28,7 +28,7 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.innerHTML = ""; });
 
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
-const preview = () => document.body.querySelector<HTMLImageElement>('img[alt="ListingPhoto 1 with edits"]');
+const preview = () => document.body.querySelector<HTMLImageElement>('img[alt="Photo 1 crop preview"]');
 const failure = () => document.body.querySelector<HTMLElement>("[data-photo-load-status]");
 const cropFrame = () => document.body.querySelector("[data-crop-frame]");
 
@@ -37,7 +37,7 @@ it("shows Retry above the crop frame when a preview cannot be shown, and Retry a
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
-  await act(async () => root.render(<PhotoEditor convId="item" photo={photo} index={0} onSaved={vi.fn()} onClose={vi.fn()} />));
+  await act(async () => root.render(<PhotoCropDialog convId="item" photo={photo} index={0} onSaved={vi.fn()} onClose={vi.fn()} />));
   try {
     await settle();
     expect(preview()?.getAttribute("src")).toBe("blob:preview-1");

@@ -1,16 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { NO_EDITS, centeredCrop, describeEdits, dragCrop, sameEdits, turnEdits, withDefaults } from "./photoEdits";
+import { centeredCrop, dragCrop } from "./photoEdits";
 
-describe("photo edit geometry", () => {
-  it("turns the crop with the photo, as the server does", () => {
-    const edits = { ...NO_EDITS, crop: { x: 0, y: 0, width: 0.5, height: 0.25 } };
-    const right = turnEdits(edits, 90);
-    expect(right.rotate).toBe(90);
-    expect(right.crop).toEqual({ x: 0.75, y: 0, width: 0.25, height: 0.5 });
-    expect(turnEdits(right, -90)).toEqual(edits);
-    expect(turnEdits(edits, -90).rotate).toBe(270);
-  });
-
+describe("photo crop geometry", () => {
   it("centres the largest crop of a shape", () => {
     // A 4:3 photo cropped square keeps the full height.
     const square = centeredCrop(1, 4 / 3);
@@ -42,12 +33,5 @@ describe("photo edit geometry", () => {
     const capped = dragCrop({ x: 0, y: 0, width: 0.3, height: 0.4 }, "se", 0.7, 0, 1, 4 / 3);
     expect(capped.height).toBeCloseTo(1);
     expect(capped.width).toBeCloseTo(0.75);
-  });
-
-  it("compares and describes edits in the seller's words", () => {
-    expect(sameEdits(withDefaults(null), NO_EDITS)).toBe(true);
-    expect(sameEdits({ ...NO_EDITS, exposure: 0.2 }, NO_EDITS)).toBe(false);
-    expect(describeEdits({ ...NO_EDITS, background: "#ffffff", straighten: 2 })).toEqual(["rotated", "background removed"]);
-    expect(describeEdits(null)).toEqual([]);
   });
 });

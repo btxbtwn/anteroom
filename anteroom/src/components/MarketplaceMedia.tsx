@@ -18,7 +18,7 @@ import { COVER_LIMIT, formPhotos, isVideoFile, pastSlots, pickedIds, videoRuleTe
 import { dragHasFiles, isImageFile, moveItem } from "../photoDrop";
 import { InspectorSection } from "./ListingFormControls";
 import { marketplaceName } from "./marketplaceNames";
-import { PhotoEditor } from "./PhotoEditor";
+import { PhotoCropDialog } from "./PhotoCropDialog";
 import { PhotoLightbox, PhotoStrip, PhotoThumb } from "./PhotoThumbs";
 import { SortablePhoto, SortablePhotos } from "./SortablePhotos";
 import { useListingSessionActive } from "./listingSession";
@@ -45,6 +45,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
   const [dropping, setDropping] = React.useState(false);
   const [previewId, setPreviewId] = React.useState<string | null>(null);
   const [editingId, setEditingId] = React.useState<string | null>(null);
+  const [adjustingPhoto, setAdjustingPhoto] = React.useState(false);
   const name = marketplaceName(marketplace);
   const ownKey = ["photos", convId, marketplace];
   const { data: item = [] } = useQuery({ queryKey: ["photos", convId], queryFn: ({ signal }) => api.conversations.photos(convId, undefined, { signal }) });
@@ -68,7 +69,8 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
   const locked = disabled || busy;
   const all = [...picked, ...unticked];
   const previewIndex = all.findIndex((photo) => photo.id === previewId);
-  const editing = all.find((photo) => photo.id === editingId) || null;
+
+  const editing = all.find((photo) => photo.id === editingId);
 
   // The pick the last change saved, so the answer about the photo this form no
   // longer sends can go away when the seller drags or adds that photo back.
@@ -167,12 +169,17 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
     }
   };
 
-  const rotate = async (photoId: string, degrees: 90 | -90) => {
+  const adjustPhoto = async (photoId: string, degrees: 90 | -90 | null) => {
+    setAdjustingPhoto(true);
+    setError(null);
     try {
-      await api.conversations.rotatePhoto(convId, photoId, degrees);
+      if (degrees === null) await api.conversations.resetPhoto(convId, photoId);
+      else await api.conversations.rotatePhoto(convId, photoId, degrees);
       await refreshPhotos();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Rotate failed");
+      setError(err instanceof Error ? err.message : "Could not change this photo");
+    } finally {
+      setAdjustingPhoto(false);
     }
   };
 
@@ -283,9 +290,11 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
       urls={all.map((photo) => photo.url)}
       index={previewIndex}
       onStep={(next) => setPreviewId(all[next].id)}
-      onRotate={runtime.features.has("photo_edits") ? (degrees) => void rotate(all[previewIndex].id, degrees) : undefined}
-      edited={Boolean(all[previewIndex].edits)}
-      onEdit={runtime.features.has("photo_edits") ? () => { setEditingId(all[previewIndex].id); setPreviewId(null); } : undefined}
+      error={error}
+      rotating={adjustingPhoto}
+      onRotate={runtime.features.has("photo_edits") ? (degrees) => void adjustPhoto(all[previewIndex].id, degrees) : undefined}
+      onCrop={runtime.features.has("photo_edits") ? () => { setEditingId(all[previewIndex].id); setPreviewId(null); } : undefined}
+      onRevert={runtime.features.has("photo_edits") && all[previewIndex].edits ? () => void adjustPhoto(all[previewIndex].id, null) : undefined}
       onMove={previewIndex < picked.length && !locked ? (delta) => movePick(previewIndex, previewIndex + delta) : undefined}
       // A touch screen hides the tiles' remove buttons; the viewer offers it instead.
       onRemove={previewIndex < picked.length && !locked ? () => {
@@ -295,7 +304,7 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
       removeLabel={`Leave off ${name}`}
       onClose={() => setPreviewId(null)}
     />}
-    {editing && <PhotoEditor key={editing.id} convId={convId} photo={editing} index={all.indexOf(editing)}
+    {editing && <PhotoCropDialog key={editing.id} convId={convId} photo={editing} index={all.indexOf(editing)}
       onSaved={() => void refreshPhotos()}
       onClose={() => { setPreviewId(editing.id); setEditingId(null); }} />}
   </>;
