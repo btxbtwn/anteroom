@@ -1750,12 +1750,13 @@ def persist_generated_listing(
     if pinned_size:
         _follow_native_size_rows(listing, seed, sanitize_size_value(listing.get("size")) or pinned_size[0])
         _drop_unformed_size_ids(listing, seed)
-    # The seller's saved field defaults over the model's answers, after its
-    # native blocks are back in place; a value the seller set here still wins.
-    from anteroom.services.user_settings import apply_listing_field_defaults
+    from anteroom.services.user_settings import apply_etsy_listing_field_defaults, clear_mercari_answers_with_defaults
 
-    apply_listing_field_defaults(listing, seed)
+    # Validate Etsy's stored answers against the captured form. For Mercari,
+    # clear preference fields after constraints can restore the prior answers.
+    apply_etsy_listing_field_defaults(listing, seed)
     constrain_generated(listing, seed)
+    clear_mercari_answers_with_defaults(listing, seed)
     cap_listing_description(listing)
     if revisions:
         from anteroom.services.seller_overrides import capture_locked, restore_locked, materialize_prices

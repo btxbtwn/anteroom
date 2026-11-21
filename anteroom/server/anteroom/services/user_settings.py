@@ -314,15 +314,8 @@ def clear_listing_field_default(path: object) -> dict[str, dict[str, str]]:
     return get_listing_field_defaults()
 
 
-def apply_listing_field_defaults(listing: dict, seed: dict | None = None) -> bool:
-    """Answer every field the seller saved a default for with that default, over the model's answer.
-
-    A saved default is the seller's choice, so a generated listing never guesses
-    another. Only a value the seller set on this listing (a lock in ``seed``) wins.
-    Etsy's answers are written into the listing. Mercari's ships-from ZIP, shipping
-    label and shoebox answer are form preferences ``native_form.attach_form`` fills
-    in, so the model's answer is removed and the saved one shows instead.
-    """
+def apply_etsy_listing_field_defaults(listing: dict, seed: dict | None = None) -> bool:
+    """Write saved Etsy defaults over generated answers unless the seller locked the field."""
     from anteroom.services.native_contract import KEY, path_of
     from anteroom.services.seller_overrides import field_locked, fold_key
 
@@ -353,10 +346,17 @@ def apply_listing_field_defaults(listing: dict, seed: dict | None = None) -> boo
         changed = True
     if changed:
         listing["etsy_specifics"] = etsy
+    return changed
+
+
+def clear_mercari_answers_with_defaults(listing: dict, seed: dict | None = None) -> bool:
+    """Leave unlocked Mercari preference fields for the form to fill from settings."""
+    from anteroom.services.seller_overrides import field_locked
 
     mercari = listing.get("mercari_specifics")
     if not isinstance(mercari, dict):
-        return changed
+        return False
+    changed = False
     preferences = {
         "shipsFrom": bool(get_ships_from_zip()),
         "shippingClassId": get_mercari_shipping_label() is not None,
@@ -366,7 +366,7 @@ def apply_listing_field_defaults(listing: dict, seed: dict | None = None) -> boo
             mercari.pop(key)
             changed = True
     package = mercari.get("package")
-    if MERCARI_SHOEBOX_PATH in defaults and isinstance(package, dict) and "fitsShoebox" in package \
+    if isinstance(package, dict) and "fitsShoebox" in package and get_mercari_shoebox_default() is not None \
             and not field_locked(seed, "mercari", "fitsShoebox"):
         package.pop("fitsShoebox")
         changed = True

@@ -121,7 +121,7 @@ def test_generation_answers_etsy_who_and_what_with_saved_defaults_over_the_model
     )
 
     listing = {"title": "Tee", "etsy_specifics": {}}
-    assert user_settings.apply_listing_field_defaults(listing) is True
+    assert user_settings.apply_etsy_listing_field_defaults(listing) is True
     assert listing["etsy_specifics"] == {
         "who_made": "Another company or person", "what_is": "A finished product",
     }
@@ -130,11 +130,11 @@ def test_generation_answers_etsy_who_and_what_with_saved_defaults_over_the_model
     guessed = {"title": "Tee", "etsy_specifics": {
         "who_made": "I did", "whoMadeIt": "I did", "whatIsIt": "A supply or tool to make things",
     }}
-    assert user_settings.apply_listing_field_defaults(guessed) is True
+    assert user_settings.apply_etsy_listing_field_defaults(guessed) is True
     assert guessed["etsy_specifics"] == {
         "who_made": "Another company or person", "what_is": "A finished product",
     }
-    assert user_settings.apply_listing_field_defaults(guessed) is False
+    assert user_settings.apply_etsy_listing_field_defaults(guessed) is False
 
 
 def test_a_value_the_seller_set_on_the_listing_wins_over_the_saved_default(settings_file):
@@ -144,7 +144,7 @@ def test_a_value_the_seller_set_on_the_listing_wins_over_the_saved_default(setti
     seed = {"seller_fields": ["etsy_specifics.whoMade"]}
 
     listing = {"etsy_specifics": {"whoMade": "I did"}}
-    assert user_settings.apply_listing_field_defaults(listing, seed) is False
+    assert user_settings.apply_etsy_listing_field_defaults(listing, seed) is False
     assert listing["etsy_specifics"] == {"whoMade": "I did"}
 
 
@@ -178,12 +178,12 @@ def test_generation_answers_etsy_renewal_with_the_saved_default_over_the_model(s
     user_settings.set_listing_field_default("etsy_specifics.renewalOption", "Automatic", "Automatic")
 
     listing = {"title": "Tee", "etsy_specifics": {}}
-    assert user_settings.apply_listing_field_defaults(listing) is True
+    assert user_settings.apply_etsy_listing_field_defaults(listing) is True
     assert listing["etsy_specifics"]["renewalOption"] == "Automatic"
 
     for guess in ({"renewalOption": "Manual"}, {"should_auto_renew": False}, {"shouldAutoRenew": 0}):
         guessed = {"title": "Tee", "etsy_specifics": dict(guess)}
-        assert user_settings.apply_listing_field_defaults(guessed) is True
+        assert user_settings.apply_etsy_listing_field_defaults(guessed) is True
         assert guessed["etsy_specifics"] == {"renewalOption": "Automatic"}
 
 
@@ -312,7 +312,7 @@ def test_generation_drops_the_models_mercari_answers_where_the_seller_saved_defa
 
     listing = {"mercari_specifics": {"shipsFrom": "90210", "shippingClassId": 17,
                                      "package": {"pounds": 1, "fitsShoebox": "no"}}}
-    assert user_settings.apply_listing_field_defaults(listing) is True
+    assert user_settings.clear_mercari_answers_with_defaults(listing) is True
     assert listing["mercari_specifics"] == {"package": {"pounds": 1}}
 
     snapshot = native_form.attach_form(listing, "mercari")
@@ -327,19 +327,23 @@ def test_mercari_answers_the_seller_set_on_the_listing_stay(settings_file):
     seed = {"seller_fields": ["mercari_specifics.shipsFrom", SHOEBOX]}
 
     listing = {"mercari_specifics": {"shipsFrom": "90210", "package": {"fitsShoebox": "no"}}}
-    assert user_settings.apply_listing_field_defaults(listing, seed) is False
+    assert user_settings.clear_mercari_answers_with_defaults(listing, seed) is False
     assert listing["mercari_specifics"] == {"shipsFrom": "90210", "package": {"fitsShoebox": "no"}}
 
 
 def test_without_saved_defaults_the_models_answers_stay(settings_file):
     listing = {"etsy_specifics": {"who_made": "I did"},
                "mercari_specifics": {"shipsFrom": "90210", "package": {"fitsShoebox": "no"}}}
-    assert user_settings.apply_listing_field_defaults(listing) is False
+    assert user_settings.apply_etsy_listing_field_defaults(listing) is False
     assert listing["etsy_specifics"] == {"who_made": "I did"}
+    assert user_settings.clear_mercari_answers_with_defaults(listing) is False
 
 
 @pytest.mark.parametrize("refresh_etsy_form", [False, True])
-def test_a_generated_listing_keeps_the_saved_defaults_over_the_models_answers(settings_file, refresh_etsy_form):
+@pytest.mark.parametrize("mercari_form_state", ["available", "unavailable", "unavailable_locked"])
+def test_a_generated_listing_keeps_the_saved_defaults_over_the_models_answers(
+    settings_file, refresh_etsy_form, mercari_form_state,
+):
     import json
 
     from sqlalchemy import create_engine
@@ -358,8 +362,16 @@ def test_a_generated_listing_keeps_the_saved_defaults_over_the_models_answers(se
     try:
         conv = ConversationRepo(db).create(title="Tee")
         seed = {"title": "Tee"}
+        form = {}
+        if mercari_form_state == "available":
+            form["mercari"] = mercari_form.form(native_form.attach_form({}, "mercari"))
+        else:
+            seed["mercari_specifics"] = {"package": {"pounds": 1, "fitsShoebox": "no"}}
+        locked = mercari_form_state == "unavailable_locked"
+        if locked:
+            seed["seller_fields"] = [SHOEBOX]
         seed[native_contract.KEY] = native_contract.capture(
-            seed, {"mercari": mercari_form.form(native_form.attach_form({}, "mercari"))}, ["mercari"],
+            seed, form, ["mercari"],
         )
         revision = listing_persistence.save_revision(db, conv.id, seed, source="native_schema")
         if refresh_etsy_form:
@@ -380,8 +392,12 @@ def test_a_generated_listing_keeps_the_saved_defaults_over_the_models_answers(se
         fields = etsy_listings.draft_fields(saved, creating=True)
         assert fields["who_made"] == "someone_else"
         assert fields["is_supply"] == "true"
-        assert "fitsShoebox" not in ((saved.get("mercari_specifics") or {}).get("package") or {})
-        assert native_form.attach_form(saved, "mercari")["mercari_specifics"]["package"]["fitsShoebox"] == "yes"
+        package = (saved.get("mercari_specifics") or {}).get("package") or {}
+        assert package.get("fitsShoebox") == ("no" if locked else None)
+        if mercari_form_state != "available":
+            assert package["pounds"] == 1
+        attached = native_form.attach_form(saved, "mercari")
+        assert attached["mercari_specifics"]["package"]["fitsShoebox"] == ("no" if locked else "yes")
     finally:
         db.close()
         engine.dispose()
