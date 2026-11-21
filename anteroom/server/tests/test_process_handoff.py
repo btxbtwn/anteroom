@@ -230,3 +230,97 @@ def test_each_role_runs_the_schedulers_its_connections_need(monkeypatch, role, j
         ran.clear()
         start()()
         assert ran == jobs[lease], lease
+
+
+def test_dead_draft_worker_outside_shutdown_triggers_server_exit_and_nonzero_status(monkeypatch):
+    import uvicorn
+    from anteroom import hosted
+    from anteroom.hosted import create_app, set_worker_stopped_handler
+    from anteroom.hosted_server import HostedServer
+    from anteroom.services import background_worker
+
+    monkeypatch.setenv('ANTEROOM_BACKGROUND_WORKER', '1')
+    monkeypatch.setenv('ANTEROOM_PROCESS_ROLE', 'worker')
+    monkeypatch.setattr(process_handoff, 'hold', lambda _engine, _name='schedulers': False)
+    monkeypatch.setattr(process_handoff, 'release', lambda _engine: None)
+
+    server = HostedServer(uvicorn.Config('anteroom.hosted:app'))
+    notified = threading.Event()
+    seen_exc: list[BaseException | None] = []
+
+    def on_stop(exc: BaseException | None) -> None:
+        seen_exc.append(exc)
+        server.exit_on_worker_failure(exc)
+        notified.set()
+
+    async def crashing_worker(_engine, _stopping):
+        raise RuntimeError('draft loop crashed')
+
+    monkeypatch.setattr(background_worker, 'serve', crashing_worker)
+    set_worker_stopped_handler(on_stop)
+    try:
+        with TestClient(create_app('https://example.supabase.co')):
+            assert notified.wait(2)
+    finally:
+        set_worker_stopped_handler(None)
+
+    assert len(seen_exc) == 1 and isinstance(seen_exc[0], RuntimeError)
+    assert server.worker_failed is True
+    assert server.should_exit is True
+    assert process_handoff.draining() is True
+    assert hosted._on_worker_stopped is None
+
+
+def test_clean_shutdown_does_not_trigger_worker_failure_handler(monkeypatch):
+    from anteroom.hosted import create_app, set_worker_stopped_handler
+    from anteroom.services import background_worker
+
+    monkeypatch.setenv('ANTEROOM_BACKGROUND_WORKER', '1')
+    monkeypatch.setenv('ANTEROOM_PROCESS_ROLE', 'worker')
+    monkeypatch.setattr(process_handoff, 'hold', lambda _engine, _name='schedulers': False)
+    monkeypatch.setattr(process_handoff, 'release', lambda _engine: None)
+
+    started = threading.Event()
+    triggered: list[BaseException | None] = []
+
+    async def healthy_worker(_engine, stopping):
+        started.set()
+        while not stopping.is_set():
+            await asyncio.sleep(0.01)
+
+    monkeypatch.setattr(background_worker, 'serve', healthy_worker)
+    set_worker_stopped_handler(triggered.append)
+    try:
+        with TestClient(create_app('https://example.supabase.co')):
+            assert started.wait(2)
+    finally:
+        set_worker_stopped_handler(None)
+
+    assert triggered == []
+
+
+def test_hosted_server_main_exits_nonzero_when_worker_failed(monkeypatch):
+    from anteroom import hosted, hosted_server
+
+    registered: list[object] = []
+
+    class FakeServer:
+        def __init__(self, _config):
+            self.worker_failed = False
+
+        def exit_on_worker_failure(self, _exc=None):
+            self.worker_failed = True
+
+        def run(self, sockets=None):
+            assert sockets
+            # Simulate the worker callback firing while uvicorn is serving.
+            self.exit_on_worker_failure(RuntimeError('boom'))
+
+    monkeypatch.setattr(hosted_server, 'HostedServer', FakeServer)
+    monkeypatch.setattr(hosted_server, 'dual_stack_socket', lambda _port: object())
+    monkeypatch.setattr(hosted, 'set_worker_stopped_handler', registered.append)
+
+    with pytest.raises(SystemExit) as exited:
+        hosted_server.main()
+    assert exited.value.code == 1
+    assert registered[-1] is None
