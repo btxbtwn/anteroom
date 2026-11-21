@@ -11,6 +11,7 @@ and scheduled edits run once, from the account.
 from __future__ import annotations
 
 import json
+import math
 import threading
 import time
 from datetime import UTC, date, datetime
@@ -22,13 +23,29 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from anteroom.config import DATA_DIR, HOSTED_URL
+from anteroom.services.hosted_limits import BODY_RECEIVE_SECONDS
 
 BATCH_ROWS = 200
 BATCH_BYTES = 2 * 1024 * 1024
 MARKER = Path(DATA_DIR) / "account-move.json"
+# Wait at least as long as a permitted same-seller body read (plus normalization
+# headroom) when sibling photo uploads hit the per-seller 429 guard.
+PHOTO_RATE_LIMIT_BUDGET_SECONDS = BODY_RECEIVE_SECONDS + 10.0
 
 _lock = threading.Lock()
 _progress: dict = {"state": "idle"}
+
+
+def _retry_after_seconds(response: httpx.Response, default: float = 5.0) -> float:
+    raw = response.headers.get("Retry-After")
+    if raw is not None:
+        try:
+            parsed = float(raw)
+        except ValueError:
+            parsed = 0.0
+        if math.isfinite(parsed) and parsed > 0:
+            return min(max(parsed, 0.5), 10.0)
+    return default
 
 
 class MoveError(Exception):
@@ -170,21 +187,45 @@ class Account:
                         "expires_at": time.time() + int(payload.get("expires_in", 3600)),
                         "user": {"id": payload["user"]["id"], "email": payload["user"].get("email")}}
 
-    def request(self, method: str, path: str, **kwargs) -> httpx.Response:
-        with self._refreshing:
-            if self.session["expires_at"] - time.time() < 120:
-                self._token({"refresh_token": self.session["refresh_token"]}, "refresh_token")
-        headers = {"Authorization": f"Bearer {self.session['access_token']}", **kwargs.pop("headers", {})}
-        for attempt in range(3):
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        rate_limit_budget: float | None = None,
+        **kwargs,
+    ) -> httpx.Response:
+        extra_headers = kwargs.pop("headers", {})
+        attempt = 0
+        rate_limit_started: float | None = None
+        rate_limit_waited = 0.0
+        while True:
+            with self._refreshing:
+                if self.session["expires_at"] - time.time() < 120:
+                    self._token({"refresh_token": self.session["refresh_token"]}, "refresh_token")
+            headers = {"Authorization": f"Bearer {self.session['access_token']}", **extra_headers}
             try:
                 response = self.http.request(method, f"{self.base_url}{path}", headers=headers, **kwargs)
             except httpx.HTTPError:
-                if attempt == 2:
+                if attempt >= 2:
                     raise MoveError("Lost the connection to your account. Run the move again to pick up where it stopped.") from None
                 time.sleep(2 ** attempt)
+                attempt += 1
                 continue
-            if response.status_code in {429, 502, 503, 504} and attempt < 2:
+            if response.status_code == 429 and rate_limit_budget is not None:
+                now = time.monotonic()
+                if rate_limit_started is None:
+                    rate_limit_started = now
+                elapsed = max(now - rate_limit_started, rate_limit_waited)
+                remaining = rate_limit_budget - elapsed
+                if remaining > 0:
+                    delay = min(_retry_after_seconds(response), remaining)
+                    time.sleep(delay)
+                    rate_limit_waited += delay
+                    continue
+            elif response.status_code in {429, 502, 503, 504} and attempt < 2:
                 time.sleep(2 ** attempt)
+                attempt += 1
                 continue
             if response.status_code >= 400:
                 try:
@@ -194,7 +235,6 @@ class Account:
                 raise MoveError(detail if isinstance(detail, str) else "Your account could not take this step. Run the move again to retry.",
                                 status=response.status_code)
             return response
-        raise AssertionError("unreachable")
 
 
 def _source():
@@ -346,8 +386,13 @@ def _move_photos(account: Account, source, store) -> dict:
         if not key or not store.exists(key):
             return "missing"
         try:
-            account.request("POST", f"/api/account-import/photos/{photo_id}/{field}", content=shrink(store.read(key)),
-                            headers={"Content-Type": "application/octet-stream"})
+            account.request(
+                "POST",
+                f"/api/account-import/photos/{photo_id}/{field}",
+                content=shrink(store.read(key)),
+                headers={"Content-Type": "application/octet-stream"},
+                rate_limit_budget=PHOTO_RATE_LIMIT_BUDGET_SECONDS,
+            )
         except MoveError as error:
             # One photo the account cannot take must not stop the whole move.
             if error.status in {413, 422}:

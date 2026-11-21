@@ -381,3 +381,115 @@ def test_a_refused_photo_save_deletes_the_uploaded_object(cloud, signing_keys, m
     with pytest.raises(RuntimeError, match='refused'):
         client.post('/api/account-import/photos/lockphoto001/stored', headers=alice, content=png())
     assert stored == {}
+
+
+def test_photo_upload_429_retries_outlast_slow_same_seller_body_read(monkeypatch):
+    """Sibling uploads in _move_photos retry HTTP 429 across BODY_RECEIVE_SECONDS without extending 503 retries."""
+    import httpx
+    from anteroom.services.hosted_limits import BODY_RECEIVE_SECONDS
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(account_move.time, 'sleep', sleeps.append)
+
+    # 1. Survives more than 3 consecutive 429s covering a full BODY_RECEIVE_SECONDS read.
+    calls = 0
+
+    def slow_slot_handler(request):
+        nonlocal calls
+        calls += 1
+        if calls <= 12:
+            return httpx.Response(429, headers={'Retry-After': '5'}, json={'detail': 'Another upload is running.'})
+        return httpx.Response(200, json={'copied': True})
+
+    account = account_move.Account('https://account.example', client=httpx.Client(transport=httpx.MockTransport(slow_slot_handler)))
+    account.session = {'access_token': 'tok', 'refresh_token': 'ref', 'expires_at': time.time() + 3600}
+    reply = account.request(
+        'POST',
+        '/api/account-import/photos/p1/stored',
+        rate_limit_budget=account_move.PHOTO_RATE_LIMIT_BUDGET_SECONDS,
+    )
+    assert reply.status_code == 200 and calls == 13
+    assert sleeps == [5.0] * 12
+
+    # 2. Stops retrying 429 once the permitted upload budget is exhausted.
+    sleeps.clear()
+    always_429_calls = 0
+
+    def always_429(request):
+        nonlocal always_429_calls
+        always_429_calls += 1
+        return httpx.Response(429, headers={'Retry-After': '5'}, json={'detail': 'Still busy.'})
+
+    bounded = account_move.Account('https://account.example', client=httpx.Client(transport=httpx.MockTransport(always_429)))
+    bounded.session = {'access_token': 'tok', 'refresh_token': 'ref', 'expires_at': time.time() + 3600}
+    with pytest.raises(account_move.MoveError, match='Still busy.') as exc:
+        bounded.request(
+            'POST',
+            '/api/account-import/photos/p1/stored',
+            rate_limit_budget=account_move.PHOTO_RATE_LIMIT_BUDGET_SECONDS,
+        )
+    assert exc.value.status == 429
+    assert sum(sleeps) >= BODY_RECEIVE_SECONDS
+    assert sum(sleeps) == pytest.approx(account_move.PHOTO_RATE_LIMIT_BUDGET_SECONDS)
+
+    # 3. Non-429 transient errors (e.g. 503) preserve the 3-attempt limit even when rate_limit_budget is set.
+    sleeps.clear()
+    error_503_calls = 0
+
+    def always_503(request):
+        nonlocal error_503_calls
+        error_503_calls += 1
+        return httpx.Response(503, json={'detail': 'Service unavailable'})
+
+    transient = account_move.Account('https://account.example', client=httpx.Client(transport=httpx.MockTransport(always_503)))
+    transient.session = {'access_token': 'tok', 'refresh_token': 'ref', 'expires_at': time.time() + 3600}
+    with pytest.raises(account_move.MoveError, match='Service unavailable') as exc503:
+        transient.request(
+            'POST',
+            '/api/account-import/photos/p1/stored',
+            rate_limit_budget=account_move.PHOTO_RATE_LIMIT_BUDGET_SECONDS,
+        )
+    assert exc503.value.status == 503
+    assert error_503_calls == 3 and sleeps == [1, 2]
+
+    # 4. _move_photos wires the extended 429 budget end-to-end.
+    sleeps.clear()
+    load_models()
+    from anteroom.models.conversation import Conversation, Photo
+    engine = create_engine('sqlite://')
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        db.add(Conversation(id='c429', title='Coat'))
+        db.flush()
+        db.add(Photo(id='p429', conversation_id='c429', original_filename='a.png',
+                     stored_filename='a.png', mime_type='image/png', size_bytes=10))
+        db.commit()
+
+    class _FakeStore:
+        def exists(self, key):
+            return key == 'a.png'
+
+        def read(self, key):
+            return png()
+
+    move_calls = 0
+
+    def move_handler(request):
+        nonlocal move_calls
+        if request.url.path == '/api/account-import/photos':
+            return httpx.Response(200, json=[{'id': 'p429', 'fields': ['stored']}])
+        move_calls += 1
+        if move_calls <= 5:
+            return httpx.Response(429, headers={'Retry-After': '5'}, json={'detail': 'Busy'})
+        return httpx.Response(200, json={'copied': True})
+
+    mover = account_move.Account('https://account.example', client=httpx.Client(transport=httpx.MockTransport(move_handler)))
+    mover.session = {'access_token': 'tok', 'refresh_token': 'ref', 'expires_at': time.time() + 3600}
+    try:
+        counts = account_move._move_photos(mover, engine, _FakeStore())
+    finally:
+        engine.dispose()
+    assert counts == {'copied': 1, 'missing': 0, 'refused': 0}
+    assert move_calls == 6 and sleeps == [5.0] * 5
+
+
