@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1105 — 2026-11-21
+
+- Make hosted error-alert recipient configurable via `ANTEROOM_OPERATOR_EMAIL` and replace remaining founder-specific URLs and placeholder ZIP codes in server metadata.
+
+## 0.1.1104 — 2026-11-21
+
+- Enforced pixel-count and dimension limits across cached photo thumbnails, photo-edit previews, and ruler measurement photo decoding so oversized images cannot spike server or Mac memory.
+
 ## 0.1.1103 — 2026-11-21
 
 - Hosted category search now shares the public marketplace category index across accounts instead of rebuilding and storing a separate copy per seller, speeding up draft generation and reducing memory use.

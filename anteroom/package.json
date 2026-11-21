@@ -1,7 +1,7 @@
 {
   "name": "anteroom",
   "private": true,
-  "version": "0.1.1103",
+  "version": "0.1.1105",
   "type": "module",
   "scripts": {
     "dev": "vite",
