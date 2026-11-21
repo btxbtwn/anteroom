@@ -16,6 +16,7 @@ from anteroom.services.ebay_fields import (
 from anteroom.models.listing_values import (
     as_mapping,
     canonical_option,
+    collapse_option,
     dropdown_field_options,
     dropdown_options,
     infer_known_option,
@@ -206,7 +207,6 @@ ETSY_WHEN_ALIASES = (
     ("2010s", "2010 - 2019 (Recently)"),
     ("2007 - 2009", "2007 - 2009 (Recently)"),
     ("2000 - 2006", "2000 - 2006 (Vintage)"),
-    ("2000s", "2000 - 2006 (Vintage)"),
     ("before 2007", "Before 2007 (Vintage)"),
     ("1990s", "1990s (Vintage)"),
     ("1980s", "1980s (Vintage)"),
@@ -337,9 +337,87 @@ def _normalize_when_text(text: str) -> str:
     return re.sub(r"\s+", " ", spaced).strip().lower()
 
 
+def _first_recent_year(today: date | None = None) -> int:
+    """The first year Etsy does not call vintage (20 years old): 2007 in 2026."""
+    return (today or date.today()).year - 19
+
+
+# A start year or decade, a separator, then a year, a decade, a two-digit year
+# or "now": "2000-2009", "1990s to 2010s", "between 1995 and 2010", "2000-09",
+# "1999-present". Built from fixed pieces only; no input reaches the pattern.
+_WHEN_SPAN = re.compile(
+    r"(?P<start>1[7-9]\d{2}|20\d{2})(?P<start_s>['’]?s)?\s*"
+    r"(?:-|–|—|/|\bto\b|\bthrough\b|\bthru\b|\buntil\b|\btill\b|\band\b)\s*"
+    r"(?:(?P<end>1[7-9]\d{2}|20\d{2})(?P<end_s>['’]?s)?|(?P<short>\d{2})(?![-/.]\d)|(?P<now>present|now|today))\b",
+    re.IGNORECASE,
+)
+_WHEN_DECADE = re.compile(r"\b(1[7-9]\d|20\d)0['’]?s\b", re.IGNORECASE)
+
+
+def _decade_end(year: int, plural: str | None) -> int:
+    """The last year a "1990s" covers; a bare year covers itself."""
+    return year + 9 if plural and year % 10 == 0 else year
+
+
+def _when_spans(text: str, today: date | None = None) -> list[tuple[int, int]]:
+    spans = []
+    for match in _WHEN_SPAN.finditer(text):
+        first = int(match["start"])
+        if match["end"]:
+            last = _decade_end(int(match["end"]), match["end_s"])
+        elif match["short"]:
+            last = first // 100 * 100 + int(match["short"])
+            last += 100 if last < first else 0
+        else:
+            last = (today or date.today()).year
+        # Both ends of "1990s to 2010s" are decades: the span runs from the first year to the last.
+        spans.append((min(first, last), max(_decade_end(first, match["start_s"]), last)))
+    spans += [(int(decade) * 10, int(decade) * 10 + 9) for decade in _WHEN_DECADE.findall(text)]
+    return spans
+
+
+def etsy_when_is_unclear(text: str, today: date | None = None) -> bool:
+    """Whether a when-made answer spans Etsy's vintage line, so it cannot say vintage or recent.
+
+    eBay's "2000-2009", "the 2000s" or "1995 to 2010" may be either side. Such
+    an answer dates nothing: guessing vintage lists a modern piece that Etsy
+    removes, and guessing recent hides a vintage one.
+    """
+    cutoff = _first_recent_year(today)
+    return any(min(span) < cutoff <= max(span) for span in _when_spans(str(text or ""), today))
+
+
+def etsy_when_unclear_note(text: str, today: date | None = None) -> str:
+    """The Etsy tab's reason for an empty When was it made?, or "" when the answer is clear."""
+    raw = str(text or "").strip()
+    if not raw or not etsy_when_is_unclear(raw, today) or _is_etsy_when_label(raw):
+        return ""
+    cutoff = _first_recent_year(today)
+    return (f'When was it made? is blank: "{raw}" could be before or after {cutoff}, and Etsy calls only '
+            f"items made before {cutoff} vintage. Choose the date range that fits.")
+
+
+def _is_etsy_when_label(text: str, options: list[str] | None = None) -> bool:
+    """Whether the whole answer is one of Etsy's When made labels (spacing and dashes aside).
+
+    The complete label, suffix included: "2000 - 2006 (possibly 2000-2009)" is free text.
+    """
+    answer = collapse_option(text)
+    return any(answer == collapse_option(option) for option in (options if options else etsy_when_options()))
+
+
+def etsy_when_is_unclear_answer(text: str, options: list[str] | None = None) -> bool:
+    """An unclear range that is not one of Etsy's own When made labels.
+
+    Etsy's labels are its answers, not guesses: a saved "2007 - 2009 (Recently)"
+    keeps meaning that range after the cutoff moves past 2007 in January.
+    """
+    return etsy_when_is_unclear(text) and not _is_etsy_when_label(text, options)
+
+
 def _canonical_etsy_when(value: str) -> str:
     raw = str(value or "").strip()
-    if not raw:
+    if not raw or etsy_when_is_unclear_answer(raw):
         return ""
     normalized = _normalize_when_text(raw)
     if normalized in UNKNOWN_ETSY_WHEN or _is_non_vintage_phrase(raw):
@@ -488,7 +566,7 @@ def etsy_renewal_raw(etsy: dict[str, Any]) -> str:
 
 def resolve_etsy_when(raw: str, options: list[str]) -> str:
     text = str(raw or "").strip()
-    if not text:
+    if not text or etsy_when_is_unclear_answer(text, options):
         return ""
     mapped = _canonical_etsy_when(text)
     allowed = options or [mapped, DEFAULT_ETSY_WHEN]
@@ -596,14 +674,15 @@ def etsy_eligible(listing: dict[str, Any] | None) -> bool:
     who = etsy_who_raw(etsy)
     what = etsy_what_raw(etsy)
     return _etsy_eligible(
-        who, what, etsy_when_raw(etsy, payload), etsy_listing_type(etsy),
+        who, what, etsy_when_raw(etsy, payload), etsy_listing_type(etsy), _first_recent_year(),
     )
 
 
 @lru_cache(maxsize=4096)
-def _etsy_eligible(who: str, what: str, when: str, listing_type: str) -> bool:
-    # Cached: the sidebar asks for every listing on each poll, and the answer
-    # depends only on these four strings.
+def _etsy_eligible(who: str, what: str, when: str, listing_type: str, cutoff: int) -> bool:
+    # Cached: the sidebar asks for every listing on each poll. The answer depends
+    # on these four strings and on the vintage cutoff, which moves each January
+    # (``cutoff`` is only part of the key; ``resolve_etsy_when`` reads the clock).
     dropdown_when = resolve_etsy_when(when, etsy_when_options()) if when else ""
     if who in _ETSY_HANDMADE_WHO:
         return True

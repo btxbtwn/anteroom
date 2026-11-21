@@ -66,7 +66,7 @@ class ListingFacetsTest(unittest.TestCase):
         }, "test")
         dated_by_ebay_form = self.convs.create(title="NASCAR tee")
         listing_persistence.save_revision(self.listings.db, dated_by_ebay_form.id, {
-            "title": "Tee", "ebay_specifics": {"Year Manufactured": "2000-2009"},
+            "title": "Tee", "ebay_specifics": {"Year Manufactured": "1995"},
         }, "test")
         facets = inventory_facets.listing_facets(self.convs.db)
         self.assertTrue(facets[dated_by_ebay_form.id]["etsy_eligible"])

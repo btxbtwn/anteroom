@@ -195,6 +195,18 @@ class ValidationCasesTest(unittest.TestCase):
         self.assertIn("etsy_specifics.what_is", fields)
         self.assertIn("etsy_specifics.when_made", fields)
 
+    def test_etsy_asks_for_a_range_when_when_made_spans_the_vintage_line(self):
+        # A handmade item still goes to Etsy; "2000-2009" is not a range Etsy has.
+        listing = dict(VALID_LISTING)
+        listing["etsy_specifics"] = {"who_made": "I did", "what_is": "A finished product", "when_made": "2000-2009"}
+        with patch("anteroom.services.etsy_fields._first_recent_year", lambda today=None: 2007):
+            result = validate_listing(listing, 5, selected_marketplaces=["etsy"])
+        when = [err["message"] for err in result.errors if err["field"] == "etsy_specifics.when_made"]
+        self.assertTrue(when and "2000-2009" in when[0], result.errors)
+        listing["etsy_specifics"] = {**listing["etsy_specifics"], "when_made": "2000 - 2006 (Vintage)"}
+        result = validate_listing(listing, 5, selected_marketplaces=["etsy"])
+        self.assertFalse([err for err in result.errors if err["field"] == "etsy_specifics.when_made"])
+
     def test_empty_string_cost_and_weight_are_treated_as_missing(self):
         listing = dict(VALID_LISTING)
         listing["cost"] = ""

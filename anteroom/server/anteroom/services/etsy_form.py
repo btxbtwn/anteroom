@@ -148,7 +148,8 @@ async def editor_form(snapshot: dict) -> dict:
     """Etsy's form rows for this listing, in the page's order."""
     from anteroom.services.direct_categories import direct_category_id
     from anteroom.services.etsy_fields import (DEFAULT_ETSY_RENEWAL, etsy_renewal_raw, etsy_what_raw,
-                                                etsy_when_options, etsy_when_raw, etsy_when_to_store, etsy_who_raw)
+                                                etsy_when_options, etsy_when_raw, etsy_when_to_store,
+                                                etsy_when_unclear_note, etsy_who_raw)
     from anteroom.services.etsy_listings import etsy_quantity, list_fields
 
     category = direct_category_id(snapshot, "etsy")
@@ -201,6 +202,8 @@ async def editor_form(snapshot: dict) -> dict:
             continue
         rows.append(_row(captured, values.get(path, captured.get("value", ""))))
     notes = [property_note] if property_note else []
+    if not values["etsy_specifics.whenMade"] and (unclear := etsy_when_unclear_note(when)):
+        notes.append(unclear)
     if category and not known:
         notes.append("This Etsy category is not in Anteroom's list. Choose the most specific category again.")
     return {"marketplace": "etsy", "native": True, "known": not category or known, "page_labels": True,
