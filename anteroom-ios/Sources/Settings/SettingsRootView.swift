@@ -25,6 +25,9 @@ struct SettingsRootView: View {
                     // then the account, and About last (HIG, Settings).
                     GeneralSettingsSections(api: api)
                     Section("Selling") {
+                        NavigationLink { ConnectionsSettingsView(api: api) } label: {
+                            Label("Connections", systemImage: "link")
+                        }
                         NavigationLink { ListingsSettingsView(api: api) } label: {
                             Label("Listings", systemImage: "tag")
                         }

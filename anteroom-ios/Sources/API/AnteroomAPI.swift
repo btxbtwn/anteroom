@@ -618,12 +618,30 @@ final class AnteroomAPI: Sendable {
         _ = try await send(request("POST", "api/ebay-offers/attempts/\(attemptID)/checked", json: ["confirm": true]))
     }
 
-    /// Starts eBay sign-in. The seller approves on the page this returns, and
+    /// Starts eBay or Etsy sign-in. The seller approves on the page this returns, and
     /// Safari comes back to the app, which finishes with `finishMarketplaceSignIn`.
+    func connectMarketplace(_ marketplace: String) async throws -> URL {
+        struct Payload: Decodable { let authorizeUrl: String }
+        let payload: Payload = try await decode(
+            request("POST", "api/marketplace-accounts/\(marketplace)/connect", json: ["client": "app"])
+        )
+        guard let url = URL(string: payload.authorizeUrl), url.scheme == "https" else {
+            throw APIError(status: 0, message: "Marketplace sign-in didn't return a page to open.")
+        }
+        return url
+    }
+
+    /// Starts eBay sign-in.
     func connectEbay() async throws -> URL {
-        struct Payload: Decodable { let authorizeUrl: URL }
-        let payload: Payload = try await decode(request("POST", "api/marketplace-accounts/ebay/connect", json: ["client": "app"]))
-        return payload.authorizeUrl
+        try await connectMarketplace("ebay")
+    }
+
+    func cancelMarketplaceConnect(_ marketplace: String) async throws {
+        _ = try await send(request("DELETE", "api/marketplace-accounts/\(marketplace)/connect"))
+    }
+
+    func disconnectMarketplace(_ marketplace: String) async throws {
+        _ = try await send(request("DELETE", "api/marketplace-accounts/\(marketplace)"))
     }
 
     /// Hands over the one-time claim Safari came back with. Returns the account name.
