@@ -114,6 +114,10 @@ class BrowserFailure(BaseModel):
 
 
 @router.post("", status_code=202)
-def report(body: BrowserFailure):
+def report(body: BrowserFailure, request: Request):
+    limiter = getattr(request.app.state, "error_report_limit", None)
+    seller = getattr(request.state, "seller", None)
+    if limiter is not None and seller is not None:
+        limiter.take(seller.user_id)
     log.error("Browser %s: %s", body.kind, body.message[:200], extra={"browser": body.model_dump()})
     return {"accepted": True}

@@ -4,11 +4,13 @@ Saving, previewing, pausing and running tasks only touch the seller's own rows
 or queue a draft regenerate. Approving a marketplace action needs web
 marketplace actions, which are not connected yet, so it is refused here.
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from anteroom.routes import automations, errors
+from anteroom.services.hosted_limits import limit_seller_submissions
 
 router = APIRouter(prefix='/api/automations', tags=['automations'])
+_RATE_LIMITED_PATHS = {'/draft', '/{automation_id}/run'}
 for path, handler, methods in (
     ('', automations.list_automations, ['GET']),
     ('/draft', automations.draft_automation, ['POST']),
@@ -22,7 +24,8 @@ for path, handler, methods in (
     ('/{automation_id}/run', automations.run_automation, ['POST']),
     ('/{automation_id}/history', automations.automation_history, ['GET']),
 ):
-    router.add_api_route(path, handler, methods=methods)
+    deps = [Depends(limit_seller_submissions)] if path in _RATE_LIMITED_PATHS else None
+    router.add_api_route(path, handler, methods=methods, dependencies=deps)
 
 
 @router.post('/approvals/{approval_id}/approve')

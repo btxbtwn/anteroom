@@ -293,9 +293,17 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         app.state.session_verifier = session_verifier or SessionVerifier(
             supabase_url if supabase_url is not None else os.environ.get("SUPABASE_URL", ""),
         )
-        from anteroom.services.hosted_limits import SellerRateLimit, UploadSlots
+        from anteroom.services.hosted_limits import (
+            ERROR_REPORT_BURST,
+            ERROR_REPORT_PER_SECOND,
+            SellerRateLimit,
+            UploadSlots,
+        )
         app.state.upload_slots = UploadSlots()
         app.state.submission_limit = SellerRateLimit()
+        app.state.error_report_limit = SellerRateLimit(
+            burst=ERROR_REPORT_BURST, per_second=ERROR_REPORT_PER_SECOND,
+        )
         from anteroom.database import engine as database_engine
         loop_checkouts = LoopCheckoutWarning(database_engine)
         from anteroom.services import chrome_wait_connections
