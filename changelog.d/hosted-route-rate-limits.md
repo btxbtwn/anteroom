@@ -1,1 +1,0 @@
-- Added per-seller rate limiting to hosted measurement and size-tag photo reads, automation drafts and manual runs, and browser error reports so one busy or stuck session cannot flood shared capacity.

@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1102 — 2026-11-21
+
+- Added per-seller rate limiting to hosted measurement and size-tag photo reads, automation drafts and manual runs, and browser error reports so one busy or stuck session cannot flood shared capacity.
+
 ## 0.1.1101 — 2026-11-21
 
 - Capped the hosted error-email outbox at 500 pending groups with an overflow counter, batched queued alert writes into one transaction, and prioritized real errors ahead of warning bursts.
