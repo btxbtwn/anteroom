@@ -70,13 +70,6 @@ def prepare_listing_snapshot(
     # old leaf in direct_category_ids. The category the seller set wins.
     align_depop_category(listing_snapshot)
     ensure_listing_defaults(listing_snapshot)
-    from anteroom.services.depop_measurements import sync_depop_measurements
-
-    sync_depop_measurements(
-        listing_snapshot,
-        conv_notes,
-        clear_empty=isinstance(conv_notes, dict) and "measurements" in conv_notes,
-    )
     materialize_prices(listing_snapshot)
     registry = RegistryService(db)
     registry.merge_learned_fields(listing_snapshot)
@@ -89,6 +82,11 @@ def prepare_listing_snapshot(
     for marketplace in (listing_json or {}).get("_native_forms") or {}:
         listing_snapshot[f"{marketplace}_specifics"] = copy.deepcopy(
             (listing_json or {}).get(f"{marketplace}_specifics") or {})
+    # General measurements come from the current notes. Restoring the saved
+    # native block first prevents it from bringing back cleared measurements.
+    from anteroom.services.depop_measurements import sync_depop_measurements
+
+    sync_depop_measurements(listing_snapshot, conv_notes, clear_empty="measurements" in conv_notes)
     return listing_snapshot
 
 
