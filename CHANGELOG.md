@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1093 — 2026-11-21
+
+- Promote selected or all active eBay listings at one ad rate from Marketing → Advertising.
+
+## 0.1.1092 — 2026-11-21
+
+- Moving your listings from the Mac to your Anteroom account carries over the Vendoo label names saved on older listings, even when Item Details is blank.
+
 ## 0.1.1091 — 2026-11-21
 
 - Operators can resolve, mute, and reopen error groups. Errors that return on a newer release alert again, and warnings arrive in a daily digest.
