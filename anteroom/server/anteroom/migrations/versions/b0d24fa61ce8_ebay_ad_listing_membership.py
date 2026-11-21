@@ -17,7 +17,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("ebay_actions", sa.Column("ad_listing_ids", sa.JSON(none_as_null=True), nullable=True))
+    # Legacy SQLite adoption can create the table from current metadata first.
+    columns = {column["name"] for column in sa.inspect(op.get_bind()).get_columns("ebay_actions")}
+    if "ad_listing_ids" not in columns:
+        op.add_column("ebay_actions", sa.Column("ad_listing_ids", sa.JSON(none_as_null=True), nullable=True))
 
 
 def downgrade() -> None:
