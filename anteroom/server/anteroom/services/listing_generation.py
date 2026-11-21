@@ -456,7 +456,9 @@ def _finish_inputs(db, conv_id: str, expected_revision_id: str | None) -> str | 
     return _photos_fingerprint(db, conv_id)
 
 
-def _finish_summary(db, conv_id: str, listing: dict, repaired: bool) -> None:
+def _finish_summary(db, conv_id: str, listing: dict, repaired: bool, expected_photo_fingerprint: str) -> None:
+    if _photos_fingerprint(db, conv_id) != expected_photo_fingerprint:
+        raise RevisionConflict("Photos changed while preparing marketplace fields")
     ConversationRepo(db).add_message(
         conv_id,
         "system",
@@ -538,8 +540,11 @@ async def _finish_generation_background(
         outcome = "incomplete" if _validation_blockers(copy.deepcopy(current)) else "done"
         # Posted only now: said before the fill, it reported fields as empty
         # and "Send when ready" while chat was still filling them.
-        await in_worker_session(_finish_summary, conv_id, copy.deepcopy(current), repaired)
+        await in_worker_session(
+            _finish_summary, conv_id, copy.deepcopy(current), repaired, expected_photo_fingerprint,
+        )
     except RevisionConflict:
+        outcome = "superseded"
         log.info("discarding stale generation finish for %s", conv_id)
     except TaskStopped:
         # The seller cancelled: an expected end. The draft keeps its saved state,
