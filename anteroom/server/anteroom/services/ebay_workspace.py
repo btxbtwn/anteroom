@@ -8,6 +8,8 @@ from html.parser import HTMLParser
 import csv
 import gzip
 import io
+import re
+import xml.etree.ElementTree as ET
 
 from sqlalchemy.orm import Session
 
@@ -15,7 +17,7 @@ from anteroom.database import in_worker_session
 from anteroom.models.conversation import Conversation
 from anteroom.models.marketplace_listing import MarketplaceListing
 from anteroom.services import inventory_import
-from anteroom.services.ebay_client import EbayClient, EbayFailure, NS, segment
+from anteroom.services.ebay_client import EbayClient, EbayFailure, NS, segment, trading_xml
 from anteroom.services.ebay_finances import order_financials
 from anteroom.services.inventory_analytics import load_rows
 from anteroom.services.relay_sales import listing_id_from_url
@@ -212,7 +214,50 @@ def _finance_page(db: Session, body: dict, orders: list, reports: list, offset: 
     return page(body, rows, offset, 10)
 
 
+async def active_listing_page(client: EbayClient, page_number: int, page_size: int) -> ET.Element | None:
+    root = ET.Element("GetMyeBaySellingRequest", xmlns=NS["e"])
+    active = ET.SubElement(root, "ActiveList")
+    ET.SubElement(active, "Include").text = "true"
+    pagination = ET.SubElement(active, "Pagination")
+    ET.SubElement(pagination, "EntriesPerPage").text = str(page_size)
+    ET.SubElement(pagination, "PageNumber").text = str(page_number)
+    for name in ("SoldList", "UnsoldList", "ScheduledList", "SellingSummary"):
+        ET.SubElement(ET.SubElement(root, name), "Include").text = "false"
+    result = await client.request("POST", "/ws/api.dll", xml=trading_xml(root), call="GetMyeBaySelling")
+    return result["xml"].find("e:ActiveList", NS)
+
+
+async def advertising_listings(client: EbayClient) -> dict[str, str]:
+    """Get active listing IDs directly from the authenticated seller's inventory."""
+    page_size = 200
+    page_number = 1
+    listings: dict[str, str] = {}
+    while True:
+        active = await active_listing_page(client, page_number, page_size)
+        if active is None:
+            return listings
+        items = active.findall("e:ItemArray/e:Item", NS)
+        for item in items:
+            identifier = item.findtext("e:ItemID", namespaces=NS) or ""
+            price = item.find("e:SellingStatus/e:CurrentPrice", NS)
+            site = item.findtext("e:Site", namespaces=NS)
+            listing_type = item.findtext("e:ListingType", namespaces=NS)
+            if (re.fullmatch(r"[0-9]{6,20}", identifier) and price is not None and price.get("currencyID") == "USD"
+                    and site in (None, "US") and listing_type in ("FixedPriceItem", "StoresFixedPrice")):
+                listings[identifier] = item.findtext("e:Title", namespaces=NS) or identifier
+        pages = active.findtext("e:PaginationResult/e:TotalNumberOfPages", namespaces=NS)
+        has_more = page_number < int(pages) if pages is not None else len(items) == page_size
+        if not has_more:
+            return listings
+        if not items:
+            raise EbayFailure("eBay returned an incomplete active listings page. Refresh and try again.")
+        page_number += 1
+
+
 async def read(client: EbayClient, section: str, offset: int = 0, target: str = "", query: str = "") -> dict:
+    if section == "advertising-listings":
+        listings = await advertising_listings(client)
+        return {"rows": [row(identifier, title) for identifier, title in listings.items()]}
     params = {"limit": 25, "offset": offset}
     if section == "inbox":
         body = await client.request("GET", "/commerce/message/v1/conversation", params={**params, "conversation_type": "FROM_MEMBERS"})

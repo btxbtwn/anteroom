@@ -11,7 +11,7 @@ import json
 import re
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import urlparse
 import xml.etree.ElementTree as ET
 
@@ -25,7 +25,7 @@ from anteroom.database import claim_in_worker_session, in_worker_session
 from anteroom.models.ebay_action import EbayAction
 from anteroom.services.ebay_api import dollars, money_cents
 from anteroom.services.ebay_client import EbayClient, EbayFailure, NS, assert_identity, digest, identity, segment, trading_xml
-from anteroom.services.ebay_workspace import listing
+from anteroom.services.ebay_workspace import advertising_listings, listing
 
 
 class Input(BaseModel):
@@ -101,7 +101,7 @@ class Campaign(Input):
 
 class Ad(Input):
     campaign_id: str = Field(min_length=1, max_length=200)
-    listing_id: str = Field(pattern=r"^\d{6,20}$")
+    listing_ids: list[Annotated[str, Field(pattern=r"^[0-9]{6,20}$")]] = Field(min_length=1, max_length=50_000)
     bid_percent: str = Field(pattern=r"^\d{1,3}(?:\.\d)?$", max_length=5)
 
 
@@ -377,8 +377,8 @@ async def prepare(client: EbayClient, kind: str, payload: dict) -> dict:
                 "lineItems": [{"itemId": i["itemId"], "lineItemId": i["lineItemId"]} for i in dispute.get("lineItems", [])],
             })
             plan["summary"] = [f"Attach evidence file {data['file_id']} to dispute {target}", data["evidence_type"]]
-    elif kind in ("markdown", "quantity_discount", "email", "ad"):
-        ids = data.get("listing_ids", [data.get("listing_id")])
+    elif kind in ("markdown", "quantity_discount", "email"):
+        ids = data["listing_ids"]
         live = [await owned_listing(client, identifier) for identifier in dict.fromkeys(ids)]
         plan["context"] = live
         plan["target"] = ",".join(item["id"] for item in live)
@@ -406,14 +406,6 @@ async def prepare(client: EbayClient, kind: str, payload: dict) -> dict:
             plan["summary"] = [f"{data['percent']}% off {len(ids)} selected listings", f"{iso(start)} to {iso(end)}", f"Promotion image: {data['image_url']}"]
             if kind == "quantity_discount":
                 plan["summary"].append(f"Buyer must purchase at least {data['quantity']} items.")
-        elif kind == "ad":
-            rate = ad_rate(data["bid_percent"])
-            campaign = await client.request("GET", f"/sell/marketing/v1/ad_campaign/{segment(data['campaign_id'])}")
-            if campaign.get("fundingStrategy", {}).get("fundingModel") != "COST_PER_SALE":
-                raise EbayFailure("Choose a general campaign charged per sale.", 409)
-            plan["context"] = {"listings": live, "campaign": campaign}
-            operation("POST", f"/sell/marketing/v1/ad_campaign/{segment(data['campaign_id'])}/ad", {"listingId": data["listing_id"], "bidPercentage": str(rate)})
-            plan["summary"] = [f"Advertise {live[0]['title']} in {campaign.get('campaignName', data['campaign_id'])}", f"Ad rate: {rate}% of attributed sales"]
         else:
             schedule = datetime.fromisoformat(data["schedule"])
             if utc(schedule) <= datetime.now(UTC) + timedelta(minutes=5):
@@ -425,6 +417,31 @@ async def prepare(client: EbayClient, kind: str, payload: dict) -> dict:
                       "emailCampaignType": "ITEM_SHOWCASE", "itemSelectMode": "MANUAL", "itemIds": ids,
                       "personalizedMessage": data["message"], "subject": data["subject"], "scheduleDate": iso(schedule)})
             plan["summary"] = [f"Email your selected store audiences at {iso(schedule)}", data["subject"], data["message"]]
+    elif kind == "ad":
+        rate = ad_rate(data["bid_percent"])
+        ids = sorted(set(data["listing_ids"]))
+        path = f"/sell/marketing/v1/ad_campaign/{segment(data['campaign_id'])}"
+        campaign = await client.request("GET", path)
+        if (campaign.get("fundingStrategy", {}).get("fundingModel") != "COST_PER_SALE"
+                or campaign.get("marketplaceId") != "EBAY_US" or campaign.get("campaignCriterion")
+                or campaign.get("campaignStatus") == "ENDED"):
+            raise EbayFailure("Choose a US General campaign with manually selected listings that has not ended.", 409)
+        active = await advertising_listings(client)
+        if not set(ids).issubset(active):
+            raise EbayFailure("Some selected listings are no longer active US fixed-price listings. Refresh the selection.", 409)
+        plan["target"] = data["campaign_id"]
+        plan["context"] = {key: campaign.get(key) for key in ("campaignName", "campaignStatus", "startDate", "endDate", "fundingStrategy")}
+        # The Marketing API accepts 500 listing IDs per request.
+        for offset in range(0, len(ids), 500):
+            operation("POST", f"{path}/bulk_create_ads_by_listing_id", {"requests": [
+                {"listingId": identifier, "bidPercentage": str(rate)} for identifier in ids[offset:offset + 500]
+            ]})
+        plan["summary"] = [
+            f"Promote {len(ids)} selected listings in {campaign.get('campaignName') or data['campaign_id']}",
+            f"Ad rate: {rate}% of attributed sales",
+            f"Campaign status: {campaign.get('campaignStatus') or 'Unknown'}",
+            *[f"{active[identifier]} ({identifier})" for identifier in ids],
+        ]
     elif kind == "campaign":
         rate = ad_rate(data["bid_percent"])
         start = datetime.fromisoformat(data["start"])
@@ -433,7 +450,7 @@ async def prepare(client: EbayClient, kind: str, payload: dict) -> dict:
         plan["target"] = "new-campaign"
         operation("POST", "/sell/marketing/v1/ad_campaign", {"campaignName": data["name"], "marketplaceId": "EBAY_US",
                   "startDate": iso(start),
-                  "fundingStrategy": {"fundingModel": "COST_PER_SALE", "bidPercentage": str(rate)}, "campaignTargetingType": "MANUAL"})
+                  "fundingStrategy": {"fundingModel": "COST_PER_SALE", "bidPercentage": str(rate)}})
         plan["summary"] = [f"Create general ad campaign {data['name']}", f"Default ad rate: {rate}%. Add listings separately."]
     elif kind in ("campaign_control", "promotion_control"):
         target = segment(data["resource_id"])
@@ -523,6 +540,23 @@ def _open_review(db: Session, account_id: str, kind: str, plan: dict, fingerprin
     return {"id": action.id, "summary": plan["summary"], "images": plan.get("images", []), "expiresAt": action.expires_at.isoformat() + "Z"}
 
 
+def _ad_result(operations: list[dict], results: list[dict]) -> tuple[str, str]:
+    requested = {item["listingId"] for operation in operations for item in operation["body"]["requests"]}
+    responses = {item["listingId"]: item for result in results
+                 for item in result.get("responses", []) if item.get("listingId") in requested}
+    accepted = {identifier for identifier, item in responses.items()
+                if item.get("statusCode") in (200, 201) and not item.get("errors")}
+    rejected = {identifier for identifier, item in responses.items()
+                if isinstance(item.get("statusCode"), int) and 400 <= item["statusCode"] < 500}
+    missing = requested - accepted - rejected
+    message = f"eBay added {len(accepted)} of {len(requested)} listings to the campaign."
+    if rejected:
+        message += " eBay declined these listing IDs: " + ", ".join(sorted(rejected)) + "."
+    if missing:
+        message += " eBay did not confirm these listing IDs: " + ", ".join(sorted(missing)) + ". Check eBay before trying again."
+    return ("unknown" if missing else "sent"), message
+
+
 async def execute(action_id: str, kind: str, payload: dict) -> dict:
     """Send one reviewed action. No database connection is held while eBay answers."""
     client = await EbayClient.connect()
@@ -536,15 +570,24 @@ async def execute(action_id: str, kind: str, payload: dict) -> dict:
                                   action_id, account_id, fingerprint, kind, plan["target"])
     completed = 0
     result = {}
+    ad_results: list[dict] = []
     try:
         for operation in plan["operations"]:
             result = await client.request(**operation)
             if kind == "refund" and result.get("refundStatus") == "FAILED":
                 raise EbayFailure("eBay rejected this refund. No refund was issued.", 422)
+            if kind == "ad":
+                ad_results.append(result)
+                completed += 1
+                continue
             # Bulk Inventory calls can return HTTP 200 with individual failures.
             if any(r.get("statusCode", 200) >= 400 or r.get("errors") for r in result.get("responses", [])):
                 raise EbayFailure("eBay rejected one or more inventory updates. Check the live listing before trying again.")
             completed += 1
+        if kind == "ad":
+            state, message = _ad_result(plan["operations"], ad_results)
+            await asyncio.shield(in_worker_session(_settle, action_id, state, None))
+            return {"state": state, "id": action_id, "message": message}
     except BaseException as exc:
         definite = isinstance(exc, EbayFailure) and exc.status in (400, 401, 403, 404, 409, 422, 429) and completed == 0
         # Shielded: a dropped request must not leave the action marked as sending.

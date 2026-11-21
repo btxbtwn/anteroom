@@ -16,7 +16,7 @@ from anteroom.services.marketplace_accounts import SignInRequired
 
 router = APIRouter(prefix="/api/ebay", tags=["ebay"])
 Section = Literal["traffic", "finances", "payouts", "inbox", "messages", "feedback", "orders", "order", "disputes", "dispute",
-                  "campaigns", "promotions", "promotion-reports", "ad-reports", "ad-report", "emails", "audiences", "inventory", "offers", "policies", "locations", "categories", "aspects", "research", "activity"]
+                  "campaigns", "advertising-listings", "promotions", "promotion-reports", "ad-reports", "ad-report", "emails", "audiences", "inventory", "offers", "policies", "locations", "categories", "aspects", "research", "activity"]
 
 
 def failure(exc: Exception) -> HTTPException:

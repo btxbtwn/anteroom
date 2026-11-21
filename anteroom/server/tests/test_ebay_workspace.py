@@ -122,7 +122,7 @@ def action_cases():
         "markdown": {"name": "Coat sale", "listing_ids": [ITEM_ID], "percent": 10, "start": future, "end": end, "image_url": "https://i.ebayimg.com/image.jpg"},
         "quantity_discount": {"name": "Two coats", "listing_ids": [ITEM_ID], "percent": 10, "quantity": 2, "start": future, "end": end, "image_url": "https://i.ebayimg.com/image.jpg"},
         "campaign": {"name": "Coat campaign", "bid_percent": "2", "start": future},
-        "ad": {"campaign_id": "campaign-1", "listing_id": ITEM_ID, "bid_percent": "2"},
+        "ad": {"campaign_id": "campaign-1", "listing_ids": [ITEM_ID], "bid_percent": "2"},
         "campaign_control": {"resource_id": "campaign-1", "action": "pause"},
         "promotion_control": {"resource_id": "promo-1", "action": "pause"},
         "email": {"subject": "Coat sale", "message": "See our coats", "audience_codes": ["FOLLOWERS"], "listing_ids": [ITEM_ID], "schedule": future},
@@ -487,3 +487,61 @@ def test_action_migration_preserves_previous_release_database(tmp_path):
     with engine.connect() as connection:
         assert connection.execute(text("SELECT title FROM conversations WHERE id='keep'")).scalar() == "Keep this item"
     engine.dispose()
+
+
+def test_bulk_ads_use_active_ebay_inventory_and_explicit_confirmation(workspace):
+    second_id = "123456789013"
+    path = "/sell/marketing/v1/ad_campaign/campaign-1/bulk_create_ads_by_listing_id"
+    workspace.remote.write_results = {path: {"responses": [
+        {"listingId": ITEM_ID, "adId": "ad-1", "statusCode": 200},
+        {"listingId": second_id, "adId": "ad-2", "statusCode": 200},
+    ]}}
+    response = workspace.client.get("/api/ebay/read/advertising-listings")
+    assert response.status_code == 200
+    assert {row["id"] for row in response.json()["rows"]} == {ITEM_ID, second_id}
+
+    payload = {"campaign_id": "campaign-1", "listing_ids": [second_id, ITEM_ID, ITEM_ID], "bid_percent": "3.5"}
+    review = preview(workspace, "ad", payload)
+    assert any("3.5%" in line for line in review["summary"])
+    assert confirm(workspace, review, "ad", payload, confirm=False).status_code == 422
+    assert not workspace.remote.writes
+    result = confirm(workspace, review, "ad", payload)
+    assert result.json()["state"] == "sent"
+    assert workspace.remote.writes == [("POST", path, {"requests": [
+        {"listingId": ITEM_ID, "bidPercentage": "3.5"}, {"listingId": second_id, "bidPercentage": "3.5"},
+    ]})]
+    assert confirm(workspace, review, "ad", payload).status_code == 409
+
+
+def test_bulk_ads_cover_multiple_inventory_pages_and_ebay_write_batches(workspace):
+    workspace.remote.active_items = [(str(123456789000 + index), f"Listing {index}") for index in range(631)]
+    ids = [identifier for identifier, _ in workspace.remote.active_items]
+    response = workspace.client.get("/api/ebay/read/advertising-listings")
+    assert [row["id"] for row in response.json()["rows"]] == ids
+    payload = {"campaign_id": "campaign-1", "listing_ids": ids, "bid_percent": "4.5"}
+    review = preview(workspace, "ad", payload)
+    assert not workspace.remote.writes
+    result = confirm(workspace, review, "ad", payload).json()
+    assert result["message"] == "eBay added 631 of 631 listings to the campaign."
+    batches = [body["requests"] for _, _, body in workspace.remote.writes]
+    assert [len(batch) for batch in batches] == [500, 131]
+    assert [ad["listingId"] for batch in batches for ad in batch] == ids
+
+
+def test_bulk_ads_reject_stale_inventory_and_report_declined_ids(workspace):
+    second_id = "123456789013"
+    payload = {"campaign_id": "campaign-1", "listing_ids": [ITEM_ID, second_id], "bid_percent": "3.5"}
+    review = preview(workspace, "ad", payload)
+    workspace.remote.active_items = [(ITEM_ID, "Test wool coat")]
+    assert confirm(workspace, review, "ad", payload).status_code == 409
+    assert not workspace.remote.writes
+
+    workspace.remote.active_items.append((second_id, "Test jeans"))
+    path = "/sell/marketing/v1/ad_campaign/campaign-1/bulk_create_ads_by_listing_id"
+    workspace.remote.write_results = {path: {"responses": [
+        {"listingId": ITEM_ID, "statusCode": 200},
+        {"listingId": second_id, "statusCode": 409, "errors": [{"message": "PRIVATE ERROR ECHO"}]},
+    ]}}
+    result = confirm(workspace, review, "ad", payload).json()
+    assert result["message"] == f"eBay added 1 of 2 listings to the campaign. eBay declined these listing IDs: {second_id}."
+    assert confirm(workspace, review, "ad", payload).status_code == 409
