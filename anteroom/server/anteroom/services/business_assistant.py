@@ -57,7 +57,9 @@ from anteroom.services.inventory_analytics import ANALYTICS_RANGES, AnalyticsIte
 log = logging.getLogger("anteroom.business_assistant")
 
 # Earlier turns sent back with a question, so a follow-up can lean on them.
+# The window moves in steps so the prompt prefix stays steady across turns for provider caching.
 HISTORY_MESSAGES = 20
+HISTORY_STEP = 10
 # How many rows of each kind the summary shows; a lookup reads every one.
 TOP_BOXES = 15
 LONGEST_LISTED = 15
@@ -681,9 +683,14 @@ def build_messages(db: Session, question: str, shop: Shop, thread_id: str | None
     The seller's question must already be saved; it is the last turn read back.
     History is that conversation only, never another thread or a listing's chat.
     """
+    rows = list_messages(db, thread_id)
+    start = max(0, len(rows) - (HISTORY_MESSAGES + 1))
+    start -= start % HISTORY_STEP
+    while start + 1 < len(rows) and rows[start].role != "user":
+        start += 1
     earlier = [
         {"role": row.role, "content": row.text + assistant_changes.history_note(row.changes) + _automation_note(row.automation)}
-        for row in list_messages(db, thread_id)[-(HISTORY_MESSAGES + 1):]
+        for row in rows[start:]
     ]
     if not earlier or earlier[-1] != {"role": "user", "content": question}:
         earlier.append({"role": "user", "content": question})

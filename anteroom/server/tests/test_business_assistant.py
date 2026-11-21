@@ -1837,6 +1837,43 @@ def test_failing_and_good_lookups_in_one_round_both_report(workspace, monkeypatc
     assert "Lookup 2 of 2 (listing count):\nLookup result (1 rows):\ncount(*)\n3" in fed_back
 
 
+def test_history_window_moves_in_steps_starting_on_a_user_turn(workspace):
+    db, _client = workspace
+    shop = business_assistant.read_shop(db, now=NOW)
+    try:
+        thread = business_assistant.create_thread(db)
+        for index in range(21):
+            role = "user" if index % 2 == 0 else "assistant"
+            business_assistant.add_message(db, role, f"turn {index}", thread_id=thread.id)
+        at_21 = business_assistant.build_messages(db, "turn 20", shop, thread_id=thread.id)
+        assert len(at_21) == 22  # system + all 21 saved rows
+        assert at_21[1] == {"role": "user", "content": "turn 0"}
+
+        first_seen: list[dict] = []
+        for length in range(22, 41):
+            role = "user" if (length - 1) % 2 == 0 else "assistant"
+            text = f"turn {length - 1}"
+            business_assistant.add_message(db, role, text, thread_id=thread.id)
+            if length >= 31:
+                messages = business_assistant.build_messages(db, text, shop, thread_id=thread.id)
+                first_seen.append(messages[1])
+        assert len(first_seen) == 10
+        assert all(first == {"role": "user", "content": "turn 10"} for first in first_seen)
+
+        # If a stepped boundary lands on an assistant row, advance to the next user turn.
+        shifted = business_assistant.create_thread(db)
+        business_assistant.add_message(db, "user", "extra user 0", thread_id=shifted.id)
+        for index in range(1, 32):
+            role = "user" if index % 2 == 1 else "assistant"
+            business_assistant.add_message(db, role, f"shifted {index}", thread_id=shifted.id)
+        # Index 10 is assistant; history must start at index 11 (user).
+        shifted_msgs = business_assistant.build_messages(db, "shifted 31", shop, thread_id=shifted.id)
+        assert shifted_msgs[1] == {"role": "user", "content": "shifted 11"}
+    finally:
+        shop.close()
+
+
+
 
 
 
