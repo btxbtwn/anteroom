@@ -79,3 +79,45 @@ it("links Privacy, Terms, and Support from the landing page footer", async () =>
   expect(html).toContain('href="/terms"');
   expect(html).toContain('href="mailto:support@myanteroom.com"');
 });
+
+it("offers Resend confirmation email after email_not_confirmed and calls supabase.auth.resend", async () => {
+  const resend = vi.fn().mockResolvedValue({ error: null });
+  const unconfirmed = {
+    auth: {
+      signInWithPassword: vi.fn().mockResolvedValue({ error: { code: "email_not_confirmed" } }),
+      resend,
+    },
+  } as unknown as SupabaseClient;
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(() => root.render(<SignIn client={unconfirmed} />));
+    const emailInput = container.querySelector<HTMLInputElement>("#email")!;
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+    await act(() => {
+      setValue.call(emailInput, "seller@example.com");
+      emailInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const form = container.querySelector("form")!;
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    const resendButton = Array.from(container.querySelectorAll("button")).find(
+      (btn) => btn.textContent === "Resend confirmation email",
+    );
+    expect(resendButton).toBeDefined();
+    await act(async () => {
+      resendButton!.click();
+    });
+    expect(resend).toHaveBeenCalledWith({
+      type: "signup",
+      email: "seller@example.com",
+      options: { emailRedirectTo: window.location.origin },
+    });
+    expect(container.querySelector('[role="status"]')?.textContent).toContain("seller@example.com");
+  } finally {
+    await act(() => root.unmount());
+    container.remove();
+  }
+});

@@ -14,6 +14,8 @@ struct SignInMessagesTests {
         precondition(SignInMessages.message(for: .signIn, code: "invalid_credentials", offline: true).contains("Check your connection"))
         precondition(SignInMessages.message(for: .newPassword, code: "something_new") == "Could not save your new password. Please try again.")
         precondition(SignInMessages.message(for: .reset, code: nil) == "Could not send the reset link. Please try again.")
+        precondition(SignInMessages.message(for: .resend, code: nil) == "Could not resend the confirmation email. Please try again.")
+        precondition(SignInMessages.message(for: .signIn, code: "email_not_confirmed") == SignInMessages.emailNotConfirmed)
         print("Sign-in message tests passed")
     }
 }

@@ -10,6 +10,7 @@ struct SignInView: View {
     @State private var isWorking = false
     @State private var notice: String?
     @State private var error: String?
+    @State private var canResendConfirmation = false
     @FocusState private var focused: Field?
 
     enum Field { case email, password }
@@ -69,6 +70,11 @@ struct SignInView: View {
                     if let message = error ?? session.signInError {
                         Label(message, systemImage: "exclamationmark.triangle")
                             .foregroundStyle(WorkspaceStyle.destructive).font(.footnote)
+                    }
+                    if mode == .signIn && canResendConfirmation {
+                        Button("Resend confirmation email", action: resendConfirmation)
+                            .font(.footnote)
+                            .disabled(isWorking || !trimmedEmail.contains("@"))
                     }
                 }
                 HStack {
@@ -131,6 +137,24 @@ struct SignInView: View {
         password = ""
         error = nil
         notice = nil
+        canResendConfirmation = false
+    }
+
+    private func resendConfirmation() {
+        let address = trimmedEmail
+        guard !isWorking, address.contains("@") else { return }
+        isWorking = true
+        error = nil
+        notice = nil
+        Task {
+            defer { isWorking = false }
+            do {
+                try await session.resendConfirmationEmail(to: address)
+                notice = "We sent another confirmation link to \(address). Open it on this iPhone, or sign in here with your password once it’s confirmed."
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
     }
 
     private func submit() {
@@ -148,6 +172,7 @@ struct SignInView: View {
                 case .createAccount:
                     if try await session.createAccount(email: address, password: password) {
                         switchTo(.signIn)
+                        canResendConfirmation = true
                         notice = "We sent a confirmation link to \(address). Open it on this iPhone, or sign in here with your password once it’s confirmed."
                     }
                 case .reset:
@@ -157,6 +182,9 @@ struct SignInView: View {
                 focused = nil
             } catch {
                 self.error = error.localizedDescription
+                if mode == .signIn && self.error == SignInMessages.emailNotConfirmed {
+                    canResendConfirmation = true
+                }
             }
         }
     }
