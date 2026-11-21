@@ -918,8 +918,15 @@ export function StructuredEditor({
   const activeReloadError = reloadErrors.get(`${convId}:${revisionId}:${tab}`) ?? null;
   // Stale fields reload on their own. A partial form can also need a retry
   // even when the request succeeded, e.g. when Mercari's quotes failed.
+  // A form that could not load, or a revision still stale after its automatic
+  // reload ran (a conflict, or a stale result), also keeps the retry.
+  const staleHere = nativeTab && !preflight.isPlaceholderData && !preflight.isError
+    && preflight.data?.revision_id === revisionId && staleFormMarketplaces(preflight.data, [tab]).length > 0;
+  const autoReloadTried = Boolean(revisionId) && autoReloadAttemptedRef.current.keys.has(`${revisionId}:${tab}`);
   const showReload = nativeTab && (retryingThisTab || activeReloadError !== null
-    || (!nativeQuery.isPlaceholderData && nativeQuery.data?.reload_recommended === true));
+    || (!nativeQuery.isPlaceholderData && nativeQuery.data?.reload_recommended === true)
+    || (nativeQuery.isError && !nativeQuery.data)
+    || (staleHere && autoReloadTried && autoReloadingMarket === null));
   const formStatus = reloadingThisTab
     ? "Reloading fields…"
     : nativeTab && !nativeQuery.data && (nativeQuery.isFetching || autoReloadingMarket !== null)
