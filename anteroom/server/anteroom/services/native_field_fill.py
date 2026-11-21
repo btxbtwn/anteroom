@@ -574,7 +574,13 @@ def _save_fill(db: Session, conv_id: str, revision_id: str, fingerprint: str, li
     accepted = {path: answer for path, answer in accepted.items() if path not in dependent_paths}
     for dependent in dependent_paths:
         if not is_locked(updated, dependent):
-            empty = {} if dependent.endswith(".attributes") else [] if dependent.endswith(".inventoryRows") else ""
+            dep_row = form_rows.get(dependent) or {}
+            empty = (
+                {} if dependent.endswith(".attributes")
+                else [] if dependent.endswith(".inventoryRows")
+                else False if dep_row.get("input_type") == "boolean"
+                else ""
+            )
             write_value(updated, dependent, empty)
             (updated.get(native_contract.EVIDENCE_KEY) or {}).pop(dependent, None)
     if strict:

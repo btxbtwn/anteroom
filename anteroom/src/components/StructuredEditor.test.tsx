@@ -75,6 +75,36 @@ describe("native row layout", () => {
     expect(html).toContain('data-listing-row="mercari_specifics.price" class="group/field min-w-0 col-span-full"');
     expect(html).toContain('class="@xl:w-1/2"');
   });
+
+  it("renders a boolean checkbox inline, clears boolean dependents to false, and hides General brand when No brand is checked", () => {
+    state.fields = [
+      field("mercari_specifics.brand", {
+        label: "Brand", value: "", options: ["Nike", "Adidas"], selection_only: true,
+        options_source: "marketplace", clears: ["mercari_specifics.noBrand"],
+      }),
+      field("mercari_specifics.noBrand", {
+        label: "No brand / Not sure", value: true, input_type: "boolean",
+        presentation: "checkbox", clears: ["mercari_specifics.brand"],
+      }),
+    ];
+    const save = vi.fn();
+    const html = renderToStaticMarkup(
+      <StructuredEditor convId="item" listing={{ title: "Original", brand: "Nike", mercari_specifics: { noBrand: true } }}
+        tab="mercari" target={null} disabled={false} onChange={save} />,
+    );
+    expect(html).toContain('data-slot="checkbox"');
+    expect(html).toContain('data-listing-field="mercari_specifics.noBrand"');
+    expect(html).toContain("No brand / Not sure");
+    // Even though General brand is "Nike", Mercari's Brand field stays blank while No brand is checked.
+    expect(choices.mock.calls[0][0].value).toBe("");
+    // Choosing a Mercari brand clears the boolean noBrand dependent to false (not "").
+    (choices.mock.calls[0][0] as { onChange: (value: string) => void }).onChange("Nike");
+    expect(save).toHaveBeenCalledWith({
+      title: "Original",
+      brand: "Nike",
+      mercari_specifics: { brand: "Nike", noBrand: false },
+    });
+  });
 });
 
 describe("editor busy state", () => {

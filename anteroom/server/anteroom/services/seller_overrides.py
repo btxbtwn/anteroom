@@ -678,8 +678,22 @@ def _parse_field_value(value: Any) -> Any:
     return value
 
 
+def _parse_bool_value(value: Any) -> Any:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        folded = value.strip().casefold()
+        if folded in {"true", "yes", "1"}:
+            return True
+        if folded in {"false", "no", "0"}:
+            return False
+    return value
+
+
 def apply_field_updates(listing: dict, fields: list[dict]) -> list[str]:
     """Set dotted paths and lock them. A clear stores an empty list or removes the key."""
+    from anteroom.services.mercari_form import is_no_brand
+
     locks = locked_paths(listing)
     applied: list[str] = []
     for field in fields:
@@ -704,7 +718,19 @@ def apply_field_updates(listing: dict, fields: list[dict]) -> list[str]:
             value = _parse_field_value(field.get("value"))
             if leaf in _DEPOP_MULTI:
                 value = _split_choices(value)
-            set_path(listing, path, value)
+            if path == "mercari_specifics.noBrand":
+                value = _parse_bool_value(value)
+                set_path(listing, path, value)
+                if value is True:
+                    specifics = listing.get("mercari_specifics")
+                    if isinstance(specifics, dict):
+                        specifics.pop("brand", None)
+            elif path == "mercari_specifics.brand":
+                set_path(listing, path, value)
+                if isinstance(value, str) and value.strip() and not is_no_brand(value):
+                    set_path(listing, "mercari_specifics.noBrand", False)
+            else:
+                set_path(listing, path, value)
         locks.add(path)
         applied.append(path)
     _write_locks(listing, locks)
