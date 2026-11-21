@@ -1872,7 +1872,7 @@ async function runDepopNative(msg, recovery = false) {
         }
       } catch (readError) {
         if (payload.action === 'save_draft') {
-          if (depopDraftGone(readError)) return marketplaceFailure(error, true, {});
+          if (depopDraftGone(readError)) return marketplaceFailure(readError, true);
           return marketplaceFailure(readError, true, {
             draft_url: payload.draft_url, ...(replacedDraft ? { draft_replaced: true } : {}),
           });

@@ -928,6 +928,29 @@ test('a Depop save confirms the draft by reading it again when the first read fa
   assert.equal(readsAfterSave, 5);
 });
 
+test('a Depop save that loses its reply reports when the recovery read finds the draft gone', async () => {
+  const { c, msg } = newDraft();
+  msg.payload.draft_url = DRAFT;
+  let writes = 0;
+  c.fetch = async (url, options = {}) => {
+    if (new URL(url).pathname !== '/presentation/api/v1/drafts/123456/') return reply(200, {});
+    if (options.method === 'PUT') {
+      writes += 1;
+      throw new Error('Disconnected');
+    }
+    return writes
+      ? reply(404, { message: 'Could not find draft with id: 123456' })
+      : reply(200, { id: '123456', description: 'Private draft', price_amount: '12', pictures: [{ id: 789 }] });
+  };
+  withCatalog(c);
+  const result = await c.runDepopNative(msg);
+  assert.equal(writes, 1);
+  assert.equal(result.ok, false);
+  assert.equal(result.safe_to_retry, true);
+  assert.equal(result.draft_url, undefined);
+  assert.match(result.marketplace_message || '', /could not find draft/i);
+});
+
 test('a deleted Depop draft is replaced once and the missing link is not kept', async () => {
   const gone = 'https://www.depop.com/sellinghub/drafts/edit/123456/';
   const created = 'https://www.depop.com/sellinghub/drafts/edit/newdraft1/';
