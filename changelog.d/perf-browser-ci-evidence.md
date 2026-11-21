@@ -1,1 +1,0 @@
-- Measure browser checks so future CI changes can keep the same test coverage.

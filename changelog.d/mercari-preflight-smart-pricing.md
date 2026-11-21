@@ -1,1 +1,0 @@
-- Open Mercari listing forms and checks for older drafts saved with a Smart Pricing toggle.

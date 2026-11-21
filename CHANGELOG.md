@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1084 — 2026-11-21
+
+- Measure browser checks so future CI changes can keep the same test coverage.
+
+## 0.1.1083 — 2026-11-21
+
+- Open Mercari listing forms and checks for older drafts saved with a Smart Pricing toggle.
+
 ## 0.1.1082 — 2026-11-21
 
 - Stop bulk Regenerate from failing when category lookup times out under load.
