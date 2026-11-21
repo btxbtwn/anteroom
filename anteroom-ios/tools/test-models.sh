@@ -103,3 +103,7 @@ xcrun swiftc Sources/Automations/OfferActivityDates.swift Tests/OfferActivityDat
 echo "Test marketplace inventory sheet rules and Quick Edit invariants"
 xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/API/AssistantModels.swift Sources/API/MarketplaceReadiness.swift Sources/API/MarketplaceActionModels.swift Sources/API/NativeFormModels.swift Sources/API/EbayFormModels.swift Sources/Inventory/InventoryFilters.swift Sources/Inventory/MarketplaceSheet.swift Tests/MarketplaceSheetTests.swift -o "$RUNNER_TEMP/marketplace-sheet-tests"
 "$RUNNER_TEMP/marketplace-sheet-tests"
+
+echo "Test direct marketplace Connections settings presentation"
+xcrun swiftc Sources/API/Generated/APIContract.swift Sources/API/Models.swift Sources/Marketplaces/MarketplaceModels.swift Sources/Settings/ConnectionsSettingsModels.swift Tests/ConnectionsSettingsTests.swift -o "$RUNNER_TEMP/connections-settings-tests"
+"$RUNNER_TEMP/connections-settings-tests"

@@ -168,9 +168,10 @@ struct EbayWorkspaceView: View {
 
 /// Which eBay tools to authorize. Sign-in opens eBay's own page in a web
 /// authentication sheet that closes when eBay sends the seller back.
-private struct EbayConnectionSheet: View {
+struct EbayConnectionSheet: View {
     let api: AnteroomAPI
     let account: DirectConnections.Account?
+    var allowRestart = false
     /// The sign-in sheet closed: read the connection again.
     let onSignInEnded: () -> Void
     @Environment(\.dismiss) private var dismiss
@@ -197,7 +198,7 @@ private struct EbayConnectionSheet: View {
                 } footer: {
                     Text("Choose the tools you want to authorize. You can grant groups separately if eBay restricts a feature. eBay may require seller eligibility or app approval. After reconnecting, refresh the view you want to use.")
                 }
-                if account?.pending == true {
+                if account?.pending == true, !allowRestart {
                     Section {
                         Text("Finish signing in to eBay.")
                         if let link = account?.authorizeURL.flatMap(URL.init(string:)) {
@@ -219,14 +220,25 @@ private struct EbayConnectionSheet: View {
             .navigationTitle("eBay connection")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                        .disabled(working)
+                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Grant") { grant() }
-                        .disabled(working || chosen.isEmpty || account?.pending == true)
-                        .accessibilityLabel("Grant selected permissions")
+                    if working {
+                        ProgressView()
+                            .accessibilityLabel("Signing in to eBay")
+                    } else {
+                        Button("Grant") { grant() }
+                            .disabled(chosen.isEmpty || (!allowRestart && account?.pending == true))
+                            .accessibilityLabel("Grant selected permissions")
+                    }
                 }
             }
         }
+        // Keep Settings' cancel and disconnect controls behind this sheet
+        // until the in-flight sign-in finishes.
+        .interactiveDismissDisabled(working)
     }
 
     private func grant() {
