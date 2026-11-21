@@ -1,6 +1,7 @@
 import { listingScreenRead } from "./listingScreen";
 import { reportError } from "./errorReports";
 import type { VendooDraft } from "./vendooDraft";
+import type { OfferLogResponse } from "./contract.gen";
 import { ApiRequestError, retryAfterMs, studioFetch, hasHostedApiSession } from "./transport";
 import { trackPhotoUpload } from "../photoUploads";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
@@ -479,7 +480,7 @@ export const api = {
     offers: (filters: { start: string; end: string; timezone: string }) =>
       request<import("./contract.gen").OfferAnalyticsResponse>(`/analytics/offers?${new URLSearchParams(filters)}`),
     offerLog: (before?: string | null) =>
-      request<import("./contract.gen").OfferLogResponse>(`/analytics/offers/log${before ? `?${new URLSearchParams({ before })}` : ""}`),
+      request<OfferLogResponse>(`/analytics/offers/log${before ? `?${new URLSearchParams({ before })}` : ""}`),
     get: (range: AnalyticsRange, custom?: { start: string; end: string }) => {
       const params = new URLSearchParams({ range });
       if (custom) {
