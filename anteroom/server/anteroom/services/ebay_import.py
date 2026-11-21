@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 from anteroom.database import in_worker_session
 from anteroom.models.schema import ListingSchema
 from anteroom.services import ebay_actions, inventory_import
-from anteroom.services.ebay_client import EbayClient, EbayFailure, NS, assert_identity, trading_xml
+from anteroom.services.ebay_client import EbayClient, EbayFailure, NS, assert_identity
+from anteroom.services.ebay_workspace import active_listing_page
 
 PAGE_SIZE = 25
 
@@ -24,16 +25,7 @@ def _number(value: str | None) -> int | None:
 
 
 async def active_listings(client: EbayClient, page_number: int) -> dict:
-    root = ET.Element("GetMyeBaySellingRequest", xmlns=NS["e"])
-    active = ET.SubElement(root, "ActiveList")
-    ET.SubElement(active, "Include").text = "true"
-    pagination = ET.SubElement(active, "Pagination")
-    ET.SubElement(pagination, "EntriesPerPage").text = str(PAGE_SIZE)
-    ET.SubElement(pagination, "PageNumber").text = str(page_number)
-    for name in ("SoldList", "UnsoldList", "ScheduledList", "SellingSummary"):
-        ET.SubElement(ET.SubElement(root, name), "Include").text = "false"
-    result = await client.request("POST", "/ws/api.dll", xml=trading_xml(root), call="GetMyeBaySelling")
-    active = result["xml"].find("e:ActiveList", NS)
+    active = await active_listing_page(client, page_number, PAGE_SIZE)
     if active is None:
         return {"rows": [], "page": page_number, "total": 0, "has_more": False}
     # eBay has answered: match its rows against inventory with a short session of their own.

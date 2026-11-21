@@ -1,0 +1,1 @@
+- Promote selected or all active eBay listings at one ad rate from Marketing → Advertising.

@@ -56,19 +56,36 @@ export function RemoteList({ section, params = {}, onSelect, selected }: { secti
   </div>;
 }
 
-export function ListingPicker({ selected, onChange }: { selected: string[]; onChange: (ids: string[]) => void }) {
+export function ListingPicker({ selected, onChange, advertisingAccount }: {
+  selected: string[]; onChange: (ids: string[]) => void; advertisingAccount?: string;
+}) {
+  const advertising = advertisingAccount !== undefined;
   const [search, setSearch] = useState("");
-  const listings = useQuery({ queryKey: ["ebay", "local-listings"], queryFn: api.ebayOffers.status });
-  const visible = listings.data?.listings.filter((item) => item.title.toLowerCase().includes(search.toLowerCase())) || [];
-  return <fieldset className="ebay-selection"><legend>Select listings</legend>
-    <p className="ebay-selection-meta">{selected.length} selected · up to 50 listings per discount</p>
-    {listings.error ? <PageError message={listings.error.message} /> : null}
+  const listings = useQuery({ queryKey: ["ebay", "local-listings"], queryFn: api.ebayOffers.status, enabled: !advertising });
+  const active = useQuery({ queryKey: ["ebay", "advertising-listings", advertisingAccount],
+    queryFn: () => api.ebay.read("advertising-listings"), enabled: advertising, retry: false });
+  const query = advertising ? active : listings;
+  const items = advertising ? (active.isError ? undefined : active.data?.rows) : listings.data?.listings.map(({ listingId, title }) => ({ id: listingId, title }));
+  const visible = items?.filter((item) => item.title.toLowerCase().includes(search.trim().toLowerCase())) ?? [];
+  const selectedIds = new Set(selected);
+  return <fieldset className="ebay-selection"><legend>{advertising ? "Active eBay listings" : "Select listings"}</legend>
+    <p className="ebay-selection-meta" aria-live="polite">{selected.length} selected{advertising ? "" : " · up to 50 listings per discount"}</p>
+    {query.error ? <PageError message={query.error.message} /> : null}
+    {advertising && query.isPending ? <p className="text-sm">Loading active eBay listings…</p> : null}
     <Input nativeInput aria-label="Filter listings" type="search" placeholder="Find a listing…" value={search} onChange={(event) => setSearch(event.target.value)} />
+    {advertising ? <div className="flex flex-wrap gap-2">
+      <Button type="button" variant="outline" disabled={!items?.length || active.isFetching}
+        onClick={() => onChange(items?.map((item) => item.id) ?? [])}>Select all active listings</Button>
+      <Button type="button" variant="outline" disabled={!selected.length} onClick={() => onChange([])}>Clear selection</Button>
+      <Button type="button" variant="ghost" disabled={active.isFetching} onClick={() => void active.refetch()}>Refresh</Button>
+    </div> : null}
     <div className="ebay-selection-list">
-      {visible.map((item) => <label key={item.listingId}>
-        <Checkbox className="mt-0.5" checked={selected.includes(item.listingId)} onCheckedChange={(next) => onChange(next === true ? [...selected, item.listingId] : selected.filter((id) => id !== item.listingId))} />{item.title}
+      {visible.map((item) => <label key={item.id}>
+        <Checkbox className="mt-0.5" checked={selectedIds.has(item.id)} onCheckedChange={(next) => onChange(next === true ? [...selected, item.id] : selected.filter((id) => id !== item.id))} />{item.title}
       </label>)}
-      {listings.data && !visible.length ? <p className="text-sm text-muted-foreground py-4">{search ? "No listings match your search." : "Import listings from eBay to select them here."}</p> : null}
+      {items && !visible.length ? <p className="text-sm text-muted-foreground py-4">
+        {search ? "No listings match your search." : advertising ? "No active US fixed-price listings found." : "Import listings from eBay to select them here."}
+      </p> : null}
     </div>
   </fieldset>;
 }

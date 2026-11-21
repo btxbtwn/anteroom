@@ -16,13 +16,14 @@ const future = (days: number) => {
 };
 const iso = (value: string) => new Date(value).toISOString();
 
-export function MarketingPanel() {
+export function MarketingPanel({ accountKey }: { accountKey: string }) {
   const [task, setTask] = useFormDraft("marketing:task", () => "Discounts");
   const [audienceCodes, setAudienceCodes] = useFormDraft<string[]>("marketing:audiences", () => []);
   const [defaults] = useState(() => ({ start: future(1), end: future(8),
     reportStart: new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10),
     reportEnd: new Date(Date.now() - 86400000).toISOString().slice(0, 10) }));
   const [ids, setIds] = useFormDraft<string[]>("marketing:listings", () => []);
+  const [adIds, setAdIds] = useFormDraft<string[]>(`advertising:listings:${accountKey}`, () => []);
   const [campaign, setCampaign] = useState<EbayRow | null>(null);
   const [promotion, setPromotion] = useState<EbayRow | null>(null);
   const [report, setReport] = useState<EbayRow | null>(null);
@@ -35,9 +36,9 @@ export function MarketingPanel() {
   const promotionPayload = (values: Record<string, string>) => ({ name: values.name, percent: Number(values.percent),
     start: iso(values.start), end: iso(values.end), quantity: Number(values.quantity || 2), image_url: values.image_url });
   return <WorkspaceTabs label="Marketing tools" items={["Discounts", "Advertising", "Store emails"]} value={task} onChange={setTask}>
-    <PageSection title="Choose listings" description="New discounts and ads apply only to the listings you select. eBay checks seller eligibility and promotion rules.">
+    {task !== "Advertising" ? <PageSection title="Choose listings" description="New discounts and ads apply only to the listings you select. eBay checks seller eligibility and promotion rules.">
       <ListingPicker selected={ids} onChange={setIds} />
-    </PageSection>
+    </PageSection> : null}
     {task === "Discounts" ? <>
     <div className="space-y-3">
       <ActionForm defaultOpen={false} title="Schedule markdown sale" kind="markdown" context={{ listing_ids: ids }}
@@ -55,6 +56,9 @@ export function MarketingPanel() {
     <PageSection title="Promotion results"><RemoteList section="promotion-reports" /></PageSection>
     </> : null}
     {task === "Advertising" ? <>
+    <PageSection title="Choose listings to promote" description="Select active US fixed-price listings from your eBay account. eBay determines which listings it can promote.">
+      <ListingPicker key={accountKey} advertisingAccount={accountKey} selected={adIds} onChange={setAdIds} />
+    </PageSection>
     <PageSection title="Promoted Listings campaigns" description="General campaigns charge an ad percentage on attributed sales. Creating a campaign does not add listings automatically.">
       <RemoteList section="campaigns" selected={campaign?.id} onSelect={setCampaign} />
       <ActionForm defaultOpen={false} title="Create ad campaign" kind="campaign"
@@ -62,11 +66,9 @@ export function MarketingPanel() {
                  { name: "start", label: "Starts (your local time)", type: "datetime-local", initial: defaults.start }]}
         build={(values) => ({ ...values, start: iso(values.start) })} />
       {campaign ? <div className="space-y-3">
-        <ActionForm defaultOpen={false} key={`ad-${campaign.id}`} title="Advertise selected listing" kind="ad" disabled={ids.length !== 1}
-          context={{ campaign_id: campaign.id, listing_id: ids[0] }}
-          fields={[{ name: "bid_percent", label: "Ad rate (%)", type: "number", initial: "2", min: "2", max: "100", step: "0.1" }]}>
-          <p className="text-xs text-muted-foreground">Select exactly one listing above for this ad.</p>
-        </ActionForm>
+        <ActionForm defaultOpen={false} key={`ad-${campaign.id}`} title="Promote selected listings" kind="ad" disabled={!adIds.length}
+          context={{ campaign_id: campaign.id, listing_ids: adIds }}
+          fields={[{ name: "bid_percent", label: "Ad rate (%)", type: "number", min: "2", max: "100", step: "0.1", help: "This rate applies to each selected listing on attributed sales." }]} />
         <ActionForm defaultOpen={false} key={`campaign-${campaign.id}`} title="Change campaign status" kind="campaign_control" context={{ resource_id: campaign.id }}
           fields={[{ name: "action", label: "Action", options: ["pause", "resume", "end"] }]} />
         <ActionForm defaultOpen={false} key={`report-${campaign.id}`} title="Generate campaign report" kind="ad_report" context={{ campaign_id: campaign.id }}
