@@ -574,3 +574,71 @@ def test_bulk_ads_reject_stale_inventory_and_report_declined_ids(workspace):
     result = confirm(workspace, review, "ad", payload).json()
     assert result["message"] == f"eBay added 1 of 2 listings to the campaign. eBay declined these listing IDs: {second_id}."
     assert confirm(workspace, review, "ad", payload).status_code == 409
+
+
+def test_wholly_declined_ads_can_be_reviewed_again(workspace):
+    payload = action_cases()["ad"]
+    review = preview(workspace, "ad", payload)
+    path = "/sell/marketing/v1/ad_campaign/campaign-1/bulk_create_ads_by_listing_id"
+    workspace.remote.write_results = {path: {"responses": [{"listingId": ITEM_ID, "statusCode": 409}]}}
+    result = confirm(workspace, review, "ad", payload).json()
+    assert result["state"] == "failed"
+    assert ITEM_ID in result["message"]
+    assert confirm(workspace, review, "ad", payload).status_code == 409
+    workspace.remote.write_results.clear()
+    retry = preview(workspace, "ad", payload)
+    assert confirm(workspace, retry, "ad", payload).json()["state"] == "sent"
+    assert len(workspace.remote.writes) == 2
+
+
+def test_later_ad_batch_failure_reports_completed_results(workspace):
+    workspace.remote.active_items = [(str(123456789000 + i), f"Listing {i}") for i in range(501)]
+    ids = [identifier for identifier, _ in workspace.remote.active_items]
+    payload = {**action_cases()["ad"], "listing_ids": ids}
+    path = "/sell/marketing/v1/ad_campaign/campaign-1/bulk_create_ads_by_listing_id"
+    workspace.remote.write_results = {path: {"responses": [
+        {"listingId": identifier, "statusCode": 409 if i == 0 else 200}
+        for i, identifier in enumerate(ids[:500])
+    ]}}
+    workspace.remote.write_errors = {2: 500}
+    review = preview(workspace, "ad", payload)
+    result = confirm(workspace, review, "ad", payload).json()
+    assert result["state"] == "unknown"
+    assert "eBay added 499 of 501 listings" in result["message"]
+    assert f"declined these listing IDs: {ids[0]}." in result["message"]
+    assert f"did not confirm these listing IDs: {ids[-1]}." in result["message"]
+    assert workspace.client.post("/api/ebay/actions/preview", json={"kind": "ad", "payload": payload}).status_code == 409
+    assert len(workspace.remote.writes) == 2
+
+
+def test_legacy_unknown_ad_blocks_review_and_confirmation_for_that_listing(workspace):
+    payload = action_cases()["ad"]
+    review = preview(workspace, "ad", payload)
+    legacy = EbayAction(account_id="seller-id", kind="ad", resource_id=ITEM_ID,
+                        fingerprint="legacy-ad-plan", state="unknown", expires_at=ebay_actions.clock())
+    workspace.db.add(legacy)
+    workspace.db.commit()
+    assert workspace.client.post("/api/ebay/actions/preview", json={"kind": "ad", "payload": payload}).status_code == 409
+    assert confirm(workspace, review, "ad", payload).status_code == 409
+    preview(workspace, "ad", {**payload, "listing_ids": ["123456789013"]})
+    assert not workspace.remote.writes
+    checked = workspace.client.post(f"/api/ebay/actions/{legacy.id}/checked", json={"confirm": True})
+    assert checked.status_code == 200
+    assert confirm(workspace, review, "ad", payload).json()["state"] == "sent"
+
+
+@pytest.mark.parametrize("during_confirmation", [False, True])
+def test_capped_ad_inventory_is_never_offered_or_used_for_confirmation(workspace, during_confirmation):
+    payload = action_cases()["ad"]
+    if during_confirmation:
+        review = preview(workspace, "ad", payload)
+    workspace.remote.active_total = 25_000
+    read = workspace.client.get("/api/ebay/read/advertising-listings")
+    assert read.status_code == 422
+    assert "Seller Hub" in read.json()["detail"]
+    if during_confirmation:
+        response = confirm(workspace, review, "ad", payload)
+    else:
+        response = workspace.client.post("/api/ebay/actions/preview", json={"kind": "ad", "payload": payload})
+    assert response.status_code == 422
+    assert not workspace.remote.writes

@@ -156,7 +156,8 @@ class WorkspaceEbay(BaseHTTPRequestHandler):
                 <SellingStatus><CurrentPrice currencyID="USD">50.00</CurrentPrice></SellingStatus></Item>"""
                 for identifier, title in listings[offset:offset + page_size])
             self.reply(200, f"""<GetMyeBaySellingResponse xmlns="urn:ebay:apis:eBLBaseComponents"><Ack>Success</Ack>
-                <ActiveList><PaginationResult><TotalNumberOfPages>{pages}</TotalNumberOfPages></PaginationResult>
+                <ActiveList><PaginationResult><TotalNumberOfPages>{pages}</TotalNumberOfPages>
+                <TotalNumberOfEntries>{getattr(state, "active_total", len(listings))}</TotalNumberOfEntries></PaginationResult>
                 <ItemArray>{items}</ItemArray></ActiveList></GetMyeBaySellingResponse>""".encode())
             return
         if path == "/ws/api.dll" and self.headers["X-EBAY-API-CALL-NAME"] == "GetItem":
@@ -173,8 +174,9 @@ class WorkspaceEbay(BaseHTTPRequestHandler):
         multipart = "multipart/form-data" in self.headers.get("Content-Type", "")
         payload = {"multipart": True, "bytes": len(raw)} if multipart else None if path == "/ws/api.dll" else json.loads(raw) if raw else {}
         state.writes.append((self.command, path, payload))
-        if state.write_error:
-            self.reply(state.write_error, {"errors": [{"errorId": 999, "message": "PRIVATE ERROR ECHO"}]})
+        error = getattr(state, "write_errors", {}).get(len(state.writes), state.write_error)
+        if error:
+            self.reply(error, {"errors": [{"errorId": 999, "message": "PRIVATE ERROR ECHO"}]})
             return
         if path in getattr(state, "write_results", {}):
             self.reply(200, state.write_results[path])

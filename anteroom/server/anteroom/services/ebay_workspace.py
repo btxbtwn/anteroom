@@ -231,12 +231,20 @@ async def advertising_listings(client: EbayClient) -> dict[str, str]:
     """Get active listing IDs directly from the authenticated seller's inventory."""
     page_size = 200
     page_number = 1
+    count = 0
     listings: dict[str, str] = {}
     while True:
         active = await active_listing_page(client, page_number, page_size)
         if active is None:
-            return listings
+            if page_number == 1:
+                return listings
+            raise EbayFailure("eBay returned an incomplete active listings page. Refresh and try again.")
         items = active.findall("e:ItemArray/e:Item", NS)
+        count += len(items)
+        total = active.findtext("e:PaginationResult/e:TotalNumberOfEntries", namespaces=NS)
+        # GetMyeBaySelling reports 25,000 even when more listings exist.
+        if count >= 25_000 or (total is not None and int(total) >= 25_000):
+            raise EbayFailure("eBay limits this inventory response to 25,000 listings, so we cannot verify the full selection. Use Seller Hub to promote listings.", 422)
         for item in items:
             identifier = item.findtext("e:ItemID", namespaces=NS) or ""
             price = item.find("e:SellingStatus/e:CurrentPrice", NS)

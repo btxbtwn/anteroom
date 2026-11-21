@@ -23,7 +23,7 @@ export interface EbayReview {
 
 export interface EbayResult {
   id: string;
-  state: "sent" | "unknown";
+  state: "sent" | "unknown" | "failed";
   message: string;
   receiptId?: string;
   imageUrl?: string;

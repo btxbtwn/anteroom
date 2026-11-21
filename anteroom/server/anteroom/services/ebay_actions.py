@@ -529,10 +529,25 @@ async def review(kind: str, payload: dict) -> dict:
     return await in_worker_session(_open_review, client.seller[0], kind, plan, digest(plan))
 
 
-def _open_review(db: Session, account_id: str, kind: str, plan: dict, fingerprint: str) -> dict:
-    if db.query(EbayAction.id).filter_by(account_id=account_id, kind=kind, resource_id=plan["target"]).filter(
+def _ad_listing_ids(operations: list[dict]) -> set[str]:
+    return {item["listingId"] for operation in operations for item in operation["body"]["requests"]}
+
+
+def _has_unresolved_action(db: Session, account_id: str, plan: dict, action_id: str | None = None) -> bool:
+    query = db.query(EbayAction.resource_id).filter_by(account_id=account_id, kind=plan["kind"]).filter(
         EbayAction.state.in_(("sending", "unknown")),
-    ).first():
+    )
+    if action_id is not None:
+        query = query.filter(EbayAction.id != action_id)
+    targets = {plan["target"]}
+    if plan["kind"] == "ad":
+        # Older ad rows were keyed by listing ID; bulk rows use the campaign.
+        targets.update(_ad_listing_ids(plan["operations"]))
+    return any(resource_id in targets for (resource_id,) in query)
+
+
+def _open_review(db: Session, account_id: str, kind: str, plan: dict, fingerprint: str) -> dict:
+    if _has_unresolved_action(db, account_id, plan):
         raise EbayFailure("An earlier action for this item has an uncertain result. Check eBay and mark it checked in Activity first.", 409)
     if db.query(EbayAction.id).filter_by(account_id=account_id, fingerprint=fingerprint).filter(
         EbayAction.state.in_(_repeatable(kind)),
@@ -546,7 +561,7 @@ def _open_review(db: Session, account_id: str, kind: str, plan: dict, fingerprin
 
 
 def _ad_result(operations: list[dict], results: list[dict]) -> tuple[str, str]:
-    requested = {item["listingId"] for operation in operations for item in operation["body"]["requests"]}
+    requested = _ad_listing_ids(operations)
     responses = {item["listingId"]: item for result in results
                  for item in result.get("responses", []) if item.get("listingId") in requested}
     accepted = {identifier for identifier, item in responses.items()
@@ -559,7 +574,7 @@ def _ad_result(operations: list[dict], results: list[dict]) -> tuple[str, str]:
         message += " eBay declined these listing IDs: " + ", ".join(sorted(rejected)) + "."
     if missing:
         message += " eBay did not confirm these listing IDs: " + ", ".join(sorted(missing)) + ". Check eBay before trying again."
-    return ("unknown" if missing else "sent"), message
+    return ("unknown" if missing else "sent" if accepted else "failed"), message
 
 
 async def execute(action_id: str, kind: str, payload: dict) -> dict:
@@ -572,13 +587,19 @@ async def execute(action_id: str, kind: str, payload: dict) -> dict:
     assert_identity(client.seller)
     # Nothing has reached eBay if the request drops while claiming, so the claim ends as failed.
     await claim_in_worker_session(_claim, lambda _claimed: in_worker_session(_settle, action_id, "failed", None),
-                                  action_id, account_id, fingerprint, kind, plan["target"])
+                                  action_id, account_id, fingerprint, plan)
     completed = 0
     result = {}
     ad_results: list[dict] = []
     try:
         for operation in plan["operations"]:
-            result = await client.request(**operation)
+            try:
+                result = await client.request(**operation)
+            except Exception:
+                if kind != "ad" or not ad_results:
+                    raise
+                # Report earlier replies and leave the remaining IDs unconfirmed.
+                break
             if kind == "refund" and result.get("refundStatus") == "FAILED":
                 raise EbayFailure("eBay rejected this refund. No refund was issued.", 422)
             if kind == "ad":
@@ -615,10 +636,9 @@ def _reviewed(db: Session, action_id: str, account_id: str, kind: str) -> tuple[
     return action.account_id, action.fingerprint
 
 
-def _claim(db: Session, action_id: str, account_id: str, fingerprint: str, kind: str, target: str) -> None:
-    if db.query(EbayAction.id).filter(EbayAction.account_id == account_id, EbayAction.kind == kind,
-                                     EbayAction.resource_id == target, EbayAction.state.in_(("sending", "unknown")),
-                                     EbayAction.id != action_id).first():
+def _claim(db: Session, action_id: str, account_id: str, fingerprint: str, plan: dict) -> None:
+    kind = plan["kind"]
+    if _has_unresolved_action(db, account_id, plan, action_id):
         raise EbayFailure("An earlier action for this item needs a result check in Activity.", 409)
     if db.query(EbayAction.id).filter(EbayAction.account_id == account_id, EbayAction.fingerprint == fingerprint,
                                      EbayAction.state.in_(_repeatable(kind)), EbayAction.id != action_id).first():

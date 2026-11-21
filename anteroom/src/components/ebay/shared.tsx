@@ -65,7 +65,7 @@ export function ListingPicker({ selected, onChange, advertisingAccount }: {
   const active = useQuery({ queryKey: ["ebay", "advertising-listings", advertisingAccount],
     queryFn: () => api.ebay.read("advertising-listings"), enabled: advertising, retry: false });
   const query = advertising ? active : listings;
-  const items = advertising ? active.data?.rows : listings.data?.listings.map(({ listingId, title }) => ({ id: listingId, title }));
+  const items = advertising ? (active.isError ? undefined : active.data?.rows) : listings.data?.listings.map(({ listingId, title }) => ({ id: listingId, title }));
   const visible = items?.filter((item) => item.title.toLowerCase().includes(search.trim().toLowerCase())) ?? [];
   const selectedIds = new Set(selected);
   return <fieldset className="ebay-selection"><legend>{advertising ? "Active eBay listings" : "Select listings"}</legend>
