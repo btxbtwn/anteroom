@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from typing import Any
 from sqlalchemy.orm import Session
-from anteroom.models.schema import EBAY_YEAR_KEYS
+from anteroom.models.schema import ebay_year_specifics
 from anteroom.repositories.queries import ConversationRepo
 
 def _facet(sku: Any, price: Any, etsy: Any, *years: Any) -> dict[str, Any]:
@@ -22,7 +22,7 @@ def _facet(sku: Any, price: Any, etsy: Any, *years: Any) -> dict[str, Any]:
         specifics = None
     listing = {
         "etsy_specifics": specifics if isinstance(specifics, dict) else {},
-        "ebay_specifics": dict(zip(EBAY_YEAR_KEYS, years, strict=True)),
+        "ebay_specifics": ebay_year_specifics(years),
     }
     return {"sku": text or None, "price": amount, "etsy_eligible": etsy_eligible(listing)}
 

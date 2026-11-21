@@ -69,13 +69,24 @@ class ListingFacetsTest(unittest.TestCase):
         listing_persistence.save_revision(self.listings.db, dated_by_ebay_form.id, {
             "title": "Tee", "ebay_specifics": {"Year Manufactured": "2000-2009"},
         }, "test")
-        conflicting = self.convs.create(title="Two years")
-        conflicting_listing = {"title": "Tee", "etsy_specifics": {"who_made": "someone_else"},
-                               "ebay_specifics": {"year_manufactured": "1988", "yearManufactured": "2022"}}
-        listing_persistence.save_revision(self.listings.db, conflicting.id, conflicting_listing, "test")
+        # Each stored shape of eBay's year: the sidebar (both queries) agrees with the full-listing check.
+        shapes = {
+            "conflicting spellings": {"year_manufactured": "1988", "yearManufactured": "2022"},
+            "nested native": {"category_specifics": {"Year Manufactured": "1988"}},
+            "nested modern": {"category_specifics": {"yearManufactured": "2022"}},
+            "blank flat, nested filled": {"yearManufactured": "", "category_specifics": {"Year Manufactured": "1988"}},
+        }
+        stored = {}
+        for name, ebay in shapes.items():
+            conv = self.convs.create(title=name)
+            stored[conv.id] = {"title": "Tee", "etsy_specifics": {"who_made": "someone_else"}, "ebay_specifics": ebay}
+            listing_persistence.save_revision(self.listings.db, conv.id, stored[conv.id], "test")
         facets = inventory_facets.listing_facets(self.convs.db)
-        # The sidebar agrees with the full-listing check when two spellings disagree.
-        self.assertEqual(facets[conflicting.id]["etsy_eligible"], etsy_eligible(conflicting_listing))
+        for conv_id, saved in stored.items():
+            with self.subTest(ebay=saved["ebay_specifics"]):
+                self.assertEqual(facets[conv_id]["etsy_eligible"], etsy_eligible(saved))
+                self.assertEqual(inventory_facets.listing_facet(self.convs.db, conv_id)["etsy_eligible"], etsy_eligible(saved))
+        self.assertEqual([etsy_eligible(saved) for saved in stored.values()], [False, True, False, True])
         self.assertTrue(facets[dated_by_ebay_form.id]["etsy_eligible"])
         self.assertTrue(inventory_facets.listing_facet(self.convs.db, dated_by_ebay_form.id)["etsy_eligible"])
         self.assertFalse(facets[modern.id]["etsy_eligible"])

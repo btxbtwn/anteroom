@@ -6,10 +6,25 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from anteroom.models.mercari_shipping import DEFAULT_SHIPPING_LABEL
 
-# The spellings of eBay's Year Manufactured that SQL projections read (SQL cannot
-# fold key spellings the way ``ebay_optional_keys`` does): the listing JSON field,
-# then eBay's own aspect name, which the native form saves.
+# Where a listing keeps eBay's Year Manufactured, inside ebay_specifics, in the
+# order they win: the listing JSON field, then eBay's own aspect name (which the
+# native form saves), flat and then under category_specifics. The Etsy reader in
+# Python and the SQL projections read exactly these, so they always agree.
 EBAY_YEAR_KEYS = ("yearManufactured", "year_manufactured", "Year Manufactured")
+EBAY_YEAR_PATHS = tuple((*prefix, key) for prefix in ((), ("category_specifics",)) for key in EBAY_YEAR_KEYS)
+
+
+def ebay_year_specifics(values) -> dict[str, Any]:
+    """The ebay_specifics holding one projected value per ``EBAY_YEAR_PATHS`` entry, in that order."""
+    ebay: dict[str, Any] = {}
+    for path, value in zip(EBAY_YEAR_PATHS, values, strict=True):
+        if value is None:
+            continue
+        node = ebay
+        for part in path[:-1]:
+            node = node.setdefault(part, {})
+        node[path[-1]] = value
+    return ebay
 
 VALID_CONDITIONS = frozenset((
     "New With Tags/Box",

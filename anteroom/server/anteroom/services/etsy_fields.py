@@ -9,7 +9,6 @@ from typing import Any
 
 from anteroom.services.ebay_fields import (
     ebay_optional_blank,
-    ebay_optional_keys,
     ebay_optional_raw,
     ebay_season_haystack,
 )
@@ -23,7 +22,7 @@ from anteroom.models.listing_values import (
     text_value,
 )
 from anteroom.models.schema import (
-    EBAY_YEAR_KEYS,
+    EBAY_YEAR_PATHS,
     _scalar_text,
 )
 
@@ -401,23 +400,18 @@ def etsy_when_raw(etsy: dict[str, Any], listing: dict[str, Any] | None = None) -
 
 
 def ebay_year_manufactured(listing: dict[str, Any] | None) -> str:
-    """eBay's Year Manufactured under any spelling, flat or in category_specifics, skipping blanks.
+    """eBay's Year Manufactured from the first filled ``EBAY_YEAR_PATHS`` entry.
 
-    eBay's native form saves it as "Year Manufactured"; the listing JSON as yearManufactured.
-    The spellings in ``EBAY_YEAR_KEYS`` win in that order, as in the SQL projections, so the
-    editor, the sidebar and the Etsy report agree when two spellings disagree.
+    The sidebar and the Etsy report project the same paths in SQL, so all three agree.
     """
     ebay = (listing or {}).get("ebay_specifics")
-    if not isinstance(ebay, dict):
-        return ""
-    for block in (ebay, ebay.get("category_specifics")):
-        if not isinstance(block, dict):
-            continue
-        known = [key for key in EBAY_YEAR_KEYS if key in block]
-        for name in (*known, *ebay_optional_keys(block, "yearManufactured")):
-            text = _scalar_text(block.get(name))
-            if text:
-                return text
+    for path in EBAY_YEAR_PATHS:
+        node: Any = ebay
+        for part in path:
+            node = node.get(part) if isinstance(node, dict) else None
+        text = _scalar_text(node)
+        if text:
+            return text
     return ""
 
 

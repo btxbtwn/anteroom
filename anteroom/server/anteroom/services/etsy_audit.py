@@ -28,7 +28,7 @@ from anteroom.services.etsy_fields import (
     resolve_etsy_when,
 )
 from anteroom.models.listing import Listing, ListingRevision
-from anteroom.models.schema import EBAY_YEAR_KEYS
+from anteroom.models.schema import ebay_year_specifics
 from anteroom.repositories.queries import ebay_year_columns
 from anteroom.services.vendoo_import import parse_notes
 
@@ -70,7 +70,7 @@ def etsy_not_allowed_live(db: Session) -> list[dict[str, Any]]:
             continue
         listing = {
             "etsy_specifics": _json_object(raw_etsy),
-            "ebay_specifics": dict(zip(EBAY_YEAR_KEYS, years, strict=True)),
+            "ebay_specifics": ebay_year_specifics(years),
         }
         if etsy_eligible(listing):
             continue

@@ -67,8 +67,8 @@ class EtsyEligibleTest(unittest.TestCase):
         self.assertTrue(etsy_eligible(dated))
         self.assertEqual(etsy_when_raw({}, dated), "2000-2009")
         self.assertEqual(etsy_when_to_store("2000-2009", dated), "2000 - 2006 (Vintage)")
-        # Any spelling, flat or nested, and a blank spelling does not hide a filled one.
-        for ebay in ({"Year manufactured": "1988"}, {"category_specifics": {"Year Manufactured": "1988"}},
+        # Flat or under category_specifics, and a blank spelling does not hide a filled one.
+        for ebay in ({"category_specifics": {"Year Manufactured": "1988"}},
                      {"yearManufactured": "", "Year Manufactured": "1988"}):
             with self.subTest(ebay=ebay):
                 self.assertEqual(etsy_when_raw({}, listing(ebay_specifics=ebay)), "1988")
@@ -134,6 +134,7 @@ class NotAllowedReportTest(unittest.TestCase):
         })
         self.add("Vintage Cardigan", VINTAGE, live)
         self.add("NASCAR Tee", {}, live, ebay_specifics={"Year Manufactured": "2000-2009"})
+        self.add("Nested Year Tee", {}, live, ebay_specifics={"category_specifics": {"Year Manufactured": "1988"}})
         self.add("Sold on Etsy", MODERN, {**live, "vendooDates": {"soldByMarketplace": {"etsy": "2026-09-01"}}})
         self.add("Not on Etsy", MODERN, {"vendooMarketplaces": ["ebay"]})
         self.add("Never synced", MODERN, {})
