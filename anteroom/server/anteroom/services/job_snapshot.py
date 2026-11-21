@@ -72,7 +72,11 @@ def prepare_listing_snapshot(
     ensure_listing_defaults(listing_snapshot)
     from anteroom.services.depop_measurements import sync_depop_measurements
 
-    sync_depop_measurements(listing_snapshot, conv_notes)
+    sync_depop_measurements(
+        listing_snapshot,
+        conv_notes,
+        clear_empty=isinstance(conv_notes, dict) and "measurements" in conv_notes,
+    )
     materialize_prices(listing_snapshot)
     registry = RegistryService(db)
     registry.merge_learned_fields(listing_snapshot)

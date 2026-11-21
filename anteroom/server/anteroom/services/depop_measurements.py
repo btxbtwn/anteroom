@@ -68,7 +68,13 @@ def depop_measurements_from_notes(notes: dict | None) -> dict[str, Any]:
     return {"unit": "in", "values": rows}
 
 
-def sync_depop_measurements(listing: dict, notes: dict | None, *, force: bool = False) -> bool:
+def sync_depop_measurements(
+    listing: dict,
+    notes: dict | None,
+    *,
+    force: bool = False,
+    clear_empty: bool = False,
+) -> bool:
     """Copy stored inches onto the Depop block unless the seller locked it."""
     from anteroom.services.seller_overrides import is_locked
 
@@ -77,17 +83,20 @@ def sync_depop_measurements(listing: dict, notes: dict | None, *, force: bool = 
     if not force and is_locked(listing, _PATH):
         return False
     built = depop_measurements_from_notes(notes)
-    if not built["values"] and not force:
+    if not built["values"] and not force and not clear_empty:
         return False
     depop = listing.get("depop_specifics")
     if not isinstance(depop, dict):
         depop = {}
-    if depop.get("measurements") == built:
-        return False
-    depop = dict(depop)
     if built["values"]:
+        if depop.get("measurements") == built:
+            return False
+        depop = dict(depop)
         depop["measurements"] = built
     else:
+        if "measurements" not in depop:
+            return False
+        depop = dict(depop)
         depop.pop("measurements", None)
     listing["depop_specifics"] = depop
     return True

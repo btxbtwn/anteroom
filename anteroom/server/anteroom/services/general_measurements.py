@@ -74,6 +74,11 @@ def is_measurement_path(path: object) -> bool:
     return canonical_measurement_path(path) is not None
 
 
+def is_garment_measurement_path(path: object) -> bool:
+    canonical = canonical_measurement_path(path)
+    return canonical is not None and canonical != "measurements.other"
+
+
 def normalize_garment(value: object) -> str | None:
     folded = _fold(value)
     if folded == "shorts":

@@ -123,7 +123,16 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
 
     scope = activity.edit_fields.get()
     if scope is not None and source in FILL_ON_SOURCES:
-        listing_json = activity.scoped_listing(before, listing_json, scope)
+        from anteroom.services.general_measurements import is_garment_measurement_path
+
+        scope_notes = None
+        if any(is_garment_measurement_path(path) for path in scope):
+            from anteroom.repositories.queries import ConversationRepo
+            from anteroom.services.vendoo_import import parse_notes
+
+            conv = ConversationRepo(db).get(conv_id)
+            scope_notes = parse_notes(conv.notes if conv else None)
+        listing_json = activity.scoped_listing(before, listing_json, scope, notes=scope_notes)
     from anteroom.services import choice_lists, native_contract
 
     if source != "native_schema" and (native_contract.KEY in before or use_saved_defaults):

@@ -663,7 +663,11 @@ def prepare_user_listing(previous: dict | None, submitted: dict, *, notes: dict 
     reconcile_followed_fields(previous, submitted)
     reconcile_size_fields(previous, submitted)
     if not is_locked(submitted, "depop_specifics.measurements"):
-        sync_depop_measurements(submitted, notes)
+        sync_depop_measurements(
+            submitted,
+            notes,
+            clear_empty=isinstance(notes, dict) and "measurements" in notes,
+        )
     return submitted
 
 

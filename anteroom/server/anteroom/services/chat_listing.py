@@ -191,7 +191,7 @@ def _save_missing_fields(db: Session, conv_id: str, missing_fields: list[dict], 
                 from anteroom.services.depop_measurements import sync_depop_measurements
                 from anteroom.services.vendoo_import import parse_notes
 
-                sync_depop_measurements(updated, parse_notes(conv.notes))
+                sync_depop_measurements(updated, parse_notes(conv.notes), clear_empty=True)
         from anteroom.services.seller_overrides import preserving_locks
 
         def _normalize(candidate: dict) -> None:
@@ -434,7 +434,7 @@ def apply_listing_payload(
                 from anteroom.services.depop_measurements import sync_depop_measurements
                 from anteroom.services.vendoo_import import parse_notes
 
-                sync_depop_measurements(updated, parse_notes(conv.notes))
+                sync_depop_measurements(updated, parse_notes(conv.notes), clear_empty=True)
         sku_keys = _patched_sku_keys(listing_ops) if _seller_asked_for_sku(user_message) else set()
         save_listing_revision(db, conv_id, updated, operations=listing_ops, sku_keys=sku_keys)
         ConversationRepo(db).add_message(

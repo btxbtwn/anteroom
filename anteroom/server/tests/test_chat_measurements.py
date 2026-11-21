@@ -338,3 +338,103 @@ class ChatMeasurementsTest(unittest.TestCase):
         self.assertNotIn("measurements", notes)
         self.assertNotIn("garment", notes)
 
+    def test_undeclared_depop_measurements_cannot_bypass_edit_scope(self):
+        # Case 1: declaring only measurements.other must not allow an undeclared depop_specifics.measurements edit.
+        reply_other = 'Updated other measurements.\n```json\n' + json.dumps({
+            "fields": [
+                {"path": "measurements.other", "value": 'Hem 21"'},
+                {"path": "description", "value": "Updated description"},
+                {
+                    "path": "depop_specifics.measurements",
+                    "value": {"unit": "in", "values": [{"id": "pit_to_pit", "label": "Pit to pit", "value": "99", "unit": "in"}]},
+                },
+            ],
+        }) + "\n```"
+        token = activity.edit_fields.set(("measurements.other", "description"))
+        try:
+            _, saved = apply_listing_payload(self.db, self.conv.id, reply_other)
+        finally:
+            activity.edit_fields.reset(token)
+        self.assertTrue(saved)
+        latest = ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json
+        self.assertNotIn("measurements", latest.get("depop_specifics") or {})
+        self.assertNotIn("depop_specifics.measurements", latest.get("seller_fields") or [])
+
+        # Case 2: declaring measurements.top.pitToPit derives Depop values from saved notes, not an undeclared payload.
+        reply_garment = 'Updated pit to pit.\n```json\n' + json.dumps({
+            "fields": [
+                {"path": "measurements.top.pitToPit", "value": "16"},
+                {"path": "description", "value": 'Updated with pit to pit 16"'},
+                {
+                    "path": "depop_specifics.measurements",
+                    "value": {"unit": "in", "values": [{"id": "pit_to_pit", "label": "Pit to pit", "value": "99", "unit": "in"}]},
+                },
+            ],
+        }) + "\n```"
+        token = activity.edit_fields.set(("measurements.top.pitToPit", "description"))
+        try:
+            _, saved = apply_listing_payload(self.db, self.conv.id, reply_garment)
+        finally:
+            activity.edit_fields.reset(token)
+        self.assertTrue(saved)
+        latest = ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json
+        self.assertEqual(
+            latest["depop_specifics"]["measurements"]["values"],
+            [{"id": "pit_to_pit", "label": "Pit to pit", "value": "16", "unit": "in"}],
+        )
+        self.assertNotIn("depop_specifics.measurements", latest.get("seller_fields") or [])
+
+    def test_clearing_last_measurement_removes_unlocked_depop_values_but_preserves_locked(self):
+        # Seed notes + unlocked Depop measurements on the revision.
+        ConversationRepo(self.db).write_notes(
+            self.conv.id,
+            json.dumps({"garment": "top", "measurements": {"top": {"pitToPit": "16"}}}),
+        )
+        depop_block = {
+            "unit": "in",
+            "values": [{"id": "pit_to_pit", "label": "Pit to pit", "value": "16", "unit": "in"}],
+        }
+        listing_persistence.save_revision(
+            self.db,
+            self.conv.id,
+            {**self.listing, "depop_specifics": {"measurements": depop_block}},
+            "test",
+        )
+
+        # Clearing the last measurement alongside a listing edit removes unlocked inherited Depop values.
+        clear_patch = 'Removed pit to pit.\n```json\n' + json.dumps([
+            {"op": "remove", "path": "/measurements/top/pitToPit"},
+            {"op": "replace", "path": "/description", "value": "Measurements removed."},
+        ]) + "\n```"
+        _, saved = apply_listing_payload(self.db, self.conv.id, clear_patch)
+        self.assertTrue(saved)
+        latest = ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json
+        self.assertNotIn("measurements", latest.get("depop_specifics") or {})
+
+        # When Depop measurements are seller-locked, clearing General measurements preserves them.
+        ConversationRepo(self.db).write_notes(
+            self.conv.id,
+            json.dumps({"garment": "top", "measurements": {"top": {"pitToPit": "16"}}}),
+        )
+        listing_persistence.save_revision(
+            self.db,
+            self.conv.id,
+            {
+                **self.listing,
+                "depop_specifics": {"measurements": depop_block},
+                "seller_fields": ["depop_specifics.measurements"],
+            },
+            "test",
+        )
+        clear_cmd = 'Removed pit to pit.\n```json\n' + json.dumps({
+            "fields": [
+                {"path": "measurements.top.pitToPit", "value": "", "clear": True},
+                {"path": "description", "value": "Measurements removed again."},
+            ],
+        }) + "\n```"
+        _, saved = apply_listing_payload(self.db, self.conv.id, clear_cmd)
+        self.assertTrue(saved)
+        latest = ListingRepo(self.db).get_revisions(self.conv.id)[0].listing_json
+        self.assertEqual(latest["depop_specifics"]["measurements"], depop_block)
+
+
