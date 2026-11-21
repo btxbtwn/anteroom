@@ -21,9 +21,8 @@ from functools import lru_cache
 from pathlib import Path
 from types import ModuleType
 
-from PIL import Image, ImageOps
-
 from anteroom.config import skills_dir
+from anteroom.services import image_decode
 
 log = logging.getLogger(__name__)
 
@@ -71,10 +70,8 @@ def reading_rules() -> str:
 
 def _has_wood(path: Path) -> bool:
     try:
-        image = Image.open(path)
-        image.draft("RGB", (160, 160))
-        image = ImageOps.exif_transpose(image).convert("RGB")
-        image.thumbnail((160, 160))
+        image, _size = image_decode.decode(path.read_bytes(), max_side=160)
+        image = image.convert("RGB")
     except Exception:
         return False
     return float(ruler().wood_mask(image).mean()) > WOOD_SHARE
@@ -108,7 +105,9 @@ def find_ruler_photos(paths: list[Path], out: Path) -> list[dict]:
         if not _has_wood(path):
             continue
         try:
-            sticks = module.find_sticks(module.load(path))
+            image, _size = image_decode.decode(path.read_bytes(), max_side=module.MAX_SIDE)
+            image = image.convert("RGB")
+            sticks = module.find_sticks(image)
         except Exception:
             log.exception("could not search %s for yardsticks", path.name)
             continue
@@ -116,7 +115,7 @@ def find_ruler_photos(paths: list[Path], out: Path) -> list[dict]:
             continue
         number = len(found) + 1
         lines = [",".join(str(round(v)) for v in (s.x1, s.y1, s.x2, s.y2, s.width)) for s in sticks]
-        report = module.crop(path, out / str(number), lines, set())
+        report = module.crop(path, out / str(number), lines, set(), image=image)
         report["number"] = number
         found.append(report)
     return found

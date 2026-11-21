@@ -146,3 +146,48 @@ def test_a_stalled_dns_lookup_ends_at_its_deadline(monkeypatch):
             release.set()
 
     assert asyncio.run(run()) < 2
+
+
+def test_cached_thumbnail_refuses_image_past_pixel_cap(local_store):
+    (local_store / "huge.png").write_bytes(_png(*HUGE))
+    with pytest.raises(ValueError):
+        photos.get_or_create_thumbnail("huge.png", 96)
+    assert not photos.thumbnail_path("huge.png", 96).exists()
+
+
+def test_photo_edit_preview_enforces_pixel_cap_and_passes_max_side(local_store, monkeypatch):
+    from anteroom.services import image_decode, photo_edits
+
+    (local_store / "huge.png").write_bytes(_png(*HUGE))
+    with pytest.raises(ValueError):
+        photo_edits.preview_jpeg("huge.png", photo_edits.PhotoEdits(), crop=True)
+
+    (local_store / "normal.png").write_bytes(_png(2400, 1800, "RGB"))
+    seen_max_sides: list[int | None] = []
+    real_decode = image_decode.decode
+
+    def spy_decode(data: bytes, *, max_side: int | None = None):
+        seen_max_sides.append(max_side)
+        return real_decode(data, max_side=max_side)
+
+    monkeypatch.setattr(image_decode, "decode", spy_decode)
+    preview = photo_edits.preview_jpeg("normal.png", photo_edits.PhotoEdits(exposure=0.2), crop=True)
+    assert preview
+    assert seen_max_sides == [photo_edits.PREVIEW_MAX_SIDE]
+
+
+def test_ruler_load_and_measure_read_enforce_pixel_cap_and_max_side(tmp_path):
+    from anteroom.services import measure_read
+
+    module = measure_read.ruler()
+    huge_path = tmp_path / "huge.png"
+    huge_path.write_bytes(_png(*HUGE))
+    with pytest.raises(ValueError):
+        module.load(huge_path)
+    assert measure_read.find_ruler_photos([huge_path], tmp_path / "out") == []
+
+    tall_path = tmp_path / "tall.png"
+    tall_path.write_bytes(_png(5000, 3000, "RGB"))
+    loaded = module.load(tall_path)
+    assert max(loaded.size) == module.MAX_SIDE
+

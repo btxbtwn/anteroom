@@ -24,6 +24,7 @@ import argparse
 import json
 import math
 import sys
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -32,6 +33,8 @@ from PIL import Image, ImageDraw, ImageOps
 
 AGREE_WITHIN = 0.25  # inches two reads may differ by and still be accepted
 DETECT_SIDE = 400  # the photo is searched for sticks at this size
+MAX_PIXELS = 50_000_000  # refuse decompression bombs and >50 MP images
+MAX_SIDE = 4096  # caps decode + HSV/crop memory while keeping 1/8" ticks legible
 MIN_STICK_SHARE = 0.3  # a stick must run at least this share of the photo's side
 TILE_INCHES_ACROSS = 4.5  # tile width, in stick widths (a yardstick is about 1.1 in wide)
 TILE_OUT_WIDTH = 1560
@@ -61,8 +64,18 @@ class Stick:
         return math.hypot(self.x2 - self.x1, self.y2 - self.y1)
 
 
-def load(path: Path) -> Image.Image:
-    return ImageOps.exif_transpose(Image.open(path)).convert("RGB")
+def load(path: Path, *, max_side: int | None = MAX_SIDE) -> Image.Image:
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", Image.DecompressionBombWarning)
+        with Image.open(path) as image:
+            if image.width * image.height > MAX_PIXELS:
+                raise ValueError(f"Photo exceeds maximum pixel count ({MAX_PIXELS})")
+            if max_side:
+                image.draft("RGB", (max_side, max_side))
+            upright = ImageOps.exif_transpose(image)
+            if max_side and max(upright.size) > max_side:
+                upright.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+            return upright.convert("RGB")
 
 
 def wood_mask(image: Image.Image) -> np.ndarray:
@@ -259,8 +272,15 @@ def ticks_on_bottom(strip: Image.Image, width: float) -> bool:
     return busy[mid : mid + reach].max() > busy[mid - reach : mid].max()
 
 
-def crop(photo: Path, out: Path, lines: list[str], flips: set[str]) -> dict:
-    image = load(photo)
+def crop(
+    photo: Path,
+    out: Path,
+    lines: list[str],
+    flips: set[str],
+    *,
+    image: Image.Image | None = None,
+) -> dict:
+    image = image if image is not None else load(photo)
     if lines:
         sticks = []
         for line in lines:

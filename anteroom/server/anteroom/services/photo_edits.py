@@ -23,13 +23,13 @@ from pathlib import Path
 from typing import Literal
 
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import inspect
 
 from anteroom.database import end_read
 from anteroom.models.conversation import Photo
-from anteroom.services import photos
+from anteroom.services import image_decode, photos
 from anteroom.services.photo_store import photo_store
 
 log = logging.getLogger(__name__)
@@ -132,15 +132,14 @@ class BackgroundRemovalError(ValueError):
     pass
 
 
-def _source_image(path: Path) -> Image.Image:
-    with Image.open(path) as img:
-        img = ImageOps.exif_transpose(img)
-        if img.mode in ("RGBA", "LA", "P"):
-            img = img.convert("RGBA")
-            flat = Image.new("RGB", img.size, "white")
-            flat.paste(img, mask=img.getchannel("A"))
-            return flat
-        return img.convert("RGB")
+def _source_image(path: Path, *, max_side: int | None = None) -> Image.Image:
+    img, _size = image_decode.decode(path.read_bytes(), max_side=max_side)
+    if img.mode in ("RGBA", "LA", "P"):
+        img = img.convert("RGBA")
+        flat = Image.new("RGB", img.size, "white")
+        flat.paste(img, mask=img.getchannel("A"))
+        return flat
+    return img.convert("RGB")
 
 
 def _adjust(img: Image.Image, edits: PhotoEdits) -> Image.Image:
@@ -264,7 +263,7 @@ def render(source_filename: str, edits: PhotoEdits, *, max_side: int | None = No
         source = photo_store().local_path(source_filename)
     except (FileNotFoundError, ValueError):
         raise FileNotFoundError(source_filename) from None
-    img = _source_image(source)
+    img = _source_image(source, max_side=None if edits.background else max_side)
     mask = foreground_mask(source_filename, img) if edits.background else None
     if max_side and max(img.size) > max_side:
         img.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
