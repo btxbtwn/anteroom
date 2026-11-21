@@ -1,1 +1,0 @@
-- Hosted account migration now enforces per-seller upload slot fairness during photo normalization so one migrating seller cannot starve other sellers' photo uploads, and retries HTTP 429 automatically.

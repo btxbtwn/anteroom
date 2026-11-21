@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1122 — 2026-11-21
+
+- Hosted account migration now enforces per-seller upload slot fairness during photo normalization so one migrating seller cannot starve other sellers' photo uploads, and retries HTTP 429 automatically.
+
 ## 0.1.1121 — 2026-11-21
 
 - iPhone and iPad Settings now include a Connections screen to connect, reconnect, or disconnect eBay and Etsy accounts directly via OAuth.
