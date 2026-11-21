@@ -72,6 +72,10 @@ class EtsyEligibleTest(unittest.TestCase):
                      {"yearManufactured": "", "Year Manufactured": "1988"}):
             with self.subTest(ebay=ebay):
                 self.assertEqual(etsy_when_raw({}, listing(ebay_specifics=ebay)), "1988")
+        # Conflicting spellings: the same one wins here as in the sidebar and the Etsy report.
+        conflicting = listing({"who_made": "someone_else"}, ebay_specifics={"year_manufactured": "1988", "yearManufactured": "2022"})
+        self.assertEqual(etsy_when_raw({}, conflicting), "2022")
+        self.assertFalse(etsy_eligible(conflicting))
 
     def test_handmade_supplies_and_digital_are_allowed(self):
         self.assertTrue(etsy_eligible(listing({**MODERN, "who_made": "I did"})))

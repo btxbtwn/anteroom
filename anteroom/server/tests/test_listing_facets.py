@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from anteroom.services import inventory_facets
+from anteroom.services.etsy_fields import etsy_eligible
 from anteroom.services import listing_persistence
 from anteroom.database import Base
 from anteroom.models.fill_log import FillLogEntry  # noqa: F401
@@ -68,7 +69,13 @@ class ListingFacetsTest(unittest.TestCase):
         listing_persistence.save_revision(self.listings.db, dated_by_ebay_form.id, {
             "title": "Tee", "ebay_specifics": {"Year Manufactured": "2000-2009"},
         }, "test")
+        conflicting = self.convs.create(title="Two years")
+        conflicting_listing = {"title": "Tee", "etsy_specifics": {"who_made": "someone_else"},
+                               "ebay_specifics": {"year_manufactured": "1988", "yearManufactured": "2022"}}
+        listing_persistence.save_revision(self.listings.db, conflicting.id, conflicting_listing, "test")
         facets = inventory_facets.listing_facets(self.convs.db)
+        # The sidebar agrees with the full-listing check when two spellings disagree.
+        self.assertEqual(facets[conflicting.id]["etsy_eligible"], etsy_eligible(conflicting_listing))
         self.assertTrue(facets[dated_by_ebay_form.id]["etsy_eligible"])
         self.assertTrue(inventory_facets.listing_facet(self.convs.db, dated_by_ebay_form.id)["etsy_eligible"])
         self.assertFalse(facets[modern.id]["etsy_eligible"])

@@ -23,6 +23,7 @@ from anteroom.models.listing_values import (
     text_value,
 )
 from anteroom.models.schema import (
+    EBAY_YEAR_KEYS,
     _scalar_text,
 )
 
@@ -403,6 +404,8 @@ def ebay_year_manufactured(listing: dict[str, Any] | None) -> str:
     """eBay's Year Manufactured under any spelling, flat or in category_specifics, skipping blanks.
 
     eBay's native form saves it as "Year Manufactured"; the listing JSON as yearManufactured.
+    The spellings in ``EBAY_YEAR_KEYS`` win in that order, as in the SQL projections, so the
+    editor, the sidebar and the Etsy report agree when two spellings disagree.
     """
     ebay = (listing or {}).get("ebay_specifics")
     if not isinstance(ebay, dict):
@@ -410,7 +413,8 @@ def ebay_year_manufactured(listing: dict[str, Any] | None) -> str:
     for block in (ebay, ebay.get("category_specifics")):
         if not isinstance(block, dict):
             continue
-        for name in ebay_optional_keys(block, "yearManufactured"):
+        known = [key for key in EBAY_YEAR_KEYS if key in block]
+        for name in (*known, *ebay_optional_keys(block, "yearManufactured")):
             text = _scalar_text(block.get(name))
             if text:
                 return text
