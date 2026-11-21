@@ -54,6 +54,13 @@ async function settle(check: () => void) {
   });
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: Error) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+}
+
 async function openDialog({
   notesById = {},
   photoCount = 1,
@@ -183,6 +190,58 @@ it("clears a read size, voids a tag warning and drops an in-flight read when a s
     await settle(() => expect(size("Shorts").value).toBe("XL"));
     expect(size("Tee").value).toBe("");
     expect(size("Tee").className).toContain("needs-review");
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
+it("waits for every photo removal before rewriting and blocks removal while saving", async () => {
+  vi.spyOn(api.sizeTags, "readSaved").mockImplementation(async (id) => tagReads[id]!);
+  const first = deferred<{ ok: boolean }>();
+  const second = deferred<{ ok: boolean }>();
+  const remove = vi.spyOn(api.conversations, "deletePhoto")
+    .mockReturnValueOnce(first.promise)
+    .mockReturnValueOnce(second.promise);
+  const { root, size, button, update, onRewrite } = await openDialog({ photoCount: 2 });
+  const save = deferred<Conversation>();
+  update.mockReturnValueOnce(save.promise);
+  const submit = () => document.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  try {
+    await act(async () => button("Read size tags").click());
+    await settle(() => expect(size("Shorts").value).toBe("0"));
+
+    const removeButtons = document.querySelectorAll<HTMLButtonElement>('[aria-label="Remove photo 2"]');
+    await act(async () => {
+      removeButtons[0]!.click();
+      removeButtons[1]!.click();
+      submit();
+    });
+    expect(remove).toHaveBeenCalledTimes(2);
+    expect(update).not.toHaveBeenCalled();
+    expect(onRewrite).not.toHaveBeenCalled();
+    expect(button("Rewrite 3").disabled).toBe(true);
+
+    await act(async () => first.resolve({ ok: true }));
+    await settle(() => expect(size("Shorts").value).toBe(""));
+    expect(button("Rewrite 3").disabled).toBe(true);
+
+    await act(async () => second.reject(new Error("Delete failed")));
+    await settle(() => expect(button("Rewrite 3").disabled).toBe(false));
+    expect(size("Jeans").value).toBe("32 x 30");
+
+    await act(async () => {
+      submit();
+      removeButtons[2]!.click();
+    });
+    expect(button("Saving…").disabled).toBe(true);
+    expect(removeButtons[2]!.disabled).toBe(true);
+    expect(remove).toHaveBeenCalledTimes(2);
+    expect(onRewrite).not.toHaveBeenCalled();
+
+    await act(async () => save.resolve({} as Conversation));
+    await settle(() => expect(onRewrite).toHaveBeenCalledTimes(1));
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledWith("c-jeans", { notes: expect.stringContaining('"32 x 30"') });
   } finally {
     await act(async () => root.unmount());
   }

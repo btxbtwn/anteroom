@@ -33,6 +33,7 @@ interface Props {
 }
 
 const READING_SIZE_NOTE = "Reading the size tag…";
+type GuardPhotoRemoval = (remove: () => Promise<void>) => Promise<void>;
 
 interface RowState {
   details: ItemDetails;
@@ -65,6 +66,9 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
   const [rows, setRows] = useState<Record<string, RowState> | null>(null);
   const savedRef = useRef<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const [pendingRemovals, setPendingRemovals] = useState(0);
+  const pendingRemovalsRef = useRef(0);
   const [error, setError] = useState<string | null>(null);
   const [zoom, setZoom] = useState<{ convId: string; index: number } | null>(null);
   const [reading, setReading] = useState<{ done: number; total: number } | null>(null);
@@ -224,8 +228,21 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
     return { ...row, ...cleared, photoSet: row.photoSet + 1 };
   });
 
+  // The refs also guard actions fired before React renders the disabled buttons.
+  const guardPhotoRemoval: GuardPhotoRemoval = async (remove) => {
+    if (savingRef.current) return;
+    setPendingRemovals(++pendingRemovalsRef.current);
+    try {
+      await remove();
+    } finally {
+      setPendingRemovals(--pendingRemovalsRef.current);
+    }
+  };
+
   const rewrite = async () => {
-    if (!rows) return;
+    if (!rows || savingRef.current || pendingRemovalsRef.current > 0 || pendingRemovals > 0
+      || reading !== null || sizeReading !== null) return;
+    savingRef.current = true;
     setSaving(true);
     setError(null);
     try {
@@ -236,6 +253,7 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
         await api.conversations.update(listing.id, { notes: notesWithItemDetails(conv.notes, details) });
       }
     } catch (err) {
+      savingRef.current = false;
       setSaving(false);
       setError(err instanceof Error ? err.message : "Could not save details");
       return;
@@ -264,7 +282,7 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
         aria-labelledby="regenerate-review-title"
         onSubmit={(event) => {
           event.preventDefault();
-          if (!saving && rows && reading === null && sizeReading === null) void rewrite();
+          void rewrite();
         }}
       >
         <button
@@ -308,6 +326,8 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
                   }));
                 }}
                 onPhotoRemoved={() => handlePhotoRemoved(listing.id)}
+                removalDisabled={saving}
+                guardPhotoRemoval={guardPhotoRemoval}
                 onZoom={(index) => setZoom({ convId: listing.id, index })}
                 onInputKeyDown={onInputKeyDown}
               />
@@ -343,7 +363,7 @@ export function RegenerateReviewDialog({ listings, onClose, onRewrite }: Props) 
           >
             {reading ? `Reading ${reading.done} of ${reading.total}…` : "Read measurements"}
           </button>
-          <button type="submit" className="btn btn-primary" disabled={saving || !rows || reading !== null || sizeReading !== null}>
+          <button type="submit" className="btn btn-primary" disabled={saving || !rows || pendingRemovals > 0 || reading !== null || sizeReading !== null}>
             {saving ? "Saving…" : `Rewrite ${count}`}
           </button>
         </div>
@@ -367,6 +387,8 @@ function ReviewRow({
   onChange,
   onSizeChange,
   onPhotoRemoved,
+  removalDisabled,
+  guardPhotoRemoval,
   onZoom,
   onInputKeyDown,
 }: {
@@ -375,6 +397,8 @@ function ReviewRow({
   onChange: (patch: Partial<ItemDetails>) => void;
   onSizeChange: (value: string) => void;
   onPhotoRemoved: () => void;
+  removalDisabled: boolean;
+  guardPhotoRemoval: GuardPhotoRemoval;
   onZoom: (index: number) => void;
   onInputKeyDown: (event: KeyboardEvent<HTMLInputElement>) => void;
 }) {
@@ -428,7 +452,13 @@ function ReviewRow({
           ))}
         </div>
       </div>
-      <ReviewPhotos convId={listing.id} onZoom={onZoom} onPhotoRemoved={onPhotoRemoved} />
+      <ReviewPhotos
+        convId={listing.id}
+        onZoom={onZoom}
+        onPhotoRemoved={onPhotoRemoved}
+        removalDisabled={removalDisabled}
+        guardPhotoRemoval={guardPhotoRemoval}
+      />
       <div className="bulk-measure-fields">
         {garmentFields(details.garment).map((field) => (
           <label className="bulk-measure-field" key={`${details.garment}-${field.key}`}>
@@ -510,10 +540,14 @@ export function ReviewPhotos({
   convId,
   onZoom,
   onPhotoRemoved,
+  removalDisabled,
+  guardPhotoRemoval,
 }: {
   convId: string;
   onZoom: (index: number) => void;
   onPhotoRemoved?: () => void;
+  removalDisabled?: boolean;
+  guardPhotoRemoval?: GuardPhotoRemoval;
 }) {
   const queryClient = useQueryClient();
   const { data } = useQuery({
@@ -558,6 +592,14 @@ export function ReviewPhotos({
     },
     onError: (err: Error) => toastManager.add({ type: "error", title: "Could not remove photo", description: err.message }),
   });
+
+  const deletePhoto = async (photoId: string) => {
+    try {
+      await remove.mutateAsync(photoId);
+    } catch {
+      // The mutation shows the error. Let the dialog release its pending count.
+    }
+  };
 
   const resetDrag = () => {
     setDragId(null);
@@ -633,10 +675,12 @@ export function ReviewPhotos({
               className="photo-thumb-delete"
               aria-label={`Remove photo ${index + 1}`}
               title="Remove photo"
-              disabled={remove.isPending}
+              disabled={removalDisabled || remove.isPending}
               onClick={(event) => {
                 event.stopPropagation();
-                remove.mutate(photo.id);
+                if (removalDisabled || remove.isPending) return;
+                if (guardPhotoRemoval) void guardPhotoRemoval(() => deletePhoto(photo.id));
+                else void deletePhoto(photo.id);
               }}
             >
               x
