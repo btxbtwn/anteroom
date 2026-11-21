@@ -1,0 +1,1 @@
+- Hosted web and iPhone sign-in screens now offer a "Resend confirmation email" button after signup confirmation or when signing in before confirming an email address.

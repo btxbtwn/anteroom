@@ -2,13 +2,14 @@ import Foundation
 
 /// What the seller was doing when sign-in failed.
 enum SignInAction {
-    case signIn, createAccount, reset, newPassword
+    case signIn, createAccount, reset, resend, newPassword
 
     var fallback: String {
         switch self {
         case .signIn: "Could not sign in. Please try again."
         case .createAccount: "Could not create your account. Please try again."
         case .reset: "Could not send the reset link. Please try again."
+        case .resend: "Could not resend the confirmation email. Please try again."
         case .newPassword: "Could not save your new password. Please try again."
         }
     }
@@ -17,6 +18,7 @@ enum SignInAction {
 /// Plain-language messages for Supabase Auth error codes. The web app shows the same ones.
 enum SignInMessages {
     static let minimumPasswordLength = 8
+    static let emailNotConfirmed = "Confirm your email first, using the link we sent you."
 
     static func message(for action: SignInAction, code: String?, serverMessage: String? = nil, offline: Bool = false) -> String {
         if offline { return "Could not reach sign-in. Check your connection and try again." }
@@ -24,7 +26,7 @@ enum SignInMessages {
         case "invalid_credentials":
             return "That email and password don’t match. Try again, or reset your password."
         case "email_not_confirmed":
-            return "Confirm your email first, using the link we sent you."
+            return emailNotConfirmed
         case "user_already_exists", "email_exists":
             return "An account with this email already exists. Sign in instead."
         case "weak_password":

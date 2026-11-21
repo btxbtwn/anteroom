@@ -22,15 +22,21 @@ export function SignIn({ client, notice, sandbox }: { client: SupabaseClient; no
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [sent, setSent] = useState("");
+  const [canResendConfirmation, setCanResendConfirmation] = useState(false);
 
-  function switchTo(next: Mode) { setMode(next); setError(""); setSent(""); setPassword(""); }
+  function switchTo(next: Mode) { setMode(next); setError(""); setSent(""); setPassword(""); setCanResendConfirmation(false); }
 
   async function run(action: AuthAction, request: () => Promise<{ error: unknown }>, onDone?: () => void) {
     setPending(true); setError(""); setSent("");
     try {
       const { error } = await request();
-      if (error) setError(authErrorMessage(action, error as { code?: string; message?: string; name?: string }));
-      else onDone?.();
+      if (error) {
+        const authError = error as { code?: string; message?: string; name?: string };
+        if (action === "sign_in" && authError.code === "email_not_confirmed") setCanResendConfirmation(true);
+        setError(authErrorMessage(action, authError));
+      } else {
+        onDone?.();
+      }
     } catch { setError(authErrorMessage(action, { name: "AuthRetryableFetchError" })); }
     finally { setPending(false); }
   }
@@ -45,6 +51,7 @@ export function SignIn({ client, notice, sandbox }: { client: SupabaseClient; no
         // With email confirmation on, Supabase answers without a session.
         if (!result.error && !result.data.session) {
           setSent(`We sent a confirmation link to ${email}. Open it, then sign in here with your password.`);
+          setCanResendConfirmation(true);
           setMode("sign_in"); setPassword("");
         }
         return result;
@@ -53,6 +60,16 @@ export function SignIn({ client, notice, sandbox }: { client: SupabaseClient; no
       void run("reset", () => client.auth.resetPasswordForEmail(email, { redirectTo: window.location.origin }),
         () => setSent(`If ${email} has an account, we sent it a link to set a new password. Open it in this browser.`));
     }
+  }
+
+  function resendConfirmation() {
+    const address = email.trim();
+    if (!address || pending) return;
+    void run(
+      "resend",
+      () => client.auth.resend({ type: "signup", email: address, options: { emailRedirectTo: window.location.origin } }),
+      () => setSent(`We sent another confirmation link to ${address}. Open it, then sign in here with your password.`),
+    );
   }
 
   const title = mode === "create_account" ? "Create your account" : mode === "reset" ? "Reset your password" : "Sign in";
@@ -81,6 +98,13 @@ export function SignIn({ client, notice, sandbox }: { client: SupabaseClient; no
         </form>
         {error && <p role="alert" className="text-destructive-foreground">{error}</p>}
         {sent && <p role="status">{sent}</p>}
+        {mode === "sign_in" && canResendConfirmation && (
+          <p>
+            <button type="button" className="link" disabled={pending || !email.trim()} onClick={resendConfirmation}>
+              Resend confirmation email
+            </button>
+          </p>
+        )}
         <nav className="sign-in-links" aria-label="Account">
           {mode === "sign_in" && <>
             <button type="button" className="link" onClick={() => switchTo("create_account")}>Create an account</button>

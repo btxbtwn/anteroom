@@ -169,6 +169,15 @@ final class SessionStore {
         }
     }
 
+    func resendConfirmationEmail(to email: String) async throws {
+        guard let client else { return }
+        do {
+            try await client.auth.resend(email: email, type: .signup, emailRedirectTo: AppConfig.signInRedirectURL)
+        } catch {
+            throw Self.readable(error, for: .resend)
+        }
+    }
+
     func setNewPassword(_ password: String) async throws {
         guard let client else { return }
         do {

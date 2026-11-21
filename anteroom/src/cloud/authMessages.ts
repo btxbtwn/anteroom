@@ -1,10 +1,11 @@
 /** Plain-language messages for Supabase Auth errors, by error code. */
-export type AuthAction = "sign_in" | "create_account" | "reset" | "new_password";
+export type AuthAction = "sign_in" | "create_account" | "reset" | "resend" | "new_password";
 
 const FALLBACK: Record<AuthAction, string> = {
   sign_in: "Could not sign in. Please try again.",
   create_account: "Could not create your account. Please try again.",
   reset: "Could not send the reset link. Please try again.",
+  resend: "Could not resend the confirmation email. Please try again.",
   new_password: "Could not save your new password. Please try again.",
 };
 
