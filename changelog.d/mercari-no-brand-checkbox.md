@@ -1,1 +1,0 @@
-- Mercari checks “No brand / Not sure” when there’s no matching brand. You or the agent can change it directly, and choosing a brand clears the checkbox.

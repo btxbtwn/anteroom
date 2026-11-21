@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1081 — 2026-11-21
+
+- Mercari checks “No brand / Not sure” when there’s no matching brand. You or the agent can change it directly, and choosing a brand clears the checkbox.
+
 ## 0.1.1080 — 2026-11-21
 
 - Mercari no longer says "The form's category or dependent choices changed" on every listing once a shoebox answer is saved as a default.
