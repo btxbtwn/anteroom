@@ -1,2 +1,2 @@
 - Mercari no longer says "The form's category or dependent choices changed" on every listing once a shoebox answer is saved as a default.
-- Reload fields only appears when the automatic reload failed and there is something to retry.
+- Reload fields appears when a reload fails for that marketplace or Mercari shipping choices could not load.

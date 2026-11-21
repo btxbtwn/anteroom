@@ -111,6 +111,7 @@ class MercariFormTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(field['option_values'], {'USPS Ground Advantage': '2552'})
         self.assertIn('$7.99', field['option_help']['USPS Ground Advantage'])
         self.assertEqual(result['notes'], [])
+        self.assertFalse(result.get('reload_recommended', False))
 
     async def test_shipping_failure_or_unknown_label_keeps_product_fields_and_never_invents_rates(self):
         listing = {'direct_category_ids': {'mercari': '275'}, 'weight_lb': 1,
@@ -123,6 +124,7 @@ class MercariFormTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn('Nike', fields['mercari_specifics.brand']['options'])
             self.assertEqual(fields['mercari_specifics.shippingClassId']['options'], [])
             self.assertTrue(result['notes'])
+            self.assertTrue(result['reload_recommended'])
 
     async def test_a_capitalized_shoebox_answer_still_loads_the_labels(self):
         # Generation saved the radio's label ("Yes") rather than its value ("yes").

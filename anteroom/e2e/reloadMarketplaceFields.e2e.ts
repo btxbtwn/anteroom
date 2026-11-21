@@ -114,3 +114,95 @@ test("stale marketplace fields reload automatically without clicking Reload fiel
     await request.delete(`/api/conversations/${id}`);
   }
 });
+
+test("reload failures stay with their marketplace and revision", async ({ page, request, phone }, info) => {
+  const title = `Scoped reload failures ${info.project.name} ${Date.now()}`;
+  const id = await createListing(request, title);
+  let finishManual = () => {};
+  try {
+    const saved = await request.put(`/api/conversations/${id}/listing`, { data: { expected_revision_id: "", listing: {
+      title, description: "Seller's description", price: 25,
+      direct_category_ids: { mercari: "2008" },
+      mercari_specifics: { title: "Original Mercari title", shippingMethod: "SOYO" },
+      _native_forms: { mercari: { category_id: "old", page_labels: true,
+        inputs: { "direct_category_ids.mercari": "old" },
+        fields: [{ path: "direct_category_ids.mercari", label: "Category" }] } },
+    } } });
+    expect(saved.ok(), await saved.text()).toBe(true);
+    await page.route(`**/api/conversations/${id}/native-marketplaces/preflight**`, async route => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.marketplaces.ebay.gaps.push({ field: "direct_category_ids.ebay", message: "Reload its fields", blocking: true });
+      await route.fulfill({ response, json: body });
+    });
+    let mercariCalls = 0;
+    await page.route(`**/api/conversations/${id}/native-marketplaces/*/form/refresh`, async route => {
+      if (route.request().url().endsWith("/mercari/form/refresh")) {
+        mercariCalls += 1;
+        if (mercariCalls === 2) await new Promise<void>(resolve => { finishManual = resolve; });
+        if (mercariCalls >= 3) return route.continue();
+      }
+      await route.fulfill({ status: 500, json: { detail: "Marketplace did not answer." } });
+    });
+    await openListing(page, phone, title);
+    await openForm(page, phone, "Mercari");
+    const retry = page.getByRole("button", { name: "Reload fields", exact: true });
+    await expect(retry).toBeEnabled();
+    await openForm(page, phone, "eBay");
+    await expect(retry).toBeEnabled();
+    await openForm(page, phone, "Mercari");
+    await expect(retry).toBeEnabled();
+    await retry.click();
+    await expect.poll(() => mercariCalls).toBe(2);
+    await openForm(page, phone, "Etsy");
+    await expect(page.getByRole("button", { name: "Reloading fields…" })).toHaveCount(0);
+    await expect(page.getByText("Reloading fields…", { exact: true })).toHaveCount(0);
+    await finishManual();
+    await openForm(page, phone, "Mercari");
+    await expect(retry).toBeEnabled();
+    const titleInput = page.getByRole("group", { name: "Mercari listing fields" }).getByRole("textbox", { name: "Title", exact: true });
+    await titleInput.fill("Edited Mercari title");
+    await titleInput.blur();
+    await expect.poll(async () => {
+      const body = await (await request.get(`/api/conversations/${id}/listing`)).json();
+      return body.listing._native_forms?.mercari?.inputs?.["direct_category_ids.mercari"];
+    }).toBe("2008");
+    await expect(retry).toHaveCount(0);
+  } finally {
+    finishManual();
+    await request.delete(`/api/conversations/${id}`);
+  }
+});
+
+test("a partial Mercari form offers a retry until shipping choices recover", async ({ page, request, phone }, info) => {
+  const title = `Retry shipping quotes ${info.project.name} ${Date.now()}`;
+  const id = await createListing(request, title);
+  try {
+    const saved = await request.put(`/api/conversations/${id}/listing`, { data: { expected_revision_id: "", listing: {
+      title, description: "Seller's description", price: 25,
+      direct_category_ids: { mercari: "2008" },
+      mercari_specifics: { title, shippingMethod: "SOYO" },
+    } } });
+    expect(saved.ok(), await saved.text()).toBe(true);
+    let quoteFailure = true;
+    await page.route(`**/api/conversations/${id}/native-marketplaces/mercari/form?*`, async route => {
+      const response = await route.fetch();
+      const body = await response.json();
+      await route.fulfill({ response, json: quoteFailure ? {
+        ...body, reload_recommended: true,
+        notes: [...body.notes, "Mercari shipping labels could not be loaded. Reload choices to try again."],
+      } : body });
+    });
+    await openListing(page, phone, title);
+    await openForm(page, phone, "Mercari");
+    const retry = page.getByRole("button", { name: "Reload fields", exact: true });
+    await expect(retry).toBeEnabled();
+    const response = page.waitForResponse(res => res.url().endsWith("/mercari/form/refresh"));
+    quoteFailure = false;
+    await retry.click();
+    expect((await response).ok()).toBe(true);
+    await expect(retry).toHaveCount(0);
+  } finally {
+    await request.delete(`/api/conversations/${id}`);
+  }
+});

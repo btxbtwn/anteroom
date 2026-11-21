@@ -409,4 +409,7 @@ async def editor_form(listing: dict, *, refresh: bool = False) -> dict:
         except Exception:  # noqa: BLE001 - all product fields remain available without a shipping quote
             classes = []
             notes.append("Mercari shipping labels could not be loaded. Reload choices to try again.")
-    return form(listing, classes, notes=notes)
+    result = form(listing, classes, notes=notes)
+    if notes:
+        result["reload_recommended"] = True
+    return result
