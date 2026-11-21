@@ -524,7 +524,8 @@ async def _finish_generation_background(
                 filled = await fill_native_fields(conv_id, provider, evidence=evidence)
                 if "etsy" in await asyncio.to_thread(get_selected_marketplaces):
                     await check_photos()
-                    filled = await fill_etsy_attributes(conv_id, provider, evidence=evidence) or filled
+                    filled = await fill_etsy_attributes(conv_id, provider, evidence=evidence,
+                                                          photos=expected_photo_fingerprint) or filled
                 agent.result("Filled category fields" if filled else "No category fields to fill")
                 return filled
 

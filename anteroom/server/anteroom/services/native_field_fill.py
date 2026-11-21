@@ -606,8 +606,19 @@ ETSY_ATTRIBUTES = "etsy_specifics.category_specifics."
 _FROM_GENERAL = frozenset(("primarycolor", "secondarycolor"))
 
 
+def _unanswered(row: dict) -> bool:
+    """Empty, or only an earlier automatic answer this category's choices do not offer (List drops it)."""
+    value = row.get("value")
+    if _empty(value):
+        return True
+    options = row.get("options") or []
+    if not row.get("selection_only") or not options:
+        return False
+    return not any(item in options for item in (value if isinstance(value, list) else [value]))
+
+
 def etsy_attribute_rows(form: dict, listing: dict) -> list[dict]:
-    """Etsy's empty category attributes the seller has not set.
+    """Etsy's unanswered category attributes the seller has not set.
 
     Editing any attribute in the Etsy tab locks the whole attribute group
     (``lock_seller_edits``), and generation then keeps it as the seller left
@@ -616,14 +627,18 @@ def etsy_attribute_rows(form: dict, listing: dict) -> list[dict]:
     if is_locked(listing, ETSY_ATTRIBUTES.rstrip(".")):
         return []
     return [row for row in form.get("fields") or []
-            if _path(row).startswith(ETSY_ATTRIBUTES) and row.get("category_specific") and _empty(row.get("value"))
+            if _path(row).startswith(ETSY_ATTRIBUTES) and row.get("category_specific") and _unanswered(row)
             and fold_key(str(row.get("label") or "")) not in _FROM_GENERAL
             and not row.get("locked") and not is_locked(listing, _path(row))
             and not field_locked(listing, "etsy", _path(row).rsplit(".", 1)[-1])]
 
 
-async def fill_etsy_attributes(conv_id: str, provider, *, evidence: str) -> dict | None:
-    """Fill Etsy's empty category attributes from the evidence. Returns the saved listing, or None when nothing changed."""
+async def fill_etsy_attributes(conv_id: str, provider, *, evidence: str, photos: str | None) -> dict | None:
+    """Fill Etsy's empty category attributes from the evidence. Returns the saved listing, or None when nothing changed.
+
+    ``photos`` is the fingerprint of the photos ``evidence`` describes: answers
+    are saved only while those are still the draft's photos.
+    """
     from anteroom.database import in_worker_session
     from anteroom.services.native_editor import editor_form
 
@@ -633,6 +648,8 @@ async def fill_etsy_attributes(conv_id: str, provider, *, evidence: str) -> dict
     if inputs is None:
         return None
     fingerprint, revision_id, listing = inputs
+    if fingerprint != photos:
+        return None
     try:
         form = await editor_form(conv_id, "etsy", revision_id)
     except Exception as exc:  # noqa: BLE001 - the other marketplaces' fields are already saved
@@ -749,14 +766,15 @@ def _finished(conv_id: str) -> None:
         _queue(conv_id, set())
 
 
-def _category_fill_evidence(db: Session, conv_id: str) -> str | None:
-    from anteroom.services.listing_generate import current_photo_analysis, seller_item_details
+def _category_fill_evidence(db: Session, conv_id: str) -> tuple[str, str] | None:
+    """The evidence for a category refill, with the fingerprint of the photos it describes."""
+    from anteroom.services.listing_generate import current_photo_analysis, photo_fingerprint, seller_item_details
 
     repo = ConversationRepo(db)
     conv = repo.get(conv_id)
     if conv is None:
         return None
-    return "\n\n".join(part for part in (
+    return photo_fingerprint(repo.get_photos(conv_id)), "\n\n".join(part for part in (
         current_photo_analysis(repo, conv_id) or "", seller_item_details(conv.notes),
         "Seller messages:\n" + "\n".join(message.text for message in repo.get_messages(conv_id)
                                             if message.role == "user" and message.text)) if part)
@@ -770,13 +788,14 @@ async def _fill_after_category(conv_id: str, markets: set[str]) -> None:
     if provider is None:
         return
     try:
-        evidence = await in_worker_session(_category_fill_evidence, conv_id)
-        if evidence is None:
+        read = await in_worker_session(_category_fill_evidence, conv_id)
+        if read is None:
             return
+        photos, evidence = read
         native = markets & set(MARKETS)
         if native:
             await fill_native_fields(conv_id, provider, evidence=evidence, markets=native)
         if "etsy" in markets:
-            await fill_etsy_attributes(conv_id, provider, evidence=evidence)
+            await fill_etsy_attributes(conv_id, provider, evidence=evidence, photos=photos)
     except Exception:
         log.exception("category field fill failed for %s", conv_id)

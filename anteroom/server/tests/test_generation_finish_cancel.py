@@ -49,8 +49,8 @@ def test_finishing_fills_etsy_attributes_when_etsy_is_selected(monkeypatch):
     async def fill_native_fields(*args, **kwargs):
         return None
 
-    async def fill_etsy_attributes(conv_id, provider, *, evidence):
-        etsy_calls.append((conv_id, evidence))
+    async def fill_etsy_attributes(conv_id, provider, *, evidence, photos):
+        etsy_calls.append((conv_id, evidence, photos))
         return filled
 
     monkeypatch.setattr(listing_generation, "in_worker_session", worker_session)
@@ -61,5 +61,6 @@ def test_finishing_fills_etsy_attributes_when_etsy_is_selected(monkeypatch):
     asyncio.run(listing_generation._finish_generation_background(
         "draft", {"title": "Tee"}, evidence="short sleeves", provider=object(),
         timing_id="timing", run_started=0.0, expected_revision_id="rev"))
-    assert etsy_calls == [("draft", "short sleeves")]
+    # Answers are fenced on the photos generation read.
+    assert etsy_calls == [("draft", "short sleeves", "photos")]
     assert summaries == [filled]

@@ -626,6 +626,9 @@ class EtsyAttributesTest(unittest.IsolatedAsyncioTestCase):
             "title": "Hanes 90s Desert Storm tee", "primaryColor": "White", "direct_category_ids": {"etsy": "449"},
             "seller_fields": ["etsy_specifics.category_specifics.Holiday"],
         }, source="model")
+        from anteroom.services.listing_generate import photo_fingerprint
+
+        self.photos = photo_fingerprint(ConversationRepo(self.db).get_photos(self.conv.id))
 
     def tearDown(self):
         self.db.close()
@@ -663,7 +666,7 @@ class EtsyAttributesTest(unittest.IsolatedAsyncioTestCase):
         with patch("anteroom.services.native_editor.editor_form", self.editor_form), \
                 patch("anteroom.services.listing_generate.collect_provider_text", provider_text):
             saved = await native_field_fill.fill_etsy_attributes(
-                self.conv.id, object(), evidence="White tee with short sleeves and a crew neck")
+                self.conv.id, object(), evidence="White tee with short sleeves and a crew neck", photos=self.photos)
         # Filled rows (Primary color from General) and the seller's own Holiday are not asked.
         self.assertIn("Sleeve length", prompts[0])
         self.assertNotIn("Primary color", prompts[0])
@@ -689,15 +692,44 @@ class EtsyAttributesTest(unittest.IsolatedAsyncioTestCase):
         before = self._current()
         with patch("anteroom.services.native_editor.editor_form", self.editor_form), \
                 patch("anteroom.services.listing_generate.collect_provider_text", AsyncMock(return_value='{"fields": {}}')):
-            self.assertIsNone(await native_field_fill.fill_etsy_attributes(self.conv.id, object(), evidence="A tee"))
+            self.assertIsNone(await native_field_fill.fill_etsy_attributes(
+                self.conv.id, object(), evidence="A tee", photos=self.photos))
         self.assertEqual(self._current(), before)
+
+    async def test_evidence_about_other_photos_is_not_saved(self):
+        before = self._current()
+        provider = AsyncMock(return_value=json.dumps({"fields": {
+            "etsy_specifics.category_specifics.Sleeve length": {"value": "Short sleeve", "evidence": "short sleeves"}}}))
+        with patch("anteroom.services.native_editor.editor_form", self.editor_form), \
+                patch("anteroom.services.listing_generate.collect_provider_text", provider):
+            self.assertIsNone(await native_field_fill.fill_etsy_attributes(
+                self.conv.id, object(), evidence="short sleeves", photos="photos before a replacement"))
+        provider.assert_not_awaited()
+        self.assertEqual(self._current(), before)
+
+    async def test_an_earlier_answer_the_new_category_does_not_offer_is_refilled(self):
+        listing = {**self._current(), "etsy_specifics": {"category_specifics": {
+            "Sleeve length": "Cap sleeve", "Neckline": "Crew neck"}}}
+        listing_persistence.save_revision(self.repo.db, self.conv.id, listing, source="native_fields")
+        rows = native_field_fill.etsy_attribute_rows(self._form(listing), listing)
+        # Neckline's answer is one of this category's choices; Sleeve length's is not, so List would drop it.
+        self.assertEqual([row["label"] for row in rows], ["Sleeve length", "Occasion"])
+        reply = json.dumps({"fields": {
+            "etsy_specifics.category_specifics.Sleeve length": {"value": "Short sleeve", "evidence": "short sleeves"}}})
+        with patch("anteroom.services.native_editor.editor_form", self.editor_form), \
+                patch("anteroom.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)):
+            saved = await native_field_fill.fill_etsy_attributes(
+                self.conv.id, object(), evidence="short sleeves", photos=self.photos)
+        self.assertEqual(saved["etsy_specifics"]["category_specifics"],
+                         {"Sleeve length": "Short sleeve", "Neckline": "Crew neck"})
 
     async def test_an_unreadable_etsy_form_leaves_the_listing_alone(self):
         before = self._current()
         provider = AsyncMock()
         with patch("anteroom.services.native_editor.editor_form", AsyncMock(side_effect=RuntimeError("Etsy down"))), \
                 patch("anteroom.services.listing_generate.collect_provider_text", provider):
-            self.assertIsNone(await native_field_fill.fill_etsy_attributes(self.conv.id, object(), evidence="A tee"))
+            self.assertIsNone(await native_field_fill.fill_etsy_attributes(
+                self.conv.id, object(), evidence="A tee", photos=self.photos))
         provider.assert_not_awaited()
         self.assertEqual(self._current(), before)
 
