@@ -161,6 +161,21 @@ struct InventoryTests {
          "vendoo_marketplaces":["ebay","poshmark","sellwild"],"removed_marketplaces":["ebay","poshmark"]}
         """#.utf8))
         precondition(delisted.inventoryStatus == "inactive" && delisted.statusTab == "draft" && delisted.statusLabel == "Inactive")
+        // A live listing stays under Active while a job runs on it (status "listing"), keeping its Listing label.
+        let sendingLive = try JSONDecoder().decode(ConversationSummary.self, from: Data(#"""
+        {"id":"sl","title":"Jacket","status":"listing","created_at":"2026-08-01T00:00:00","updated_at":"2026-10-01T00:00:00",
+         "direct_marketplaces":["poshmark"]}
+        """#.utf8))
+        precondition(sendingLive.inventoryStatus == "listing" && sendingLive.statusTab == "active" && sendingLive.statusLabel == "Listing")
+        let sendingDraft = try JSONDecoder().decode(ConversationSummary.self, from: Data(#"""
+        {"id":"sd","title":"Scarf","status":"listing","created_at":"2026-08-01T00:00:00","updated_at":"2026-10-01T00:00:00"}
+        """#.utf8))
+        precondition(sendingDraft.inventoryStatus == "listing" && sendingDraft.statusTab == "draft" && sendingDraft.statusLabel == "Listing")
+        let sendingDelisted = try JSONDecoder().decode(ConversationSummary.self, from: Data(#"""
+        {"id":"sx","title":"Vest","status":"listing","created_at":"2026-08-01T00:00:00","updated_at":"2026-10-01T00:00:00",
+         "vendoo_marketplaces":["ebay","sellwild"],"removed_marketplaces":["ebay"]}
+        """#.utf8))
+        precondition(sendingDelisted.inventoryStatus == "listing" && sendingDelisted.statusTab == "draft")
         // Each marketplace's live price, marked when it is not the item price; unknown stays unknown.
         let priced = try JSONDecoder().decode(ConversationSummary.self, from: Data(#"""
         {"id":"g","title":"Tee","status":"active","created_at":"2026-08-01T00:00:00","updated_at":"2026-10-01T00:00:00","price":25,"direct_records":{

@@ -1,7 +1,7 @@
 /** Inventory filters and sorts over Studio's own listing rows. */
 
 import { soldAtMs } from "./sidebar/listingShelves";
-import { inventoryStatus, liveMarketplaces } from "./sidebar/listingStatus";
+import { hasLiveListing, inventoryStatus, liveMarketplaces } from "./sidebar/listingStatus";
 
 export type ListingSortId =
   | "recent"
@@ -120,13 +120,31 @@ export function listingStatusTab(status?: string | null): ListingStatusFilter {
 }
 
 /**
+ * The tab a listing belongs to, taking live marketplaces into account: a live
+ * item stays under Active while a background job ("listing") runs on it,
+ * keeping its Listing label until the job finishes.
+ */
+export function listingTab(listing: {
+  status?: string | null;
+  vendoo_marketplaces?: string[];
+  direct_marketplaces?: string[];
+  removed_marketplaces?: string[];
+  sold_marketplaces?: string[];
+}): ListingStatusFilter {
+  const status = inventoryStatus(listing);
+  if (status === "active" || status === "sold") return status;
+  if (status === "listing" && hasLiveListing(listing)) return "active";
+  return "draft";
+}
+
+/**
  * Whether a listing shows under a status tab. The tabs are lifecycle states and
- * nothing else: a live listing with unsent edits still belongs to Active, where
- * its unsent tag and the filter can explain it. A failed send keeps its Failed
- * label on its row under Draft.
+ * nothing else: a live listing with unsent edits or an active send still
+ * belongs to Active, where its tag and label explain what is happening. A
+ * failed send keeps its Failed label on its row under Draft.
  */
 export function inStatusTab(listing: FilterableListing, tab: ListingStatusFilter): boolean {
-  return listingStatusTab(inventoryStatus(listing)) === tab;
+  return listingTab(listing) === tab;
 }
 
 function lower(value: string | null | undefined): string {
@@ -309,7 +327,7 @@ export function statusCounts(
 ): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const listing of listings) {
-    const status = retainedTab && listing.id === selectedId ? retainedTab : listingStatusTab(inventoryStatus(listing));
+    const status = retainedTab && listing.id === selectedId ? retainedTab : listingTab(listing);
     if (!visibleInInventory(listing, status, searching, selectedId)) continue;
     counts[status] = (counts[status] || 0) + 1;
   }
