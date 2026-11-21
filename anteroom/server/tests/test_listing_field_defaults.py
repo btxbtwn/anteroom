@@ -338,7 +338,8 @@ def test_without_saved_defaults_the_models_answers_stay(settings_file):
     assert listing["etsy_specifics"] == {"who_made": "I did"}
 
 
-def test_a_generated_listing_keeps_the_saved_defaults_over_the_models_answers(settings_file):
+@pytest.mark.parametrize("refresh_etsy_form", [False, True])
+def test_a_generated_listing_keeps_the_saved_defaults_over_the_models_answers(settings_file, refresh_etsy_form):
     import json
 
     from sqlalchemy import create_engine
@@ -346,9 +347,10 @@ def test_a_generated_listing_keeps_the_saved_defaults_over_the_models_answers(se
 
     from anteroom.database import Base
     from anteroom.repositories.queries import ConversationRepo
-    from anteroom.services import listing_persistence, mercari_form, native_contract
+    from anteroom.services import etsy_listings, listing_persistence, mercari_form, native_contract, native_editor
 
     user_settings.set_listing_field_default("etsy_specifics.whoMade", "Another company or person")
+    user_settings.set_listing_field_default("etsy_specifics.whatIsIt", "A supply or tool to make things")
     user_settings.set_listing_field_default(SHOEBOX, "yes")
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
@@ -359,17 +361,25 @@ def test_a_generated_listing_keeps_the_saved_defaults_over_the_models_answers(se
         seed[native_contract.KEY] = native_contract.capture(
             seed, {"mercari": mercari_form.form(native_form.attach_form({}, "mercari"))}, ["mercari"],
         )
-        listing_persistence.save_revision(db, conv.id, seed, source="native_schema")
+        revision = listing_persistence.save_revision(db, conv.id, seed, source="native_schema")
+        if refresh_etsy_form:
+            form = asyncio.run(etsy_form.editor_form(seed))
+            native_editor.save_refreshed_form(db, conv.id, "etsy", revision.id, form)
         generated = {
             "title": "Tee", "description": "Soft tee.", "brand": "Hanes", "condition": "Good", "size": "M",
-            "price": 18, "etsy_specifics": {"who_made": "I did"},
+            "price": 18, "etsy_specifics": {"whoMade": "I did", "whatIsIt": "A finished product"},
             "mercari_specifics": {"package": {"fitsShoebox": "no"}},
         }
         saved = listing_generate.persist_generated_listing(
             db, conv.id, json.dumps(generated), provider_name="test", model_name="test", parsed=generated,
         )
         assert saved is not None
-        assert saved["etsy_specifics"]["who_made"] == "Another company or person"
+        who, what = ("whoMade", "whatIsIt") if refresh_etsy_form else ("who_made", "what_is")
+        assert saved["etsy_specifics"][who] == "Another company or person"
+        assert saved["etsy_specifics"][what] == "A supply or tool to make things"
+        fields = etsy_listings.draft_fields(saved, creating=True)
+        assert fields["who_made"] == "someone_else"
+        assert fields["is_supply"] == "true"
         assert "fitsShoebox" not in ((saved.get("mercari_specifics") or {}).get("package") or {})
         assert native_form.attach_form(saved, "mercari")["mercari_specifics"]["package"]["fitsShoebox"] == "yes"
     finally:

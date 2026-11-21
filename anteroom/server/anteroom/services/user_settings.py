@@ -323,6 +323,7 @@ def apply_listing_field_defaults(listing: dict, seed: dict | None = None) -> boo
     label and shoebox answer are form preferences ``native_form.attach_form`` fills
     in, so the model's answer is removed and the saved one shows instead.
     """
+    from anteroom.services.native_contract import KEY, path_of
     from anteroom.services.seller_overrides import field_locked, fold_key
 
     if not isinstance(listing, dict):
@@ -331,16 +332,24 @@ def apply_listing_field_defaults(listing: dict, seed: dict | None = None) -> boo
     defaults = _stored_listing_field_defaults()
     etsy = listing.get("etsy_specifics")
     etsy = dict(etsy) if isinstance(etsy, dict) else {}
+    contracts = (seed or {}).get(KEY)
+    contract = contracts.get("etsy") if isinstance(contracts, dict) else None
+    paths = {path_of(row) for row in contract.get("fields") or []} if isinstance(contract, dict) else set()
     for path, aliases in _ETSY_FIELD_DEFAULT_KEYS.items():
         saved = defaults.get(path)
         if not saved or any(field_locked(seed, "etsy", alias) for alias in aliases):
             continue
         folded = {fold_key(alias) for alias in aliases}
         answer = {key: value for key, value in etsy.items() if fold_key(key) in folded}
-        if answer == {aliases[0]: saved["label"]}:
+        # A captured form only allows its exact paths. Keep the existing
+        # listing spelling when Etsy has no captured row for this answer.
+        key = path.split(".", 1)[1] if path in paths else next(
+            (alias for alias in aliases if f"etsy_specifics.{alias}" in paths), aliases[0],
+        )
+        if answer == {key: saved["label"]}:
             continue
         etsy = {key: value for key, value in etsy.items() if key not in answer}
-        etsy[aliases[0]] = saved["label"]
+        etsy[key] = saved["label"]
         changed = True
     if changed:
         listing["etsy_specifics"] = etsy
