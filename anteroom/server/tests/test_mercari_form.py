@@ -112,7 +112,8 @@ class MercariFormTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(brand_gaps({'brand': 'Nike', 'price': 20}), [])
         self.assertEqual(brand_gaps({'brand': 'Nike', 'price': 20, 'mercari_specifics': {'noBrand': True}}), [])
         # Toggling the No brand checkbox or choosing a Mercari brand does not make the saved form stale.
-        listing = {'brand': 'Walt Disney World', 'price': 20, 'condition': 'Good',
+        listing = {'title': 'Walt Disney World T-shirt', 'description': 'Short sleeve graphic T-shirt.',
+                   'brand': 'Walt Disney World', 'price': 20, 'condition': 'Good',
                    'direct_category_ids': {'mercari': '303'}, 'size': 'S',
                    'mercari_specifics': {'shippingMethod': 'SOYO', 'shipsFrom': '70115',
                                          'smartPricing': {'enabled': False}}}
