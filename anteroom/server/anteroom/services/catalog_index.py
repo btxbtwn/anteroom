@@ -533,17 +533,22 @@ def _publish_index(
     categories: Any = None,
     category_fingerprint: str | None = None,
     category_root: str | None = None,
+    mark_current: bool = True,
 ) -> None:
     with _INDEX_LOCK:
         _state().index = index
-        _state().fingerprint = fp_text
-        _state().stale = False
+        if mark_current:
+            _state().fingerprint = fp_text
+            _state().stale = False
+            catalog_meta_path().parent.mkdir(parents=True, exist_ok=True)
+            catalog_meta_path().write_text(fp_text, encoding="utf-8")
+        else:
+            _state().stale = True
+            _state().checked_at = 0.0
         if category_fingerprint is not None:
             _SHARED_CATEGORIES.index = categories
             _SHARED_CATEGORIES.fingerprint = category_fingerprint
             _SHARED_CATEGORIES.root = category_root or str(category_index_dir())
-        catalog_meta_path().parent.mkdir(parents=True, exist_ok=True)
-        catalog_meta_path().write_text(fp_text, encoding="utf-8")
 
 
 def _index_docs(docs: Path):
@@ -669,17 +674,15 @@ def _build_unlocked(
     docs_index = _index_docs(docs)
     fp_text = json.dumps(fp, sort_keys=True)
     # Never stamp a failed Semble build on non-empty rows as up-to-date.
-    publish_cat_fp = (
-        trees_text
-        if build_categories and trees_text is not None and (categories is not None or not snapshot.category_rows)
-        else None
-    )
+    categories_failed = build_categories and bool(snapshot.category_rows) and categories is None
+    publish_cat_fp = trees_text if build_categories and trees_text is not None and not categories_failed else None
     _publish_index(
         docs_index,
         fp_text,
         categories=categories,
         category_fingerprint=publish_cat_fp,
         category_root=saved_root,
+        mark_current=not categories_failed,
     )
     counts = {
         "categories": len(snapshot.category_rows) if category_count is None else category_count,
@@ -754,6 +757,7 @@ def _build_hosted(snapshot: CatalogSnapshot, owner: str) -> dict[str, Any]:
 
             docs_index = SembleIndex.load_from_disk(output / 'index')
         publish_cat_fp: str | None = trees_text
+        categories_failed = False
         if build_categories:
             if not snapshot.category_rows:
                 categories = None
@@ -763,14 +767,16 @@ def _build_hosted(snapshot: CatalogSnapshot, owner: str) -> dict[str, Any]:
                     categories = loaded
                 else:
                     # Save or tokenization failed; keep any previous shared index
-                    # intact and do not stamp trees_text as cached.
+                    # intact and leave seller state stale so the next check retries.
                     publish_cat_fp = None
+                    categories_failed = True
         _publish_index(
             docs_index,
             json.dumps(snapshot.fingerprint, sort_keys=True),
             categories=categories,
             category_fingerprint=publish_cat_fp,
             category_root=saved_root,
+            mark_current=not categories_failed,
         )
         return result
 

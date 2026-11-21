@@ -195,11 +195,14 @@ def test_failed_category_build_preserves_last_good_index_and_does_not_poison_cac
     assert first_index is not None
     assert (catalog.category_index_dir() / 'studio-fingerprint.json').is_file()
 
-    # If Semble fails on v2, keep v1 on disk and in memory without stamping v2 as cached.
+    # If Semble fails on v2, keep v1 on disk and in memory without stamping v2 as cached
+    # and keep the seller state stale so ensure_catalog_index retries on the next check.
     monkeypatch.setattr(catalog, '_load_semble_index', lambda _docs: (_ for _ in ()).throw(RuntimeError('boom')))
     catalog._build_unlocked(v2_snap)
     assert catalog._SHARED_CATEGORIES.index is first_index
     assert catalog._SHARED_CATEGORIES.fingerprint == first_fp
+    assert catalog._state().stale is True
+    assert catalog._index_needs_rebuild(json.dumps(v2_snap.fingerprint, sort_keys=True)) is True
     assert (catalog.category_index_dir() / 'studio-fingerprint.json').is_file()
 
     # Corrupt stamp on disk falls back cleanly to rebuilding instead of raising.
