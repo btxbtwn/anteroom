@@ -291,27 +291,63 @@ def test_match_description_blocks_rejects_duplicate_snippets():
 
 
 def test_seller_facts_respect_custom_section_order():
-    from anteroom.services.listing_generate import apply_seller_description_facts
+    from anteroom.services.listing_generate import apply_seller_description_facts, ensure_physical_description
     from anteroom.services.user_settings import set_listing_formulas
 
-    set_listing_formulas(
-        description=skill_formulas.compile_description_blocks(["vibe", "measurements", "flaws"])
-    )
     seller = {
         "garment": "top",
         "measurements": {"top": {"pitToPit": "20", "length": "26"}},
         "knownFlaws": "small stain on hem",
     }
-    listing = {"description": 'Y2K black cotton tee.\n\nMeasurements: Pit to pit: 20"; Length: 26"'}
-    apply_seller_description_facts(listing, seller)
-    assert "small stain on hem" in listing["description"]
-    assert listing["description"].index("Measurements:") < listing["description"].index("Flaws:")
 
-    listing_missing_measurements = {"description": "Y2K black cotton tee.\n\nFlaws:\n- Small stain on hem."}
-    apply_seller_description_facts(listing_missing_measurements, seller)
-    assert 'Pit to pit: 20"' in listing_missing_measurements["description"]
+    # Measurements first: measurements, vibe, flaws — both when Flaws is present and when Flaws is absent.
+    set_listing_formulas(
+        description=skill_formulas.compile_description_blocks(["measurements", "vibe", "flaws"])
+    )
+    with_flaws = {"description": "Y2K black cotton tee with a soft wash.\n\nFlaws:\n- Small stain on hem."}
+    apply_seller_description_facts(with_flaws, seller)
+    assert with_flaws["description"].startswith('Measurements: Pit to pit: 20"; Length: 26"\n\nY2K black cotton tee')
     assert (
-        listing_missing_measurements["description"].index("Measurements:")
-        < listing_missing_measurements["description"].index("Flaws:")
+        with_flaws["description"].index("Measurements:")
+        < with_flaws["description"].index("Y2K black cotton tee")
+        < with_flaws["description"].index("Flaws:")
+    )
+
+    without_flaws = {"description": "Y2K black cotton tee with a soft wash."}
+    apply_seller_description_facts(without_flaws, {"garment": "top", "measurements": seller["measurements"]})
+    assert without_flaws["description"].startswith('Measurements: Pit to pit: 20"; Length: 26"\n\nY2K black cotton tee')
+
+    ensure_listing = {"description": "Y2K black cotton tee with a soft wash.\n\nFlaws:\n- Small stain on hem."}
+    assert ensure_physical_description(ensure_listing) is True
+    assert ensure_listing["description"].startswith("Measurements: See photos\n\nY2K black cotton tee")
+
+    # Intermediate attributes: vibe, flaws, material, measurements.
+    set_listing_formulas(
+        description=skill_formulas.compile_description_blocks(["vibe", "flaws", "material", "measurements"])
+    )
+    with_material = {
+        "description": 'Y2K black cotton tee.\n\nMaterial: 100% cotton.\n\nMeasurements: Pit to pit: 20"; Length: 26"'
+    }
+    apply_seller_description_facts(with_material, seller)
+    assert (
+        with_material["description"].index("Y2K black cotton tee.")
+        < with_material["description"].index("Flaws:")
+        < with_material["description"].index("Material:")
+        < with_material["description"].index("Measurements:")
+    )
+
+    # Material before Measurements before Vibe: material, measurements, vibe, flaws.
+    set_listing_formulas(
+        description=skill_formulas.compile_description_blocks(["material", "measurements", "vibe", "flaws"])
+    )
+    middle_measurements = {
+        "description": "Material: 100% cotton.\n\nY2K black cotton tee.\n\nFlaws:\n- Small stain on hem."
+    }
+    apply_seller_description_facts(middle_measurements, seller)
+    assert (
+        middle_measurements["description"].index("Material:")
+        < middle_measurements["description"].index("Measurements:")
+        < middle_measurements["description"].index("Y2K black cotton tee.")
+        < middle_measurements["description"].index("Flaws:")
     )
 

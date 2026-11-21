@@ -213,17 +213,59 @@ def active_description_template() -> str:
     return get_listing_formulas().get("description") or DEFAULT_DESCRIPTION_FORMULA
 
 
+_SECTION_LABEL_RE = re.compile(r"^([A-Za-z][A-Za-z /]{1,20})\s*:")
+
+
 def description_has_section(label: str) -> bool:
     """True when the active description formula has a ``Label:`` line."""
     return re.search(rf"(?im)^{re.escape(label)}\s*:", active_description_template()) is not None
 
 
-def description_section_precedes(first_label: str, second_label: str) -> bool:
-    """True when ``first_label:`` appears ahead of ``second_label:`` in the active formula."""
-    template = active_description_template()
-    first = re.search(rf"(?im)^{re.escape(first_label)}\s*:", template)
-    second = re.search(rf"(?im)^{re.escape(second_label)}\s*:", template)
-    return bool(first and second and first.start() < second.start())
+def _template_section_slots(template: str) -> list[str | None]:
+    """Ordered slot keys for each paragraph in ``template`` (``None`` for unlabeled prose)."""
+    slots: list[str | None] = []
+    for chunk in re.split(r"\n{2,}", template.strip()):
+        part = chunk.strip()
+        if not part:
+            continue
+        match = _SECTION_LABEL_RE.match(part)
+        slots.append(match.group(1).strip().lower() if match else None)
+    return slots
+
+
+def insert_description_section(description: str, label: str, block: str) -> str:
+    """Insert a missing ``Label: ...`` block at its position in the active description formula."""
+    text = description.strip()
+    if not text:
+        return block
+    slots = _template_section_slots(active_description_template())
+    target = label.strip().lower()
+    if target not in slots:
+        return f"{text}\n\n{block}"
+    target_idx = slots.index(target)
+    paragraphs = [part.strip() for part in re.split(r"\n{2,}", text) if part.strip()]
+    if target_idx == 0:
+        paragraphs.insert(0, block)
+        return "\n\n".join(paragraphs)
+
+    known_labels = {slot for slot in slots if slot is not None}
+
+    def paragraph_slot(paragraph: str) -> str | None:
+        match = _SECTION_LABEL_RE.match(paragraph)
+        if match:
+            found = match.group(1).strip().lower()
+            if found in known_labels:
+                return found
+        return None
+
+    para_slots = [paragraph_slot(paragraph) for paragraph in paragraphs]
+    for later_slot in slots[target_idx + 1 :]:
+        for idx, para_slot in enumerate(para_slots):
+            if para_slot == later_slot:
+                paragraphs.insert(idx, block)
+                return "\n\n".join(paragraphs)
+    paragraphs.append(block)
+    return "\n\n".join(paragraphs)
 
 
 def _optional_description_markers(template: str) -> frozenset[str]:
