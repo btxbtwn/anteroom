@@ -1,1 +1,0 @@
-- Hosted scheduled automations now run with bounded per-process seller concurrency so bursts of due accounts stay smooth without saturating database connections.

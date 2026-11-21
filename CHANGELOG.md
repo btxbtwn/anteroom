@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1098 — 2026-11-21
+
+- Hosted scheduled automations now run with bounded per-process seller concurrency so bursts of due accounts stay smooth without saturating database connections.
+
 ## 0.1.1097 — 2026-11-21
 
 - Keep Smart Pricing turned on or off as saved when you edit or clear the minimum price on an older Mercari draft.
