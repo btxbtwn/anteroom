@@ -4,6 +4,7 @@ import type { ComposerImage } from "./ComposerAttachments";
 export interface ComposerDraft {
   text: string;
   images: ComposerImage[];
+  listingPhotoBatch?: "uploading" | "retry";
 }
 
 const EMPTY_DRAFT: ComposerDraft = { text: "", images: [] };
@@ -31,10 +32,10 @@ export function hasComposerDraft(key: string): boolean {
 export function setComposerDraftText(key: string, text: string): void {
   const current = drafts.get(key) ?? EMPTY_DRAFT;
   if (current.text === text) return;
-  if (!text && !current.images.length) {
+  if (!text && !current.images.length && !current.listingPhotoBatch) {
     drafts.delete(key);
   } else {
-    drafts.set(key, { text, images: current.images });
+    drafts.set(key, { ...current, text });
   }
   emit();
 }
@@ -42,10 +43,22 @@ export function setComposerDraftText(key: string, text: string): void {
 export function setComposerDraftImages(key: string, images: ComposerImage[]): void {
   const current = drafts.get(key) ?? EMPTY_DRAFT;
   if (current.images === images) return;
-  if (!current.text && !images.length) {
+  if (!current.text && !images.length && !current.listingPhotoBatch) {
     drafts.delete(key);
   } else {
-    drafts.set(key, { text: current.text, images });
+    drafts.set(key, { ...current, images });
+  }
+  emit();
+}
+
+/** Keep the batch intent across remounts and while a failed image is replaced. */
+export function setComposerListingPhotoBatch(key: string, batch: ComposerDraft["listingPhotoBatch"]): void {
+  const current = getComposerDraft(key);
+  if (current.listingPhotoBatch === batch) return;
+  if (!batch && !current.text && !current.images.length) {
+    drafts.delete(key);
+  } else {
+    drafts.set(key, { ...current, listingPhotoBatch: batch });
   }
   emit();
 }

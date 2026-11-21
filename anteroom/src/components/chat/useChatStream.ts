@@ -228,7 +228,7 @@ export function useChatStream({
         thinkingStarted: false,
       });
     }
-  }, [convId, queryClient, setInput, messageIds]);
+  }, [convId, queryClient, messageIds]);
 
   const handleGenerate = useCallback(async () => {
     if (photosUploading(convId)) return;
@@ -244,7 +244,7 @@ export function useChatStream({
 
   const sendMessage = useCallback(async (
     text: string,
-    opts?: { attachments?: ChatAttachmentUpload[] },
+    opts?: { attachments?: ChatAttachmentUpload[]; preserveInput?: boolean },
   ) => {
     const running = getLive(convId).streaming
       || getLive(convId).generating
@@ -270,7 +270,7 @@ export function useChatStream({
       userCancelled: false,
       restoreInputOnAbort: false,
     });
-    setInput("");
+    if (!opts?.preserveInput) setInput("");
     const stillMine = () => getLive(convId).controller === controller;
     const errorContext = () => ({
       action: "send" as const,
@@ -337,7 +337,10 @@ export function useChatStream({
             userCancelled: false,
             restoreInputOnAbort: false,
           });
-          if (restore) setInput(text);
+          if (restore) {
+            if (opts?.preserveInput) setInput((current) => current || text);
+            else setInput(text);
+          }
           return true;
         }
         patchLive(convId, { controller: null, streaming: false });

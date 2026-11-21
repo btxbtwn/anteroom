@@ -7,7 +7,15 @@ import { turnHasWork, type FoldedTurn } from "./workLogModel";
 import { isStreamError } from "./assistantDisplay";
 import { TRACE_ONLY_EVENTS } from "./chatStream";
 
+type PendingPhotoSend = {
+  text: string;
+  running: boolean;
+  deferred: boolean;
+};
+
 type LiveStream = {
+  /** A completed upload waiting to send its note or start generation. */
+  pendingPhotoSend: PendingPhotoSend | null;
   controller: AbortController | null;
   streaming: boolean;
   generating: boolean;
@@ -43,6 +51,7 @@ const liveStreams: Record<string, LiveStream> = {};
 
 function emptyLive(): Omit<LiveStream, "listeners"> {
   return {
+    pendingPhotoSend: null,
     controller: null,
     streaming: false,
     generating: false,

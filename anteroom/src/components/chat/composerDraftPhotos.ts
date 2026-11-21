@@ -1,0 +1,58 @@
+import type { ComposerImage } from "./ComposerAttachments";
+import type { ComposerDraft } from "./composerDrafts";
+
+export type ComposerImageRoute = "busy" | "wait" | "listing_photos" | "chat_attachments";
+
+/**
+ * Decide how chat-composer images should be routed when the seller presses Send.
+ * Keeps images in the composer while the draft's photos query is still loading,
+ * promotes them to listing photos on empty drafts (or active retry batches), and
+ * otherwise sends them as reference chat attachments.
+ */
+export function decideComposerImageRoute(
+  photosCount: number | undefined,
+  listingPhotoBatch: ComposerDraft["listingPhotoBatch"],
+): ComposerImageRoute {
+  if (listingPhotoBatch === "uploading") return "busy";
+  if (listingPhotoBatch === "retry") return "listing_photos";
+  if (photosCount === undefined) return "wait";
+  return photosCount === 0 ? "listing_photos" : "chat_attachments";
+}
+
+export interface DraftPhotoUploadDeps {
+  uploadPhoto: (file: File) => Promise<void>;
+  invalidatePhotos: () => Promise<void>;
+  clearImages: (ids: readonly string[]) => void;
+  setError: (message: string) => void;
+}
+
+/** Upload the batch and leave any failed images in the composer for retry. */
+export async function uploadComposerDraftPhotos(
+  attached: readonly ComposerImage[],
+  deps: DraftPhotoUploadDeps,
+): Promise<boolean> {
+  const uploadedIds: string[] = [];
+  const errors: string[] = [];
+  for (const image of attached) {
+    try {
+      await deps.uploadPhoto(image.file);
+      uploadedIds.push(image.id);
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : `${image.file.name}: could not upload this photo.`);
+    }
+  }
+  if (uploadedIds.length) {
+    // A failed refresh must not put acknowledged writes back on the retry path.
+    deps.clearImages(uploadedIds);
+    try {
+      await deps.invalidatePhotos();
+    } catch {
+      errors.push("Photos were saved, but the photo list could not be refreshed.");
+    }
+  }
+  if (errors.length || !uploadedIds.length) {
+    deps.setError(errors.join("; ") || "Could not upload photos.");
+    return false;
+  }
+  return true;
+}

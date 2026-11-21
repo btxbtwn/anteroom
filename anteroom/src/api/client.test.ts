@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { api, errorMessage } from "./client";
 import { ApiRequestError, installHostedApiSession, retryAfterMs } from "./transport";
 import { reportError } from "./errorReports";
+import { uploadComposerDraftPhotos } from "../components/chat/composerDraftPhotos";
 
 vi.mock("./errorReports", () => ({ reportError: vi.fn() }));
 
@@ -26,6 +27,44 @@ it("keeps hosted upload file identities by returned photo ID despite failures an
     expect(result.count).toBe(2);
     expect(result.errors).toEqual(["lost.jpg: could not upload this photo."]);
     expect(fetch).toHaveBeenCalledTimes(4);
+  } finally {
+    uninstall();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("keeps acknowledged hosted writes off the composer retry path after a later request throws", async () => {
+  const uninstall = installHostedApiSession({
+    seller: "fixture-alice", origin: "https://anteroom.test", accessToken: async () => "fixture-token", unauthorized: () => {},
+  });
+  const fetch = vi.fn()
+    .mockResolvedValueOnce(new Response(null, { status: 201 }))
+    .mockRejectedValueOnce(new Error("Disconnected"))
+    .mockResolvedValueOnce(new Response(null, { status: 201 }));
+  vi.stubGlobal("fetch", fetch);
+  try {
+    const first = { id: "front", file: new File(["front"], "image.jpg") };
+    const second = { id: "tag", file: new File(["tag"], "image.jpg") };
+    let attached = [first, second];
+    const deps = {
+      uploadPhoto: (file: File) => api.conversations.uploadListingPhoto("coat", file),
+      invalidatePhotos: vi.fn<() => Promise<void>>()
+        .mockRejectedValueOnce(new Error("Refresh unavailable"))
+        .mockResolvedValueOnce(undefined),
+      clearImages: (ids: readonly string[]) => { attached = attached.filter(({ id }) => !ids.includes(id)); },
+      setError: vi.fn(),
+    };
+
+    expect(await uploadComposerDraftPhotos(attached, deps)).toBe(false);
+    expect(attached).toEqual([second]);
+    expect(deps.invalidatePhotos).toHaveBeenCalledTimes(1);
+    expect(deps.setError).toHaveBeenCalledWith(expect.stringContaining("Photos were saved"));
+
+    expect(await uploadComposerDraftPhotos(attached, deps)).toBe(true);
+    expect(attached).toEqual([]);
+    expect(fetch.mock.calls.map(([, options]) => [options.method, options.body])).toEqual([
+      ["POST", first.file], ["POST", second.file], ["POST", second.file],
+    ]);
   } finally {
     uninstall();
     vi.unstubAllGlobals();

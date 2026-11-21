@@ -528,6 +528,18 @@ describe("useChatStream send", () => {
     });
   });
 
+  it("sends a queued note without clearing the current composer text", async () => {
+    routes = () => sse("data: Saved.", "", DONE);
+    const { chat, setInput } = mountChat();
+
+    await act(async () => {
+      expect(await chat().sendMessage("Submitted note", { preserveInput: true })).toBe(true);
+    });
+
+    expect(requested("/messages")).toHaveLength(1);
+    expect(setInput).not.toHaveBeenCalled();
+  });
+
   it("refuses to send while a generate is running", async () => {
     patchLive(convId, { generating: true });
     const { chat, setInput } = mountChat();
