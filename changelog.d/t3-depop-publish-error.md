@@ -1,0 +1,1 @@
+- Show Depop’s duplicate-SKU error when Depop reports it. Keep uncertain publishes blocked from retrying while you check the result.

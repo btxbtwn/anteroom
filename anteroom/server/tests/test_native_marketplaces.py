@@ -1369,6 +1369,33 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
 
 
 
+    def test_depop_check_with_a_404_and_remaining_draft_keeps_listing_blocked(self):
+        draft = URLS["depop"]
+        unknown = {
+            "ok": False, "safe_to_retry": False, "error_code": "uncertain", "draft_url": draft,
+            "error": "Depop still has this draft. Open it in Depop’s Selling Hub to check for a listing error.",
+            "marketplace_message": "publish status: HTTP 404; draft: still in drafts",
+        }
+        self.bridge.side_effect = [
+            {"ok": True, "state": "draft", "draft_url": draft},
+            unknown,
+            {"finished": True, "result": unknown},
+        ]
+        record = self.list("depop")
+        self.assertEqual(record["state"], "unknown")
+        checked = self.client.post(f"{self.base}/depop/check")
+        self.assertEqual(checked.status_code, 200, checked.text)
+        result = checked.json()
+        self.assertEqual((result["state"], result["error_code"]), ("unknown", "uncertain"))
+        self.assertEqual(result["draft_url"], draft)
+        self.assertIsNone(result.get("listing_url"))
+        self.assertEqual(result["marketplace_message"], unknown["marketplace_message"])
+        blocked = self.client.post(f"{self.base}/depop/list", json={"revision_id": self.rev.id, "confirm": True})
+        self.assertEqual(blocked.status_code, 409, blocked.text)
+        self.assertEqual([call.args[1] for call in self.bridge.call_args_list],
+                         ["marketplace.execute", "marketplace.execute", "marketplace.result"])
+        self.assertEqual(self.actions(), ["save_draft", "publish"])
+
     def test_a_check_that_answers_after_the_seller_added_the_link_keeps_the_link(self):
         # Production, 2026-11-18: Depop's publish was unconfirmed, a Check was asking
         # Chrome, and the seller pasted the live link before Chrome answered.

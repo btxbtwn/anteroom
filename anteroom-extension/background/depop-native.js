@@ -308,6 +308,7 @@ const DEPOP_PHOTO_HOSTS = ['.s3.amazonaws.com', '.s3-accelerate.amazonaws.com'];
 const DEPOP_WEBAPI = 'https://webapi.depop.com';
 // Reads of a draft Depop is still posting when its publish status read is unavailable.
 const DEPOP_UNAVAILABLE_STATUS_POLLS = 8;
+const DEPOP_DUPLICATE_SKU_MESSAGE = 'Depop reports a duplicate SKU. Use a new SKU or clear it in the Depop draft.';
 
 function depopBaseDescription(listing) {
   return String(marketplaceCopy(listing, 'depop', 'description') || '').trim();
@@ -1094,7 +1095,7 @@ async function depopApiAction(action, payload) {
       const allowedRead = method === 'GET' && (/^\/presentation\/api\/v1\/drafts\/[A-Za-z0-9_-]{1,80}\/$/.test(path)
         || path === '/presentation/api/v1/drafts/?limit=24&sort_by=createdAt'
         || /^\/api\/v2\/drafts\/[A-Za-z0-9_-]{1,80}\/$/.test(path)
-        || /^\/api\/v3\/drafts\/products\/[A-Za-z0-9_-]+\/status\/$/.test(path)
+        || /^\/presentation\/api\/v1\/drafts\/products\/[A-Za-z0-9_-]+\/status\/$/.test(path)
         || path === '/presentation/api/v1/attributes/'
         || path === '/presentation/api/v1/users/me/'
         || depopShopRead(path)
@@ -1285,12 +1286,12 @@ async function depopApiAction(action, payload) {
         // Depop's SKU is the seller's own inventory id and has to be unique across
         // their listings. A duplicate blocks the draft, not the item, so a new draft
         // is written again without it and the seller is told.
-        if (!depopSkuTaken(error, draft.sku)) throw error;
+        if (!draft.sku || !depopSkuTaken(`${error?.message || ''} ${error?.marketplace_message || ''}`)) throw error;
         const stored = String(depopDraftView(existing).sku || '').trim();
         if (stored) {
           // A save never clears a SKU once Depop holds it, so the draft has to be fixed on Depop.
           throw marketplaceError(`Depop already has a listing with the SKU ${draft.sku}. Clear this draft's SKU `
-            + 'on Depop, or delete the other listing, then List again.', { marketplace_message: error.marketplace_message });
+            + 'on Depop or give it a new SKU.', { marketplace_message: error.marketplace_message });
         }
         delete draft.sku;
         delete fields.sku;
@@ -1403,22 +1404,20 @@ async function depopApiAction(action, payload) {
       if (!/^[A-Za-z0-9_-]+$/.test(String(payload.publish_job_id))) throw marketplaceError('A Depop publish receipt is required.');
       let status;
       try {
-        status = await request('GET', `/api/v3/drafts/products/${payload.publish_job_id}/status/`);
+        status = await request('GET', `/presentation/api/v1/drafts/products/${payload.publish_job_id}/status/`);
       } catch (error) {
-        // Since 2026-11-17 Depop answers this read with a bodiless 404 on every
-        // poll, after it has posted the item. A 404 on a read is not a refusal of
-        // the publish, which Depop already accepted. Read what the publish leaves.
+        // A 404 leaves the accepted publish unresolved. Read the draft and shop for evidence.
         if (error?.status !== 404) throw error;
         if (Number.isFinite(payload.evidence_until)) readDeadline = Math.min(payload.deadline, payload.evidence_until);
         return await depopPublishEvidence(request, payload, id ? path : '', () => Date.now() >= readDeadline);
       }
-      // Only a count names an answer. A job Depop has accepted but not started yet
-      // reports no counts at all, which is waiting, not a refusal.
+      // This request submitted one draft. A terminal answer accounts for exactly that draft.
       const counts = status?.count_by_status && typeof status.count_by_status === 'object' ? status.count_by_status : {};
-      const count = key => Number(counts[key]) || 0;
-      const complete = count('COMPLETE') === 1 && count('PENDING') === 0;
-      // A job that ended without posting is an answer too: nothing is live and the draft is still there.
-      const failed = !complete && ['FAILED', 'ERROR', 'CANCELLED'].some(key => count(key) > 0);
+      const reported = Object.entries(counts).filter(([, value]) => value !== 0 && value !== '0');
+      const [outcome, total] = reported[0] ?? [];
+      const settled = reported.length === 1 && (total === 1 || total === '1');
+      const complete = settled && outcome === 'COMPLETE';
+      const failed = settled && ['FAILED', 'ERROR', 'CANCELLED'].includes(outcome);
       // Depop's own words, so a job it refused is never a silent one.
       let reason = depopValidationReason(status);
       if (failed && !reason && id) {
@@ -1447,7 +1446,7 @@ async function depopApiAction(action, payload) {
 }
 
 // Depop's own path words, with every id, slug and query left out of logs.
-const DEPOP_PATH_WORDS = new Set(['presentation', 'api', 'v1', 'v2', 'v3', 'drafts', 'products', 'status', 'by-slug',
+const DEPOP_PATH_WORDS = new Set(['presentation', 'api', 'v1', 'v2', 'drafts', 'products', 'status', 'by-slug',
   'edit-listing', 'shops', 'shop', 'by-status', 'selling', 'users', 'me', 'pictures', 'attributes', 'addresses',
   'settings', 'shipping', 'providers', 'depop', 'validate']);
 function depopPathTemplate(path) {
@@ -1464,8 +1463,10 @@ async function depopPublishEvidence(request, payload, draftPath, spent = () => f
   const unavailable = { complete: false, failed: false, counts: {}, status_unavailable: true };
   if (!draftPath) return unavailable;
   try {
-    await request('GET', draftPath);
-    return unavailable;
+    const draft = await request('GET', draftPath);
+    const reason = depopValidationReason(draft);
+    // The draft can explain the issue. Only the job status can confirm a refusal.
+    return { ...unavailable, draft_present: true, ...(depopSkuTaken(reason) ? { reason } : {}) };
   } catch (error) {
     // Out of time for evidence: still unconfirmed, never a refusal.
     if (spent()) return unavailable;
@@ -1501,13 +1502,14 @@ function depopValidationReason(document) {
     }
   };
   for (const key of ['error', 'message', 'detail', 'errors']) collect(document?.[key]);
-  return marketplaceScrub([...new Set(messages)].join(' '));
+  return marketplaceScrub([...new Set(messages)].join(', '));
 }
 
 // Depop's own words when it refuses a SKU that another listing already carries.
-function depopSkuTaken(error, sku) {
-  const said = `${error?.message || ''} ${error?.marketplace_message || ''}`;
-  return Boolean(String(sku || '').trim()) && /sku/i.test(said) && /unique|already|duplicate/i.test(said);
+function depopSkuTaken(message) {
+  return /\bduplicate[ _]sku\b/i.test(message)
+    || /\bsku (?:must|has to) be unique\b/i.test(message)
+    || /\bsku (?:already (?:exists|belongs)|(?:is )?already (?:in use|used|taken)|has already been (?:used|taken))\b/i.test(message);
 }
 
 function depopDraftGone(error) {
@@ -1824,7 +1826,9 @@ async function runDepopNative(msg, recovery = false) {
         || (status.draft_posted ? (postedPolls += 1) >= 2 : (queuedPolls += 1) >= DEPOP_UNAVAILABLE_STATUS_POLLS))) break;
       if (status.failed) {
         // Depop's job ended without posting this draft. The draft is untouched, so List can run again.
-        return marketplaceFailure(marketplaceError(`Depop could not publish this listing.${status.reason ? ` ${status.reason}` : ''}`,
+        const message = depopSkuTaken(status.reason) ? DEPOP_DUPLICATE_SKU_MESSAGE
+          : `Depop could not publish this listing.${status.reason ? ` ${status.reason}` : ''}`;
+        return marketplaceFailure(marketplaceError(message,
           { code: 'rejected', marketplace_message: status.reason || `counts: ${JSON.stringify(status.counts || {})}` }), true,
         { draft_url: payload.draft_url });
       }
@@ -1839,10 +1843,20 @@ async function runDepopNative(msg, recovery = false) {
       { code: 'uncertain', rejected: false, marketplace_message: 'publish status: HTTP 404; draft: no longer in drafts; shop: no single new matching listing' }),
       { publish_read: true });
     }
-    throw Object.assign(marketplaceError('Depop has not confirmed publishing yet. Check its result later.',
-      { code: 'uncertain', rejected: false, marketplace_message: status.status_unavailable
-        ? 'publish status: HTTP 404; draft: still in drafts' : `counts: ${JSON.stringify(status.counts || {})}` }),
-    { publish_read: true });
+    let message = 'Depop has not confirmed publishing yet. Check its result later.';
+    let detail = `counts: ${JSON.stringify(status.counts || {})}`;
+    if (status.status_unavailable) {
+      detail = 'publish status: HTTP 404';
+      if (status.reason) {
+        message = DEPOP_DUPLICATE_SKU_MESSAGE;
+        detail = status.reason;
+      } else if (status.draft_present) {
+        message = 'Depop still has this draft. Open it in Depop’s Selling Hub to check for a listing error.';
+        detail += '; draft: still in drafts';
+      }
+    }
+    throw Object.assign(marketplaceError(message, { code: 'uncertain', rejected: false, marketplace_message: detail }),
+      { publish_read: true });
   } catch (error) {
     if (depopDraftGone(error) && !replacedDraft) payload.draft_url = '';
     // A write may have landed and the reply was lost. Read Depop before answering
@@ -1857,10 +1871,8 @@ async function runDepopNative(msg, recovery = false) {
           return await verify();
         }
       } catch (readError) {
-        if (depopDraftGone(readError)) {
-          return marketplaceFailure(error, true, {});
-        }
         if (payload.action === 'save_draft') {
+          if (depopDraftGone(readError)) return marketplaceFailure(error, true, {});
           return marketplaceFailure(readError, true, {
             draft_url: payload.draft_url, ...(replacedDraft ? { draft_replaced: true } : {}),
           });
