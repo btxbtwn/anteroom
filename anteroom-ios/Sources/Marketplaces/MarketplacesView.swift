@@ -220,14 +220,25 @@ struct EbayConnectionSheet: View {
             .navigationTitle("eBay connection")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { dismiss() }
+                        .disabled(working)
+                }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Grant") { grant() }
-                        .disabled(working || chosen.isEmpty || (!allowRestart && account?.pending == true))
-                        .accessibilityLabel("Grant selected permissions")
+                    if working {
+                        ProgressView()
+                            .accessibilityLabel("Signing in to eBay")
+                    } else {
+                        Button("Grant") { grant() }
+                            .disabled(chosen.isEmpty || (!allowRestart && account?.pending == true))
+                            .accessibilityLabel("Grant selected permissions")
+                    }
                 }
             }
         }
+        // Keep Settings' cancel and disconnect controls behind this sheet
+        // until the in-flight sign-in finishes.
+        .interactiveDismissDisabled(working)
     }
 
     private func grant() {
