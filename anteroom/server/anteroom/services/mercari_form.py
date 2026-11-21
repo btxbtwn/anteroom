@@ -338,14 +338,14 @@ def form(listing: dict, shipping_classes: list[dict] | None = None, *, notes: li
     smart = specifics.get("smartPricing")
     if isinstance(smart, dict):
         enabled = smart.get("enabled") is True
-        minimum = smart.get("minimumPrice")
     else:
         enabled = smart if isinstance(smart, bool) else _number(price) >= 1
-        minimum = None
+        smart = {}
+    suggested_minimum = math.floor(_number(price) * 0.85 + 0.5) if enabled else ""
+    minimum = smart.get("minimumPrice", suggested_minimum)
     fields["mercari_specifics.smartPricing.enabled"]["value"] = enabled
     fields["mercari_specifics.smartPricing.minimumPrice"].update(
-        value=minimum if minimum not in (None, "") else math.floor(_number(price) * 0.85 + 0.5) if enabled else "",
-        required=enabled)
+        value="" if minimum is None else minimum, required=enabled)
     notes = list(notes or [])
     if category_id and not category:
         notes.append("This Mercari category is not in the native catalog. Reload the catalog before choosing its fields.")

@@ -63,6 +63,19 @@ class MercariFormTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIs(fields['mercari_specifics.smartPricing.enabled']['value'], enabled)
                 self.assertEqual(fields['mercari_specifics.smartPricing.minimumPrice']['value'], minimum)
 
+    def test_smart_pricing_minimum_only_defaults_when_absent(self):
+        for pricing, expected in (
+            ({'enabled': True}, 34),
+            ({'enabled': True, 'minimumPrice': None}, ''),
+            ({'enabled': True, 'minimumPrice': ''}, ''),
+            ({'enabled': True, 'minimumPrice': 21.25}, 21.25),
+        ):
+            with self.subTest(pricing=pricing):
+                rows = mercari_form.form({'price': 40, 'mercari_specifics': {'smartPricing': pricing}})['fields']
+                minimum = next(row for row in rows if row['path'] == 'mercari_specifics.smartPricing.minimumPrice')
+                self.assertEqual(minimum['value'], expected)
+                self.assertTrue(minimum['required'])
+
     def test_a_brand_missing_from_mercaris_list_checks_no_brand_and_clears_brand(self):
         # Walt Disney World / AM Tees: General brand is not in Mercari's brand list.
         listing = {'brand': 'Walt Disney World', 'condition': 'Pre-Owned - Good', 'price': 20}
