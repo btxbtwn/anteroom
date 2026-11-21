@@ -1,0 +1,1 @@
+- Hosted database deploys now repair an invalid `ix_listing_promotions_rule_recent` index left behind by an interrupted concurrent index build instead of failing subsequent deploys.
