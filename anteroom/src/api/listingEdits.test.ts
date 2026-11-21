@@ -1,3 +1,4 @@
+import { readinessKey } from "../components/useInventoryReadiness";
 import { afterEach, expect, it, vi } from "vitest";
 import { api } from "./client";
 import { ApiRequestError } from "./transport";
@@ -36,6 +37,26 @@ it("waits for a draft task and saves retained edits against its latest revision"
     await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(2));
     expect(update).toHaveBeenLastCalledWith("item", { title: "My edit", price: 25 }, "r1");
     expect(edits.getSnapshot()).toEqual({ draft: null, saving: false, error: null });
+  } finally { client.clear(); }
+});
+
+it("invalidates only sheet blocks containing the saved listing after the editor detaches", async () => {
+  const { client, edits } = setup();
+  const key = (id: string) => readinessKey({ id, updated_at: "2026-11-20T12:00:00Z", direct_records: {} });
+  const savedBlocks = [["listing-sheet", "depop", [key("another"), key("item")]], ["listing-sheet", "ebay", [key("item")]]];
+  const unrelatedBlock = ["listing-sheet", "depop", [key("item-suffix")]];
+  for (const key of [...savedBlocks, unrelatedBlock]) client.setQueryData(key, {});
+  let finish!: (value: ListingSaveResult) => void;
+  vi.spyOn(api.listings, "update").mockReturnValue(new Promise(resolve => { finish = resolve; }));
+  const unsubscribe = edits.subscribe(() => {});
+  try {
+    edits.save({ price: 25 });
+    unsubscribe();
+    finish(result("r1", { price: 25 }));
+    await vi.waitFor(() => {
+      for (const key of savedBlocks) expect(client.getQueryState(key)?.isInvalidated).toBe(true);
+    });
+    expect(client.getQueryState(unrelatedBlock)?.isInvalidated).toBe(false);
   } finally { client.clear(); }
 });
 

@@ -34,4 +34,23 @@ describe("bulk marketplace dialog", () => {
     expect(preview).not.toHaveBeenCalled();
     for (const [options] of useMutation.mock.calls) expect(options.retry).toBe(false);
   });
+
+  it("pre-selects the marketplace when opened from a marketplace tab without bypassing review", async () => {
+    const perform = vi.spyOn(api.bulkMarketplace, "perform");
+    const preview = vi.spyOn(api.bulkMarketplace, "preview").mockResolvedValue({ action: "list", marketplaces: ["depop"], rows: [] });
+    const html = renderToStaticMarkup(
+      <BulkMarketplaceDialog conversationIds={["a", "b"]} initialAction="list" initialMarketplaces={["depop"]} onClose={vi.fn()} />,
+    );
+    expect(html.match(/role="checkbox"[^>]*aria-checked="true"/g)).toHaveLength(1);
+    expect(html).toContain("Pre-selected from this tab");
+    expect(html).toContain(">Review items</button>");
+    expect(html).not.toMatch(/<button[^>]*disabled=""[^>]*>Review items<\/button>/);
+    expect(perform).not.toHaveBeenCalled();
+    expect(preview).not.toHaveBeenCalled();
+    // Clicking Review items sends only the pre-selected marketplace to preview, never others.
+    const previewOptions = useMutation.mock.calls[0]?.[0] as { mutationFn: (ids: string[]) => Promise<unknown> };
+    await previewOptions.mutationFn(["a", "b"]);
+    expect(preview).toHaveBeenCalledWith(["a", "b"], "list", ["depop"]);
+    expect(perform).not.toHaveBeenCalled();
+  });
 });

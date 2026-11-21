@@ -8,6 +8,25 @@ struct WorkspaceStatus: Decodable, Sendable {
 struct ListingActivity: Decodable, Sendable {
     let busy: Bool
     let items: [String]
+    let lockedFields: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case busy, items
+        case lockedFields = "locked_fields"
+    }
+
+    init(busy: Bool, items: [String], lockedFields: [String] = []) {
+        self.busy = busy
+        self.items = items
+        self.lockedFields = lockedFields
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        busy = try values.decodeIfPresent(Bool.self, forKey: .busy) ?? false
+        items = try values.decodeIfPresent([String].self, forKey: .items) ?? []
+        lockedFields = try values.decodeIfPresent([String].self, forKey: .lockedFields) ?? []
+    }
 }
 
 struct ListingMessage: Decodable, Identifiable, Sendable {

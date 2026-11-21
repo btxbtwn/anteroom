@@ -213,6 +213,13 @@ final class AnteroomAPI: Sendable {
         try await decode(request("GET", "api/conversations/\(id)/native-marketplaces/preflight"))
     }
 
+    /// Cached display cells and readiness for one marketplace tab across the inventory rows on screen.
+    func listingSheet(marketplace: String, ids: [String]) async throws -> ListingSheetResponse {
+        var query = [URLQueryItem(name: "marketplace", value: marketplace)]
+        query.append(contentsOf: ids.map { URLQueryItem(name: "ids", value: $0) })
+        return try await decode(request("GET", "api/listing-sheet", query: query))
+    }
+
     func nativeMarketplaceStates(_ id: String) async throws -> [String: NativeDraftState] {
         let states: [String: NativeDraftState?] = try await decode(request("GET", "api/conversations/\(id)/native-marketplaces"))
         return states.compactMapValues { $0 }

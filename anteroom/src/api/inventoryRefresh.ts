@@ -44,3 +44,16 @@ export function refreshInventory(queryClient: QueryClient): void {
   if (wait <= 0) read();
   else schedule.timer = setTimeout(read, wait);
 }
+
+/** Invalidate cached sheet blocks containing the listing, across markets by default. */
+export function invalidateSheetForListing(client: QueryClient, id: string, marketplace?: string): void {
+  void client.invalidateQueries({
+    queryKey: marketplace ? ["listing-sheet", marketplace] : ["listing-sheet"],
+    predicate: ({ queryKey }) => {
+      const readinessKeys = queryKey[2];
+      // readinessKey encodes the listing ID before the first colon.
+      return Array.isArray(readinessKeys)
+        && readinessKeys.some((key) => typeof key === "string" && key.startsWith(`${id}:`));
+    },
+  });
+}

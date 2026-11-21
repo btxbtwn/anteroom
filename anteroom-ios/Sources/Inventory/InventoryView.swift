@@ -24,6 +24,20 @@ struct InventoryView: View {
     @State private var selected: Set<String> = []
     @State private var bulk: BulkAction?
     @State private var templating: ConversationSummary?
+    /// Listing open in Quick Edit on a marketplace tab; switches in place on Next draft.
+    @State private var quickEditListingID: String?
+    /// Pending 2-step confirmation for a row-level List button on a marketplace tab.
+    @State private var pendingRowList: RowListTarget?
+    @State private var pendingRowListRequest: SellerConfirmationRequest?
+    @State private var sheetListError: String?
+    /// Marketplace tab to open when navigating from Quick Edit's "Open form".
+    @State private var preferredEditorTab = "general"
+
+    private struct RowListTarget: Equatable {
+        let listing: ConversationSummary
+        let marketplace: String
+        let revisionID: String
+    }
 
     init(api: AnteroomAPI) {
         _model = State(initialValue: InventoryModel(api: api))
@@ -41,7 +55,7 @@ struct InventoryView: View {
                 } detail: {
                     NavigationStack {
                         if let open {
-                            editor(open).id(open.id)
+                            editor(open).id("\(open.id)-\(preferredEditorTab)")
                         } else {
                             ContentUnavailableView("No listing open", systemImage: "tag",
                                                    description: Text("Choose a listing to edit it here."))
@@ -64,11 +78,12 @@ struct InventoryView: View {
         }
         .onChange(of: model.listings.map(\.id)) { _, ids in
             if let listing = open, !ids.contains(listing.id) { open = nil }
+            if let id = quickEditListingID, !ids.contains(id) { quickEditListingID = nil }
         }
     }
 
     private func editor(_ listing: ConversationSummary) -> some View {
-        ListingEditorView(api: model.api, listing: listing, onLeave: { hasChanges in
+        ListingEditorView(api: model.api, listing: listing, initialTab: preferredEditorTab, onLeave: { hasChanges in
             // The editor has stashed its changes before cleanup. A pushed
             // picker, tab switch or layout change can hide it while it stays selected.
             guard !hasChanges, !path.contains(where: { $0.id == listing.id }), open?.id != listing.id else { return }
@@ -77,7 +92,8 @@ struct InventoryView: View {
     }
 
     /// Opens the listing beside the list, or pushes it on iPhone.
-    private func show(_ listing: ConversationSummary) {
+    private func show(_ listing: ConversationSummary, tab: String = "general") {
+        preferredEditorTab = tab
         if sideBySide {
             open = listing
         } else {
@@ -91,7 +107,10 @@ struct InventoryView: View {
         let row = ListingRow(api: model.api, listing: listing, hint: hint, selling: model.preferredMarketplaces)
         return HStack(spacing: 0) {
             if sideBySide {
-                Button { open = listing } label: {
+                Button {
+                    preferredEditorTab = "general"
+                    open = listing
+                } label: {
                     row.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -99,6 +118,7 @@ struct InventoryView: View {
             } else {
                 row.frame(maxWidth: .infinity, alignment: .leading)
                     .background { NavigationLink(value: listing) { EmptyView() }.opacity(0) }
+                    .simultaneousGesture(TapGesture().onEnded { preferredEditorTab = "general" })
             }
             if !selecting {
                 Menu { actions(listing) } label: {
@@ -114,8 +134,62 @@ struct InventoryView: View {
         }
     }
 
+    private func marketplaceRow(_ listing: ConversationSummary, marketplace: String) -> some View {
+        let sheetRow = model.sheetRow(marketplace: marketplace, id: listing.id)
+        let status = MarketplaceSheetRules.rowStatus(listing: listing, marketplace: marketplace, sheetRow: sheetRow)
+        let summary = MarketplaceSheetRules.scanSummary(marketplace: marketplace, sheetRow: sheetRow)
+        let price = MarketplaceSheetRules.priceLabel(
+            marketplace: marketplace,
+            sheetRow: sheetRow,
+            document: nil,
+            fallbackPrice: listing.price
+        )
+        let canList = MarketplaceSheetRules.canListFromSheet(
+            listing: listing,
+            status: status,
+            sheetRow: sheetRow,
+            canAct: model.canAct(on: marketplace)
+        )
+        let inFlight = model.listingInFlight.contains(listing.id)
+        let isLoadingSheet = model.isLoadingSheet(marketplace) && sheetRow == nil
+
+        return MarketplaceScanRow(
+            api: model.api,
+            listing: listing,
+            marketplace: marketplace,
+            status: status,
+            summary: summary,
+            priceLabel: price,
+            canList: canList,
+            isListingInFlight: inFlight,
+            isLoadingSheet: isLoadingSheet,
+            selecting: selecting,
+            onTap: {
+                quickEditListingID = listing.id
+            },
+            onList: {
+                guard let rev = sheetRow?.revisionID, !rev.isEmpty else { return }
+                pendingRowList = RowListTarget(listing: listing, marketplace: marketplace, revisionID: rev)
+                pendingRowListRequest = SellerConfirmationRequest.list(
+                    title: listing.displayTitle,
+                    marketplace: marketplace,
+                    priceLabel: price
+                )
+            }
+        )
+    }
+
     @ViewBuilder
     private func actions(_ listing: ConversationSummary) -> some View {
+        if case .marketplace(let market) = model.activeTab {
+            Button("Quick edit", systemImage: "slider.horizontal.3") {
+                quickEditListingID = listing.id
+            }
+            Button("Open full form", systemImage: "square.and.pencil") {
+                show(listing, tab: market)
+            }
+            Divider()
+        }
         Button("Rename", systemImage: "pencil") {
             newTitle = listing.title ?? ""
             renaming = listing
@@ -131,11 +205,31 @@ struct InventoryView: View {
         let rows = model.rows(search: search)
         let hints = Suggestion.hints(model.suggestions)
         let stale = model.staleListingIDs
+        let activeMarketplace = model.activeTab.marketplace
+        let initialWindow = Array(rows.prefix(50))
+        let initialWindowKey = initialWindow.map { "\($0.id):\($0.updatedAt)" }.joined(separator: ",")
         return VStack(spacing: 0) {
+            MarketplaceTabsBar(marketplaces: model.availableMarketplaceTabs, selection: $model.activeTab)
             StatusTabs(tabs: StatusTab.allCases, counts: counts, selection: $model.filters.status)
             List(selection: $selected) {
+            if let market = activeMarketplace, let sheetError = model.sheetErrors[market] {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundStyle(WorkspaceStyle.warning)
+                    Text(sheetError)
+                        .font(.footnote)
+                        .foregroundStyle(WorkspaceStyle.mutedText)
+                    Spacer()
+                    Button("Retry") {
+                        Task { await model.retryFailedSheet(marketplace: market, fallback: initialWindow) }
+                    }
+                    .font(.footnote.weight(.medium))
+                }
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+            }
             // Suggestions show on each listing's own row; only the batch markdown needs a place of its own.
-            if !selecting && !stale.isEmpty {
+            if activeMarketplace == nil && !selecting && !stale.isEmpty {
                 Button(stale.count == 1 ? "Mark down 1 stale listing" : "Mark down \(stale.count) stale listings",
                        systemImage: "tag") { bulk = .markdown(stale) }
                     .font(.footnote)
@@ -144,19 +238,12 @@ struct InventoryView: View {
                     .listRowBackground(Color.clear)
             }
             ForEach(rows) { listing in
-                link(listing, hint: hints[listing.id])
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(sideBySide && open?.id == listing.id ? WorkspaceStyle.selected : Color.clear)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 4))
-                    .swipeActions(edge: .trailing) {
-                        Button("Delete", systemImage: "trash") { deleting = listing }
-                            .tint(.red)
-                        Button("Rename", systemImage: "pencil") {
-                            newTitle = listing.title ?? ""
-                            renaming = listing
-                        }
-                    }
-                    .contextMenu { actions(listing) }
+                inventoryListRow(
+                    listing,
+                    rows: rows,
+                    activeMarketplace: activeMarketplace,
+                    hints: hints
+                )
             }
         }
         .listStyle(.plain)
@@ -169,10 +256,20 @@ struct InventoryView: View {
         .toolbarBackground(WorkspaceStyle.sidebar, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .searchable(text: $search, prompt: "Search title or SKU")
-        .refreshable { await model.reload() }
+        .refreshable {
+            await model.reload()
+            if let market = model.activeTab.marketplace {
+                await model.loadSheet(marketplace: market, listings: Array(model.rows(search: search).prefix(50)), force: true)
+            }
         }
-        // The status pills sit above the list, so the whole column needs the sidebar color, not only the list.
+        }
+        // The tab pills sit above the list, so the whole column needs the sidebar color, not only the list.
         .background(WorkspaceStyle.sidebar)
+        .task(id: "\(model.activeTab.id)|\(initialWindowKey)") {
+            if let market = model.activeTab.marketplace {
+                await model.loadSheet(marketplace: market, listings: initialWindow)
+            }
+        }
         .task { if !model.hasLoaded { await model.reload() } }
         .reloadingOnReturn(when: !model.hasLoaded && model.error != nil) { await model.reload() }
         // Listings change on other devices; catch up when the app comes back
@@ -277,6 +374,73 @@ struct InventoryView: View {
                 BulkRegenerateView(api: model.api, listings: ids.compactMap { id in model.listings.first { $0.id == id } }) { finishBulk() }
             }
         }
+        .sheet(isPresented: quickEditPresented) {
+            if let market = activeMarketplace,
+               let id = quickEditListingID,
+               let listing = rows.first(where: { $0.id == id }) ?? model.listings.first(where: { $0.id == id }) {
+                MarketplaceQuickEditSheet(
+                    api: model.api,
+                    listing: listing,
+                    marketplace: market,
+                    sheetRow: { model.sheetRow(marketplace: market, id: listing.id) },
+                    runtime: model.runtime,
+                    nextDraftID: MarketplaceSheetRules.nextQuickEditListingID(
+                        rows: rows,
+                        currentID: listing.id,
+                        marketplace: market
+                    ),
+                    isListingInFlight: model.listingInFlight.contains(listing.id),
+                    onSaved: {
+                        _ = await model.refreshSheetRow(marketplace: market, id: listing.id)
+                    },
+                    onSelectListing: { nextID in
+                        quickEditListingID = nextID
+                    },
+                    onOpenFullForm: {
+                        quickEditListingID = nil
+                        show(listing, tab: market)
+                    },
+                    onListConfirmed: { revisionID, confirmation in
+                        await model.listFromSheet(
+                            listing: listing,
+                            marketplace: market,
+                            revisionID: revisionID,
+                            confirmation: confirmation
+                        )
+                    }
+                )
+                .id("\(listing.id)-\(market)")
+            }
+        }
+        .sellerConfirmation($pendingRowListRequest) { confirmation in
+            guard let target = pendingRowList else { return }
+            pendingRowList = nil
+            Task {
+                if case .failed(let message) = await model.listFromSheet(
+                    listing: target.listing,
+                    marketplace: target.marketplace,
+                    revisionID: target.revisionID,
+                    confirmation: confirmation
+                ) {
+                    sheetListError = message
+                }
+            }
+        }
+        .alert("Couldn't list", isPresented: sheetListErrorShown) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(sheetListError ?? "")
+        }
+        .onChange(of: model.activeTab) { _, _ in
+            quickEditListingID = nil
+            pendingRowList = nil
+            pendingRowListRequest = nil
+        }
+        .onChange(of: model.availableMarketplaceTabs) { _, tabs in
+            if case .marketplace(let market) = model.activeTab, !tabs.contains(market) {
+                model.activeTab = .overview
+            }
+        }
     }
 
     private var sortMenu: some View {
@@ -345,6 +509,50 @@ struct InventoryView: View {
         }
     }
 
+    @ViewBuilder
+    private func inventoryListRow(
+        _ listing: ConversationSummary,
+        rows: [ConversationSummary],
+        activeMarketplace: String?,
+        hints: [String: String]
+    ) -> some View {
+        Group {
+            if let market = activeMarketplace {
+                marketplaceRow(listing, marketplace: market)
+                    .onAppear {
+                        prefetchSheetWindow(marketplace: market, listing: listing, rows: rows)
+                    }
+            } else {
+                link(listing, hint: hints[listing.id])
+            }
+        }
+        .listRowSeparator(activeMarketplace == nil ? .hidden : .visible)
+        .listRowSeparatorTint(WorkspaceStyle.border)
+        .listRowBackground(sideBySide && open?.id == listing.id ? WorkspaceStyle.selected : Color.clear)
+        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: activeMarketplace == nil ? 4 : 16))
+        .swipeActions(edge: .trailing) {
+            Button("Delete", systemImage: "trash") { deleting = listing }
+                .tint(.red)
+            Button("Rename", systemImage: "pencil") {
+                newTitle = listing.title ?? ""
+                renaming = listing
+            }
+        }
+        .contextMenu { actions(listing) }
+    }
+
+    private func prefetchSheetWindow(
+        marketplace: String,
+        listing: ConversationSummary,
+        rows: [ConversationSummary]
+    ) {
+        guard model.needsSheetLoad(marketplace: marketplace, listing: listing),
+              let index = rows.firstIndex(where: { $0.id == listing.id }) else { return }
+        let end = min(index + 50, rows.count)
+        let window = Array(rows[index..<end])
+        Task { await model.loadSheet(marketplace: marketplace, listings: window) }
+    }
+
     private var errorShown: Binding<Bool> {
         Binding(get: { model.hasLoaded && model.error != nil }, set: { if !$0 { model.error = nil } })
     }
@@ -355,6 +563,20 @@ struct InventoryView: View {
 
     private var deleteShown: Binding<Bool> {
         Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })
+    }
+
+    private var quickEditPresented: Binding<Bool> {
+        Binding(
+            get: {
+                guard let id = quickEditListingID, model.activeTab.marketplace != nil else { return false }
+                return model.listings.contains(where: { $0.id == id })
+            },
+            set: { if !$0 { quickEditListingID = nil } }
+        )
+    }
+
+    private var sheetListErrorShown: Binding<Bool> {
+        Binding(get: { sheetListError != nil }, set: { if !$0 { sheetListError = nil } })
     }
 
     private var deleteTitle: String {
@@ -451,6 +673,213 @@ private struct CheckedLabel: View {
 
     var body: some View {
         if on { Label(title, systemImage: "checkmark") } else { Text(title) }
+    }
+}
+
+/// Top-level Inventory view switcher: Overview plus one tab per enabled marketplace.
+private struct MarketplaceTabsBar: View {
+    let marketplaces: [String]
+    @Binding var selection: InventorySheetTab
+
+    private var tabs: [InventorySheetTab] {
+        [.overview] + marketplaces.map { .marketplace($0) }
+    }
+
+    var body: some View {
+        if !marketplaces.isEmpty {
+            ScrollView(.horizontal) {
+                if #available(iOS 26, *) {
+                    GlassEffectContainer(spacing: 8) {
+                        pills
+                    }
+                } else {
+                    pills
+                }
+            }
+            .scrollIndicators(.hidden)
+            .contentMargins(.horizontal, 16, for: .scrollContent)
+            .padding(.top, 6)
+            .padding(.bottom, 2)
+        }
+    }
+
+    private var pills: some View {
+        HStack(spacing: 8) {
+            ForEach(tabs) { tab in
+                let isSelected = selection == tab
+                Button {
+                    selection = tab
+                } label: {
+                    HStack(spacing: 6) {
+                        if let market = tab.marketplace {
+                            MarketplaceLogo(id: market, size: 15)
+                                .accessibilityHidden(true)
+                        }
+                        Text(tab.label).lineLimit(1)
+                    }
+                    .font(.subheadline.weight(.medium))
+                    .padding(.horizontal, 10)
+                    .frame(minHeight: 32)
+                    .fixedSize(horizontal: true, vertical: false)
+                }
+                .modifier(StatusPillStyle(selected: isSelected))
+                .controlSize(.small)
+                .frame(minHeight: 44)
+                .accessibilityLabel(tab.label)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
+        }
+    }
+}
+
+/// Phone scan row for one listing on a marketplace tab.
+/// Mirrors web `MarketplaceSheetPhoneRow`: compact 48pt cover, title, per-marketplace
+/// price, single-line alert/meta summary, and trailing List CTA or status pill.
+private struct MarketplaceScanRow: View {
+    let api: AnteroomAPI
+    let listing: ConversationSummary
+    let marketplace: String
+    let status: MarketplaceSheetStatus
+    let summary: MarketplaceScanSummary
+    let priceLabel: String?
+    let canList: Bool
+    let isListingInFlight: Bool
+    let isLoadingSheet: Bool
+    let selecting: Bool
+    let onTap: () -> Void
+    let onList: () -> Void
+
+    @Environment(AppearanceModel.self) private var appearance
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var name: String {
+        if appearance.listingNames == .sku,
+           let sku = listing.sku?.trimmingCharacters(in: .whitespaces), !sku.isEmpty {
+            return sku
+        }
+        return listing.displayTitle
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if selecting {
+                rowMain
+            } else {
+                Button(action: onTap) {
+                    rowMain.contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens \(Marketplaces.name(marketplace)) Quick Edit")
+            }
+
+            if !selecting {
+                trailingAction
+            }
+        }
+        .padding(.vertical, 10)
+        .frame(minHeight: 68)
+    }
+
+    private var rowMain: some View {
+        HStack(spacing: 12) {
+            Group {
+                if let cover = listing.coverPhotoID {
+                    RemotePhoto(api: api, photoID: cover, maxPixels: 144, version: listing.coverPhotoVersion, urgent: false)
+                } else {
+                    Image(systemName: "photo")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(WorkspaceStyle.surface)
+                }
+            }
+            .frame(width: 48, height: 48)
+            .clipped()
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(WorkspaceStyle.border, lineWidth: 1))
+            .opacity(listing.settledAt == nil ? 1 : 0.55)
+            .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(name)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+                    Spacer(minLength: 4)
+                    if let priceLabel {
+                        Text(priceLabel)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.primary)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                    }
+                }
+
+                subtitleLine
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private var subtitleLine: some View {
+        if let alert = summary.alert {
+            HStack(spacing: 4) {
+                Text(alert)
+                    .foregroundStyle(summary.alertIsError ? WorkspaceStyle.destructive : WorkspaceStyle.warning)
+                    .fontWeight(.medium)
+                if !summary.meta.isEmpty {
+                    Text("· \(summary.meta)")
+                        .foregroundStyle(WorkspaceStyle.mutedText)
+                }
+            }
+            .font(.caption)
+            .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+        } else if !summary.meta.isEmpty {
+            Text(summary.meta)
+                .font(.caption)
+                .foregroundStyle(WorkspaceStyle.mutedText)
+                .lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
+        } else if summary.needsLoad {
+            Text("Tap to load \(Marketplaces.name(marketplace)) form")
+                .font(.caption)
+                .foregroundStyle(WorkspaceStyle.mutedText)
+                .lineLimit(1)
+        } else if isLoadingSheet {
+            Text("Checking \(Marketplaces.name(marketplace))…")
+                .font(.caption)
+                .foregroundStyle(WorkspaceStyle.mutedText)
+                .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder
+    private var trailingAction: some View {
+        if canList {
+            Button(action: onList) {
+                if isListingInFlight {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(minWidth: 44, minHeight: 32)
+                } else {
+                    Text("List")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 32)
+                }
+            }
+            .workspaceProminentButton()
+            .controlSize(.small)
+            .frame(minHeight: 44)
+            .disabled(isListingInFlight)
+            .accessibilityLabel("List \(name) on \(Marketplaces.name(marketplace))")
+        } else if isLoadingSheet && status.kind == .notListed {
+            ProgressView()
+                .controlSize(.small)
+                .frame(minWidth: 44, minHeight: 44)
+        } else {
+            SheetStatusPill(status: status)
+        }
     }
 }
 

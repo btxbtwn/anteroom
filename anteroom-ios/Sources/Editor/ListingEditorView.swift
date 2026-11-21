@@ -29,9 +29,10 @@ struct ListingEditorView: View {
     private let onSaved: () -> Void
     private let onLeave: (Bool) -> Void
 
-    init(api: AnteroomAPI, listing: ConversationSummary, onLeave: @escaping (Bool) -> Void = { _ in },
-         onSaved: @escaping () -> Void) {
+    init(api: AnteroomAPI, listing: ConversationSummary, initialTab: String = "general",
+         onLeave: @escaping (Bool) -> Void = { _ in }, onSaved: @escaping () -> Void) {
         _model = State(initialValue: ListingEditorModel(api: api, listing: listing))
+        _tab = State(initialValue: initialTab)
         self.onSaved = onSaved
         self.onLeave = onLeave
     }

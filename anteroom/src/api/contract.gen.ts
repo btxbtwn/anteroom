@@ -234,6 +234,44 @@ export interface ListingSaveResult {
   validation: ListingValidation;
 }
 
+/** One display cell in a marketplace inventory sheet. */
+export interface ListingSheetCell {
+  /** Human-readable label for display in the grid or scan list. */
+  value?: string;
+  /** Stored scalar value or ID. */
+  raw?: string;
+  required?: boolean;
+  missing?: boolean;
+  rejected?: boolean;
+  error?: string;
+  /** False when editing requires the full listing editor. */
+  editable?: boolean;
+}
+
+/** One field this marketplace still needs on this listing. */
+export interface ListingSheetMissing {
+  field: string;
+  label: string;
+  message?: string;
+  rejected?: boolean;
+}
+
+/** Cached marketplace sheet cells and readiness for the inventory rows on screen. */
+export interface ListingSheetResponse {
+  marketplace: "ebay" | "poshmark" | "mercari" | "depop" | "etsy";
+  listings?: Record<string, ListingSheetRow>;
+}
+
+/** One listing's cached cells and readiness for one marketplace. */
+export interface ListingSheetRow {
+  revision_id?: string | null;
+  ready?: boolean;
+  /** True when this marketplace's full category form is not cached yet. */
+  needs_load?: boolean;
+  cells?: Record<string, ListingSheetCell>;
+  missing?: ListingSheetMissing[];
+}
+
 export interface ListingValidation {
   valid: boolean;
   errors: Record<string, string>[];
