@@ -106,7 +106,7 @@ export function ActionForm({ title, kind, fields = [], context = {}, build, disa
         </div>
       </form>
     </div>
-    {result ? <div className="ebay-action-result" role="status">{result.state === "unknown" ? <TriangleAlertIcon /> : <CheckCircle2Icon />}<p>{result.message}{result.receiptId ? <span className="block text-xs text-muted-foreground mt-1">Receipt {result.receiptId}</span> : null}</p></div> : null}
+    {result ? <div className="ebay-action-result" role="status">{result.state !== "sent" ? <TriangleAlertIcon /> : <CheckCircle2Icon />}<p>{result.message}{result.receiptId ? <span className="block text-xs text-muted-foreground mt-1">Receipt {result.receiptId}</span> : null}</p></div> : null}
     <Dialog open={Boolean(activeReview)} onOpenChange={(open) => { if (!open && !confirming.current) setReview(null); }}>
       <DialogPopup className="ebay-action-dialog sm:max-w-xl" initialFocus={cancelRef} showCloseButton={!confirm.isPending}>
         <DialogHeader>

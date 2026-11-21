@@ -232,6 +232,25 @@ class PrepareListingSnapshotRetryTest(unittest.TestCase):
         self.assertEqual(snapshot["cost"], 9)
         self.assertEqual(snapshot["internal_notes"], "Bin 2")
 
+    def test_depop_native_snapshot_drops_only_unlocked_cleared_measurements(self):
+        from anteroom.services.job_snapshot import prepare_listing_snapshot
+
+        measurements = {"unit": "in", "values": [{"id": "pit_to_pit", "value": "16", "unit": "in"}]}
+        listing = {
+            "title": "Tee",
+            "_native_forms": {"depop": {}},
+            "depop_specifics": {"measurements": measurements, "size": "S"},
+        }
+        self.conv.notes = '{"garment":"top","measurements":{"top":{"pitToPit":""}}}'
+
+        snapshot = prepare_listing_snapshot(self.db, self.conv, listing)
+        self.assertEqual(snapshot["depop_specifics"], {"size": "S"})
+        self.assertEqual(listing["depop_specifics"]["measurements"], measurements)
+
+        listing["seller_fields"] = ["depop_specifics.measurements"]
+        snapshot = prepare_listing_snapshot(self.db, self.conv, listing)
+        self.assertEqual(snapshot["depop_specifics"], listing["depop_specifics"])
+
     def test_depop_snapshot_keeps_the_saved_package_instead_of_reinferring_from_weight(self):
         import copy
 

@@ -314,26 +314,62 @@ def clear_listing_field_default(path: object) -> dict[str, dict[str, str]]:
     return get_listing_field_defaults()
 
 
-def apply_listing_field_defaults(listing: dict) -> bool:
-    """Fill empty Etsy who/what/renewal answers from the seller's saved defaults."""
+def apply_etsy_listing_field_defaults(listing: dict, seed: dict | None = None) -> bool:
+    """Write saved Etsy defaults over generated answers unless the seller locked the field."""
+    from anteroom.services.native_contract import KEY, path_of
+    from anteroom.services.seller_overrides import field_locked, fold_key
+
     if not isinstance(listing, dict):
         return False
-    defaults = _stored_listing_field_defaults()
-    if not any(path in defaults for path in _ETSY_FIELD_DEFAULT_KEYS):
-        return False
-    specifics = listing.get("etsy_specifics")
-    specifics = dict(specifics) if isinstance(specifics, dict) else {}
     changed = False
+    defaults = _stored_listing_field_defaults()
+    etsy = listing.get("etsy_specifics")
+    etsy = dict(etsy) if isinstance(etsy, dict) else {}
+    contracts = (seed or {}).get(KEY)
+    contract = contracts.get("etsy") if isinstance(contracts, dict) else None
+    paths = {path_of(row) for row in contract.get("fields") or []} if isinstance(contract, dict) else set()
     for path, aliases in _ETSY_FIELD_DEFAULT_KEYS.items():
         saved = defaults.get(path)
-        if not saved:
+        if not saved or any(field_locked(seed, "etsy", alias) for alias in aliases):
             continue
-        if any(isinstance(specifics.get(alias), (bool, int, float)) or str(specifics.get(alias) or "").strip() for alias in aliases):
+        folded = {fold_key(alias) for alias in aliases}
+        answer = {key: value for key, value in etsy.items() if fold_key(key) in folded}
+        # A captured form only allows its exact paths. Keep the existing
+        # listing spelling when Etsy has no captured row for this answer.
+        key = path.split(".", 1)[1] if path in paths else next(
+            (alias for alias in aliases if f"etsy_specifics.{alias}" in paths), aliases[0],
+        )
+        if answer == {key: saved["label"]}:
             continue
-        specifics[aliases[0]] = saved["label"]
+        etsy = {key: value for key, value in etsy.items() if key not in answer}
+        etsy[key] = saved["label"]
         changed = True
     if changed:
-        listing["etsy_specifics"] = specifics
+        listing["etsy_specifics"] = etsy
+    return changed
+
+
+def clear_mercari_answers_with_defaults(listing: dict, seed: dict | None = None) -> bool:
+    """Leave unlocked Mercari preference fields for the form to fill from settings."""
+    from anteroom.services.seller_overrides import field_locked
+
+    mercari = listing.get("mercari_specifics")
+    if not isinstance(mercari, dict):
+        return False
+    changed = False
+    preferences = {
+        "shipsFrom": bool(get_ships_from_zip()),
+        "shippingClassId": get_mercari_shipping_label() is not None,
+    }
+    for key, saved in preferences.items():
+        if saved and key in mercari and not field_locked(seed, "mercari", key):
+            mercari.pop(key)
+            changed = True
+    package = mercari.get("package")
+    if isinstance(package, dict) and "fitsShoebox" in package and get_mercari_shoebox_default() is not None \
+            and not field_locked(seed, "mercari", "fitsShoebox"):
+        package.pop("fitsShoebox")
+        changed = True
     return changed
 
 

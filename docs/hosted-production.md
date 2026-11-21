@@ -561,8 +561,9 @@ exception, the stack trace, and the same report as JSON. Credentials are masked
 by `services/redaction.py` and SQL parameter values are removed.
 
 **Noise control:** reports group by severity and fingerprint (exception type
-plus code path, or call site and message shape). Errors are eligible immediately;
-repeats wait 15 minutes. Warnings are grouped into at most one digest per hour.
+plus code path, or call site and message shape). New errors are eligible
+immediately and repeat errors batch hourly. Warnings batch hourly during a
+rolling upgrade and every 24 hours after lifecycle activation.
 Each message contains at most 20 groups; remaining groups stay pending. The
 outbox keeps the latest scrubbed report and occurrence count for each group.
 
@@ -575,8 +576,9 @@ assuming the published maximum applies to this account.
 Every SMTP attempt, including failed or uncertain attempts, reserves one slot
 in the rolling 24-hour budget before network activity. A quarter of the budget
 (at least one slot) is reserved for errors. A shared 60/hour ceiling also
-applies. Accounting, pending groups and backoff live in `error_email_state`,
-survive restarts, and are locked transactionally across Machines. SMTP never
+applies. Accounting and backoff live in `error_email_state`. Pending groups
+and issue history live in `error_email_groups`. Both survive restarts and
+are locked transactionally across Machines. SMTP never
 holds a database connection. Only the API role can access this operator table;
 seller and Supabase client roles have no access.
 
@@ -597,6 +599,34 @@ The request path still hands scrubbed reports to a bounded in-memory queue;
 abrupt termination before persistence or a full queue can omit an email report.
 Original application logs remain the diagnostic source; the status includes
 the process's queue-drop count.
+
+**Operator triage.** Complete the
+[two-phase lifecycle rollout](error-email-storage.md#lifecycle-rollout)
+before enabling triage. Use the operator's Supabase access token for the group API.
+List responses default to open groups, most recently seen first. Use
+`status=resolved` or `status=muted` for other groups, `sort=count` for
+highest occurrence count first, and `limit`/`offset` to page through results.
+See [error-mail storage](error-email-storage.md) for release ordering and
+deployment details.
+
+```bash
+base='https://myanteroom.com/api/error-reports/groups'
+# OPERATOR_ACCESS_TOKEN is the operator's current Supabase access token.
+auth="Authorization: Bearer ${OPERATOR_ACCESS_TOKEN}"
+curl -fsS -H "$auth" "$base?status=open&severity=ERROR&sort=count"
+
+group="$base/ERROR/REPLACE_WITH_FINGERPRINT"
+curl -fsS -X POST -H "$auth" "$group/resolve"
+curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' \
+  -d '{"duration_hours":168,"note":"Investigating recurring failure"}' "$group/mute"
+curl -fsS -X POST -H "$auth" -H 'Content-Type: application/json' \
+  -d '{"duration_hours":null}' "$group/mute"
+curl -fsS -X POST -H "$auth" "$group/reopen"
+```
+
+Resolve records the running server release by default. To specify a release,
+send JSON such as `{"resolved_release":"1.2.3"}`. Same, older, or unknown
+releases keep the issue quiet. A newer comparable release reopens it.
 
 **Delivery:** Google Workspace SMTP relay (`smtp-relay.gmail.com:587`, TLS
 required), which accepts mail only from the app's static egress addresses

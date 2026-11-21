@@ -820,6 +820,16 @@ class PersistListingTest(unittest.TestCase):
         )
         self.assertIn("Flaws:", listing["description"])
 
+    def test_strip_pricing_preserves_measurements_as_opening_section(self):
+        from anteroom.services.listing_generate import strip_pricing_from_description
+
+        listing = {
+            "title": "Cotton tee",
+            "description": "Measurements: See photos\n\nY2K black cotton tee. Price: $20.",
+        }
+        self.assertTrue(strip_pricing_from_description(listing))
+        self.assertEqual(listing["description"], "Measurements: See photos\n\nY2K black cotton tee.")
+
     def test_send_readiness_fixes_strip_uncertainty_from_description(self):
         from anteroom.services.listing_generate import apply_send_readiness_fixes
 

@@ -512,6 +512,11 @@ export const api = {
       files.forEach((file) => form.append("files", file));
       return readPhotos<SizeTagReadResult>("/size-tags/read", form, "Read size tags");
     },
+    /** The same, from a saved listing's photos. */
+    readSaved: (convId: string) =>
+      request<SizeTagReadResult>(`/conversations/${convId}/size-tags/read`, {
+        method: "POST",
+      }),
   },
   scout: {
     list: () => request<ScoutState>("/scout"),
@@ -1353,6 +1358,7 @@ export const api = {
         description: string;
         default_title: string;
         default_description: string;
+        default_blocks?: string[];
         empty_description?: string;
         custom_description?: boolean;
         blocks?: DescriptionFormulaBlock[];
@@ -1364,6 +1370,7 @@ export const api = {
         description: string;
         default_title: string;
         default_description: string;
+        default_blocks?: string[];
         empty_description?: string;
         custom_description?: boolean;
         blocks?: DescriptionFormulaBlock[];

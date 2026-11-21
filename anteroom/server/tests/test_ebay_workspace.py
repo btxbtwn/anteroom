@@ -15,6 +15,7 @@ from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import sessionmaker
 
 from ebay_workspace_fake import ITEM_ID, WorkspaceEbay, order
+from test_seller_ownership import migration_config, migration_engine  # noqa: F401
 from anteroom.services import listing_persistence
 from anteroom.database import Base, get_db, load_models
 from anteroom.main import app
@@ -122,7 +123,7 @@ def action_cases():
         "markdown": {"name": "Coat sale", "listing_ids": [ITEM_ID], "percent": 10, "start": future, "end": end, "image_url": "https://i.ebayimg.com/image.jpg"},
         "quantity_discount": {"name": "Two coats", "listing_ids": [ITEM_ID], "percent": 10, "quantity": 2, "start": future, "end": end, "image_url": "https://i.ebayimg.com/image.jpg"},
         "campaign": {"name": "Coat campaign", "bid_percent": "2", "start": future},
-        "ad": {"campaign_id": "campaign-1", "listing_id": ITEM_ID, "bid_percent": "2"},
+        "ad": {"campaign_id": "campaign-1", "listing_ids": [ITEM_ID], "bid_percent": "2"},
         "campaign_control": {"resource_id": "campaign-1", "action": "pause"},
         "promotion_control": {"resource_id": "promo-1", "action": "pause"},
         "email": {"subject": "Coat sale", "message": "See our coats", "audience_codes": ["FOLLOWERS"], "listing_ids": [ITEM_ID], "schedule": future},
@@ -487,3 +488,268 @@ def test_action_migration_preserves_previous_release_database(tmp_path):
     with engine.connect() as connection:
         assert connection.execute(text("SELECT title FROM conversations WHERE id='keep'")).scalar() == "Keep this item"
     engine.dispose()
+
+
+@pytest.mark.parametrize("confirm_with_bulk_shape", [False, True])
+def test_installed_iphone_ad_payload_uses_the_same_review_and_confirmation(workspace, confirm_with_bulk_shape):
+    legacy = {"campaign_id": "campaign-1", "listing_id": ITEM_ID, "bid_percent": "2"}
+    bulk = {"campaign_id": "campaign-1", "listing_ids": [ITEM_ID], "bid_percent": "2"}
+    review = preview(workspace, "ad", legacy)
+    payload = bulk if confirm_with_bulk_shape else legacy
+    assert confirm(workspace, review, "ad", payload, confirm=False).status_code == 422
+    assert not workspace.remote.writes
+    response = confirm(workspace, review, "ad", payload)
+    assert response.status_code == 200, response.text
+    assert response.json()["state"] == "sent"
+    assert workspace.remote.writes == [(
+        "POST", "/sell/marketing/v1/ad_campaign/campaign-1/bulk_create_ads_by_listing_id",
+        {"requests": [{"listingId": ITEM_ID, "bidPercentage": "2"}]},
+    )]
+
+
+@pytest.mark.parametrize("fields", [
+    {"listing_id": ITEM_ID, "listing_ids": [ITEM_ID]},
+    {"listing_id": "invalid"},
+    {"listing_id": ITEM_ID, "unexpected": True},
+])
+def test_invalid_legacy_ad_payloads_are_rejected(workspace, fields):
+    payload = {"campaign_id": "campaign-1", "bid_percent": "2", **fields}
+    response = workspace.client.post("/api/ebay/actions/preview", json={"kind": "ad", "payload": payload})
+    assert response.status_code == 422, response.text
+    assert not workspace.remote.writes
+
+
+def test_bulk_ads_use_active_ebay_inventory_and_explicit_confirmation(workspace):
+    second_id = "123456789013"
+    path = "/sell/marketing/v1/ad_campaign/campaign-1/bulk_create_ads_by_listing_id"
+    workspace.remote.write_results = {path: {"responses": [
+        {"listingId": ITEM_ID, "adId": "ad-1", "statusCode": 200},
+        {"listingId": second_id, "adId": "ad-2", "statusCode": 200},
+    ]}}
+    response = workspace.client.get("/api/ebay/read/advertising-listings")
+    assert response.status_code == 200
+    assert {row["id"] for row in response.json()["rows"]} == {ITEM_ID, second_id}
+
+    payload = {"campaign_id": "campaign-1", "listing_ids": [second_id, ITEM_ID, ITEM_ID], "bid_percent": "3.5"}
+    review = preview(workspace, "ad", payload)
+    assert any("3.5%" in line for line in review["summary"])
+    assert confirm(workspace, review, "ad", payload, confirm=False).status_code == 422
+    assert not workspace.remote.writes
+    result = confirm(workspace, review, "ad", payload)
+    assert result.json()["state"] == "sent"
+    assert workspace.remote.writes == [("POST", path, {"requests": [
+        {"listingId": ITEM_ID, "bidPercentage": "3.5"}, {"listingId": second_id, "bidPercentage": "3.5"},
+    ]})]
+    assert confirm(workspace, review, "ad", payload).status_code == 409
+
+
+def test_bulk_ads_cover_multiple_inventory_pages_and_ebay_write_batches(workspace):
+    workspace.remote.active_items = [(str(123456789000 + index), f"Listing {index}") for index in range(631)]
+    ids = [identifier for identifier, _ in workspace.remote.active_items]
+    response = workspace.client.get("/api/ebay/read/advertising-listings")
+    assert [row["id"] for row in response.json()["rows"]] == ids
+    payload = {"campaign_id": "campaign-1", "listing_ids": ids, "bid_percent": "4.5"}
+    review = preview(workspace, "ad", payload)
+    assert not workspace.remote.writes
+    result = confirm(workspace, review, "ad", payload).json()
+    assert result["message"] == "eBay added 631 of 631 listings to the campaign."
+    batches = [body["requests"] for _, _, body in workspace.remote.writes]
+    assert [len(batch) for batch in batches] == [500, 131]
+    assert [ad["listingId"] for batch in batches for ad in batch] == ids
+
+
+def test_bulk_ads_reject_stale_inventory_and_report_declined_ids(workspace):
+    second_id = "123456789013"
+    payload = {"campaign_id": "campaign-1", "listing_ids": [ITEM_ID, second_id], "bid_percent": "3.5"}
+    review = preview(workspace, "ad", payload)
+    workspace.remote.active_items = [(ITEM_ID, "Test wool coat")]
+    assert confirm(workspace, review, "ad", payload).status_code == 409
+    assert not workspace.remote.writes
+
+    workspace.remote.active_items.append((second_id, "Test jeans"))
+    path = "/sell/marketing/v1/ad_campaign/campaign-1/bulk_create_ads_by_listing_id"
+    workspace.remote.write_results = {path: {"responses": [
+        {"listingId": ITEM_ID, "statusCode": 200},
+        {"listingId": second_id, "statusCode": 409, "errors": [{"message": "PRIVATE ERROR ECHO"}]},
+    ]}}
+    result = confirm(workspace, review, "ad", payload).json()
+    assert result["message"] == f"eBay added 1 of 2 listings to the campaign. eBay declined these listing IDs: {second_id}."
+    assert confirm(workspace, review, "ad", payload).status_code == 409
+
+
+def test_wholly_declined_ads_can_be_reviewed_again(workspace):
+    payload = action_cases()["ad"]
+    review = preview(workspace, "ad", payload)
+    path = "/sell/marketing/v1/ad_campaign/campaign-1/bulk_create_ads_by_listing_id"
+    workspace.remote.write_results = {path: {"responses": [{"listingId": ITEM_ID, "statusCode": 409}]}}
+    result = confirm(workspace, review, "ad", payload).json()
+    assert result["state"] == "failed"
+    assert ITEM_ID in result["message"]
+    assert confirm(workspace, review, "ad", payload).status_code == 409
+    workspace.remote.write_results.clear()
+    retry = preview(workspace, "ad", payload)
+    assert confirm(workspace, retry, "ad", payload).json()["state"] == "sent"
+    assert len(workspace.remote.writes) == 2
+
+
+def test_later_ad_batch_failure_reports_completed_results(workspace):
+    workspace.remote.active_items = [(str(123456789000 + i), f"Listing {i}") for i in range(501)]
+    ids = [identifier for identifier, _ in workspace.remote.active_items]
+    payload = {**action_cases()["ad"], "listing_ids": ids}
+    path = "/sell/marketing/v1/ad_campaign/campaign-1/bulk_create_ads_by_listing_id"
+    workspace.remote.write_results = {path: {"responses": [
+        {"listingId": identifier, "statusCode": 409 if i == 0 else 200}
+        for i, identifier in enumerate(ids[:500])
+    ]}}
+    workspace.remote.write_errors = {2: 500}
+    review = preview(workspace, "ad", payload)
+    result = confirm(workspace, review, "ad", payload).json()
+    assert result["state"] == "unknown"
+    assert "eBay added 499 of 501 listings" in result["message"]
+    assert f"declined these listing IDs: {ids[0]}." in result["message"]
+    assert f"did not confirm these listing IDs: {ids[-1]}." in result["message"]
+    assert workspace.client.post("/api/ebay/actions/preview", json={"kind": "ad", "payload": payload}).status_code == 409
+    assert len(workspace.remote.writes) == 2
+
+
+def test_legacy_unknown_ad_blocks_review_and_confirmation_for_that_listing(workspace):
+    payload = action_cases()["ad"]
+    review = preview(workspace, "ad", payload)
+    legacy = EbayAction(account_id="seller-id", kind="ad", resource_id=ITEM_ID,
+                        fingerprint="legacy-ad-plan", state="unknown", expires_at=ebay_actions.clock())
+    workspace.db.add(legacy)
+    workspace.db.commit()
+    assert workspace.client.post("/api/ebay/actions/preview", json={"kind": "ad", "payload": payload}).status_code == 409
+    assert confirm(workspace, review, "ad", payload).status_code == 409
+    preview(workspace, "ad", {**payload, "listing_ids": ["123456789013"]})
+    assert not workspace.remote.writes
+    checked = workspace.client.post(f"/api/ebay/actions/{legacy.id}/checked", json={"confirm": True})
+    assert checked.status_code == 200
+    assert confirm(workspace, review, "ad", payload).json()["state"] == "sent"
+
+
+@pytest.mark.parametrize("during_confirmation", [False, True])
+def test_capped_ad_inventory_is_never_offered_or_used_for_confirmation(workspace, during_confirmation):
+    payload = action_cases()["ad"]
+    if during_confirmation:
+        review = preview(workspace, "ad", payload)
+    workspace.remote.active_total = 25_000
+    read = workspace.client.get("/api/ebay/read/advertising-listings")
+    assert read.status_code == 422
+    assert "Seller Hub" in read.json()["detail"]
+    if during_confirmation:
+        response = confirm(workspace, review, "ad", payload)
+    else:
+        response = workspace.client.post("/api/ebay/actions/preview", json={"kind": "ad", "payload": payload})
+    assert response.status_code == 422
+    assert not workspace.remote.writes
+
+
+def test_first_ad_batch_http_conflict_requires_reconciliation(workspace):
+    payload = action_cases()["ad"]
+    review = preview(workspace, "ad", payload)
+    workspace.remote.write_error = 409
+    response = confirm(workspace, review, "ad", payload)
+    assert response.json()["state"] == "unknown"
+    assert workspace.client.post("/api/ebay/actions/preview", json={"kind": "ad", "payload": payload}).status_code == 409
+    assert len(workspace.remote.writes) == 1
+
+
+@pytest.mark.parametrize("returned", [600, 620])
+def test_incomplete_terminal_ad_inventory_is_rejected(workspace, returned):
+    payload = action_cases()["ad"]
+    review = preview(workspace, "ad", payload)
+    workspace.remote.active_items = [(str(int(ITEM_ID) + i), str(i)) for i in range(returned)]
+    workspace.remote.active_total = 631
+    workspace.remote.active_pages = 4
+    expected = {"detail": "eBay returned an incomplete active listings page. Refresh and try again."}
+    read = workspace.client.get("/api/ebay/read/advertising-listings")
+    assert read.status_code == 502 and read.json() == expected
+    result = confirm(workspace, review, "ad", payload)
+    assert result.status_code == 502 and result.json() == expected
+    assert not workspace.remote.writes
+
+
+def test_overlapping_ad_inventory_pages_are_rejected(workspace):
+    payload = action_cases()["ad"]
+    review = preview(workspace, "ad", payload)
+    # Two full pages report 400 rows, but the page boundary repeats an ID.
+    workspace.remote.active_items = [
+        (str(int(ITEM_ID) + i), str(i)) for i in [*range(200), *range(199, 399)]
+    ]
+    expected = {"detail": "eBay returned an incomplete active listings page. Refresh and try again."}
+    read = workspace.client.get("/api/ebay/read/advertising-listings")
+    assert read.status_code == 502 and read.json() == expected
+    result = confirm(workspace, review, "ad", payload)
+    assert result.status_code == 502 and result.json() == expected
+    assert not workspace.remote.writes
+
+
+def test_empty_ad_inventory_is_valid(workspace):
+    workspace.remote.active_items = []
+    assert workspace.client.get("/api/ebay/read/advertising-listings").json() == {"rows": []}
+
+
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_unresolved_bulk_ad_blocks_overlapping_listings_across_campaigns(workspace, interrupted):
+    second_id = "123456789013"
+    other_id = "123456789014"
+    workspace.remote.active_items = [(ITEM_ID, "Coat"), (second_id, "Jeans"), (other_id, "Shoes")]
+    first = {**action_cases()["ad"], "listing_ids": [ITEM_ID, second_id]}
+    workspace.remote.overrides["/sell/marketing/v1/ad_campaign/campaign-2"] = {
+        "campaignName": "Another campaign", "campaignStatus": "RUNNING", "marketplaceId": "EBAY_US",
+        "fundingStrategy": {"fundingModel": "COST_PER_SALE"},
+    }
+    overlap = {**first, "campaign_id": "campaign-2", "listing_ids": [second_id]}
+    old_review = preview(workspace, "ad", overlap)
+    first_review = preview(workspace, "ad", first)
+    if interrupted:
+        # Claim the action without settling, then run the startup recovery.
+        async def prepare():
+            return await ebay_actions.prepare(await ebay_client.EbayClient.connect(), "ad", first)
+
+        plan = asyncio.run(prepare())
+        with workspace.sessions() as db:
+            ebay_actions._claim(db, first_review["id"], "seller-id", ebay_actions.digest(plan), plan)
+        with workspace.sessions() as db:
+            ebay_actions.recover(db)
+    else:
+        workspace.remote.write_error = 409
+        assert confirm(workspace, first_review, "ad", first).json()["state"] == "unknown"
+        workspace.remote.write_error = 0
+    assert workspace.client.post("/api/ebay/actions/preview", json={"kind": "ad", "payload": overlap}).status_code == 409
+    assert confirm(workspace, old_review, "ad", overlap).status_code == 409
+    preview(workspace, "ad", {**overlap, "listing_ids": [other_id]})
+    assert len(workspace.remote.writes) == (0 if interrupted else 1)
+    checked = workspace.client.post(f"/api/ebay/actions/{first_review['id']}/checked", json={"confirm": True})
+    assert checked.status_code == 200
+    assert confirm(workspace, old_review, "ad", overlap).json()["state"] == "sent"
+
+
+def test_ad_membership_migration_preserves_legacy_reconciliation(migration_engine):  # noqa: F811
+    from alembic import command
+    from sqlalchemy.orm import Session
+
+    config = migration_config(migration_engine)
+    command.upgrade(config, "4cf6b35245d2")
+    with migration_engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO ebay_actions
+                (id, account_id, kind, resource_id, fingerprint, state, created_at, expires_at)
+            VALUES ('legacy-ad', 'seller-id', 'ad', :listing, 'legacy-plan', 'unknown',
+                    CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """), {"listing": ITEM_ID})
+    command.upgrade(config, "head")
+    plan = {"kind": "ad", "target": "campaign-2", "operations": [{"body": {"requests": [{"listingId": ITEM_ID}]}}]}
+    with Session(migration_engine) as db:
+        assert db.get(EbayAction, "legacy-ad").ad_listing_ids is None
+        assert ebay_actions._has_unresolved_action(db, "seller-id", plan)
+        assert not ebay_actions._has_unresolved_action(db, "other-seller", plan)
+        ebay_actions._settle(db, "legacy-ad", "checked", None)
+        first_plan = {**plan, "target": "campaign-1", "summary": []}
+        review = ebay_actions._open_review(db, "seller-id", "ad", first_plan, "bulk-plan")
+        ebay_actions._claim(db, review["id"], "seller-id", "bulk-plan", first_plan)
+    with Session(migration_engine) as db:
+        ebay_actions.recover(db)
+        assert db.get(EbayAction, review["id"]).ad_listing_ids == [ITEM_ID]
+        assert ebay_actions._has_unresolved_action(db, "seller-id", plan)

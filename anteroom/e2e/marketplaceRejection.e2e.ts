@@ -61,3 +61,49 @@ test("a marketplace rejection leaves the form editable and List available for re
     await request.delete(`/api/conversations/${id}`);
   }
 });
+
+test("checking an unconfirmed Depop publish keeps List blocked after a 404", async ({ page, phone, request }, info) => {
+  const title = `Depop publish check ${info.project.name}`;
+  const id = await createListing(request, title);
+  const api = `/api/conversations/${id}/native-marketplaces`;
+  const draft = {
+    state: "unknown", running: false, error_code: "uncertain",
+    draft_url: "https://www.depop.com/sellinghub/drafts/edit/123456/",
+    error: "Depop has not confirmed publishing yet. Check its result later.",
+  };
+  const checked = {
+    ...draft, error: "Depop still has this draft. Open it in Depop’s Selling Hub to check for a listing error.",
+    marketplace_message: "publish status: HTTP 404; draft: still in drafts",
+  };
+  let status = draft;
+  const posts: string[] = [];
+  try {
+    const saved = await request.put(`/api/conversations/${id}/listing`, { data: { expected_revision_id: "", listing: {
+      title, description: "Sandbox publish check", price: 25, quantity: 1,
+    } } });
+    expect(saved.ok(), await saved.text()).toBe(true);
+    await page.route(`**${api}**`, async route => {
+      const { pathname } = new URL(route.request().url());
+      if (route.request().method() !== "GET") {
+        posts.push(pathname);
+        if (pathname !== `${api}/depop/check`) return route.abort();
+        status = checked;
+        return route.fulfill({ json: status });
+      }
+      return pathname === api ? route.fulfill({ json: { depop: status } }) : route.continue();
+    });
+    await openListing(page, phone, title);
+    if (phone) await page.getByRole("tab", { name: "Listing", exact: true }).click();
+    await openForm(page, phone, "Depop");
+    const check = page.getByRole("button", { name: "Check result", exact: true });
+    await check.click();
+    await expect(page.getByText(checked.error, { exact: true })).toBeVisible();
+    await expect(check).toBeEnabled();
+    await expect(page.getByRole("button", { name: "List…", exact: true })).toHaveCount(0);
+    await expect(page.getByRole("link", { name: "View listing", exact: true })).toHaveCount(0);
+    expect(posts).toEqual([`${api}/depop/check`]);
+    await page.screenshot({ path: info.outputPath("depop-publish-check.png") });
+  } finally {
+    await request.delete(`/api/conversations/${id}`);
+  }
+});

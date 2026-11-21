@@ -60,8 +60,8 @@ struct EbayActionSheet: View {
             Form {
                 if let result {
                     Section {
-                        Label(result.message, systemImage: result.state == "unknown" ? "exclamationmark.triangle" : "checkmark.circle.fill")
-                            .foregroundStyle(result.state == "unknown" ? .orange : .green)
+                        Label(result.message, systemImage: result.state != "sent" ? "exclamationmark.triangle" : "checkmark.circle.fill")
+                            .foregroundStyle(result.state != "sent" ? .orange : .green)
                         if let receipt = result.receiptId { Text("Receipt \(receipt)").font(.footnote).foregroundStyle(.secondary).textSelection(.enabled) }
                     }
                 } else if let review {

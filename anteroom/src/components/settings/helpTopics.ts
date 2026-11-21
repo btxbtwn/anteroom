@@ -36,7 +36,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
       "One listing: press **Regenerate** in the listing header. If it has a price, pick the new price and press **Confirm**; if not, press **Rewrite**.",
       "Several listings: press **Select** above the sidebar list, tick the listings (each needs photos), then choose **More** → **Regenerate…** in the bar at the bottom.",
       "If any have a price, choose **Keep prices**, a drop for each, or **Each listing's suggestion**.",
-      "In **Review … listings before rewriting**, check the photos, SKU, COG, labels and measurements, then press **Rewrite**.",
+      "In **Review … listings before rewriting**, check the photos, size, SKU, COG, labels and measurements (or press **Read size tags** and **Read measurements**), then press **Rewrite**.",
       "The new copy stays in Anteroom until you update it on the marketplace. To go back, press **History** at the bottom of the listing editor, then **Restore this version** and **Confirm restore**.",
     ],
   },

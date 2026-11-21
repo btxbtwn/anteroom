@@ -776,3 +776,167 @@ class NativeContractRevisionTest(unittest.TestCase):
         self.assertTrue(source.has_approved_photos)
         # Original caller dict is not mutated.
         self.assertIn(contract.KEY, snapshot)
+
+
+class EtsyNativeContractTest(unittest.TestCase):
+    def _etsy_form(self, **extra):
+        return {
+            "marketplace": "etsy",
+            "native": True,
+            "known": True,
+            "page_labels": True,
+            "category_id": "482",
+            "fields": [
+                {"path": "direct_category_ids.etsy", "label": "Category", "required": True,
+                 "selection_only": True, "options": ["Clothing > Men's Clothing > Shirts & Tees > T-shirts"],
+                 "option_values": {"Clothing > Men's Clothing > Shirts & Tees > T-shirts": "482"}},
+                {"path": "etsy_specifics.whoMade", "label": "Who made it?", "required": True,
+                 "selection_only": True, "options": ["I did", "A member of my shop", "Another company or person"]},
+                {"path": "etsy_specifics.whatIsIt", "label": "What is it?", "required": True,
+                 "selection_only": True, "options": ["A finished product", "A supply or tool to make things"]},
+                {"path": "etsy_specifics.whenMade", "label": "When was it made?", "required": True,
+                 "selection_only": True, "options": ["2020 - 2026 (Recently)", "1990s (Vintage)"]},
+                {"path": "etsy_specifics.renewalOption", "label": "Renewal options",
+                 "selection_only": True, "options": ["Automatic", "Manual"]},
+                {"path": "etsy_specifics.shipping_profile_id", "label": "Shipping option",
+                 "locked": True, "value": "Not chosen yet"},
+                {"path": "etsy_specifics.category_specifics.Clothing style", "label": "Clothing style",
+                 "selection_only": True, "category_specific": True,
+                 "options": ["Athletic", "Minimalist", "Streetwear"]},
+                {"path": "etsy_specifics.category_specifics.Graphic", "label": "Graphic",
+                 "selection_only": True, "category_specific": True,
+                 "options": ["Brand & logo", "Nature", "Text"]},
+                {"path": "etsy_specifics.category_specifics.Sleeve length", "label": "Sleeve length",
+                 "selection_only": True, "category_specific": True,
+                 "options": ["Short sleeve", "Long sleeve"]},
+                {"path": "etsy_specifics.category_specifics.Primary color", "label": "Primary color",
+                 "selection_only": True, "category_specific": True,
+                 "options": ["Red", "Blue", "Black"]},
+            ],
+            **extra,
+        }
+
+    def test_etsy_constrain_generated_drops_unavailable_choices_and_folds_aliases(self):
+        base = {
+            "title": "Vintage 90s Speedway Graphic Tee",
+            "direct_category_ids": {"etsy": "482"},
+            "etsy_specifics": {},
+        }
+        base[contract.KEY] = contract.capture(base, {"etsy": self._etsy_form()}, ["etsy"])
+        generated = {
+            **base,
+            "etsy_specifics": {
+                "who_made": "someone_else",
+                "what_is": "0",
+                "when_made": "1990s",
+                "renewal_option": "manual",
+                "clothingStyle": "Casual",
+                "category_specifics": {
+                    "Graphic": "Graphic Print",
+                    "Sleeve length": "Short sleeve",
+                },
+            },
+        }
+        contract.constrain_generated(generated, base)
+        etsy = generated["etsy_specifics"]
+        self.assertEqual(etsy["whoMade"], "Another company or person")
+        self.assertEqual(etsy["whatIsIt"], "A finished product")
+        self.assertEqual(etsy["whenMade"], "1990s (Vintage)")
+        self.assertEqual(etsy["renewalOption"], "Manual")
+        self.assertNotIn("who_made", etsy)
+        self.assertNotIn("what_is", etsy)
+        self.assertNotIn("when_made", etsy)
+        self.assertNotIn("clothingStyle", etsy)
+        self.assertEqual(etsy["category_specifics"], {"Sleeve length": "Short sleeve"})
+
+    def test_etsy_row_values_and_gaps_resolve_legacy_aliases_without_a_double_dot(self):
+        form = self._etsy_form()
+        listing = {
+            "title": "Vintage Tee",
+            "direct_category_ids": {"etsy": "482"},
+            "etsy_specifics": {
+                "who_made": "someone_else",
+                "what_is": "0",
+                "category_specifics": {"Sleeve length": "Short sleeve"},
+            },
+        }
+        listing[contract.KEY] = contract.capture(listing, {"etsy": form}, ["etsy"])
+        rows = {contract.path_of(row): row for row in form["fields"]}
+        self.assertIn("A finished product", [
+            contract._etsy_canonical_value("etsy_specifics.whatIsIt", rows["etsy_specifics.whatIsIt"], value)
+            or value
+            for value in contract._row_values(listing, "etsy", "etsy_specifics.whatIsIt", rows)
+        ])
+        self.assertIn("someone_else", contract._row_values(listing, "etsy", "etsy_specifics.whoMade", rows))
+        with patch("anteroom.services.user_settings.get_listing_field_defaults", return_value={}):
+            gap_fields = {item["field"] for item in contract.gaps(listing, "etsy")}
+        self.assertNotIn("etsy_specifics.whatIsIt", gap_fields)
+        self.assertNotIn("etsy_specifics.whoMade", gap_fields)
+
+    def test_etsy_properties_unavailable_marks_contract_unavailable_and_preserves_seed(self):
+        base = {
+            "title": "Vintage 90s Graphic Tee",
+            "direct_category_ids": {"etsy": "482"},
+            "etsy_specifics": {"whoMade": "Another company or person"},
+        }
+        contracts = contract.capture(base, {"etsy": self._etsy_form(properties_unavailable=True)}, ["etsy"])
+        self.assertEqual(contracts["etsy"], {"unavailable": True})
+        base[contract.KEY] = contracts
+        generated = {
+            **base,
+            "etsy_specifics": {
+                "whoMade": "Another company or person",
+                "category_specifics": {"Clothing style": "Casual", "Graphic": "Graphic Print"},
+            },
+        }
+        contract.constrain_generated(generated, base)
+        self.assertEqual(generated["etsy_specifics"], {"whoMade": "Another company or person"})
+
+    def test_etsy_defaults_color_matching_and_eligibility_in_validation_and_preflight(self):
+        from anteroom.services import direct_preflight
+        from anteroom.services.validation import validate_listing
+
+        listing = {
+            "title": "Speedway Graphic Tee",
+            "description": "Maroon cotton graphic tee.",
+            "price": 20,
+            "quantity": 1,
+            "primaryColor": "Maroon",
+            "direct_category_ids": {"etsy": "482"},
+            "etsy_specifics": {
+                "whoMade": "Another company or person",
+                "whatIsIt": "A finished product",
+                "whenMade": "2020 - 2026 (Recently)",
+            },
+        }
+        listing[contract.KEY] = contract.capture(listing, {"etsy": self._etsy_form()}, ["etsy"])
+        # Maroon is not in Etsy's ["Red", "Blue", "Black"] choices — must not cause a false gap.
+        with patch("anteroom.services.user_settings.get_listing_field_defaults", return_value={}):
+            self.assertEqual(contract.gaps(listing, "etsy"), [])
+        # Modern resale item is ineligible for Etsy: validate_listing must not emit blocking Etsy errors.
+        ineligible = copy.deepcopy(listing)
+        ineligible["etsy_specifics"] = {"whenMade": "2020 - 2026 (Recently)"}
+        validation = validate_listing(ineligible, require_photos=False, selected_marketplaces=["etsy"])
+        self.assertFalse(any(err["field"].startswith("etsy_specifics") for err in validation.errors), validation.errors)
+        self.assertTrue(any(warn["field"] == "etsy_specifics.when_made" for warn in validation.warnings))
+        # Direct preflight for ineligible item reports only the eligibility notice, not missing form rows.
+        ineligible["form"] = {"unresolved": [{"field": "etsy:Color", "value": ""}]}
+        preflight_ineligible = direct_preflight.gaps(ineligible, "etsy")
+        self.assertEqual([item["field"] for item in preflight_ineligible], ["etsy_specifics.when_made"])
+        # Eligible vintage item with saved Settings defaults resolves whoMade/whatIsIt without gaps.
+        vintage = copy.deepcopy(listing)
+        vintage["etsy_specifics"] = {"whenMade": "1990s (Vintage)"}
+        saved_defaults = {
+            "etsy_specifics.whoMade": {"label": "Another company or person"},
+            "etsy_specifics.whatIsIt": {"label": "A finished product"},
+        }
+        with patch("anteroom.services.user_settings.get_listing_field_defaults", return_value=saved_defaults):
+            self.assertEqual(contract.gaps(vintage, "etsy"), [])
+        # Eligible vintage item without defaults deduplicates who_made / whoMade in direct_preflight.
+        with patch("anteroom.services.user_settings.get_listing_field_defaults", return_value={}):
+            preflight_vintage = direct_preflight.gaps(vintage, "etsy")
+        vintage["form"] = ineligible["form"]
+        self.assertTrue(any(item["field"] == "etsy_specifics.category_specifics.Color" and item["required"]
+                            for item in direct_preflight.gaps(vintage, "etsy")))
+        who_gaps = [item for item in preflight_vintage if item["field"] in {"etsy_specifics.who_made", "etsy_specifics.whoMade"}]
+        self.assertEqual(len(who_gaps), 1)

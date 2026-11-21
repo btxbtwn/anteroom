@@ -429,6 +429,10 @@ function mercariEditorForm(listing, master) {
   const sizeChoices = sizes.map(row => ({ value: row.id, label: sizes.filter(other => other.name === row.name).length > 1
     ? `${row.name} · ${row.group_name || row.id}` : row.name || row.title }));
   const brand = mercariBrandRequest(listing);
+  const matchedBrand = brand.omit
+    ? ''
+    : (master.itemBrands.find(row => marketplaceNameKey(row.name) === marketplaceNameKey(brand.name))?.name || '');
+  const noBrandChecked = specifics.noBrand === true || (!matchedBrand && specifics.noBrand !== false);
   // Mercari's sell page, top to bottom (read 2026-10-27, rechecked 2026-10-28).
   const [title, description, price] = nativeEditorBase(listing, { marketplace: 'mercari', maxTitle: 80, maxDescription: 1000, minPrice: 1, maxPrice: 2000, priceStep: 1 });
   const product = section => row => ({ ...row, section });
@@ -440,11 +444,11 @@ function mercariEditorForm(listing, master) {
     { ...description, placeholder: 'Describe your item (5+ words)', counter: true },
     nativeEditorChoice('direct_category_ids.mercari', 'Category', category || '', categories,
       { required: true, clears: ['mercari_specifics.nativeSizeId'] }),
-    nativeEditorChoice('mercari_specifics.brand', 'Brand', brand.omit
-      ? MERCARI_NO_BRAND
-      : (master.itemBrands.find(row => marketplaceNameKey(row.name) === marketplaceNameKey(brand.name))?.name || brand.name || ''),
-      [...master.itemBrands.map(row => ({ label: row.name, value: row.name })), { label: 'No brand / Not sure', value: MERCARI_NO_BRAND }],
+    nativeEditorChoice('mercari_specifics.brand', 'Brand', matchedBrand,
+      master.itemBrands.map(row => ({ label: row.name, value: row.name })),
       { clears: ['mercari_specifics.noBrand'], placeholder: 'Select brand' }),
+    nativeEditorField('mercari_specifics.noBrand', 'No brand / Not sure', noBrandChecked,
+      { input_type: 'boolean', presentation: 'checkbox', clears: ['mercari_specifics.brand'] }),
     nativeEditorChoice('mercari_specifics.condition', 'Condition', mercariConditionId(specifics.condition || listing.condition),
       MERCARI_CONDITION_CHOICES.map(([label], index) => ({ label, value: index + 1 })),
       { required: true, presentation: 'radio-row', option_help: Object.fromEntries(MERCARI_CONDITION_CHOICES) }),

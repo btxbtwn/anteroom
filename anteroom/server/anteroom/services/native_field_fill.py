@@ -27,8 +27,8 @@ from anteroom.services import native_contract
 
 log = logging.getLogger("anteroom.native_field_fill")
 
-MARKETS = ("ebay", "poshmark", "mercari", "depop")
-NAMES = {"ebay": "eBay", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop"}
+MARKETS = native_contract.MARKETS
+NAMES = {"ebay": "eBay", "poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop", "etsy": "Etsy"}
 CATEGORY_PATHS = {f"direct_category_ids.{market}" for market in MARKETS}
 
 FILL_RULES = (
@@ -39,8 +39,15 @@ FILL_RULES = (
     "use a short supported description when the suggestions do not fit. Leave out any field you cannot tell. Never guess a measurement, material "
     "or fit that the evidence does not show. Reply with one JSON object and nothing else: "
     '{"fields": {"<field path>": "<choice>" or ["<choice>", ...]}}. '
-    "Use a list only where a field allows more than one choice, and never more than its limit."
+    "Use a list only where a field allows more than one choice, and never more than its limit. "
+    "Depop's Source, Age and Style describe what kind of item it is, its era and its look: always answer "
+    "them with the closest listed choices, quoting the words they rest on (a decade, vintage, preloved, "
+    "graphic tee, the cut or print)."
 )
+
+# Depop leaves these optional, but a listing without them is harder to find,
+# so the agent always answers them, and falls back to the listing's own words.
+DEPOP_TAGS = ("depop_specifics.source", "depop_specifics.age", "depop_specifics.style")
 
 
 def _empty(value: Any) -> bool:
@@ -55,6 +62,7 @@ def fillable_rows(form: dict, market: str, listing: dict, *, evidence: str = "")
     """Empty or unverified item fields the agent may choose values for."""
     prefix = f"{market}_specifics."
     strict = native_contract.KEY in listing
+    etsy_attributes_locked = market == "etsy" and is_locked(listing, ETSY_ATTRIBUTES.rstrip("."))
     rows = []
     for row in form.get("fields") or []:
         row = native_contract.applicable_row(row, listing, form.get("fields") or [])
@@ -63,6 +71,11 @@ def fillable_rows(form: dict, market: str, listing: dict, *, evidence: str = "")
         if not path.startswith(prefix) or row.get("locked") or (not options and not strict):
             continue
         if not native_contract.item_field(row, market) or (not strict and not _empty(row.get("value"))):
+            continue
+        # Legacy Etsy attributes go through fill_etsy_attributes for quote validation.
+        if market == "etsy" and path.startswith(ETSY_ATTRIBUTES) and (not strict or etsy_attributes_locked):
+            continue
+        if market == "etsy" and fold_key(str(row.get("label") or "")) in _FROM_GENERAL:
             continue
         if row.get("input_type") in {"note", "badge", "photos", "inventory", "variations"}:
             continue
@@ -124,7 +137,7 @@ def forms_prompt(rows_by_market: dict[str, list[dict]], forms: dict[str, dict]) 
             if row.get("max_length") is not None:
                 mode += f"; max length {row['max_length']}"
             label = str(row.get("label") or "").removesuffix(" *")
-            requirement = "required" if row.get("required") else "optional"
+            requirement = "required" if row.get("required") or _path(row) in DEPOP_TAGS else "optional"
             from anteroom.services.option_lookup import project_row
 
             projected = project_row(row)
@@ -187,6 +200,21 @@ def validated_values(reply: dict, rows: dict[str, dict], *, evidence: str | None
     return accepted
 
 
+def _clear_etsy_property_aliases(bucket: dict, want: str, *, keep: str | None = None) -> None:
+    """Drop differently-spelled Etsy property keys from category_specifics and top-level etsy_specifics."""
+    from anteroom.services.etsy_listings import _NOT_PROPERTIES, _key
+
+    nested = bucket.get("category_specifics")
+    if isinstance(nested, dict):
+        nested = dict(nested)
+        for alias in [name for name in nested if name != keep and fold_key(name) == want]:
+            del nested[alias]
+        bucket["category_specifics"] = nested
+    for alias in [name for name, val in bucket.items()
+                  if not isinstance(val, dict) and _key(name) not in _NOT_PROPERTIES and fold_key(name) == want]:
+        del bucket[alias]
+
+
 def write_value(listing: dict, path: str, value: Any) -> None:
     """Store a form value the way the editor does, replacing a differently spelled copy of the key."""
     parts = path.split(".")
@@ -199,6 +227,16 @@ def write_value(listing: dict, path: str, value: Any) -> None:
         bucket[parts[1]] = value
         listing[parts[0]] = bucket
         return
+    if len(parts) == 3 and parts[0] == "etsy_specifics" and parts[1] == "category_specifics":
+        bucket = listing.get("etsy_specifics")
+        bucket = dict(bucket) if isinstance(bucket, dict) else {}
+        _clear_etsy_property_aliases(bucket, fold_key(parts[2]), keep=parts[2])
+        nested = bucket.get("category_specifics")
+        nested = dict(nested) if isinstance(nested, dict) else {}
+        nested[parts[2]] = value
+        bucket["category_specifics"] = nested
+        listing["etsy_specifics"] = bucket
+        return
     set_path(listing, path, value)
 
 
@@ -209,6 +247,12 @@ def clear_value(listing: dict, path: str) -> None:
     (size, brand) from answering it. Only the seller's own edit stores one.
     """
     parts = path.split(".")
+    if len(parts) == 3 and parts[0] == "etsy_specifics" and parts[1] == "category_specifics":
+        bucket = listing.get("etsy_specifics")
+        if not isinstance(bucket, dict):
+            return
+        _clear_etsy_property_aliases(bucket, fold_key(parts[2]))
+        return
     parent = get_path(listing, ".".join(parts[:-1]))
     if not isinstance(parent, dict):
         return
@@ -217,24 +261,33 @@ def clear_value(listing: dict, path: str) -> None:
         del parent[name]
 
 
-DEPOP_AGE = "depop_specifics.age"
+def _keep_depop_tags(listing: dict, rows: dict[str, dict]) -> None:
+    """Depop's Source, Age and Style always have an answer. The evidence check
+    leaves blank what the model did not quote (photos never show "Modern"), so
+    a blank one gets the default generation uses, spelled as the form stores it."""
+    from anteroom.models.schema import VALID_DEPOP_STYLE
+    from anteroom.services.depop_fields import depop_default_age, depop_default_source, infer_depop_styles
 
-
-def _keep_depop_age(listing: dict, row: dict | None) -> None:
-    """Depop's Age always has an answer. Photos never show "Modern", so the
-    evidence check leaves it blank; give it the default generation uses."""
-    from anteroom.services.depop_fields import depop_default_age
-
-    if row is None or not _empty(get_path(listing, DEPOP_AGE)):
-        return
-    wanted = fold_key(depop_default_age(listing))
-    values = row.get("option_values") or {}
-    label = next((label for label in row.get("options") or []
-                  if wanted in (fold_key(label), fold_key(str(values.get(label, label))))), None)
-    if label is None:
-        return
-    stored = str(values.get(label, label))
-    write_value(listing, DEPOP_AGE, [stored] if row.get("multi") else stored)
+    for path in DEPOP_TAGS:
+        row = rows.get(path)
+        if row is None or not _empty(get_path(listing, path)):
+            continue
+        if path.endswith(".source"):
+            wanted = [depop_default_source(listing)]
+        elif path.endswith(".age"):
+            wanted = [depop_default_age(listing)]
+        else:
+            # Rank every style, keep those this form offers, then apply its limit.
+            wanted = infer_depop_styles(listing, limit=len(VALID_DEPOP_STYLE))
+        values = row.get("option_values") or {}
+        by_fold = {}
+        for label in row.get("options") or []:
+            by_fold.setdefault(fold_key(label), label)
+            by_fold.setdefault(fold_key(str(values.get(label, label))), label)
+        labels = list(dict.fromkeys(by_fold[fold_key(item)] for item in wanted if fold_key(item) in by_fold))
+        stored = [str(values.get(label, label)) for label in labels[:_limit(row)]]
+        if stored:
+            write_value(listing, path, stored if row.get("multi") else stored[0])
 
 
 async def load_forms(conv_id: str, markets: Iterable[str] = MARKETS) -> dict[str, dict]:
@@ -248,7 +301,7 @@ async def load_forms(conv_id: str, markets: Iterable[str] = MARKETS) -> dict[str
         except Exception as exc:  # noqa: BLE001 - one marketplace's form never stops the others
             log.info("No %s form to fill for %s: %s", market, conv_id, exc)
             continue
-        if isinstance(form, dict) and form.get("known") is not False:
+        if isinstance(form, dict) and form.get("known") is not False and not form.get("properties_unavailable"):
             forms[market] = form
     return forms
 
@@ -293,8 +346,8 @@ def _stale_markets(listing: dict | None, markets: set[str], *, include_unavailab
 
 
 async def fill_native_fields(conv_id: str, provider, *, evidence: str,
-                             markets: Iterable[str] = MARKETS) -> dict | None:
-    """Choose required categories first, then read their forms again to fill item fields."""
+                             markets: Iterable[str] = MARKETS, expected_photo_fingerprint: str | None = None) -> dict | None:
+    """Choose categories, then fill item fields using evidence tied to the supplied photos, if any."""
     from anteroom.database import in_worker_session
 
     markets = set(markets)
@@ -302,7 +355,8 @@ async def fill_native_fields(conv_id: str, provider, *, evidence: str,
     strict = bool(listing is not None and native_contract.KEY in listing)
     if strict and listing is not None:
         markets &= set(listing[native_contract.KEY])
-    categories = await _fill_native_fields(conv_id, provider, evidence=evidence, markets=markets, categories=True)
+    categories = await _fill_native_fields(conv_id, provider, evidence=evidence, markets=markets, categories=True,
+                                          expected_photo_fingerprint=expected_photo_fingerprint)
     if strict:
         current = await in_worker_session(_current_listing, conv_id)
         stale = _stale_markets(current, markets, include_unavailable=True)
@@ -313,7 +367,8 @@ async def fill_native_fields(conv_id: str, provider, *, evidence: str,
     for _round in range(3 if strict else 1):
         before = await in_worker_session(_current_listing, conv_id) or {}
         fields = await _fill_native_fields(conv_id, provider, evidence=evidence, markets=markets,
-                                           categories=False, required_only=required_only)
+                                           categories=False, required_only=required_only,
+                                           expected_photo_fingerprint=expected_photo_fingerprint)
         dependencies_changed = fields is not None and any(
             native_contract.inputs(before, market, contract.get("fields") or [])
             != native_contract.inputs(fields, market, contract.get("fields") or [])
@@ -382,13 +437,16 @@ def _record_forms(db: Session, conv_id: str, revision_id: str, saved: dict, form
             value = row.get("value")
             if path in CATEGORY_PATHS and form.get("category_id") and not get_path(listing, path) and not _empty(value):
                 write_value(listing, path, str(form["category_id"]))
-            sale_field = row.get("locked") or native_contract.SALE_FIELDS.search(path.split("_specifics.", 1)[-1].casefold())
+            sale_field = row.get("locked") or native_contract.is_sale_field(path)
             if (path.startswith(f"{market}_specifics.") and ".package." not in path and sale_field
+                    and not is_locked(listing, path)
+                    and not (market == "etsy" and row.get("locked"))
                     and path not in CATEGORY_PATHS and not _empty(value) and not native_contract.value_error(row, value)):
                 write_value(listing, path, value)
     listing[native_contract.KEY] = {**choice_lists.compact_contracts(listing.get(native_contract.KEY) or {}),
                                     **native_contract.capture(listing, forms, markets)}
-    native_contract.constrain_generated(listing, listing, freeze_categories=False)
+    # Keep a separate seed so normalization cannot erase answers it must restore.
+    native_contract.constrain_generated(listing, native_contract.copy_listing(listing), freeze_categories=False)
     if listing != saved:
         listing_persistence.save_revision(db, conv_id, listing, source="native_schema", parent_revision_id=revision_id, expected_revision_id=revision_id)
     return listing[native_contract.KEY]
@@ -409,10 +467,10 @@ def _note(db: Session, conv_id: str, text: str) -> None:
 
 
 async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
-                              markets: Iterable[str], categories: bool, required_only: bool = False) -> dict | None:
+                              markets: Iterable[str], categories: bool, required_only: bool = False,
+                              expected_photo_fingerprint: str | None = None) -> dict | None:
     """Save picks; a valid strict check returns its snapshot even when unchanged."""
     from anteroom.database import in_worker_session
-    from anteroom.services.listing_generate import collect_provider_text
 
     if provider is None:
         return None
@@ -420,6 +478,10 @@ async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
     if inputs is None:
         return None
     fingerprint, revision_id, listing = inputs
+    # The save already checks this fingerprint again. Do not adopt new photos
+    # between passes when the evidence was read from a different set.
+    if expected_photo_fingerprint is not None and fingerprint != expected_photo_fingerprint:
+        return None
     has_contract = native_contract.KEY in listing
     strict = has_contract and not categories
     # Finishing just captured these definitions. Reuse them while their
@@ -457,11 +519,28 @@ async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
     if not rows_by_market:
         return None
     rows = {_path(row): row for market_rows in rows_by_market.values() for row in market_rows}
+    reply = await _ask(conv_id, provider, rows_by_market, forms, listing, evidence, strict=strict, categories=categories)
+    if reply is None:
+        return None
+    accepted = validated_values(reply, rows, evidence=evidence if strict else None)
+    if not accepted and not strict:
+        return None
+    return await in_worker_session(_save_fill, conv_id, revision_id, fingerprint, listing, forms, rows, reply,
+                                   accepted, strict, categories)
+
+
+async def _ask(conv_id: str, provider, rows_by_market: dict[str, list[dict]], forms: dict[str, dict], listing: dict,
+               evidence: str, *, strict: bool, categories: bool) -> dict | None:
+    """The model's answers for these form rows, or None (with a chat note) when it fails or replies unreadably."""
+    from anteroom.database import in_worker_session
+    from anteroom.services import activity
+    from anteroom.services.catalog_index import relevant_skill_rules
+    from anteroom.services.listing_generate import collect_provider_text
+
+    rows = [_path(row) for market_rows in rows_by_market.values() for row in market_rows]
     summary = {key: listing.get(key) for key in (
         "title", "description", "brand", "category_path", "department", "size", "primaryColor",
         "secondaryColor", "material", "condition") if not _empty(listing.get(key))}
-    from anteroom.services.catalog_index import relevant_skill_rules
-
     query = " ".join([*rows, str(summary.get("category_path") or "")])
     rules = await asyncio.to_thread(relevant_skill_rules, None, query, max_chars=40000)
     messages = [
@@ -480,8 +559,6 @@ async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
             f"--- Listing ---\n{json.dumps(summary, ensure_ascii=False)}"
         )},
     ]
-    from anteroom.services import activity
-
     work = activity.begin(conv_id, "Filling marketplace fields…")
     work.fields = tuple(rows)
     reply = None
@@ -489,7 +566,7 @@ async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
     try:
         from anteroom.services.option_lookup import OptionCatalog
 
-        catalog = OptionCatalog({market: {"fields": rows} for market, rows in rows_by_market.items()})
+        catalog = OptionCatalog({market: {"fields": market_rows} for market, market_rows in rows_by_market.items()})
         for attempt in range(2):
             text = await collect_provider_text(provider, messages, option_catalog=catalog)
             reply = _json_object(text)
@@ -521,11 +598,7 @@ async def _fill_native_fields(conv_id: str, provider, *, evidence: str,
             "Your saved listing is unchanged. Ask chat to fill the remaining fields.",
         )
         return None
-    accepted = validated_values(reply, rows, evidence=evidence if strict else None)
-    if not accepted and not strict:
-        return None
-    return await in_worker_session(_save_fill, conv_id, revision_id, fingerprint, listing, forms, rows, reply,
-                                   accepted, strict, categories)
+    return reply
 
 
 def _save_fill(db: Session, conv_id: str, revision_id: str, fingerprint: str, listing: dict, forms: dict[str, dict],
@@ -539,16 +612,34 @@ def _save_fill(db: Session, conv_id: str, revision_id: str, fingerprint: str, li
         # The seller edited, cleared or regenerated while the forms were read.
         return None
     updated = native_contract.copy_listing(listing)
+    no_brand_path = "mercari_specifics.noBrand"
+    brand_path = "mercari_specifics.brand"
+    no_brand, _ = accepted.get(no_brand_path, (None, []))
+    # An explicit checked box wins over a brand in the same response.
+    if no_brand is True:
+        accepted = {path: answer for path, answer in accepted.items() if path != brand_path}
     changed_parents = {path for path, (value, _labels) in accepted.items() if get_path(listing, path) != value}
     changed_labels = {rows[path].get("label") for path in changed_parents}
-    dependent_paths = {dependent for path in changed_parents for dependent in rows[path].get("clears") or []}
+    dependent_paths = {dependent for path in changed_parents if path != no_brand_path
+                       for dependent in rows[path].get("clears") or []}
+    if no_brand is True:
+        dependent_paths.add(brand_path)
+    elif no_brand is False:
+        # A brand and an unchecked box are compatible and can both be saved.
+        dependent_paths.discard(no_brand_path)
     form_rows = {_path(row): row for form in forms.values() for row in form.get("fields") or []}
     dependent_paths.update(path for path, row in form_rows.items() for rules in (row.get("value_constraints") or {}).values()
                            for rule in rules if rule.get("parentName") in changed_labels)
     accepted = {path: answer for path, answer in accepted.items() if path not in dependent_paths}
     for dependent in dependent_paths:
         if not is_locked(updated, dependent):
-            empty = {} if dependent.endswith(".attributes") else [] if dependent.endswith(".inventoryRows") else ""
+            dep_row = form_rows.get(dependent) or {}
+            empty = (
+                {} if dependent.endswith(".attributes")
+                else [] if dependent.endswith(".inventoryRows")
+                else False if dep_row.get("input_type") == "boolean"
+                else ""
+            )
             write_value(updated, dependent, empty)
             (updated.get(native_contract.EVIDENCE_KEY) or {}).pop(dependent, None)
     if strict:
@@ -561,7 +652,7 @@ def _save_fill(db: Session, conv_id: str, revision_id: str, fingerprint: str, li
         if strict:
             updated.setdefault(native_contract.EVIDENCE_KEY, {})[path] = {
                 "value": copy.deepcopy(value), "quote": reply["fields"][path]["evidence"]}
-    _keep_depop_age(updated, rows.get(DEPOP_AGE))
+    _keep_depop_tags(updated, rows)
     if updated == listing:
         return updated if strict else None
     revision = listing_persistence.save_revision(db, conv_id, updated, source="native_categories" if categories else "native_fields", parent_revision_id=revision_id, expected_revision_id=revision_id)
@@ -579,6 +670,87 @@ def filled_message(accepted: dict[str, tuple[Any, list[str]]], rows: dict[str, d
     lines = [f"Filled {count} marketplace category field{'s' if count != 1 else ''}:"]
     lines += [f"- {market}: " + "; ".join(items) for market, items in by_market.items()]
     return "\n".join(lines)
+
+
+# --- Etsy's category attributes --------------------------------------------
+#
+# Etsy's tab is built locally (services/etsy_form.py) and has no captured
+# native contract: its other keys (styles, profiles, renewal) are read by List
+# as they are. Only its category attributes (Sleeve length, Neckline, ...) are
+# item facts, so they get the same evidence-checked fill as the other forms.
+
+ETSY_ATTRIBUTES = "etsy_specifics.category_specifics."
+
+
+# Etsy reads these from General's colors (etsy_listings._answers). A copy of
+# its own would stop the row following a later General edit.
+_FROM_GENERAL = frozenset(("primarycolor", "secondarycolor"))
+
+
+def _unanswered(row: dict) -> bool:
+    """Empty, or only an earlier automatic answer this category's choices do not offer (List drops it)."""
+    value = row.get("value")
+    if _empty(value):
+        return True
+    options = row.get("options") or []
+    if not row.get("selection_only") or not options:
+        return False
+    return not any(item in options for item in (value if isinstance(value, list) else [value]))
+
+
+def etsy_attribute_rows(form: dict, listing: dict) -> list[dict]:
+    """Etsy's unanswered category attributes the seller has not set.
+
+    Editing any attribute in the Etsy tab locks the whole attribute group
+    (``lock_seller_edits``), and generation then keeps it as the seller left
+    it, blanks included. The fill does the same.
+    """
+    if is_locked(listing, ETSY_ATTRIBUTES.rstrip(".")):
+        return []
+    return [row for row in form.get("fields") or []
+            if _path(row).startswith(ETSY_ATTRIBUTES) and row.get("category_specific") and _unanswered(row)
+            and fold_key(str(row.get("label") or "")) not in _FROM_GENERAL
+            and not row.get("locked") and not is_locked(listing, _path(row))
+            and not field_locked(listing, "etsy", _path(row).rsplit(".", 1)[-1])]
+
+
+async def fill_etsy_attributes(conv_id: str, provider, *, evidence: str, photos: str | None) -> dict | None:
+    """Fill Etsy's empty category attributes from the evidence. Returns the saved listing, or None when nothing changed.
+
+    ``photos`` is the fingerprint of the photos ``evidence`` describes: answers
+    are saved only while those are still the draft's photos.
+    """
+    from anteroom.database import in_worker_session
+    from anteroom.services.native_editor import editor_form
+
+    if provider is None:
+        return None
+    inputs = await in_worker_session(_fill_inputs, conv_id)
+    if inputs is None:
+        return None
+    fingerprint, revision_id, listing = inputs
+    if fingerprint != photos or "etsy" in (listing.get(native_contract.KEY) or {}):
+        return None
+    try:
+        form = await editor_form(conv_id, "etsy", revision_id)
+    except Exception as exc:  # noqa: BLE001 - the other marketplaces' fields are already saved
+        log.info("No Etsy form to fill for %s: %s", conv_id, exc)
+        return None
+    if not isinstance(form, dict) or form.get("known") is False:
+        return None
+    candidates = etsy_attribute_rows(form, listing)
+    if not candidates:
+        return None
+    rows = {_path(row): row for row in candidates}
+    forms = {"etsy": form}
+    reply = await _ask(conv_id, provider, {"etsy": candidates}, forms, listing, evidence, strict=True, categories=False)
+    if reply is None:
+        return None
+    accepted = validated_values(reply, rows, evidence=evidence)
+    if not accepted:
+        return None
+    return await in_worker_session(_save_fill, conv_id, revision_id, fingerprint, listing, forms, rows, reply,
+                                   accepted, False, False)
 
 
 # --- A category the seller changes later -------------------------------------
@@ -675,16 +847,19 @@ def _finished(conv_id: str) -> None:
         _queue(conv_id, set())
 
 
-def _category_fill_evidence(db: Session, conv_id: str) -> str | None:
-    from anteroom.services.listing_generate import current_photo_analysis, seller_item_details
+def _category_fill_evidence(db: Session, conv_id: str) -> tuple[str, str] | None:
+    """The evidence for a category refill, with the fingerprint of the photos it describes."""
+    from anteroom.services.listing_generate import latest_photo_analysis, photo_fingerprint, seller_item_details
 
     repo = ConversationRepo(db)
     conv = repo.get(conv_id)
     if conv is None:
         return None
-    return "\n\n".join(part for part in (
-        current_photo_analysis(repo, conv_id) or "", seller_item_details(conv.notes),
-        "Seller messages:\n" + "\n".join(message.text for message in repo.get_messages(conv_id)
+    photos = photo_fingerprint(repo.get_photos(conv_id))
+    messages = repo.get_messages(conv_id)
+    return photos, "\n\n".join(part for part in (
+        latest_photo_analysis(messages, fingerprint=photos) or "", seller_item_details(conv.notes),
+        "Seller messages:\n" + "\n".join(message.text for message in messages
                                             if message.role == "user" and message.text)) if part)
 
 
@@ -696,9 +871,15 @@ async def _fill_after_category(conv_id: str, markets: set[str]) -> None:
     if provider is None:
         return
     try:
-        evidence = await in_worker_session(_category_fill_evidence, conv_id)
-        if evidence is None:
+        read = await in_worker_session(_category_fill_evidence, conv_id)
+        if read is None:
             return
-        await fill_native_fields(conv_id, provider, evidence=evidence, markets=markets)
+        photos, evidence = read
+        native = markets & set(MARKETS)
+        if native:
+            await fill_native_fields(conv_id, provider, evidence=evidence, markets=native,
+                                     expected_photo_fingerprint=photos)
+        if "etsy" in markets:
+            await fill_etsy_attributes(conv_id, provider, evidence=evidence, photos=photos)
     except Exception:
         log.exception("category field fill failed for %s", conv_id)

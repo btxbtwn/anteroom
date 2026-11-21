@@ -55,6 +55,136 @@ def migrate(engine):
     command.upgrade(alembic_config(engine.url.render_as_string(hide_password=False)), 'head')
 
 
+def test_lifecycle_migration_initializes_history_from_pending_reports(previous_engine):
+    legacy = LegacyDelivery(LegacyStore(previous_engine), lambda *args: None, daily_limit=0, clock=lambda: 100)
+    item = report(1)
+    legacy.add(item)
+    legacy.add(item)
+    config = alembic_config(previous_engine.url.render_as_string(hide_password=False))
+    command.upgrade(config, '4cf6b35245d2')
+    before = LegacyStore(previous_engine).read()
+    migrate(previous_engine)
+    store = EmailStore(previous_engine)
+    assert store.read() == before
+    assert not store.lifecycle_active()
+    assert store.list_groups('open') == []
+    delivery = EmailDelivery(store, lambda *args: None, daily_limit=10, clock=lambda: 100)
+    # Activate independently of draining mail.
+    EmailDelivery(store, lambda *_: pytest.fail('budget is zero'), daily_limit=0).tick()
+    issue, = store.list_groups('open')
+    assert issue['fingerprint'] == item['fingerprint']
+    assert issue['headline'] == item['title']
+    assert issue['count'] == 2
+    assert issue['first_seen'].isoformat() == issue['last_seen'].isoformat() == item['occurred_at']
+    assert issue['last_release'] == item['environment']['release']
+    assert store.summary()[1] == 2
+
+    delivery.tick()
+    assert store.summary()[1] == 0
+    assert store.list_groups('open') == [issue]
+
+
+def test_rolling_worker_keeps_hourly_warning_gate_until_shared_activation(previous_engine):
+    clock, sent = [100.0], []
+    old_store = LegacyStore(previous_engine)
+    record = report(7)
+    record['severity'] = 'WARNING'
+    legacy = LegacyDelivery(old_store, lambda *args: sent.append(args), daily_limit=10, clock=lambda: clock[0])
+    legacy.add(record)
+    before = old_store.read()
+    migrate(previous_engine)
+    store = EmailStore(previous_engine)
+    worker = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=10,
+                           clock=lambda: clock[0], enable_lifecycle=False)
+    assert store.read() == before
+    worker.add(record)
+    assert old_store.read()['groups']['WARNING:' + record['fingerprint']]['count'] == 2
+    clock[0] += 3600
+    worker.tick()
+    assert len(sent) == 1
+    assert '2 occurrences' in sent[0][1]
+    assert not store.lifecycle_active()
+
+    # An idle opted-in sender publishes the switch even with a zero SMTP budget.
+    worker.add(record)
+    # A much older JSON writer may still add a fingerprint after migration.
+    # The final pre-activation snapshot must include it before it recurs.
+    legacy.add(report(9))
+    before = store.read()
+    EmailDelivery(store, lambda *_: pytest.fail('budget is zero'), daily_limit=0, clock=lambda: clock[0]).tick()
+    assert store.lifecycle_active()
+    assert all(store.read()[field] == value for field, value in before.items())
+    assert {group['fingerprint'] for group in store.list_groups('open')} == {
+        record['fingerprint'], report(9)['fingerprint']}
+    clock[0] += 3600
+    worker.tick()
+    assert len(sent) == 2 and 'ERROR' in sent[-1][0]
+    clock[0] += 82800
+    worker.tick()
+    assert len(sent) == 3 and 'Warnings' in sent[-1][0]
+
+
+def test_postgres_upgrade_repairs_legacy_nuls_without_changing_queue_accounting(previous_engine):
+    if previous_engine.dialect.name != 'postgresql':
+        pytest.skip('Postgres JSONB rejects NUL')
+    legacy_store = LegacyStore(previous_engine)
+    legacy = LegacyDelivery(legacy_store, lambda *_: None, daily_limit=0, clock=lambda: 100)
+    broken = report(1)
+    broken['message'] = 'old\x00\x00message with a literal \\u0000'
+    legacy.add(broken)
+    legacy.add(report(2))
+    with legacy_store.transaction() as state:
+        state.update(attempts=[90], lease='old-attempt', lease_until=220, digest_after=3700)
+    before = legacy_store.read()
+    migrate(previous_engine)
+    store = EmailStore(previous_engine)
+    corrected = store.read()
+    assert list(corrected['groups']) == list(before['groups'])
+    before['groups']['ERROR:' + broken['fingerprint']]['report']['message'] = 'old��message with a literal \\u0000'
+    assert corrected == before
+    assert store.summary()[1] == 2
+    with store.transaction() as tx:
+        assert tx.get_group('ERROR:' + broken['fingerprint'])[0] == corrected['groups']['ERROR:' + broken['fingerprint']]
+    late = report(3)
+    late['message'] = 'late legacy input\x00'
+    legacy.add(late)
+    assert store.summary()[1] == 3
+    assert store.read()['groups']['ERROR:' + late['fingerprint']]['report']['message'] == 'late legacy input�'
+    # The previous normalized writer writes a group row and then its mirror
+    # under the same lock. Both boundaries must protect its next JSONB read.
+    normalized_old = report(4)
+    normalized_old['message'] = 'late normalized input\x00'
+    key = 'ERROR:' + normalized_old['fingerprint']
+    with store.transaction() as tx:
+        tx.put_group(key, {'report': normalized_old, 'count': 1,
+                           'first': normalized_old['occurred_at'], 'due': 100}, None)
+    assert store.summary()[1] == 4
+    with store.transaction() as tx:
+        assert tx.get_group(key)[0]['report']['message'] == 'late normalized input�'
+
+
+def test_postgres_retries_invalid_concurrent_lifecycle_index(previous_engine):
+    if previous_engine.dialect.name != 'postgresql':
+        pytest.skip('Postgres concurrent index recovery')
+    from sqlalchemy.exc import IntegrityError
+
+    old = LegacyDelivery(LegacyStore(previous_engine), lambda *_: None, daily_limit=0, clock=lambda: 100)
+    old.add(report(1))
+    old.add(report(2))
+    config = alembic_config(previous_engine.url.render_as_string(hide_password=False))
+    command.upgrade(config, '4cf6b35245d2')
+    with previous_engine.connect().execution_options(isolation_level='AUTOCOMMIT') as connection:
+        with pytest.raises(IntegrityError):
+            connection.exec_driver_sql(
+                'CREATE UNIQUE INDEX CONCURRENTLY ix_error_email_groups_status_last_seen ON error_email_groups (warning)')
+    migrate(previous_engine)
+    with previous_engine.connect() as connection:
+        assert connection.scalar(text("SELECT indisvalid FROM pg_index WHERE indexrelid = "
+                                      "'ix_error_email_groups_status_last_seen'::regclass"))
+        assert 'status, last_seen' in connection.scalar(text(
+            "SELECT pg_get_indexdef('ix_error_email_groups_status_last_seen'::regclass)"))
+
+
 def test_migration_preserves_backlog_budget_pause_and_inflight_lease(previous_engine):
     old = LegacyStore(previous_engine)
     delivery = LegacyDelivery(old, lambda *args: None, daily_limit=0, clock=lambda: 100)
@@ -177,9 +307,10 @@ def test_group_storage_denies_sellers_and_supports_old_api_role_writes(previous_
             # An old writer changes only payload; its invoker trigger needs the
             # same explicit group-table/sequence grants as the new repository.
             import json
+            item = report(3)
             connection.execute(text('UPDATE error_email_state SET payload = CAST(:payload AS JSON)'),
                                {'payload': json.dumps({'groups': {'ERROR:test': {
-                                   'report': report(3), 'count': 3, 'first': 'first', 'due': 100}}})})
+                                   'report': item, 'count': 3, 'first': item['occurred_at'], 'due': 100}}})})
             assert connection.scalar(text('SELECT count(*) FROM error_email_groups')) == 1
 
     from sqlalchemy import event
@@ -258,6 +389,8 @@ def test_idle_read_payload_is_independent_of_unrelated_backlog(previous_engine, 
     for name, factory, store in [('legacy', LegacyDelivery, old), ('groups', EmailDelivery, EmailStore(previous_engine))]:
         if name == 'groups':
             migrate(previous_engine)
+            # One-time pending-summary initialization precedes hot-path sampling.
+            EmailDelivery(store, lambda *_: pytest.fail('budget is zero'), daily_limit=0).tick()
         delivery = factory(store, lambda *args: pytest.fail('nothing is due'), daily_limit=10, clock=lambda: 100)
         counter, timings = ResultBytes(), []
         event.listen(previous_engine, 'after_cursor_execute', counter.observe)

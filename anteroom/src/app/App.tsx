@@ -950,7 +950,7 @@ export function App() {
                   </Empty>
                 )}
               </ErrorBoundary>
-              {suggestionsVisited && <SuggestionsPage active={activeView === "suggestions"} onOpenListing={openSuggestedListing} />}
+              {suggestionsVisited && <SuggestionsPage active={activeView === "suggestions"} onOpenListing={openSuggestedListing} conversations={conversations} bulk={bulk} />}
               {selectedConvId && (
                 <div hidden={activeView !== "listings"} className="listing-workspace">
                   {openListingState && (

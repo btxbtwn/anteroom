@@ -474,11 +474,7 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
     from anteroom.database import end_read
     from anteroom.services.inventory_analytics import analytics_ranges, read_analytics_inputs, rows_from_inputs
 
-    # Analytics inputs release their transaction (end_read) before calculating.
-    # _records and boxes.results(release=True) also release it. The later ad,
-    # event and Scout reads reopen a transaction that stays open through the
-    # sourcing and summary calculations, _automation_lines and later Scout reads.
-    # Postgres can end that transaction after its idle deadline.
+    # Release each read before calculations or a potentially blocking lock.
     inputs = read_analytics_inputs(db)
     end_read(db, keep=[line for lines in inputs.sales.values() for line in lines])
     rows = rows_from_inputs(inputs)
@@ -489,7 +485,16 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
     box_results = boxes.results(db, rows=rows, release=True)
     ads = [ad_spend.entry_view(row) for row in ad_spend.list_entries(db)]
     events = _sale_events(db)
+    end_read(db)
     scout_sales = scout.outcomes(db, rows)
+    automation_lines = _automation_lines(db)
+    scout_record = scout.track_record(db, scout_sales)
+    scout_recent = [
+        {key: check[key] for key in ("title", "asking_price", "estimate", "comps_count", "decision",
+                                     "sold_price", "created_at")}
+        for check in (scout.to_dict(row, scout_sales.get(row.id)) for row in scout.recent(db))
+    ]
+    end_read(db)
     sourcing_state = box_scout.read_state()
     tab_boxes = sourcing_boxes.box_rows(sourcing_state, rows, clock)
     breakdowns = {
@@ -529,14 +534,10 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
         _sourcing_box_rows(tab_boxes),
         _section("Ad spend the seller recorded", ads),
         _section("Sale events", events),
-        _automation_lines(db),
+        automation_lines,
         _section("Sourcing checks (is this worth buying?)", {
-            "track_record": scout.track_record(db, scout_sales),
-            "recent": [
-                {key: check[key] for key in ("title", "asking_price", "estimate", "comps_count", "decision",
-                                             "sold_price", "created_at")}
-                for check in (scout.to_dict(row, scout_sales.get(row.id)) for row in scout.recent(db))
-            ],
+            "track_record": scout_record,
+            "recent": scout_recent,
         }),
     ]
     return (

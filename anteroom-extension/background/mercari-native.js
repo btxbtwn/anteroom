@@ -257,7 +257,6 @@ function mercariNumberedSizes(wanted, sizes) {
   });
 }
 
-const MERCARI_NO_BRAND = 'No Brand/Not sure';
 // Mercari leaves a draft's brand unchanged when brandId is omitted or null.
 // Zero is the empty brand its form sends to clear one.
 const MERCARI_EMPTY_BRAND = 0;

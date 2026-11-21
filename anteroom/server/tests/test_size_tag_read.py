@@ -141,6 +141,61 @@ class ReadSizeTagsRouteTest(unittest.TestCase):
         self.assertEqual(self.post(FakeProvider([]), [_photo()] * 21).status_code, 400)
 
 
+class ReadSavedSizeTagsRouteTest(unittest.TestCase):
+    """Regenerate's review window reads a saved listing's size tag the same way."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from sqlalchemy.pool import StaticPool
+        from worker_sessions import worker_sessions
+        from anteroom.database import Base
+        from anteroom.repositories.queries import ConversationRepo
+        from anteroom.services import listing_persistence
+        from anteroom.services.photo_store import LocalPhotoStore
+
+        engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+        Base.metadata.create_all(engine)
+        self.enterContext(worker_sessions(engine))
+        self.db = sessionmaker(bind=engine)()
+        self.addCleanup(self.db.close)
+        photos = tempfile.TemporaryDirectory()
+        self.addCleanup(photos.cleanup)
+        folder = Path(photos.name)
+        self.enterContext(patch("anteroom.services.photo_store._store", LocalPhotoStore(str(folder))))
+        self.conv = ConversationRepo(self.db).create(title="Saved Shirt")
+        for name in ("first.jpg", "second.jpg"):
+            body = _photo()
+            (folder / name).write_bytes(body)
+            listing_persistence.add_photo(
+                self.db, self.conv.id, name, name, "image/jpeg", len(body), checksum=name * 8, width=1, height=1,
+            )
+        self.db.commit()
+
+    def post(self, provider, conv_id=None):
+        with patch.object(route, "get_photo_provider", return_value=provider):
+            return TestClient(app).post(f"/api/conversations/{conv_id or self.conv.id}/size-tags/read")
+
+    def test_reads_saved_photos_in_order_and_names_no_model(self):
+        provider = FakeProvider([{"tag": "found", "sizes": ["0"]}, {"tag": "found", "sizes": [0]}])
+        response = self.post(provider)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {"photos_read": 2, "status": "accepted", "size": "0", "sizes": ["0"]})
+        self.assertEqual(len(provider.calls), 2)
+        self.assertNotIn("gemini", response.text.casefold())
+
+    def test_returns_404_for_missing_conversation(self):
+        response = self.post(FakeProvider([]), conv_id="missing")
+        self.assertEqual(response.status_code, 404)
+
+    def test_needs_a_connected_model(self):
+        response = self.post(None)
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("size tags", response.json()["detail"])
+
+
 class EditedSizeLeavesTheTagTest(unittest.TestCase):
     """Once Size changes in the editor the tag size no longer applies. The edit is a seller lock;
     it is not recorded as a tag size, since chat, templates and normalizers edit Size too."""

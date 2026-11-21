@@ -35,6 +35,224 @@ def report(level=logging.ERROR, line=1):
     return build_report(logging.LogRecord('anteroom.jobs', level, '/jobs.py', line, 'failed', (), None))
 
 
+def test_muted_group_counts_occurrences_and_resumes_at_expiry(store):
+    sent, now = [], [100.0]
+    delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=10, clock=lambda: now[0])
+    item = report()
+    delivery.add(item)
+    delivery.tick()
+    assert store.triage('ERROR', item['fingerprint'], status='muted', muted_until=200, note='Investigating')
+    now[0] = 199
+    delivery.add(item)
+    delivery.tick()
+    assert len(sent) == 1
+    assert store.list_groups('muted')[0]['count'] == 2
+    now[0] = 200
+    delivery.add(item)
+    delivery.tick()
+    assert len(sent) == 2
+    group = store.list_groups('open')[0]
+    assert group['count'] == 3
+    assert group['muted_until'] is None
+    assert group['note'] == 'Investigating'
+
+
+def test_timed_mute_holds_queued_mail_after_expiry_until_a_new_occurrence(store):
+    sent, now = [], [100.0]
+    delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=10, clock=lambda: now[0])
+    item = report()
+    delivery.add(item)
+    assert store.triage('ERROR', item['fingerprint'], status='muted', muted_until=200, note='Investigating')
+
+    now[0] = 201
+    delivery.tick()
+    assert not sent
+    assert delivery.status()['pending'] == 1
+    assert store.list_groups('muted')[0]['count'] == 1
+
+    delivery.add(item)
+    delivery.tick()
+    assert len(sent) == 1
+    assert '2 occurrences' in sent[0][1]
+    assert delivery.status()['pending'] == 0
+    assert store.list_groups('open')[0]['note'] == 'Investigating'
+
+
+def test_resolved_group_only_alerts_on_newer_release(store):
+    sent = []
+    delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=10, clock=lambda: 100)
+    item = report()
+    item['environment']['release'] = 'v1.2.9'
+    delivery.add(item)
+    delivery.tick()
+    assert store.triage('ERROR', item['fingerprint'], status='resolved', resolved_at=100, resolved_release='v1.2.9')
+    for release in ('1.2.9', '1.2.8', None, 'unknown'):
+        item = report()
+        item['environment']['release'] = release
+        delivery.add(item)
+        delivery.tick()
+    assert len(sent) == 1
+    assert store.list_groups('resolved')[0]['count'] == 5
+    item['environment']['release'] = '1.2.10'
+    delivery.add(item)
+    late = report()
+    late['environment']['release'] = '1.2.8'
+    delivery.add(late)
+    delivery.tick()
+    assert sent[1][0].startswith('[Regression]')
+    assert 'v1.2.9' in sent[1][1]
+    assert '1.2.10' in sent[1][1]
+    assert store.list_groups('open')[0]['last_release'] == '1.2.8'
+
+
+def test_warnings_wait_a_day_while_repeat_errors_send_hourly(store):
+    sent, now = [], [100.0]
+    delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=10, clock=lambda: now[0])
+    delivery.add(report())
+    delivery.tick()
+    delivery.add(report())
+    delivery.add(report(logging.WARNING))
+    now[0] += 3600
+    delivery.tick()
+    assert len(sent) == 2 and 'ERROR' in sent[-1][0]
+    now[0] = 100 + 86400 - 1
+    delivery.tick()
+    assert len(sent) == 2
+    now[0] += 1
+    delivery.tick()
+    assert len(sent) == 3 and 'Warnings' in sent[-1][0]
+
+
+def test_regression_stays_eligible_if_an_older_send_completes_first(store):
+    sent = []
+    item = report()
+    item['environment']['release'] = '1.2.9'
+
+    def send(*args):
+        sent.append(args)
+        store.triage('ERROR', item['fingerprint'], status='resolved', resolved_at=100, resolved_release='1.2.9')
+        regression = report()
+        regression['environment']['release'] = '1.2.10'
+        delivery.add(regression)
+        delivery.tick()
+
+    delivery = EmailDelivery(store, send, daily_limit=10, clock=lambda: 100)
+    delivery.add(item)
+    delivery.tick()
+    assert len(sent) == 1
+    delivery.send = lambda *args: sent.append(args)
+    delivery.tick()
+    assert sent[1][0].startswith('[Regression]')
+    assert delivery.status()['pending'] == 0
+
+
+@pytest.mark.parametrize('fails_first', [False, True])
+def test_regression_send_preserves_latest_trace_arriving_during_smtp(store, fails_first):
+    sent, now = [], [100.0]
+    item = report()
+    item['environment']['release'] = '1.2.9'
+    delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=10, clock=lambda: now[0])
+    delivery.add(item)
+    delivery.tick()
+    store.triage('ERROR', item['fingerprint'], status='resolved', resolved_at=100, resolved_release='1.2.9')
+    newer = report()
+    newer['environment']['release'] = '1.2.10'
+    newer['stack'] = 'Trace that triggered regression'
+    delivery.add(newer)
+
+    def send(*args):
+        sent.append(args)
+        late = report()
+        late['environment']['release'] = '1.2.9'
+        late['stack'] = 'Different trace during SMTP'
+        delivery.add(late)
+        if fails_first:
+            raise OSError('transient relay failure')
+
+    delivery.send = send
+    delivery.tick()
+    assert 'Trace that triggered regression' in sent[-1][1]
+    assert delivery.status()['pending'] == (2 if fails_first else 1)
+    delivery.send = lambda *args: sent.append(args)
+    now[0] += 301 if fails_first else 3600
+    delivery.tick()
+    assert 'Different trace during SMTP' in sent[-1][1]
+    assert ('Trace that triggered regression' in sent[-1][1]) is fails_first
+    assert delivery.status()['pending'] == 0
+
+
+def test_delayed_activation_does_not_start_with_an_expired_smtp_lease(store, monkeypatch):
+    from anteroom.repositories.error_email import EmailTransaction
+
+    clock, sent = [100.0], []
+    old_policy = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=10,
+                               clock=lambda: clock[0], enable_lifecycle=False)
+    old_policy.add(report())
+    seed = EmailTransaction.seed_pending_issues
+
+    def slow_seed(transaction):
+        seed(transaction)
+        clock[0] += 121
+
+    def send(*args):
+        sent.append(args)
+        assert store.read()['lease_until'] == clock[0] + 120
+        old_policy.tick()
+
+    monkeypatch.setattr(EmailTransaction, 'seed_pending_issues', slow_seed)
+    EmailDelivery(store, send, daily_limit=10, clock=lambda: clock[0]).tick()
+    assert len(sent) == 1
+
+
+def test_quota_pause_preserves_critical_and_regression_first_alerts(store):
+    sent, now = [], [100.0]
+    delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=10, clock=lambda: now[0])
+    original = report()
+    original['environment']['release'] = '1.2.9'
+    delivery.add(original)
+    delivery.tick()
+    store.triage('ERROR', original['fingerprint'], status='resolved', resolved_at=100, resolved_release='1.2.9')
+    regression = report()
+    regression['environment']['release'] = '1.2.10'
+    delivery.add(regression)
+
+    def quota(*_):
+        raise smtplib.SMTPDataError(550, b'Daily relay quota exceeded')
+
+    delivery.send = quota
+    delivery.tick()
+    assert delivery.status()['state'] == 'quota_paused'
+    assert delivery.status()['used'] == 2
+    delivery.add(report(logging.CRITICAL, line=2))
+    delivery.add(report(logging.WARNING, line=3))
+    delivery.send = lambda *args: sent.append(args)
+    now[0] += 86399
+    delivery.tick()
+    assert len(sent) == 1
+    assert delivery.status()['pending'] == 3
+    now[0] += 1
+    delivery.tick()
+    assert sent[-1][0].startswith('[Regression]')
+    assert 'Severity     CRITICAL' in sent[-1][1]
+    assert 'Previously resolved on release 1.2.9' in sent[-1][1]
+    assert delivery.status()['pending'] == 1
+
+
+def test_indefinite_mute_holds_pending_mail_until_reopened(store):
+    sent = []
+    delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=10, clock=lambda: 100)
+    item = report()
+    delivery.add(item)
+    store.triage('ERROR', item['fingerprint'], status='muted')
+    delivery.add(item)
+    delivery.tick()
+    assert not sent
+    assert store.list_groups('muted')[0]['count'] == 2
+    store.triage('ERROR', item['fingerprint'], status='open')
+    delivery.tick()
+    assert len(sent) == 1 and '1 occurrences' in sent[0][1]
+
+
 def test_unconfigured_budget_retains_reports_without_sending(store):
     sent = []
     delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=0)
@@ -43,6 +261,21 @@ def test_unconfigured_budget_retains_reports_without_sending(store):
     assert sent == []
     assert delivery.status()['state'] == 'needs_budget'
     assert delivery.status()['pending'] == 1
+
+
+def test_nul_in_error_report_does_not_block_later_delivery(store):
+    sent = []
+    delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=10, clock=lambda: 100)
+    broken = report()
+    broken['title'] = 'Invalid\x00text'
+    broken['environment']['release'] = 'invalid\x00release'
+    broken['stack'] = 'Example\x00stack'
+    delivery.add(broken)
+    delivery.add(report(line=2))
+    delivery.tick()
+    assert len(sent) == 1 and '2 occurrences' in sent[0][1]
+    assert 'Invalid�text' in sent[0][1] and 'Example�stack' in sent[0][1]
+    assert len(store.list_groups('open')) == 2
 
 
 def test_budget_survives_restart_and_is_shared_across_concurrent_workers(store):
@@ -67,14 +300,14 @@ def test_warning_digest_waits_and_leaves_budget_for_errors(store):
         delivery.add(report(logging.WARNING, i))
     delivery.tick()
     assert not sent
-    now[0] += 3600
-    delivery.tick()
-    assert len(sent) == 1 and '10 occurrences' in sent[0][1]
-    for _ in range(4):
-        delivery.add(report(logging.WARNING))
-        now[0] += 3601
+    now[0] += 86000
+    for line in (101, 102, 103):
+        delivery.add(report(line=line))
         delivery.tick()
+    now[0] += 400
+    delivery.tick()
     assert len(sent) == 3
+    assert delivery.status()['pending'] == 10
     delivery.add(report())
     delivery.tick()
     assert len(sent) == 4
@@ -173,13 +406,13 @@ def test_warning_backlog_is_bounded_per_message_and_waits_for_next_digest(store)
     delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=20, clock=lambda: now[0])
     for line in range(25):
         delivery.add(report(logging.WARNING, line=line))
-    now[0] += 3600
+    now[0] += 86400
     delivery.tick()
     delivery.tick()
     assert len(sent) == 1
     assert '20 occurrences' in sent[0][1]
     assert delivery.status()['pending'] == 5
-    now[0] += 3600
+    now[0] += 86400
     delivery.tick()
     assert len(sent) == 2
     assert delivery.status()['pending'] == 0
@@ -379,17 +612,17 @@ def test_staggered_first_sends_cannot_start_separate_repeat_timers(store):
 def test_due_warnings_are_not_starved_by_repeats_but_keep_error_reserve(store):
     now, sent = [100.0], []
     delivery = EmailDelivery(store, lambda *args: sent.append(args), daily_limit=4, clock=lambda: now[0])
+    delivery.add(report(logging.WARNING))
+    now[0] += 82800
     delivery.add(report())
     delivery.tick()
     delivery.add(report())
-    delivery.add(report(logging.WARNING))
     now[0] += 3600
     delivery.tick()
     assert 'Warnings' in sent[-1][0]
     delivery.tick()
     assert delivery.status()['pending'] == 0
     delivery.add(report(logging.WARNING))
-    now[0] += 3600
     delivery.tick()
     assert len(sent) == 3  # The last slot belongs to errors.
     delivery.add(report(logging.CRITICAL, line=2))
