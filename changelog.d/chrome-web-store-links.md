@@ -1,0 +1,1 @@
+- Directs sellers to install or update Anteroom Bridge directly from the Chrome Web Store across the hosted web app, desktop Settings, onboarding checklist, and macOS setup instructions.

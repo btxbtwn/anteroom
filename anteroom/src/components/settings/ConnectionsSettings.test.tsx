@@ -172,5 +172,12 @@ describe("Connections settings", () => {
     expect(html).toContain("Update Anteroom Bridge in Chrome to 0.2.44 or later");
     expect(html).toContain("Update Anteroom Bridge<");
     expect(html).not.toContain("Connect Chrome first");
+    expect(html).toContain("https://chromewebstore.google.com/detail/empinkdlhndpfoigoipbiiofaeepcheo");
+  });
+
+  it("links to the Chrome Web Store on desktop Connections settings", () => {
+    const html = renderToStaticMarkup(<ConnectionsSettings />);
+    expect(html).toContain("https://chromewebstore.google.com/detail/empinkdlhndpfoigoipbiiofaeepcheo");
+    expect(html).toContain("Chrome Web Store");
   });
 });
