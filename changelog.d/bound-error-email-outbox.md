@@ -1,1 +1,0 @@
-- Capped the hosted error-email outbox at 500 pending groups with an overflow counter, batched queued alert writes into one transaction, and prioritized real errors ahead of warning bursts.

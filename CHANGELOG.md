@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1101 — 2026-11-21
+
+- Capped the hosted error-email outbox at 500 pending groups with an overflow counter, batched queued alert writes into one transaction, and prioritized real errors ahead of warning bursts.
+
 ## 0.1.1100 — 2026-11-21
 
 - Added per-device rate limiting to the Cloudflare relay's eBay research endpoint so one busy or runaway client cannot exhaust shared eBay API quota for other sellers.
