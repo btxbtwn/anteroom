@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import logging
 import subprocess
@@ -388,6 +389,37 @@ def list_versions() -> dict:
         return {"packaged": is_packaged(), "versions": [], "error": str(exc)}
 
 
+# First packaged Mac release that opens anteroom.db (after #1669 renamed the
+# SQLite file from vendoo_studio.db). Earlier builds ignore anteroom.db and
+# anteroom-* backups, so rolling back to them would open an empty inventory.
+_DATABASE_RENAME_MIN_VERSION = (0, 1, 1054)
+_PRE_RENAME_ROLLBACK_REASON = (
+    "Versions before 0.1.1054 used an older database file name and cannot open "
+    "your current inventory. Choose 0.1.1054 or newer."
+)
+
+
+def _version_tuple(version: str | None) -> tuple[int, ...] | None:
+    if not version:
+        return None
+    match = re.match(r"^\s*v?(\d+(?:\.\d+)*)", str(version))
+    if not match:
+        return None
+    return tuple(int(part) for part in match.group(1).split("."))
+
+
+def _pre_rename_rollback_reason(tag: str, remote: dict) -> str | None:
+    from anteroom.services.packaged_updates import _parse_versioned_tag
+
+    parsed_tag = _parse_versioned_tag(tag)
+    candidates = [remote.get("version"), parsed_tag[0] if parsed_tag else None]
+    for candidate in candidates:
+        parsed = _version_tuple(candidate)
+        if parsed is not None and parsed < _DATABASE_RENAME_MIN_VERSION:
+            return _PRE_RENAME_ROLLBACK_REASON
+    return None
+
+
 def version_plan(tag: str) -> dict:
     """What installing the build under ``tag`` would do, before doing it."""
     from anteroom.services.packaged_updates import PackagedUpdateError, fetch_version_build_info
@@ -397,6 +429,15 @@ def version_plan(tag: str) -> dict:
         remote = fetch_version_build_info(tag)
     except PackagedUpdateError as exc:
         raise UpdateBlocked(str(exc)) from exc
+    blocked_reason = _pre_rename_rollback_reason(tag, remote)
+    if blocked_reason:
+        return {
+            "tag": tag,
+            "version": remote.get("version"),
+            "title": remote.get("title"),
+            "action": "blocked",
+            "reason": blocked_reason,
+        }
     return {
         "tag": tag,
         "version": remote.get("version"),
@@ -439,6 +480,9 @@ def install_version(tag: str, snapshot_name: str | None = None) -> dict:
     try:
         try:
             remote = fetch_version_build_info(tag)
+            blocked_reason = _pre_rename_rollback_reason(tag, remote)
+            if blocked_reason:
+                raise UpdateBlocked(blocked_reason)
             older = needs_older_database(remote.get("schema_revision"), engine)
         except (PackagedUpdateError, SchemaError) as exc:
             raise UpdateBlocked(str(exc)) from exc
