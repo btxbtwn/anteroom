@@ -1,0 +1,1 @@
+- Hosted category search now shares the public marketplace category index across accounts instead of rebuilding and storing a separate copy per seller, speeding up draft generation and reducing memory use.
