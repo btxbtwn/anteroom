@@ -36,3 +36,13 @@ it("shows cancelled orders as review notices without suggesting restocking or de
   expect(html).toContain("No inventory was restocked or relisted");
   expect(html).not.toContain("Take it down");
 });
+
+it("names each marketplace whose delist did not confirm, and why", () => {
+  const sale: MarketplaceSale = { id: "sale", marketplace: "poshmark", orderId: "order", orderStatus: "paid", listingId: "555", quantity: 1,
+    stockStatus: "sold_out", remainingQuantity: 0, state: "new", soldAt: null, receivedAt: null, conversationId: "coat", title: "Coat",
+    listedElsewhere: ["ebay", "mercari"], delistErrors: { ebay: "Sign in to eBay again." } };
+  const html = renderToStaticMarkup(<QueryClientProvider client={new QueryClient()}><SaleNotice sale={sale} /></QueryClientProvider>);
+  expect(html).toContain('data-variant="warning"');
+  expect(html).toContain("did not confirm the delist: Sign in to eBay again.");
+  expect(html).toContain("Delist selected");
+});

@@ -1,4 +1,8 @@
-"""Persist hosted sales without a browser, never publishing or delisting."""
+"""Persist hosted sales without a browser, never publishing.
+
+The only delist it starts is the seller-enabled follow-up after a sale
+(``sale_delist_followup``).
+"""
 from __future__ import annotations
 
 import asyncio
@@ -7,7 +11,7 @@ import logging
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from anteroom.services import marketplace_accounts, recent_orders, relay_client, relay_sales
+from anteroom.services import marketplace_accounts, recent_orders, relay_client, relay_sales, sale_delist_followup
 from anteroom.services.hosted_context import for_seller
 from anteroom.services.keychain import get_marketplace_accounts
 from anteroom.services.service_context import use
@@ -24,6 +28,8 @@ def sales_owners(engine) -> list[str]:
 async def check_owner(owner: str) -> None:
     context = for_seller(owner)
     with use(context):
+        # Sales from every source, the inbox below included, are followed until delisted elsewhere.
+        sale_delist_followup.start()
         if not await asyncio.to_thread(get_marketplace_accounts):
             return
         try:

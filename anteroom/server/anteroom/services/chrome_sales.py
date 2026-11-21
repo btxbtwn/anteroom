@@ -227,6 +227,9 @@ async def _watch() -> None:
             await check_due()
         except Exception:  # noqa: BLE001 - one bad pass must not stop the watcher
             log.exception("Sale check failed")
+        from anteroom.services import sale_delist_followup
+
+        sale_delist_followup.start()
 
 
 def start_chrome_sales() -> asyncio.Task:

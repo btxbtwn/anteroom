@@ -5,6 +5,7 @@ import { api } from "../api/client";
 import { IDLE_POLL_MS, pollMs } from "../api/polling";
 import type { SettingsSearchItem, SettingsSectionId } from "./settingsNav";
 import { ListingFilters } from "./ListingFilters";
+import { StillListedAlert } from "./StillListedAlert";
 import { suggestionHint } from "./SuggestionsPanel";
 import type { BulkRegenerate } from "./useBulkRegenerate";
 import { MobileNavButton } from "./MobileNav";
@@ -386,6 +387,7 @@ export function ListingSidebar({
             </button>
           </div>
 
+          <StillListedAlert onOpen={onSelect} />
           {runtime.features.has("suggestions") && (
             <div className="shrink-0 px-(--sidebar-content-inset)">
               <Button variant="ghost" size="sm" className="min-h-11 w-full justify-start sm:min-h-8"

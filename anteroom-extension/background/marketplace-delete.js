@@ -3,6 +3,7 @@
 // delete whose reply was lost is safe to repeat. Requests come from each
 // marketplace's own web client (read 2026-10-24).
 const DELETE_DEADLINE_MS = 60000;
+const MERCARI_GONE = /^Item is no longer available\.?$/i;
 
 async function deletePoshmark(id, deadline) {
   const account = await poshmarkAccount();
@@ -28,7 +29,13 @@ async function deletePoshmark(id, deadline) {
 async function deleteMercari(id, deadline) {
   mercariSession = null;
   const session = await mercariCurrentSession(deadline);
-  const item = await readMercariItem(id, deadline);
+  let item;
+  try { item = await readMercariItem(id, deadline); }
+  catch (error) {
+    // Mercari answers the read of a deleted item with this refusal (2026-11-20).
+    if (error.code === 'rejected' && MERCARI_GONE.test(error.marketplace_message || '')) return { ok: true, state: 'deleted', already: true };
+    throw error;
+  }
   // cancel / admin_cancel is the item status once it is gone.
   if (['cancel', 'admin_cancel'].includes(item.status)) return { ok: true, state: 'deleted', already: true };
   if (String(item.seller?.id ?? '') !== String(session.user.userId)) {

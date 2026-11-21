@@ -504,7 +504,7 @@ function MarketplaceSection() {
         id="sale-autodelist"
         inlineControl
         title="Delist the other marketplaces"
-        description="When something sells, take it off the other marketplaces it’s still listed on; the sale notice says if a delist can’t finish."
+        description="When something sells, take it off the other marketplaces it’s still listed on; a delist that doesn’t go through is tried again until it does, and the sidebar alerts you while a sold item is still listed."
         control={
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Switch

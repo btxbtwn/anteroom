@@ -1,0 +1,3 @@
+- When Mercari says an item is no longer available, Delist now records that listing as already gone instead of failing. It is never counted as a sale.
+- After a sale, a delist that didn't go through is tried again automatically until each marketplace confirms it, when Delist the other marketplaces is on. eBay and Etsy sales on the web app now start that delist too.
+- A red alert in the sidebar lists every sold item still listed on another marketplace, and the sale notice on the item says why each delist failed.

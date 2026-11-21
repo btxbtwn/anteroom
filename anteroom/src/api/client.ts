@@ -82,7 +82,7 @@ import { AssistantRefused, type AssistantMemory, type AssistantMessage, type Ass
 import type { Automation, AutomationApproval, AutomationBody, AutomationDraft, AutomationHistory, AutomationPreview, AutomationRun, RelistGap } from "./automations";
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
 import type { AgentConnectionStatus, AgentConnectionTest } from "./agentConnection";
-import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus } from "./directConnections";
+import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus, StillListedResponse } from "./directConnections";
 import type { DelistMarketplace, MarketplaceListings, MarketplaceMark, SalesCheck, SellerSale, SellerSaleResult } from "./marketplaceListings";
 import type { ListingReadiness, NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight } from "./nativeMarketplaces";
 import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
@@ -858,6 +858,7 @@ export const api = {
       return read<{ sales: MarketplaceSale[] }>(`/marketplace-sales?${params}`, readOptions);
     },
     dismiss: (saleId: string) => request<OkResponse>(`/marketplace-sales/${saleId}/dismiss`, { method: "POST" }),
+    stillListed: (readOptions?: ReadOptions) => read<StillListedResponse>("/marketplace-sales/still-listed", readOptions),
   },
   health: () => request<{ status: string; version: string }>("/health"),
 

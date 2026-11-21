@@ -4,8 +4,11 @@ Delist means the listing is removed from the marketplace. eBay has no delete,
 so its listing is ended. The
 marketplace where the item sold is never touched. Nothing here runs on a
 timer, a queue, or a retry: each call names its marketplaces and carries the
-seller's confirmation. Deleting is safe to repeat, because every marketplace
-step reads the listing first and reports one that is already gone as deleted.
+seller's confirmation, except the follow-up after a sale the seller turned
+on (``sale_delist_followup``), which repeats a delist that did not confirm.
+Deleting is safe to repeat, because every marketplace step reads the listing
+first and reports one that is already gone as deleted. Already gone records
+the listing as absent; it is never read as a sale.
 
 The seller can also correct what Anteroom knows: mark a marketplace listed
 (with its link), sold, or not listed. A mark changes only Anteroom's record,
@@ -229,7 +232,8 @@ def known_listings(notes: dict, native: dict, sold: dict) -> dict:
         result[marketplace] = {"url": url or record.get("url"), "listing_id": item_id, "source": source,
                                "sold_here": sold_here, "state": record.get("state") or "live",
                                "error": record.get("error"), "marketplace_message": record.get("marketplace_message"),
-                               "at": record.get("at")}
+                               "at": record.get("at"), "attempts": record.get("attempts"),
+                               "already_gone": record.get("already") is True}
     return result
 
 
@@ -442,7 +446,8 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool) -> dict:
     try:
         for name in names:
             entry = known[name]
-            base = {"listing_id": entry["listing_id"], "url": entry["url"], "at": _now()}
+            base = {"listing_id": entry["listing_id"], "url": entry["url"], "at": _now(),
+                    "attempts": _attempt(entry)}
             ebay_record = await in_worker_session(_start_delete, conv_id, name, base, job_id)
             try:
                 if name == "ebay":
@@ -453,8 +458,11 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool) -> dict:
                     result = await browser_bridge.request(job, "marketplace.delete", {
                         "marketplace": name, "listing_id": entry["listing_id"], "confirm": True,
                     }, timeout=90)
-                if result.get("ok") is True and result.get("state") == "deleted":
-                    await in_worker_session(_deleted, conv_id, name, base)
+                gone = _mercari_gone(name, result)
+                if result.get("ok") is True and result.get("state") == "deleted" or gone:
+                    # Already absent is a reconciliation of the listing, never evidence of a sale.
+                    already = gone or result.get("already") is True
+                    await in_worker_session(_deleted, conv_id, name, {**base, "already": True} if already else base)
                 else:
                     failed = True
                     await in_worker_session(_record, conv_id, name, {
@@ -476,6 +484,22 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool) -> dict:
     finally:
         release_api_job(job_id)
     return await in_worker_session(listings, conv_id)
+
+
+def _attempt(entry: dict) -> int:
+    """Which try this is at deleting this listing: a failed one before it counts."""
+    previous = entry.get("attempts") if entry.get("state") in {"failed", "deleting"} else 0
+    return (previous if isinstance(previous, int) and previous > 0 else 0) + 1
+
+
+def _mercari_gone(name: str, result: dict) -> bool:
+    """Mercari refuses the read of a deleted item with these words (2026-11-20).
+
+    Transition for extensions without the check in ``deleteMercari``: remove
+    on 2027-01-31, once installed extensions report it as already deleted.
+    """
+    message = str(result.get("marketplace_message") or "").strip().rstrip(".").lower()
+    return name == "mercari" and result.get("error_code") == "rejected" and message == "item is no longer available"
 
 
 def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bool) -> tuple[list[str], dict, str]:

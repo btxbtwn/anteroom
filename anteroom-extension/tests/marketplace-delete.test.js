@@ -109,6 +109,17 @@ test('Mercari never deletes a sold or foreign listing, and a cancelled one is al
   }
 });
 
+test('Mercari refusing the read with "Item is no longer available" means the listing is already gone', async () => {
+  const s = mercari({ errors: [{ message: 'Item is no longer available' }] });
+  const result = await s.run();
+  assert.deepEqual([result.ok, result.state, result.already], [true, 'deleted', true]);
+  assert.deepEqual(s.operations, ['sellFetchItemsDetails']);
+  // Any other refusal of the read is still the seller's to check.
+  const other = await mercari({ errors: [{ message: 'Something went wrong' }] }).run();
+  assert.equal(other.ok, false);
+  assert.equal(other.already, undefined);
+});
+
 test('a refused delete carries the marketplace\'s own words and is safe to repeat', async () => {
   const { c } = worker({ [`GET ${posh}`]: [200, livePost], [`DELETE ${posh}`]: [200, { error: { errorType: 'ProductReservedError', userMessage: 'This listing has an order in progress' } }] });
   const result = await c.runMarketplaceDelete({ marketplace: 'poshmark', listing_id: POST, confirm: true });
