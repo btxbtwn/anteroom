@@ -13,8 +13,9 @@ it.each([
   ["keeps a cleared selection", (selection: ListingSelection) => selection.exitSelecting(), []],
   ["restores failures when the selection is untouched", () => {}, ["coat"]],
 ] as const)("%s after an earlier rewrite fails", async (_, changeSelection, expected) => {
-  const batch = Promise.withResolvers<BulkRegenerateResult>();
-  const bulk: BulkRegenerate = { start: () => batch.promise, run: null, running: false, pendingIds: [], cancel: () => {} };
+  let resolveBatch!: (value: BulkRegenerateResult) => void;
+  const batch = new Promise<BulkRegenerateResult>((resolve) => { resolveBatch = resolve; });
+  const bulk: BulkRegenerate = { start: () => batch, run: null, running: false, pendingIds: [], cancel: () => {} };
   const root = createRoot(document.createElement("div"));
   let current!: ListingSelection;
 
@@ -32,7 +33,7 @@ it.each([
     act(() => { settled = current.finishRegenerate(["coat"]); });
     act(() => changeSelection(current));
     await act(async () => {
-      batch.resolve({ completed: [], failed: [{ id: "coat", message: "Rewrite failed" }], skipped: [], cancelled: false });
+      resolveBatch({ completed: [], failed: [{ id: "coat", message: "Rewrite failed" }], skipped: [], cancelled: false });
       await settled;
     });
     expect([...current.selectedIds]).toEqual(expected);
