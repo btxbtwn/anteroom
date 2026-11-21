@@ -156,6 +156,7 @@ async def build_chat_messages(conv_id: str, user_message: str, option_catalog=No
             '{"fields":[{"path":"depop_specifics.style","value":[]}]}\n'
             "Paths look like sku, price, mercari_specifics.brand, poshmark_specifics.size, "
             "ebay_specifics.inseam, ebay_specifics.bestOffer.minimumOfferPrice, depop_specifics.measurements, "
+            "measurements.garment, measurements.top.pitToPit, measurements.other, "
             "direct_category_ids.ebay, direct_category_ids.poshmark, direct_category_ids.depop, "
             "or direct_category_ids.mercari. "
             "An empty value clears the field and it stays cleared. "

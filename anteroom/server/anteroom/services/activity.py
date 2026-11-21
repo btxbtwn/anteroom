@@ -43,13 +43,26 @@ edit_fields: ContextVar[tuple[str, ...] | None] = ContextVar("agent_edit_fields"
 
 def scoped_listing(previous: dict, candidate: dict, paths: tuple[str, ...]) -> dict:
     """Merge only declared agent edits onto the seller's latest revision."""
-    from anteroom.services.seller_overrides import set_path
+    from anteroom.services.general_measurements import is_measurement_path
+    from anteroom.services.seller_overrides import is_locked, set_path
 
     result = copy.deepcopy(previous)
+    has_measurements = False
     for path in paths:
+        if is_measurement_path(path):
+            has_measurements = True
+            continue
         set_path(result, path, copy.deepcopy(field_value(candidate, path)))
+    if (
+        has_measurements
+        and not is_locked(previous, "depop_specifics.measurements")
+        and field_value(candidate, "depop_specifics.measurements") != field_value(previous, "depop_specifics.measurements")
+    ):
+        set_path(result, "depop_specifics.measurements", copy.deepcopy(field_value(candidate, "depop_specifics.measurements")))
     locks = set(previous.get("seller_fields") or [])
     for path in paths:
+        if is_measurement_path(path):
+            continue
         if path in (candidate.get("seller_fields") or []):
             locks.add(path)
     if locks or "seller_fields" in result:

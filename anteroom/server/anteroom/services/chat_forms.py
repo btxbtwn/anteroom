@@ -8,29 +8,36 @@ import re
 from sqlalchemy.orm import Session
 
 from anteroom.config import skills_dir
-from anteroom.repositories.queries import ListingRepo
+from anteroom.repositories.queries import ConversationRepo, ListingRepo
 from anteroom.services import native_contract, native_field_fill
+from anteroom.services.general_measurements import measurement_form_fields
 from anteroom.services.marketplaces import get_selected_marketplaces
 from anteroom.services.seller_overrides import get_path
 
 
-def _latest_listing(db: Session, conv_id: str) -> dict | None:
+def _latest_listing_and_notes(db: Session, conv_id: str) -> tuple[dict | None, str | None]:
     revisions = ListingRepo(db).get_revisions(conv_id)
     if not revisions or not isinstance(revisions[0].listing_json, dict):
-        return None
-    return copy.deepcopy(revisions[0].listing_json)
+        return None, None
+    conv = ConversationRepo(db).get(conv_id)
+    return copy.deepcopy(revisions[0].listing_json), (conv.notes if conv else None)
 
 
 async def forms_prompt(conv_id: str, option_catalog=None) -> str:
     from anteroom.database import in_worker_session
 
-    listing = await in_worker_session(_latest_listing, conv_id)
+    listing, notes = await in_worker_session(_latest_listing_and_notes, conv_id)
     if listing is None:
         return ""
     definitions = json.loads((skills_dir() / "list-this/references/listing-editor-fields.json").read_text())
     markets = set(get_selected_marketplaces()) | set(listing.get(native_contract.KEY) or {})
     native = await native_field_fill.load_forms(conv_id, markets)
-    forms: dict[str, dict] = {"general": {"fields": _values(definitions["general"], listing, "general")}}
+    forms: dict[str, dict] = {
+        "general": {
+            "fields": _values(definitions["general"], listing, "general")
+            + measurement_form_fields(listing, notes),
+        },
+    }
     for market in sorted(markets):
         if market in native_field_fill.MARKETS:
             form = native.get(market)
