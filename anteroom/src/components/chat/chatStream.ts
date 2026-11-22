@@ -169,7 +169,13 @@ function applySseLine(
     return false;
   }
   state.parts.trace = appendLiveTrace(state.parts.trace, state.eventType, text, continued);
-  if (state.eventType === "thinking") state.parts.thinking += text;
+  if (state.eventType === "error") {
+    // The server's failure ends the reply: it replaces any partial text and
+    // carries the "Error:" mark the chat reads as a failed turn.
+    state.parts.content = continued
+      ? state.parts.content + text
+      : /^Error:/i.test(chunk) ? chunk : `Error: ${chunk}`;
+  } else if (state.eventType === "thinking") state.parts.thinking += text;
   else if (state.eventType === "status") state.parts.status = continued ? state.parts.status + text : text;
   else if (!TRACE_ONLY_EVENTS.has(state.eventType)) state.parts.content += text;
   onEvent(state.eventType, state.parts);

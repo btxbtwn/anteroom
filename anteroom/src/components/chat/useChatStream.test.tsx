@@ -658,7 +658,8 @@ describe("useChatStream send", () => {
           { headers: { "X-Anteroom-Task": "task-8" } },
         );
       }
-      return sse("data: Error: The provider timed out", "", DONE);
+      // How task_stream ends a failed task: an error event, its text unprefixed.
+      return sse("data: I upd", "", "event: error", "data: Review the saved draft before retrying.", "", DONE);
     };
     const { chat } = mountChat();
 
@@ -666,7 +667,7 @@ describe("useChatStream send", () => {
 
     expect(getLive(convId)).toMatchObject({
       failedAction: "send",
-      streamText: "Error: The provider timed out",
+      streamText: "Error: Review the saved draft before retrying.",
     });
   });
 
