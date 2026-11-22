@@ -109,12 +109,7 @@ def _due_cloud_like_markets(
     due: list[str] = []
     for market in marketplaces:
         key = (owner, market)
-        next_due = like_checks.get(key)
-        if next_due is None:
-            stagger = random.uniform(0.0, min(interval, CLOUD_LIKE_INITIAL_STAGGER_S))
-            next_due = current_time + stagger
-            like_checks[key] = next_due
-        if current_time >= next_due:
+        if current_time >= like_checks.get(key, current_time):
             due.append(market)
             like_checks[key] = _arm_next_cloud_like_check(current_time, interval)
     return tuple(due)
@@ -143,6 +138,8 @@ async def check_cloud_sellers(
     engine,
     recovered: set[str],
     like_checks: dict[tuple[str, str], float] | None = None,
+    *,
+    startup: bool = False,
 ) -> None:
     from anteroom.services import cloud_sessions
 
@@ -156,6 +153,13 @@ async def check_cloud_sellers(
         for stale in list(like_checks):
             if stale not in active_pairs:
                 like_checks.pop(stale, None)
+        if startup:
+            # Spread the checks for existing connections across the first few rounds.
+            now = time.monotonic()
+            stagger = min(_cloud_like_check_interval_s(), CLOUD_LIKE_INITIAL_STAGGER_S)
+            for seller, markets in owners_by_seller.items():
+                for market in markets:
+                    like_checks[(seller, market)] = now + random.uniform(0.0, stagger)
     if not owners_by_seller:
         return
     with limit_worker_db_steps(asyncio.Semaphore(MAX_CONCURRENT_DB_STEPS)):
@@ -168,6 +172,8 @@ async def check_cloud_sellers(
 async def serve_cloud(engine) -> None:
     recovered: set[str] = set()
     like_checks: dict[tuple[str, str], float] = {}
+    startup = True
     while True:
         await asyncio.sleep(promotion_automations.TICK_S)
-        await check_cloud_sellers(engine, recovered, like_checks)
+        await check_cloud_sellers(engine, recovered, like_checks, startup=startup)
+        startup = False
