@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1139 — 2026-11-22
+
+- Track business expenses and mileage, import expenses from a spreadsheet, and export a cash or accrual profit and loss report.
+- Compare units listed and sell-through with the preceding period in Analytics.
+
 ## 0.1.1138 — 2026-11-22
 
 - When your connection drops while the listing chat is answering on the web, the chat reconnects and shows the saved reply instead of a "connection dropped" error.

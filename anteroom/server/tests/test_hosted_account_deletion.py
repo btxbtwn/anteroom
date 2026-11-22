@@ -98,6 +98,19 @@ def test_seller_deletes_only_their_own_account(cloud, signing_keys, monkeypatch)
     alice, bob = headers(signing_keys), headers(signing_keys, BOB)
     seed(engine, ALICE)
     bob_item = seed(engine, BOB)
+    expense_path = '/api/business-expenses'
+    expense = {'incurred_date': '2026-01-10', 'amount_cents': 100, 'category': 'other'}
+    alice_expense = client.post(expense_path, headers=alice, json=expense)
+    assert alice_expense.status_code == 201, alice_expense.text
+    bob_import = client.post(f'{expense_path}/import', headers=bob, json={
+        'content': 'incurred_date,amount_cents,category\n2026-01-10,200,other\n',
+    })
+    assert bob_import.status_code == 200, bob_import.text
+    assert bob_import.json()['imported'] == 1
+    assert client.put(f"{expense_path}/{alice_expense.json()['id']}", headers=bob,
+                      json={**expense, 'expected_revision': alice_expense.json()['revision']}).status_code == 404
+    bob_expenses = client.get(expense_path, headers=bob, params={'start': '2026-01-01', 'end': '2026-01-31'}).json()
+    assert [row['amount_cents'] for row in bob_expenses] == [200]
     bob_before = owned_rows(engine, BOB)
 
     assert client.request('DELETE', '/api/account', json={'confirm': True}).status_code == 401
@@ -401,7 +414,7 @@ def test_cloud_session_fence_downgrade(migration_engine, receipt_state):  # noqa
     if receipt_state != 'absent' and engine.dialect.name != 'postgresql':
         pytest.skip('Deletion receipts require Postgres')
     config = schema_migrations.alembic_config(engine.url.render_as_string(hide_password=False))
-    command.upgrade(config, '8580524be7de')
+    command.upgrade(config, 'head')
     if receipt_state == 'absent':
         command.downgrade(config, 'ae814be47ba5')
         assert schema_migrations.recorded_revision(engine) == 'ae814be47ba5'
@@ -412,7 +425,7 @@ def test_cloud_session_fence_downgrade(migration_engine, receipt_state):  # noqa
                    {'owner': ALICE, 'keys': [f'{ALICE}/photo.jpg'] if receipt_state == 'pending' else []})
     with pytest.raises(DBAPIError, match='Deletion fences cannot be removed'):
         command.downgrade(config, 'ae814be47ba5')
-    assert schema_migrations.recorded_revision(engine) == '8580524be7de'
+    assert schema_migrations.recorded_revision(engine) == schema_migrations.head_revision()
     with SellerDatabaseSession(user_id=ALICE, bind=engine) as db:
         db.add(CloudSessionAudit(marketplace='poshmark', event='connected'))
         with pytest.raises(DBAPIError, match='Account deletion is pending'):

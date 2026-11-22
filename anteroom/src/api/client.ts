@@ -1,7 +1,7 @@
 import { listingScreenRead } from "./listingScreen";
 import { reportError } from "./errorReports";
 import type { VendooDraft } from "./vendooDraft";
-import type { OfferLogResponse } from "./contract.gen";
+import type { CsvInput, CsvResult, CurrencyReport, Expense, ExpenseInput, ExpenseUpdate, MileageAmount, MileageInput, OfferLogResponse } from "./contract.gen";
 import { ApiRequestError, currentHostedSession, retryAfterMs, studioFetch, studioUpload, hasHostedApiSession } from "./transport";
 import { trackPhotoUpload } from "../photoUploads";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
@@ -217,6 +217,7 @@ async function rawRequest<T>(path: string, options?: RequestInit): Promise<T> {
       res.headers.get("X-Anteroom-Reason"),
     );
   }
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
 
@@ -515,6 +516,26 @@ function postHostedPhoto(convId: string, file: File, marketplace?: string): Prom
 }
 
 export const api = {
+  businessExpenses: {
+    list: (params: string, signal: AbortSignal) => read<Expense[]>(`/business-expenses?${params}`, { signal }),
+    report: (params: string, signal: AbortSignal) => read<CurrencyReport[]>(`/business-expenses/profit-and-loss?${params}`, { signal }),
+    create: (body: ExpenseInput) => request<Expense>("/business-expenses", {
+      method: "POST", body: JSON.stringify(body),
+    }),
+    update: (id: string, body: ExpenseUpdate) => request<Expense>(`/business-expenses/${encodeURIComponent(id)}`, {
+      method: "PUT", body: JSON.stringify(body),
+    }),
+    remove: ({ id, revision }: Pick<Expense, "id" | "revision">) => request<void>(
+      `/business-expenses/${encodeURIComponent(id)}?expected_revision=${revision}`, { method: "DELETE" },
+    ),
+    mileage: (body: MileageInput) => request<MileageAmount>(
+      "/business-expenses/mileage", { method: "POST", body: JSON.stringify(body) },
+    ),
+    import: (body: CsvInput, preview: boolean) => request<CsvResult>(
+      preview ? "/business-expenses/import/preview" : "/business-expenses/import",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  },
   vendooDraft: {
     check: (id: string) => request<VendooDraft>(`/conversations/${id}/vendoo-draft/check`, { method: "POST" }),
     status: (id: string) => request<VendooDraft>(`/conversations/${id}/vendoo-draft`),
