@@ -83,6 +83,9 @@ fi
 # Backend tests also inspect frontend, extension and skill sources. The shared
 # selector retains those dependencies without rebuilding an unchanged frontend.
 if component backend; then
+  # The cloud marketplace runner tests start its Node script, which needs its
+  # own packages (CI's "Install cloud runner dependencies" step).
+  run "Anteroom cloud runner dependencies" bash -c "cd anteroom/server/anteroom/cloud_runner && { [[ -d node_modules ]] || npm ci --no-audit --no-fund; }"
   run "Anteroom backend" bash -c "cd anteroom && ANTEROOM_DATA_DIR=\$(mktemp -d) '$PY' -m pytest -q -n auto"
   if [[ "$FAST" == "1" ]]; then
     skip "Anteroom backend on Postgres" "--fast"
