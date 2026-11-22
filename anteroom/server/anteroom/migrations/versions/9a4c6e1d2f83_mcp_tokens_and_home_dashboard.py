@@ -1,7 +1,7 @@
 """Add MCP access tokens, seller goals, and Needs Attention dismissals
 
 Revision ID: 9a4c6e1d2f83
-Revises: 8580524be7de
+Revises: 049b76a1ce20
 Create Date: 2026-11-22 10:40:00.000000
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 revision = "9a4c6e1d2f83"
-down_revision = "8580524be7de"
+down_revision = "049b76a1ce20"
 branch_labels = None
 depends_on = None
 

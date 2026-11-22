@@ -41,6 +41,9 @@ class AnalyticsSales(BaseModel):
 
 
 class AnalyticsPrevious(BaseModel):
+    units_listed: int
+    units_sold: int
+    sell_through_rate: float | None
     start: str
     end: str
     sales: AnalyticsSales
@@ -137,6 +140,11 @@ class MissingCount(BaseModel):
 
 
 class AnalyticsResponse(BaseModel):
+    window_start: str | None
+    window_end: str
+    window_end_exclusive: str
+    units_listed: int
+    units_sold: int
     range: str
     incomplete_sales: list[AnalyticsIncompleteSale]
     # How many of those sales lack each amount; Sales records' summary uses the same counts.

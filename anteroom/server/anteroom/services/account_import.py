@@ -2,16 +2,18 @@
 
 The Mac sends its rows table by table, parents first. Every row is written
 under the verified seller (never the Mac's local owner), through the seller
-session, so row security checks each insert. Rows already in the account are
-left alone, which lets an interrupted move run again without duplicates.
+session, so row security checks each insert. Rows already in the account
+keep their data. For the same Vendoo item, an absent label field can be filled
+from the Mac's saved labels. An interrupted move can run again without duplicates.
 """
 from __future__ import annotations
 
+import json
 from datetime import UTC, date, datetime
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import Date, DateTime, Table, and_, or_, select, tuple_
+from sqlalchemy import Date, DateTime, Table, and_, case, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert
 
 from anteroom.database import Base, load_models
@@ -80,6 +82,50 @@ def _key(table: Table, row: dict) -> tuple:
     return tuple(row.get(column.name) for column in table.primary_key.columns)
 
 
+def _saved_notes(raw: Any) -> dict:
+    """Read the stored keys without normalizing other Vendoo metadata."""
+    if not isinstance(raw, str):
+        return {}
+    try:
+        notes = json.loads(raw)
+    except ValueError:
+        return {}
+    return notes if isinstance(notes, dict) else {}
+
+
+def _restore_labels(db, table: Table, rows: list[dict], skipped: set[tuple]) -> None:
+    incoming = {}
+    for row in rows:
+        if (row["id"],) not in skipped:
+            continue
+        notes = _saved_notes(row.get("notes"))
+        item_id = notes.get("vendooItemId")
+        labels = notes.get("vendooLabels")
+        if isinstance(item_id, str) and item_id.strip() and isinstance(labels, str) and labels.strip():
+            incoming[row["id"]] = (item_id, labels)
+    if not incoming:
+        return
+
+    # Serialize with Notes & Labels edits. Read the saved notes under the lock,
+    # including a deliberately empty label field.
+    owned = table.c.user_id == db.user_id
+    current = db.execute(
+        select(table.c.id, table.c.notes).where(owned, table.c.id.in_(incoming))
+        .order_by(table.c.id).with_for_update()
+    )
+    restored = {}
+    for item, raw in current:
+        notes = _saved_notes(raw)
+        item_id, labels = incoming[item]
+        if notes.get("vendooItemId") == item_id and "vendooLabels" not in notes:
+            restored[item] = json.dumps({**notes, "vendooLabels": labels})
+    if restored:
+        db.execute(
+            update(table).where(owned, table.c.id.in_(restored))
+            .values(notes=case(restored, value=table.c.id), updated_at=table.c.updated_at)
+        )
+
+
 def import_rows(db, table_name: str, rows: list[dict]) -> dict:
     table = _table(table_name)
     if not isinstance(rows, list) or len(rows) > MAX_ROWS or not all(isinstance(row, dict) for row in rows):
@@ -102,6 +148,8 @@ def import_rows(db, table_name: str, rows: list[dict]) -> dict:
         # someone else, most likely because this Mac moved to another account.
         db.rollback()
         raise HTTPException(409, 'Some of this Mac’s listings are already in a different account. Sign in to that account to move them.')
+    if table_name == 'conversations' and skipped:
+        _restore_labels(db, table, prepared, set(skipped))
     db.commit()
     return {'inserted': len(inserted_keys), 'existing': existing}
 
@@ -216,31 +264,38 @@ MAX_SECRET_CHARS = 64 * 1024
 
 def import_secrets(values: dict) -> list[str]:
     """Save the Mac's keys in the account's Vault, never replacing one already set there."""
-    import json
+    from anteroom.services.service_context import current
 
-    from anteroom.services import keychain
     if not isinstance(values, dict) or set(values) - SECRET_SLOTS:
         raise HTTPException(422, 'Only provider keys and sign-ins can be moved')
     if any(not isinstance(value, str) or not value or len(value) > MAX_SECRET_CHARS for value in values.values()):
         raise HTTPException(422, 'Check the keys and try again')
+    context = current()
+    if context is None:
+        raise RuntimeError('Importing keys requires a seller context')
+
     saved: list[str] = []
     for slot, value in values.items():
-        existing = keychain.read_slot(slot)
-        if slot == 'ai-api-keys':
-            try:
-                incoming = json.loads(value)
-                current = json.loads(existing) if existing else {}
-            except ValueError:
-                raise HTTPException(422, 'Check the keys and try again') from None
-            if not isinstance(incoming, dict) or not isinstance(current, dict):
-                raise HTTPException(422, 'Check the keys and try again')
-            merged = {**incoming, **current}
-            if merged != current:
-                keychain.write_slot(slot, json.dumps(merged))
+        def fill(existing: str | None, slot: str = slot, value: str = value) -> str | None:
+            if slot == 'ai-api-keys':
+                try:
+                    incoming = json.loads(value)
+                    previous = json.loads(existing) if existing else {}
+                except ValueError:
+                    raise HTTPException(422, 'Check the keys and try again') from None
+                if not isinstance(incoming, dict) or not isinstance(previous, dict):
+                    raise HTTPException(422, 'Check the keys and try again')
+                merged = {**incoming, **previous}
+                if merged == previous:
+                    return existing
                 saved.append(slot)
-        elif not existing:
-            keychain.write_slot(slot, value)
-            saved.append(slot)
+                return json.dumps(merged)
+            if not existing:
+                saved.append(slot)
+                return value
+            return existing
+
+        context.secrets.update(slot, fill)
     return saved
 
 

@@ -6,6 +6,20 @@ import { uploadComposerDraftPhotos } from "../components/chat/composerDraftPhoto
 
 vi.mock("./errorReports", () => ({ reportError: vi.fn() }));
 
+it("acknowledges an empty expense deletion response", async () => {
+  const fetch = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+  vi.stubGlobal("fetch", fetch);
+  try {
+    await expect(api.businessExpenses.remove({ id: "expense", revision: 2 })).resolves.toBeUndefined();
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/business-expenses/expense?expected_revision=2",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 it("keeps hosted upload file identities by returned photo ID despite failures and response order", async () => {
   const uninstall = installHostedApiSession({
     seller: "fixture-alice", origin: "https://anteroom.test", accessToken: async () => "fixture-token", unauthorized: () => {},

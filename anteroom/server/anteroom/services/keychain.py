@@ -311,10 +311,6 @@ def read_slot(account: str) -> str | None:
     return _get(account)
 
 
-def write_slot(account: str, value: str) -> bool:
-    return _set(account, value)
-
-
 def _delete(account: str) -> None:
     from anteroom.services.service_context import current
     context = current()

@@ -190,7 +190,10 @@ separately.
    `routes/hosted_account_import.py` in the account). The seller signs in with
    their password; the Mac sends its records table by table, parents first,
    and the account writes each under the verified seller through row
-   security, skipping rows it already has, so a move can run again. Photos are
+   security, keeping data on rows it already has. If both copies identify the
+   same Vendoo item, the move fills an absent Labels field from the Mac and
+   preserves any saved cloud value, including an intentionally cleared field.
+   The move can run again without duplicates. Photos are
    converted to JPEG into private Storage; settings fill in what the account
    lacks; provider keys and the ChatGPT sign-in go to Vault without replacing
    ones set on the web. eBay and Etsy reconnect in the account instead of

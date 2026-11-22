@@ -8,8 +8,8 @@
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "1.8.1",
+    "@cloudflare/vitest-plugin": "1.8.2",
     "vitest": "4.1.12",
-    "wrangler": "4.161.0"
+    "wrangler": "4.162.0"
   }
 }

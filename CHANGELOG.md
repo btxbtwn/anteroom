@@ -6,6 +6,24 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1139 — 2026-11-22
+
+- Track business expenses and mileage, import expenses from a spreadsheet, and export a cash or accrual profit and loss report.
+- Compare units listed and sell-through with the preceding period in Analytics.
+
+## 0.1.1138 — 2026-11-22
+
+- When your connection drops while the listing chat is answering on the web, the chat reconnects and shows the saved reply instead of a "connection dropped" error.
+
+## 0.1.1137 — 2026-11-22
+
+- Pace hosted cloud recent-likes checks with randomized jitter (4–7 minutes by default, configurable via `ANTEROOM_CLOUD_LIKE_CHECK_INTERVAL_S`) plus startup stagger, bound cloud scheduler DB steps, and record the cloud command type in `cloud_session_audit` decrypt events.
+
+## 0.1.1136 — 2026-11-22
+
+- Moving from Mac to Anteroom cloud now restores missing labels for the same Vendoo item and keeps any labels you already saved or cleared in the cloud.
+- Copying provider keys to your account also preserves any keys you save on the web while the copy runs.
+
 ## 0.1.1135 — 2026-11-22
 
 - Deleting a hosted account now also stops late writes to its Poshmark cloud session records.
