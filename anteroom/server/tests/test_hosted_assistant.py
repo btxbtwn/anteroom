@@ -158,28 +158,44 @@ def test_web_answer_settlement_waits_for_first_text_append(migration_engine, jwk
     from anteroom.models.background_task import BackgroundTaskEvent
     from anteroom.services import background_tasks, business_assistant
 
-    started, release, produced, settling = (Event() for _ in range(4))
+    started, release, append_finished, waiting_for_append = (Event() for _ in range(4))
     append, complete = background_tasks.append_events, background_tasks.complete_in
+    prepare_settlement = assistant_route._Journal.prepare_settlement
 
     async def answer(*_args, **_kwargs):
         yield 'text', 'You sold '
         assert await asyncio.to_thread(started.wait, 10)
-        produced.set()
         yield 'text', 'one item.'
 
     def blocked_append(task_id, token, frames):
         if any('You sold' in frame for frame in frames):
             started.set()
             assert release.wait(10)
+            result = append(task_id, token, frames)
+            append_finished.set()
+            return result
         return append(task_id, token, frames)
 
+    async def observe_prepare(journal):
+        wait = journal.flush_done.wait
+
+        async def observe_wait():
+            assert started.is_set()
+            assert not journal.flush_done.is_set()
+            waiting_for_append.set()
+            return await wait()
+
+        monkeypatch.setattr(journal.flush_done, 'wait', observe_wait)
+        await prepare_settlement(journal)
+
     def observe_settle(*args, **kwargs):
-        settling.set()
+        assert append_finished.is_set()
         return complete(*args, **kwargs)
 
     monkeypatch.setattr(assistant_route, 'get_listing_provider', lambda: Provider())
     monkeypatch.setattr(business_assistant, 'answer', answer)
     monkeypatch.setattr(background_tasks, 'append_events', blocked_append)
+    monkeypatch.setattr(assistant_route._Journal, 'prepare_settlement', observe_prepare)
     monkeypatch.setattr(background_tasks, 'complete_in', observe_settle)
     with _worker_client(migration_engine, monkeypatch) as client:
         alice = headers(signing_keys)
@@ -188,8 +204,7 @@ def test_web_answer_settlement_waits_for_first_text_append(migration_engine, jwk
             response = pool.submit(client.post, '/api/assistant/messages', headers=alice,
                                    json={'text': 'How did I do?', 'thread_id': thread})
             try:
-                assert produced.wait(10)
-                assert not settling.wait(0.2)
+                assert waiting_for_append.wait(10), 'Settlement did not wait for the first append'
             finally:
                 release.set()
             assert response.result(timeout=10).status_code == 200
