@@ -861,6 +861,19 @@ class EtsyNativeContractTest(unittest.TestCase):
         self.assertEqual(generated["etsy_specifics"]["whoMade"], "I did")
         self.assertNotIn("madeUpKey", generated["etsy_specifics"])
 
+    def test_etsy_constrain_generated_drops_only_the_tags_etsy_would_refuse(self):
+        # One generated tag over Etsy's 20 characters must not delete every tag.
+        tags_row = {"path": "etsy_specifics.tags", "label": "Tags", "multi": True,
+                    "max_values": 13, "max_length": 20}
+        base = {"title": "Tee", "direct_category_ids": {"etsy": "482"}, "etsy_specifics": {}}
+        form = self._etsy_form()
+        form["fields"].append(tags_row)
+        base[contract.KEY] = contract.capture(base, {"etsy": form}, ["etsy"])
+        generated = {**base, "etsy_specifics": {
+            "tags": ["vintage tee", "speedway racing shirt tee", "90s", "Vintage Tee"]}}
+        contract.constrain_generated(generated, base)
+        self.assertEqual(generated["etsy_specifics"]["tags"], ["vintage tee", "90s"])
+
     def test_etsy_row_values_and_gaps_resolve_legacy_aliases_without_a_double_dot(self):
         form = self._etsy_form()
         listing = {

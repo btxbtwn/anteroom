@@ -697,6 +697,13 @@ def constrain_generated(
                 if spelling is not None:
                     set_path(listing, path, spelling)
                     value = spelling
+                if market == "etsy" and path == "etsy_specifics.tags" and isinstance(value, (list, str)):
+                    # Drop only the tags Etsy would refuse, as List always has,
+                    # instead of failing the whole list on one long tag.
+                    from anteroom.services.etsy_fields import sanitize_etsy_tags
+
+                    value = sanitize_etsy_tags(value)
+                    set_path(listing, path, value)
                 if market == "etsy":
                     canonical = _etsy_canonical_value(path, rows[path], value)
                     if canonical is not None:
