@@ -4,7 +4,7 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -20,6 +20,7 @@ from anteroom.models.plaid import PlaidConnection, PlaidTransaction
 from anteroom.models.user_preference import UserPreference
 from anteroom.services import account_deletion
 from anteroom.services.hosted_context import VaultSecretStore
+from anteroom.services.plaid_client import PlaidClient, PlaidError
 
 ALICE = USER_ID
 
@@ -190,7 +191,8 @@ def test_private_functions_only_reach_the_claimed_seller(cloud):  # noqa: F811
         assert db.scalar(text('SELECT count(*) FROM auth.users')) == 2
 
 
-def test_vault_credentials_of_only_the_deleted_seller_go(vault_storage):  # noqa: F811
+@pytest.mark.parametrize('plaid_offline', [False, True])
+def test_vault_credentials_of_only_the_deleted_seller_go(vault_storage, monkeypatch, plaid_offline):  # noqa: F811
     engine, sessions = vault_storage
     for owner in (ALICE, BOB):
         VaultSecretStore(sessions(owner), owner).set('marketplace-accounts', f'fixture-{owner}')
@@ -204,14 +206,33 @@ def test_vault_credentials_of_only_the_deleted_seller_go(vault_storage):  # noqa
         VaultSecretStore(sessions(owner), owner).set(slot, f'fixture-plaid-{owner}')
         if owner == BOB:
             bob_slot = slot
+    calls = []
+    checked_out = set()
+
+    @event.listens_for(engine, 'checkout')
+    def checkout(_connection, record, _proxy):
+        checked_out.add(record)
+
+    @event.listens_for(engine, 'checkin')
+    def checkin(_connection, record):
+        checked_out.remove(record)
+
+    async def post(_client, path, *, access_token):
+        assert not checked_out
+        with engine.connect() as db:
+            assert db.scalar(text('SELECT anteroom_private.account_write_allowed(:owner)'), {'owner': ALICE}) is False
+        calls.append((path, access_token))
+        if plaid_offline:
+            raise PlaidError()
+        return {}
+
     from anteroom import database
-    original = database.engine
-    database.engine = engine
-    try:
-        account_deletion._delete_records(ALICE)
-        account_deletion._finish_deletion(ALICE)
-    finally:
-        database.engine = original
+    monkeypatch.setattr(database, 'engine', engine)
+    monkeypatch.setattr(account_deletion, '_read_relay_device', lambda: None)
+    monkeypatch.setattr(PlaidClient, 'configured', lambda: PlaidClient('sandbox', 'fixture', 'fixture'))
+    monkeypatch.setattr(PlaidClient, 'post', post)
+    asyncio.run(account_deletion.delete_account(ALICE, 'fixture-jwt'))
+    assert calls == [('/item/remove', f'fixture-plaid-{ALICE}')]
     with engine.connect() as db:
         names = set(db.scalars(text('SELECT name FROM vault.secrets')))
         assert names == {f'anteroom:{BOB}:marketplace-accounts', f'anteroom:{BOB}:ai-api-keys', f'anteroom:{BOB}:{bob_slot}'}

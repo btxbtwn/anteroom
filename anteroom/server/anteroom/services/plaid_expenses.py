@@ -178,6 +178,20 @@ async def _revoke(client: PlaidClient, token: str) -> None:
         logger.warning("Plaid could not revoke an Item")
 
 
+async def revoke_hosted_items(client: PlaidClient, owner: str, connection_ids: list[str]) -> None:
+    """Attempt revocation before hosted account deletion clears the seller's Vault."""
+    if not connection_ids:
+        return
+    secrets = for_seller(owner).secrets
+    assert isinstance(secrets, VaultSecretStore)
+
+    def read_tokens() -> list[str]:
+        return [token for connection_id in connection_ids if (token := secrets.get_fresh(_slot(connection_id)))]
+
+    tokens = await database.run_worker_db_step(read_tokens)
+    await asyncio.gather(*(_revoke(client, token) for token in tokens))
+
+
 async def exchange(client: PlaidClient, public_token: str, institution_name: str) -> ConnectionStatus:
     await database.in_worker_session(_require_capacity)
     exchanged = await client.post("/item/public_token/exchange", public_token=public_token)

@@ -1,7 +1,7 @@
 """Delete a hosted seller's Anteroom account at their request.
 
 Removes the seller's records in every seller table, their photos and chat
-images, their stored credentials (AI keys, eBay and Etsy sign-ins), their
+images, their stored credentials (including bank connections), their
 relay registration and finally their Supabase Auth user. It never contacts a
 marketplace listing: live listings stay on the marketplaces.
 
@@ -19,7 +19,9 @@ from sqlalchemy.exc import DBAPIError
 
 from anteroom.models.job import ACTIVE_JOB_STATUSES, Job
 from anteroom.models.marketplace_listing import UNSETTLED_STATES, MarketplaceListing
+from anteroom.models.plaid import PlaidConnection
 from anteroom.services.hosted_database import SellerDatabaseSession
+from anteroom.services.plaid_client import PlaidClient
 
 # Seller tables the restricted role may only read; anteroom_private.delete_account() clears them.
 DELETED_BY_DATABASE = frozenset({'user_secret_references'})
@@ -58,12 +60,12 @@ def _check(db: SellerDatabaseSession, *, finishing: bool = False) -> None:
                                           'Let it finish, or check its result, then try again.' + unchanged)
 
 
-def _retry_deadlocks[Result](operation: Callable[[str], Result]) -> Callable[[str], Result]:
+def _retry_deadlocks[**Args, Result](operation: Callable[Args, Result]) -> Callable[Args, Result]:
     @wraps(operation)
-    def run(owner: str) -> Result:
+    def run(*args: Args.args, **kwargs: Args.kwargs) -> Result:
         for attempt in range(3):
             try:
-                return operation(owner)
+                return operation(*args, **kwargs)
             except DBAPIError as exc:
                 if getattr(exc.orig, 'sqlstate', None) != '40P01' or attempt == 2:
                     raise
@@ -74,13 +76,31 @@ def _retry_deadlocks[Result](operation: Callable[[str], Result]) -> Callable[[st
     return run
 
 
+def _lock_deletion(db: SellerDatabaseSession, owner: str) -> None:
+    db.execute(text('SELECT pg_advisory_xact_lock(hashtextextended(:identity, 0))'),
+               {'identity': f'anteroom-account-delete:{owner}'})
+
+
+@_retry_deadlocks
+def _stage_plaid_cleanup(owner: str, environment: str) -> list[str]:
+    with _session(owner) as db:
+        _lock_deletion(db, owner)
+        _check(db)
+        db.execute(text('SELECT * FROM anteroom_private.stage_account_deletion()'))
+        ids = list(db.scalars(select(PlaidConnection.id).where(
+            PlaidConnection.user_id == owner,
+            PlaidConnection.environment == environment,
+        )))
+        db.commit()
+    return ids
+
+
 @_retry_deadlocks
 def _delete_records(owner: str) -> list[str]:
     with _session(owner) as db:
         # The account is going: no other device needs to hear about these deletes.
         db.info['quiet_changes'] = True
-        db.execute(text('SELECT pg_advisory_xact_lock(hashtextextended(:identity, 0))'),
-                   {'identity': f'anteroom-account-delete:{owner}'})
+        _lock_deletion(db, owner)
         _check(db)
         # Collect Storage cleanup targets under the lock before removing database records.
         # The function already scopes to this seller; never send another prefix to Storage.
@@ -105,8 +125,7 @@ def _read_relay_device() -> dict | None:
 def _finish_deletion(owner: str) -> None:
     with _session(owner) as db:
         db.info['quiet_changes'] = True
-        db.execute(text('SELECT pg_advisory_xact_lock(hashtextextended(:identity, 0))'),
-                   {'identity': f'anteroom-account-delete:{owner}'})
+        _lock_deletion(db, owner)
         _check(db, finishing=True)
         db.execute(text('SELECT anteroom_private.finish_account_deletion()'))
         db.commit()
@@ -131,13 +150,24 @@ async def _forget_relay_device(device: dict | None = None) -> None:
 
 
 async def delete_account(owner: str, token: str) -> None:
-    from anteroom.services.hosted_context import forget_catalog_state
+    from anteroom.services.hosted_context import CredentialStorageUnavailable, forget_catalog_state
     from anteroom.services.hosted_photos import remove_objects
 
     # Capture cleanup keys under the locked active-job check. The durable
     # receipt survives deletion of listing rows and a restart of this request.
     # Auth and Vault remain available to a fresh retry until cleanup succeeds.
     relay_device = await asyncio.to_thread(_read_relay_device)
+    if plaid := PlaidClient.configured():
+        from anteroom.services.plaid_expenses import revoke_hosted_items
+
+        # Fence new connections before revoking; keep the rows and credentials
+        # until this step returns so an interrupted attempt can be repeated.
+        ids = await asyncio.to_thread(_stage_plaid_cleanup, owner, plaid.environment)
+        try:
+            await revoke_hosted_items(plaid, owner, ids)
+        except CredentialStorageUnavailable:
+            raise AccountDeletionRefused(503, 'Could not read your bank connection credentials. '
+                                              'Try deleting your account again in a minute.') from None
     keys = await asyncio.to_thread(_delete_records, owner)
     forget_catalog_state(owner)
     if relay_device:
