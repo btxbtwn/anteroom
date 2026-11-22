@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConnectionStatus, PlaidStatus } from "../api/contract.gen";
 import { api } from "../api/client";
+import { desktopRuntime, WorkspaceRuntimeProvider } from "../app/runtime";
 import { readConfirmDialogState, registerConfirmDialogHost, respondToConfirmDialog } from "../ui/confirmDialog";
 import { ConnectedBanks } from "./ConnectedBanks";
 
@@ -27,10 +28,13 @@ async function settle() {
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 }
 
-async function render(status: PlaidStatus) {
+async function render(status: PlaidStatus, seller?: string) {
   vi.mocked(api.plaid.status).mockResolvedValue(status);
   await act(async () => {
-    root.render(<QueryClientProvider client={queries}><ConnectedBanks /></QueryClientProvider>);
+    const runtime = seller ? { ...desktopRuntime, hosted: true, account: { id: seller, email: "" } } : desktopRuntime;
+    root.render(<QueryClientProvider client={queries}>
+      <WorkspaceRuntimeProvider value={runtime}><ConnectedBanks /></WorkspaceRuntimeProvider>
+    </QueryClientProvider>);
   });
   await settle();
 }
@@ -93,6 +97,31 @@ describe("Connected banks and cards", () => {
       expect(api.plaid.exchange).toHaveBeenCalledWith({ public_token: "public-token", institution_name: "Test Bank" }, expect.anything());
       expect(container.textContent).toContain("1/2 connected");
     } finally {
+      Reflect.deleteProperty(window, "Plaid");
+    }
+  });
+
+  it("resumes hosted OAuth with the same seller's Link token", async () => {
+    const create = vi.fn(({ onExit }: { onExit: (error: unknown) => void }) => ({
+      open: () => onExit(null), destroy: () => {},
+    }));
+    Object.assign(window, { Plaid: { create } });
+    const previous = window.location.href;
+    window.history.replaceState({}, "", "/?oauth_state_id=fixture");
+    sessionStorage.setItem("anteroom-plaid-link:seller-1", "first-seller-link");
+    sessionStorage.setItem("anteroom-plaid-link:seller-2", "second-seller-link");
+    try {
+      await render(empty, "seller-2");
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({
+        token: "second-seller-link", receivedRedirectUri: expect.stringContaining("oauth_state_id=fixture"),
+      }));
+      expect(api.plaid.linkToken).not.toHaveBeenCalled();
+      expect(sessionStorage.getItem("anteroom-plaid-link:seller-1")).toBe("first-seller-link");
+      expect(sessionStorage.getItem("anteroom-plaid-link:seller-2")).toBeNull();
+      expect(window.location.search).toBe("");
+    } finally {
+      window.history.replaceState({}, "", previous);
+      sessionStorage.clear();
       Reflect.deleteProperty(window, "Plaid");
     }
   });

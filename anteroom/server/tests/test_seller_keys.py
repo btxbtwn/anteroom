@@ -24,8 +24,6 @@ PREVIOUS_REVISION = "9664651bec7c"
 
 # User-chosen/external identities may be identical in independent shops.
 CASES = [
-    ("plaid_connections", dict(institution_id="bank", institution_name="Bank", environment="sandbox", accounts=[])),
-    ("plaid_transactions", dict(import_key="transaction", imported_revision=1)),
     ("category_schemas", dict(general_path="Clothing", marketplace="ebay", category_path="Coats", fields=[])),
     ("category_field_schemas", dict(marketplace="ebay", category_id="123", fields=[])),
     ("category_nodes", dict(marketplace="ebay", path="Clothing/Coats", parent_path="Clothing", label="Coats")),
@@ -38,6 +36,11 @@ CASES = [
     ("listing_copy_receipts", dict(request_id="same-request", fingerprint="basis", source_id="source")),
     ("ebay_actions", dict(account_id="account", kind="offer", resource_id="123", fingerprint="basis", state="sending",
                           expires_at=datetime.now(UTC) + timedelta(hours=1))),
+]
+
+PLAID_CASES = [
+    ("plaid_connections", dict(institution_id="bank", institution_name="Bank", environment="sandbox", accounts=[])),
+    ("plaid_transactions", dict(import_key="transaction", imported_revision=1)),
 ]
 
 
@@ -57,7 +60,7 @@ def prepare(engine, revision="head"):
                                {"job": f"job-{seller}", "item": f"item-{seller}", "seller": seller})
 
 
-@pytest.mark.parametrize("table_name,values", CASES, ids=[case[0] for case in CASES])
+@pytest.mark.parametrize("table_name,values", CASES + PLAID_CASES, ids=[case[0] for case in CASES + PLAID_CASES])
 def test_independent_shops_can_reuse_keys_but_same_shop_cannot(migration_engine, table_name, values):  # noqa: F811
     engine = migration_engine
     prepare(engine)
@@ -74,12 +77,11 @@ def test_independent_shops_can_reuse_keys_but_same_shop_cannot(migration_engine,
 def test_upgrade_keeps_all_keyed_records_and_matches_models(migration_engine):  # noqa: F811
     engine = migration_engine
     prepare(engine, PREVIOUS_REVISION)
-    legacy_cases = [(name, values) for name, values in CASES if not name.startswith("plaid_")]
     with engine.begin() as connection:
-        for name, values in legacy_cases:
+        for name, values in CASES:
             table = Base.metadata.tables[name]
             connection.execute(table.insert().values(**owned_values(values, ALICE), user_id=ALICE))
-    names = [name for name, _ in legacy_cases]
+    names = [name for name, _ in CASES]
     before = read_rows(engine, names)
     schema_migrations.ensure_schema(engine)
     after = read_rows(engine, names)
@@ -88,7 +90,7 @@ def test_upgrade_keeps_all_keyed_records_and_matches_models(migration_engine):  
     assert after == before
     with engine.connect() as connection:
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []
-    for name, values in legacy_cases:
+    for name, values in CASES:
         with pytest.raises(IntegrityError), engine.begin() as connection:
             connection.execute(Base.metadata.tables[name].insert().values(**owned_values(values, ALICE), user_id=ALICE))
         with engine.begin() as connection:

@@ -167,11 +167,13 @@ class VaultSecretStore:
 
     def write_in_session(self, db: SellerDatabaseSession, account: str, value: str | None) -> None:
         """Stage a Vault write in the same transaction as related seller records."""
+        stage = 'write'
         try:
             db.execute(text('SELECT anteroom_private.secret_write(:slot, :value)'), {'slot': account, 'value': value})
+            stage = 'change'
             note_changes(db, 'user_secret_references')
         except SQLAlchemyError as exc:
-            _storage_failure('update', 'write', exc)
+            _storage_failure('update', stage, exc)
             raise CredentialStorageUnavailable() from None
         self._cache.pop(account, None)
 
