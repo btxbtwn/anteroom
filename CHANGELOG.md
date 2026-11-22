@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1137 — 2026-11-22
+
+- Pace hosted cloud recent-likes checks with randomized jitter (4–7 minutes by default, configurable via `ANTEROOM_CLOUD_LIKE_CHECK_INTERVAL_S`) plus startup stagger, bound cloud scheduler DB steps, and record the cloud command type in `cloud_session_audit` decrypt events.
+
 ## 0.1.1136 — 2026-11-22
 
 - Moving from Mac to Anteroom cloud now restores missing labels for the same Vendoo item and keeps any labels you already saved or cleared in the cloud.
