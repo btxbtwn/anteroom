@@ -588,6 +588,98 @@ describe("useChatStream send", () => {
     expect(getLive(convId).failedAction).toBe("send");
   });
 
+  it("follows a dropped hosted answer to its saved reply instead of showing an error", async () => {
+    // The connection dropped while the answer ran on the server; it still saved.
+    routes = (url) => {
+      if (url.endsWith("/messages")) {
+        const encoder = new TextEncoder();
+        const body = new ReadableStream<Uint8Array>({
+          start(c) {
+            c.enqueue(encoder.encode("event: status\ndata: Reading the listing…\n\n"));
+            c.error(new TypeError("Load failed"));
+          },
+        });
+        return new Response(body, { headers: { "X-Anteroom-Task": "task-7" } });
+      }
+      return sse("event: status", "data: Reading the listing…", "", "data: Updated Occasion.", "", DONE);
+    };
+    const { chat } = mountChat();
+
+    await act(async () => { await chat().sendMessage("Fill occasion"); });
+
+    expect(calls.map((call) => call.url.replace(/^.*\/api\/conversations\/[^/]+/, ""))).toEqual([
+      "/messages",
+      "/messages/resume?task_id=task-7",
+    ]);
+    expect(getLive(convId)).toMatchObject({ failedAction: null, streaming: false, controller: null });
+    expect(getLive(convId).streamText).not.toMatch(/Error/);
+  });
+
+  it("follows a task stream that closed before it finished", async () => {
+    routes = (url) => (url.endsWith("/messages")
+      ? new Response("event: status\ndata: Reading the listing…\n\ndata: I upd\n\n", {
+        headers: { "X-Anteroom-Task": "task-9" },
+      })
+      : sse("data: I updated the Occasion field.", "", DONE));
+    const { chat } = mountChat();
+
+    await act(async () => { await chat().sendMessage("Fill occasion"); });
+
+    expect(requested("/messages/resume?task_id=task-9")).toHaveLength(1);
+    expect(getLive(convId)).toMatchObject({ failedAction: null, streaming: false });
+  });
+
+  it("reads an error event as a failure whatever case its prefix is in", async () => {
+    routes = () => sse("event: error", "data: error: The provider timed out", "", DONE);
+    const { chat } = mountChat();
+
+    await act(async () => { await chat().sendMessage("Fill occasion"); });
+
+    expect(getLive(convId)).toMatchObject({ failedAction: "send", streamText: "Error: The provider timed out" });
+  });
+
+  it("names the step, not the reconnect, when a dropped answer cannot be followed", async () => {
+    routes = (url) => {
+      // The status arrives, then the connection breaks on the next read.
+      let pulls = 0;
+      const body = new ReadableStream<Uint8Array>({
+        pull(c) {
+          if (pulls++ === 0) c.enqueue(new TextEncoder().encode("event: status\ndata: Reading the listing…\n\n"));
+          else c.error(new TypeError("network error"));
+        },
+      });
+      return new Response(body, { headers: url.endsWith("/messages") ? { "X-Anteroom-Task": "task-10" } : {} });
+    };
+    const { chat } = mountChat();
+
+    await act(async () => { await chat().sendMessage("Fill occasion"); });
+
+    expect(requested("/messages/resume")).toHaveLength(9);
+    expect(getLive(convId).failedAction).toBe("send");
+    expect(getLive(convId).streamText).toMatch(/^Error: Chat request connection dropped during “Reading the listing…”\./);
+  });
+
+  it("shows the answer's own failure when the followed task failed", async () => {
+    routes = (url) => {
+      if (url.endsWith("/messages")) {
+        return new Response(
+          new ReadableStream({ start(c) { c.error(new TypeError("Load failed")); } }),
+          { headers: { "X-Anteroom-Task": "task-8" } },
+        );
+      }
+      // How task_stream ends a failed task: an error event, its text unprefixed.
+      return sse("data: I upd", "", "event: error", "data: Review the saved draft before retrying.", "", DONE);
+    };
+    const { chat } = mountChat();
+
+    await act(async () => { await chat().sendMessage("Fill occasion"); });
+
+    expect(getLive(convId)).toMatchObject({
+      failedAction: "send",
+      streamText: "Error: Review the saved draft before retrying.",
+    });
+  });
+
   it("Stop puts the unanswered message back in the composer", async () => {
     routes = (url, init) => (url.endsWith("/messages") ? hangUntilAborted(init) : json({ ok: true }));
     const { chat, setInput } = mountChat();

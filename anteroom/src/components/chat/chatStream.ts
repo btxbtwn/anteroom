@@ -1,4 +1,4 @@
-import { readWithin } from "../../api/sse";
+import { readWithin, StreamIdleError } from "../../api/sse";
 import { coalesceSseEvents, emptySseParts, type SseParts } from "../sseCoalesce";
 import { appendLiveTrace, applyAgentEvent, parseAgentEvent } from "../liveTrace";
 
@@ -25,6 +25,21 @@ export type StreamRequestError = Error & { httpStatus?: number; body?: unknown }
 export function isAbortError(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { name?: unknown }).name === "AbortError";
 }
+
+// How browsers word a lost connection: Safari "Load failed" or "The network
+// connection was lost.", Chrome "Failed to fetch" or, mid-body, "network error",
+// Firefox "NetworkError when attempting to fetch resource." or "Error in input stream".
+const NETWORK_FAILURE = /failed to fetch|network ?error|load failed|network request failed|network connection was lost|error in input stream|the internet connection appears to be offline/i;
+
+/** A dropped or silent connection, as opposed to an answer the server refused or failed. */
+export function isNetworkFailure(error: unknown): boolean {
+  if (error instanceof StreamIdleError) return true;
+  const msg = error instanceof Error ? error.message : String(error || "");
+  return NETWORK_FAILURE.test(msg);
+}
+
+/** The hosted API names the durable task behind a chat stream, so a dropped stream can follow it again. */
+export const TASK_HEADER = "X-Anteroom-Task";
 
 /** Turn opaque browser/HTTP failures into actionable chat errors. */
 export function formatClientStreamError(
@@ -53,8 +68,7 @@ export function formatClientStreamError(
     ? ` Chrome is still on field discovery${opts.probeStep ? ` (${opts.probeStep})` : ""}.`
     : "";
 
-  const network = /^(load failed|failed to fetch|networkerror when attempting to fetch resource|network request failed|the internet connection appears to be offline\.?)$/i.test(raw)
-    || /failed to fetch|networkerror|load failed/i.test(raw);
+  const network = NETWORK_FAILURE.test(raw);
 
   if (network) {
     return (
@@ -155,7 +169,13 @@ function applySseLine(
     return false;
   }
   state.parts.trace = appendLiveTrace(state.parts.trace, state.eventType, text, continued);
-  if (state.eventType === "thinking") state.parts.thinking += text;
+  if (state.eventType === "error") {
+    // The server's failure ends the reply: it replaces any partial text and
+    // carries the "Error:" mark the chat reads as a failed turn.
+    state.parts.content = continued
+      ? state.parts.content + text
+      : `Error: ${chunk.replace(/^error:\s*/i, "")}`;
+  } else if (state.eventType === "thinking") state.parts.thinking += text;
   else if (state.eventType === "status") state.parts.status = continued ? state.parts.status + text : text;
   else if (!TRACE_ONLY_EVENTS.has(state.eventType)) state.parts.content += text;
   onEvent(state.eventType, state.parts);
