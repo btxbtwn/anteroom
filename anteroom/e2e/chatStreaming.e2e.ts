@@ -57,8 +57,9 @@ test("a follow-up sent while an answer streams cuts it off and goes next", async
   await expect(answers.first()).toContainText("Sandbox is streaming");
   await expect(answers.first()).not.toContainText("The end.");
   // The follow-up gets its own full answer (the sandbox streams it slowly too).
-  await expect(streaming).toHaveCount(0, { timeout: 30_000 });
-  await expect(answers).toHaveCount(2);
+  // There can be a moment with no live row between the interrupted answer and its successor.
+  await expect(answers).toHaveCount(2, { timeout: 30_000 });
+  await expect(streaming).toHaveCount(0);
   await expect(answers.last()).toContainText("The end.");
 });
 
@@ -95,7 +96,9 @@ test("a queued follow-up can be edited and sends once the answer finishes", asyn
 /** A queued follow-up survives a reload and still goes once the answer it waited for ends. */
 test("a queued follow-up is still sent after the page reloads", async ({ page, phone }) => {
   const composer = await openAssistant(page, phone);
-  await composer.fill("Tell me something long [sandbox:slow]");
+  // Its own title, so Recent chats opens this conversation and not an earlier test's.
+  const title = `Reload check ${Date.now()}`;
+  await composer.fill(`${title} [sandbox:slow]`);
   await composer.press("Enter");
   const streaming = page.locator('[data-message-role="assistant"][aria-busy="true"]');
   await expect(streaming).toContainText("Sandbox is streaming", { timeout: 15_000 });
@@ -107,10 +110,10 @@ test("a queued follow-up is still sent after the page reloads", async ({ page, p
   // The assistant opens on its home screen; go back to the conversation.
   if (phone) {
     await page.getByRole("button", { name: "Show chat history" }).click();
-    await page.getByRole("button").filter({ hasText: "Tell me something long" }).first().click();
+    await page.getByRole("button").filter({ hasText: title }).first().click();
   } else {
     await page.getByRole("region", { name: "Recent chats" }).getByRole("button")
-      .filter({ hasText: "Tell me something long" }).first().click();
+      .filter({ hasText: title }).first().click();
   }
   const queued = page.locator("[data-queued-message-id]");
   // It waits for the answer still being written, then goes by itself.

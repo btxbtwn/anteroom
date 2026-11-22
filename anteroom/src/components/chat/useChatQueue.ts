@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import type { ChatAttachmentUpload } from "../../api/types";
 import {
   enqueueChatMessage,
@@ -18,6 +18,14 @@ export type ListingQueuePayload = { attachments: ChatAttachmentUpload[] };
 
 /** Listings sending a queued message right now; one at a time per listing, any number across them. */
 const draining = new Set<string>();
+const drainListeners = new Set<() => void>();
+function subscribeDrain(listener: () => void) {
+  drainListeners.add(listener);
+  return () => { drainListeners.delete(listener); };
+}
+function notifyDrain() {
+  for (const listener of drainListeners) listener();
+}
 
 export function listingQueueKey(convId: string) {
   return `listing:${convId}`;
@@ -54,6 +62,7 @@ export function useChatQueue({
   pinChatToBottom,
 }: Options) {
   const key = listingQueueKey(convId);
+  const sending = useSyncExternalStore(subscribeDrain, () => draining.has(key), () => false);
   const pendingQueue = useChatQueueItems<ListingQueuePayload>(key);
 
   // Ask-chat prompts from the inspector join the same queue as typed follow-ups.
@@ -68,18 +77,20 @@ export function useChatQueue({
   // serverBusy is a dependency, not a cache read: the fill a chat save starts
   // ends after the reply does, and the held follow-up must send when it ends.
   useEffect(() => {
-    if (busy || serverBusy || paused || pendingQueue.length === 0 || draining.has(key)) return;
+    if (sending || busy || serverBusy || paused || pendingQueue.length === 0 || draining.has(key)) return;
     const liveState = getLive(convId);
     if (liveState.streaming || liveState.generating || liveState.resetting) return;
     const next = takeNextChatMessage<ListingQueuePayload>(key);
     if (!next) return;
     draining.add(key);
+    notifyDrain();
     void sendMessage(next.text, next.payload?.attachments ?? []).then((started) => {
       if (!started) returnChatMessage(key, next);
     }).finally(() => {
       draining.delete(key);
+      notifyDrain();
     });
-  }, [busy, serverBusy, paused, pendingQueue, sendMessage, convId, key]);
+  }, [sending, busy, serverBusy, paused, pendingQueue, sendMessage, convId, key]);
 
   const enqueue = useCallback((message: QueuedChatMessage) => enqueueChatMessage(key, message), [key]);
 

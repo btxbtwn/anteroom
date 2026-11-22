@@ -131,6 +131,19 @@ describe("held chat follow-ups", () => {
     ]);
   });
 
+  it("drains the next message when a pending send finishes after the idle render", async () => {
+    let finish!: (started: boolean) => void;
+    const send = vi.fn(async () => true)
+      .mockImplementationOnce(() => new Promise<boolean>((resolve) => { finish = resolve; }));
+    const { render } = mountQueue(send);
+    render({ busy: true, serverBusy: false, queued: "first" });
+    render({ busy: true, serverBusy: false, queued: "second" });
+    render({ busy: false, serverBusy: false, queued: null });
+    expect(send).toHaveBeenCalledTimes(1);
+    await act(async () => { finish(true); });
+    expect(send.mock.calls).toEqual([["first", []], ["second", []]]);
+  });
+
   it("a listing's queue still sends while another listing is mid-send", async () => {
     let finishA: (started: boolean) => void = () => {};
     const sendMessage = vi.fn((text: string) =>
