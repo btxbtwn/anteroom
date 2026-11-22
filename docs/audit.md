@@ -42,17 +42,24 @@ These override everything below.
   (`ANTEROOM_PORT`, `ANTEROOM_WEB_PORT`). The iPhone script always uses
   4320, so stop the hosted sandbox before running it. If a developer's sandbox
   already holds a port, pick other ports; do not stop their process.
+- On the seller's Mac a hand-installed pytest plugin (`heavy_gate`,
+  `~/.local/lib/heavy-gate`) lets one pytest run at a time across every
+  worktree: a later run prints `[heavy-gate] waiting for a test slot` and
+  sleeps, so a one-test reproduction can look hung while another worker's
+  suite runs. Leave it on for suites. For a single test file run serially
+  (`-p no:xdist`), `HEAVY_GATE_SLOTS=0` skips the queue (2026-11-21).
 - Run heavy suites one at a time. On 2026-11-12, four fix branches running
   `./check.sh --fast` alongside `./check.sh --all` pushed the load past 19:
   Playwright's web server missed its 120 s start, every iPhone test timed
   out, and the backend run took two hours. Finish the smoke first, then
   check fix branches one after another.
-- A fix worktree can reuse the audit worktree's installs: symlink
-  `anteroom/.venv` and `anteroom/node_modules` to them, and add
-  both paths to `$(git rev-parse --git-common-dir)/info/exclude`, or
-  `check.sh` counts the untracked symlinks as changes. pytest still imports
-  the fix worktree's code, because `pyproject.toml` puts `server` first on
-  its path. A hosted test needs Postgres: run it with
+- Give each fix worktree its own `anteroom/.venv` (`python3.12 -m venv .venv
+  && .venv/bin/pip install -e ".[dev]"`, about 40 s with a warm cache) and
+  its own `npm ci`. Do not symlink another worktree's venv: pytest imports
+  the fix worktree's `server`, but tests that start a subprocess (the
+  `test_config.py` adoption tests) import the editable install, which is
+  the other worktree's code. That gave a false backend failure on #1698
+  (2026-11-20). A hosted test needs Postgres: run it with
   `ANTEROOM_TEST_DATABASE_URL` from a private `pgserver` (see `check.sh`);
   on SQLite it is skipped. Keep fix worktrees on a short path
   (`../anteroom-fix-<name>`), not the scratchpad: macOS caps Unix socket
@@ -85,6 +92,12 @@ These override everything below.
 If a step cannot run (Xcode missing, Simulator broken, sandbox will not start),
 record it as **not run** with the error and keep going. Never report a step as
 passing when it did not run.
+
+File the daily issue before the run ends, even a partial one, and push every
+fix branch or name it in the issue as unpushed. On 2026-11-21 a run filed two
+findings but no daily issue, and left its fix branches (`fix/audit-etsy-styles`,
+`fix/audit-fair-claim`) unpushed; the next run found them only in local
+worktrees, and one had meanwhile been superseded by #1764.
 
 ## Smoke
 
@@ -176,7 +189,11 @@ Every run, in this order:
 3. `cd anteroom && npm run e2e:hosted` (hosted web, two sellers).
 4. `./anteroom-ios/test-sandbox.sh` (iPhone XCUITests in the Simulator). Run
    it while nothing else heavy runs: under load its 5 to 30 second waits time
-   out on different tests each run. Before reporting a failure, rerun it alone
+   out on different tests each run. Several failures at the same step are
+   usually one regression, not load: on 2026-11-22, four tests failed where
+   they tap an Inventory row, because #1745's tap gesture took the row's taps
+   (#1771). The UI hierarchy attachment showed the row's link button shrunk
+   to 7×12 pt. Before reporting a failure, rerun it alone
    <!-- coderabbit-ai-generated:v1 -->
    <!-- coderabbit-ai-generated-section:v1:a5fa7de14472f6751a674b304a01d87bd69212105040e487029358b0be32c8a3 -->
    and compare with the last full local run in the previous `audit` issue.
