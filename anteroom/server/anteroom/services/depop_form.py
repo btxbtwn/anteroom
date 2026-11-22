@@ -129,7 +129,12 @@ def size_label(category_id: str, size) -> str:
 def form(listing: dict) -> dict:
     """Keep native rows and order; resolve labels to posting IDs only at publication."""
     from anteroom.services.native_editor import field
+    from anteroom.services.seller_region import seller_region
 
+    region = seller_region()
+    currency = "US$" if region.country == "US" else region.currency
+    carriers = {"US": "USPS", "GB": "Evri", "AU": "Australia Post"}
+    carrier = carriers.get(region.country)
     specifics = listing.get("depop_specifics") or {}
     category_id = str((listing.get("direct_category_ids") or {}).get("depop") or "")
     category = _by_id().get(category_id)
@@ -209,21 +214,23 @@ def form(listing: dict) -> dict:
     # A category must be chosen before its dependent rows can be built.
     rows.extend([
         field("price", "Item price", price_for(listing, "depop"), required=True, input_type="number", min_value=1,
-              max_value=9999999999.99, step=0.01, prefix="US$", section="Item price"),
+              max_value=9999999999.99, step=0.01, prefix=currency, section="Item price"),
         field("depop.note.fees", "No selling fees.", "", input_type="note", section="Item price"),
         field("depop.note.boost", "Learn more about boosting", "", input_type="note", section="Boost your listing"),
         field("depop_specifics.boost", "Promote your item in search to help it sell faster. Pay an extra 12% fee, only if you sell.",
               specifics.get("boost") is True, input_type="boolean", section="Boost your listing"),
-        field("depop.note.carrier", "Depop Shipping (via USPS)", "", input_type="note", section="Shipping",
-              help="You’ll receive a pre-paid shipping label and a QR code when you sell. Use either of these to ship at your nearest USPS Post Office."),
+        *([field("depop.note.carrier", f"Depop Shipping (via {carrier})", "", input_type="note", section="Shipping",
+                 help="Use the shipping label Depop provides for your order.")] if carrier else []),
         field("depop_specifics.shipFrom", "Shipping from", specifics.get("shipFrom", ""), input_type="textarea",
               locked=True, section="Shipping", help="Your Depop account's shipping address is checked when you publish."),
-        choice("depop_specifics.parcelSize", "Package size", fixed["parcelSize"], section="Shipping", required=True),
+        *([choice("depop_specifics.parcelSize", "Package size", fixed["parcelSize"], section="Shipping", required=True)]
+           if carrier else [field("depop_specifics.domesticShippingPrice", "Domestic shipping", value("depop_specifics.domesticShippingPrice"),
+                                   input_type="number", required=True, min_value=0, step=0.01, prefix=currency, section="Shipping")]),
         field("depop_specifics.worldwideShipping.enabled", "Offer worldwide shipping",
               value("depop_specifics.worldwideShipping.enabled", False), input_type="boolean", section="Shipping"),
         field("depop_specifics.worldwideShipping.price", "Worldwide Shipping", value("depop_specifics.worldwideShipping.price"),
               input_type="number", required=value("depop_specifics.worldwideShipping.enabled", False) is True,
-              min_value=0, max_value=99.99, step=0.01, prefix="US$", section="Shipping"),
+              min_value=0, max_value=99.99, step=0.01, prefix=currency, section="Shipping"),
     ])
     notes = []
     if category_id and not category:

@@ -59,7 +59,7 @@ async def next_command(capabilities: str = Query('', max_length=400)):
 
 class Heartbeat(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    capabilities: list[Literal['marketplace.actions',
+    capabilities: list[Literal['marketplace.actions', 'marketplace.regions',
                                'marketplace.sessions', 'marketplace.sales_history',
                                'marketplace.promotions', 'marketplace.import', 'vendoo.drafts',
                                'marketplace.signed_approvals', 'marketplace.signed_commands',

@@ -70,10 +70,13 @@ def list_conversations(db: Session = Depends(get_db)):
     from anteroom.services.sales_records import missing_by_conversation
 
     missing = missing_by_conversation(db)
+    from anteroom.services.price_consistency import DriftReader
+
+    drift = DriftReader(db)
     return [
         _conv_response(c, _extras(
             _cover_photo_url(covers.get(c.id)), facets.get(c.id), revisions.get(c.id), c.id in unsent,
-            direct.get(c.id, {}), sold.get(c.id), missing.get(c.id, []),
+            direct.get(c.id, {}), sold.get(c.id), missing.get(c.id, []), drift.drift(c.id, direct.get(c.id, {})),
         ))
         for c in conversations
     ]
@@ -505,9 +508,11 @@ def _extras(
     direct: dict[str, dict] | None = None,
     sold=None,
     missing_sale_data: list[str] | None = None,
+    price_drift: list[dict] | None = None,
 ) -> dict:
     """The per-row fields the sidebar needs alongside the conversation itself."""
     return {
+        "price_drift": price_drift or [],
         "cover_photo_url": cover_photo_url,
         "sku": (facet or {}).get("sku"),
         "price": (facet or {}).get("price"),
@@ -532,17 +537,24 @@ def _extras_for(db: Session, conv_id: str) -> dict:
     from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
 
     from anteroom.services.item_status import sold_units
+    from anteroom.services.price_consistency import DriftReader
     from anteroom.services.sales_records import missing_by_conversation
 
+    direct = MarketplaceListingRepo(db).summaries(conv_id).get(conv_id, {})
     return _extras(
         _cover_photo_url(repo.cover_photo(conv_id)),
         inventory_facets.listing_facet(repo.db, conv_id),
         revision_id,
         conv_id in unsent,
-        MarketplaceListingRepo(db).summaries(conv_id).get(conv_id, {}),
+        direct,
         sold_units(db, [conv] if conv else []).get(conv_id),
         missing_by_conversation(db, conv_id).get(conv_id, []),
+        DriftReader(db, conv_id).drift(conv_id, direct),
     )
+
+
+def _inactive(direct: dict[str, dict]) -> list[str]:
+    return [market for market, record in direct.items() if record.get("inactive")]
 
 
 def _conv_response(conv, extras: dict | None = None) -> Conversation:
@@ -572,6 +584,8 @@ def _conv_response(conv, extras: dict | None = None) -> Conversation:
         missing_sale_data=row.get("missing_sale_data", []),
         unsent_edits=bool(row.get("unsent_edits")),
         etsy_eligible=bool(row.get("etsy_eligible", True)),
+        inactive_marketplaces=_inactive(row.get("direct_records") or {}),
+        price_drift=row.get("price_drift") or [],
         **imported_fields(parse_notes(conv.notes), row.get("direct_records") or {}),
     )
 

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from urllib.parse import urlsplit
 from datetime import UTC, datetime
 
 import httpx
@@ -502,6 +503,10 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
                     raise
                 skipped = names[index:]
                 break
+            payload = {"marketplace": name, "listing_id": entry["listing_id"], "confirm": True}
+            # A saved listing keeps its original site when the seller moves.
+            if name == "poshmark" and urlsplit(entry["url"]).hostname in {"poshmark.ca", "www.poshmark.ca"}:
+                payload["seller_region"] = "CA"
             try:
                 if name == "ebay":
                     result = await _delete_ebay(entry["listing_id"], ebay_record)
@@ -516,18 +521,12 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
                             "type": "marketplace.delete",
                             "job_id": job.id,
                             "message_id": f"{job.id}-{name}",
-                            "payload": {
-                                "marketplace": name,
-                                "listing_id": entry["listing_id"],
-                                "confirm": True,
-                            },
+                            "payload": payload,
                         },
                         timeout=90,
                     )
                 else:
-                    result = await browser_bridge.request(job, "marketplace.delete", {
-                        "marketplace": name, "listing_id": entry["listing_id"], "confirm": True,
-                    }, timeout=90)
+                    result = await browser_bridge.request(job, "marketplace.delete", payload, timeout=90)
                 gone = _mercari_gone(name, result)
                 if result.get("ok") is True and result.get("state") == "deleted" or gone:
                     # Already absent is a reconciliation of the listing, never evidence of a sale.

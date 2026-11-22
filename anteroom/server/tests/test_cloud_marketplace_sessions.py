@@ -164,15 +164,17 @@ def test_cloud_sessions_disabled_by_default_and_never_in_local_mode(cloud, signi
 
 def test_connect_token_single_use_upload_cookie_filtering_and_disconnect(cloud, signing_keys, monkeypatch):  # noqa: F811
     client, engine = cloud
+    alice = headers(signing_keys)
+    assert client.put("/api/settings/seller-region", headers=alice, json={"country": "CA"}).status_code == 200
     vault = _patch_vault(monkeypatch)
     monkeypatch.setenv("ANTEROOM_CLOUD_MARKETPLACES", "poshmark")
-    alice = headers(signing_keys)
 
     # 1. Mint single-use upload token
     minted = client.post("/api/cloud-sessions/poshmark/connect-token", headers=alice)
     assert minted.status_code == 200
     token_data = minted.json()
     assert token_data["marketplace"] == "poshmark"
+    assert token_data["seller_region"] == "CA"
     token = token_data["token"]
     assert token.startswith(f"{USER_ID}.")
 
@@ -180,7 +182,8 @@ def test_connect_token_single_use_upload_cookie_filtering_and_disconnect(cloud, 
     upload = client.post(
         "/api/cloud-sessions/poshmark/upload",
         headers={"X-Cloud-Upload-Token": token},
-        json={"cookies": _sample_cookies(include_foreign=True), "user_agent": "Mozilla/5.0 TestChrome"},
+        json={"cookies": [{**cookie, "domain": cookie["domain"].replace("poshmark.com", "poshmark.ca")}
+                          for cookie in _sample_cookies(include_foreign=True)], "user_agent": "Mozilla/5.0 TestChrome"},
     )
     assert upload.status_code == 200
     body = upload.json()
@@ -191,11 +194,12 @@ def test_connect_token_single_use_upload_cookie_filtering_and_disconnect(cloud, 
     assert "cookies" not in json.dumps(body)
     assert "evil_cookie" not in json.dumps(body)
 
-    # Stored Vault payload only contains poshmark.com cookies
+    # Stored Vault payload only contains the Canadian Poshmark cookies.
     stored_raw = vault.data[(USER_ID, "cloud-session-poshmark")]
     stored = json.loads(stored_raw)
     assert stored["user_agent"] == "Mozilla/5.0 TestChrome"
     assert {c["name"] for c in stored["cookies"]} == {"jwt", "_web_app_session"}
+    assert {c["domain"].lstrip(".") for c in stored["cookies"]} == {"poshmark.ca"}
 
     # 3. Replay of the same single-use upload token is rejected (401)
     replay = client.post(

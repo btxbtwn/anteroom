@@ -2,6 +2,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { chatQueue, enqueueChatMessage, newQueuedChatMessage, removeChatMessage } from "./chat/chatQueueStore";
 import { AssistantPage } from "./AssistantPage";
 import {
   getComposerDraft,
@@ -80,10 +81,11 @@ vi.mock("./ChatMarkdown", () => ({
 }));
 
 vi.mock("./chat/ChatComposer", () => ({
-  ChatComposer: ({ onSend }: { onSend: () => void }) => (
-    <button type="button" data-testid="send-button" onClick={onSend}>
-      Send
-    </button>
+  ChatComposer: ({ onSend, onEditQueued }: { onSend: (alternate: boolean) => void; onEditQueued: () => boolean }) => (
+    <>
+      <button type="button" data-edit onClick={onEditQueued}>Edit</button>
+      <button type="button" data-testid="send-button" onClick={() => onSend(false)}>Send</button>
+    </>
   ),
 }));
 
@@ -102,6 +104,92 @@ describe("AssistantPage concurrency and background failure recovery", () => {
 
   afterEach(() => {
     resetComposerDrafts();
+  });
+
+  it("sends a saved follow-up after an empty resume", async () => {
+    const root = createRoot(document.createElement("div"));
+    enqueueChatMessage("assistant", newQueuedChatMessage("saved", { threadId: "idle" }));
+    mocks.ask.mockResolvedValue({});
+    try {
+      await act(async () => {
+        root.render(<AssistantPage threadId="idle" onOpenProviders={vi.fn()} onOpenListing={vi.fn()} />);
+      });
+      expect(mocks.ask).toHaveBeenCalledWith("saved", expect.anything(), expect.anything(), [], "idle");
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+
+  it.each(["switch", "unmount"])("discards only the temporary edit on %s", async (action) => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const resume = deferred<object>();
+    mocks.resume.mockReturnValueOnce(resume.promise);
+    const item = newQueuedChatMessage("original", { threadId: "leaving" });
+    enqueueChatMessage("assistant", item);
+    const page = (threadId: string) => <AssistantPage threadId={threadId} onOpenProviders={vi.fn()} onOpenListing={vi.fn()} />;
+    try {
+      await act(async () => root.render(page("leaving")));
+      await act(async () => container.querySelector<HTMLButtonElement>("[data-edit]")!.click());
+      expect(getComposerDraft("assistant:leaving").text).toBe("original");
+      await act(async () => setComposerDraftText("assistant:leaving", "unfinished"));
+      await act(async () => root.render(action === "switch" ? page("elsewhere") : null));
+      expect(getComposerDraft("assistant:leaving").text).toBe("");
+      expect(chatQueue("assistant")).toContainEqual(item);
+    } finally {
+      await act(async () => { removeChatMessage("assistant", item.id); resume.resolve({}); root.unmount(); });
+    }
+  });
+
+  it("keeps the draft if the queued question disappears during editing", async () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const resume = deferred<object>();
+    mocks.resume.mockReturnValueOnce(resume.promise);
+    const item = newQueuedChatMessage("original", { threadId: "edit" });
+    enqueueChatMessage("assistant", item);
+    try {
+      await act(async () => root.render(<AssistantPage threadId="edit" onOpenProviders={vi.fn()} onOpenListing={vi.fn()} />));
+      await act(async () => container.querySelector<HTMLButtonElement>("[data-edit]")!.click());
+      expect(getComposerDraft("assistant:edit").text).toBe("original");
+      await act(async () => {
+        setComposerDraftText("assistant:edit", "keep this edit");
+        removeChatMessage("assistant", item.id);
+      });
+      await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="send-button"]')!.click());
+      expect(getComposerDraft("assistant:edit").text).toBe("keep this edit");
+      expect(mocks.addToast).toHaveBeenCalledWith(expect.objectContaining({ type: "warning" }));
+    } finally {
+      await act(async () => { resume.resolve({}); root.unmount(); });
+    }
+  });
+
+  it("steers a resume that becomes live during preparation and waits for Stop before draining", async () => {
+    const resume = deferred<object>();
+    const stop = deferred<object>();
+    const prepare = deferred<{ ok: true; name: string; dataUrl: string }>();
+    mocks.resume.mockReturnValueOnce(resume.promise);
+    mocks.stop.mockReturnValueOnce(stop.promise);
+    mocks.ask.mockResolvedValueOnce({});
+    mocks.prepareComposerImage.mockReturnValueOnce(prepare.promise);
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    setComposerDraftImages("assistant:prepare", [{ id: "img", file: new File(["tag"], "tag.png", { type: "image/png" }) }]);
+    try {
+      await act(async () => root.render(<AssistantPage threadId="prepare" onOpenProviders={vi.fn()} onOpenListing={vi.fn()} />));
+      await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="send-button"]')!.click());
+      await act(async () => mocks.resume.mock.calls[0][0].onEvent("status", "Working"));
+      await act(async () => prepare.resolve({ ok: true, name: "tag.png", dataUrl: "data:image/png;base64,AQ==" }));
+      expect(mocks.stop).toHaveBeenCalledTimes(1);
+      await act(async () => resume.resolve({}));
+      expect(mocks.ask).not.toHaveBeenCalled();
+      expect(chatQueue("assistant")).toHaveLength(1);
+      await act(async () => stop.resolve({}));
+      expect(mocks.ask).toHaveBeenCalledTimes(1);
+      expect(mocks.ask.mock.calls[0][2].aborted).toBe(false);
+    } finally {
+      await act(async () => root.unmount());
+    }
   });
 
   it("shares a single createThread() call and routes concurrent new-chat submissions to the same thread", async () => {

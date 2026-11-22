@@ -15,6 +15,17 @@ import {
   setNestedValue,
 } from "./listingPaths";
 
+it.each([["PSA", "9.5"], ["PCGS", "MS-65"]])("preserves %s grading fields through eBay editor saves", (grader, grade) => {
+  const listing = { ebay_specifics: {} };
+  const values = { condition: "2750", "Professional Grader": grader, Grade: grade, "Certification Number": "00123456" };
+  for (const [key, value] of Object.entries(values)) {
+    const path = `ebay_specifics.${key}`;
+    setListingEditorValue(listing, path, value);
+    expect(getListingEditorValue(listing, path)).toBe(value);
+  }
+  expect(JSON.stringify(listing)).toContain('"00123456"');
+});
+
 describe("formFieldText", () => {
   it("never renders a group of values as [object Object]", () => {
     expect(formFieldText({ autoAcceptPrice: 15, minimumOfferPrice: 13 })).toBe("");

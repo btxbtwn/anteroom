@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import stat
 
@@ -108,3 +109,18 @@ def test_agent_connection_test_reports_a_failed_command(monkeypatch, tmp_path):
     assert body["ok"] is False
     assert "Could not reach" in body["detail"]
     assert os.access(binary, os.X_OK)
+
+
+def test_chatgpt_setup_without_token_omits_authorization():
+    from anteroom.services.agent_connection import _remote_clients
+
+    for require_token in (False, True):
+        snippet = next(
+            client["snippet"] for client in _remote_clients("http://127.0.0.1:4318/api/mcp", require_token=require_token)
+            if client["id"] == "chatgpt"
+        )
+        setup = json.loads(snippet)
+        if require_token:
+            assert setup["headers"]["Authorization"] == "Bearer arm_your_access_token"
+        else:
+            assert "headers" not in setup

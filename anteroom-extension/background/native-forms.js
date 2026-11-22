@@ -517,8 +517,9 @@ const MERCARI_CONDITION_CHOICES = [
 
 async function readPoshmarkEditorForm(listing, deadline) {
   // Wait for every read to settle before releasing a caller's operation claim.
-  const results = await Promise.allSettled([poshmarkCatalogData(deadline), poshmarkCatalogDisplay(deadline),
-    poshmarkStyleTags(deadline), poshmarkShippingDiscounts(deadline)]);
+  const origin = poshmarkOrigin(listing._seller_region);
+  const results = await Promise.allSettled([poshmarkCatalogData(deadline, origin), poshmarkCatalogDisplay(deadline, origin),
+    poshmarkStyleTags(deadline, origin), poshmarkShippingDiscounts(deadline, origin)]);
   const failed = results.find(result => result.status === 'rejected');
   if (failed) throw failed.reason;
   return poshmarkEditorForm(listing, ...results.map(result => result.value));

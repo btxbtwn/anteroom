@@ -14,6 +14,7 @@ marketplace is not contacted and a listing still up there stays up.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from typing import Literal
@@ -89,6 +90,18 @@ def _token(action: str, marketplaces: list[str], basis: str) -> str:
     return hashlib.sha256(json.dumps([action, marketplaces, basis]).encode()).hexdigest()
 
 
+def _same_price(db: Session, marketplace: str, record: dict, revision_id: str | None) -> bool:
+    from anteroom.services.seller_overrides import money, price_for
+
+    listed_price = money(record.get("listed_price"))
+    if listed_price is None:
+        # Legacy records without a confirmed price still rely on revision identity.
+        return True
+    revision = ListingRepo(db).get_revision(revision_id)
+    current_price = money(price_for(revision.listing_json if revision else None, marketplace))
+    return current_price is None or current_price == listed_price
+
+
 def review_row(db: Session, conv_id: str, action: str, marketplaces: list[str]) -> dict:
     """What ``action`` would do for one item on the named marketplaces, with a token for exactly that."""
     from anteroom.services.automations import approval_snapshot
@@ -116,7 +129,8 @@ def review_row(db: Session, conv_id: str, action: str, marketplaces: list[str]) 
         record = records.get(marketplace) or {}
         reason = _target_reason(action, marketplace, known.get(marketplace) or {}, record)
         if (not reason and action == "update" and record.get("state") == "published"
-                and record.get("revision_id") and record.get("revision_id") == row["revision_id"]):
+                and record.get("revision_id") and record.get("revision_id") == row["revision_id"]
+                and _same_price(db, marketplace, record, row["revision_id"])):
             reason = f"Already up to date on {_name(marketplace)}."
         if reason:
             row["skipped"].append({"marketplace": marketplace, "reason": reason})
@@ -125,7 +139,7 @@ def review_row(db: Session, conv_id: str, action: str, marketplaces: list[str]) 
     if not row["marketplaces"]:
         row["skip_reason"] = "Nothing to do on the chosen marketplaces."
         return row
-    basis, _targets = approval_snapshot(db, conv_id, row["marketplaces"])
+    basis, _targets = approval_snapshot(db, conv_id, row["marketplaces"], includes_prices=action in {"list", "relist", "update"})
     row["review_token"] = _token(action, row["marketplaces"], basis)
     return row
 
@@ -133,13 +147,17 @@ def review_row(db: Session, conv_id: str, action: str, marketplaces: list[str]) 
 def preview(db: Session, body: PreviewRequest) -> dict:
     """Review only. Nothing is sent to a marketplace."""
     marketplaces: list[str] = [*dict.fromkeys(body.marketplaces)]
-    return {"action": body.action, "marketplaces": marketplaces,
-            "rows": [review_row(db, conv_id, body.action, marketplaces) for conv_id in dict.fromkeys(body.conversation_ids)]}
+    from anteroom.services.pricing_rules import freeze_active_rules
+
+    with freeze_active_rules():
+        return {"action": body.action, "marketplaces": marketplaces,
+                "rows": [review_row(db, conv_id, body.action, marketplaces) for conv_id in dict.fromkeys(body.conversation_ids)]}
 
 
 async def perform(body: PerformRequest) -> dict:
     """One reviewed item. Every marketplace named is tried once; nothing retries."""
     from anteroom.services.automations import AutomationBusy
+    from anteroom.services.pricing_rules import active_rules, freeze_active_rules
 
     if body.confirm is not True:
         raise HTTPException(400, "Review and confirm this marketplace action first.")
@@ -149,11 +167,12 @@ async def perform(body: PerformRequest) -> dict:
     key = body.conversation_id if side_by_side else "*"
     _running.add(key)
     try:
-        await in_worker_session(_check_reviewed, body, side_by_side)
-        try:
-            result = await _dispatch(body)
-        except AutomationBusy as exc:
-            raise HTTPException(409, str(exc) or "A marketplace job is running. Wait for it to finish.") from exc
+        with freeze_active_rules(await asyncio.to_thread(active_rules)):
+            await in_worker_session(_check_reviewed, body, side_by_side)
+            try:
+                result = await _dispatch(body)
+            except AutomationBusy as exc:
+                raise HTTPException(409, str(exc) or "A marketplace job is running. Wait for it to finish.") from exc
     finally:
         _running.discard(key)
     return {"conversation_id": body.conversation_id, "action": body.action, "marketplaces": list(body.marketplaces),
@@ -175,7 +194,7 @@ def _check_reviewed(db: Session, body: PerformRequest, side_by_side: bool) -> No
             raise HTTPException(409, " ".join(reasons) + " Review again.")
         if (current["marketplaces"] != list(body.marketplaces) or current["revision_id"] != body.revision_id
                 or current["review_token"] != body.review_token):
-            raise HTTPException(409, "The item, its photos or marketplace links changed since the review. Review again.")
+            raise HTTPException(409, "The item, its photos, marketplace links or pricing rules changed since the review. Review again.")
 
 
 async def _dispatch(body: PerformRequest) -> dict:

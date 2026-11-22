@@ -12,9 +12,38 @@ import { ListingRow } from "./ListingRow";
 vi.mock("../ListingTemplatesDialog", () => ({ ListingTemplatesDialog: () => null }));
 vi.mock("../CopyListingDialog", () => ({ CopyListingDialog: () => null }));
 
-describe("ListingRow rename error feedback", () => {
+describe("ListingRow", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("keeps a sold marketplace distinct from an inactive live marketplace", async () => {
+    const client = new QueryClient();
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    try {
+      await act(() => root.render(
+        <QueryClientProvider client={client}>
+          <ListingRow
+            listing={{
+              id: "item-1", title: "Vintage Jacket", status: "sold",
+              direct_marketplaces: ["poshmark", "etsy"],
+              sold_marketplaces: ["poshmark"],
+              inactive_marketplaces: ["poshmark", "etsy"],
+            }}
+            selected={false}
+            settled={false}
+            onSelect={vi.fn()}
+            onDelete={vi.fn()}
+          />
+        </QueryClientProvider>,
+      ));
+      expect(container.querySelector('[aria-label="Listed on Etsy; Sold on Poshmark"]')).not.toBeNull();
+      expect(container.querySelector('[title="Etsy · inactive"]')).not.toBeNull();
+    } finally {
+      await act(() => root.unmount());
+      client.clear();
+    }
   });
 
   it("shows an error toast and keeps the rename input open when renaming fails", async () => {

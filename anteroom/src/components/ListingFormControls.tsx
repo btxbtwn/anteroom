@@ -450,18 +450,21 @@ export function CategoryTreeSelect({
   );
 }
 
-/** eBay categories from the synced tree. Search stays available until that tree is complete. */
+/** US categories can use the synced tree; other sites use live category search. */
 export function EbayCategorySelect({ id, value, onChange, disabled }: {
   id: string; value: string; disabled?: boolean; onChange: (id: string, path: string) => void;
 }) {
+  const region = useQuery({ queryKey: ["seller-region"], queryFn: api.settings.sellerRegion });
+  const site = region.data?.country;
   const tree = useQuery({
     queryKey: ["catalog-categories", "ebay"],
     queryFn: () => api.catalog.categories("ebay"),
+    enabled: site === "US",
     staleTime: Infinity,
     retry: false,
   });
-  const leaves = React.useMemo(() => catalogLeafChoices(tree.data), [tree.data]);
-  const treeReady = !tree.isPending;
+  const leaves = React.useMemo(() => site === "US" ? catalogLeafChoices(tree.data) : [], [site, tree.data]);
+  const treeReady = site !== undefined && (site !== "US" || !tree.isPending);
   const searchFallback = treeReady && (leaves.length === 0 || tree.data?.complete === false);
   const [query, setQuery] = React.useState("");
   const [search, setSearch] = React.useState("");
@@ -469,10 +472,11 @@ export function EbayCategorySelect({ id, value, onChange, disabled }: {
     const timer = setTimeout(() => setSearch(query.trim()), 300);
     return () => clearTimeout(timer);
   }, [query]);
-  const result = useQuery({ queryKey: ["ebay-category-search", search],
+  const result = useQuery({ queryKey: ["ebay-category-search", site, search],
     queryFn: () => api.ebay.read("categories", { q: search }),
     enabled: searchFallback && search.length >= 3 && search !== value, retry: false });
   const choices = (result.data?.rows || []).map((row) => ({ id: row.id, path: [row.subtitle, row.title].filter(Boolean).join(" › ") }));
+  if (region.isError && !site) return <p role="alert" className="text-xs text-warning-foreground">Could not read your seller region. <button type="button" onClick={() => void region.refetch()}>Retry</button></p>;
   if (!treeReady) return <p role="status" className="text-xs text-muted-foreground">Loading categories…</p>;
   const searchPanel = (
     <>

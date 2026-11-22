@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import unittest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from anteroom.database import Base
 from anteroom.models.catalog import CategoryTree, CategoryTreeNode
@@ -32,6 +33,33 @@ class DirectCategoryChoiceTest(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.db.close()
         self.engine.dispose()
+
+    async def test_ebay_category_and_schema_caches_follow_the_seller_marketplace(self):
+        from anteroom.services import marketplace_schemas
+        from anteroom.services.direct_categories import _ebay_leaf
+
+        self.enterContext(patch("anteroom.services.category_fields.SessionLocal", sessionmaker(bind=self.engine)))
+        for country, tree in [("US", "0"), ("CA", "2"), ("GB", "3"), ("AU", "15")]:
+            with self.subTest(country=country):
+                site = f"EBAY_{country}"
+                suggestions = {"categorySuggestions": [{"category": {"categoryId": "11483", "categoryName": "Jeans"}}]}
+                aspects = {"aspects": [{"localizedAspectName": f"Size {country}"}]}
+                policies = {"itemConditionPolicies": [{"categoryId": "11483",
+                             "itemConditions": [{"conditionId": 1000, "conditionDescription": f"New {country}"}]}]}
+                replies = [suggestions, aspects, policies] if country == "US" else [
+                    {"categoryTreeId": tree}, suggestions, aspects, policies,
+                ]
+                client = SimpleNamespace(request=AsyncMock(side_effect=replies))
+                with patch("anteroom.services.seller_region.read_settings", return_value={"seller_region": country}), \
+                        patch("anteroom.services.ebay_client.EbayClient.connect", new=AsyncMock(return_value=client)):
+                    self.assertEqual(await _ebay_leaf("jeans"), {"id": "11483", "path": "Jeans"})
+                    self.assertEqual((await marketplace_schemas.ebay_aspects(client, "11483"))[0]["name"], f"Size {country}")
+                    self.assertEqual((await marketplace_schemas.ebay_conditions(client, "11483"))["conditions"][0]["label"], f"New {country}")
+                    await marketplace_schemas.ebay_conditions(client, "11483")
+                paths = [call.args[1] for call in client.request.await_args_list]
+                self.assertIn(f"/commerce/taxonomy/v1/category_tree/{tree}/get_category_suggestions", paths)
+                self.assertIn(f"/commerce/taxonomy/v1/category_tree/{tree}/get_item_aspects_for_category", paths)
+                self.assertEqual(paths.count(f"/sell/metadata/v1/marketplace/{site}/get_item_condition_policies"), 1)
 
     async def test_generation_uses_the_exact_synced_ebay_leaf_without_a_suggestion_request(self):
         path = "Clothing, Shoes & Accessories > Men > Men's Clothing > Jeans"

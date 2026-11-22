@@ -5,6 +5,7 @@ import {
   BoxIcon,
   CalendarClockIcon,
   ChartColumnIcon,
+  HomeIcon,
   MessageCircleIcon,
   SettingsIcon,
   StoreIcon,
@@ -25,13 +26,14 @@ const FOOTER_PADDING_PX = 8;
 const SIDEBAR_BORDER_PX = 1;
 
 /**
- * The footer pages in seller-workflow order: home first, then the day's work
- * (sourcing), marketplace tools, then insight (analytics), then settings, the
- * way T3 Code ends its sidebar footer with settings. The updater sits after
- * them. The listings above are the inventory; Vendoo sync lives in
- * Settings → Data and on Analytics.
+ * The footer pages in seller-workflow order: today's command center and
+ * assistant first, then the day's work (sourcing), insight (analytics),
+ * marketplace tools, then settings, the way T3 Code ends its sidebar footer
+ * with settings. The updater sits after them. The listings above are the
+ * inventory; Vendoo sync lives in Settings → Data and on Analytics.
  */
 export const SIDEBAR_FOOTER_BUTTONS = [
+  "home",
   "assistant",
   "sourcing",
   "analytics",
@@ -111,6 +113,7 @@ export function SidebarFooter({
   settingsMode,
   activeView,
   onCloseSettings,
+  onOpenHome,
   onOpenSourcing,
   onOpenAnalytics,
   onOpenMarketplaces,
@@ -121,6 +124,7 @@ export function SidebarFooter({
   settingsMode: boolean;
   activeView: WorkspaceView;
   onCloseSettings: () => void;
+  onOpenHome: () => void;
   onOpenSourcing: () => void;
   onOpenAnalytics: () => void;
   onOpenMarketplaces: () => void;
@@ -130,6 +134,7 @@ export function SidebarFooter({
 }) {
   const runtime = useWorkspaceRuntime();
   const buttons: Record<FooterButtonId, ReactNode> = {
+    home: <FooterButton page="home" label="Today" icon={HomeIcon} active={activeView === "home"} onClick={onOpenHome} />,
     assistant: (
       <FooterButton page="assistant" label="Assistant" icon={MessageCircleIcon} active={activeView === "assistant"} onClick={onOpenAssistant} />
     ),

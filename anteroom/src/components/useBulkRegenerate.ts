@@ -44,6 +44,7 @@ export function useBulkRegenerate(chatOpen: (id: string) => boolean) {
     chatOpenRef.current = chatOpen;
   }, [chatOpen]);
   const batches = useRef(new Set<Batch>());
+  const submissions = useRef(new Map<string, AbortController>());
   const [run, setRun] = useState<BulkRegenerateRun | null>(null);
   const [pendingIds, setPendingIds] = useState<string[]>([]);
 
@@ -130,14 +131,32 @@ export function useBulkRegenerate(chatOpen: (id: string) => boolean) {
         },
         async generate(id) {
           const generation = { started: false };
+          // Once a rewrite has wiped a draft, finish submitting it as before.
+          const submission = mode === "generate" ? new AbortController() : undefined;
+          const updateProgress = (update: Pick<BulkRegenerateProgress, "started" | "waiting">) => {
+            const progress = active.get(id);
+            if (progress) {
+              active.set(id, { ...progress, ...update });
+              batch.run = { ...batch.run, active: new Map(active) };
+              refresh();
+            }
+          };
           try {
-            await followListingGeneration(id, {
+            return await followListingGeneration(id, {
+              submissionSignal: submission?.signal,
+              onWaiting: (waiting) => {
+                if (waiting && submission) submissions.current.set(id, submission);
+                else submissions.current.delete(id);
+                updateProgress({ waiting });
+              },
               onStarted: () => {
                 generation.started = true;
                 markChatGenerating(id);
+                updateProgress({ started: true });
               },
             });
           } finally {
+            submissions.current.delete(id);
             if (!generation.started) {
               // The wipe was already on screen and the rewrite never began.
               markChatResetting(id, false);
@@ -187,6 +206,7 @@ export function useBulkRegenerate(chatOpen: (id: string) => boolean) {
     running: run != null,
     run,
     pendingIds,
+    cancelSubmission: (id: string) => submissions.current.get(id)?.abort(),
     start,
     cancel,
   };

@@ -1,4 +1,5 @@
 import type { BulkMarketplacePerform, BulkMarketplaceResult, BulkMarketplaceRow } from "./api/bulkMarketplace";
+import type { MarketplaceTextResult, RuleMarketplace, TextMode } from "./api/listingRules";
 
 export interface MarketplaceTask {
   id: string;
@@ -72,4 +73,44 @@ export async function runMarketplaceTasks(
 
   await Promise.all(Array.from({ length: Math.min(slots, queue.length) }, worker));
   return result;
+}
+
+export interface TextPrepResult {
+  id: string;
+  ok: boolean;
+  /** Fields saved with new text on this item. */
+  changed: number;
+  /** Fields the AI left out, which keep their text. */
+  skipped: number;
+  error?: string;
+}
+
+/**
+ * Prepare each item's marketplace text before review, a few items at a time.
+ * Each item's text is saved as a local edit; nothing is sent. A failed item
+ * keeps its text as it was and is reported, and the others go on.
+ */
+export async function prepareMarketplaceText(
+  ids: readonly string[],
+  marketplaces: RuleMarketplace[],
+  mode: TextMode,
+  prepare: (id: string, body: { marketplaces: RuleMarketplace[]; mode: TextMode }) => Promise<MarketplaceTextResult>,
+  progress: (done: number) => void = () => {},
+): Promise<TextPrepResult[]> {
+  if (mode === "keep" || !ids.length) return ids.map((id) => ({ id, ok: true, changed: 0, skipped: 0 }));
+  const queue = [...ids];
+  const results = new Map<string, TextPrepResult>();
+  async function worker() {
+    for (let id = queue.shift(); id; id = queue.shift()) {
+      try {
+        const reply = await prepare(id, { marketplaces, mode });
+        results.set(id, { id, ok: true, changed: reply.changes.length, skipped: reply.skipped.length });
+      } catch (failure) {
+        results.set(id, { id, ok: false, changed: 0, skipped: 0, error: failure instanceof Error ? failure.message : "Could not prepare the text." });
+      }
+      progress(results.size);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(ITEMS_AT_ONCE, queue.length) }, worker));
+  return ids.map((id) => results.get(id)!);
 }

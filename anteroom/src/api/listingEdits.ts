@@ -1,3 +1,6 @@
+import { MARKETPLACE_PRICE_KEYS } from "../components/nativeFieldCommit";
+import { getListingEditorValue } from "../listingPaths";
+import type { PricingRules } from "./listingRules";
 import type { QueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import { invalidateSheetForListing, refreshInventory } from "./inventoryRefresh";
@@ -6,24 +9,45 @@ import type { ConversationSummary, ListingData, ListingDocument } from "./types"
 import { listingCategorySignature } from "../components/nativeFormStability";
 import { notifyUnsavedWork, registerUnsavedWork } from "../lib/unsavedWork";
 
+function priceInputs(listing: ListingData | undefined): string {
+  const locks = sellerLocks(listing?.seller_fields).filter(path => /price$/i.test(path));
+  return JSON.stringify([listing?.price, listing?._price_followers, locks.map(path => [path, getListingEditorValue(listing, path)]),
+    Object.values(MARKETPLACE_PRICE_KEYS).map(path => getListingEditorValue(listing, path))]);
+}
+
+function sellerLocks(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((path): path is string => typeof path === "string") : [];
+}
+
 /** Keep newer field edits while accepting the server's normalized unchanged fields. */
-function rebase(saved: unknown, before: unknown, after: unknown, checkConflicts = false, path = ""): unknown {
+function rebase(saved: unknown, before: unknown, after: unknown, conflictMessage?: (path: string) => string, path = ""): unknown {
   if (JSON.stringify(before) === JSON.stringify(after)) return saved;
   if (JSON.stringify(saved) === JSON.stringify(after)) return saved;
+  if (path === "seller_fields") {
+    const prior = new Set(sellerLocks(before));
+    const next = new Set(sellerLocks(after));
+    const merged = new Set(sellerLocks(saved).filter(key => !prior.has(key) || next.has(key)));
+    for (const key of next) if (!prior.has(key)) merged.add(key);
+    return merged.size ? [...merged].sort() : undefined;
+  }
   if (!saved || !before || !after || typeof saved !== "object" || typeof before !== "object" || typeof after !== "object" || Array.isArray(saved) || Array.isArray(before) || Array.isArray(after)) {
-    if (checkConflicts && JSON.stringify(saved) !== JSON.stringify(before)) {
-      throw new Error(`The field ${path || "listing"} also changed in the saved listing. Your edits are kept. Copy them before using Discard and reload.`);
+    if (conflictMessage && JSON.stringify(saved) !== JSON.stringify(before)) {
+      throw new Error(conflictMessage(path));
     }
     return after;
   }
   const result = { ...(saved as Record<string, unknown>) };
   for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
-    const value = rebase(result[key], (before as Record<string, unknown>)[key], (after as Record<string, unknown>)[key], checkConflicts, path ? `${path}.${key}` : key);
+    const value = rebase(result[key], (before as Record<string, unknown>)[key], (after as Record<string, unknown>)[key], conflictMessage, path ? `${path}.${key}` : key);
     if (!(key in after) && value === undefined) delete result[key];
     else result[key] = value;
   }
   return result;
 }
+
+const saveConflictMessage = (path: string) =>
+  `The field ${path || "listing"} also changed in the saved listing. Your edits are kept. Copy them before using Discard and reload.`;
+const transformConflictMessage = () => "The listing changed while this action was running. Review your edits and apply it again.";
 
 class ListingEdits {
   private state: { draft: ListingData | null; saving: boolean; error: string | null } = { draft: null, saving: false, error: null };
@@ -76,6 +100,23 @@ class ListingEdits {
     if (!this.state.saving && !this.state.error) void this.flush();
   };
 
+  applyTransform = (before: ListingData, after: ListingData, kind: "pricing" | "shipping") => {
+    // A delayed response can outlive the editor that requested it.
+    const active = queues.get(this.client)?.get(this.id) ?? this;
+    const current = active.state.draft ?? this.client.getQueryData<ListingDocument>(["listing", this.id])?.listing;
+    if (!current) return;
+    // Pricing depends on the item price and marketplace overrides, even if
+    // the result does not edit those inputs.
+    if (kind === "pricing" && priceInputs(current) !== priceInputs(before)) {
+      throw new Error(transformConflictMessage());
+    }
+    const merged = rebase(current, before, after, transformConflictMessage) as ListingData;
+    if (JSON.stringify(current) !== JSON.stringify(merged)) {
+      active.registry.attach(active);
+      active.save(merged);
+    }
+  };
+
   retry = () => {
     if (this.state.saving || !this.state.draft) return;
     this.update({ ...this.state, error: null });
@@ -93,7 +134,7 @@ class ListingEdits {
     try {
       if (refresh) {
         const latest = await api.listings.get(this.id);
-        const merged = rebase(latest.listing, this.base, this.state.draft, true) as ListingData;
+        const merged = rebase(latest.listing, this.base, this.state.draft, saveConflictMessage) as ListingData;
         this.revisionId = latest.current_revision_id ?? "";
         this.base = latest.listing;
         this.update({ ...this.state, draft: merged });
@@ -108,7 +149,7 @@ class ListingEdits {
             await new Promise(resolve => setTimeout(resolve, 1000));
           }
           const latest = await api.listings.get(this.id);
-          const merged = rebase(latest.listing, this.base, this.state.draft, true) as ListingData;
+          const merged = rebase(latest.listing, this.base, this.state.draft, saveConflictMessage) as ListingData;
           this.revisionId = latest.current_revision_id ?? "";
           this.base = latest.listing;
           this.update({ ...this.state, draft: merged });
@@ -126,6 +167,10 @@ class ListingEdits {
         });
         if (listingCategorySignature(previous?.listing) !== listingCategorySignature(result.listing)) {
           void this.client.invalidateQueries({ queryKey: ["listing-fields", this.id] });
+        }
+        if (this.client.getQueryData<PricingRules>(["settings-pricing-rules"])?.enabled
+            && priceInputs(previous?.listing) !== priceInputs(result.listing)) {
+          void this.client.invalidateQueries({ queryKey: ["native-editor-form", this.id] });
         }
         invalidateSheetForListing(this.client, this.id);
         if (!pending) {

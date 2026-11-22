@@ -359,6 +359,8 @@ def _collect_choices(
     notes: str = "",
     override: str = "",
 ) -> tuple[dict[str, list[dict]], dict[str, dict[str, CategoryTreeNode]]]:
+    from anteroom.sandbox import enabled as sandbox_enabled
+
     choices: dict[str, list[dict]] = {}
     nodes_by_marketplace: dict[str, dict[str, CategoryTreeNode]] = {}
     women_tops = _women_tops_intent(analysis, notes, override, query)
@@ -376,6 +378,9 @@ def _collect_choices(
             kind="category",
             top_k=DEFAULT_TOP_K,
             path_prefix=prefix,
+            # A fresh offline sandbox can rank the verified database leaves
+            # without first building the semantic index.
+            ensure=not sandbox_enabled(),
         )
         if not hits:
             hits = [{

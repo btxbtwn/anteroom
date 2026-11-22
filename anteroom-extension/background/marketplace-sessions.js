@@ -78,23 +78,23 @@ async function readMercariSession(now = Date.now()) {
 }
 
 
-async function readExtensionSession(marketplace, now = Date.now()) {
+async function readExtensionSession(marketplace, now = Date.now(), region) {
   try {
     if (marketplace === 'depop') return await cookieSession('https://www.depop.com/', 'access_token');
-    if (marketplace === 'poshmark') return await cookieSession('https://poshmark.com/', 'jwt');
+    if (marketplace === 'poshmark') return await cookieSession(poshmarkOrigin(region) + '/', 'jwt');
     if (marketplace === 'mercari') return await readMercariSession(now);
   } catch { /* one marketplace failing must not blank the others */ }
   return unknownExtensionSession();
 }
 
-async function readExtensionSessions(now = Date.now()) {
-  const entries = await Promise.all(EXTENSION_SESSION_MARKETS.map(async marketplace => [marketplace, await readExtensionSession(marketplace, now)]));
+async function readExtensionSessions(now = Date.now(), region) {
+  const entries = await Promise.all(EXTENSION_SESSION_MARKETS.map(async marketplace => [marketplace, await readExtensionSession(marketplace, now, region)]));
   return Object.fromEntries(entries);
 }
 
 async function handleMarketplaceSessions(msg) {
   try {
-    sendBrowserResult(msg, { ok: true, sessions: await readExtensionSessions() });
+    sendBrowserResult(msg, { ok: true, sessions: await readExtensionSessions(undefined, msg.payload?.seller_region) });
   } catch {
     sendBrowserResult(msg, { ok: false, error: 'Could not check marketplace sign-in.' });
   }
@@ -130,7 +130,8 @@ async function checkDepopSignIn() {
 
 async function handleMarketplaceConnect(msg, reply = result => sendBrowserResult(msg, result)) {
   const marketplace = msg.payload?.marketplace;
-  const url = MARKETPLACE_SIGN_IN[marketplace];
+  const region = msg.payload?.seller_region;
+  const url = marketplace === 'poshmark' && region === 'CA' ? poshmarkOrigin(region) + '/feed' : MARKETPLACE_SIGN_IN[marketplace];
   if (!url || nativeOperationsRunning()) {
     reply({ ok: false, error: url ? 'Wait for the current listing action to finish.' : 'Unsupported marketplace.' });
     return;
@@ -141,7 +142,7 @@ async function handleMarketplaceConnect(msg, reply = result => sendBrowserResult
     const tab = existing || await openMarketplaceTab(url);
     await chrome.tabs.update(tab.id, { active: true });
     await nativeWait(tab.id, value => value.status === 'complete' && String(value.url || '').startsWith(`${origin}/`), Date.now() + 30000);
-    let summary = await readExtensionSession(marketplace);
+    let summary = await readExtensionSession(marketplace, undefined, region);
     if (marketplace === 'depop' && summary.state === 'signed_in') {
       let response;
       try {

@@ -33,3 +33,35 @@ test("Select mode keeps every action off until a listing is picked, and only Del
     await request.delete(`/api/conversations/${id}`);
   }
 });
+
+test("bulk marketplace text reports saved and skipped fields when preview fails", async ({ page, phone, request }, info) => {
+  const title = `Marketplace text ${info.project.name} ${Date.now()}`;
+  const id = await createListing(request, title);
+  try {
+    await page.route(`**/api/listings/bulk-edit/marketplace-text/${id}`, route => route.fulfill({
+      json: { conversation_id: id, revision_id: "saved",
+        changes: [{ marketplace: "ebay", field: "title", old: title, new: "New title" }],
+        skipped: [{ marketplace: "ebay", field: "description", reason: "No text returned" }] },
+    }));
+    await page.route("**/api/listings/marketplace-actions/preview", route =>
+      route.fulfill({ status: 409, json: { detail: "Could not preview the marketplace action" } }));
+    await page.goto("/");
+    if (phone) {
+      await page.getByRole("button", { name: "Open navigation" }).click();
+      await page.getByRole("navigation", { name: "Pages" }).getByRole("button", { name: "Inventory" }).click();
+    }
+    await showStatusTab(page, "Draft");
+    await page.getByRole("button", { name: "Select listings", exact: true }).click();
+    await page.getByRole("list", { name: "Listings" }).getByRole("checkbox", { name: `Select ${title}`, exact: true }).click();
+    await page.getByRole("region", { name: "Bulk listing actions" }).getByRole("button", { name: "Marketplaces", exact: true }).click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("checkbox", { name: "eBay", exact: true }).click();
+    await dialog.getByText("Write with AI", { exact: true }).click();
+    await dialog.getByRole("button", { name: "Review items" }).click();
+    await expect(dialog.getByText("Could not preview the marketplace action", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("Marketplace text: 1 item updated in Anteroom")).toBeVisible();
+    await expect(dialog.getByText("1 field skipped", { exact: false })).toBeVisible();
+  } finally {
+    await request.delete(`/api/conversations/${id}`);
+  }
+});

@@ -21,7 +21,7 @@ let root = createRoot(container);
 afterEach(async () => { await act(() => root.unmount()); root = createRoot(container); });
 const base: ComponentProps<typeof ListingSidebar> = {
   conversations: [], selectedConvId: "one", activeView: "listings", settingsSection: "general", creating: false,
-  onSelect: noop, onDelete: noop, onCreate: noop, onOpenSettings: noop, onOpenAnalytics: noop,
+  onSelect: noop, onDelete: noop, onCreate: noop, onOpenHome: noop, onOpenSettings: noop, onOpenAnalytics: noop,
   onOpenMarketplaces: noop, onOpenAutomations: noop, onOpenAssistant: noop, onOpenSourcing: noop,
   onOpenSuggestions: noop, onToggleInventoryTable: noop, onCloseSettings: noop,
   onSettingsSectionChange: noop, onSettingsSearchResult: noop,

@@ -24,6 +24,17 @@ const LISTING = { title: 'Vintage tee', description: 'Soft cotton tee', price: 1
 const BRANDS = { data: [{ type: 'brand', brand_id: 'd'.repeat(24), brand_name: 'Hanes' }, { type: 'brand', brand_id: 'e'.repeat(24), brand_name: 'Hanes Her Way' }] };
 const STYLE_TAGS = { data: ['Casual', 'Retro', 'Streetwear', 'Vintage'] };
 const CATALOG_READS = ['GET /vm-rest/meta/catalog_v2', 'GET /vm-rest/searches/brands/suggested', 'GET /vm-rest/meta/style_tags/top'];
+
+test('Canadian Poshmark checks the Canadian cookie and uses CAD', async () => {
+  const context = loadWorker();
+  const lookups = [];
+  context.chrome.cookies = { get: async args => { lookups.push(args.url); return null; } };
+  await context.readExtensionSession('poshmark', undefined, 'CA');
+  assert.deepEqual(lookups, ['https://poshmark.ca/']);
+  const post = context.poshmarkPostFields(CATALOG.data, { ...LISTING, _seller_region: 'CA' });
+  assert.equal(post.price_amount.currency_code, 'CAD');
+  assert.equal(context.poshmarkDraftUrl(POST, context.poshmarkOrigin('CA')), `https://poshmark.ca/edit-listing/${POST}`);
+});
 const savedPost = requests => requests.find(r => r.method === 'POST' && r.path === `/vm-rest/posts/${POST}`)?.body.post;
 const PAGE = `<html><script>window.__INITIAL_STATE__={"csrftoken":"page-csrf","userCookies":{"userInfo":{"uid":"${USER}"}}};</script></html>`;
 const page = () => response(200, PAGE, { 'content-type': 'text/html' });

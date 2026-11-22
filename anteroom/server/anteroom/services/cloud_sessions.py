@@ -117,8 +117,8 @@ def _seller_id() -> str:
 
 def _marketplace_domain(marketplace: str, domain: str) -> bool:
     clean = domain.strip().lower().removeprefix(".")
-    root = f"{marketplace}.com"
-    return clean == root or clean.endswith(f".{root}")
+    roots = ("poshmark.com", "poshmark.ca") if marketplace == "poshmark" else (f"{marketplace}.com",)
+    return any(clean == root or clean.endswith(f".{root}") for root in roots)
 
 
 def _jwt_claims(token: str) -> dict[str, Any] | None:
@@ -315,6 +315,8 @@ def serialize_session_row(marketplace: str, row: CloudMarketplaceSession | None)
 
 
 def mint_upload_token(db: Session, marketplace: str) -> dict[str, Any]:
+    from anteroom.services.seller_region import seller_region
+
     market = str(marketplace or "").lower()
     if not is_cloud_enabled(market):
         raise CloudSessionError("Cloud sessions are not enabled for this marketplace.")
@@ -343,9 +345,12 @@ def mint_upload_token(db: Session, marketplace: str) -> dict[str, Any]:
         row.upload_token_expires_at = expires_at
         row.updated_at = now
     _audit(db, market, "token_minted")
+    region = seller_region(db=db).country
     db.commit()
+
     return {
         "marketplace": market,
+        "seller_region": region,
         "token": f"{seller}.{secret_part}",
         "expires_at": expires_at.isoformat(),
         "expires_in": UPLOAD_TOKEN_TTL_S,

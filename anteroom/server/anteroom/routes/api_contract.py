@@ -166,6 +166,21 @@ class DirectRecord(ContractModel):
     """The live listing's price on this marketplace, when Anteroom knows it."""
     listed_at: str | None = None
     """When Anteroom's last confirmed List put this listing up."""
+    inactive: bool = False
+    """Still on the marketplace but not for sale (deactivated, expired, Not For Sale), from
+    Anteroom's latest verified read of that listing. Neither sold nor deleted."""
+
+
+class PriceDrift(ContractModel):
+    """A marketplace price that is not what the seller's pricing rules give."""
+
+    marketplace: str
+    expected: float
+    """The price the pricing rules give this marketplace."""
+    price: float
+    """The price the marketplace has now."""
+    source: Literal["override", "live"]
+    """``override``: a price typed on that marketplace's form. ``live``: the live listing's known price."""
 
 
 class ConversationSummary(ContractModel):
@@ -200,6 +215,10 @@ class ConversationSummary(ContractModel):
     """Marketplaces a sold item sold on, from Anteroom's sales and Mark as sold. Their listing records may still read live."""
     removed_marketplaces: list[str] = []
     """Marketplaces Anteroom delisted directly, though imported history says listed."""
+    inactive_marketplaces: list[str] = []
+    """Marketplaces where the listing is still up but not for sale. Not a sale and not a delist."""
+    price_drift: list[PriceDrift] = []
+    """Marketplace prices that differ from the seller's pricing rules; empty while the rules are off."""
     units_sold: int = 0
     """Units sold on Anteroom's sales ledger. An Active row with some sold reads "1 of 3 sold"."""
     quantity: int | None = None

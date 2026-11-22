@@ -15,6 +15,7 @@ Finished with a note of where it went.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -80,23 +81,27 @@ def difference_hash(path: Path) -> str | None:
     return f"{bits:016x}"
 
 
-def _fingerprints(db: Session, photos: dict[str, str]) -> dict[str, int]:
-    """Cover hashes by checksum, computing and saving the ones not seen before."""
+def _fingerprints(db: Session, photos: dict[str, str], *, compute: bool = True) -> dict[str, int]:
+    """Cover hashes by checksum, optionally computing and saving ones not seen before."""
     from anteroom.models.similar_item import PhotoFingerprint
 
     known = {
         row.checksum: row.dhash
         for row in db.query(PhotoFingerprint).filter(PhotoFingerprint.checksum.in_(list(photos))).all()
     } if photos else {}
-    for checksum, stored in photos.items():
-        if checksum in known:
-            continue
-        try:
-            known[checksum] = difference_hash(photo_store().local_path(stored))
-        except (FileNotFoundError, ValueError):
-            continue
-        db.add(PhotoFingerprint(checksum=checksum, dhash=known[checksum]))
-    db.commit()
+    if compute:
+        added = False
+        for checksum, stored in photos.items():
+            if checksum in known:
+                continue
+            try:
+                known[checksum] = difference_hash(photo_store().local_path(stored))
+            except (FileNotFoundError, ValueError):
+                continue
+            db.add(PhotoFingerprint(checksum=checksum, dhash=known[checksum]))
+            added = True
+        if added:
+            db.commit()
     return {checksum: int(value, 16) for checksum, value in known.items() if value}
 
 
@@ -163,8 +168,11 @@ def _pair(a: str, b: str) -> tuple[str, str]:
     return (a, b) if a < b else (b, a)
 
 
-def find_similar(db: Session) -> dict[str, Any]:
-    """Pairs worth a look, most alike first. Reads and fingerprints photos; changes no item."""
+def find_similar(
+    db: Session, *, compute_fingerprints: bool = True, limit: int = MAX_PAIRS,
+    include_beyond_limit: Callable[[str, str], bool] | None = None,
+) -> dict[str, Any]:
+    """Pairs worth a look, most alike first. Reads and optionally fingerprints photos; changes no item."""
     from anteroom.models.conversation import Photo
     from anteroom.services.photos import cover_thumb_url
 
@@ -223,7 +231,7 @@ def find_similar(db: Session) -> dict[str, Any]:
     stored = dict(
         db.query(Photo.checksum, Photo.stored_filename).filter(Photo.checksum.in_(covers)).all()
     ) if covers else {}
-    hashes = _fingerprints(db, cast(dict[str, str], stored))
+    hashes = _fingerprints(db, cast(dict[str, str], stored), compute=compute_fingerprints)
     for (first, second), entry in found.items():
         first_checksum, second_checksum = items[first].cover_checksum, items[second].cover_checksum
         left = hashes.get(first_checksum) if first_checksum is not None else None
@@ -251,6 +259,16 @@ def find_similar(db: Session) -> dict[str, Any]:
         found.items(),
         key=lambda entry: (-entry[1]["score"], -len(entry[1]["reasons"]), entry[0]),
     )
+    selected = ranked[:limit]
+    if include_beyond_limit is not None:
+        selected = []
+        active = 0
+        for pair, entry in ranked:
+            if include_beyond_limit(*pair):
+                selected.append((pair, entry))
+            elif active < limit:
+                selected.append((pair, entry))
+                active += 1
     return {
         "total": len(ranked),
         "pairs": [
@@ -262,7 +280,7 @@ def find_similar(db: Session) -> dict[str, Any]:
                 "photo_distance": entry.get("photo_distance"),
                 "title_score": entry.get("title_score"),
             }
-            for (first, second), entry in ranked[:MAX_PAIRS]
+            for (first, second), entry in selected
         ],
     }
 

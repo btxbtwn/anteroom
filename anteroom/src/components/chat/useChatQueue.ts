@@ -1,79 +1,113 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
+import type { ChatAttachmentUpload } from "../../api/types";
 import {
   enqueueChatMessage,
   newQueuedChatMessage,
+  promoteChatMessage,
   removeChatMessage,
+  returnChatMessage,
+  steerChatMessage,
   takeNextChatMessage,
+  useChatQueueItems,
   type QueuedChatMessage,
-} from "../chatMessageQueue";
+} from "./chatQueueStore";
 import { getLive } from "./liveChatStore";
+
+/** Images a queued listing follow-up carries, already prepared for upload. */
+export type ListingQueuePayload = { attachments: ChatAttachmentUpload[] };
+
+/** Listings sending a queued message right now; one at a time per listing, any number across them. */
+const draining = new Set<string>();
+const drainListeners = new Set<() => void>();
+function subscribeDrain(listener: () => void) {
+  drainListeners.add(listener);
+  return () => { drainListeners.delete(listener); };
+}
+function notifyDrain() {
+  for (const listener of drainListeners) listener();
+}
+
+export function listingQueueKey(convId: string) {
+  return `listing:${convId}`;
+}
 
 interface Options {
   convId: string;
   busy: boolean;
   /** Background listing work (a field fill after a save). A held follow-up waits for it. */
   serverBusy: boolean;
-  sendMessage: (text: string) => Promise<boolean>;
+  /** Hold the queue while one of its messages is being edited. */
+  paused?: boolean;
+  sendMessage: (text: string, attachments: ChatAttachmentUpload[]) => Promise<boolean>;
+  /** Cut off the reply being written; false when nothing can take a steer. */
+  interruptAnswer: () => Promise<boolean>;
   queuedMessage: string | null | undefined;
   onQueuedMessageConsumed: (() => void) | undefined;
   pinChatToBottom: () => void;
 }
 
-/** Follow-ups held client-side while a run is going, sent one at a time when it settles. */
+/**
+ * Follow-ups held while a run is going, sent one at a time when it settles.
+ * They live in the shared queue store, so they outlast this panel.
+ */
 export function useChatQueue({
   convId,
   busy,
   serverBusy,
+  paused = false,
   sendMessage,
+  interruptAnswer,
   queuedMessage,
   onQueuedMessageConsumed,
   pinChatToBottom,
 }: Options) {
-  // Follow-ups typed while a run is still writing — same idea as T3 Code's
-  // composer queue: hold them client-side and send when the turn settles.
-  const [pendingQueue, setPendingQueue] = useState<QueuedChatMessage[]>([]);
-  const drainLockRef = useRef(false);
-
-  useEffect(() => {
-    setPendingQueue([]);
-    drainLockRef.current = false;
-  }, [convId]);
+  const key = listingQueueKey(convId);
+  const sending = useSyncExternalStore(subscribeDrain, () => draining.has(key), () => false);
+  const pendingQueue = useChatQueueItems<ListingQueuePayload>(key);
 
   // Ask-chat prompts from the inspector join the same queue as typed follow-ups.
   useEffect(() => {
     if (!queuedMessage) return;
     const text = queuedMessage;
     onQueuedMessageConsumed?.();
-    setPendingQueue((queue) => enqueueChatMessage(queue, newQueuedChatMessage(text)));
+    enqueueChatMessage(key, newQueuedChatMessage(text));
     pinChatToBottom();
-  }, [queuedMessage, onQueuedMessageConsumed, pinChatToBottom]);
+  }, [key, queuedMessage, onQueuedMessageConsumed, pinChatToBottom]);
 
   // serverBusy is a dependency, not a cache read: the fill a chat save starts
   // ends after the reply does, and the held follow-up must send when it ends.
   useEffect(() => {
-    if (busy || serverBusy || pendingQueue.length === 0 || drainLockRef.current) return;
+    if (sending || busy || serverBusy || paused || pendingQueue.length === 0 || draining.has(key)) return;
     const liveState = getLive(convId);
     if (liveState.streaming || liveState.generating || liveState.resetting) return;
-    const { next, rest } = takeNextChatMessage(pendingQueue);
+    const next = takeNextChatMessage<ListingQueuePayload>(key);
     if (!next) return;
-    drainLockRef.current = true;
-    setPendingQueue(rest);
-    void sendMessage(next.text).then((started) => {
-      if (!started) {
-        setPendingQueue((queue) => [next, ...queue]);
-      }
+    draining.add(key);
+    notifyDrain();
+    void sendMessage(next.text, next.payload?.attachments ?? []).then((started) => {
+      if (!started) returnChatMessage(key, next);
     }).finally(() => {
-      drainLockRef.current = false;
+      draining.delete(key);
+      notifyDrain();
     });
-  }, [busy, serverBusy, pendingQueue, sendMessage, convId]);
+  }, [sending, busy, serverBusy, paused, pendingQueue, sendMessage, convId, key]);
 
-  const enqueue = useCallback((message: QueuedChatMessage) => {
-    setPendingQueue((queue) => enqueueChatMessage(queue, message));
-  }, []);
+  const enqueue = useCallback((message: QueuedChatMessage) => enqueueChatMessage(key, message), [key]);
 
-  const handleRemoveQueued = useCallback((id: string) => {
-    setPendingQueue((queue) => removeChatMessage(queue, id));
-  }, []);
+  /** Send this follow-up next, cutting off the reply being written when it can take a steer. */
+  const steer = useCallback(async (message: QueuedChatMessage) => {
+    steerChatMessage(key, message);
+    pinChatToBottom();
+    await interruptAnswer();
+  }, [key, interruptAnswer, pinChatToBottom]);
 
-  return { pendingQueue, enqueue, handleRemoveQueued };
+  const sendNow = useCallback(async (id: string) => {
+    promoteChatMessage(key, id);
+    await interruptAnswer();
+  }, [key, interruptAnswer]);
+
+  const handleRemoveQueued = useCallback((id: string) => removeChatMessage(key, id), [key]);
+
+  /** True while a queued message is on its way, its server check included; a new message waits behind it. */
+  return { key, pendingQueue, sending, enqueue, steer, sendNow, handleRemoveQueued };
 }

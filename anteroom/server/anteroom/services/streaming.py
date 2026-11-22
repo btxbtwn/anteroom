@@ -127,7 +127,8 @@ async def _pump_generation(run: GenerationRun, work) -> None:
     try:
         await work(run)
     except asyncio.CancelledError:
-        pass
+        run.publish(sse_event("error", "Generation stopped."))
+        run.publish("data: [DONE]\n\n")
     except Exception:
         log.exception("listing generation pump failed")
     finally:
