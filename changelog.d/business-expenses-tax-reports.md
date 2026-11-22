@@ -1,2 +1,0 @@
-- Track business expenses and mileage, import expenses from a spreadsheet, and export a cash or accrual profit and loss report.
-- Compare units listed and sell-through with the preceding period in Analytics.
