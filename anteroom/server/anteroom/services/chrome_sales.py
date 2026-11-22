@@ -144,6 +144,7 @@ async def check_item(conv_id: str, *, session_factory=None) -> dict:
     what a marketplace tells it. Only the listing IDs travel, and nothing on
     any marketplace changes.
     """
+    from anteroom.services import cloud_sessions
     from anteroom.services.extension_connection import current_extension
 
     extension_manager = current_extension()
@@ -154,8 +155,13 @@ async def check_item(conv_id: str, *, session_factory=None) -> dict:
         result["skipped"] = "No live listing to check."
         return result
     if not extension_manager.connected:
-        result.update(ok=False, skipped="Connect Chrome first.")
-        return result
+        cloud_wanted = await asyncio.to_thread(
+            lambda: {name: listing_id for name, listing_id in wanted.items() if cloud_sessions.has_active_session(name)}
+        )
+        if not cloud_wanted:
+            result.update(ok=False, skipped="Connect Chrome first.")
+            return result
+        wanted = cloud_wanted
     now = time.time()
     due = {name: listing_id for name, listing_id in wanted.items()
            if now - _item_read.get(_market_key(name), 0) >= ITEM_GAP_S}
@@ -193,7 +199,7 @@ def _line_ids(session_factory, conv_id: str) -> set[str]:
         return {row[0] for row in db.query(MarketplaceSale.id).filter(MarketplaceSale.conversation_id == conv_id).all()}
 
 
-async def check_due() -> None:
+async def check_due(*, marketplaces: tuple[str, ...] | None = None) -> None:
     """Check one shop. The others wait for their own turn, on uneven gaps.
 
     Nothing is checked while this Mac's window shows the seller's account,
@@ -204,7 +210,7 @@ async def check_due() -> None:
     if account_shown():
         return
     now = time.time()
-    for marketplace in CHROME_MARKETS:
+    for marketplace in (marketplaces if marketplaces is not None else CHROME_MARKETS):
         if not sale_detection_enabled(marketplace):
             clear_check_error(marketplace)
             _next.pop(_market_key(marketplace), None)

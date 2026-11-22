@@ -87,7 +87,7 @@ import type { AgentConnectionStatus, AgentConnectionTest } from "./agentConnecti
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus, StillListedResponse } from "./directConnections";
 import type { DelistMarketplace, MarketplaceListings, MarketplaceMark, SalesCheck, SellerSale, SellerSaleResult } from "./marketplaceListings";
 import type { ListingReadiness, NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight } from "./nativeMarketplaces";
-import type { ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
+import type { CloudConnectTokenResponse, ExtensionSessionConnect, ExtensionSessionMarket, ExtensionSessions } from "./marketplaceSessions";
 import type { EbayOffer, EbayOfferSelection, EbayOffersStatus } from "./ebayOffers";
 import type { EbayListing, EbayPageData, EbayPayload, EbayResult, EbayReview } from "./ebay";
 import type { ChromeImportMarketplace, MarketplaceImportHeld, MarketplaceImportPage, MarketplaceImportResult } from "./inventoryImport";
@@ -840,6 +840,12 @@ export const api = {
     status: () => request<ExtensionSessions>("/marketplaces/sessions"),
     connect: (marketplace: ExtensionSessionMarket) =>
       request<ExtensionSessionConnect>(`/marketplaces/${marketplace}/connect`, { method: "POST" }),
+  },
+  cloudSessions: {
+    connectToken: (marketplace: ExtensionSessionMarket) =>
+      request<CloudConnectTokenResponse>(`/cloud-sessions/${marketplace}/connect-token`, { method: "POST" }),
+    disconnect: (marketplace: ExtensionSessionMarket) =>
+      request<OkResponse>(`/cloud-sessions/${marketplace}`, { method: "DELETE" }),
   },
   marketplaceListings: {
     get: (convId: string, options?: ReadOptions) => read<MarketplaceListings>(`/conversations/${convId}/marketplace-listings`, options),

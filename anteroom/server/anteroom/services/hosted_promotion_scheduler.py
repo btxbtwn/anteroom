@@ -31,8 +31,8 @@ def _prepare_seller(db, owner: str, recovered: set[str]) -> None:
 async def check_seller(owner: str, recovered: set[str]) -> None:
     with use(for_seller(owner)):
         await in_worker_session(_prepare_seller, owner, recovered)
-        await promotion_automations.check_new_likes()
-        await promotion_automations.tick()
+        await promotion_automations.check_new_likes(skip_cloud=True)
+        await promotion_automations.tick(skip_cloud=True)
 
 
 async def check_ready_sellers(recovered: set[str]) -> None:
@@ -61,3 +61,38 @@ async def serve() -> None:
         # Enabling a rule or starting the API never sends as a side effect.
         await asyncio.sleep(promotion_automations.TICK_S)
         await check_ready_sellers(recovered)
+
+
+async def check_cloud_seller(owner: str, marketplaces: tuple[str, ...], recovered: set[str]) -> None:
+    try:
+        with use(for_seller(owner)):
+            await in_worker_session(_prepare_seller, owner, recovered)
+            await promotion_automations.check_new_likes(marketplaces=marketplaces)
+            await promotion_automations.tick(marketplaces=marketplaces)
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 - a seller's failed round must not stop others
+        log.exception('Cloud promotion check failed for one seller; unknown sends are never retried')
+
+
+async def check_cloud_sellers(engine, recovered: set[str]) -> None:
+    from anteroom.services import cloud_sessions
+
+    owners_by_seller: dict[str, list[str]] = {}
+    for marketplace in sorted(cloud_sessions.SUPPORTED_CLOUD_MARKETPLACES):
+        owners = await asyncio.to_thread(cloud_sessions.active_owners, engine, marketplace)
+        for seller in owners:
+            owners_by_seller.setdefault(seller, []).append(marketplace)
+    if not owners_by_seller:
+        return
+    await asyncio.gather(*(
+        check_cloud_seller(seller, tuple(markets), recovered)
+        for seller, markets in owners_by_seller.items()
+    ))
+
+
+async def serve_cloud(engine) -> None:
+    recovered: set[str] = set()
+    while True:
+        await asyncio.sleep(promotion_automations.TICK_S)
+        await check_cloud_sellers(engine, recovered)

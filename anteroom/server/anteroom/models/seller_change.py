@@ -42,6 +42,7 @@ TOPIC_BY_TABLE: dict[str, str | None] = {
     "fill_log_entries": "jobs",
     "user_preferences": "settings",
     "user_secret_references": "settings",
+    "cloud_marketplace_sessions": "settings",
     "listing_templates": "settings",
     "assistant_threads": "assistant",
     "assistant_messages": "assistant",
@@ -68,6 +69,8 @@ TOPIC_BY_TABLE: dict[str, str | None] = {
     "scout_checks": "sourcing",
     # Streamed generation progress: the device running it already polls live.
     "background_task_events": None,
+    "cloud_operation_journals": None,
+    "cloud_session_audit": None,
     "category_field_schemas": None,
     "category_nodes": None,
     "category_schemas": None,

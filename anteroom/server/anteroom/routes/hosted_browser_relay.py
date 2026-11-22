@@ -62,7 +62,8 @@ class Heartbeat(BaseModel):
     capabilities: list[Literal['marketplace.actions',
                                'marketplace.sessions', 'marketplace.sales_history',
                                'marketplace.promotions', 'marketplace.import', 'vendoo.drafts',
-                               'marketplace.signed_approvals', 'marketplace.signed_commands']] = Field(max_length=12)
+                               'marketplace.signed_approvals', 'marketplace.signed_commands',
+                               'marketplace.cloud_connect']] = Field(max_length=12)
 
 
 @router.post('/heartbeat')

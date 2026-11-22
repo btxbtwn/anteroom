@@ -35,3 +35,36 @@ async def serve() -> None:
     while True:
         await asyncio.sleep(chrome_sales.POLL_INTERVAL_S)
         await check_ready_sellers()
+
+
+async def check_cloud_seller(seller: str, marketplaces: tuple[str, ...]) -> None:
+    try:
+        with use(for_seller(seller)):
+            await chrome_sales.check_due(marketplaces=marketplaces)
+            sale_delist_followup.start()
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 - a failed seller must not stop other checks
+        log.exception('Cloud sale check failed for one seller')
+
+
+async def check_cloud_sellers(engine) -> None:
+    from anteroom.services import cloud_sessions
+
+    owners_by_seller: dict[str, list[str]] = {}
+    for marketplace in sorted(cloud_sessions.SUPPORTED_CLOUD_MARKETPLACES):
+        owners = await asyncio.to_thread(cloud_sessions.active_owners, engine, marketplace)
+        for seller in owners:
+            owners_by_seller.setdefault(seller, []).append(marketplace)
+    if not owners_by_seller:
+        return
+    await asyncio.gather(*(
+        check_cloud_seller(seller, tuple(markets))
+        for seller, markets in owners_by_seller.items()
+    ))
+
+
+async def serve_cloud(engine) -> None:
+    while True:
+        await asyncio.sleep(chrome_sales.POLL_INTERVAL_S)
+        await check_cloud_sellers(engine)

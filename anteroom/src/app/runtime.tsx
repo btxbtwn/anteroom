@@ -1,4 +1,5 @@
 import { createContext, useContext, type ReactNode } from "react";
+import type { BrowserAccount } from "../api/cloudExtension";
 import type { WorkspaceRuntime as HostedRuntime } from "../api/types";
 
 export type WorkspaceFeature = HostedRuntime["features"][number];
@@ -10,6 +11,7 @@ export interface WorkspaceRuntime {
   /** Marketplaces this app can list on, update and delist from. */
   actionMarketplaces: ReadonlySet<string>;
   accountControls?: ReactNode;
+  account?: BrowserAccount;
 }
 export const desktopRuntime: WorkspaceRuntime = {
   hosted: false,

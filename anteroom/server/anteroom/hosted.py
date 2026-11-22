@@ -210,6 +210,12 @@ class SellerSessionMiddleware:
             return
         if scope["type"] != "http" or (
             (scope["path"] in {"/api/health", "/api/ready", "/api/auth-config"} and scope["method"] == "GET")
+            or (
+                scope["method"] == "POST"
+                and scope["path"].startswith("/api/cloud-sessions/")
+                and scope["path"].endswith("/upload")
+                and scope["path"].count("/") == 4
+            )
             or scope["path"].startswith("/internal/")
             or (scope["method"] in {"GET", "HEAD"} and scope["app"].state.web_dir is not None
                 and (scope["path"] in {"/", "/favicon.png", "/privacy", "/terms", "/robots.txt"} or scope["path"].startswith("/assets/")))
@@ -357,7 +363,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             from anteroom.database import engine
             from anteroom.services import (
                 background_worker, hosted_automation_scheduler, hosted_job_watchdog, hosted_offer_scheduler,
-                hosted_sourcing_scheduler, hosted_sales_scheduler,
+                hosted_promotion_scheduler, hosted_sale_checks, hosted_sourcing_scheduler, hosted_sales_scheduler,
             )
             from anteroom.services import background_tasks as queue
             from anteroom.routes.assistant import answer_task
@@ -390,6 +396,9 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
                 # Refreshes each seller's due buy list, as the Mac's Sourcing timer does.
                 (lambda: hosted_sourcing_scheduler.serve(engine), 'anteroom-sourcing'),
                 (lambda: hosted_sales_scheduler.serve(engine), 'anteroom-sales'),
+                # Cloud marketplace sales and promotion schedulers run only on worker/all Machines.
+                (lambda: hosted_sale_checks.serve_cloud(engine), 'anteroom-cloud-sales'),
+                (lambda: hosted_promotion_scheduler.serve_cloud(engine), 'anteroom-cloud-promotions'),
             ])
         if os.environ.get('ANTEROOM_BACKGROUND_WORKER') == '1' and app.state.process_role != 'worker':
             from anteroom.services import hosted_promotion_scheduler, hosted_sale_checks
@@ -535,6 +544,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     from anteroom.routes.hosted_browser_relay import router as browser_relay_router, sessions_router
     app.include_router(browser_relay_router)
     app.include_router(sessions_router)
+    from anteroom.routes.cloud_sessions import router as cloud_sessions_router
+    app.include_router(cloud_sessions_router)
     from anteroom.routes import listing_promotions, promotion_automations
     app.include_router(listing_promotions.router)
     app.include_router(promotion_automations.router)

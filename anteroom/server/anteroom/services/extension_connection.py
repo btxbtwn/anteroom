@@ -491,9 +491,24 @@ async def _web_chrome(command: str, payload: dict, timeout: float) -> dict | Non
 async def marketplace_sessions():
     from types import SimpleNamespace
 
-    from anteroom.services import browser_bridge
+    from anteroom.database import in_worker_session
+    from anteroom.services import browser_bridge, cloud_sessions
 
-    raw = await _web_chrome("marketplace.sessions", {}, 25)
+    cloud_enabled = cloud_sessions.enabled_marketplaces()
+    cloud_map: dict[str, dict] = {}
+    if cloud_enabled:
+        cloud_map = await in_worker_session(lambda db: cloud_sessions.public_sessions(db))
+
+    chrome_connected = True
+    raw = None
+    try:
+        raw = await _web_chrome("marketplace.sessions", {}, 25)
+    except HTTPException as exc:
+        if cloud_enabled and exc.status_code == 409:
+            chrome_connected = False
+            raw = {"sessions": {}}
+        else:
+            raise
     try:
         if raw is None:
             raw = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.sessions", {}, timeout=20)
@@ -503,7 +518,42 @@ async def marketplace_sessions():
     sessions = raw.get("sessions") if isinstance(raw, dict) else None
     if not isinstance(sessions, dict):
         raise HTTPException(502, "Chrome did not report marketplace sign-in.")
-    return {"sessions": {name: _public_session(sessions.get(name)) for name in _SESSION_MARKETS}}
+
+    result_sessions: dict[str, dict] = {}
+    for name in _SESSION_MARKETS:
+        chrome_summary = _public_session(sessions.get(name)) if chrome_connected else _public_session(None)
+        if name in cloud_map:
+            cloud_meta = cloud_map[name]
+            if cloud_meta.get("cloud_connected"):
+                result_sessions[name] = {
+                    **_public_session(cloud_meta),
+                    "mode": "cloud",
+                    "cloud_available": True,
+                    "cloud_connected": True,
+                    "cloud_state": cloud_meta.get("state", "signed_in"),
+                    "last_used_at": cloud_meta.get("last_used_at"),
+                }
+            else:
+                use_cloud_state = (not chrome_connected) or (
+                    chrome_summary["state"] in {"signed_out", "unknown"} and cloud_meta.get("state") == "expired"
+                )
+                base = _public_session(cloud_meta) if use_cloud_state else chrome_summary
+                result_sessions[name] = {
+                    **base,
+                    "mode": "cloud" if use_cloud_state else "chrome",
+                    "cloud_available": True,
+                    "cloud_connected": False,
+                    "cloud_state": cloud_meta.get("state", "signed_out"),
+                    "last_error": cloud_meta.get("last_error"),
+                }
+        else:
+            result_sessions[name] = chrome_summary
+
+    response: dict = {"sessions": result_sessions}
+    if cloud_enabled:
+        response["chrome_connected"] = chrome_connected
+        response["cloud_available"] = sorted(cloud_enabled)
+    return response
 
 
 async def connect_marketplace(marketplace: str):
@@ -619,12 +669,17 @@ async def extension_websocket(ws: WebSocket):
         db.close()
 
 
-def marketplace_actions_refusal() -> str | None:
+def marketplace_actions_refusal(marketplace: str | None = None) -> str | None:
     """Why Chrome cannot run a marketplace action now, or None when it can."""
     from anteroom.services.service_context import current
 
     context = current()
     if context is not None:
+        if marketplace:
+            from anteroom.services import cloud_sessions
+
+            if cloud_sessions.has_active_session(marketplace):
+                return None
         from anteroom.services.hosted_browser_relay import relay_for
 
         return relay_for(context.seller_id).refusal()

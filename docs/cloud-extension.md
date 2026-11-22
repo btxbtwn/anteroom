@@ -247,4 +247,31 @@ The hosted promotion timer uses each connected seller's row-secured context.
 Rules are saved off; enabling one requires the seller's confirmation. Existing
 minimums, daily caps, cooldowns and stop conditions apply. The first timer pass
 waits a full tick; interrupted or unconfirmed sends stay unknown and pause their
-rule. Disconnecting Chrome suspends checks until a capable tab reconnects.
+rule. Disconnecting Chrome suspends Chrome-only checks until a capable tab
+reconnects; sellers with an active Poshmark Cloud session continue running
+Poshmark sale checks and promotions on the worker while Chrome is closed.
+
+## Poshmark Cloud session connect (Bridge 0.2.84)
+
+Bridge 0.2.84 adds `marketplace.cloud_connect` (`cloud_session_connect` message) so
+a seller on `https://myanteroom.com` can opt in to Poshmark Cloud execution:
+
+1. The web app calls `POST /api/cloud-sessions/poshmark/connect-token`, which mints
+   a 120-second single-use upload token (`<accountId>.<random>`), stores only its
+   SHA-256 hash on the seller's `cloud_marketplace_sessions` row, and returns
+   `upload_token` and `upload_url`.
+2. The page posts `{ marketplace: "poshmark", uploadToken, uploadUrl }` to the
+   content script. The worker validates the approved connection, checks that
+   `uploadToken`'s UUID prefix matches the approved `accountId`, checks that
+   `uploadUrl` targets the exact allowed hosted origin's
+   `/api/cloud-sessions/poshmark/upload` path, and opens the extension-owned
+   `cloud-session-connect.html` confirmation window.
+3. Only after the seller explicitly clicks **Connect Poshmark in Cloud** in that
+   extension popup does the worker read `poshmark.com` cookies via
+   `chrome.cookies.getAll` and upload them directly over HTTPS to `uploadUrl` with
+   `X-Cloud-Upload-Token` and `credentials: "omit"`.
+4. Cookies never enter page JavaScript, never cross `window.postMessage`, and
+   Supabase JWTs never enter the extension. The server consumes the token atomically
+   (preventing replay), strips any non-Poshmark cookies, verifies a valid unexpired
+   Poshmark `jwt` cookie, and writes the encrypted payload to Supabase Vault.
+

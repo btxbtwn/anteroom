@@ -1,0 +1,13 @@
+{
+  "name": "anteroom-cloud-runner",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Isolated single-operation Node runner for server-side Poshmark cloud sessions.",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "impit": "0.14.9",
+    "tough-cookie": "6.1.0"
+  }
+}

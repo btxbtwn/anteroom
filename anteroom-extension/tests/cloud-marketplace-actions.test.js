@@ -55,7 +55,7 @@ async function setup() {
 test('an approved page relays the seller command with its photos and gets the Bridge reply', async () => {
   const s = await setup();
   await s.connect();
-  assert.deepEqual((await s.page('status')).supportedActions, ['marketplace.actions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_commands']);
+  assert.deepEqual((await s.page('status')).supportedActions, ['marketplace.actions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_commands', 'marketplace.cloud_connect']);
   const result = await s.page('marketplace_command', ALICE, { command: await s.sign(execute(), ALICE, { photos: [photo] }), photos: [photo] });
   assert.deepEqual(result, { ok: true, reply: { ok: true, state: 'published' } });
   assert.equal(s.runs.length, 1);
@@ -186,5 +186,5 @@ test('reads take only their own inputs and no job', async () => {
   ]) assert.equal(CloudMarketplaceProtocol.command(command), null, JSON.stringify(command));
   const s = await setup();
   await s.connect();
-  assert.deepEqual((await s.page('status')).supportedActions, ['marketplace.actions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_commands']);
+  assert.deepEqual((await s.page('status')).supportedActions, ['marketplace.actions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_commands', 'marketplace.cloud_connect']);
 });

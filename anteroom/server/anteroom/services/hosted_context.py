@@ -141,16 +141,22 @@ class VaultSecretStore:
 
     def get(self, account):
         if account not in self._cache:
-            stage = 'session'
-            try:
-                with self.sessions() as db:
-                    stage = 'read'
-                    self._cache[account] = self._read(db, account)
-                    stage = 'close'
-            except SQLAlchemyError as exc:
-                _storage_failure('get', stage, exc)
-                raise CredentialStorageUnavailable() from None
+            return self.get_fresh(account)
         return self._cache[account]
+
+    def get_fresh(self, account):
+        """Read directly from Vault, bypassing the per-request cache."""
+        stage = 'session'
+        try:
+            with self.sessions() as db:
+                stage = 'read'
+                value = self._read(db, account)
+                stage = 'close'
+        except SQLAlchemyError as exc:
+            _storage_failure('get', stage, exc)
+            raise CredentialStorageUnavailable() from None
+        self._cache[account] = value
+        return value
 
     def set(self, account, value):
         self.update(account, lambda _previous: value)

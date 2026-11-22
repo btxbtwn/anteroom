@@ -222,6 +222,11 @@ def load_models() -> None:
         ItemPriceBaseline,
     )
     from anteroom.models.generation_timing import GenerationTiming  # noqa: F401
+    from anteroom.models.cloud_session import (  # noqa: F401
+        CloudMarketplaceSession,
+        CloudOperationJournal,
+        CloudSessionAudit,
+    )
     from anteroom.models.catalog import (  # noqa: F401
         CategoryFieldSchema,
         CategoryNode,
@@ -255,6 +260,9 @@ BACKFILLED_COLUMNS: dict[str, dict[str, str]] = {
     },
     "field_registry": {
         "options_source": "VARCHAR",
+    },
+    "marketplace_listings": {
+        "executor": "VARCHAR(16)",
     },
 }
 

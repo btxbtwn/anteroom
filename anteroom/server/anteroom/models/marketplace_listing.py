@@ -55,8 +55,10 @@ class MarketplaceListing(SellerOwned, Base):
     # the jobs these rows name, and deleting the item deletes both.
     action: Mapped[str | None] = mapped_column(String, nullable=True)
     job_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
-    # The id Chrome journals the action under; each step of a List has its own.
+    # The id Chrome or Cloud journals the action under; each step of a List has its own.
     operation_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Which executor started the active or last action ("cloud" or "chrome"); pins recovery/cancel.
+    executor: Mapped[str | None] = mapped_column(String(16), nullable=True)
     revision_id: Mapped[str | None] = mapped_column(String, nullable=True)
     previous_revision_id: Mapped[str | None] = mapped_column(String, nullable=True)
     draft_url: Mapped[str | None] = mapped_column(String, nullable=True)

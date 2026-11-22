@@ -245,12 +245,26 @@ async def run(*, session_factory=None) -> None:
 
 
 async def _follow(conv_id: str, sale_id: str, targets: dict[str, str]) -> None:
-    """Delist the pinned listings, eBay and Etsy apart from Chrome's, so Chrome away never holds up an API delist."""
+    """Delist server-side marketplaces (eBay, Etsy, and cloud-connected) apart from Chrome-only ones."""
+    from anteroom.services import cloud_sessions
     from anteroom.services.marketplace_delist import BROWSER_MARKETPLACES
 
-    groups = ({name: item for name, item in targets.items() if name not in BROWSER_MARKETPLACES},
-              {name: item for name, item in targets.items() if name in BROWSER_MARKETPLACES})
-    for group in groups:
+    def _cloud_ready() -> set[str]:
+        return {
+            name for name in targets
+            if name in BROWSER_MARKETPLACES and cloud_sessions.has_active_session(name)
+        }
+
+    cloud_ready = await asyncio.to_thread(_cloud_ready)
+    server_side = {
+        name: item for name, item in targets.items()
+        if name not in BROWSER_MARKETPLACES or name in cloud_ready
+    }
+    chrome_only = {
+        name: item for name, item in targets.items()
+        if name in BROWSER_MARKETPLACES and name not in cloud_ready
+    }
+    for group in (server_side, chrome_only):
         if group:
             await _follow_group(conv_id, sale_id, group)
 

@@ -99,3 +99,52 @@ async def read_chrome(body: ChromeRead, authorization: str | None = Header(defau
         text = str(exc)
         return {'ok': False, 'error': text if text and len(text) <= 200 else 'Chrome did not answer in time. Try again.'}
     return {'ok': True, 'reply': reply}
+
+
+class CloudMarketplaceExecute(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    user_id: str
+    marketplace: Literal['poshmark']
+    command: dict
+    photos: list[dict] = Field(default_factory=list)
+    approved_photos: list[dict] = Field(default_factory=list)
+    timeout: float = Field(default=180.0, ge=5.0, le=300.0)
+
+
+@router.post('/cloud-marketplace/execute')
+async def execute_cloud_marketplace(body: CloudMarketplaceExecute, authorization: str | None = Header(default=None)):
+    _authorized(authorization)
+    from anteroom.services import cloud_marketplace
+    from anteroom.services.cloud_sessions import CloudSessionDecryptForbidden
+    from anteroom.services.hosted_context import for_seller
+    from anteroom.services.service_context import use
+
+    owner = _owner(body.user_id)
+    with use(for_seller(owner)):
+        try:
+            result = await cloud_marketplace.execute_local(
+                body.marketplace,
+                body.command,
+                photos=body.photos or None,
+                approved_photos=body.approved_photos or None,
+                timeout=body.timeout,
+            )
+        except CloudSessionDecryptForbidden:
+            raise HTTPException(404, 'Not found') from None
+    return {'ok': True, 'result': result}
+
+
+class CloudMarketplaceCancel(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    user_id: str
+    job_id: str = Field(max_length=128)
+
+
+@router.post('/cloud-marketplace/cancel')
+async def cancel_cloud_marketplace(body: CloudMarketplaceCancel, authorization: str | None = Header(default=None)):
+    _authorized(authorization)
+    from anteroom.services import cloud_marketplace
+
+    cancelled = await cloud_marketplace.cancel_local(_owner(body.user_id), body.job_id)
+    return {'ok': True, 'cancelled': bool(cancelled)}
+

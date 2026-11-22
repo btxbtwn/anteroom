@@ -6,7 +6,8 @@ const MARKETPLACE_SIGN_IN = {
 const EXTENSION_SESSION_MARKETS = ['depop', 'poshmark', 'mercari'];
 const SESSION_EXPIRING_MS = 24 * 60 * 60 * 1000;
 
-// Cookie and token values stay in Chrome. Callers receive only this summary.
+// Session status checks return only this summary. Cookies stay in Chrome unless
+// the seller explicitly approves connecting Poshmark in Anteroom Cloud.
 function sessionLabel(record) {
   if (!record || typeof record !== 'object') return null;
   for (const key of ['username', 'user_name', 'name', 'handle', 'email']) {

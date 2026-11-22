@@ -29,7 +29,7 @@ const ERRORS: Record<string, string> = {
   rate_limited: "Poshmark asked you to wait. Try again later.",
   schema_drift: "Poshmark's form changed. Anteroom needs an update before showing it.",
 };
-const BRIDGE_ACTIONS = ["poshmark.form.read", "marketplace.actions", "marketplace.sessions", "marketplace.sales_history", "marketplace.promotions", "marketplace.import", "vendoo.drafts", "marketplace.signed_approvals", "marketplace.signed_commands"];
+const BRIDGE_ACTIONS = ["poshmark.form.read", "marketplace.actions", "marketplace.sessions", "marketplace.sales_history", "marketplace.promotions", "marketplace.import", "vendoo.drafts", "marketplace.signed_approvals", "marketplace.signed_commands", "marketplace.cloud_connect"];
 /** The connection a Bridge reported, keeping only states and actions this page knows. */
 function toConnection(data: Record<string, unknown>): CloudConnection {
   const state = data.state === "connected" || data.state === "disconnected" || data.state === "pending" ? data.state : "unavailable";
@@ -38,8 +38,9 @@ function toConnection(data: Record<string, unknown>): CloudConnection {
     supportedActions: Array.isArray(data.supportedActions) ? data.supportedActions.filter((item): item is string => typeof item === "string" && BRIDGE_ACTIONS.includes(item)) : [] };
 }
 export function cloudExtension(account: BrowserAccount, channel: Window = window) {
-  function send(action: "status" | "connect" | "disconnect" | "poshmark_form" | "marketplace_command",
-    listing?: Record<string, string | number | null>, relay?: { command: RelayedCommand; photos: RelayedPhoto[] }): Promise<Record<string, unknown>> {
+  function send(action: "status" | "connect" | "disconnect" | "poshmark_form" | "marketplace_command" | "cloud_session_connect",
+    listing?: Record<string, string | number | null>, relay?: { command: RelayedCommand; photos: RelayedPhoto[] },
+    cloudSession?: { marketplace: "poshmark"; uploadToken: string }): Promise<Record<string, unknown>> {
     if (channel.location.origin !== ORIGIN) return Promise.resolve({ ok: false, state: "unavailable", extensionVersion: "" });
     const requestId = crypto.randomUUID();
     return new Promise(resolve => {
@@ -49,6 +50,9 @@ export function cloudExtension(account: BrowserAccount, channel: Window = window
       const listener = (event: MessageEvent) => {
         const data = event.data;
         if (event.source !== channel || event.origin !== ORIGIN || data?.source !== "anteroom-extension" || data.version !== 1 || data.requestId !== requestId) return;
+        if (action === "cloud_session_connect") {
+          finish({ ok: data.ok === true, state: data.state === "pending" ? "pending" : "unavailable", error: typeof data.error === "string" ? data.error : undefined }); return;
+        }
         if (action === "poshmark_form") {
           finish({ ok: data.ok === true, form: data.form, error_code: data.error_code }); return;
         }
@@ -61,13 +65,22 @@ export function cloudExtension(account: BrowserAccount, channel: Window = window
       const timer = channel.setTimeout(() => finish({ ok: false, state: "unavailable", extensionVersion: "" }), timeout);
       channel.addEventListener("message", listener);
       channel.postMessage({ source: "anteroom-cloud", version: 1, requestId, action, accountId: account.id,
-        ...(action === "connect" ? { email: account.email } : {}), ...(listing ? { listing } : {}), ...relay }, ORIGIN);
+        ...(action === "connect" || action === "cloud_session_connect" ? { email: account.email } : {}),
+        ...(listing ? { listing } : {}), ...relay, ...cloudSession }, ORIGIN);
     });
   }
   const status = async () => toConnection(await send("status"));
   return {
     status, connect: async () => toConnection(await send("connect")),
     disconnect: async () => toConnection(await send("disconnect")),
+    connectCloudSession: async (marketplace: "poshmark", uploadToken: string): Promise<{ ok: boolean; state: "pending" | "unavailable"; error?: string }> => {
+      const result = await send("cloud_session_connect", undefined, undefined, { marketplace, uploadToken });
+      return {
+        ok: result.ok === true,
+        state: result.state === "pending" ? "pending" : "unavailable",
+        ...(typeof result.error === "string" ? { error: result.error } : {}),
+      };
+    },
     /** Run one relayed command in Chrome. Returns the Bridge's reply, or a failure the server records as unconfirmed. */
     runMarketplaceCommand: async (command: RelayedCommand, photos: RelayedPhoto[]): Promise<Record<string, unknown>> => {
       const result = await send("marketplace_command", undefined, { command, photos });

@@ -1,24 +1,71 @@
-/* Browser-local site permission, form reads, and the seller's relayed marketplace commands. No cloud credentials. */
+/* Browser-local site permission, form reads, relayed commands, and opt-in Poshmark Cloud session upload. */
 (function () {
   const ORIGIN = 'https://myanteroom.com';
   const KEY = 'anteroom_cloud_connections';
   const APPROVALS_KEY = 'anteroom_cloud_approvals';
+  const CLOUD_SESSION_KEY = 'anteroom_cloud_session_connects';
   const TTL = 2 * 60 * 1000;
+  const CLOUD_SESSION_TTL = 3 * 60 * 1000;
   // A remembered approval lasts this long; then the seller approves the account again.
   const APPROVAL_TTL = 30 * 24 * 60 * 60 * 1000;
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const UPLOAD_TOKEN_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[A-Za-z0-9_-]{20,200}$/i;
+  const CLOUD_SESSION_MARKETS = new Set(['poshmark']);
   const PAGE_ACTIONS = new Set(['status', 'connect', 'disconnect']);
   const APPROVAL_ACTIONS = new Set(['details', 'approve', 'deny']);
+  const CLOUD_SESSION_APPROVAL_ACTIONS = new Set(['cloud_session_details', 'cloud_session_approve', 'cloud_session_deny']);
   // What a relaying Bridge runs: marketplace actions, and each named read under its own name,
   // and how it checks them: a signed approval on every relayed command, binding the photos
   // relayed with it (background/cloud-approvals.js). It no longer declares the writes-only
   // `marketplace.signed_approvals` of Bridges 0.2.56 to 0.2.67, which the server drops later.
-  const RELAY_CAPABILITIES = ['marketplace.actions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_commands'];
+  const RELAY_CAPABILITIES = ['marketplace.actions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_commands', 'marketplace.cloud_connect'];
+
+  function isPoshmarkCookieDomain(domain) {
+    const clean = String(domain || '').trim().toLowerCase().replace(/^\./, '');
+    return clean === 'poshmark.com' || clean.endsWith('.poshmark.com');
+  }
+
+  async function defaultUploadCloudSession(api, { marketplace, uploadToken }) {
+    if (!CLOUD_SESSION_MARKETS.has(marketplace)) return { ok: false, error: 'Unsupported cloud marketplace.' };
+    if (!api.cookies?.getAll) return { ok: false, error: 'Chrome cookies API is unavailable.' };
+    const rawCookies = await api.cookies.getAll({ domain: 'poshmark.com' });
+    const cookies = (Array.isArray(rawCookies) ? rawCookies : [])
+      .filter(cookie => cookie && typeof cookie.name === 'string' && typeof cookie.value === 'string' && isPoshmarkCookieDomain(cookie.domain))
+      .map(cookie => ({
+        name: cookie.name,
+        value: cookie.value,
+        domain: cookie.domain,
+        path: cookie.path || '/',
+        secure: Boolean(cookie.secure),
+        httpOnly: Boolean(cookie.httpOnly),
+        sameSite: cookie.sameSite || 'unspecified',
+        ...(Number.isFinite(cookie.expirationDate) ? { expirationDate: cookie.expirationDate } : {}),
+      }));
+    if (!cookies.some(cookie => cookie.name === 'jwt' && cookie.value)) {
+      return { ok: false, error: 'Sign in to Poshmark in Chrome first, then try again.' };
+    }
+    const userAgent = typeof navigator !== 'undefined' && typeof navigator.userAgent === 'string' ? navigator.userAgent : '';
+    const response = await fetch(`${ORIGIN}/api/cloud-sessions/${marketplace}/upload`, {
+      method: 'POST',
+      credentials: 'omit',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Cloud-Upload-Token': uploadToken,
+      },
+      body: JSON.stringify({ cookies, user_agent: userAgent }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || data?.ok !== true) {
+      return { ok: false, error: typeof data?.detail === 'string' ? data.detail : `Upload failed (HTTP ${response.status}).` };
+    }
+    return { ok: true };
+  }
 
   function createCloudConnection(api, { now = Date.now, randomId = () => crypto.randomUUID(), readForm = null, runCommand = null,
-    verifyApproval = null } = {}) {
+    verifyApproval = null, uploadCloudSession = null } = {}) {
     // A Bridge that runs relayed commands must check the hosted API's signature on each one.
     if (runCommand && !verifyApproval) throw new Error('Relayed commands need an approval check.');
+    const performCloudUpload = uploadCloudSession || (opts => defaultUploadCloudSession(api, opts));
     // Serializing state changes prevents two tabs from overwriting each other's
     // session records across asynchronous chrome.storage operations.
     let tail = Promise.resolve();
@@ -30,12 +77,16 @@
     const site = value => { try { return new URL(value).origin === ORIGIN; } catch { return false; } };
     const popup = sender => sender.id === api.runtime.id && typeof sender.url === 'string'
       && sender.url.split('#')[0] === api.runtime.getURL('cloud-connect.html');
+    const sessionPopup = sender => sender.id === api.runtime.id && typeof sender.url === 'string'
+      && sender.url.split('#')[0] === api.runtime.getURL('cloud-session-connect.html');
     const page = sender => sender.id === api.runtime.id && Number.isInteger(sender.tab?.id)
       && sender.frameId === 0 && typeof sender.documentId === 'string'
       && site(sender.url) && site(sender.tab.url) && (!sender.origin || sender.origin === ORIGIN);
     const status = state => ({ ok: true, state, extensionVersion: api.runtime.getManifest().version, supportedActions: [...(readForm ? ['poshmark.form.read'] : []), ...(runCommand ? RELAY_CAPABILITIES : [])] });
     async function read() { return (await api.storage.session.get(KEY))[KEY] || {}; }
     async function write(records) { await api.storage.session.set({ [KEY]: records }); }
+    async function readCloudSessions() { return (await api.storage.session.get(CLOUD_SESSION_KEY))[CLOUD_SESSION_KEY] || {}; }
+    async function writeCloudSessions(records) { await api.storage.session.set({ [CLOUD_SESSION_KEY]: records }); }
     async function readApprovals() { return (await api.storage.local.get(APPROVALS_KEY))[APPROVALS_KEY] || {}; }
     async function writeApprovals(records) { await api.storage.local.set({ [APPROVALS_KEY]: records }); }
     // An approval from before approvals expired has no time and counts as expired.
@@ -46,12 +97,29 @@
         try { await api.windows.remove(record.pending.windowId); } catch { /* Already closed. */ }
       }
     }
+    async function closeWindow(windowId) {
+      if (Number.isInteger(windowId)) {
+        try { await api.windows.remove(windowId); } catch { /* Already closed. */ }
+      }
+    }
+    async function clearCloudSessionsForTab(tabId) {
+      const pending = await readCloudSessions();
+      let changed = false;
+      for (const [reqId, item] of Object.entries(pending)) {
+        if (item.tabId !== Number(tabId)) continue;
+        delete pending[reqId];
+        changed = true;
+        await closeWindow(item.windowId);
+      }
+      if (changed) await writeCloudSessions(pending);
+    }
     async function clear(tabId) {
       const records = await read();
       const record = records[tabId];
       delete records[tabId];
       await write(records);
       await closeApproval(record);
+      await clearCloudSessionsForTab(tabId);
     }
     async function disconnect(accountId) {
       const approvals = await readApprovals();
@@ -64,9 +132,102 @@
         await closeApproval(record);
       }
       await write(records);
+      const pending = await readCloudSessions();
+      let changed = false;
+      for (const [reqId, item] of Object.entries(pending)) {
+        if (item.accountId !== accountId) continue;
+        delete pending[reqId];
+        changed = true;
+        await closeWindow(item.windowId);
+      }
+      if (changed) await writeCloudSessions(pending);
+    }
+    async function handleCloudSessionConnect(message, sender) {
+      const allowed = ['type', 'action', 'accountId', 'email', 'marketplace', 'uploadToken'];
+      if (!page(sender) || !UUID.test(message.accountId || '')
+          || Object.keys(message).some(key => !allowed.includes(key))
+          || typeof message.email !== 'string' || message.email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(message.email)
+          || !CLOUD_SESSION_MARKETS.has(message.marketplace)
+          || typeof message.uploadToken !== 'string' || !UPLOAD_TOKEN_RE.test(message.uploadToken)
+          || message.uploadToken.slice(0, 36).toLowerCase() !== message.accountId.toLowerCase()) {
+        return { ok: false, state: 'unavailable', error: 'Invalid cloud connect request.' };
+      }
+      const pending = await readCloudSessions();
+      const currentTime = now();
+      for (const [reqId, item] of Object.entries(pending)) {
+        if (currentTime - item.createdAt >= CLOUD_SESSION_TTL || (item.tabId === sender.tab.id && item.marketplace === message.marketplace)) {
+          delete pending[reqId];
+          await closeWindow(item.windowId);
+        }
+      }
+      const requestId = randomId();
+      const entry = {
+        requestId,
+        tabId: sender.tab.id,
+        documentId: sender.documentId,
+        accountId: message.accountId,
+        email: message.email,
+        marketplace: message.marketplace,
+        uploadToken: message.uploadToken,
+        createdAt: currentTime,
+      };
+      pending[requestId] = entry;
+      await writeCloudSessions(pending);
+      try {
+        const win = await api.windows.create({
+          url: api.runtime.getURL('cloud-session-connect.html') + '#' + requestId,
+          type: 'popup',
+          width: 460,
+          height: 460,
+          focused: true,
+        });
+        entry.windowId = win.id;
+        await writeCloudSessions(pending);
+      } catch {
+        delete pending[requestId];
+        await writeCloudSessions(pending);
+        return { ok: false, state: 'unavailable', error: 'Could not open confirmation window.' };
+      }
+      return { ok: true, state: 'pending' };
+    }
+    async function handleCloudSessionApproval(message, sender) {
+      if (!sessionPopup(sender)
+          || Object.keys(message).some(key => !['type', 'action', 'requestId'].includes(key))
+          || !UUID.test(message.requestId || '')) {
+        return { ok: false };
+      }
+      const pending = await readCloudSessions();
+      const entry = pending[message.requestId];
+      if (!entry) return { ok: false };
+      if (now() - entry.createdAt >= CLOUD_SESSION_TTL) {
+        delete pending[message.requestId];
+        await writeCloudSessions(pending);
+        return { ok: false, error: 'This request expired. Return to Anteroom Settings and try again.' };
+      }
+      if (message.action === 'cloud_session_details') {
+        return { ok: true, email: entry.email, marketplace: entry.marketplace };
+      }
+      delete pending[message.requestId];
+      await writeCloudSessions(pending);
+      if (message.action === 'cloud_session_deny') return { ok: true };
+      try {
+        const tab = await api.tabs.get(Number(entry.tabId));
+        if (!site(tab.url)) throw new Error('Tab moved');
+        const reply = await api.tabs.sendMessage(
+          Number(entry.tabId),
+          { type: 'cloud.connection.probe', accountId: entry.accountId },
+          { documentId: entry.documentId },
+        );
+        if (reply?.current !== true) throw new Error('Account changed');
+      } catch {
+        return { ok: false, error: 'The page or account changed. Return to Anteroom Settings and try again.' };
+      }
+      return performCloudUpload({ marketplace: entry.marketplace, uploadToken: entry.uploadToken });
     }
     async function handle(message, sender) {
       if (!message || typeof message !== 'object' || message.type !== 'cloud.connection') return undefined;
+      if (message.action === 'cloud_session_connect') return handleCloudSessionConnect(message, sender);
+      if (CLOUD_SESSION_APPROVAL_ACTIONS.has(message.action)) return handleCloudSessionApproval(message, sender);
       if (PAGE_ACTIONS.has(message.action)) {
         const allowed = ['type', 'action', 'accountId', ...(message.action === 'connect' ? ['email'] : [])];
         if (!page(sender) || !UUID.test(message.accountId || '') || Object.keys(message).some(key => !allowed.includes(key))) return { ok: false };
@@ -221,10 +382,16 @@
           if (record.pending?.windowId === windowId) { delete records[id]; changed = true; }
         }
         if (changed) await write(records);
+        const pending = await readCloudSessions();
+        let sessionChanged = false;
+        for (const [reqId, item] of Object.entries(pending)) {
+          if (item.windowId === windowId) { delete pending[reqId]; sessionChanged = true; }
+        }
+        if (sessionChanged) await writeCloudSessions(pending);
       }),
     };
   }
-  if (typeof module !== 'undefined') module.exports = { createCloudConnection, ORIGIN, RELAY_CAPABILITIES };
+  if (typeof module !== 'undefined') module.exports = { createCloudConnection, defaultUploadCloudSession, ORIGIN, RELAY_CAPABILITIES };
   else {
     const bridge = createCloudConnection(chrome, { readForm: readCloudPoshmarkForm, runCommand: runCloudMarketplaceCommand,
       verifyApproval: CloudApprovals.createApprovalVerifier(chrome).verify });

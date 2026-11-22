@@ -202,13 +202,16 @@ def _save_floor(db: Session, marketplace: str, listing_id: str, conv_id: str, ce
     db.commit()
 
 
-def require_chrome() -> None:
+def require_chrome(marketplace: str | None = None, *, db: Session | None = None) -> None:
+    from anteroom.services import cloud_sessions
     from anteroom.services.extension_connection import current_extension
     from anteroom.services.hosted_browser_relay import MARKETPLACE_PROMOTIONS, relay_for
     from anteroom.services.service_context import current
 
     context = current()
     if context is not None:
+        if marketplace and cloud_sessions.has_active_session(marketplace, db):
+            return
         if refusal := relay_for(context.seller_id).refusal(MARKETPLACE_PROMOTIONS):
             raise PromotionError(409, refusal, "chrome")
         return
@@ -274,7 +277,9 @@ def _review_local(db: Session, row: ListingPromotion, conv: Conversation, floor_
 
 
 async def _review_remote(row: ListingPromotion, listing_id: str) -> None:
-    """Ask Chrome for the listing's live facts and fill them in. Uses no database session."""
+    """Ask Cloud or Chrome for the listing's live facts and fill them in. Uses no database session."""
+    from anteroom.services import cloud_marketplace, cloud_sessions
+
     name = NAMES.get(row.marketplace, row.marketplace)
     payload = {
         "marketplace": row.marketplace, "action": row.action, "listing_id": listing_id,
@@ -282,9 +287,21 @@ async def _review_remote(row: ListingPromotion, listing_id: str) -> None:
     }
     diagnostic_inputs = {**payload, "floor_cents": row.floor_cents}
     started = time.monotonic()
+    use_cloud = await asyncio.to_thread(cloud_sessions.has_active_session, row.marketplace)
     try:
-        facts = await browser_bridge.request(SimpleNamespace(id=f"promotion-{row.batch_id}"), "marketplace.promotion_check", payload, timeout=90)
-    except browser_bridge.BrowserBridgeError as exc:
+        if use_cloud:
+            facts = await cloud_marketplace.execute(
+                row.marketplace,
+                {"type": "marketplace.promotion_check", "job_id": f"promotion-{row.batch_id}", "payload": payload},
+                timeout=90,
+            )
+        else:
+            facts = await browser_bridge.request(SimpleNamespace(id=f"promotion-{row.batch_id}"), "marketplace.promotion_check", payload, timeout=90)
+    except (
+        browser_bridge.BrowserBridgeError,
+        cloud_marketplace.CloudExecutionUnavailable,
+        cloud_sessions.CloudSessionError,
+    ) as exc:
         log.error("%s %s preview failed for listing %s: %s", row.marketplace, row.action, listing_id, scrub(str(exc)), exc_info=True,
                   extra={"marketplace_context": failure_context("marketplace.promotion_check", diagnostic_inputs, None,
                                                                time.monotonic() - started, 90)})
@@ -350,7 +367,7 @@ async def preview(conversation_ids: list[str], marketplace: str, action: str,
         raise PromotionError(400, f"Select between 1 and {MAX_ITEMS} items.")
     if action == "offer" and not (isinstance(discount_percent, int) and 1 <= discount_percent <= 99):
         raise PromotionError(400, "Enter the discount for the offer.")
-    require_chrome()
+    await asyncio.to_thread(require_chrome, marketplace)
     batch = new_id()
     rows = []
     for conv_id in ids:
@@ -422,19 +439,32 @@ async def perform(promotion_id: str, shipping_discount_id: str | None = None, *,
                   new_like_at: datetime | None = None) -> dict:
     """Send one reviewed row, once. The caller has the seller's explicit confirmation or enabled automation.
 
-    The checks, the job claim and the durable ``sending`` mark are committed before Chrome is asked;
-    no database connection is held while Chrome sends.
+    The checks, the job claim and the durable ``sending`` mark are committed before Cloud or Chrome is asked;
+    no database connection is held while it sends.
     """
+    from anteroom.services import cloud_marketplace, cloud_sessions
+
     # A request dropped while claiming sent nothing: the row fails as safe to retry and the job is released.
-    job_id, payload = await claim_in_worker_session(
+    job_id, payload, use_cloud = await claim_in_worker_session(
         _start_send, partial(_abandon_send, promotion_id), promotion_id, shipping_discount_id, new_like_at)
     if gap_ms and payload["action"] == "share":
         payload["gap_ms"] = gap_ms
     finish: asyncio.Future | None = None
     try:
         try:
-            result = await browser_bridge.request(SimpleNamespace(id=job_id), "marketplace.promote", payload, timeout=150)
-        except browser_bridge.BrowserBridgeError:
+            if use_cloud:
+                result = await cloud_marketplace.execute(
+                    payload["marketplace"],
+                    {"type": "marketplace.promote", "job_id": job_id, "payload": payload},
+                    timeout=150,
+                )
+            else:
+                result = await browser_bridge.request(SimpleNamespace(id=job_id), "marketplace.promote", payload, timeout=150)
+        except (
+            browser_bridge.BrowserBridgeError,
+            cloud_marketplace.CloudExecutionUnavailable,
+            cloud_sessions.CloudSessionError,
+        ):
             result = None
         # Shielded: a dropped request must not leave the send recorded as in progress.
         finish = asyncio.ensure_future(in_worker_session(_finish_send, promotion_id, job_id, result))
@@ -451,7 +481,7 @@ async def perform(promotion_id: str, shipping_discount_id: str | None = None, *,
         release_api_job(job_id)
 
 
-async def _abandon_send(promotion_id: str, started: tuple[str, dict]) -> None:
+async def _abandon_send(promotion_id: str, started: tuple[str, dict, bool]) -> None:
     job_id = started[0]
     try:
         await in_worker_session(_finish_send, promotion_id, job_id, {
@@ -461,8 +491,10 @@ async def _abandon_send(promotion_id: str, started: tuple[str, dict]) -> None:
 
 
 def _start_send(db: Session, promotion_id: str, shipping_discount_id: str | None,
-                new_like_at: datetime | None) -> tuple[str, dict]:
-    """Check the reviewed row, claim the job and mark the row ``sending``. Returns the job and Chrome's payload."""
+                new_like_at: datetime | None) -> tuple[str, dict, bool]:
+    """Check the reviewed row, claim the job and mark the row ``sending``. Returns the job, payload and cloud flag."""
+    from anteroom.services import cloud_sessions
+
     row = _get(db, promotion_id)
     if row.state != "preview":
         raise PromotionError(409, "This item was already sent or skipped. Review it again to act on it.")
@@ -485,7 +517,8 @@ def _start_send(db: Session, promotion_id: str, shipping_discount_id: str | None
             raise PromotionError(409, "Your floor for this listing changed. Review the offer again.")
         row.floor_cents = max(row.floor_cents, minimum)
         _choose_shipping(row, shipping_discount_id)
-    require_chrome()
+    use_cloud = cloud_sessions.has_active_session(row.marketplace, db)
+    require_chrome(row.marketplace, db=db)
     repo = JobRepo(db)
     listing = ListingRepo(db).get_current(conv.id)
     with listing_mode.guard(db, "direct"):
@@ -496,7 +529,8 @@ def _start_send(db: Session, promotion_id: str, shipping_discount_id: str | None
         if blocked := blocking(db, row.marketplace, row.listing_id, row.action, new_like_at=new_like_at):
             raise PromotionError(409, blocked)
         job = repo.create(conv.id, listing.current_revision_id if listing else "",
-                          {"promotion": {"id": row.id, "marketplace": row.marketplace, "action": row.action}},
+                          {"promotion": {"id": row.id, "marketplace": row.marketplace, "action": row.action,
+                                         "executor": "cloud" if use_cloud else "chrome"}},
                           status="dispatched", current_step=STEP)
         claim_api_job(db, job.id)
     job_id = job.id
@@ -520,7 +554,7 @@ def _start_send(db: Session, promotion_id: str, shipping_discount_id: str | None
                 db.rollback()
                 repo.update_status(job_id, "failed", STEP, error="The automation changed or was turned off before this was sent.")
                 raise PromotionError(409, "This automation changed or was turned off. Nothing was sent.", "paused")
-        # Durable before Chrome is asked: a crash from here on is unknown, never resent.
+        # Durable before Cloud or Chrome is asked: a crash from here on is unknown, never resent.
         row.state, row.job_id, row.sent_at = "sending", job_id, _now()
         payload = {"action_id": row.id, "marketplace": row.marketplace, "action": row.action, "listing_id": row.listing_id,
                    "confirm": True, "price_cents": row.price_cents, "offer_price_cents": row.offer_price_cents,
@@ -537,7 +571,7 @@ def _start_send(db: Session, promotion_id: str, shipping_discount_id: str | None
         finally:
             release_api_job(job_id)
         raise
-    return job_id, payload
+    return job_id, payload, use_cloud
 
 
 def _finish_send(db: Session, promotion_id: str, job_id: str, result: dict | None) -> dict:
@@ -599,10 +633,12 @@ def _settle(row: ListingPromotion, result: dict | None) -> None:
 
 
 async def check(promotion_id: str) -> dict:
-    """Read the extension's journal for an unknown row. Never sends anything, and holds no connection while Chrome answers."""
-    settled, job_key = await in_worker_session(_check_target, promotion_id)
+    """Read the journal for an unknown row. Never sends anything, and holds no connection while Chrome answers."""
+    settled, job_key, cloud_answer = await in_worker_session(_check_target, promotion_id)
     if settled is not None:
         return settled
+    if cloud_answer is not None:
+        return await in_worker_session(_record_check, promotion_id, cloud_answer)
     require_chrome()
     try:
         answer = await browser_bridge.request(SimpleNamespace(id=job_key), "marketplace.promotion_result",
@@ -612,11 +648,30 @@ async def check(promotion_id: str) -> dict:
     return await in_worker_session(_record_check, promotion_id, answer)
 
 
-def _check_target(db: Session, promotion_id: str) -> tuple[dict | None, str]:
+def _check_target(db: Session, promotion_id: str) -> tuple[dict | None, str, dict | None]:
+    from anteroom.services import cloud_sessions
+
     row = _get(db, promotion_id)
     if row.state != "unknown":
-        return out(row), ""
-    return None, row.job_id or f"promotion-{row.id}"
+        return out(row), "", None
+    executor = None
+    if row.job_id:
+        job = JobRepo(db).get(row.job_id)
+        if job and isinstance(job.listing_snapshot, dict):
+            promo = job.listing_snapshot.get("promotion")
+            if isinstance(promo, dict):
+                executor = promo.get("executor")
+    if executor == "cloud":
+        journals = cloud_sessions.load_journals(db, row.marketplace)
+        stored = journals.get(f"promotion_{promotion_id}")
+        answer = {
+            "ok": True,
+            "known": stored is not None,
+            "finished": bool(isinstance(stored, dict) and stored.get("finished")),
+            "result": stored.get("result") if isinstance(stored, dict) else None,
+        }
+        return None, row.job_id or f"promotion-{row.id}", answer
+    return None, row.job_id or f"promotion-{row.id}", None
 
 
 def _record_check(db: Session, promotion_id: str, answer: dict) -> dict:

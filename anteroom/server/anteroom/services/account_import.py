@@ -22,6 +22,7 @@ from anteroom.models.job import ACTIVE_JOB_STATUSES
 # which are rebuilt from the converted photos.
 SKIPPED_TABLES = frozenset({
     'background_tasks', 'background_task_events', 'user_secret_references',
+    'cloud_marketplace_sessions', 'cloud_session_audit', 'cloud_operation_journals',
     'listing_videos', 'photo_fingerprints',
 })
 MAX_ROWS = 500
