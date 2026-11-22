@@ -986,11 +986,12 @@ def _check_target(db: Session, promotion_id: str) -> tuple[dict | None, str, dic
                 promo = job.listing_snapshot.get("promotion")
                 if isinstance(promo, dict):
                     executor = promo.get("executor")
-    elif row.listing_id == "__account__" and cloud_sessions.has_active_session(row.marketplace, db):
-        executor = "cloud"
-    if executor == "cloud":
+    if executor == "cloud" or (not row.job_id and row.listing_id == "__account__"):
         journals = cloud_sessions.load_journals(db, row.marketplace)
         stored = journals.get(f"promotion_{promotion_id}")
+        if executor != "cloud" and stored is None:
+            # Account actions can also run in Chrome; consult its journal next.
+            return None, row.id, None
         answer = {
             "ok": True,
             "known": stored is not None,

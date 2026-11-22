@@ -326,6 +326,7 @@ def _claim_due_drafts(db: Session, moment: datetime) -> list[dict[str, Any]]:
         )
         .order_by(Listing.scheduled_publish_at.asc())
         .limit(20)
+        .with_for_update(skip_locked=True)
         .all()
     )
     claimed: list[dict[str, Any]] = []
@@ -345,8 +346,10 @@ def _claim_due_drafts(db: Session, moment: datetime) -> list[dict[str, Any]]:
                 Listing.conversation_id == row.conversation_id,
                 Listing.scheduled_status == "scheduled",
                 Listing.scheduled_revision_id == row.scheduled_revision_id,
-                Listing.scheduled_publish_at == row.scheduled_publish_at,
+                Listing.current_revision_id == row.scheduled_revision_id,
                 Listing.scheduled_confirmed_at == row.scheduled_confirmed_at,
+                Listing.scheduled_publish_at == row.scheduled_publish_at,
+                Listing.ready_to_list.is_(True),
             )
             .values(scheduled_status="publishing", scheduled_error=None)
         )
