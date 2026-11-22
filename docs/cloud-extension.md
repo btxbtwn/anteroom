@@ -275,7 +275,7 @@ with the `www` host.
    `X-Cloud-Upload-Token` and `credentials: "omit"`.
 4. Cookies never enter page JavaScript, never cross `window.postMessage`, and
    Supabase JWTs never enter the extension. The server consumes the token atomically
-   (preventing replay), filters cookies to the selected marketplace, and writes the
-   encrypted payload to Supabase Vault. Mercari and Depop require a successful
-   account read from the worker before the session can execute commands.
+   (preventing replay) and filters cookies to the selected marketplace. For Mercari
+   and Depop, the worker verifies the account before the hosted API writes the
+   encrypted payload to Supabase Vault.
 

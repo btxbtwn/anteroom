@@ -135,6 +135,7 @@ struct ConnectionsSettingsView: View {
     }
 
     private func updateCloud(_ marketplace: String, disconnect: Bool) async {
+        cloudLoadGeneration += 1
         cloudBusy = marketplace
         cloudMessages[marketplace] = nil
         defer { cloudBusy = nil }

@@ -8,6 +8,7 @@ single-use extension upload tokens without ever decrypting credentials.
 from __future__ import annotations
 
 import base64
+from dataclasses import dataclass
 from datetime import datetime, timedelta, UTC
 import hashlib
 import json
@@ -48,6 +49,14 @@ _DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
+
+
+@dataclass(frozen=True)
+class CloudUpload:
+    seller_id: str
+    state: str
+    connected_at: datetime | None
+    proxy_session_id: str
 
 
 class CloudSessionError(ValueError):
@@ -273,7 +282,7 @@ def serialize_session_row(marketplace: str, row: CloudMarketplaceSession | None)
             "label": None,
             "expires_at": None,
             "expiring": False,
-            "connected_at": connected_at.isoformat() if connected_at and row and row.state == "pending" else None,
+            "connected_at": None,
             "last_used_at": None,
             "last_error": None,
         }
@@ -340,7 +349,7 @@ def mint_upload_token(db: Session, marketplace: str) -> dict[str, Any]:
     }
 
 
-def consume_upload_token(engine, marketplace: str, raw_token: str) -> str | None:
+def consume_upload_token(engine, marketplace: str, raw_token: str) -> CloudUpload | None:
     """Atomically verify and consume a single-use upload token, returning the seller UUID."""
     market = str(marketplace or "").lower()
     if market not in _configured_marketplaces():
@@ -375,7 +384,12 @@ def consume_upload_token(engine, marketplace: str, raw_token: str) -> str | None
                 {"owner": owner, "market": market, "hash": expected_hash, "now": now},
             )
             ok = (result.rowcount or 0) == 1
-    return owner if ok else None
+        if not ok:
+            return None
+        state, connected_at, proxy_session_id = conn.execute(select(
+            CloudMarketplaceSession.state, CloudMarketplaceSession.connected_at, CloudMarketplaceSession.proxy_session_id,
+        ).where(CloudMarketplaceSession.user_id == owner, CloudMarketplaceSession.marketplace == market)).one()
+        return CloudUpload(owner, state, connected_at, proxy_session_id or secrets.token_hex(12))
 
 
 def save_uploaded_session(
@@ -384,9 +398,12 @@ def save_uploaded_session(
     raw_cookies: list[dict[str, Any]],
     user_agent: str | None = None,
     *,
-    verify_first: bool = False,
+    upload: CloudUpload | None = None,
+    verified_label: str | None = None,
+    verified: bool = False,
 ) -> dict[str, Any]:
     """Validate uploaded cookies, encrypt them in Vault, and mark session connected."""
+    from anteroom.services.promotion_automations import resume_after_cloud_reconnect
     market = str(marketplace or "").lower()
     if not is_cloud_enabled(market):
         raise CloudSessionError("Cloud sessions are not enabled for this marketplace.")
@@ -403,15 +420,18 @@ def save_uploaded_session(
     ctx = current()
     assert ctx is not None
     row = _row(db, market, lock=True)
+    if upload and (row is None or row.state != upload.state or row.connected_at != upload.connected_at or row.upload_token_hash):
+        raise CloudSessionError("The cloud connection changed. Start connecting again.")
+    if verified_label:
+        label = _sanitize_label({"name": verified_label}) or label
     if not ctx.secrets.set(vault_account(market), payload):
         raise CloudSessionError("Could not store encrypted session.")
 
-    state = "pending" if verify_first else "connected"
     if row is None:
         row = CloudMarketplaceSession(
             user_id=_seller_id(),
             marketplace=market,
-            state=state,
+            state="connected",
             account_label=label,
             expires_at=expires_at,
             connected_at=now,
@@ -424,43 +444,24 @@ def save_uploaded_session(
         )
         db.add(row)
     else:
-        row.state = state
+        row.state = "connected"
         row.account_label = label
         row.expires_at = expires_at
         row.connected_at = now
         row.last_error = None
         if not row.proxy_session_id:
-            row.proxy_session_id = secrets.token_hex(12)
+            row.proxy_session_id = upload.proxy_session_id if upload else secrets.token_hex(12)
         row.upload_token_hash = None
         row.upload_token_expires_at = None
         row.updated_at = now
     _audit(db, market, "connect", detail=f"cookies={len(cookies)}")
+    if verified:
+        count = resume_after_cloud_reconnect(db, _seller_id(), market)
+        if count:
+            _audit(db, market, "automations_resumed", detail=f"count={count}")
+            log.info("%s cloud reconnect resumed %s automation(s)", market, count)
     db.commit()
     return serialize_session_row(market, row)
-
-
-def activate_verified_session(
-    db: Session, marketplace: str, generation: str | None, label: str | None,
-) -> dict[str, Any] | None:
-    from anteroom.services.promotion_automations import resume_after_cloud_reconnect
-
-    row = _row(db, marketplace, lock=True)
-    connected_at = _as_utc(row.connected_at) if row else None
-    if row is None or connected_at is None or connected_at.isoformat() != generation or row.state not in {"pending", "connected"}:
-        return None
-    expires_at = _as_utc(row.expires_at)
-    if expires_at is not None and expires_at <= utcnow():
-        mark_session_expired(db, marketplace, f"Your {marketplace.title()} cloud session expired.", row.connected_at)
-        return serialize_session_row(marketplace, row)
-    row.state = "connected"
-    if label:
-        row.account_label = _sanitize_label({"name": label})
-    count = resume_after_cloud_reconnect(db, _seller_id(), marketplace)
-    if count:
-        _audit(db, marketplace, "automations_resumed", detail=f"count={count}")
-        log.info("%s cloud reconnect resumed %s automation(s)", marketplace, count)
-    db.commit()
-    return serialize_session_row(marketplace, row)
 
 
 def needs_automation_resume(db: Session, marketplace: str) -> bool:
@@ -487,7 +488,7 @@ def revoke_session(db: Session, marketplace: str) -> dict[str, Any]:
         ctx.secrets.delete(vault_account(market))
     now = utcnow()
     if row is not None:
-        if row.state == "connected" or (row.state == "pending" and row.connected_at is not None):
+        if row.state == "connected":
             pause_for_cloud_disconnect(db, _seller_id(), market)
         row.state = "revoked"
         row.account_label = None
@@ -506,11 +507,9 @@ def mark_session_expired(db: Session, marketplace: str, error: str, generation: 
     from anteroom.services.promotion_automations import pause_for_cloud_disconnect
 
     row = _row(db, market, lock=True)
-    if row is None or row.state not in {"connected", "pending"} or row.connected_at != generation:
+    if row is None or row.state != "connected" or row.connected_at != generation:
         return
-    # Minting a first upload token also creates a pending row, without credentials.
-    if row.state == "connected" or row.connected_at is not None:
-        pause_for_cloud_disconnect(db, _seller_id(), market)
+    pause_for_cloud_disconnect(db, _seller_id(), market)
     row.state = "expired"
     row.last_error = (error or f"{market.title()} asked to sign in again.")[:300]
     row.updated_at = utcnow()
@@ -540,8 +539,7 @@ def read_credentials_fresh(
     if not is_cloud_enabled(market):
         return None
     row = _row(db, market, lock=True)
-    states = {"connected", "pending"} if operation == "marketplace.verify_session" else {"connected"}
-    if row is None or row.state not in states:
+    if row is None or row.state != "connected":
         return None
     expires_at = _as_utc(row.expires_at)
     if expires_at is not None and expires_at <= utcnow():
@@ -584,7 +582,7 @@ def refresh_cookies(
     _assert_can_decrypt()
     market = str(marketplace or "").lower()
     row = _row(db, market, lock=True)
-    if row is None or row.state not in {"connected", "pending"} or row.connected_at != generation:
+    if row is None or row.state != "connected" or row.connected_at != generation:
         return
     try:
         cookies, label, expires_at, clean_ua = validate_and_normalize_cookies(market, updated_cookies, user_agent)

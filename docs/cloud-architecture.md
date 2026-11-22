@@ -176,8 +176,10 @@ Local desktop mode is unchanged and stays strictly on local Chrome.
   before each delist; approved photos are loaded directly from `photo_store()` with
   SHA-256 verification.
 
-Mercari and Depop remain Chrome-only until a server-side session path is evaluated
-separately.
+Mercari and Depop uploads are verified by the worker before replacing Vault
+credentials. A verified reconnect resumes rules paused by a cloud disconnect.
+Depop uses its recent-like feed, while Mercari checks eligibility during its
+scheduled listing scans and honors the existing offer cooldown.
 
 ## Next steps (2026-10-31)
 

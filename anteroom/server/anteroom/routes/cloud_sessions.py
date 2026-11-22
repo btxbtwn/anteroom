@@ -78,24 +78,33 @@ async def upload_cloud_session(
     if not x_cloud_upload_token:
         raise HTTPException(401, "A valid one-time upload token is required.")
 
-    seller_id = await asyncio.to_thread(
+    upload = await asyncio.to_thread(
         cloud_sessions.consume_upload_token, database.engine, market, x_cloud_upload_token,
     )
-    if not seller_id:
+    if upload is None:
         raise HTTPException(401, "This connection token expired or was already used. Start connecting again.")
 
-    with use(for_seller(seller_id)):
+    with use(for_seller(upload.seller_id)):
         try:
-            verify_first = market != "poshmark" or await in_worker_session(cloud_sessions.needs_automation_resume, market)
-            summary = await in_worker_session(
-                lambda db: cloud_sessions.save_uploaded_session(db, market, body.cookies, body.user_agent, verify_first=verify_first),
-            )
-            if verify_first:
-                summary, error = await _verify(market, summary["connected_at"])
-                if error:
-                    raise HTTPException(409, error)
+            cookies, _, _, user_agent = cloud_sessions.validate_and_normalize_cookies(market, body.cookies, body.user_agent)
+            verify = market != "poshmark" or await in_worker_session(cloud_sessions.needs_automation_resume, market)
+            label = None
+            if verify:
+                outcome = await cloud_marketplace.verify_upload(market, cookies, user_agent, upload.proxy_session_id)
+                result = outcome.get("result") or {}
+                session = result.get("session") or {}
+                if not result.get("ok") or session.get("state") != "signed_in":
+                    raise HTTPException(409, result.get("error") or f"Could not verify the {market.title()} cloud sign-in.")
+                label = session.get("label")
+                if outcome.get("cookies_changed") and outcome.get("cookies"):
+                    cookies = outcome["cookies"]
+            summary = await in_worker_session(lambda db: cloud_sessions.save_uploaded_session(
+                db, market, cookies, user_agent, upload=upload, verified_label=label, verified=verify,
+            ))
         except cloud_sessions.CloudSessionError as exc:
             raise HTTPException(400, str(exc)) from None
+        except cloud_marketplace.CloudExecutionUnavailable as exc:
+            raise HTTPException(503, str(exc)) from None
     return JSONResponse({"ok": True, "session": summary}, headers={"Cache-Control": "no-store"})
 
 
@@ -115,13 +124,10 @@ async def disconnect_cloud_session(marketplace: str, response: Response):
 async def _verify(market: str, generation: str | None):
     result = await cloud_marketplace.verify_session(market)
     verified = result.get("session") or {}
-    if result.get("ok") and verified.get("state") == "signed_in":
-        summary = await in_worker_session(
-            cloud_sessions.activate_verified_session, market, generation, verified.get("label"),
-        )
-        if summary and summary.get("cloud_connected"):
-            return summary, None
     summary = await in_worker_session(lambda db: cloud_sessions.public_session(market, db))
+    if (result.get("ok") and verified.get("state") == "signed_in" and summary
+            and summary.get("connected_at") == generation and summary.get("cloud_connected")):
+        return summary, None
     return summary, result.get("error") or f"Could not verify the {market.title()} cloud sign-in."
 
 

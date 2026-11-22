@@ -634,6 +634,34 @@ async def _execute_local(
     return result
 
 
+async def verify_upload(
+    marketplace: str,
+    cookies: list[dict[str, Any]],
+    user_agent: str,
+    proxy_session_id: str,
+) -> dict[str, Any]:
+    """Verify freshly captured cookies in memory before replacing the Vault session."""
+    if _process_role() == "web":
+        return await _forward_to_worker("/internal/cloud-marketplace/verify-upload", {
+            "user_id": _seller_id(), "marketplace": marketplace, "cookies": cookies,
+            "user_agent": user_agent, "proxy_session_id": proxy_session_id,
+        }, timeout=25.0)
+    return await verify_upload_local(marketplace, cookies, user_agent, proxy_session_id)
+
+
+async def verify_upload_local(
+    marketplace: str, cookies: list[dict[str, Any]], user_agent: str, proxy_session_id: str,
+) -> dict[str, Any]:
+    if _process_role() == "web" or not cloud_sessions.is_cloud_enabled(marketplace):
+        raise CloudExecutionUnavailable("Cloud marketplace verification is unavailable.")
+    async with _loop_semaphore():
+        return await _run_subprocess(marketplace, _seller_id(), "", {
+            "type": "run",
+            "command": {"type": "marketplace.verify_session", "payload": {"marketplace": marketplace}},
+            "cookies": cookies, "user_agent": user_agent, "proxy_url": cloud_sessions.proxy_url_for(proxy_session_id),
+        }, 25.0)
+
+
 async def verify_session(marketplace: str = "poshmark", timeout: float = 25.0) -> dict[str, Any]:
     """Run a live read-only verification against the marketplace for the current seller."""
     return await execute(

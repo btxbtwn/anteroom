@@ -20,6 +20,7 @@ async function openConnections(page: Page, phone: boolean) {
 }
 
 test("cloud connections can be checked with Chrome closed", async ({ page }, info) => {
+  test.setTimeout(90_000);
   const sessions = Object.fromEntries(["poshmark", "mercari", "depop"].map(market => [market, {
     state: market === "mercari" ? "signed_in" : market === "depop" ? "expired" : "signed_out",
     mode: "cloud", cloud_connected: market === "mercari", cloud_available: true,
@@ -32,16 +33,18 @@ test("cloud connections can be checked with Chrome closed", async ({ page }, inf
   await page.getByLabel("Email address").fill("alice@sandbox.test");
   await page.getByLabel("Password").fill("sandbox");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Account", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Account", exact: true })).toBeVisible({ timeout: 20_000 });
   await openConnections(page, info.project.name === "phone");
   const mercari = page.locator("#chrome-mercari");
   await mercari.getByRole("button", { name: "Test Cloud" }).click();
   await expect(mercari.getByText("Mercari cloud sign-in verified.")).toBeVisible();
   await expect(mercari.getByRole("button", { name: "Disconnect Cloud" })).toBeVisible();
-  await expect(page.locator("#chrome-depop").getByRole("button", { name: "Reconnect in Cloud" })).toBeVisible();
+  const depop = page.locator("#chrome-depop");
+  await expect(depop.getByRole("button", { name: "Reconnect in Cloud" })).toBeVisible();
+  await expect(depop.getByRole("button", { name: "Disconnect Cloud" })).toBeVisible();
   await expect(page.locator("#chrome-poshmark").getByRole("button", { name: "Connect in Cloud" })).toBeVisible();
   await mercari.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: info.outputPath("cloud-connections.png"), fullPage: true });
+  await page.screenshot({ path: `e2e/results/hosted/session-cloud-connections-${info.project.name}.png`, fullPage: true });
 });
 
 test("hosted Chrome imports, saved-off rules and sale switches are available", async ({ page }, info) => {

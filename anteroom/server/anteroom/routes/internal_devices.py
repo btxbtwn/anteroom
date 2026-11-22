@@ -135,6 +135,33 @@ async def execute_cloud_marketplace(body: CloudMarketplaceExecute, authorization
     return {'ok': True, 'result': result}
 
 
+class CloudMarketplaceVerifyUpload(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    user_id: str
+    marketplace: Literal['poshmark', 'mercari', 'depop']
+    cookies: list[dict] = Field(min_length=1, max_length=100)
+    user_agent: str = Field(max_length=300)
+    proxy_session_id: str = Field(max_length=64)
+
+
+@router.post('/cloud-marketplace/verify-upload')
+async def verify_cloud_marketplace_upload(
+    body: CloudMarketplaceVerifyUpload, authorization: str | None = Header(default=None),
+):
+    _authorized(authorization)
+    from anteroom.services import cloud_marketplace
+    from anteroom.services.hosted_context import for_seller
+    from anteroom.services.service_context import use
+
+    with use(for_seller(_owner(body.user_id))):
+        try:
+            return await cloud_marketplace.verify_upload_local(
+                body.marketplace, body.cookies, body.user_agent, body.proxy_session_id,
+            )
+        except cloud_marketplace.CloudExecutionUnavailable:
+            raise HTTPException(503, 'Cloud marketplace verification is unavailable.') from None
+
+
 class CloudMarketplaceCancel(BaseModel):
     model_config = ConfigDict(extra='forbid')
     user_id: str

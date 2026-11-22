@@ -436,6 +436,12 @@ function ChromeSessionRow({
                   {cloudConnect.isPending ? <Spinner /> : null}
                   {session?.cloud_state === "expired" ? "Reconnect in Cloud" : "Connect in Cloud"}
                 </Button>
+                {session?.cloud_state === "expired" ? (
+                  <Button size="xs" variant="outline" disabled={busy} onClick={() => cloudDisconnect.mutate()}>
+                    {cloudDisconnect.isPending ? <Spinner /> : null}
+                    Disconnect Cloud
+                  </Button>
+                ) : null}
                 {chromeReady ? (
                   <Button size="xs" variant="ghost" disabled={busy} onClick={() => connect.mutate()}>
                     {connect.isPending ? <Spinner /> : null}
