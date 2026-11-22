@@ -436,6 +436,17 @@ export function MarketplacesLayout({
       if (kind === "reset") return api.nativeMarketplaces.reset(convId, marketplace);
       if (kind === "reconnect") {
         if (marketplace === "ebay" || marketplace === "etsy") return await api.directConnections.connect(marketplace);
+        if (marketplace === "poshmark" && runtime.hosted && runtime.account) {
+          const cached = queryClient.getQueryData<{ sessions?: { poshmark?: { mode?: string; cloud_available?: boolean } }; chrome_connected?: boolean }>(["marketplace-sessions"]);
+          const posh = cached?.sessions?.poshmark;
+          if (posh?.cloud_available && (posh.mode === "cloud" || cached?.chrome_connected === false)) {
+            const { token } = await api.cloudSessions.connectToken("poshmark");
+            const { cloudExtension } = await import("../api/cloudExtension");
+            const res = await cloudExtension(runtime.account).connectCloudSession("poshmark", token);
+            if (!res.ok) throw new Error(res.error || "Open Settings → Connections in Chrome to reconnect Poshmark in Cloud.");
+            return { ok: true, signed_in: false };
+          }
+        }
         if ((EXTENSION_SESSION_MARKETS as readonly string[]).includes(marketplace)) {
           return await api.marketplaceSessions.connect(marketplace as ExtensionSessionMarket);
         }

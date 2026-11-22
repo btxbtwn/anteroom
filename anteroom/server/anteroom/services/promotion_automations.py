@@ -566,7 +566,7 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
     counts: Counter = Counter()
     stop_note = None
     try:
-        promotions.require_chrome()
+        await asyncio.to_thread(promotions.require_chrome, marketplace)
         targets, remaining, waiting, held = await in_worker_session(_prepare_round, automation_id, now, like_events)
         reads = 0
         batch = new_id()
@@ -719,52 +719,83 @@ def _pause(db: Session, row: PromotionAutomation, reason: str) -> str:
     return note
 
 
-def _due_automations(db: Session, moment: datetime) -> list[tuple[str, datetime | None]]:
+def _due_automations(
+    db: Session,
+    moment: datetime,
+    *,
+    marketplaces: tuple[str, ...] | None = None,
+    skip_cloud: bool = False,
+) -> list[tuple[str, datetime | None, str]]:
+    from anteroom.services import cloud_sessions
     from anteroom.services.listing_mode import read
     if read(db) == "vendoo":
         return []
-    rows = db.query(PromotionAutomation).filter(
+    query = db.query(PromotionAutomation).filter(
         PromotionAutomation.enabled.is_(True), PromotionAutomation.next_run_at <= moment,
-    ).order_by(PromotionAutomation.next_run_at).all()
-    return [(row.id, row.next_run_at) for row in rows]
+    )
+    if marketplaces is not None:
+        query = query.filter(PromotionAutomation.marketplace.in_(marketplaces))
+    rows = query.order_by(PromotionAutomation.next_run_at).all()
+    if skip_cloud:
+        rows = [row for row in rows if not cloud_sessions.has_active_session(row.marketplace, db)]
+    return [(row.id, row.next_run_at, row.marketplace) for row in rows]
 
 
 def _has_active_job(db: Session) -> bool:
     return bool(JobRepo(db).get_active())
 
 
-async def tick(*, now: datetime | None = None, sleep=asyncio.sleep) -> int:
+async def tick(
+    *,
+    now: datetime | None = None,
+    sleep=asyncio.sleep,
+    marketplaces: tuple[str, ...] | None = None,
+    skip_cloud: bool = False,
+) -> int:
     """Run every due automation, one at a time. A busy slot waits for the next tick."""
     moment = now or _now()
-    due = await in_worker_session(_due_automations, moment)
+    due = await in_worker_session(
+        lambda db: _due_automations(db, moment, marketplaces=marketplaces, skip_cloud=skip_cloud)
+    )
     ran = 0
-    for automation_id, next_run_at in due:
+    for automation_id, next_run_at, marketplace in due:
         if await in_worker_session(_has_active_job):
             break
-        if _awaiting_chrome_at(next_run_at, moment):
+        if await asyncio.to_thread(_awaiting_chrome_at, next_run_at, moment, marketplace):
             continue
         if await run_round(automation_id, expected_next_run_at=next_run_at, sleep=sleep) is not None:
             ran += 1
     return ran
 
 
-def _awaiting_chrome_at(next_run_at: datetime | None, moment: datetime) -> bool:
+def _awaiting_chrome_at(next_run_at: datetime | None, moment: datetime, marketplace: str | None = None) -> bool:
     """Whether a due round should wait for Chrome to reconnect rather than record a round that cannot run."""
     try:
-        promotions.require_chrome()
+        promotions.require_chrome(marketplace)
     except PromotionError as exc:
         return exc.code == "chrome" and next_run_at is not None and moment - next_run_at < CHROME_GRACE
     return False
 
 
-def _offer_automations(db: Session) -> list[tuple[str, str]]:
+def _offer_automations(
+    db: Session,
+    *,
+    marketplaces: tuple[str, ...] | None = None,
+    skip_cloud: bool = False,
+) -> list[tuple[str, str]]:
+    from anteroom.services import cloud_sessions
     from anteroom.services.listing_mode import read
     if read(db) == "vendoo":
         return []
+    allowed = tuple(m for m in ("poshmark", "depop") if marketplaces is None or m in marketplaces)
+    if not allowed:
+        return []
     rows = db.query(PromotionAutomation).filter(
         PromotionAutomation.enabled.is_(True), PromotionAutomation.action == "offer",
-        PromotionAutomation.marketplace.in_(("poshmark", "depop")),
+        PromotionAutomation.marketplace.in_(allowed),
     ).all()
+    if skip_cloud:
+        rows = [row for row in rows if not cloud_sessions.has_active_session(row.marketplace, db)]
     return [(row.id, row.marketplace) for row in rows]
 
 
@@ -815,14 +846,23 @@ def _filter_like_events(
     }
 
 
-async def check_new_likes(*, sleep=asyncio.sleep) -> int:
+async def check_new_likes(
+    *,
+    sleep=asyncio.sleep,
+    marketplaces: tuple[str, ...] | None = None,
+    skip_cloud: bool = False,
+) -> int:
     """Check bounded recent-like feeds once per minute, only for approved rules.
 
     The regular scan still catches older likes that fell out of these feeds.
     Only events after approval qualify. Re-reading the recent feed also catches
     late notifications; the send journal prevents replaying confirmed offers.
     """
-    rules = await in_worker_session(_offer_automations)
+    from anteroom.services import cloud_marketplace, cloud_sessions
+
+    rules = await in_worker_session(
+        lambda db: _offer_automations(db, marketplaces=marketplaces, skip_cloud=skip_cloud)
+    )
     feeds: dict[str, tuple[datetime, dict]] = {}
     ran = 0
     for automation_id, marketplace in rules:
@@ -833,11 +873,29 @@ async def check_new_likes(*, sleep=asyncio.sleep) -> int:
             continue
         if marketplace not in feeds:
             try:
-                promotions.require_chrome()
+                use_cloud = await asyncio.to_thread(cloud_sessions.has_active_session, marketplace)
+                if not use_cloud:
+                    await asyncio.to_thread(promotions.require_chrome, marketplace)
                 started = _now()
-                answer = await promotions.browser_bridge.request(SimpleNamespace(id=f"likes-{automation_id}"),
-                    "marketplace.like_events", {"marketplace": marketplace}, timeout=45)
-            except (promotions.browser_bridge.BrowserBridgeError, PromotionError) as exc:
+                if use_cloud:
+                    answer = await cloud_marketplace.execute(
+                        marketplace,
+                        {
+                            "type": "marketplace.like_events",
+                            "job_id": f"likes-{automation_id}",
+                            "payload": {"marketplace": marketplace},
+                        },
+                        timeout=45,
+                    )
+                else:
+                    answer = await promotions.browser_bridge.request(SimpleNamespace(id=f"likes-{automation_id}"),
+                        "marketplace.like_events", {"marketplace": marketplace}, timeout=45)
+            except (
+                promotions.browser_bridge.BrowserBridgeError,
+                PromotionError,
+                cloud_marketplace.CloudExecutionUnavailable,
+                cloud_sessions.CloudSessionError,
+            ) as exc:
                 log.warning("%s automation %s could not read recent likes: %s", marketplace, automation_id, scrub(str(exc)))
                 continue
             feeds[marketplace] = started, answer

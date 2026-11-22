@@ -67,25 +67,38 @@ def listing_id_from(marketplace: str, value: str) -> str:
 
 
 async def _ask(marketplace: str, message_type: str, payload: dict) -> dict:
-    """One read in the seller's Chrome: the Mac's paired Bridge, or on the web the seller's own tab relaying to theirs."""
+    """One read through Cloud (when connected) or the seller's Chrome."""
+    import asyncio
+    from anteroom.services import cloud_marketplace, cloud_sessions
     from anteroom.services.hosted_browser_relay import ChromeReadError, relay_for
     from anteroom.services.service_context import current
 
     payload = {"marketplace": marketplace, **{key: value for key, value in payload.items() if value is not None}}
     context = current()
+    use_cloud = context is not None and await asyncio.to_thread(cloud_sessions.has_active_session, marketplace)
     try:
-        if context is not None:
+        if use_cloud:
+            reply = await cloud_marketplace.execute(
+                marketplace,
+                {"type": message_type, "payload": payload},
+                timeout=120,
+            )
+        elif context is not None:
             reply = await relay_for(context.seller_id).read(message_type, payload, timeout=120)
         else:
             reply = await browser_bridge.request(SimpleNamespace(id=None), message_type, payload, timeout=120)
+    except (cloud_marketplace.CloudExecutionUnavailable, cloud_sessions.CloudSessionError) as exc:
+        raise ChromeImportError(503, str(exc)) from exc
     except (browser_bridge.BrowserBridgeError, ChromeReadError) as exc:
         raise ChromeImportError(503, f"{exc} Then sign in to {_name(marketplace)} in Chrome.") from exc
     if not isinstance(reply, dict):
-        raise ChromeImportError(502, f"Chrome did not return {_name(marketplace)}'s listings.")
+        source = "Cloud" if use_cloud else "Chrome"
+        raise ChromeImportError(502, f"{source} did not return {_name(marketplace)}'s listings.")
     if reply.get("ok") is not True:
         code = reply.get("error_code")
         status = 409 if code in {"busy", "rejected"} else 403 if code == "signed_out" else 429 if code == "rate_limited" else 502
-        raise ChromeImportError(status, str(reply.get("error") or f"Chrome could not read {_name(marketplace)}."))
+        source = "Cloud" if use_cloud else "Chrome"
+        raise ChromeImportError(status, str(reply.get("error") or f"{source} could not read {_name(marketplace)}."))
     return reply
 
 

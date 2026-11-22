@@ -153,9 +153,10 @@ function HostedWorkspace({ session }: { session: Session }) {
   useEffect(() => followSellerChanges(supabase, session.user.id, liveToken, queryClient),
     [session.user.id, liveToken, queryClient]);
   // The Mac app's window has no Chrome extension; its own Chrome connection stays with this Mac's listings.
-  const controls = <div className="cloud-account"><AccountMenu account={{ id: session.user.id, email: session.user.email || "" }} chrome={!isMacApp()} canDelete={!!runtime?.features.includes("account_deletion")} onSignOut={() => void supabase.auth.signOut({ scope: "local" }).then(({ error }) => { if (error) setError("Could not sign out. Please try again."); })}/></div>;
+  const account = { id: session.user.id, email: session.user.email || "" };
+  const controls = <div className="cloud-account"><AccountMenu account={account} chrome={!isMacApp()} canDelete={!!runtime?.features.includes("account_deletion")} onSignOut={() => void supabase.auth.signOut({ scope: "local" }).then(({ error }) => { if (error) setError("Could not sign out. Please try again."); })}/></div>;
   if (!runtime) return <StartupScreen error={error}/>;
-  return <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(runtime.features), views: new Set(runtime.views), marketplaceForms: new Set(runtime.marketplace_forms), actionMarketplaces: new Set(runtime.action_marketplaces), accountControls: controls }}>
+  return <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(runtime.features), views: new Set(runtime.views), marketplaceForms: new Set(runtime.marketplace_forms), actionMarketplaces: new Set(runtime.action_marketplaces), accountControls: controls, account }}>
     <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}><ToastProvider><AnchoredToastProvider>
       {error && <div role="alert">{error}</div>}<App/>
     </AnchoredToastProvider></ToastProvider></PersistQueryClientProvider>

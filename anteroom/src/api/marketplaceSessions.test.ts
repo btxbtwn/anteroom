@@ -47,4 +47,33 @@ describe("chrome marketplace sign-in", () => {
     const expiresAt = Math.floor(now / 1000) + 60 * 60;
     expect(sessionNotification("mercari", "Mercari", session({ expires_at: expiresAt, expiring: true }), "signed_in")).toBeNull();
   });
+
+  it("shows Poshmark Cloud status even when Chrome is disconnected", () => {
+    const cloudConnected = session({
+      state: "signed_in",
+      mode: "cloud",
+      cloud_connected: true,
+      label: "alice_closet",
+    });
+    expect(chromeSessionPresentation(cloudConnected, false, now)).toEqual({
+      tone: "success",
+      label: "Connected in Cloud as alice_closet",
+    });
+
+    const cloudExpired = session({
+      state: "expired",
+      mode: "cloud",
+      cloud_connected: false,
+      expires_at: 100,
+    });
+    expect(chromeSessionPresentation(cloudExpired, false, now)).toEqual({
+      tone: "error",
+      label: "Cloud session expired",
+    });
+    expect(sessionNotification("poshmark", "Poshmark", cloudExpired, "signed_in")).toMatchObject({
+      key: "poshmark:cloud-expired:100",
+      title: "Poshmark cloud session expired",
+    });
+  });
 });
+

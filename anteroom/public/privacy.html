@@ -41,7 +41,12 @@
       marketplace and the account name it shows (your username or display name, or the
       email address on the account when the marketplace gives no name). For eBay and
       Etsy, which Anteroom connects to directly, the sign-in tokens you approve, stored
-      encrypted and never shown back to any app or page.</li>
+      encrypted and never shown back to any app or page. If you choose to turn on
+      <strong>Poshmark Cloud</strong> for your hosted account, your Poshmark session
+      cookies are also stored encrypted in Supabase Vault (isolated per seller and
+      never shown back to any app or page) so Anteroom can run your Poshmark actions,
+      sale checks, and automations when Chrome is closed; you can disconnect and
+      delete those stored cookies at any time in Settings &rarr; Connections.</li>
     <li><strong>Your sales:</strong> for each order on your marketplace accounts, the order
       number, status and date, and the amounts: item price, shipping, refunds, marketplace
       fees and your shipping cost. Anteroom does not collect buyers' names, addresses or
@@ -60,16 +65,21 @@
   <h2>What the Chrome extension does</h2>
   <p>Anteroom Bridge works on the marketplace sites you are signed in to in Chrome
   (Poshmark, Mercari, Depop and eBay), Vendoo, and Anteroom itself. It uses your existing
-  sign-in on those sites so requests run as you. Your marketplace cookies and sign-in
-  tokens stay in Chrome: the extension uses them there and does not send them to
-  Anteroom.</p>
+  sign-in on those sites so requests run as you. By default, your marketplace cookies and
+  sign-in tokens stay in Chrome and are never sent to Anteroom. If you explicitly choose
+  <strong>Connect in Cloud</strong> for Poshmark on myanteroom.com and confirm in the
+  extension's approval window, the extension sends only your Poshmark cookies directly to
+  Anteroom over HTTPS using a single-use upload token so they can be stored encrypted for
+  your hosted account.</p>
   <p><strong>When you ask</strong>, it:</p>
   <ul>
     <li>fills a marketplace's listing form to save a draft, list, or update a listing,
       and delists a listing, only after you confirm that action in Anteroom;</li>
     <li>imports your existing listings and your sales history;</li>
     <li>creates and reads drafts in your Vendoo account;</li>
-    <li>checks which marketplaces you are signed in to, and opens a sign-in page.</li>
+    <li>checks which marketplaces you are signed in to, opens a sign-in page, or (when
+      you explicitly confirm <strong>Connect in Cloud</strong> for Poshmark) uploads your
+      Poshmark session directly to your encrypted cloud vault.</li>
   </ul>
   <p><strong>Automatically</strong>, while Chrome is connected to Anteroom (the desktop app is
   running, or you have myanteroom.com open):</p>

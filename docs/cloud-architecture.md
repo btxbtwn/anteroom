@@ -133,13 +133,53 @@ The design does not assume a Mac.
 
 | Seller has | What works |
 |---|---|
-| iPhone or web only | Everything that runs on the server: generation, editing, photos, history, analytics. eBay and Etsy list through their official APIs. |
-| Any computer with desktop Chrome | The above, plus Poshmark, Mercari, Depop form fills through the Bridge extension, which has the only path to those forms (they offer no public listing API). |
+| iPhone or web only | Everything that runs on the server: generation, editing, photos, history, analytics. eBay and Etsy list through their official APIs. Once Poshmark is connected in Cloud (via a one-time Chrome extension capture when `ANTEROOM_CLOUD_MARKETPLACES=poshmark` is enabled), Poshmark listing, updating, delisting, sales checks, imports, and promotions also run server-side while Chrome is closed. |
+| Any computer with desktop Chrome | The above, plus Poshmark, Mercari, Depop actions through the Bridge extension, and one-time Poshmark Cloud session connect/reconnect. |
 | The Mac app | The above, plus Mac-only work: Apple Vision background removal and local SDK sign-ins. |
 
-A phone-only seller cannot fill browser-only marketplace forms. Running a
-browser on the server with the seller's marketplace sign-ins would store those
-sign-ins on a server and trip marketplace bot checks, so it is not planned.
+### Opt-in Poshmark Cloud sessions
+
+Hosted accounts can optionally run Poshmark actions server-side without keeping
+Chrome open, gated behind `ANTEROOM_CLOUD_MARKETPLACES=poshmark` (off by default).
+Local desktop mode is unchanged and stays strictly on local Chrome.
+
+- **One-time direct capture:** When the seller chooses **Connect in Cloud** in
+  Settings → Connections and approves in the extension's `cloud-session-connect.html`
+  confirmation window, the hosted API mints a 120-second single-use upload token
+  (stored as a SHA-256 hash). The extension worker uploads only `poshmark.com`
+  cookies and User-Agent directly over HTTPS to `POST /api/cloud-sessions/poshmark/upload`
+  with `X-Cloud-Upload-Token` and `credentials: 'omit'`. Cookies never pass through
+  page JavaScript or `window.postMessage`, and Supabase JWTs never enter the extension.
+- **Encrypted storage and process isolation:** Cookies are encrypted per seller in
+  Supabase Vault (`cloud-session-poshmark`) while `cloud_marketplace_sessions` stores
+  only non-secret status metadata under Postgres RLS. Web processes
+  (`ANTEROOM_PROCESS_ROLE=web`) are strictly forbidden from decrypting cloud cookies;
+  they forward execution to worker processes via `/internal/cloud-marketplace/execute`.
+  Disconnecting deletes the Vault slot immediately and writes an audit event to
+  `cloud_session_audit`.
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:f6be35b883480db5b69db6020df226bf796a7b6cb3f2a5d8cee758426a607635 -->
+
+- **Fresh isolated subprocess per operation:** Workers execute each Poshmark operation
+  in a fresh single-operation Node 22 subprocess (`cloud_runner/run-poshmark.cjs`)
+  using `impit` (Chrome TLS impersonation) and `tough-cookie` (strict `poshmark.com`
+  cookie allowlist), with an optional sticky residential proxy (`ANTEROOM_CLOUD_PROXY_URL`)
+  and per-Machine concurrency cap (`ANTEROOM_CLOUD_MAX_CONCURRENCY`, default 4).
+  Write-ahead operation journals persist to Postgres `cloud_operation_journals`, and
+  each active listing/promotion pins its executor (`cloud` vs `chrome`) so recovery,
+  status checks, and cancellations never cross-wire between executors.
+  On Fly, cancellation goes to every private worker address. Only the worker that owns
+  the seller’s operation can confirm cancellation.
+
+<!-- /coderabbit-ai-generated:v1 -->
+- **Unchanged safety invariants:** Explicit `confirm: true` is still enforced on every
+  list, update, delete, and promotion; auto-delist re-reads the seller's setting
+  before each delist; approved photos are loaded directly from `photo_store()` with
+  SHA-256 verification.
+
+Mercari and Depop remain Chrome-only until a server-side session path is evaluated
+separately.
 
 ## Next steps (2026-10-31)
 

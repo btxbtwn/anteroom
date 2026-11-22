@@ -81,3 +81,42 @@ describe("Poshmark form capability", () => {
     expect(c.sent).toHaveLength(2);
   });
 });
+
+describe("Poshmark cloud session connect capability", () => {
+  it("posts upload token with account identity and omits access_token", async () => {
+    const c = channel();
+    const bridge = cloudExtension(ACCOUNT, c.target);
+    const token = `${ACCOUNT.id}.${"b".repeat(32)}`;
+    const pending = bridge.connectCloudSession("poshmark", token);
+    expect(c.sent[0].origin).toBe(ORIGIN);
+    expect(c.sent[0].data).toMatchObject({
+      action: "cloud_session_connect",
+      accountId: ACCOUNT.id,
+      email: ACCOUNT.email,
+      marketplace: "poshmark",
+      uploadToken: token,
+    });
+    expect(JSON.stringify(c.sent)).not.toContain("access_token");
+    c.reply({ data: { source: "anteroom-extension", version: 1, requestId: c.sent[0].data.requestId, ok: true, state: "pending" } });
+    await expect(pending).resolves.toEqual({ ok: true, state: "pending" });
+  });
+
+  it("surfaces unavailable error when the Bridge rejects or lacks cloud connect support", async () => {
+    const c = channel();
+    const bridge = cloudExtension(ACCOUNT, c.target);
+    const token = `${ACCOUNT.id}.${"a".repeat(32)}`;
+    const pending = bridge.connectCloudSession("poshmark", token);
+    c.reply({
+      data: {
+        source: "anteroom-extension",
+        version: 1,
+        requestId: c.sent[0].data.requestId,
+        ok: false,
+        state: "unavailable",
+        error: "Update Anteroom Bridge first.",
+      },
+    });
+    await expect(pending).resolves.toEqual({ ok: false, state: "unavailable", error: "Update Anteroom Bridge first." });
+  });
+});
+

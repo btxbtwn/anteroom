@@ -15,6 +15,11 @@ ARG VITE_SUPABASE_PUBLISHABLE_KEY
 RUN node -e 'if (!process.env.VITE_SUPABASE_URL || !process.env.VITE_SUPABASE_PUBLISHABLE_KEY) throw new Error("Cloud public configuration is required")' \
     && ANTEROOM_HOSTED_BUILD=1 npm run build
 
+FROM node:22-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS cloud-runner
+WORKDIR /src/cloud_runner
+COPY anteroom/server/anteroom/cloud_runner/package.json anteroom/server/anteroom/cloud_runner/package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund
+
 FROM ghcr.io/astral-sh/uv:0.13.9@sha256:d3b601f0c7b118bc1753febf7c41cc80981df678445e0254284eecf84db79a7d AS uv
 
 # The hosted packages exactly as uv.lock pins them, with their hashes.
@@ -30,12 +35,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     ANTEROOM_HOSTED=1 \
     PYTHONPATH=/app/anteroom/server \
-    ANTEROOM_WEB_DIR=/app/web
+    ANTEROOM_WEB_DIR=/app/web \
+    ANTEROOM_EXTENSION_DIR=/app/anteroom-extension
 WORKDIR /app
+# Node 22 binary for isolated per-operation Poshmark cloud runner subprocesses needs libstdc++6.
+RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=cloud-runner /usr/local/bin/node /usr/local/bin/node
 COPY deploy/fly/supabase-prod-ca-2021.crt /app/supabase-prod-ca-2021.crt
 COPY anteroom/VERSION /app/anteroom/VERSION
 COPY CHANGELOG.md /app/CHANGELOG.md
 COPY anteroom/server/anteroom/ /app/anteroom/server/anteroom/
+COPY --from=cloud-runner /src/cloud_runner/node_modules /app/anteroom/server/anteroom/cloud_runner/node_modules
+COPY anteroom-extension/background/ /app/anteroom-extension/background/
 COPY skills/list-this/SKILL.md /app/skills/list-this/SKILL.md
 COPY skills/list-this/references/ /app/skills/list-this/references/
 # Bulk listing reads measurements and Sourcing runs Box Scout from these skills' scripts.
@@ -46,7 +58,7 @@ COPY --from=requirements /requirements.txt /tmp/requirements.txt
 # folder, and installing it would build it with an unpinned setuptools.
 RUN pip install --no-cache-dir --require-hashes --no-deps -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt \
-    && chmod -R a+rX /app/skills /app/anteroom /app/CHANGELOG.md \
+    && chmod -R a+rX /app/skills /app/anteroom /app/anteroom-extension /app/CHANGELOG.md \
     && useradd --create-home --uid 10001 anteroom
 COPY --from=web /src/anteroom/dist /app/web
 ENV ANTEROOM_DATA_DIR=/home/anteroom/.local/share/anteroom

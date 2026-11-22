@@ -478,7 +478,9 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
     from anteroom.database import in_worker_session
     from anteroom.services.sale_delist_followup import _enabled
 
-    names, known, job_id = await in_worker_session(_open_delist, conv_id, marketplaces, confirm, expected, sale_id)
+    names, known, job_id, cloud_names = await in_worker_session(
+        _open_delist, conv_id, marketplaces, confirm, expected, sale_id
+    )
     job = SimpleNamespace(id=job_id)
     failed = False
     skipped: list[str] = []
@@ -505,6 +507,23 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
                     result = await _delete_ebay(entry["listing_id"], ebay_record)
                 elif name == "etsy":
                     result = await _delete_etsy(entry["listing_id"])
+                elif name in cloud_names:
+                    from anteroom.services import cloud_marketplace
+
+                    result = await cloud_marketplace.execute(
+                        name,
+                        {
+                            "type": "marketplace.delete",
+                            "job_id": job.id,
+                            "message_id": f"{job.id}-{name}",
+                            "payload": {
+                                "marketplace": name,
+                                "listing_id": entry["listing_id"],
+                                "confirm": True,
+                            },
+                        },
+                        timeout=90,
+                    )
                 else:
                     result = await browser_bridge.request(job, "marketplace.delete", {
                         "marketplace": name, "listing_id": entry["listing_id"], "confirm": True,
@@ -563,10 +582,10 @@ def _mercari_gone(name: str, result: dict) -> bool:
 
 
 def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bool,
-                 expected: dict[str, str] | None = None, sale_id: str | None = None) -> tuple[list[str], dict, str]:
+                 expected: dict[str, str] | None = None, sale_id: str | None = None) -> tuple[list[str], dict, str, set[str]]:
     from anteroom.services.extension_connection import current_extension
 
-    from anteroom.services import listing_mode
+    from anteroom.services import cloud_sessions, listing_mode
 
     listing_mode.require("direct", db)
     names = list(dict.fromkeys(str(m).strip().lower() for m in marketplaces if str(m or "").strip()))
@@ -586,7 +605,12 @@ def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
         if changed:
             raise DelistError(409, f"The {', '.join(changed)} listing changed. Nothing was delisted.", reason="listing_changed")
         sold_at = _require_followup_sale(db, conv_id, sale_id, names) if sale_id is not None else None
-        if BROWSER_MARKETPLACES & set(names) and not current_extension().connected:
+        cloud_names = {
+            name for name in names
+            if name in BROWSER_MARKETPLACES and cloud_sessions.has_active_session(name, db)
+        }
+        chrome_needed = (BROWSER_MARKETPLACES & set(names)) - cloud_names
+        if chrome_needed and not current_extension().connected:
             raise DelistError(409, "Connect Chrome first.")
         repo = JobRepo(db)
         listing = ListingRepo(db).get_current(conv_id)
@@ -606,7 +630,7 @@ def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
         job = repo.create(conv_id, listing.current_revision_id if listing else "", {"delist": names},
                           status="dispatched", current_step="native_delist")
         claim_api_job(db, job.id)
-    return names, known, job.id
+    return names, known, job.id, cloud_names
 
 
 def _require_followup_sale(db: Session, conv_id: str, sale_id: str, names: list[str], *,

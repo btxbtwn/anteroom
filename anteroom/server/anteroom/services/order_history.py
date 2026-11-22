@@ -257,7 +257,12 @@ def clear_listing_reports(db: Session, marketplace: str) -> int:
     return len(rows)
 
 
-def bridge_can_read() -> bool:
+def bridge_can_read(marketplace: str | None = None) -> bool:
+    if marketplace:
+        from anteroom.services import cloud_sessions
+
+        if cloud_sessions.has_active_session(marketplace):
+            return True
     from anteroom.services.extension_connection import current_extension
 
     extension_manager = current_extension()
@@ -265,8 +270,8 @@ def bridge_can_read() -> bool:
 
 
 async def sync(marketplace: str, *, session_factory=None) -> dict:
-    """Read this marketplace's orders through Chrome and store them. Nothing on the marketplace changes."""
-    from anteroom.services import browser_bridge
+    """Read this marketplace's orders through Cloud or Chrome and store them. Nothing on the marketplace changes."""
+    from anteroom.services import browser_bridge, cloud_marketplace, cloud_sessions
     from anteroom.services.api_job_lock import start_gate
     from anteroom.services.hosted_browser_relay import ChromeReadError
     from anteroom.services.relay_sales import reconcile_unmatched
@@ -277,7 +282,8 @@ async def sync(marketplace: str, *, session_factory=None) -> dict:
         session_factory = SessionLocal
     if marketplace not in HISTORY_MARKETS:
         return {"ok": False, "error": "Sales are not read from this marketplace."}
-    if not bridge_can_read():
+    use_cloud = await asyncio.to_thread(cloud_sessions.has_active_session, marketplace)
+    if not use_cloud and not bridge_can_read():
         return {"ok": False, "error": "Update the Anteroom Chrome extension to read sales from this marketplace."}
     def read_settled() -> list:
         with session_factory() as db:
@@ -290,19 +296,36 @@ async def sync(marketplace: str, *, session_factory=None) -> dict:
 
         context = current()
         payload = {"marketplace": marketplace, "settled": settled}
-        if context is not None:
+        if use_cloud:
+            raw = await cloud_marketplace.execute(
+                marketplace,
+                {"type": "marketplace.sales_history", "payload": payload},
+                timeout=READ_TIMEOUT_S,
+            )
+        elif context is not None:
             raw = await relay_for(context.seller_id).read("marketplace.sales_history", payload, READ_TIMEOUT_S)
         else:
             raw = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.sales_history",
                                                payload, timeout=READ_TIMEOUT_S)
-    except (browser_bridge.BrowserBridgeError, ChromeReadError) as exc:
+    except (
+        browser_bridge.BrowserBridgeError,
+        ChromeReadError,
+        cloud_marketplace.CloudExecutionUnavailable,
+        cloud_sessions.CloudSessionError,
+    ) as exc:
         return {"ok": False, "error": str(exc)}
     if not isinstance(raw, dict) or raw.get("skipped") is True:
         return {"ok": False, "skipped": True}
     if raw.get("ok") is not True:
         messages = {
-            "signed_out": "Sign in to this marketplace in Chrome.",
-            "challenge": "Open this marketplace in Chrome and finish its browser check, then try again.",
+            "signed_out": (
+                "Your cloud session expired. Reconnect it in Settings."
+                if use_cloud else "Sign in to this marketplace in Chrome."
+            ),
+            "challenge": (
+                "The marketplace asked for a browser check. Open it in Chrome and reconnect in Settings."
+                if use_cloud else "Open this marketplace in Chrome and finish its browser check, then try again."
+            ),
             "rate_limited": "The marketplace is limiting sales reads. Wait a few minutes, then try again.",
             "network": "The marketplace did not answer the sales read. Try again shortly.",
             "schema_drift": "The marketplace returned sales Anteroom can't read. Saved records were kept.",

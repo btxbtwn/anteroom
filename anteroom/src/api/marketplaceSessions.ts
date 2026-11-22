@@ -12,10 +12,24 @@ export interface ExtensionSession {
   expires_at: number | null;
   label: string | null;
   expiring: boolean;
+  /** Present on hosted accounts when cloud sessions are enabled for this marketplace. */
+  mode?: "chrome" | "cloud";
+  cloud_available?: boolean;
+  cloud_connected?: boolean;
+  cloud_state?: ExtensionSessionState;
+  last_error?: string | null;
 }
 
 export interface ExtensionSessions {
   sessions: Record<ExtensionSessionMarket, ExtensionSession>;
+  chrome_connected?: boolean;
+}
+
+export interface CloudConnectTokenResponse {
+  marketplace: string;
+  token: string;
+  expires_at: string;
+  expires_in: number;
 }
 
 export interface ExtensionSessionConnect {
@@ -49,6 +63,16 @@ export function chromeSessionPresentation(
   now = Date.now(),
   unavailable?: string | null,
 ): { tone: "success" | "warning" | "error" | "muted"; label: string } {
+  if (session?.mode === "cloud") {
+    if (session.state === "expired") return { tone: "error", label: "Cloud session expired" };
+    if (session.state === "signed_in") {
+      const expiry = expiryPhrase(session.expires_at, now);
+      const who = session.label ? `Connected in Cloud as ${session.label}` : "Connected in Cloud";
+      if (sessionIsExpiring(session, now)) return { tone: "warning", label: expiry ? `${who} · ${expiry}` : `${who} · expires soon` };
+      return { tone: "success", label: expiry ? `${who} · ${expiry}` : who };
+    }
+    if (!chromeReady) return { tone: "muted", label: "Not connected in Cloud" };
+  }
   if (!chromeReady) {
     // A connected but older Bridge can list yet cannot read sign-ins; say so instead of asking to connect.
     if (unavailable?.startsWith("Update Anteroom Bridge")) return { tone: "warning", label: "Update Anteroom Bridge" };
@@ -88,6 +112,13 @@ export function sessionNotification(
 ): SessionAlert | null {
   if (!session || session.state === "unknown") return null;
   if (session.state === "expired") {
+    if (session.mode === "cloud") {
+      return {
+        key: `${id}:cloud-expired:${session.expires_at ?? "cookie"}`,
+        title: `${name} cloud session expired`,
+        description: "Reconnect in Settings so cloud listing and sales checks can continue.",
+      };
+    }
     return {
       key: `${id}:expired:${session.expires_at ?? "cookie"}`,
       title: `${name} sign-in expired`,

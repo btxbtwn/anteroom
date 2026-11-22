@@ -1,4 +1,4 @@
-/* Narrow page-to-extension transport. Only connection, form reads and the relayed marketplace commands. */
+/* Narrow page-to-extension transport. Only connection, form reads, relayed commands, and cloud-session connect triggers. */
 (function () {
   const ORIGIN = 'https://myanteroom.com';
   if (window !== window.top || location.origin !== ORIGIN) return;
@@ -8,12 +8,17 @@
     const data = event.data;
     if (event.source !== window || event.origin !== ORIGIN || !data || data.source !== 'anteroom-cloud' || data.version !== 1
         || !UUID.test(data.requestId || '') || !UUID.test(data.accountId || '')
-        || !['status', 'connect', 'disconnect', 'poshmark_form', 'marketplace_command'].includes(data.action)) return;
+        || !['status', 'connect', 'disconnect', 'poshmark_form', 'marketplace_command', 'cloud_session_connect'].includes(data.action)) return;
     const relay = data.action === 'marketplace_command';
-    const keys = ['source', 'version', 'requestId', 'action', 'accountId', ...(data.action === 'connect' ? ['email'] : []),
-      ...(data.action === 'poshmark_form' ? ['listing'] : []), ...(relay ? ['command', 'photos'] : [])];
+    const cloudSession = data.action === 'cloud_session_connect';
+    const keys = ['source', 'version', 'requestId', 'action', 'accountId',
+      ...(data.action === 'connect' ? ['email'] : []),
+      ...(cloudSession ? ['email', 'marketplace', 'uploadToken'] : []),
+      ...(data.action === 'poshmark_form' ? ['listing'] : []),
+      ...(relay ? ['command', 'photos'] : [])];
     if (Object.keys(data).some(key => !keys.includes(key))) return;
-    if (data.action === 'connect' && (typeof data.email !== 'string' || data.email.length > 254)) return;
+    if ((data.action === 'connect' || cloudSession) && (typeof data.email !== 'string' || data.email.length > 254)) return;
+    if (cloudSession && (data.marketplace !== 'poshmark' || typeof data.uploadToken !== 'string' || data.uploadToken.length > 260)) return;
     const listing = data.action === 'poshmark_form' ? CloudMarketplaceProtocol.listing(data.listing) : null;
     if (data.action === 'poshmark_form' && !listing) return;
     const command = relay ? CloudMarketplaceProtocol.command(data.command) : null;
@@ -24,11 +29,19 @@
       if (accountId === data.accountId) accountId = null;
     } else if (data.action !== 'poshmark_form' && !relay) accountId = data.accountId;
     const message = { type: 'cloud.connection', action: data.action, accountId: data.accountId,
-      ...(data.action === 'connect' ? { email: data.email } : {}), ...(listing ? { listing } : {}), ...(relay ? { command, photos } : {}) };
+      ...(data.action === 'connect' ? { email: data.email } : {}),
+      ...(cloudSession ? { email: data.email, marketplace: data.marketplace, uploadToken: data.uploadToken } : {}),
+      ...(listing ? { listing } : {}), ...(relay ? { command, photos } : {}) };
     if ((data.action === 'poshmark_form' || relay) && accountId !== data.accountId) {
       respond({ ok: false, error_code: 'account_changed' }); return;
     }
     function respond(result) {
+      if (cloudSession) {
+        window.postMessage({ source: 'anteroom-extension', version: 1, requestId: data.requestId,
+          ok: result?.ok === true, state: result?.state === 'pending' ? 'pending' : 'unavailable',
+          ...(typeof result?.error === 'string' ? { error: result.error.slice(0, 200) } : {}) }, ORIGIN);
+        return;
+      }
       if (relay) {
         // The Bridge's reply goes to the hosted API, which records what the marketplace did.
         const reply = result?.ok ? CloudMarketplaceProtocol.reply(result.reply) : null;
@@ -47,7 +60,7 @@
       }
       window.postMessage({ source: 'anteroom-extension', version: 1, requestId: data.requestId,
         ok: result?.ok === true, state: ['connected', 'disconnected', 'pending'].includes(result?.state) ? result.state : 'unavailable',
-        extensionVersion: typeof result?.extensionVersion === 'string' ? result.extensionVersion.slice(0, 30) : '', supportedActions: Array.isArray(result?.supportedActions) ? result.supportedActions.filter(action => ['poshmark.form.read', 'marketplace.actions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_commands'].includes(action)) : [] }, ORIGIN);
+        extensionVersion: typeof result?.extensionVersion === 'string' ? result.extensionVersion.slice(0, 30) : '', supportedActions: Array.isArray(result?.supportedActions) ? result.supportedActions.filter(action => ['poshmark.form.read', 'marketplace.actions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_commands', 'marketplace.cloud_connect'].includes(action)) : [] }, ORIGIN);
     }
     try { chrome.runtime.sendMessage(message).then(respond).catch(() => respond(null)); }
     catch { respond(null); }

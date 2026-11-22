@@ -82,6 +82,7 @@ export default defineConfig({
     },
   },
   test: {
+    exclude: ["**/node_modules/**", "server/**"],
     // Off unless `npm run test:coverage` (vitest run --coverage) asks for it,
     // so the plain `npm test` stays fast. Reported only; there is no threshold.
     coverage: {

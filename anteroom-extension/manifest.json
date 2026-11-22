@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Anteroom Bridge",
-  "version": "0.2.83",
+  "version": "0.2.84",
   "minimum_chrome_version": "120",
   "description": "Lets Anteroom publish, update and delist your marketplace listings, save drafts, share, send offers, and read sales and likes.",
   "permissions": [
@@ -14,6 +14,7 @@
     "system.display"
   ],
   "host_permissions": [
+    "https://myanteroom.com/*",
     "https://web.vendoo.co/*",
     "https://app.vendoo.co/*",
     "https://us.vendoo.co/*",

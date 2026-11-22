@@ -380,7 +380,7 @@ def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequest) -
             raise NativeMarketplaceError(400, str(exc)) from exc
     if active_generation(conv_id) or activity.running(conv_id):
         raise NativeMarketplaceError(409, "Wait for generation to finish.")
-    if marketplace not in API_MARKETPLACES and (refusal := marketplace_actions_refusal()):
+    if marketplace not in API_MARKETPLACES and (refusal := marketplace_actions_refusal(marketplace)):
         raise NativeMarketplaceError(409, refusal)
     photos, warning = _photos(db, conv_id, snapshot, marketplace)
     snapshot["_approved_photo_warning"] = warning
@@ -527,9 +527,15 @@ def _open_job(db: Session, conv_id: str, marketplace: str, body: ListRequest, ki
                     steps = ["save_draft", "publish"]
             job = repo.create(conv_id, body.revision_id, snapshot, status="dispatched", current_step=f"native_{marketplace}_{steps[0]}")
             claim_api_job(db, job.id)
+            executor: str | None = None
+            if marketplace not in API_MARKETPLACES:
+                from anteroom.services import cloud_sessions
+
+                executor = "cloud" if cloud_sessions.has_active_session(marketplace, db) else "chrome"
             record = _store(db, conv_id, marketplace, {
                 **extra, **_CLEARED_ERROR, "state": STEP_STATE[steps[0]], "action": steps[0], "job_id": job.id,
-                "operation_id": job.id, "previous_revision_id": record.get("revision_id"), "revision_id": body.revision_id,
+                "operation_id": job.id, "executor": executor, "previous_revision_id": record.get("revision_id"),
+                "revision_id": body.revision_id,
             })
     except BaseException:
         if job is None:
@@ -800,6 +806,35 @@ async def _execute_step(job_id: str, conv_id: str, marketplace: str, step: str, 
                 stored = await _joined_worker_session(_apply_result, conv_id, marketplace, job_id, step, checked)
         return stored
     payload = _execute_payload(marketplace, step, binding, snapshot, photos, warning)
+    if binding.get("executor") == "cloud":
+        from anteroom.services import cloud_marketplace
+
+        command = {
+            "type": "marketplace.execute",
+            "job_id": job.id,
+            "message_id": binding["operation_id"],
+            "payload": payload,
+        }
+        try:
+            result = await _unless_cancelled(
+                job.id,
+                cloud_marketplace.execute(
+                    marketplace,
+                    command,
+                    approved_photos=snapshot.get(approved_photos.KEY),
+                    timeout=EXECUTE_TIMEOUT_S,
+                ),
+            )
+        except _Cancelled:
+            await cloud_marketplace.cancel(binding["operation_id"])
+            context = await _joined_worker_session(
+                _result_context, conv_id, marketplace, binding, snapshot, binding.get("draft_url")
+            )
+            checked = await _read_result(
+                marketplace, binding, snapshot, binding.get("draft_url"), job, context=context, remember=lambda _: None
+            )
+            result = checked if isinstance(checked, dict) else failure(UNKNOWN, "uncertain", safe=False)
+        return await _joined_worker_session(_apply_result, conv_id, marketplace, job_id, step, result)
     try:
         result = await _unless_cancelled(job.id, browser_bridge.request(
             job, "marketplace.execute", payload, timeout=EXECUTE_TIMEOUT_S))
@@ -902,7 +937,12 @@ async def request_cancel(job_id: str, record: dict) -> None:
     if not await in_worker_session(_record_cancel, job_id, record.get("marketplace")):
         return
     if record.get("operation_id"):
-        await _send_cancel(record["operation_id"])
+        if record.get("executor") == "cloud":
+            from anteroom.services import cloud_marketplace
+
+            await cloud_marketplace.cancel(record["operation_id"])
+        else:
+            await _send_cancel(record["operation_id"])
 
 
 def _record_cancel(db: Session, job_id: str, marketplace: str | None) -> bool:
@@ -916,10 +956,10 @@ def _record_cancel(db: Session, job_id: str, marketplace: str | None) -> bool:
 
 async def _read_result(marketplace: str, record: dict, snapshot: dict, candidate: str | None, job, *,
                        context: dict | None, remember) -> dict | None:
-    """Read the action's result from the marketplace (or Chrome's journal). Never writes the marketplace.
+    """Read the action's result from the marketplace (or Chrome/Cloud journal). Never writes the marketplace.
 
-    ``context`` is ``_result_context`` for a Chrome marketplace; ``remember`` keeps what eBay
-    reports along the way. None means Chrome has no journal for it: the seller has to look.
+    ``context`` is ``_result_context`` for a Chrome or Cloud marketplace; ``remember`` keeps what eBay
+    reports along the way. None means no journal for it: the seller has to look.
     """
     if marketplace == "etsy":
         return await etsy_listings.check(snapshot, record, candidate)
@@ -927,6 +967,26 @@ async def _read_result(marketplace: str, record: dict, snapshot: dict, candidate
         from anteroom.services import ebay_listings
 
         return await ebay_listings.check(record, snapshot, remember)
+    if record.get("executor") == "cloud":
+        from anteroom.services import cloud_marketplace
+
+        reply = await cloud_marketplace.execute(
+            marketplace,
+            {
+                "type": "marketplace.result",
+                "job_id": job.id,
+                "message_id": record.get("operation_id"),
+                "payload": {
+                    "marketplace": marketplace,
+                    "operation_id": record.get("operation_id"),
+                    "context": context,
+                },
+            },
+            timeout=65,
+        )
+        if not reply.get("finished") or not isinstance(reply.get("result"), dict):
+            return None
+        return reply["result"]
     try:
         reply = await browser_bridge.request(job, "marketplace.result", {
             "marketplace": marketplace, "operation_id": record.get("operation_id"), "context": context,
@@ -970,7 +1030,14 @@ def _open_check(db: Session, conv_id: str, marketplace: str, body: CheckRequest 
         ))
     if _running(db, record):
         raise NativeMarketplaceError(409, f"The {NAMES[marketplace]} action is still running. Wait for it to finish.")
-    if marketplace not in API_MARKETPLACES and not current_extension().connected:
+    if record.get("executor") == "cloud":
+        from anteroom.services import cloud_sessions
+
+        if not cloud_sessions.has_active_session(marketplace, db):
+            raise NativeMarketplaceError(
+                409, f"Reconnect {NAMES[marketplace]} in Settings -> Connections to check the result."
+            )
+    elif marketplace not in API_MARKETPLACES and not current_extension().connected:
         raise NativeMarketplaceError(409, "Connect Chrome to check the result.")
     action_job = JobRepo(db).get(record["job_id"])
     snapshot = action_job.listing_snapshot if action_job and isinstance(action_job.listing_snapshot, dict) else {}
@@ -1120,8 +1187,20 @@ async def reconcile(*, chrome: bool) -> int:
 
 
 def _reconcile_targets(db: Session, chrome: bool) -> list[tuple[str, str]]:
-    return [(row.conversation_id, row.marketplace) for row in MarketplaceListingRepo(db).unsettled()
-            if row.job_id and not job_is_live(db, row.job_id) and (row.marketplace in API_MARKETPLACES or chrome)]
+    from anteroom.services import cloud_sessions
+
+    targets: list[tuple[str, str]] = []
+    for row in MarketplaceListingRepo(db).unsettled():
+        if not row.job_id or job_is_live(db, row.job_id):
+            continue
+        if row.marketplace in API_MARKETPLACES:
+            targets.append((row.conversation_id, row.marketplace))
+        elif row.executor == "cloud":
+            if cloud_sessions.has_active_session(row.marketplace, db):
+                targets.append((row.conversation_id, row.marketplace))
+        elif chrome:
+            targets.append((row.conversation_id, row.marketplace))
+    return targets
 
 
 async def reconcile_after_reconnect() -> None:

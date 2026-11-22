@@ -35,12 +35,21 @@ function rememberSignIn(id: string) {
 
 /** Tells the seller when a Chrome marketplace sign-in has ended, and opens that shop. */
 export function MarketplaceSessionNotice() {
-  const { hosted } = useWorkspaceRuntime();
+  const { hosted, account } = useWorkspaceRuntime();
   const queryClient = useQueryClient();
   const seen = useRef(new Set<string>());
   const previous = useRef<Partial<Record<string, ExtensionSessionState>>>({});
   const connect = useMutation({
-    mutationFn: (marketplace: ExtensionSessionMarket) => api.marketplaceSessions.connect(marketplace),
+    mutationFn: async ({ marketplace, cloud }: { marketplace: ExtensionSessionMarket; cloud: boolean }) => {
+      if (cloud && hosted && account && marketplace === "poshmark") {
+        const { token } = await api.cloudSessions.connectToken(marketplace);
+        const { cloudExtension } = await import("../../api/cloudExtension");
+        const res = await cloudExtension(account).connectCloudSession("poshmark", token);
+        if (!res.ok) throw new Error(res.error || "Open Settings → Connections in Chrome to reconnect Poshmark in Cloud.");
+        return;
+      }
+      await api.marketplaceSessions.connect(marketplace);
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["marketplace-sessions"] });
     },
@@ -93,13 +102,14 @@ export function MarketplaceSessionNotice() {
       previous.current[id] = session.state;
       if (!alert || seen.current.has(alert.key)) continue;
       seen.current.add(alert.key);
+      const isCloud = session.mode === "cloud";
       toastManager.add(stackedThreadToast({
         type: "warning",
         title: alert.title,
         description: alert.description,
         timeout: 0,
         actionVariant: "outline",
-        actionProps: { children: "Sign in", onClick: () => signIn.current(id) },
+        actionProps: { children: isCloud ? "Reconnect" : "Sign in", onClick: () => signIn.current({ marketplace: id, cloud: isCloud }) },
       }));
     }
   }, [sessions.data]);

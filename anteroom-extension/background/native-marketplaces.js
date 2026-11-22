@@ -1,4 +1,5 @@
-// Native forms use the seller's existing session. No cookie/token export.
+// Native forms use the seller's active session (Chrome locally, or encrypted
+// Poshmark Cloud session when explicitly connected by the seller).
 // Single-use mutation commands are journaled; reconnects only read results.
 // A listing action holds only its own marketplace, so different marketplaces run
 // side by side. Delist and promotions hold every marketplace ('*').

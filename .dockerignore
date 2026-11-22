@@ -48,11 +48,15 @@ skills/list-this/references/*
 !skills/measure-this/**
 !skills/box-scout/
 !skills/box-scout/**
-# The site compares Chrome's Anteroom Bridge with this version.
+# The site compares Chrome's Anteroom Bridge with this version, and cloud
+# marketplace execution runs the Poshmark native handlers from background/.
 !anteroom-extension/
 anteroom-extension/*
 !anteroom-extension/manifest.json
+!anteroom-extension/background/
+!anteroom-extension/background/**
 # Keep private/runtime files excluded after every source allow rule.
+**/node_modules/
 **/__pycache__/
 **/*.pyc
 **/.env*

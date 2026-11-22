@@ -465,6 +465,12 @@ jobs:
           # pytest-split (in the dev extra) divides the suite between the
           # shards; the full suite still runs, each test exactly once per database.
           ./scripts/install-locked.sh python dev
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: "22"
+      - name: Install cloud runner dependencies
+        working-directory: anteroom/server/anteroom/cloud_runner
+        run: npm ci --no-audit --no-fund
       - name: Verify duration artifacts with xdist
         if: matrix.group == 1
         run: |
