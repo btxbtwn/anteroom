@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Awaitable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -271,6 +272,27 @@ def _category(detail: str, vendor: str) -> Category:
     return "other"
 
 
+_FEE_WORD_RE = re.compile(r"\bfees?\b")
+
+
+def _is_bank_fee(primary: str, detailed: str) -> bool:
+    return (
+        primary == "BANK_FEES"
+        or detailed == "BANK_FEES"
+        or detailed.startswith("BANK_FEES_")
+        or detailed.endswith("_BANK_FEES")
+    )
+
+
+def _is_credit_card_payment(primary: str, detailed: str, name: str) -> bool:
+    if detailed == "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT":
+        return True
+    lowered = name.casefold()
+    if "credit card payment" not in lowered:
+        return False
+    return not (_is_bank_fee(primary, detailed) or _FEE_WORD_RE.search(lowered))
+
+
 def _expense(row: dict) -> ExpenseInput | None:
     finance = row.get("personal_finance_category") or {}
     primary = finance.get("primary", "")
@@ -278,7 +300,7 @@ def _expense(row: dict) -> ExpenseInput | None:
         return None
     detailed = finance.get("detailed") or ""
     name = str(row.get("name", ""))
-    if detailed == "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT" or (not primary and "credit card payment" in name.casefold()):
+    if _is_credit_card_payment(primary, detailed, name):
         return None
     currency = row.get("iso_currency_code")
     if not currency:

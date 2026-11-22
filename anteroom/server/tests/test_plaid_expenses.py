@@ -147,7 +147,19 @@ def test_credit_card_payment_processing_fee_imports():
         personal_finance_category={"primary": "BANK_FEES"},
     ))
     assert fee is not None and fee.category == "platform_fees"
+    unclassified_fee = plaid_expenses._expense(transaction(
+        "fee-unclassified", name="CREDIT CARD PAYMENT PROCESSING FEE",
+    ))
+    assert unclassified_fee is not None
     assert plaid_expenses._expense(transaction("payment", name="CREDIT CARD PAYMENT")) is None
+    assert plaid_expenses._expense(transaction(
+        "payment-general", name="CREDIT CARD PAYMENT",
+        personal_finance_category={"primary": "GENERAL_SERVICES", "detailed": "GENERAL_SERVICES_OTHER_GENERAL_SERVICES"},
+    )) is None
+    assert plaid_expenses._expense(transaction(
+        "payment-loan-detailed", name="CREDIT CARD PAYMENT FEE",
+        personal_finance_category={"primary": "GENERAL_SERVICES", "detailed": "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT"},
+    )) is None
 
 
 def test_unconfigured_is_safe(local, monkeypatch):
