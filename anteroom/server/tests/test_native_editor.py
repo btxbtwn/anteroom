@@ -630,6 +630,46 @@ class NativeEditorTest(unittest.TestCase):
 
 
 class NativeEbayFieldsTest(unittest.IsolatedAsyncioTestCase):
+    async def test_slab_evidence_reaches_native_condition_rows_and_submission(self):
+        from anteroom.services.ebay_listings import _inventory_body, _listing_fields
+        from anteroom.services.listing_generate import format_photo_analysis
+
+        conditions = [{"id": "condition", "name": "Condition", "required": True, "multi": False, "mode": "selection",
+                       "values": [{"id": "2750", "label": "Graded"}, {"id": "4000", "label": "Ungraded"}]}]
+        for category, grader, grade, expected in (
+            ("183454", "PSA", "9.5", ["27501", "27502", "27503"]),
+            ("524", "PCGS", "MS-65", ["1", "3", "4", "5"]),
+        ):
+            with self.subTest(category=category):
+                evidence = {"grader": grader, "grade": grade, "certification_number": "00123456"}
+                analysis = format_photo_analysis({"slab_label": evidence})
+                self.assertIn(f"professional grader: {grader} (source: slab label)", analysis)
+                self.assertIn(f"grade: {grade} (source: slab label)", analysis)
+                self.assertIn("certification number: 00123456 (source: slab label)", analysis)
+                listing = {"direct_category_ids": {"ebay": category}, "title": "Collectible", "price": 25,
+                           "description": "Professionally graded.", "weight_oz": 8,
+                           "ebay_specifics": {"Professional Grader": grader, "Grade": grade,
+                                              "Certification Number": "00123456"}}
+                with patch.object(marketplace_schemas, "fields", new=AsyncMock(return_value=conditions)), \
+                        patch.object(native_editor, "_ebay_choices", new=AsyncMock(return_value=[
+                            native_editor.field("ebay_specifics.paymentPolicyId", "Payment", "", section="Pricing"),
+                            native_editor.field("ebay_specifics.fulfillmentPolicyId", "Shipping", "", section="Shipping"),
+                            native_editor.field("ebay_specifics.merchantLocationKey", "Location", "", section="Preferences"),
+                            native_editor.field("ebay_specifics.returnPolicyId", "Returns", "", section="Preferences"),
+                        ])), \
+                        patch.object(native_editor, "_ebay_format_fields", new=AsyncMock(return_value=[])), \
+                        patch.object(native_editor, "_ebay_variations_field", new=AsyncMock(return_value=[])):
+                    form = await native_editor.ebay_form(listing)
+                rows = {row["label"]: row for row in form["fields"] if row["section"] == "Condition"}
+                self.assertEqual(rows["Item condition"]["value"], "2750")
+                self.assertEqual(rows["Professional Grader"]["value"], grader)
+                self.assertEqual(rows["Grade"]["value"], grade)
+                self.assertEqual(rows["Certification Number"]["value"], "00123456")
+                payload = _inventory_body(_listing_fields(listing, {}), {}, [], listing, {})
+                self.assertEqual(payload["condition"], "LIKE_NEW")
+                self.assertEqual([entry["name"] for entry in payload["conditionDescriptors"]], expected)
+                self.assertEqual(payload["conditionDescriptors"][-1]["additionalInfo"], "00123456")
+
     async def test_category_search_keeps_the_breadcrumb_in_root_to_leaf_order(self):
         from anteroom.services.ebay_workspace import read
 

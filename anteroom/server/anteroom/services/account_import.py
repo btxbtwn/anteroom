@@ -229,6 +229,7 @@ ALLOWED_SETTINGS_KEYS = frozenset({
     'sale_autodelist',
     'business_note',
     'marketplaces',
+    'seller_region',
     'hidden_fields',
     'vendoo_sales_archived_at',
     'brave_quota_exhausted',

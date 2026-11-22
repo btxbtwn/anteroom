@@ -95,13 +95,14 @@ def _moment(value) -> datetime | None:
     return parsed.astimezone(UTC).replace(tzinfo=None) if parsed.tzinfo else parsed
 
 
-def parse_orders(marketplace: str, raw: object) -> list[Order]:
+def parse_orders(marketplace: str, raw: object, *, seller_region: str | None = None) -> list[Order]:
     """The orders the extension sent, checked field by field. Anything malformed rejects the whole read."""
     if marketplace not in _LISTING_ID or not isinstance(raw, dict) or not isinstance(raw.get("orders"), list):
         raise HistoryError("unreadable orders")
     if len(raw["orders"]) > MAX_ORDERS:
         raise HistoryError("too many orders")
     pattern = _LISTING_ID[marketplace]
+    currency = "CAD" if marketplace == "poshmark" and seller_region == "CA" else "USD"
     orders: dict[str, Order] = {}
     for item in raw["orders"]:
         if not isinstance(item, dict):
@@ -111,7 +112,7 @@ def parse_orders(marketplace: str, raw: object) -> list[Order]:
         totals = item.get("totals")
         lines = item.get("lines")
         if (not _ORDER_ID.fullmatch(order_id) or status not in ORDER_STATUSES or not isinstance(totals, dict)
-                or not isinstance(lines, list) or not 0 < len(lines) <= MAX_LINES or item.get("currency") != "USD"):
+                or not isinstance(lines, list) or not 0 < len(lines) <= MAX_LINES or item.get("currency") != currency):
             raise HistoryError("unreadable order")
         parsed_lines = []
         for line in lines:
@@ -126,7 +127,7 @@ def parse_orders(marketplace: str, raw: object) -> list[Order]:
             parsed_lines.append(Line(line_id, listing_id, tuple(alt_ids[:5]), _money(line.get("weight")), _money(line.get("item_revenue"))))
         if len({line.line_id for line in parsed_lines}) != len(parsed_lines):
             raise HistoryError("duplicate lines")
-        orders[order_id] = Order(order_id, status, item.get("final") is True, _moment(item.get("sold_at")), "USD",
+        orders[order_id] = Order(order_id, status, item.get("final") is True, _moment(item.get("sold_at")), currency,
                                  {field: _money(totals.get(field)) for field in TOTALS}, tuple(parsed_lines))
     return list(orders.values())
 
@@ -295,7 +296,11 @@ async def sync(marketplace: str, *, session_factory=None) -> dict:
         from anteroom.services.hosted_browser_relay import relay_for
 
         context = current()
+        from anteroom.services.seller_region import seller_region
+
         payload = {"marketplace": marketplace, "settled": settled}
+        if marketplace == "poshmark" and (await asyncio.to_thread(seller_region)).country == "CA":
+            payload["seller_region"] = "CA"
         if use_cloud:
             raw = await cloud_marketplace.execute(
                 marketplace,
@@ -334,7 +339,7 @@ async def sync(marketplace: str, *, session_factory=None) -> dict:
         code = raw.get("error_code") or raw.get("error")
         return {"ok": False, "error": messages.get(code, "Couldn't read sales.") if isinstance(code, str) else "Couldn't read sales."}
     try:
-        orders = parse_orders(marketplace, raw)
+        orders = parse_orders(marketplace, raw, seller_region=payload.get("seller_region"))
     except HistoryError:
         log.warning("%s returned orders Anteroom could not read", marketplace)
         return {"ok": False, "error": "The marketplace returned sales Anteroom can't read. Nothing was saved."}

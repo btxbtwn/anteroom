@@ -54,6 +54,10 @@ export function nativeFormCategoryKey(listing: ListingData | undefined, marketpl
  */
 export function nativeFormStructureKey(listing: ListingData | undefined, marketplace: string): string {
   const category = nativeFormCategoryKey(listing, marketplace);
+  if (marketplace === "ebay") {
+    const condition = textOf(asRecord(listing?.ebay_specifics).condition);
+    if (condition === "2750" || condition === "4000") return `${category}|${condition}`;
+  }
   if (marketplace !== "mercari") return category;
   // Mercari's labels depend on the package: its picker asks for them again when the weight or size changes.
   const specifics = asRecord(listing?.mercari_specifics);

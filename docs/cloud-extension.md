@@ -282,7 +282,7 @@ with the `www` host.
 
 ## Listing videos
 
-Bridge 0.2.86 reads a web listing's video for Poshmark through the signed
+Bridge 0.2.87 reads a web listing's video for Poshmark through the signed
 link the hosted API adds to `payload.video.download_url` when the page takes a
 `marketplace.execute` command (`services/hosted_browser_relay.with_video_link`),
 so the approval covers the link. The Bridge fetches only

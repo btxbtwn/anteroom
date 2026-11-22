@@ -42,9 +42,9 @@ export function MarketplaceSessionNotice() {
   const connect = useMutation({
     mutationFn: async ({ marketplace, cloud }: { marketplace: ExtensionSessionMarket; cloud: boolean }) => {
       if (cloud && hosted && account) {
-        const { token } = await api.cloudSessions.connectToken(marketplace);
+        const { token, seller_region } = await api.cloudSessions.connectToken(marketplace);
         const { cloudExtension } = await import("../../api/cloudExtension");
-        const res = await cloudExtension(account).connectCloudSession(marketplace, token);
+        const res = await cloudExtension(account).connectCloudSession(marketplace, token, seller_region);
         if (!res.ok) throw new Error(res.error || `Open Settings → Connections in Chrome to reconnect ${EXTENSION_SESSION_NAMES[marketplace]} in Cloud.`);
         return;
       }

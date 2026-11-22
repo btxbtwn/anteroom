@@ -53,6 +53,10 @@ async def _request(job, message_type: str, payload: dict[str, Any] | None = None
     if not await asyncio.to_thread(lambda: manager.connected):
         raise BrowserBridgeError("Connect Chrome first.")
     owner = getattr(manager, "owner", None)
+    from anteroom.services.extension_connection import MARKETPLACE_REGIONS, needs_regional_bridge
+
+    if not owner and needs_regional_bridge(message_type, payload or {}) and MARKETPLACE_REGIONS not in manager.capabilities:
+        raise BrowserBridgeError("Update Anteroom Bridge before sending a regional listing.")
     if owner:
         from anteroom.services.device_routes import RoutingUnavailable, forward_target, post
         try:

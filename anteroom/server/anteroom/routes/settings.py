@@ -598,6 +598,24 @@ def _marketplaces_payload(selected: list[str]) -> dict:
     }
 
 
+class SellerRegionConfig(BaseModel):
+    country: Literal["US", "CA", "GB", "AU"]
+
+
+@router.get("/seller-region")
+def get_seller_region():
+    from anteroom.services.seller_region import seller_region
+
+    return seller_region()
+
+
+@router.put("/seller-region")
+def put_seller_region(config: SellerRegionConfig):
+    from anteroom.services.seller_region import set_seller_region
+
+    return set_seller_region(config.country)
+
+
 @router.get("/marketplaces")
 def get_marketplaces():
     from anteroom.services.marketplaces import get_selected_marketplaces

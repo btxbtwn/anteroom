@@ -173,12 +173,24 @@ class EbayClient:
                 ("GET", "/sell/marketing/v1/ad_report_metadata/CAMPAIGN_PERFORMANCE_SUMMARY_REPORT"): "ad_metadata",
             }
             operation = operations.get((method, path))
+            research_params = dict(params or {})
+            site = research_params.get("marketplace_id")
+            regional: dict[str, str] = {}
+            if site in {"EBAY_CA", "EBAY_GB", "EBAY_AU"} and method == "GET":
+                if path == "/commerce/taxonomy/v1/get_default_category_tree_id":
+                    operation = "category_tree"
+                elif match := re.fullmatch(
+                    r"/commerce/taxonomy/v1/category_tree/([0-9]{1,10})/(get_category_suggestions|get_item_aspects_for_category)",
+                    path,
+                ):
+                    operation = "regional_categories" if match[2] == "get_category_suggestions" else "regional_aspects"
+                    regional = {"marketplace_id": str(research_params.pop("marketplace_id")), "tree_id": match[1]}
             if not operation:
                 raise EbayFailure("Invalid eBay research operation.", 422)
             if operation == "image" and (body is None or "image" not in body):
                 raise EbayFailure("Choose an image for image search.", 422)
             response = await relay_request("POST", "/studio/ebay/research", json_body={
-                "operation": operation, "params": params or {}, **({"image": body["image"]} if operation == "image" and body is not None else {}),
+                "operation": operation, "params": research_params, **regional, **({"image": body["image"]} if operation == "image" and body is not None else {}),
             })
             assert_identity(self.seller)
         host = api_host(path)
@@ -186,6 +198,15 @@ class EbayClient:
         async def send(token: str):
             headers = {"Authorization": f"Bearer {token}", "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
                        "Content-Language": "en-US"}
+            if path.startswith("/sell/inventory/") and xml is None:
+                from anteroom.services.seller_region import seller_region
+
+                region = await asyncio.to_thread(seller_region)
+                headers["X-EBAY-C-MARKETPLACE-ID"] = region.ebay_marketplace
+                headers["Content-Language"] = f"en-{region.country}"
+            if metadata := re.match(r"/sell/metadata/v1/marketplace/EBAY_(US|CA|GB|AU)/", path):
+                headers["X-EBAY-C-MARKETPLACE-ID"] = f"EBAY_{metadata[1]}"
+                headers["Accept-Language"] = f"en-{metadata[1]}"
             if xml is not None:
                 headers = {"X-EBAY-API-IAF-TOKEN": token, "X-EBAY-API-CALL-NAME": call,
                            "X-EBAY-API-SITEID": "0", "X-EBAY-API-COMPATIBILITY-LEVEL": "1487",

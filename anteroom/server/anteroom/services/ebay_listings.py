@@ -25,6 +25,7 @@ from typing import Any
 
 from anteroom.services.photo_store import photo_store
 from anteroom.services.ebay_fields import EBAY_CONDITION_DESCRIPTION
+from anteroom.services.seller_region import seller_region
 from anteroom.services.ebay_api import dollars, money_cents
 import httpx
 
@@ -352,6 +353,79 @@ _GRADES = {format(10 - step / 2, "g"): f"27502{step}" for step in range(19)} | {
 _CARD_CONDITIONS = {"near mint or better": "400010", "near mint": "400010", "excellent": "400011", "very good": "400012",
                     "poor": "400013", "lightly played": "400015", "moderately played": "400016", "heavily played": "400017"}
 
+# Supported leaves from eBay's Condition Descriptor IDs guide.
+_COIN_CATEGORIES = frozenset("""
+    257 524 528 532 533 534 535 536 537 538 539 542
+    543 546 547 786 3364 3365 3369 3372 3375 3379 3382 3383
+    3384 3385 3386 3387 3388 3389 3390 3391 3392 3396 3397 3398
+    3399 3401 3402 3404 3405 3406 3408 4184 4186 4398 4734 4735
+    4737 4738 4739 4740 4741 4941 7955 7968 11942 11946 11947 11948
+    11949 11950 11952 11953 11957 11958 11959 11963 11964 11965 11966 11969
+    11970 11971 11973 11976 11977 11978 11980 11981 11982 11983 18470 18473
+    28680 31137 31373 32477 32478 39455 39458 39461 39464 39468 39469 39470
+    39471 39472 39473 39479 39481 40715 40717 41084 41087 41090 41093 41099
+    41102 45137 45143 45147 45149 45150 45151 45152 45153 45154 45155 45156
+    45157 45158 45159 45161 45162 45163 45164 48024 48026 58529 68588 68590
+    69510 77528 90641 90643 90644 96810 98765 108914 118376 118377 118378 118379
+    122480 122491 122492 127145 139029 139806 139962 141146 149924 149926 149927 149929
+    149930 149932 149937 149938 149939 149940 149950 149951 149952 156977 159713 162142
+    162143 162145 162146 162147 162148 162149 162150 162152 162153 162155 162157 162159
+    162160 162161 162162 162163 162165 162166 162168 162169 162170 162171 162172 162173
+    162174 162175 162176 162177 162178 162179 162180 166676 167155 167156 167157 167158
+    167160 167161 167162 167164 167958 167960 170040 170827 171524 171525 171526 173586
+    173587 173588 173589 173591 173592 173593 173594 173597 173598 173599 173600 173601
+    173603 173605 173607 173608 173609 173610 173612 173613 173614 173615 173616 173620
+    173625 173626 173627 173628 173629 173630 173631 173643 173644 173645 173646 173647
+    173648 173685 173693 176964 177492 179531 179532 179533 179534
+""".split())
+_COIN_GRADERS: dict[str, str] = dict(zip(
+    "pcgs ngc cacg anacs icg iccs cccs lcgs cgsuk segs nnc ntc pci acg asa other".split(),
+    "14 15 16 34 35 36 37 38 39 40 41 42 43 44 45 76".split(),
+    strict=True,
+))
+_COIN_GRADES: dict[str, str] = dict(zip(
+    "70 69 68 67 66 65 64 63 62 61 60 58 55 53 50 45 40 35 30 25 20 15 12 10 8 6 4 3 2 1".split(),
+    "32 25 26 53 54 55 56 57 58 59 60 27 28 29 61 30 31 62 63 64 65 66 67 68 69 70 71 72 73 74".split(),
+    strict=True,
+))
+_COIN_LETTER_GRADES = {
+    "MS": ("18", range(60, 71)), "PR": ("18", range(60, 71)), "PF": ("18", range(60, 71)),
+    "AU": ("19", (50, 53, 55, 58)), "EX": ("20", (40, 45)), "XF": ("20", (40, 45)),
+    "VF": ("46", (20, 25, 30, 35)), "F": ("47", (12, 15)), "VG": ("48", (8, 10)),
+    "G": ("49", (4, 6)), "AG": ("50", (3,)), "FR": ("51", (2,)), "P": ("52", (1,)),
+}
+_COIN_CONDITIONS = {"uncirculated": "7", "extremely fine to about uncirculated": "8",
+                    "fine to very fine": "9", "below fine": "10"}
+
+
+def coin_condition(listing: dict, category_id: str) -> tuple[str, list[dict]] | None:
+    """Map eBay's coin-specific grader, grade and raw condition descriptors."""
+    if category_id not in _COIN_CATEGORIES:
+        return None
+    said = {_aspect_key(str(key)): str(value or "").strip() for key, value in _specifics(listing).items()
+            if not isinstance(value, (dict, list))}
+    grader = _grader_key(said.get("professionalgrader") or said.get("certification", ""))
+    grader_id = _COIN_GRADERS.get("cacg" if grader == "cac" else grader)
+    grade = re.fullmatch(r"([A-Z]+)[ -]*(\d{1,2})", said.get("grade", "").upper())
+    explicit = said.get("condition", "").upper()
+    if grader_id and grade and explicit not in {"4000", "USED_VERY_GOOD"}:
+        letters, number = grade.groups()
+        letter = _COIN_LETTER_GRADES.get(letters)
+        numeric_id = _COIN_GRADES.get(number)
+        if letter and numeric_id and int(number) in letter[1]:
+            descriptors = [
+                {"name": "1", "values": [grader_id]},
+                {"name": "3", "values": [letter[0]]},
+                {"name": "4", "values": [numeric_id]},
+            ]
+            if said.get("certificationnumber"):
+                descriptors.append({"name": "5", "additionalInfo": said["certificationnumber"][:30]})
+            return "LIKE_NEW", descriptors
+    raw = _COIN_CONDITIONS.get(said.get("coincondition", "").lower())
+    if raw and explicit not in {"2750", "LIKE_NEW"}:
+        return "USED_VERY_GOOD", [{"name": "2", "values": [raw]}]
+    return ebay_condition(listing), []
+
 
 def card_condition(listing: dict, category_id: str) -> tuple[str, list[dict]] | None:
     """eBay's condition and descriptors for a trading card, or None outside the card categories."""
@@ -359,17 +433,42 @@ def card_condition(listing: dict, category_id: str) -> tuple[str, list[dict]] | 
         return None
     said = {_aspect_key(str(key)): str(value or "").strip() for key, value in _specifics(listing).items()
             if not isinstance(value, (dict, list))}
-    grader = _GRADERS.get(_aspect_key(said.get("professionalgrader", "")))
+    grader = _GRADERS.get(_grader_key(said.get("professionalgrader", "")))
     grade = _GRADES.get(said.get("grade", "").lower().replace("gem mint", "").strip())
-    if grader and grade:
+    explicit = said.get("condition", "").upper()
+    if grader and grade and explicit not in {"4000", "USED_VERY_GOOD"}:
         descriptors = [{"name": "27501", "values": [grader]}, {"name": "27502", "values": [grade]}]
         if said.get("certificationnumber"):
             descriptors.append({"name": "27503", "additionalInfo": said["certificationnumber"][:30]})
         return "LIKE_NEW", descriptors
     ungraded = _CARD_CONDITIONS.get(said.get("cardcondition", "").lower())
-    if ungraded:
+    if ungraded and explicit not in {"2750", "LIKE_NEW"}:
         return "USED_VERY_GOOD", [{"name": "40001", "values": [ungraded]}]
     return ebay_condition(listing), []
+
+
+def _grader_key(label: str) -> str:
+    abbreviation = re.search(r"\(([A-Za-z-]+)\)\s*$", label)
+    return _aspect_key(abbreviation.group(1) if abbreviation else label)
+
+
+def collectible_condition_options(category_id: str, condition: str) -> dict[str, list[str]]:
+    """The descriptor inputs for eBay's current card or coin condition."""
+    coin = category_id in _COIN_CATEGORIES
+    if not coin and category_id not in CARD_CATEGORIES:
+        return {}
+    if condition == "LIKE_NEW":
+        grades = [f"{letters}-{number}" for letters, (_, numbers) in _COIN_LETTER_GRADES.items() for number in numbers] if coin else list(_GRADES)
+        return {
+            "Professional Grader": [name.upper() if name != "other" else "Other" for name in (_COIN_GRADERS if coin else _GRADERS)],
+            "Grade": grades,
+            "Certification Number": [],
+        }
+    if condition == "USED_VERY_GOOD":
+        if coin:
+            return {"Coin Condition": [name.title() for name in _COIN_CONDITIONS]}
+        return {"Card Condition": [name.title() for name in _CARD_CONDITIONS]}
+    return {}
 
 
 def ebay_category_id(listing: dict) -> str:
@@ -445,23 +544,26 @@ async def _not_found(call) -> dict | None:
 
 
 async def _offer_for(client: EbayClient, sku: str, binding: dict, kind: str = FIXED_PRICE) -> dict | None:
-    """This item's EBAY_US offer in the chosen format: the saved one, or the one eBay has for its SKU.
+    """This item's offer on the seller's site, in the chosen format.
 
     eBay keeps one offer per SKU and format. A live offer always wins; an
     unpublished offer in the other format is left as it is.
     """
+    marketplace = (await asyncio.to_thread(seller_region)).ebay_marketplace
     offer_id = str(binding.get("ebay_offer_id") or "")
     if offer_id:
         offer = await client.request("GET", f"/sell/inventory/v1/offer/{segment(offer_id)}")
+        if offer.get("marketplaceId", "EBAY_US") != marketplace:
+            raise ValueError("This offer belongs to another eBay marketplace. Select its seller region before continuing.")
         if offer.get("status") == "PUBLISHED" or offer.get("format", kind) == kind:
             return offer
     if not binding.get("ebay_inventory_written"):
         # An offer needs the inventory item, which this item has never written.
         return None
     found = await _not_found(client.request("GET", "/sell/inventory/v1/offer",
-                                            params={"sku": sku, "marketplace_id": "EBAY_US", "format": kind}))
+                                            params={"sku": sku, "marketplace_id": marketplace, "format": kind}))
     offers = [offer for offer in (found or {}).get("offers") or []
-              if offer.get("marketplaceId") in (None, "EBAY_US") and offer.get("offerId")]
+              if offer.get("marketplaceId", "EBAY_US") == marketplace and offer.get("offerId")]
     if len(offers) > 1:
         raise ValueError(f"eBay has {len(offers)} offers for SKU {sku}. Remove the extra ones in eBay, then List again.")
     return offers[0] if offers else None
@@ -484,10 +586,11 @@ POLICY_LABELS = {"fulfillment": "shipping", "payment": "payment", "return": "ret
 
 
 async def _policies(client: EbayClient, kind: str) -> list[dict]:
-    body = await client.request("GET", f"/sell/account/v1/{kind}_policy", params={"marketplace_id": "EBAY_US"})
+    marketplace = (await asyncio.to_thread(seller_region)).ebay_marketplace
+    body = await client.request("GET", f"/sell/account/v1/{kind}_policy", params={"marketplace_id": marketplace})
     return [{"id": str(policy[f"{kind}PolicyId"]), "title": str(policy.get("name") or "Untitled")[:200]}
             for policy in body.get(f"{kind}Policies", [])
-            if policy.get("marketplaceId") in (None, "EBAY_US") and policy.get(f"{kind}PolicyId")]
+            if policy.get("marketplaceId", marketplace) == marketplace and policy.get(f"{kind}PolicyId")]
 
 
 def _location_enabled(item: dict) -> bool:
@@ -499,15 +602,19 @@ def _location_enabled(item: dict) -> bool:
 
 
 async def _locations(client: EbayClient) -> list[dict]:
+    country = (await asyncio.to_thread(seller_region)).country
     body = await client.request("GET", "/sell/inventory/v1/location", params={"limit": "100"})
     return [{"id": str(item["merchantLocationKey"]), "title": str(item.get("name") or item["merchantLocationKey"])[:200]}
-            for item in body.get("locations", []) if isinstance(item, dict) and _location_enabled(item)]
+            for item in body.get("locations", []) if isinstance(item, dict) and _location_enabled(item)
+            and ((item.get("location") or {}).get("address") or {}).get("country", "US") == country]
 
 
 def _ship_from_postal_code() -> str | None:
     """The saved inventory location when it is a US ZIP eBay can store."""
     from anteroom.services.user_settings import get_ebay_inventory_location
 
+    if seller_region().country != "US":
+        return None
     match = re.fullmatch(r"(\d{5})(?:-\d{4})?", get_ebay_inventory_location())
     return match.group(1) if match else None
 
@@ -959,7 +1066,11 @@ def _listing_fields(snapshot: dict, form: dict) -> dict:
             value = price_for(snapshot, "ebay")
             price = str(value) if value is not None else ""
     category_id = ebay_category_id(snapshot)
-    condition, descriptors = card_condition(snapshot, category_id) or (ebay_condition(snapshot), [])
+    condition, descriptors = (
+        card_condition(snapshot, category_id)
+        or coin_condition(snapshot, category_id)
+        or (ebay_condition(snapshot), [])
+    )
     condition_note = condition_description(snapshot, form)
     fields = {"title": title, "description": description, "quantity": quantity, "price": price, "category_id": category_id,
               "condition": condition, "condition_descriptors": descriptors, "store_categories": store_category_names(snapshot),
@@ -967,6 +1078,11 @@ def _listing_fields(snapshot: dict, form: dict) -> dict:
     if varied:
         fields["variations"] = ebay_variations.plan(snapshot, price)
     return fields
+
+
+async def _regional_listing_fields(snapshot: dict, form: dict) -> dict:
+    region = await asyncio.to_thread(seller_region)
+    return {**_listing_fields(snapshot, form), "marketplace_id": region.ebay_marketplace, "currency": region.currency}
 
 
 def listing_options(snapshot: dict) -> dict:
@@ -1055,13 +1171,13 @@ def _cached_aspect_gaps(snapshot: dict, form: dict) -> list[dict]:
     """Advisory eBay aspect issues from the cached schema."""
     from anteroom.services.category_fields import load_rows
     from anteroom.services.direct_categories import direct_category_id
-    from anteroom.services.marketplace_schemas import EBAY_ASPECTS
+    from anteroom.services.marketplace_schemas import EBAY_ASPECTS, ebay_schema_cache_key
 
     category = direct_category_id(snapshot, "ebay")
     if not re.fullmatch(r"[1-9]\d{0,14}", category):
         return []
     try:
-        rows = load_rows(EBAY_ASPECTS, category)
+        rows = load_rows(ebay_schema_cache_key(EBAY_ASPECTS), category)
     except Exception:  # noqa: BLE001 - a closed database only means the live check at List remains
         return []
     if not rows:
@@ -1154,33 +1270,35 @@ def _inventory_body(fields: dict, aspects: dict, image_urls: list[str], snapshot
         body["product"]["subtitle"] = fields["subtitle"]
     if fields.get("condition_descriptors"):
         body["conditionDescriptors"] = fields["condition_descriptors"]
+        body.pop("conditionDescription", None)
     if video_ids:
         # eBay supports one video per listing. The item is replaced whole, so leaving it out clears it.
         body["product"]["videoIds"] = video_ids
     return body
 
 
-def _usd(value: str) -> dict:
-    return {"value": value, "currency": "USD"}
-
-
 def offer_terms(form: dict, fields: dict, snapshot: dict) -> dict | None:
     """Best Offer terms for a fixed-price offer. An auction or a listing with variations carries none."""
     if fields["format"]["format"] == AUCTION or fields.get("variations"):
         return None
-    return best_offer_terms(form, fields["price"], snapshot)
+    terms = best_offer_terms(form, fields["price"], snapshot)
+    for field_name in ("autoAcceptPrice", "autoDeclinePrice"):
+        if field_name in terms:
+            terms[field_name]["currency"] = fields.get("currency", "USD")
+    return terms
 
 
 def _offer_body(sku: str, fields: dict, location: str | None, policies: dict) -> dict:
     chosen = fields["format"]
-    pricing = {"price": _usd(fields["price"])} if fields["price"] else {}
+    currency = fields.get("currency", "USD")
+    pricing = {"price": {"value": fields["price"], "currency": currency}} if fields["price"] else {}
     if chosen["format"] == AUCTION:
-        pricing["auctionStartPrice"] = _usd(chosen["start"])
+        pricing["auctionStartPrice"] = {"value": chosen["start"], "currency": currency}
         if chosen.get("reserve"):
-            pricing["auctionReservePrice"] = _usd(chosen["reserve"])
+            pricing["auctionReservePrice"] = {"value": chosen["reserve"], "currency": currency}
     policies = {key: value for key, value in policies.items() if value is not None}
     body = {
-        "sku": sku, "marketplaceId": "EBAY_US", "format": chosen["format"], "listingDuration": chosen["duration"],
+        "sku": sku, "marketplaceId": fields.get("marketplace_id", "EBAY_US"), "format": chosen["format"], "listingDuration": chosen["duration"],
         "includeCatalogProductDetails": False, "categoryId": fields["category_id"],
         "pricingSummary": pricing,
         "listingDescription": description_html(fields["description"]),
@@ -1216,12 +1334,14 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Reco
         form = snapshot.get("form")
         if not isinstance(form, dict):
             form = vendoo_form(snapshot, "ebay")
-        fields = _listing_fields(snapshot, form)
+        fields = await _regional_listing_fields(snapshot, form)
         listing_id = str(binding.get("listing_id") or binding.get("ebay_listing_id") or "")
         offer_id = str(binding.get("ebay_offer_id") or "")
         if not re.fullmatch(r"\d{6,20}", listing_id):
             raise ValueError("eBay has not confirmed which live listing to update.")
         if fields.get("variations") or binding.get("ebay_group_key"):
+            if fields["marketplace_id"] != "EBAY_US":
+                raise ValueError("Update this regional variation listing on eBay.")
             from anteroom.services import ebay_variations
 
             if not fields.get("variations"):
@@ -1234,11 +1354,15 @@ async def _update_live(snapshot: dict, photos: list, binding: dict, record: Reco
                 client, fields["category_id"], ebay_variations.with_first_values(ebay_aspects(snapshot, form), chosen)), fields)
             return await ebay_variations.update_live(client, snapshot, form, fields, photos, binding, record, active, aspects)
         if not offer_id:
+            if fields["marketplace_id"] != "EBAY_US":
+                raise ValueError("Update this regional listing on eBay.")
             video_ids = await _video_ids(client, snapshot, binding, record, active)
             await _wait_for_video(client, video_ids, active)
             return await _revise_by_item_id(client, listing_id, fields, best_offer_terms(form, fields["price"], snapshot),
                                             None if _video_choice(snapshot) is False else video_ids)
         offer = await client.request("GET", f"/sell/inventory/v1/offer/{segment(offer_id)}")
+        if offer.get("marketplaceId", "EBAY_US") != fields["marketplace_id"]:
+            raise ValueError("This offer belongs to another eBay marketplace. Select its seller region before updating.")
         current_id = str((offer.get("listing") or {}).get("listingId") or "")
         if offer.get("status") != "PUBLISHED" or current_id != listing_id:
             raise ValueError("This eBay offer is not the live listing. Check eBay before updating it.")
@@ -1291,8 +1415,10 @@ async def execute(action: str, snapshot: dict, photos: list, binding: dict,
         form = snapshot.get("form")
         if not isinstance(form, dict):
             form = vendoo_form(snapshot, "ebay")
-        fields = _listing_fields(snapshot, form)
+        fields = await _regional_listing_fields(snapshot, form)
         if fields.get("variations"):
+            if fields["marketplace_id"] != "EBAY_US":
+                raise ValueError("Create this regional variation listing on eBay.")
             from anteroom.services import ebay_variations
 
             chosen = ebay_variations.assign_skus(fields["variations"], ebay_sku(snapshot, binding, conversation_id))

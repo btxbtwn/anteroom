@@ -452,6 +452,28 @@ class EbayListingsTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ebay_listings.card_condition(card, "183454"), ("USED_EXCELLENT", []))
         self.assertIsNone(ebay_listings.card_condition(LISTING, "15687"))
 
+    def test_graded_coin_inventory_payload_preserves_certification_number(self):
+        coin = {**LISTING, "direct_category_ids": {"ebay": "524"}, "ebay_specifics": {
+            "Professional Grader": "PCGS", "Grade": "MS-65", "Certification Number": "00123456",
+        }}
+        fields = ebay_listings._listing_fields(coin, {})
+        body = ebay_listings._inventory_body(fields, {}, [], coin, {})
+        self.assertEqual(body["condition"], "LIKE_NEW")
+        self.assertEqual(body["conditionDescriptors"], [
+            {"name": "1", "values": ["14"]},
+            {"name": "3", "values": ["18"]},
+            {"name": "4", "values": ["55"]},
+            {"name": "5", "additionalInfo": "00123456"},
+        ])
+
+    def test_raw_coin_inventory_payload_uses_coin_condition(self):
+        coin = {**LISTING, "direct_category_ids": {"ebay": "524"},
+                "ebay_specifics": {"Coin Condition": "Uncirculated"}}
+        fields = ebay_listings._listing_fields(coin, {})
+        body = ebay_listings._inventory_body(fields, {}, [], coin, {})
+        self.assertEqual(body["condition"], "USED_VERY_GOOD")
+        self.assertEqual(body["conditionDescriptors"], [{"name": "2", "values": ["7"]}])
+
     async def test_the_shipping_policy_chosen_in_settings_is_used_when_there_are_several(self):
         client = Client(policies=3)
         self.defaults = {"fulfillment_policy_id": "f2"}

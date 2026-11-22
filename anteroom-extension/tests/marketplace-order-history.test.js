@@ -22,7 +22,7 @@ function worker(routes, cookies = {}) {
   return { c, calls };
 }
 
-const read = async (c, marketplace, settled = []) => JSON.parse(JSON.stringify(await c.readMarketplaceOrderHistory(marketplace, settled)));
+const read = async (c, marketplace, settled = [], region) => JSON.parse(JSON.stringify(await c.readMarketplaceOrderHistory(marketplace, settled, region)));
 
 test('sales reads classify a refused Depop session', async () => {
   const { c } = worker({ 'receipts/?role=seller': [401, {}] }, { access_token: 'expired' });
@@ -217,6 +217,8 @@ test('Poshmark reads a bundle order page and a cancelled order', async () => {
       { line_id: 'l2', listing_id: 'eeeeeeeeeeeeeeeeeeeeeeee', alt_ids: [], weight: '68.00', item_revenue: null }] });
   assert.deepEqual([second.status, second.final, second.totals.item_revenue], ['cancelled', true, '0.00']);
   assert.equal(JSON.stringify(result).includes('someone'), false);
+  const canadian = await read(c, 'poshmark', [], 'CA');
+  assert.deepEqual(canadian.orders.map(order => order.currency), ['CAD', 'CAD']);
 });
 
 function mercariSummary(rows) {

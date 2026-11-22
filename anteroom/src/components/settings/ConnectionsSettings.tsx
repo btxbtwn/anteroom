@@ -341,9 +341,9 @@ function ChromeSessionRow({
   const cloudConnect = useMutation({
     mutationFn: async () => {
       if (!account) throw new Error("Sign in to your Anteroom account first.");
-      const { token } = await api.cloudSessions.connectToken(marketplace);
+      const { token, seller_region } = await api.cloudSessions.connectToken(marketplace);
       const { cloudExtension } = await import("../../api/cloudExtension");
-      const response = await cloudExtension(account).connectCloudSession(marketplace, token);
+      const response = await cloudExtension(account).connectCloudSession(marketplace, token, seller_region);
       if (!response.ok) {
         throw new Error(
           response.error || `Update Anteroom Bridge in desktop Chrome, sign in to ${name}, then choose Connect in Cloud.`,

@@ -43,7 +43,7 @@ function nativeDraftUrl(platform, raw) {
     const url = new URL(raw);
     const valid = platform === 'mercari' ? url.origin === 'https://www.mercari.com' && /^\/sell\/draft\/[A-Za-z0-9_-]+\/$/.test(url.pathname)
       : platform === 'depop' ? url.origin === 'https://www.depop.com' && /^\/sellinghub\/drafts\/edit\/[A-Za-z0-9_-]{1,80}\/?$/.test(url.pathname)
-      : platform === 'poshmark' && url.origin === 'https://poshmark.com' && /^\/edit-listing\/[a-f0-9]{24}$/.test(url.pathname) && !url.search && !url.hash;
+      : platform === 'poshmark' && ['https://poshmark.com', 'https://poshmark.ca'].includes(url.origin) && /^\/edit-listing\/[a-f0-9]{24}$/.test(url.pathname) && !url.search && !url.hash;
     return valid ? `${url.origin}${url.pathname}` : '';
   } catch { return ''; }
 }

@@ -25,6 +25,7 @@ export interface ExtensionSessions {
 }
 
 export interface CloudConnectTokenResponse {
+  seller_region?: "US" | "CA" | "GB" | "AU";
   marketplace: string;
   token: string;
   expires_at: string;
