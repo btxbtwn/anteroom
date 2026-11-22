@@ -208,8 +208,13 @@ class BrowserRelay(ReplyWaits):
                 # The page went away while the photos were read: the next poll takes the command.
                 self._outbox.appendleft(command)
                 raise
-        command = await with_video_link(command)
-        return bridge_approvals.signed(self.owner, command, self._capabilities, photos)
+        try:
+            linked = await with_video_link(command)
+        except asyncio.CancelledError:
+            # The same for its video link: the next poll takes the command.
+            self._outbox.appendleft(command)
+            raise
+        return bridge_approvals.signed(self.owner, linked, self._capabilities, photos)
 
     async def read_local(self, command: str, payload: dict, timeout: float) -> dict:
         """One named command other than a marketplace action, run in the seller's Chrome,

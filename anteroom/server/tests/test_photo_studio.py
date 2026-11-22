@@ -107,7 +107,8 @@ def test_studio_options_become_photoroom_form_fields():
     assert ghost["background.color"] == "FFFFFF" and "outputSize" not in ghost
     assert StudioOptions(flat_lay=True).form()["flatLay.mode"] == "ai.auto"
     auto = StudioOptions(virtual_model=VirtualModel()).form()
-    assert auto == {"removeBackground": "false", "virtualModel.mode": "ai.auto", "virtualModel.scene.preset.name": "random",
+    assert auto == {"removeBackground": "false", "referenceBox": "originalImage", "virtualModel.mode": "ai.auto",
+                    "virtualModel.scene.preset.name": "random",
                     "virtualModel.pose": "random", "export.format": "png"}
     chosen = StudioOptions(virtual_model=VirtualModel(model="maya", scene="beach", pose="seated")).form()
     assert chosen["virtualModel.model.preset.name"] == "maya"

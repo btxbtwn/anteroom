@@ -391,7 +391,7 @@ test('a hosted listing video is read only through a signed link to the private p
   }
   const fetched = [];
   c.fetch = async (url, options) => {
-    fetched.push([url, options.credentials]);
+    fetched.push([url, options.credentials, options.redirect]);
     return { ok: true, blob: async () => ({ size: 4, type: 'video/mp4' }) };
   };
   const video = { id: 'abc-123', size_bytes: 4, url: '/api/videos/abc-123', download_url: signed };
@@ -400,7 +400,7 @@ test('a hosted listing video is read only through a signed link to the private p
     return vm.runInContext('nativeVideo(...__args)', c);
   };
   assert.equal((await load(video)).size, 4);
-  assert.deepEqual(fetched, [[signed, 'omit']]);
+  assert.deepEqual(fetched, [[signed, 'omit', 'error']]);
   await assert.rejects(load({ ...video, download_url: 'https://evil.example/x.video' }), /Could not load the video/);
   assert.equal(fetched.length, 1);
   // The Mac's own preview address never replaces its job-scoped loopback download.

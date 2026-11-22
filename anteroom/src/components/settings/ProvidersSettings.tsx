@@ -346,8 +346,9 @@ function PhotoroomSection({ hosted }: { hosted: boolean }) {
   const setKeyMutation = useMutation({ mutationFn: (key: string) => api.settings.setPhotoroom(key), onSuccess: refresh });
   const deleteKeyMutation = useMutation({ mutationFn: () => api.settings.deletePhotoroom(), onSuccess: refresh });
   const configured = Boolean(photoroom?.configured);
-  const status = setKeyMutation.isError ? (
-    <span className="text-destructive-foreground">{(setKeyMutation.error as Error).message}</span>
+  const failure = (setKeyMutation.error ?? deleteKeyMutation.error) as Error | null;
+  const status = failure ? (
+    <span className="text-destructive-foreground">{failure.message}</span>
   ) : configured ? (
     <span className="inline-flex items-center gap-1.5">
       <span className="size-1.5 rounded-full bg-success" aria-hidden />

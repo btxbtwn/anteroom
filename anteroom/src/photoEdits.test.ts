@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { centeredCrop, dragCrop, flipEdits, markFromDrag, normalizeStudio, studioProblem } from "./photoEdits";
+import { centeredCrop, dragCrop, flipEdits, markFromDrag, normalizeStudio, studioProblem, withCrop } from "./photoEdits";
 
 describe("photo crop geometry", () => {
   it("centres the largest crop of a shape", () => {
@@ -75,4 +75,27 @@ describe("flip, marks and AI Studio rules", () => {
     expect(studioProblem({ remove_background: true })).toBeNull();
   });
 
+
+  it("keeps a redaction on the same part of the photo when the crop changes", () => {
+    // A name at 70–80% of the full width is hidden; cropping to the right half moves the box with it.
+    const edits = { redactions: [{ x: 0.7, y: 0.4, width: 0.1, height: 0.2 }], annotations: [{ kind: "arrow" as const, x1: 0.5, y1: 0, x2: 1, y2: 1 }] };
+    const cropped = withCrop(edits, { x: 0.5, y: 0, width: 0.5, height: 1 });
+    expect(cropped.redactions?.[0].x).toBeCloseTo(0.4);
+    expect(cropped.redactions?.[0].width).toBeCloseTo(0.2);
+    expect(cropped.annotations?.[0].x1).toBeCloseTo(0);
+    // Uncropping puts it back.
+    const back = withCrop(cropped, null);
+    expect(back.redactions?.[0].x).toBeCloseTo(0.7);
+    // A box cropped away entirely goes, one partly outside is trimmed.
+    expect(withCrop(edits, { x: 0, y: 0, width: 0.5, height: 1 }).redactions).toEqual([]);
+    const trimmed = withCrop(edits, { x: 0, y: 0, width: 0.75, height: 1 }).redactions?.[0];
+    expect((trimmed?.x ?? 0) + (trimmed?.width ?? 0)).toBeCloseTo(1);
+  });
+
+  it("keeps a redaction drawn at the edge inside the frame, and mirrors the tilt with a flip", () => {
+    const edge = markFromDrag("blur", 1, 0.995, 0.97, 1, "#E5484D", "");
+    expect(edge && "redaction" in edge && edge.redaction.x + edge.redaction.width).toBeLessThanOrEqual(1);
+    expect(edge && "redaction" in edge && edge.redaction.y + edge.redaction.height).toBeLessThanOrEqual(1);
+    expect(flipEdits({ straighten: 5 }, "horizontal").straighten).toBe(-5);
+  });
 });

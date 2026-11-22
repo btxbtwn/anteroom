@@ -29,6 +29,7 @@ import {
   dragCrop,
   flipEdits,
   markFromDrag,
+  withCrop,
   normalizeStudio,
   studioProblem,
   type CropHandle,
@@ -44,6 +45,8 @@ import { ToggleGroup, Toggle } from "./ui/toggle-group";
 import { SettingsSelect, type SettingsSelectOption } from "./settings/SettingsLayout";
 
 const FULL_FRAME: CropBox = { x: 0, y: 0, width: 1, height: 1 };
+/** The server keeps at most this many annotations, and as many redactions, per photo. */
+const MAX_MARKS = 30;
 const PREVIEW_DELAY_MS = 150;
 
 type Tab = "crop" | "adjust" | "markup" | "studio";
@@ -101,6 +104,8 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pen, setPen] = useState<MarkPen>({ tool: "arrow", color: DEFAULT_MARK_COLOR, text: "" });
+  // AI Studio keeps the editor open (and on its tab) until Photoroom answers.
+  const [studioRunning, setStudioRunning] = useState(false);
 
   // The crop is drawn on the whole frame; marks are drawn live over the finished frame without them.
   const cropping = tab === "crop";
@@ -149,7 +154,7 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
   const chooseAspect = (id: string) => {
     setAspectId(id);
     const next = CROP_ASPECTS.find((option) => option.id === id)?.aspect;
-    if (next && frameAspect) setEdits((current) => ({ ...current, crop: centeredCrop(next, frameAspect) }));
+    if (next && frameAspect) setEdits((current) => withCrop(current, centeredCrop(next, frameAspect)));
   };
   const changed = JSON.stringify(edits) !== JSON.stringify(saved);
   const unreadable = previewUrl !== null && unreadablePreview === previewUrl;
@@ -167,7 +172,7 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
     }
   };
 
-  const busy = saving;
+  const busy = saving || studioRunning;
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
       <DialogPopup
@@ -207,7 +212,7 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
                       box={edits.crop ?? FULL_FRAME}
                       aspect={aspect}
                       frameAspect={frameAspect ?? 1}
-                      onChange={(crop) => setEdits((current) => ({ ...current, crop }))}
+                      onChange={(crop) => setEdits((current) => withCrop(current, crop))}
                     />
                   ) : tab === "markup" ? (
                     <MarkupOverlay edits={edits} pen={pen} onChange={setEdits} />
@@ -229,7 +234,7 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
               value={[tab]}
               onValueChange={(next) => {
                 const value = next[0] as Tab | undefined;
-                if (value) setTab(value);
+                if (value && !studioRunning) setTab(value);
               }}
             >
               {TABS.map((option) => (
@@ -244,7 +249,7 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
                 hasCrop={Boolean(edits.crop)}
                 disabled={!frameAspect || loading}
                 onAspect={chooseAspect}
-                onClear={() => { setAspectId("free"); setEdits((current) => ({ ...current, crop: null })); }}
+                onClear={() => { setAspectId("free"); setEdits((current) => withCrop(current, null)); }}
               />
             ) : tab === "adjust" ? (
               <AdjustTools edits={edits} onChange={setEdits} />
@@ -257,6 +262,8 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
                 photos={photos ?? [photo]}
                 unsaved={changed}
                 onSaved={onSaved}
+                onRunning={setStudioRunning}
+                onRebase={(next) => setEdits(normalized(next))}
                 onDone={onClose}
               />
             )}
@@ -528,11 +535,17 @@ function MarkupOverlay({ edits, pen, onChange }: {
       setHint(pen.tool === "text" ? "Type a label first." : null);
       return;
     }
+    const list = "annotation" in mark ? edits.annotations ?? [] : edits.redactions ?? [];
+    if (list.length >= MAX_MARKS) {
+      setHint("annotation" in mark ? `A photo takes ${MAX_MARKS} marks. Remove one to add another.`
+        : `A photo takes ${MAX_MARKS} hidden areas. Remove one to hide another.`);
+      return;
+    }
     setHint(null);
     if ("annotation" in mark) {
-      onChange((current) => ({ ...current, annotations: [...(current.annotations ?? []), mark.annotation].slice(0, 30) }));
+      onChange((current) => ({ ...current, annotations: [...(current.annotations ?? []), mark.annotation] }));
     } else {
-      onChange((current) => ({ ...current, redactions: [...(current.redactions ?? []), mark.redaction].slice(0, 30) }));
+      onChange((current) => ({ ...current, redactions: [...(current.redactions ?? []), mark.redaction] }));
     }
   };
   const preview = draft ? markFromDrag(pen.tool, draft.x1, draft.y1, draft.x2, draft.y2, pen.color, pen.text || " ") : null;
@@ -647,14 +660,21 @@ export function studioRequest(choice: StudioChoice): StudioOptions {
   });
 }
 
-function StudioTools({ convId, photo, photos, unsaved, onSaved, onDone }: {
+const MAX_STUDIO_PHOTOS = 20;
+
+function StudioTools({ convId, photo, photos, unsaved, onSaved, onRunning, onRebase, onDone }: {
   convId: string;
   photo: ListingPhoto;
   photos: ListingPhoto[];
   unsaved: boolean;
   onSaved: (photo: ListingPhoto) => void;
+  onRunning: (running: boolean) => void;
+  /** The open photo changed under the editor; its recipe starts from the result. */
+  onRebase: (edits: PhotoEdits | null | undefined) => void;
   onDone: () => void;
 }) {
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
   const { data: key } = useQuery({ queryKey: ["settings-photoroom"], queryFn: api.settings.photoroom, staleTime: 60_000 });
   const [choice, setChoice] = useState<StudioChoice>({
     removeBackground: true, background: DEFAULT_BACKDROP, effect: "none", shadow: false,
@@ -673,17 +693,26 @@ function StudioTools({ convId, photo, photos, unsaved, onSaved, onDone }: {
 
   const apply = async () => {
     setRunning(true);
+    onRunning(true);
     setError(null);
     setFailures([]);
     try {
       const result = await api.conversations.photoStudio(convId, ids, options);
+      // The listing's photos update even if this editor has gone.
       result.photos.forEach(onSaved);
-      if (result.errors.length) setFailures(result.errors);
-      else onDone();
+      if (!mounted.current) return;
+      const open = result.photos.find((item) => item.id === photo.id);
+      if (open) onRebase(open.edits);
+      if (result.errors.length) {
+        setFailures(result.errors);
+        // Trying again sends only the photos that failed, so none is charged twice.
+        setSelected(new Set(result.errors.map((failure) => failure.photo_id)));
+      } else onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "AI Studio failed");
+      if (mounted.current) setError(err instanceof Error ? err.message : "AI Studio failed");
     } finally {
-      setRunning(false);
+      if (mounted.current) setRunning(false);
+      onRunning(false);
     }
   };
 
@@ -758,6 +787,7 @@ function StudioTools({ convId, photo, photos, unsaved, onSaved, onDone }: {
                 <label key={item.id} className={cn("relative aspect-square overflow-hidden rounded-md border", on ? "border-foreground" : "border-border")}>
                   <StudioImage src={photoThumbUrl(item)} alt={`Photo ${position + 1}`} className="size-full object-cover" />
                   <Checkbox className="absolute top-1 left-1 bg-background" checked={on} aria-label={`Apply to photo ${position + 1}`}
+                    disabled={running || (!on && selected.size >= MAX_STUDIO_PHOTOS)}
                     onCheckedChange={(checked) => setSelected((current) => {
                       const next = new Set(current);
                       if (checked === true) next.add(item.id);
@@ -769,14 +799,21 @@ function StudioTools({ convId, photo, photos, unsaved, onSaved, onDone }: {
             })}
           </div>
           <Button size="xs" variant="ghost-muted" className="self-start"
-            onClick={() => setSelected(selected.size === photos.length ? new Set([photo.id]) : new Set(photos.map((item) => item.id)))}>
-            {selected.size === photos.length ? "Only this photo" : "Select all photos"}
+            disabled={running}
+            onClick={() => setSelected(selected.size === Math.min(photos.length, MAX_STUDIO_PHOTOS) ? new Set([photo.id])
+              : new Set([photo.id, ...photos.map((item) => item.id).filter((id) => id !== photo.id)].slice(0, MAX_STUDIO_PHOTOS)))}>
+            {selected.size === Math.min(photos.length, MAX_STUDIO_PHOTOS) ? "Only this photo"
+              : photos.length > MAX_STUDIO_PHOTOS ? `Select ${MAX_STUDIO_PHOTOS} photos` : "Select all photos"}
           </Button>
+          {photos.length > MAX_STUDIO_PHOTOS ? (
+            <p className="text-muted-foreground text-xs">AI Studio edits up to {MAX_STUDIO_PHOTOS} photos at a time.</p>
+          ) : null}
         </ToolGroup>
       ) : null}
       {problem && choice.effect !== "none" ? <p className="text-muted-foreground text-xs">{problem}</p> : null}
       {unsaved ? <p className="text-muted-foreground text-xs">Save or discard your changes first.</p> : null}
-      <Button size="sm" onClick={() => void apply()} disabled={running || unsaved || Boolean(problem) || !ids.length || Boolean(unavailable)}>
+      <Button size="sm" onClick={() => void apply()}
+        disabled={running || unsaved || Boolean(problem) || !ids.length || ids.length > MAX_STUDIO_PHOTOS || Boolean(unavailable)}>
         {running ? <Spinner className="size-3" /> : null}
         {running ? "Photoroom is working…" : ids.length > 1 ? `Apply to ${ids.length} photos` : "Apply"}
       </Button>

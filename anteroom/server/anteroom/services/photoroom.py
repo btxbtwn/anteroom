@@ -96,7 +96,8 @@ class StudioOptions(BaseModel):
     def form(self) -> dict[str, str]:
         """Photoroom's form fields for these options."""
         if self.virtual_model is not None:
-            fields = {"removeBackground": "false", "virtualModel.mode": "ai.auto"}
+            # Both keep the generated scene, as Photoroom's Virtual Model example sends them.
+            fields = {"removeBackground": "false", "referenceBox": "originalImage", "virtualModel.mode": "ai.auto"}
             if self.virtual_model.model != "auto":
                 fields["virtualModel.model.preset.name"] = self.virtual_model.model
             # Photoroom's own "random" is what Auto means here.
@@ -200,7 +201,8 @@ async def edit(image: bytes, options: StudioOptions) -> bytes:
     """
     if _sandboxed():
         return await asyncio.to_thread(sandbox_result, image, options)
-    key, _source = configured_key()
+    # Hosted, the key is a Vault read: a blocking database query, kept off the event loop.
+    key, _source = await asyncio.to_thread(configured_key)
     if not key:
         raise PhotoroomError("Add a Photoroom API key in Settings → Providers to use AI Studio.", 400)
     png = await asyncio.to_thread(prepare_input, image)

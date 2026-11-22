@@ -124,7 +124,7 @@ async def run(run_db: RunDb, conv_id: str, photo_ids: list[str], options: Studio
         raise ValueError(f"Choose at most {photoroom.MAX_BATCH} photos at once.")
     if len(set(photo_ids)) != len(photo_ids):
         raise ValueError("Choose each photo once.")
-    if not photoroom.available():
+    if not await asyncio.to_thread(photoroom.available):
         raise PhotoroomError("Add a Photoroom API key in Settings → Connections to use AI Studio.", 400)
     slots = asyncio.Semaphore(photoroom.CONCURRENCY)
 

@@ -92,6 +92,8 @@ export function flipEdits(edits: PhotoEdits, axis: "horizontal" | "vertical"): P
   return {
     ...edits,
     ...(horizontal ? { flip_horizontal: !edits.flip_horizontal } : { flip_vertical: !edits.flip_vertical }),
+    // The frame is straightened after the flip, so a mirrored tilt leans the other way.
+    straighten: edits.straighten ? -edits.straighten : edits.straighten,
     crop: edits.crop ? box(edits.crop) : edits.crop,
     redactions: (edits.redactions ?? []).map(box),
     // A text label keeps reading left to right; only where it starts moves.
@@ -128,9 +130,12 @@ export function markFromDrag(tool: MarkTool, x1: number, y1: number, x2: number,
   }
   if (Math.abs(bx - ax) < 0.02 && Math.abs(by - ay) < 0.02) return null;
   if (tool === "pixelate" || tool === "blur") {
-    const x = Math.min(ax, bx);
-    const y = Math.min(ay, by);
-    return { redaction: { x, y, width: Math.max(0.01, Math.abs(bx - ax)), height: Math.max(0.01, Math.abs(by - ay)), style: tool } };
+    // At least 1% each way, and always inside the frame, which the server requires.
+    const width = Math.max(0.01, Math.abs(bx - ax));
+    const height = Math.max(0.01, Math.abs(by - ay));
+    const x = Math.min(Math.min(ax, bx), 1 - width);
+    const y = Math.min(Math.min(ay, by), 1 - height);
+    return { redaction: { x, y, width, height, style: tool } };
   }
   return { annotation: { kind: tool, x1: ax, y1: ay, x2: bx, y2: by, color } };
 }
@@ -161,4 +166,28 @@ export function studioProblem(options: StudioOptions): string | null {
     return "Choose an AI Studio edit.";
   }
   return null;
+}
+
+/**
+ * The edits with a new crop, marks moved so they stay on the same part of the
+ * photo. Marks sit on the cropped frame, so without this a new crop would slide
+ * a redaction off the name it hides. A box is trimmed to the new frame and
+ * dropped once it falls wholly outside (that part is cropped away anyway).
+ */
+export function withCrop(edits: PhotoEdits, crop: CropBox | null): PhotoEdits {
+  const before = edits.crop ?? { x: 0, y: 0, width: 1, height: 1 };
+  const after = crop ?? { x: 0, y: 0, width: 1, height: 1 };
+  const mapX = (value: number) => (before.x + value * before.width - after.x) / after.width;
+  const mapY = (value: number) => (before.y + value * before.height - after.y) / after.height;
+  const redactions = (edits.redactions ?? []).flatMap((box) => {
+    const left = Math.max(0, mapX(box.x));
+    const top = Math.max(0, mapY(box.y));
+    const right = Math.min(1, mapX(box.x + box.width));
+    const bottom = Math.min(1, mapY(box.y + box.height));
+    return right - left > 0.001 && bottom - top > 0.001 ? [{ ...box, x: left, y: top, width: right - left, height: bottom - top }] : [];
+  });
+  const annotations = (edits.annotations ?? []).map((mark) => ({
+    ...mark, x1: unit(mapX(mark.x1)), y1: unit(mapY(mark.y1)), x2: unit(mapX(mark.x2)), y2: unit(mapY(mark.y2)),
+  }));
+  return { ...edits, crop, redactions, annotations };
 }

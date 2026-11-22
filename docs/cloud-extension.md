@@ -287,5 +287,5 @@ link the hosted API adds to `payload.video.download_url` when the page takes a
 `marketplace.execute` command (`services/hosted_browser_relay.with_video_link`),
 so the approval covers the link. The Bridge fetches only
 `https://<project>.supabase.co/storage/v1/object/sign/anteroom-photos/…` (or a
-loopback sandbox), without credentials, and still checks the size and type
+loopback sandbox), without credentials and refusing redirects, and still checks the size and type
 against the approved revision. Without a link it reads the Mac's loopback route.

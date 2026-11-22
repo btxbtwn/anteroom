@@ -85,7 +85,8 @@ async function nativeVideo(jobId, video, deadline) {
   let response;
   try {
     response = await fetch(link || `${STUDIO_URL}/api/jobs/${encodeURIComponent(jobId)}/videos/${encodeURIComponent(video.id)}`,
-      { credentials: 'omit', signal: AbortSignal.timeout(Math.max(1000, Math.min(60000, deadline - Date.now()))) });
+      // A signed link answers with the file itself; a redirect would leave the checked path.
+      { credentials: 'omit', redirect: link ? 'error' : 'follow', signal: AbortSignal.timeout(Math.max(1000, Math.min(60000, deadline - Date.now()))) });
   } catch {
     throw marketplaceError('Anteroom could not load the selected video in time.', { code: 'network' });
   }

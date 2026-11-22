@@ -33,9 +33,12 @@ const photo: ListingPhoto = {
 
 let created = 0;
 beforeEach(() => {
-  vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => `blob:preview-${++created}`, revokeObjectURL: vi.fn() }));
+  created = 0;
+  // Spies, so restoreAllMocks puts the real methods back on URL.
+  vi.spyOn(URL, "createObjectURL").mockImplementation(() => `blob:preview-${++created}`);
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
 });
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.innerHTML = ""; });
+afterEach(() => { vi.restoreAllMocks(); document.body.innerHTML = ""; });
 
 const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 250)); });
 const preview = () => document.body.querySelector<HTMLImageElement>('img[alt="Photo 1 crop preview"]');
