@@ -6,7 +6,8 @@ edit turns it off again. A round goes one listing at a time through
 at most once, and holds the single automation slot only while it is sent.
 
 A round stops at the marketplace's first limit, browser check or sign-out and
-pauses the automation. An unconfirmed result pauses it too, and that listing
+pauses the automation. For Cloud sign-outs, the session expiry transaction
+pauses the rule only if the expired session is still current. An unconfirmed result pauses it too, and that listing
 stays blocked until the seller checks it. Offers never cross the listing's
 saved individual minimum and optional shared minimum, and go only to listings
 with new likers since the last offer. Nothing
@@ -669,11 +670,12 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
                 send.marketplace_message = scrub(send.marketplace_message)
                 send.finished_at = _now()
                 paused = await in_worker_session(
-                    _record_review_failure, send, automation_id, str(exc) if exc.code in STOP_CODES else None,
+                    _record_review_failure, send, automation_id,
+                    str(exc) if exc.code in STOP_CODES and not exc.cloud_signed_out else None,
                     exc.code == "signed_out",
                 )
                 if exc.code in STOP_CODES:
-                    stop_note = paused
+                    stop_note = f"Stopped: {exc}" if exc.cloud_signed_out else paused
                     break
                 if exc.code in ("chrome", "network"):
                     stop_note = str(exc)
@@ -684,7 +686,8 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
             try:
                 result = await promotions.perform(send_id, shipping,
                                                   new_like_at=new_like_at,
-                                                  gap_ms=SHARE_SPEEDS.get(rule["speed"] or "") if action == "share" else None)
+                                                  gap_ms=SHARE_SPEEDS.get(rule["speed"] or "") if action == "share" else None,
+                                                  include_executor=True)
             except PromotionError as exc:
                 reason = await in_worker_session(_mark_send_skipped, send_id, exc)
                 if exc.code in ("busy", "paused", "chrome"):
@@ -706,10 +709,12 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
                 )
                 break
             if result.get("stop"):
-                stop_note = await in_worker_session(
-                    _pause_by_id, automation_id, result.get("note") or "The marketplace asked Anteroom to stop.",
-                    result.get("error_code") == "signed_out",
-                )
+                reason = result.get("note") or "The marketplace asked Anteroom to stop."
+                signed_out = result.get("error_code") == "signed_out"
+                if signed_out and result.get("executor") == "cloud":
+                    stop_note = f"Stopped: {reason}"
+                else:
+                    stop_note = await in_worker_session(_pause_by_id, automation_id, reason, signed_out)
                 break
             reasons[str(result.get("note") or "refused")[:120]] += 1
     except PromotionError as exc:
@@ -895,7 +900,7 @@ async def check_new_likes(
     rules = await in_worker_session(
         lambda db: _offer_automations(db, marketplaces=marketplaces, skip_cloud=skip_cloud)
     )
-    feeds: dict[str, tuple[datetime, dict]] = {}
+    feeds: dict[str, tuple[datetime, dict, bool]] = {}
     ran = 0
     for automation_id, marketplace in rules:
         state, since = await in_worker_session(_check_like_rule_state, automation_id)
@@ -930,15 +935,16 @@ async def check_new_likes(
             ) as exc:
                 log.warning("%s automation %s could not read recent likes: %s", marketplace, automation_id, scrub(str(exc)))
                 continue
-            feeds[marketplace] = started, answer
-        started, answer = feeds[marketplace]
+            feeds[marketplace] = started, answer, use_cloud
+        started, answer, use_cloud = feeds[marketplace]
         if answer.get("ok") is not True:
             log.error("%s automation %s recent-like feed failed: %s", marketplace, automation_id,
                       scrub(answer.get("error") or "The marketplace did not answer."))
-            if answer.get("error_code") in STOP_CODES | {"schema_drift"}:
+            code = answer.get("error_code")
+            if code in STOP_CODES | {"schema_drift"} and not (use_cloud and code == "signed_out"):
                 await in_worker_session(
                     _pause_by_id, automation_id, str(answer.get("error") or "The marketplace asked Anteroom to stop."),
-                    answer.get("error_code") == "signed_out",
+                    code == "signed_out",
                 )
             continue
         events: dict[str, datetime] = {}

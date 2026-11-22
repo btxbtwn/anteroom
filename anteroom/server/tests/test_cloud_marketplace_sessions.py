@@ -462,6 +462,75 @@ def test_manual_pause_survives_cloud_reconnect(cloud, pause_all):  # noqa: F811
         assert rules.resume_after_cloud_reconnect(manual, USER_ID, "depop") == 0
 
 
+@pytest.mark.parametrize("operation", ["marketplace.like_events", "marketplace.promotion_check", "marketplace.promote"])
+@pytest.mark.parametrize("reconnect", [False, True])
+def test_cloud_promotion_sign_out_preserves_reconnect_state(cloud, monkeypatch, operation, reconnect):  # noqa: F811
+    from anteroom.database import SessionLocal, in_worker_session
+    from anteroom.models.promotion_automation import PromotionAutomation
+    from anteroom.services import promotion_automations as rules
+
+    _patch_vault(monkeypatch)
+    monkeypatch.setenv("ANTEROOM_CLOUD_MARKETPLACES", "poshmark")
+    monkeypatch.setenv("ANTEROOM_PROCESS_ROLE", "worker")
+    market = "poshmark"
+    listing_id = "1" * 24
+
+    def connect(db):
+        cloud_sessions.save_uploaded_session(db, market, _sample_cookies(), verified=True)
+
+    def expire_and_reconnect(db, generation):
+        cloud_sessions.mark_session_expired(db, market, "Old session signed out.", generation)
+        connect(db)
+
+    calls = []
+
+    async def runner(marketplace, seller_id, job_id, payload, timeout):
+        command = payload["command"]["type"]
+        calls.append(command)
+        if command == operation:
+            if reconnect:
+                await in_worker_session(expire_and_reconnect, generation)
+            return {"result": {"ok": False, "safe_to_retry": True,
+                               "error_code": "signed_out", "error": "Old session signed out."}}
+        assert operation == "marketplace.promote" and command == "marketplace.promotion_check"
+        return {"result": {"ok": True, "price_cents": 5000, "like_count": 3, "offer_price_cents": 4000,
+                           "minimum_discount_percent": 10, "maximum_discount_percent": 79,
+                           "shipping_discounts": [{"id": "none", "label": "No discount"}]}}
+
+    monkeypatch.setattr(cloud_marketplace, "_run_subprocess", runner)
+    with use(for_seller(USER_ID)):
+        with SessionLocal() as db:
+            connect(db)
+            session = db.scalar(select(CloudMarketplaceSession))
+            assert session is not None
+            generation = session.connected_at
+            conv = Conversation(title="Cloud item")
+            db.add(conv)
+            db.flush()
+            db.add(MarketplaceListing(conversation_id=conv.id, marketplace=market, state="listed",
+                                      listing_id=listing_id, listing_url=f"https://poshmark.com/listing/Item-{listing_id}"))
+            rule = PromotionAutomation(name="offers", marketplace=market, action="offer",
+                                       scope="all", min_likes=1, discount_percent=20)
+            db.add(rule)
+            db.flush()
+            rule_id = rule.id
+            rules.enable(db, rule_id)
+
+        if operation == "marketplace.like_events":
+            asyncio.run(rules.check_new_likes())
+        else:
+            run = asyncio.run(rules.run_round(rule_id))
+            assert run is not None and "Old session signed out." in (run.note or "")
+        assert calls == (["marketplace.promotion_check", operation] if operation == "marketplace.promote" else [operation])
+
+        with SessionLocal() as db:
+            rule = db.get(PromotionAutomation, rule_id)
+            assert rule is not None
+            assert rule.enabled is reconnect
+            assert rule.paused_reason == (None if reconnect else rules.CLOUD_DISCONNECTED)
+            assert cloud_sessions.has_active_session(market, db) is reconnect
+
+
 @pytest.mark.parametrize("dimensions", [(1, 4096), (4096, 1)])
 def test_depop_photo_preparation_preserves_a_narrow_image(dimensions):
     from io import BytesIO
