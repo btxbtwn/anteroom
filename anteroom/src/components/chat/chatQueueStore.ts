@@ -21,12 +21,20 @@ export type QueuedChatMessage<P = unknown> = {
   threadId?: string | null;
   /** Sent ahead of the rest as soon as the interrupted answer has stopped. */
   steer?: boolean;
+  /**
+   * The tab that sends it. Only that tab knows whether its own reply is still
+   * being written; another tab, seeing the listing idle, would send it at once.
+   * A closing tab hands its messages back for an open one to take.
+   */
+  owner?: string;
   /** Images and other in-memory extras; never written to browser storage. */
   payload?: P;
 };
 
 const STORAGE_KEY = "anteroom.chatQueue.v1";
 const SAVED_FOR_MS = 24 * 60 * 60 * 1000;
+/** This tab, for `owner`. */
+const TAB = globalThis.crypto?.randomUUID?.() ?? `tab-${Math.random()}`;
 
 type Queues = Record<string, QueuedChatMessage[]>;
 
@@ -54,11 +62,12 @@ function readStorage(): Queues {
             Boolean(item) && typeof item.id === "string" && typeof item.text === "string"
             && typeof item.createdAt === "string" && Date.parse(item.createdAt) >= oldest,
         )
-        .map(({ id, text, createdAt, threadId }) => ({
+        .map(({ id, text, createdAt, threadId, owner }) => ({
           id,
           text,
           createdAt,
           ...(typeof threadId === "string" ? { threadId } : {}),
+          ...(typeof owner === "string" ? { owner } : {}),
         }));
       if (kept.length) read[key] = kept;
     }
@@ -68,8 +77,25 @@ function readStorage(): Queues {
   return read;
 }
 
+/** Make messages nobody sends this tab's own; true when any changed hands. */
+function claim(all: Queues, every: boolean): boolean {
+  let claimed = false;
+  for (const [key, items] of Object.entries(all)) {
+    all[key] = items.map((item) => {
+      if (item.owner === TAB || (!every && item.owner !== undefined)) return item;
+      claimed = true;
+      return { ...item, owner: TAB };
+    });
+  }
+  return claimed;
+}
+
 function load(): Queues {
-  if (!queues) queues = readStorage();
+  if (!queues) {
+    queues = readStorage();
+    // A page that just loaded takes over what was saved: whoever queued it is gone or reloaded.
+    if (claim(queues, true)) persist();
+  }
   return queues;
 }
 
@@ -93,13 +119,33 @@ function syncFromStorage(): string[] {
     if (merged.length) next[key] = merged;
   }
   queues = next;
+  if (claim(next, false)) persist();
   return [...new Set([...Object.keys(before), ...Object.keys(next)])];
+}
+
+function syncAndNotify() {
+  for (const key of syncFromStorage()) listeners.get(key)?.forEach((listener) => listener());
 }
 
 if (typeof window !== "undefined") {
   window.addEventListener("storage", (event) => {
     if (event.key !== STORAGE_KEY && event.key !== null) return;
-    for (const key of syncFromStorage()) listeners.get(key)?.forEach((listener) => listener());
+    syncAndNotify();
+  });
+  // Hand this tab's saved messages back as it closes; take them again if it comes back.
+  window.addEventListener("pagehide", () => {
+    if (!queues) return;
+    for (const [key, items] of Object.entries(queues)) {
+      queues[key] = items.map((item) => {
+        if (item.owner !== TAB || memoryOnly(item)) return item;
+        const { owner: _owner, ...rest } = item;
+        return rest;
+      });
+    }
+    persist();
+  });
+  window.addEventListener("pageshow", (event) => {
+    if (event.persisted) syncAndNotify();
   });
 }
 
@@ -109,7 +155,13 @@ function persist() {
   for (const [key, items] of Object.entries(all)) {
     const durable = items
       .filter((item) => !memoryOnly(item))
-      .map(({ id, text, createdAt, threadId }) => ({ id, text, createdAt, ...(threadId !== undefined ? { threadId } : {}) }));
+      .map(({ id, text, createdAt, threadId, owner }) => ({
+        id,
+        text,
+        createdAt,
+        ...(threadId !== undefined ? { threadId } : {}),
+        ...(owner !== undefined ? { owner } : {}),
+      }));
     if (durable.length) saved[key] = durable;
   }
   try {
@@ -132,7 +184,7 @@ export function newQueuedChatMessage<P = unknown>(
   text: string,
   extra: Partial<Pick<QueuedChatMessage<P>, "threadId" | "payload" | "steer">> = {},
 ): QueuedChatMessage<P> {
-  return { id: crypto.randomUUID(), text, createdAt: new Date().toISOString(), ...extra };
+  return { id: crypto.randomUUID(), text, createdAt: new Date().toISOString(), owner: TAB, ...extra };
 }
 
 export function chatQueue<P = unknown>(key: string): readonly QueuedChatMessage<P>[] {
@@ -183,7 +235,7 @@ export function steerChatMessage(key: string, message: QueuedChatMessage) {
   write(key, [{ ...message, steer: true }, ...chatQueue(key)]);
 }
 
-/** The oldest message that `matches` leaves the queue; the rest stay in order. */
+/** The oldest message of this tab's that `matches` leaves the queue; the rest stay in order. */
 export function takeNextChatMessage<P = unknown>(
   key: string,
   matches: (message: QueuedChatMessage<P>) => boolean = () => true,
@@ -191,7 +243,7 @@ export function takeNextChatMessage<P = unknown>(
   // Another tab may have sent it a moment ago.
   syncFromStorage();
   const queue = chatQueue<P>(key);
-  const next = queue.find(matches) ?? null;
+  const next = queue.find((message) => message.owner === TAB && matches(message)) ?? null;
   if (next) write(key, queue.filter((message) => message !== next) as QueuedChatMessage[]);
   return next;
 }

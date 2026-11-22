@@ -99,9 +99,20 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
   });
   const serverBusy = Boolean(activity?.busy);
   const sendQueuedMessage = useCallback(
-    (text: string, attachments: ChatAttachmentUpload[] = []) =>
-      sendMessage(text, { preserveInput: true, ...(attachments.length ? { attachments } : {}) }),
-    [sendMessage],
+    async (text: string, attachments: ChatAttachmentUpload[] = []) => {
+      // Ask the server first: the activity on hand can be seconds old, and a
+      // reply just cut off by a steer saves its words as it unwinds. Sending
+      // before it has would put the follow-up ahead of that reply.
+      try {
+        const fresh = await api.conversations.activity(convId);
+        queryClient.setQueryData(["activity", convId], fresh);
+        if (fresh.busy) return false;
+      } catch {
+        // Unreachable right now: go on what is cached, as before, rather than retry in a loop.
+      }
+      return sendMessage(text, { preserveInput: true, ...(attachments.length ? { attachments } : {}) });
+    },
+    [convId, queryClient, sendMessage],
   );
   // A queued message being edited in the box, as T3 Code edits a queued run in its composer.
   // Keyed by listing, so another listing never inherits it.

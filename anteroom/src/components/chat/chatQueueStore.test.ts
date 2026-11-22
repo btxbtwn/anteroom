@@ -81,4 +81,18 @@ describe("chat queue store", () => {
     resetChatQueuesForTest();
     expect(chatQueue("assistant").map((m) => [m.text, m.threadId])).toEqual([["before the thread", "t1"]]);
   });
+
+  it("leaves another open tab's message for that tab to send", () => {
+    const mine = newQueuedChatMessage("mine");
+    enqueueChatMessage("k", mine);
+    const saved = JSON.parse(localStorage.getItem("anteroom.chatQueue.v1")!);
+    saved.k.push({ id: "theirs", text: "theirs", createdAt: new Date().toISOString(), owner: "other-tab" });
+    localStorage.setItem("anteroom.chatQueue.v1", JSON.stringify(saved));
+    expect(takeNextChatMessage("k")?.text).toBe("mine");
+    expect(takeNextChatMessage("k")).toBeNull();
+    expect(chatQueue("k").map((m) => m.text)).toEqual(["theirs"]);
+    // Once that tab has closed and reopened elsewhere, the page that loads takes it over.
+    resetChatQueuesForTest();
+    expect(takeNextChatMessage("k")?.text).toBe("theirs");
+  });
 });

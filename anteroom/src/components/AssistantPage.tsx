@@ -613,6 +613,16 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     };
   }, [threadId]);
 
+  // Leaving an edit (another conversation, another page) gives the queued
+  // message back unchanged and leaves no half-edited copy in that box.
+  useEffect(() => {
+    if (!editingQueuedId) return;
+    return () => {
+      setComposerDraftText(draftKey, "");
+      setEditing(null);
+    };
+  }, [editingQueuedId, draftKey]);
+
   // Send the oldest held follow-up of this conversation once the answer before it has ended.
   useEffect(() => {
     if (live || controller.current || editingQueuedId) return;
