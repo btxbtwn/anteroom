@@ -1,6 +1,7 @@
 import { expect, test } from "./fixtures";
 
 test("records an expense and exports profit and loss", async ({ page, phone }, info) => {
+  const description = `Mailers ${info.project.name} ${crypto.randomUUID()}`;
   await page.goto("/");
   if (phone) {
     await page.getByRole("button", { name: "Open navigation" }).click();
@@ -12,9 +13,9 @@ test("records an expense and exports profit and loss", async ({ page, phone }, i
   const expenses = page.getByRole("tabpanel", { name: "Expenses", exact: true });
   await expenses.getByRole("button", { name: "Add expense" }).click();
   await expenses.getByLabel("Amount", { exact: true }).fill("12.34");
-  await expenses.getByLabel("Description", { exact: true }).fill(`Mailers ${info.project.name}`);
+  await expenses.getByLabel("Description", { exact: true }).fill(description);
   await expenses.getByRole("button", { name: "Save expense" }).click();
-  await expect(expenses.getByText(`Mailers ${info.project.name}`, { exact: true })).toBeVisible();
+  await expect(expenses.getByText(description, { exact: true })).toBeVisible();
   await page.screenshot({ path: info.outputPath("business-expenses.png") });
   await page.getByRole("tab", { name: "Profit & loss", exact: true }).click();
   const report = page.getByRole("tabpanel", { name: "Profit & loss", exact: true });
@@ -26,8 +27,9 @@ test("records an expense and exports profit and loss", async ({ page, phone }, i
   expect((await download).suggestedFilename()).toBe("profit-and-loss.csv");
   await page.screenshot({ path: info.outputPath("profit-and-loss.png") });
   await page.getByRole("tab", { name: "Expenses", exact: true }).click();
-  await expenses.getByRole("button", { name: "Edit", exact: true }).first().click();
+  const row = expenses.getByText(description, { exact: true }).locator("xpath=../..");
+  await row.getByRole("button", { name: "Edit", exact: true }).click();
   page.once("dialog", (dialog) => dialog.accept());
   await expenses.getByRole("button", { name: "Delete expense" }).click();
-  await expect(expenses.getByText(`Mailers ${info.project.name}`, { exact: true })).toHaveCount(0);
+  await expect(expenses.getByText(description, { exact: true })).toHaveCount(0);
 });
