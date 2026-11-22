@@ -8,6 +8,7 @@ it("opens appearance and web release controls without starting the desktop updat
   const client = new QueryClient();
   client.setQueryData(["settings-ui"], { theme: "dark", listing_names: "sku" });
   client.setQueryData(["status"], { version: "99.0.0" });
+  client.setQueryData(["seller-region"], { country: "GB", currency: "GBP" });
   const html = renderToStaticMarkup(
     <WorkspaceRuntimeProvider value={{ hosted: true, features: new Set(), views: new Set(["settings"]), marketplaceForms: new Set(), actionMarketplaces: new Set() }}>
       <QueryClientProvider client={client}><SettingsPage section="general" onOpenListing={() => {}} /></QueryClientProvider>
@@ -17,6 +18,8 @@ it("opens appearance and web release controls without starting the desktop updat
     expect(html).toContain(text);
   }
   expect(html).not.toContain("First-run tutorial");
+  expect(html).toContain("United Kingdom");
+  expect(html).toContain("Listing currency GBP");
   expect(html).not.toContain("quit and reopen");
   expect(html).not.toContain("Use Vendoo");
   expect(client.getQueryCache().find({ queryKey: ["updates"] })).toBeUndefined();

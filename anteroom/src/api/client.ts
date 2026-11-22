@@ -507,6 +507,15 @@ function postHostedPhoto(convId: string, file: File, marketplace?: string): Prom
   return studioFetch(`${BASE}/drafts/${encodeURIComponent(convId)}/photos${query}`, { method: "POST", body: file });
 }
 
+export type GenerationRating = {
+  rating: "up" | "down";
+  issues: string[];
+  note: string;
+};
+
+export type SellerCountry = "US" | "CA" | "GB" | "AU";
+type SellerRegion = { country: SellerCountry; currency: string; ebay_marketplace: string; poshmark_domain: string | null; marketplaces: string[] };
+
 export const api = {
   vendooDraft: {
     check: (id: string) => request<VendooDraft>(`/conversations/${id}/vendoo-draft/check`, { method: "POST" }),
@@ -1012,6 +1021,13 @@ export const api = {
       data_dir?: string;
     }>("/status", options),
 
+  generationFeedback: {
+    get: (id: string) => read<{ revision_id: string; feedback: GenerationRating | null } | null>(`/conversations/${id}/generation-feedback`),
+    save: (id: string, revisionId: string, feedback: GenerationRating) => request<GenerationRating>(`/conversations/${id}/generation-feedback`, {
+      method: "PUT", body: JSON.stringify({ revision_id: revisionId, ...feedback }),
+    }),
+    summary: () => read<{ up: number; down: number; issues: Record<string, number> }>("/generation-feedback"),
+  },
   conversations: {
     copyBatchPreview: (ids: string[]) => request<{ rows: BatchCopyPreviewRow[] }>("/listings/copies/preview", { method: "POST", body: JSON.stringify({ conversation_ids: ids }) }),
     copyResult: (id: string, requestId: string) => request<Conversation>(`/conversations/${id}/copy-result/${requestId}`),
@@ -1034,6 +1050,8 @@ export const api = {
       request<Conversation>(`/conversations/${id}/unsettle`, { method: "POST" }),
     stop: (id: string) =>
       request<{ ok: boolean }>(`/conversations/${id}/stop`, { method: "POST" }),
+    cancelGeneration: (id: string) =>
+      request<{ ok: boolean }>(`/conversations/${id}/generate/cancel`, { method: "POST" }),
     activity: (id: string, options?: ReadOptions) => read<ConversationActivity>(`/conversations/${id}/activity`, options),
     messages: (id: string, options?: ReadOptions) => read<Message[]>(`/conversations/${id}/messages`, options),
     /** The item's photos, or with `marketplace` the photos added on that marketplace's form only. */
@@ -1356,6 +1374,10 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(models),
       }),
+    sellerRegion: () => read<SellerRegion>("/settings/seller-region"),
+    setSellerRegion: (country: SellerCountry) => request<SellerRegion>("/settings/seller-region", {
+      method: "PUT", body: JSON.stringify({ country }),
+    }),
     marketplaces: () =>
       request<{
         available: { id: string; label: string; fillable: boolean }[];

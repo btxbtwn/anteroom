@@ -55,6 +55,8 @@ def subscription_models(provider: str):
 # start browser sessions, write marketplace listings, or use machine settings.
 for path, handler, methods in (
     ('/marketplaces', settings.get_marketplaces, ['GET']),
+    ('/seller-region', settings.get_seller_region, ['GET']),
+    ('/seller-region', settings.put_seller_region, ['PUT']),
     ('/marketplaces', settings.set_marketplaces, ['PUT']),
     ('/package-dimensions', settings.get_package_dimensions, ['GET']),
     ('/package-dimensions', settings.set_package_dimensions, ['PUT']),

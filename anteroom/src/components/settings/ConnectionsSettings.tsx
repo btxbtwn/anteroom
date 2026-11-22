@@ -338,9 +338,9 @@ function ChromeSessionRow({
     mutationFn: async () => {
       if (!account) throw new Error("Sign in to your Anteroom account first.");
       if (marketplace !== "poshmark") throw new Error("Cloud sessions are only available for Poshmark.");
-      const { token } = await api.cloudSessions.connectToken(marketplace);
+      const { token, seller_region } = await api.cloudSessions.connectToken(marketplace);
       const { cloudExtension } = await import("../../api/cloudExtension");
-      const response = await cloudExtension(account).connectCloudSession("poshmark", token);
+      const response = await cloudExtension(account).connectCloudSession("poshmark", token, seller_region);
       if (!response.ok) {
         throw new Error(
           response.error || "Install or update Anteroom Bridge in Chrome (v0.2.84+), sign in to Poshmark in Chrome, then press Connect in Cloud again.",

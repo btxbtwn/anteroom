@@ -3,9 +3,9 @@
 const CLOUD_READS = {
   'marketplace.sales_history': ({ marketplace, settled }) => readMarketplaceOrderHistory(marketplace, settled),
   // Settings → Connections: sign-in status only, never cookie or token values.
-  'marketplace.sessions': async () => ({ sessions: await readExtensionSessions() }),
+  'marketplace.sessions': async ({ seller_region }) => ({ sessions: await readExtensionSessions(undefined, seller_region) }),
   // The seller asked to sign in: open that marketplace's sign-in page in this Chrome, as the Mac does.
-  'marketplace.connect': ({ marketplace }) => new Promise(resolve => handleMarketplaceConnect({ payload: { marketplace } }, resolve)),
+  'marketplace.connect': ({ marketplace, seller_region }) => new Promise(resolve => handleMarketplaceConnect({ payload: { marketplace, seller_region } }, resolve)),
   // Inventory import: the same reads the Mac's import makes, each listing checked against the signed-in account.
   // Their errors are the Bridge's own words, as the Mac shows them; nothing the marketplace said.
   'marketplace.import.page': async ({ marketplace, cursor }) => importReply(await readMarketplaceImportPage(marketplace, cursor ?? null)),

@@ -76,5 +76,6 @@ class ListingRevision(SellerOwned, Base):
     # without loading or decompressing full marketplace forms.
     normalized_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     source: Mapped[str] = mapped_column(String, nullable=False)
+    generation_feedback: Mapped[dict[str, Any] | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     parent_revision_id: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, nullable=True)

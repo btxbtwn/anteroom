@@ -113,6 +113,8 @@ def task_stream(task_id):
                 if status not in queue.ACTIVE:
                     if status == 'failed':
                         yield sse_event('error', error or 'Review the saved draft before retrying.')
+                    elif status == 'cancelled':
+                        yield sse_event('error', 'Generation stopped.')
                     yield 'data: [DONE]\n\n'
                     return
                 yield KEEPALIVE

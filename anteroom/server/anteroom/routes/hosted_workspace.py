@@ -22,7 +22,7 @@ from anteroom.routes import api_contract as contract
 from anteroom.routes.api_contract import CONFLICT, NOT_FOUND, REFUSED
 from anteroom.routes.hosted_direct_listing import ACTION_MARKETPLACES
 from anteroom.routes.suggestions import SuggestionsResponse
-from anteroom.services import user_settings
+from anteroom.services import generation_feedback, user_settings
 from anteroom.services.hosted_database import get_seller_db, in_seller_session
 from anteroom.services.hosted_limits import bounded_route_class
 from anteroom.services.hosted_listing_contract import editable_listing, stored_listing_fields
@@ -298,6 +298,24 @@ def listing_screen(identity: str, db=Depends(get_seller_db, scope="function")):
     # The DTO is fully materialized. Encoding and sending it need no transaction.
     db.close()
     return payload
+
+
+@router.get('/generation-feedback')
+def generation_feedback_summary(db=Depends(get_seller_db, scope="function")):
+    return generation_feedback.feedback_summary(db)
+
+
+@router.get('/conversations/{identity}/generation-feedback')
+def get_generation_feedback(identity: str, db=Depends(get_seller_db, scope="function")):
+    conversation(db, identity)
+    return generation_feedback.feedback_for(db, identity)
+
+
+@router.put('/conversations/{identity}/generation-feedback')
+def put_generation_feedback(identity: str, body: generation_feedback.FeedbackInput,
+                            db=Depends(get_seller_db, scope="function")):
+    conversation(db, identity, lock=True)
+    return generation_feedback.save_feedback(db, identity, body)
 
 
 @router.get('/conversations/{identity}/listing', response_model=contract.ListingDocument, responses=NOT_FOUND)

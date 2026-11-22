@@ -135,6 +135,12 @@ export function useBulkRegenerate(chatOpen: (id: string) => boolean) {
               onStarted: () => {
                 generation.started = true;
                 markChatGenerating(id);
+                const progress = active.get(id);
+                if (progress) {
+                  active.set(id, { ...progress, started: true });
+                  batch.run = { ...batch.run, active: new Map(active) };
+                  refresh();
+                }
               },
             });
           } finally {

@@ -44,8 +44,8 @@
   // a maximum string length, the set of values allowed, or the pattern a value must match.
   const READS = {
     'marketplace.sales_history': { marketplace: new Set(['depop', 'poshmark', 'mercari']), settled: 'order_ids' },
-    'marketplace.sessions': {},
-    'marketplace.connect': { marketplace: new Set(['depop', 'poshmark', 'mercari']) },
+    'marketplace.sessions': { seller_region: new Set(['CA']) },
+    'marketplace.connect': { marketplace: MARKETPLACES, seller_region: new Set(['CA']) },
     // Inventory import: a page of the seller's own active listings, or one of them.
     'marketplace.import.page': { marketplace: MARKETPLACES, cursor: 300 },
     'marketplace.import.listing': { marketplace: MARKETPLACES, listing_id: /^[a-z0-9][a-z0-9-]{0,200}$/ },

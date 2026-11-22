@@ -193,7 +193,7 @@ def draft_url(marketplace: str, value: str) -> str:
     pattern, host = (
         (r"/your/shops/me/listing-editor/edit/\d+/?", "www.etsy.com") if marketplace == "etsy"
         else (r"/sellinghub/drafts/edit/[A-Za-z0-9_-]{1,80}/?", "www.depop.com") if marketplace == "depop"
-        else (r"/edit-listing/[a-f0-9]{24}", "poshmark.com") if marketplace == "poshmark"
+        else (r"/edit-listing/[a-f0-9]{24}", "poshmark.ca" if parsed.netloc == "poshmark.ca" else "poshmark.com") if marketplace == "poshmark"
         else (r"/sell/draft/[A-Za-z0-9_-]+/", "www.mercari.com")
     )
     if (parsed.scheme != "https" or parsed.netloc != host or not re.fullmatch(pattern, parsed.path)
@@ -634,8 +634,11 @@ def _for_chrome(snapshot: dict) -> dict:
     """The listing as Chrome receives it. The marketplaces' saved form contracts stay on the
     server: Chrome never reads them, and they can be megabytes, past what the Bridge accepts."""
     from anteroom.services.native_contract import KEY
+    from anteroom.services.seller_region import seller_region
 
-    return {key: value for key, value in snapshot.items() if key != KEY}
+    region = seller_region().country
+    return {**{key: value for key, value in snapshot.items() if key not in {KEY, "_seller_region"}},
+            **({"_seller_region": region} if region != "US" else {})}
 
 
 def _execute_payload(marketplace: str, step: str, record: dict, snapshot: dict, photos: list, warning: str) -> dict:
@@ -805,7 +808,7 @@ async def _execute_step(job_id: str, conv_id: str, marketplace: str, step: str, 
             if checked is not None:
                 stored = await _joined_worker_session(_apply_result, conv_id, marketplace, job_id, step, checked)
         return stored
-    payload = _execute_payload(marketplace, step, binding, snapshot, photos, warning)
+    payload = await asyncio.to_thread(_execute_payload, marketplace, step, binding, snapshot, photos, warning)
     if binding.get("executor") == "cloud":
         from anteroom.services import cloud_marketplace
 

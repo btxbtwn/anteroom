@@ -15,6 +15,7 @@ from anteroom.services.chat_citations import (
 from anteroom.services.comp_research import research_sold_comps
 from anteroom.services.photo_store import photo_store
 from anteroom.services.generation_history import seller_history_prompt
+from anteroom.services.generation_feedback import feedback_prompt
 from anteroom.services.item_context import item_decisions_prompt
 from anteroom.services.listing_generate import (
     analysis_with_photo_count,
@@ -377,6 +378,7 @@ def listing_generation_messages(
         f"{analysis_text}"
         f"{comps_block}"
         f"{seller_history_prompt(db, conv_id, analysis_text)}"
+        f"{feedback_prompt(db)}"
         f"{item_decisions_prompt(db, conv_id)}"
         f"{current_listing_prompt(db, conv_id, include_native_forms=native_forms is None)}"
         f"{_empty_discovered_fields_prompt(db, conv_id, field_evidence) if native_forms is None else ''}"

@@ -440,9 +440,9 @@ export function MarketplacesLayout({
           const cached = queryClient.getQueryData<{ sessions?: { poshmark?: { mode?: string; cloud_available?: boolean } }; chrome_connected?: boolean }>(["marketplace-sessions"]);
           const posh = cached?.sessions?.poshmark;
           if (posh?.cloud_available && (posh.mode === "cloud" || cached?.chrome_connected === false)) {
-            const { token } = await api.cloudSessions.connectToken("poshmark");
+            const { token, seller_region } = await api.cloudSessions.connectToken("poshmark");
             const { cloudExtension } = await import("../api/cloudExtension");
-            const res = await cloudExtension(runtime.account).connectCloudSession("poshmark", token);
+            const res = await cloudExtension(runtime.account).connectCloudSession("poshmark", token, seller_region);
             if (!res.ok) throw new Error(res.error || "Open Settings → Connections in Chrome to reconnect Poshmark in Cloud.");
             return { ok: true, signed_in: false };
           }

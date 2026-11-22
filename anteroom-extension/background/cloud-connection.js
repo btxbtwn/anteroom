@@ -18,19 +18,20 @@
   // and how it checks them: a signed approval on every relayed command, binding the photos
   // relayed with it (background/cloud-approvals.js). It no longer declares the writes-only
   // `marketplace.signed_approvals` of Bridges 0.2.56 to 0.2.67, which the server drops later.
-  const RELAY_CAPABILITIES = ['marketplace.actions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_commands', 'marketplace.cloud_connect'];
+  const RELAY_CAPABILITIES = ['marketplace.actions', 'marketplace.regions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_commands', 'marketplace.cloud_connect'];
 
-  function isPoshmarkCookieDomain(domain) {
+  function isPoshmarkCookieDomain(domain, root) {
     const clean = String(domain || '').trim().toLowerCase().replace(/^\./, '');
-    return clean === 'poshmark.com' || clean.endsWith('.poshmark.com');
+    return clean === root || clean.endsWith('.' + root);
   }
 
-  async function defaultUploadCloudSession(api, { marketplace, uploadToken }) {
+  async function defaultUploadCloudSession(api, { marketplace, uploadToken, sellerRegion }) {
     if (!CLOUD_SESSION_MARKETS.has(marketplace)) return { ok: false, error: 'Unsupported cloud marketplace.' };
     if (!api.cookies?.getAll) return { ok: false, error: 'Chrome cookies API is unavailable.' };
-    const rawCookies = await api.cookies.getAll({ domain: 'poshmark.com' });
+    const domain = sellerRegion === 'CA' ? 'poshmark.ca' : 'poshmark.com';
+    const rawCookies = await api.cookies.getAll({ domain });
     const cookies = (Array.isArray(rawCookies) ? rawCookies : [])
-      .filter(cookie => cookie && typeof cookie.name === 'string' && typeof cookie.value === 'string' && isPoshmarkCookieDomain(cookie.domain))
+      .filter(cookie => cookie && typeof cookie.name === 'string' && typeof cookie.value === 'string' && isPoshmarkCookieDomain(cookie.domain, domain))
       .map(cookie => ({
         name: cookie.name,
         value: cookie.value,
@@ -144,11 +145,12 @@
       if (changed) await writeCloudSessions(pending);
     }
     async function handleCloudSessionConnect(message, sender) {
-      const allowed = ['type', 'action', 'accountId', 'email', 'marketplace', 'uploadToken'];
+      const allowed = ['type', 'action', 'accountId', 'email', 'marketplace', 'uploadToken', 'sellerRegion'];
       if (!page(sender) || !UUID.test(message.accountId || '')
           || Object.keys(message).some(key => !allowed.includes(key))
           || typeof message.email !== 'string' || message.email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(message.email)
           || !CLOUD_SESSION_MARKETS.has(message.marketplace)
+          || (message.sellerRegion !== undefined && message.sellerRegion !== 'CA')
           || typeof message.uploadToken !== 'string' || !UPLOAD_TOKEN_RE.test(message.uploadToken)
           || message.uploadToken.slice(0, 36).toLowerCase() !== message.accountId.toLowerCase()) {
         return { ok: false, state: 'unavailable', error: 'Invalid cloud connect request.' };
@@ -170,6 +172,7 @@
         email: message.email,
         marketplace: message.marketplace,
         uploadToken: message.uploadToken,
+        sellerRegion: message.sellerRegion,
         createdAt: currentTime,
       };
       pending[requestId] = entry;
@@ -223,7 +226,7 @@
       } catch {
         return { ok: false, error: 'The page or account changed. Return to Anteroom Settings and try again.' };
       }
-      return () => performCloudUpload({ marketplace: entry.marketplace, uploadToken: entry.uploadToken });
+      return () => performCloudUpload({ marketplace: entry.marketplace, uploadToken: entry.uploadToken, ...(entry.sellerRegion ? { sellerRegion: entry.sellerRegion } : {}) });
     }
     async function handle(message, sender) {
       if (!message || typeof message !== 'object' || message.type !== 'cloud.connection') return undefined;

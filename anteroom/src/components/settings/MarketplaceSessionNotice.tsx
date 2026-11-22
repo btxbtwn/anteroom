@@ -42,9 +42,9 @@ export function MarketplaceSessionNotice() {
   const connect = useMutation({
     mutationFn: async ({ marketplace, cloud }: { marketplace: ExtensionSessionMarket; cloud: boolean }) => {
       if (cloud && hosted && account && marketplace === "poshmark") {
-        const { token } = await api.cloudSessions.connectToken(marketplace);
+        const { token, seller_region } = await api.cloudSessions.connectToken(marketplace);
         const { cloudExtension } = await import("../../api/cloudExtension");
-        const res = await cloudExtension(account).connectCloudSession("poshmark", token);
+        const res = await cloudExtension(account).connectCloudSession("poshmark", token, seller_region);
         if (!res.ok) throw new Error(res.error || "Open Settings → Connections in Chrome to reconnect Poshmark in Cloud.");
         return;
       }

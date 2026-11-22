@@ -185,7 +185,9 @@ Apply the PRICING Formula below.
 
 **eBay Fields — ALWAYS include ALL of these in `ebay_specifics`. Do not skip any.**
 
-Every eBay listing MUST populate these fields. Leaving them blank causes downgraded search visibility and incomplete eBay drafts.
+For an eBay trading card or coin, use the category's own specifics. For a professionally graded item, read the slab label and save `Professional Grader` (for example PSA, BGS, CGC, SGC, PCGS or NGC), `Grade` (for example `9.5` for cards or `MS-65` for coins), and `Certification Number` as text, preserving leading zeros. Use `Card Condition` or `Coin Condition` for ungraded items when the supported condition is evident. Leave unreadable slab details blank for seller review.
+
+Every applicable eBay apparel listing MUST populate these fields. Leaving them blank causes downgraded search visibility and incomplete eBay drafts.
 
 | Field | Value guidance |
 |-------|---------------|

@@ -142,6 +142,12 @@ def format_photo_analysis(evidence: dict) -> str:
         ]
         if tag_parts:
             parts.append("- tag text: " + "; ".join(tag_parts))
+    slab = evidence.get("slab_label")
+    if isinstance(slab, dict):
+        for key, label in (("grader", "professional grader"), ("grade", "grade"), ("certification_number", "certification number")):
+            value = slab.get(key)
+            if isinstance(value, str) and value.strip():
+                parts.append(f"- {label}: {value.strip()} (source: slab label)")
     uncertainties = evidence.get("uncertainties") or []
     if uncertainties:
         parts.append("- uncertainties: " + ", ".join(

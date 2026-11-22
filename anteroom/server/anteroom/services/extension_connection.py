@@ -48,6 +48,16 @@ DUPLICATE_REPORT_SEC = 300.0
 # need the exact copy this app ships. A change an older Bridge cannot handle
 # gets a new name here and in the Bridge's capabilities.
 MARKETPLACE_ACTIONS = "marketplace.actions"
+MARKETPLACE_REGIONS = "marketplace.regions"
+
+
+def needs_regional_bridge(command: str, payload: dict) -> bool:
+    if command not in {"marketplace.execute", "marketplace.result"}:
+        return False
+    region = (payload.get("listing") or {}).get("_seller_region")
+    marketplace = payload.get("marketplace")
+    return (marketplace == "poshmark" and region == "CA"
+            or marketplace == "depop" and region in {"CA", "GB", "AU"})
 
 
 def _ws_origin_allowed(origin: str) -> bool:
@@ -491,6 +501,8 @@ async def _web_chrome(command: str, payload: dict, timeout: float) -> dict | Non
 async def marketplace_sessions():
     from types import SimpleNamespace
 
+    from anteroom.services.seller_region import seller_region
+
     from anteroom.database import in_worker_session
     from anteroom.services import browser_bridge, cloud_sessions
 
@@ -499,10 +511,12 @@ async def marketplace_sessions():
     if cloud_enabled:
         cloud_map = await in_worker_session(lambda db: cloud_sessions.public_sessions(db))
 
+    region = (await asyncio.to_thread(seller_region)).country
+    payload = {"seller_region": region} if region == "CA" else {}
     chrome_connected = True
     raw = None
     try:
-        raw = await _web_chrome("marketplace.sessions", {}, 25)
+        raw = await _web_chrome("marketplace.sessions", payload, 25)
     except HTTPException as exc:
         if cloud_enabled and exc.status_code == 409:
             chrome_connected = False
@@ -511,7 +525,7 @@ async def marketplace_sessions():
             raise
     try:
         if raw is None:
-            raw = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.sessions", {}, timeout=20)
+            raw = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.sessions", payload, timeout=20)
     except browser_bridge.BrowserBridgeError as exc:
         status = 409 if "Connect Chrome" in str(exc) else 502
         raise HTTPException(status, "Connect Chrome, then check marketplace sign-in.") from exc
@@ -559,15 +573,20 @@ async def marketplace_sessions():
 async def connect_marketplace(marketplace: str):
     from types import SimpleNamespace
 
+    from anteroom.services.seller_region import seller_region
+
     from anteroom.services import browser_bridge
 
     if marketplace not in set(_SESSION_MARKETS):
         raise HTTPException(404, "Unknown marketplace.")
-    raw = await _web_chrome("marketplace.connect", {"marketplace": marketplace}, 45)
+    payload = {"marketplace": marketplace}
+    if marketplace == "poshmark" and (await asyncio.to_thread(seller_region)).country == "CA":
+        payload["seller_region"] = "CA"
+    raw = await _web_chrome("marketplace.connect", payload, 45)
     if raw is not None:
         return _public_connect(raw)
     try:
-        raw = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.connect", {"marketplace": marketplace}, timeout=40)
+        raw = await browser_bridge.request(SimpleNamespace(id=None), "marketplace.connect", payload, timeout=40)
     except browser_bridge.BrowserBridgeError as exc:
         raise HTTPException(502, "Finish signing in in Chrome, then reconnect.") from exc
     return _public_connect(raw)

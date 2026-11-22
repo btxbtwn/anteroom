@@ -579,8 +579,11 @@ async def _execute_local(
 
 async def verify_session(marketplace: str = "poshmark", timeout: float = 25.0) -> dict[str, Any]:
     """Run a live read-only verification against Poshmark for the current seller."""
+    from anteroom.services.seller_region import seller_region
+
+    region = (await asyncio.to_thread(seller_region)).country
     return await execute(
         marketplace,
-        {"type": "marketplace.verify_session", "payload": {"marketplace": marketplace}},
+        {"type": "marketplace.verify_session", "payload": {"marketplace": marketplace, "seller_region": region}},
         timeout=timeout,
     )

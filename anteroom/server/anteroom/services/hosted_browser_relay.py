@@ -134,7 +134,12 @@ class BrowserRelay(ReplyWaits):
             if loop.is_closed():
                 return False
             return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(self.deliver_local(message), loop))
-        capability = COMMANDS.get(str(message.get("type")))
+        from anteroom.services.extension_connection import MARKETPLACE_REGIONS, needs_regional_bridge
+
+        command_type = str(message.get("type"))
+        if needs_regional_bridge(command_type, message.get("payload") or {}) and not self._can(MARKETPLACE_REGIONS):
+            return False
+        capability = COMMANDS.get(command_type)
         if capability is None or not self._can(capability):
             return False
         # The page and Bridge take exactly these fields; the socket envelope's others stay here.

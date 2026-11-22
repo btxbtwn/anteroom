@@ -422,6 +422,22 @@ describe("followListingGeneration", () => {
       }),
     })).rejects.toThrow("No photos to generate from.");
   });
+
+  it("reports a hosted failure after partial output", async () => {
+    await expect(followListingGeneration("conv-1", {
+      fetchImpl: async () => sseResponse("data: partial\n\nevent: error\ndata: Provider stalled\n\ndata: [DONE]\n\n"),
+    })).rejects.toThrow("Provider stalled");
+  });
+
+  it("waits for a submission slot when the server provides Retry-After", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 429, headers: { "Retry-After": "3" } }))
+      .mockResolvedValueOnce(sseResponse("data: {\"title\":\"Coat\"}\n\ndata: [DONE]\n\n"));
+    const sleep = vi.fn(async () => {});
+    await followListingGeneration("conv-1", { fetchImpl, sleep });
+    expect(sleep).toHaveBeenCalledWith(3000);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("parseGenerationSse", () => {

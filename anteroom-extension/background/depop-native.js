@@ -26,6 +26,13 @@ function depopColour(value) {
 
 // Age, style, and source use the same codes Vendoo writes. Colour and condition
 // are Depop's own slugs. Brand stays on the draft until Depop's brand id is known.
+const DEPOP_CURRENCIES = { US: 'USD', CA: 'CAD', GB: 'GBP', AU: 'AUD' };
+
+function depopRegion(listing) {
+  const region = listing?._seller_region;
+  return Object.hasOwn(DEPOP_CURRENCIES, region) ? region : 'US';
+}
+
 function depopPrice(listing) {
   const locked = Array.isArray(listing?.seller_fields) && listing.seller_fields.includes('depop_specifics.price');
   const override = listing?.depop_specifics?.price;
@@ -107,8 +114,8 @@ function depopBrandId(brands, name) {
 
 // The sell page asks Depop for sizes with the category's group and product type.
 // Gender is only on men's and women's; kids' and everything else leave it off.
-function depopShippingParams(category) {
-  const params = new URLSearchParams({ ids: 'USPS' });
+function depopShippingParams(category, region = 'US') {
+  const params = new URLSearchParams(region === 'US' ? { ids: 'USPS' } : {});
   if (category?.group) params.set('group', category.group);
   const productType = category?.productType || category?.product_type;
   if (productType) params.set('product_type', productType);
@@ -135,7 +142,8 @@ function depopParcelRows(payload) {
       const subtitle = String(size?.subtitle || size?.sub_title || size?.description || size?.content || '').trim();
       const suggested = size?.suggested === true || size?.recommended === true || size?.is_suggested === true
         || (suggestedId !== '' && suggestedId === id);
-      rows.push({ id, title, subtitle, suggested, cost: size?.cost });
+      rows.push({ id, title, subtitle, suggested, cost: size?.cost,
+        providerId: provider.id ?? provider.shipping_provider_id ?? size.providerId });
     }
   }
   return rows;
@@ -235,24 +243,30 @@ function depopQuotedCost(cost) {
 // quote names, which is the package size a draft cannot be published without.
 // Empty when Depop does not answer; publishing names what is missing.
 async function depopShippingFields(listing, category, deadline) {
-  const from = depopAddress(listing, await depopAccountRead('/api/v1/addresses/?providers=USPS', 'ship-from addresses', deadline));
-  const params = depopShippingParams(category);
+  const region = depopRegion(listing);
+  if (region === 'CA') {
+    const cost = listing.depop_specifics?.domesticShippingPrice;
+    const amount = cost == null || cost === '' ? null : depopQuotedCost(cost);
+    return amount === null
+      ? { fields: {}, problem: { field: 'depop_specifics.domesticShippingPrice', needs: 'a domestic shipping price' } }
+      : { fields: { national_shipping_cost: amount, shipping_methods: [] } };
+  }
+  const query = region === 'US' ? '?providers=USPS' : '';
+  const from = depopAddress(listing, await depopAccountRead('/api/v1/addresses/' + query, 'ship-from addresses', deadline));
+  const params = depopShippingParams(category, region);
   params.set('item_cost', Number(depopPrice(listing)).toFixed(2));
-  params.set('item_currency', 'USD');
+  params.set('item_currency', DEPOP_CURRENCIES[region]);
   const providers = await depopAccountRead(`/presentation/api/v1/shipping/providers/depop/?${params}`, 'parcel sizes', deadline);
-  const parcel = depopParcelSize(depopParcelRows(providers), listing);
+  const rows = depopParcelRows(providers);
+  const parcel = depopParcelSize(region === 'US' ? rows : rows.filter(row => row.providerId), listing);
   if (!from || !parcel?.id) return { from, parcel, fields: {}, problem: depopShippingProblem(from, parcel, listing) };
   const fields = {
-    // The draft's shipping entry uses parcel_size. parcel_size_id is the partner
-    // API's name, and Depop refuses a draft that carries it.
-    shipping_methods: [{ payer: 'buyer', parcel_size: String(parcel.id), shipping_provider_id: 'USPS', ship_from_address_id: from.id }],
+    shipping_methods: [{ payer: 'buyer', parcel_size: String(parcel.id),
+      shipping_provider_id: region === 'US' ? 'USPS' : String(parcel.providerId), ship_from_address_id: from.id }],
     ...depopLocation(listing, from),
   };
-  // Depop's quote for that package, as the sell page shows it beside the size.
-  // A draft Depop publishes needs a national shipping cost of its own, so a parcel
-  // row that names no price still gets the form's free-shipping amount rather than
-  // leaving the field off, which Depop would report as missing at publish.
-  fields.national_shipping_cost = depopQuotedCost(parcel.cost) ?? '0.00';
+  const cost = depopQuotedCost(parcel.cost);
+  if (cost !== null || region === 'US') fields.national_shipping_cost = cost ?? '0.00';
   return { from, parcel, fields };
 }
 
@@ -281,7 +295,7 @@ function depopMissingEntries(missing, shippingProblem) {
   for (const field of missing) {
     const shipping = DEPOP_SHIPPING_FIELDS.has(field);
     const entry = shipping
-      ? { field: DEPOP_PARCEL_FIELD, needs: shippingProblem?.needs || (field === 'parcel_size' ? 'a package size' : 'shipping') }
+      ? { field: shippingProblem?.field || DEPOP_PARCEL_FIELD, needs: shippingProblem?.needs || (field === 'parcel_size' ? 'a package size' : 'shipping') }
       : { field, needs: depopFieldNeeds(field) };
     if (!entries.some(other => other.field === entry.field)) entries.push(entry);
   }
@@ -387,10 +401,10 @@ function depopCategory(listing, attributes) {
   return match ? depopProduct(attributes, match[1], match[2], match[0]) : null;
 }
 
-// The US size set for the product type and the listing's size inside it.
+// The regional size set for the product type and the listing's size inside it.
 function depopSize(listing, category, attributes) {
   const mapping = attributes.category_size_mapping.find(entry => entry.department === category.department && entry.product_type === category.productType);
-  const setId = mapping?.size_set_by_region?.US;
+  const setId = mapping?.size_set_by_region?.[depopRegion(listing)] ?? mapping?.size_set_by_region?.US;
   if (setId == null) return { none: true };
   const set = attributes.size_sets.find(entry => String(entry.id) === String(setId));
   if (!set) return { problem: 'a size Depop offers for this category' };
@@ -479,8 +493,10 @@ function depopAttributeValues(listing, category, attributes) {
 // and does not mark one as the default, so the most recently updated match is used.
 function depopAddress(listing, data) {
   const raw = Array.isArray(data) ? data : data?.addresses || data?.objects || data?.data || [];
-  const rows = (Array.isArray(raw) ? raw : []).filter(entry => entry?.id != null);
-  const zip = String(listing.form?.ships_from_zip || '').replace(/\D/g, '').slice(0, 5);
+  const region = depopRegion(listing);
+  const rows = (Array.isArray(raw) ? raw : []).filter(entry => entry?.id != null &&
+    (region === 'US' || String(entry.country_code ?? entry.country ?? '').toUpperCase() === region));
+  const zip = region === 'US' ? String(listing.form?.ships_from_zip || '').replace(/\D/g, '').slice(0, 5) : '';
   const postal = entry => String(entry?.postal_code ?? entry?.postalCode ?? entry?.zip ?? '').replace(/\D/g, '').slice(0, 5);
   const newest = group => group.slice().sort((a, b) => String(b.lastModified || b.last_modified || '').localeCompare(String(a.lastModified || a.last_modified || '')))[0];
   const matches = zip ? rows.filter(entry => postal(entry) === zip) : [];
@@ -708,6 +724,7 @@ function depopDraftView(draft) {
     international_shipping_cost: source.international_shipping_cost ?? source.internationalShippingCost,
     description: source.description,
     price: source.price_amount ?? source.priceAmount ?? source.price,
+    price_currency: source.price_currency ?? source.priceCurrency ?? source.price?.currency,
     shipping_methods: source.shipping_methods,
     measurements: source.measurements,
   };
@@ -779,7 +796,7 @@ function depopDraftWriteBody(listing, fields, pictures, existing) {
   const body = {
     description: depopDescription(listing),
     price_amount: String(depopPrice(listing) ?? ''),
-    price_currency: 'USD',
+    price_currency: DEPOP_CURRENCIES[depopRegion(listing)],
     pictures: depopPictureIds(pictures),
   };
   for (const key of ['address', 'age', 'attributes', 'brand', 'colour', 'condition', 'country', 'country_code',
@@ -828,6 +845,7 @@ function depopDraftMismatch(draft, listing, fields) {
   const wrong = [];
   if (marketplaceText(view.description) !== marketplaceText(depopDescription(listing))) wrong.push('description');
   if (depopPrice(listing) != null && Number(view.price) !== Number(depopPrice(listing))) wrong.push('price');
+  if (view.price_currency && view.price_currency !== DEPOP_CURRENCIES[depopRegion(listing)]) wrong.push('currency');
   if (!fields) return wrong;
   if (fields.product_type != null && String(view.product_type) !== String(fields.product_type)) wrong.push('category');
   if (fields.variant_set != null) {
@@ -959,7 +977,7 @@ function depopLiveWriteBody(product, listing, fields) {
     is_kids: fields.is_kids,
     picture_ids: depopPictureIds(stored, null),
     price_amount: String(depopPrice(listing) ?? ''),
-    price_currency: 'USD',
+    price_currency: DEPOP_CURRENCIES[depopRegion(listing)],
     product_type: fields.product_type,
     shipping_methods: depopCleanShipping(fields.shipping_methods || []),
     ...(fields.sku ? { sku: fields.sku } : {}),
@@ -968,6 +986,7 @@ function depopLiveWriteBody(product, listing, fields) {
     variant_set: fields.variant_set ?? null,
     variants: depopRequestVariants(fields.variants || {}),
   };
+  if (fields.national_shipping_cost != null && depopRegion(listing) !== 'US') body.national_shipping_cost = fields.national_shipping_cost;
   if (Object.hasOwn(fields, 'international_shipping_cost')) body.international_shipping_cost = fields.international_shipping_cost;
   if (typeof fields.quantity === 'number') body.quantity = fields.quantity;
   // Depop's product request carries boost as { status: 'active' | 'inactive' }.
@@ -1180,7 +1199,7 @@ async function depopApiAction(action, payload) {
     const summary = draft => {
       const view = depopDraftView(draft);
       const pictureIds = depopPictureIds(draft, null);
-      return { id: String(draft.id), description: draft.description, price: view.price,
+      return { id: String(draft.id), description: draft.description, price: view.price, price_currency: view.price_currency,
         product_type: view.product_type, variant_set_id: view.variant_set, variants: view.variants,
         brand: view.brand, condition: view.condition, colour: view.colour, age: view.age, source: view.source, style: view.style,
         attributes: view.attributes, sku: view.sku, quantity: view.quantity,
@@ -1214,7 +1233,7 @@ async function depopApiAction(action, payload) {
     if (action === 'create') {
       const draft = await request('POST', '/presentation/api/v1/drafts/', payload.depop_fields
         ? depopDraftWriteBody(payload.listing, payload.depop_fields, [])
-        : { description, price_amount: String(depopPrice(payload.listing) ?? ''), price_currency: 'USD', pictures: [], quantity: 1 });
+        : { description, price_amount: String(depopPrice(payload.listing) ?? ''), price_currency: DEPOP_CURRENCIES[depopRegion(payload.listing)], pictures: [], quantity: 1 });
       if (!/^[A-Za-z0-9_-]{1,80}$/.test(String(draft.id))) throw marketplaceError('Depop did not confirm its new draft ID. Check drafts before trying again.', { code: 'schema_drift', rejected: false });
       return { draft_url: `https://www.depop.com/sellinghub/drafts/edit/${draft.id}/` };
     }

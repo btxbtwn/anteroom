@@ -107,7 +107,7 @@ def _seller_id() -> str:
 
 def _is_poshmark_domain(domain: str) -> bool:
     clean = domain.strip().lower().lstrip(".")
-    return clean == "poshmark.com" or clean.endswith(".poshmark.com")
+    return any(clean == host or clean.endswith("." + host) for host in ("poshmark.com", "poshmark.ca"))
 
 
 def _jwt_claims(token: str) -> dict[str, Any] | None:
@@ -324,8 +324,11 @@ def mint_upload_token(db: Session, marketplace: str) -> dict[str, Any]:
         row.updated_at = now
     _audit(db, market, "token_minted")
     db.commit()
+    from anteroom.services.seller_region import seller_region
+
     return {
         "marketplace": market,
+        "seller_region": seller_region().country,
         "token": f"{seller}.{secret_part}",
         "expires_at": expires_at.isoformat(),
         "expires_in": UPLOAD_TOKEN_TTL_S,

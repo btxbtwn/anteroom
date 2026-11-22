@@ -33,7 +33,7 @@ const EXTENSION_SCRIPTS = [
 
 function isPoshmarkCookieHost(hostname) {
   const host = String(hostname || '').toLowerCase();
-  return host === 'poshmark.com' || host.endsWith('.poshmark.com');
+  return ['poshmark.com', 'poshmark.ca'].some(domain => host === domain || host.endsWith('.' + domain));
 }
 
 function isAllowedHost(hostname) {
@@ -203,10 +203,10 @@ function createPoshmarkFetch({ jar, userAgent, httpFetch }) {
       const isPoshmark = isPoshmarkCookieHost(currentUrl.hostname);
       if (isPoshmark && POSHMARK_HEADER_PATH.test(currentUrl.pathname)) {
         if (!headerMap.has('origin')) {
-          headerMap.set('origin', ['Origin', 'https://poshmark.com']);
+          headerMap.set('origin', ['Origin', currentUrl.origin]);
         }
         if (!headerMap.has('referer')) {
-          headerMap.set('referer', ['Referer', 'https://poshmark.com/create-listing']);
+          headerMap.set('referer', ['Referer', currentUrl.origin + '/create-listing']);
         }
       }
 
@@ -532,15 +532,15 @@ async function executePoshmarkOperation({
   if (cmdType === 'marketplace.sales') {
     result = await context.readMarketplaceSales('poshmark', command.payload?.listing_ids || []);
   } else if (cmdType === 'marketplace.sessions') {
-    const summary = await context.readExtensionSession('poshmark');
+    const summary = await context.readExtensionSession('poshmark', undefined, command.payload?.seller_region);
     result = { ok: true, sessions: { poshmark: summary } };
   } else if (cmdType === 'marketplace.verify_session') {
-    const summary = await context.readExtensionSession('poshmark');
+    const summary = await context.readExtensionSession('poshmark', undefined, command.payload?.seller_region);
     if (summary.state !== 'signed_in') {
       result = { ok: true, session: summary };
     } else {
       try {
-        await context.poshmarkCsrf(Date.now() + 15000);
+        await context.poshmarkCsrf(Date.now() + 15000, context.poshmarkOrigin(command.payload?.seller_region));
         result = { ok: true, session: summary };
       } catch (err) {
         if (err?.code === 'signed_out') {

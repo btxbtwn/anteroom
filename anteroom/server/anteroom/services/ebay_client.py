@@ -186,6 +186,12 @@ class EbayClient:
         async def send(token: str):
             headers = {"Authorization": f"Bearer {token}", "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
                        "Content-Language": "en-US"}
+            if path.startswith("/sell/inventory/") and xml is None:
+                from anteroom.services.seller_region import seller_region
+
+                region = await asyncio.to_thread(seller_region)
+                headers["X-EBAY-C-MARKETPLACE-ID"] = region.ebay_marketplace
+                headers["Content-Language"] = f"en-{region.country}"
             if xml is not None:
                 headers = {"X-EBAY-API-IAF-TOKEN": token, "X-EBAY-API-CALL-NAME": call,
                            "X-EBAY-API-SITEID": "0", "X-EBAY-API-COMPATIBILITY-LEVEL": "1487",

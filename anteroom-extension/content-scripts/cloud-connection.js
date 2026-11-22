@@ -13,12 +13,12 @@
     const cloudSession = data.action === 'cloud_session_connect';
     const keys = ['source', 'version', 'requestId', 'action', 'accountId',
       ...(data.action === 'connect' ? ['email'] : []),
-      ...(cloudSession ? ['email', 'marketplace', 'uploadToken'] : []),
+      ...(cloudSession ? ['email', 'marketplace', 'uploadToken', 'sellerRegion'] : []),
       ...(data.action === 'poshmark_form' ? ['listing'] : []),
       ...(relay ? ['command', 'photos'] : [])];
     if (Object.keys(data).some(key => !keys.includes(key))) return;
     if ((data.action === 'connect' || cloudSession) && (typeof data.email !== 'string' || data.email.length > 254)) return;
-    if (cloudSession && (data.marketplace !== 'poshmark' || typeof data.uploadToken !== 'string' || data.uploadToken.length > 260)) return;
+    if (cloudSession && (data.marketplace !== 'poshmark' || typeof data.uploadToken !== 'string' || data.uploadToken.length > 260 || (data.sellerRegion !== undefined && data.sellerRegion !== 'CA'))) return;
     const listing = data.action === 'poshmark_form' ? CloudMarketplaceProtocol.listing(data.listing) : null;
     if (data.action === 'poshmark_form' && !listing) return;
     const command = relay ? CloudMarketplaceProtocol.command(data.command) : null;
@@ -30,7 +30,7 @@
     } else if (data.action !== 'poshmark_form' && !relay) accountId = data.accountId;
     const message = { type: 'cloud.connection', action: data.action, accountId: data.accountId,
       ...(data.action === 'connect' ? { email: data.email } : {}),
-      ...(cloudSession ? { email: data.email, marketplace: data.marketplace, uploadToken: data.uploadToken } : {}),
+      ...(cloudSession ? { email: data.email, marketplace: data.marketplace, uploadToken: data.uploadToken, ...(data.sellerRegion === 'CA' ? { sellerRegion: 'CA' } : {}) } : {}),
       ...(listing ? { listing } : {}), ...(relay ? { command, photos } : {}) };
     if ((data.action === 'poshmark_form' || relay) && accountId !== data.accountId) {
       respond({ ok: false, error_code: 'account_changed' }); return;
@@ -60,7 +60,7 @@
       }
       window.postMessage({ source: 'anteroom-extension', version: 1, requestId: data.requestId,
         ok: result?.ok === true, state: ['connected', 'disconnected', 'pending'].includes(result?.state) ? result.state : 'unavailable',
-        extensionVersion: typeof result?.extensionVersion === 'string' ? result.extensionVersion.slice(0, 30) : '', supportedActions: Array.isArray(result?.supportedActions) ? result.supportedActions.filter(action => ['poshmark.form.read', 'marketplace.actions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_commands', 'marketplace.cloud_connect'].includes(action)) : [] }, ORIGIN);
+        extensionVersion: typeof result?.extensionVersion === 'string' ? result.extensionVersion.slice(0, 30) : '', supportedActions: Array.isArray(result?.supportedActions) ? result.supportedActions.filter(action => ['poshmark.form.read', 'marketplace.actions', 'marketplace.regions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_commands', 'marketplace.cloud_connect'].includes(action)) : [] }, ORIGIN);
     }
     try { chrome.runtime.sendMessage(message).then(respond).catch(() => respond(null)); }
     catch { respond(null); }

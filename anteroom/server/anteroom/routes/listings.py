@@ -24,11 +24,26 @@ from anteroom.services.hosted_limits import limit_seller_submissions
 from anteroom.services.validation import validate_listing
 from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
 from anteroom.repositories.queries import ListingRepo, ConversationRepo
-from anteroom.services import price_markdown
+from anteroom.services import generation_feedback, price_markdown
 from anteroom.services.price_drop import build_preview
 from anteroom.services.price_markdown import PriceDropError, current_listing, listing_busy
 
 router = APIRouter(tags=["listings"])
+
+
+@router.get("/api/generation-feedback")
+def generation_feedback_summary(db: Session = Depends(get_db)):
+    return generation_feedback.feedback_summary(db)
+
+
+@router.get("/api/conversations/{conv_id}/generation-feedback")
+def get_generation_feedback(conv_id: str, db: Session = Depends(get_db)):
+    return generation_feedback.feedback_for(db, conv_id)
+
+
+@router.put("/api/conversations/{conv_id}/generation-feedback")
+def put_generation_feedback(conv_id: str, body: generation_feedback.FeedbackInput, db: Session = Depends(get_db)):
+    return generation_feedback.save_feedback(db, conv_id, body)
 
 
 @router.get("/api/conversations/{conv_id}/listing", response_model=ListingDocument, responses=NOT_FOUND)

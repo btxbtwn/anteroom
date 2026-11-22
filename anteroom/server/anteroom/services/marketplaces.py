@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from anteroom.services.user_settings import read_settings, update_settings
+from anteroom.services.seller_region import seller_region
 
 # Direct marketplace forms that use the shared category-field generation pass.
 FILLABLE_MARKETPLACES = ("ebay", "etsy", "poshmark", "mercari", "depop")
@@ -21,9 +22,11 @@ DEFAULT_SELECTED = ["ebay", "etsy", "poshmark", "mercari", "depop"]
 
 
 def catalog_payload() -> list[dict]:
+    allowed = seller_region().marketplaces
     return [
         {"id": item_id, "label": label, "fillable": fillable}
         for item_id, label, fillable in MARKETPLACE_CATALOG
+        if item_id in allowed
     ]
 
 
@@ -45,13 +48,16 @@ def get_selected_marketplaces() -> list[str]:
     payload = read_settings()
     raw = payload.get("marketplaces")
     if not isinstance(raw, list):
-        return list(DEFAULT_SELECTED)
+        return [item for item in DEFAULT_SELECTED if item in seller_region(payload).marketplaces]
     # A marketplace Anteroom no longer offers drops out; the rest of the choice stays.
-    return normalize_selected([item for item in raw if str(item).strip().lower() in KNOWN_MARKETPLACES])
+    allowed = seller_region(payload).marketplaces
+    return normalize_selected([item for item in raw if str(item).strip().lower() in allowed])
 
 
 def set_selected_marketplaces(selected: object) -> list[str]:
     normalized = normalize_selected(selected)
+    if not set(normalized) <= seller_region().marketplaces:
+        raise ValueError("Choose marketplaces available in your seller region.")
     update_settings(lambda payload: payload.__setitem__("marketplaces", normalized))
     return normalized
 
