@@ -26,6 +26,7 @@ import httpx
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
+from anteroom.models.automation import MarketplaceRelistRule
 from anteroom.models.conversation import Conversation
 from anteroom.models.marketplace_listing import UNSETTLED_STATES
 from anteroom.models.marketplace_sale import MarketplaceSale, PAID_STATUSES
@@ -461,7 +462,7 @@ def _failure_text(marketplace: str, exc: Exception) -> str:
 
 
 async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expected: dict[str, str] | None = None,
-                 sale_id: str | None = None) -> dict:
+                 sale_id: str | None = None, relist_rule_id: str | None = None) -> dict:
     """Delete the named listings. Runs as a job holding the automation slot, so no Send starts into Chrome meanwhile.
 
     ``expected`` pins the listing ID to delete on each marketplace: when one names
@@ -469,6 +470,8 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
     sale a delist after a sale follows: once that order is no longer paid, or the
     item has stock again, nothing is deleted. A follow-up stops before its
     next marketplace if automatic delisting is turned off.
+
+    A relist rule must still be enabled when a delete is recorded as started.
 
     Each database step runs on a worker thread with its own session; none is open while
     eBay, Etsy or Chrome answers.
@@ -484,6 +487,7 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
     job = SimpleNamespace(id=job_id)
     failed = False
     skipped: list[str] = []
+    disabled_rule: DelistError | None = None
     try:
         for index, name in enumerate(names):
             if sale_id is not None and not await asyncio.to_thread(_enabled):
@@ -494,10 +498,13 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
                     "attempts": _attempt(entry)}
             try:
                 if sale_id is None:
-                    ebay_record = await in_worker_session(_start_delete, conv_id, name, base, job_id)
+                    ebay_record = await in_worker_session(_start_delete, conv_id, name, base, job_id, relist_rule_id)
                 else:
                     ebay_record = await in_worker_session(_start_followup_delete, conv_id, name, base, job_id, sale_id)
             except DelistError as exc:
+                if exc.reason == "relist_rule_disabled":
+                    disabled_rule = exc
+                    break
                 if exc.reason != "sale_changed":
                     raise
                 skipped = names[index:]
@@ -558,6 +565,8 @@ async def delist(conv_id: str, marketplaces: list[str], confirm: bool, *, expect
         raise
     finally:
         release_api_job(job_id)
+    if disabled_rule is not None:
+        raise disabled_rule
     result = await in_worker_session(listings, conv_id)
     # Skipped marketplaces may have failures from a prior sweep; don't report them as new tries.
     for name in skipped:
@@ -660,7 +669,20 @@ def _start_followup_delete(db: Session, conv_id: str, name: str, base: dict, job
         return _start_delete(db, conv_id, name, base, job_id)
 
 
-def _start_delete(db: Session, conv_id: str, name: str, base: dict, job_id: str) -> dict | None:
+def _start_delete(db: Session, conv_id: str, name: str, base: dict, job_id: str,
+                  relist_rule_id: str | None = None) -> dict | None:
+    if relist_rule_id is not None:
+        from anteroom.services import listing_mode
+
+        with listing_mode.guard(db, "direct"):
+            rule = db.get(MarketplaceRelistRule, relist_rule_id, with_for_update=True)
+            if not rule or rule.marketplace != name or not rule.enabled:
+                raise DelistError(409, "The relist rule was turned off. Nothing was delisted.", reason="relist_rule_disabled")
+            return _record_delete_start(db, conv_id, name, base, job_id)
+    return _record_delete_start(db, conv_id, name, base, job_id)
+
+
+def _record_delete_start(db: Session, conv_id: str, name: str, base: dict, job_id: str) -> dict | None:
     """Record the delete as started. Returns the eBay listing record the eBay delete reads."""
     _record_delete(db, conv_id, name, {**base, "state": "deleting"}, commit=False)
     ebay_record = MarketplaceListingRepo(db).get(conv_id, "ebay") if name == "ebay" else None

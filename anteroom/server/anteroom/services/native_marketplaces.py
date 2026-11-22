@@ -415,7 +415,8 @@ def _photos(db: Session, conv_id: str, snapshot: dict, marketplace: str) -> tupl
     return marketplace_media.photos_for(snapshot, ConversationRepo(db).get_all_photos(conv_id), marketplace)
 
 
-async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str) -> dict:
+async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str,
+                 relist_rule_id: str | None = None) -> dict:
     """Check, ask Chrome or eBay, then open the job. Each database step runs on a worker thread
     with its own session, so no pooled connection is held while Chrome or eBay answers."""
     snapshot, photos, deleted_here = await in_worker_session(_check_start, conv_id, marketplace, body, kind)
@@ -438,7 +439,7 @@ async def _start(conv_id: str, marketplace: str, body: ListRequest, kind: str) -
 
     async def open_and_launch() -> dict:
         record, job_id, steps = await in_worker_session(
-            _open_job, conv_id, marketplace, body, kind, snapshot, photos, deleted_here)
+            _open_job, conv_id, marketplace, body, kind, snapshot, photos, deleted_here, relist_rule_id)
         _launch(run_job(job_id, conv_id, marketplace, steps, options))
         record["running"] = True
         return record
@@ -496,13 +497,19 @@ def _after_preview(db: Session, marketplace: str, body: ListRequest, snapshot: d
 
 
 def _open_job(db: Session, conv_id: str, marketplace: str, body: ListRequest, kind: str, snapshot: dict,
-              photos: list, deleted_here: bool) -> tuple[dict, str, list[str]]:
+              photos: list, deleted_here: bool, relist_rule_id: str | None = None) -> tuple[dict, str, list[str]]:
     from anteroom.services import approved_photos, listing_mode
 
     name = NAMES[marketplace]
     job = None
     try:
         with listing_mode.guard(db, "direct"):
+            if relist_rule_id is not None:
+                from anteroom.models.automation import MarketplaceRelistRule
+
+                rule = db.get(MarketplaceRelistRule, relist_rule_id, with_for_update=True)
+                if not rule or rule.marketplace != marketplace or not rule.enabled:
+                    raise NativeMarketplaceError(409, "The relist rule was turned off.", reason="relist_rule_disabled")
             record = _record(db, conv_id, marketplace)
             if record.get("state") in UNSETTLED_STATES:
                 raise NativeMarketplaceError(409, f"Check the last {name} action first; Anteroom has not confirmed it.")
@@ -611,9 +618,10 @@ def preflight(conv_id: str, db: Session) -> dict:
     return {"revision_id": revision.id, "marketplaces": out}
 
 
-async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest) -> dict:
+async def list_now(conv_id: str, marketplace: Marketplace, body: ListRequest, *,
+                   relist_rule_id: str | None = None) -> dict:
     """Start listing on one marketplace in one seller-confirmed step. Returns at once; poll status."""
-    return await _start(conv_id, marketplace, body, "list")
+    return await _start(conv_id, marketplace, body, "list", relist_rule_id)
 
 
 async def update_live(conv_id: str, marketplace: Marketplace, body: ListRequest) -> dict:

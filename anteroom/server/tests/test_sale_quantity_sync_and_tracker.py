@@ -99,6 +99,7 @@ class SaleQuantitySyncAndTrackerTest(unittest.TestCase):
         return sale
 
     def test_mercari_adapter_uses_completed_job_listing_id(self):
+        user_settings.set_auto_adjust_quantity(True)
         from anteroom.services import automation_actions, native_marketplaces
 
         conv = self._create_multi_qty_item()
@@ -116,6 +117,20 @@ class SaleQuantitySyncAndTrackerTest(unittest.TestCase):
             self.db.commit()
             return True
 
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def disable_on_turn(_marketplace):
+            user_settings.set_auto_adjust_quantity(False)
+            yield
+
+        with (patch.object(automation_actions, "_turn", disable_on_turn),
+              patch.object(native_marketplaces, "list_now") as publish):
+            actual = asyncio.run(sale_quantity_sync._default_mercari_relister(conv.id, "reviewed", sale_id=sale.id))
+        self.assertTrue(actual["skipped"])
+        publish.assert_not_awaited()
+        user_settings.set_auto_adjust_quantity(True)
+
         with patch.object(native_marketplaces, "list_now", return_value={"job_id": job_id, "state": "saving"}), \
              patch.object(automation_actions, "_wait_for_job", side_effect=settle), \
              patch.object(automation_actions, "_job_outcome", return_value=("completed", None)):
@@ -124,6 +139,7 @@ class SaleQuantitySyncAndTrackerTest(unittest.TestCase):
         self.assertEqual(actual["listing_id"], "m7654321")
 
     def test_quantity_write_is_pinned_and_contains_no_draft_fields(self):
+        user_settings.set_auto_adjust_quantity(True)
         from unittest.mock import AsyncMock
 
         conv = self._create_multi_qty_item(title="Unsent title")
@@ -154,6 +170,54 @@ class SaleQuantitySyncAndTrackerTest(unittest.TestCase):
             with patch("anteroom.services.native_marketplaces.update_live") as full_update:
                 self.assertFalse(adjust("etsy")["ok"])
                 full_update.assert_not_called()
+
+    def test_quantity_retry_uses_current_stock_and_checks_opt_out_at_dispatch(self):
+        from contextlib import asynccontextmanager
+        from unittest.mock import AsyncMock
+
+        conv = self._create_multi_qty_item()
+        sale = self._add_sale(conv.id, "poshmark", order_id="quantity-retry")
+        lid = "123456789100"
+        binding = self._add_live(conv.id, "ebay", lid, f"https://www.ebay.com/itm/{lid}")
+        binding.ebay_offer_id = "1234"
+        row = sale_quantity_sync.record_sync_event(
+            self.db, sale_id=sale.id, conversation_id=conv.id, sku=None,
+            sold_marketplace="poshmark", target_marketplace="ebay", action="adjust_quantity",
+            target_listing_id=lid, new_quantity=2, status="failed",
+        )
+        user_settings.set_auto_adjust_quantity(True)
+
+        def retry():
+            return asyncio.run(sale_quantity_sync.retry_sync_event(row.id, session_factory=self.Session))
+
+        client = AsyncMock()
+        client.request.side_effect = [
+            {"status": "PUBLISHED", "sku": "live-sku", "listing": {"listingId": lid}},
+            {"responses": [{"offerId": "1234", "statusCode": 200}]},
+        ]
+        with (patch("anteroom.services.ebay_client.EbayClient.connect", return_value=client) as connect,
+              patch("anteroom.services.sale_inventory.stock_after_sale", return_value={"remaining": 1})):
+            self.assertEqual(retry()["status"], "succeeded")
+            self.assertEqual(client.request.await_args.kwargs["body"]["requests"][0]["offers"][0]["availableQuantity"], 1)
+
+            @asynccontextmanager
+            async def disable_on_turn(_marketplace):
+                user_settings.set_auto_adjust_quantity(False)
+                yield
+
+            connect.reset_mock()
+            with patch("anteroom.services.automation_actions._turn", disable_on_turn):
+                outcome = retry()
+            self.assertEqual(outcome["status"], "skipped")
+            self.assertFalse(outcome["retryable"])
+            connect.assert_not_awaited()
+
+            for remaining in (None, 0):
+                with (patch("anteroom.services.sale_inventory.stock_after_sale", return_value={"remaining": remaining}),
+                      self.assertRaises(sale_quantity_sync.SaleSyncError) as error):
+                    retry()
+                self.assertEqual(error.exception.status_code, 409)
+            connect.assert_not_awaited()
 
     def test_auto_adjust_quantity_defaults_off_and_toggles_via_settings(self):
         self.assertFalse(user_settings.auto_adjust_quantity_enabled())

@@ -385,7 +385,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertEqual(updated_ml.listing_id, new_posh_1)
         self.assertEqual(updated_ml.listed_price, 95.0)
         swapped_floor = self.db.query(MarketplaceOfferFloor).filter_by(marketplace="poshmark", listing_id=new_posh_1).first()
-        self.assertIsNotNone(swapped_floor)
+        assert swapped_floor is not None
         self.assertEqual(swapped_floor.floor_cents, 7500)
 
         # Audit logs recorded
@@ -437,6 +437,63 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
             delete.assert_awaited_once()
         self.assertEqual(self.db.query(MarketplaceRelistLog).filter_by(status="completed").count(), 1)
 
+    def _relist_after_opt_out(self, *, disable_during_delete_start: bool):
+        from contextlib import asynccontextmanager
+        from unittest.mock import AsyncMock
+
+        from anteroom.services import marketplace_delist
+
+        conv, _, _ = self._create_draft("Opt out")
+        conv.status = "listed"
+        old_id = "5f0000000000000000000081"
+        self.db.add(MarketplaceListing(id=new_id(), conversation_id=conv.id, marketplace="poshmark",
+                                      state="published", listing_id=old_id, listed_at=_now() - timedelta(days=45),
+                                      listing_url=f"https://poshmark.com/listing/{old_id}", listed_price=58.0))
+        self.db.add(MarketplaceRelistRule(id=new_id(), marketplace="poshmark", enabled=True))
+        self.db.commit()
+
+        def disable():
+            with self.Session() as db:
+                auto_relist.save_rule(db, "poshmark", {"enabled": False})
+
+        open_delist = marketplace_delist._open_delist
+
+        def disable_after_open(*args):
+            result = open_delist(*args)
+            if disable_during_delete_start:
+                disable()
+            return result
+
+        @asynccontextmanager
+        async def disable_on_turn(_marketplace):
+            disable()
+            yield
+
+        with (
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch("anteroom.services.cloud_marketplace.execute", AsyncMock(return_value={
+                "ok": True, "state": "deleted",
+            })) as delete,
+            patch.object(marketplace_delist, "_open_delist", side_effect=disable_after_open),
+            patch("anteroom.services.automation_actions._turn", disable_on_turn),
+            patch("anteroom.services.native_marketplaces.list_now", AsyncMock(return_value={
+                "state": "published", "listing_id": "5f0000000000000000000082",
+            })) as publish,
+        ):
+            outcomes = asyncio.run(auto_relist.run_auto_relist(offer_checker=AsyncMock(return_value=False)))
+            self.assertEqual([entry["status"] for entry in outcomes], ["skipped_rule_disabled"])
+            publish.assert_not_awaited()
+            if disable_during_delete_start:
+                delete.assert_not_awaited()
+            else:
+                delete.assert_awaited_once()
+
+    def test_auto_relist_opt_out_before_delete_start(self):
+        self._relist_after_opt_out(disable_during_delete_start=True)
+
+    def test_auto_relist_opt_out_while_waiting_for_publish_turn(self):
+        self._relist_after_opt_out(disable_during_delete_start=False)
+
     def test_check_active_buyer_offer_ebay_poshmark_and_mercari(self):
         import xml.etree.ElementTree as ET
         from unittest.mock import AsyncMock, patch
@@ -454,6 +511,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
                 assert fields["BestOfferStatus"] == "Active"
                 if self._exc is not None:
                     raise self._exc
+                assert self._xml_text is not None
                 return {"xml": ET.fromstring(self._xml_text)}
 
         # 1. eBay active buyer offer -> True
