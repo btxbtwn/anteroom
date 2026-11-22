@@ -201,7 +201,7 @@ def test_browser_error_reports_are_rate_limited_per_seller(jwks, signing_keys, c
             # Another seller keeps an independent allowance.
             assert client.post('/api/error-reports', headers=bob, json=payload).status_code == 202
         # Only the 3 accepted reports were logged.
-        assert len(caplog.records) == 3
+        assert len([r for r in caplog.records if r.name == 'anteroom.browser']) == 3
 
 
 def test_hosted_vision_and_automation_routes_are_rate_limited_per_seller(jwks, signing_keys, monkeypatch):  # noqa: F811
