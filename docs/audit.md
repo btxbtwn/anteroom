@@ -53,9 +53,22 @@ These override everything below.
   Playwright's web server missed its 120 s start, every iPhone test timed
   out, and the backend run took two hours. Finish the smoke first, then
   check fix branches one after another.
-- Give each fix worktree its own `anteroom/.venv` and npm install. From the
-  fix worktree root, run
-  `cd anteroom && python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]" && npm ci`.
+- Give each fix worktree its own `anteroom/.venv` and npm install. Run this
+  from the fix worktree root. It removes any links left by the old shared
+  setup and keeps your shell at the root for `./check.sh --fast`.
+
+  ```bash
+  (
+    cd anteroom || exit 1
+    for install_dir in .venv node_modules; do
+      if [ -L "$install_dir" ]; then
+        rm "$install_dir" || exit 1
+      fi
+    done
+    python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]" && npm ci
+  )
+  ```
+
   Do not symlink another worktree's venv: pytest imports
   the fix worktree's `server`, but tests that start a subprocess (the
   `test_config.py` adoption tests) import the editable install, which is
