@@ -45,6 +45,24 @@ def test_old_bridge_can_poll_past_regional_command_without_consuming_it():
     asyncio.run(scenario())
 
 
+def test_regional_request_timeout_removes_command_skipped_by_old_bridge():
+    async def scenario():
+        relay = hosted_browser_relay.BrowserRelay(USER_ID)
+        current_caps = {MARKETPLACE_ACTIONS, MARKETPLACE_REGIONS}
+        relay.note_seen(current_caps)
+        request = asyncio.create_task(relay.request_local(
+            {"type": "marketplace.delete", "job_id": "job1", "message_id": "one",
+             "payload": {"marketplace": "poshmark", "listing_id": "a" * 24,
+                         "seller_region": "CA", "confirm": True}}, timeout=0.05))
+        await asyncio.sleep(0)
+        assert await relay.next_message({MARKETPLACE_ACTIONS}, 0) is None
+        with pytest.raises(hosted_browser_relay.ChromeReadError, match="did not answer in time"):
+            await request
+        assert await relay.next_message(current_caps, 0) is None
+
+    asyncio.run(scenario())
+
+
 def test_relay_is_per_seller_and_refuses_other_commands(direct_mode):
     hosted_browser_relay._relays.clear()
 

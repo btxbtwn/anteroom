@@ -254,15 +254,15 @@ class BrowserRelay(ReplyWaits):
         if not isinstance(request_id, str):
             raise ChromeReadError("Chrome did not answer in time. Try again.")
         waiter = self.register_wait(request_id, message.get("job_id"))
-        if not await self.deliver_local(message):
-            self.cancel_wait(request_id)
-            raise ChromeReadError("Open Anteroom in Chrome on your computer and connect Chrome first.")
         try:
+            if not await self.deliver_local(message):
+                raise ChromeReadError("Open Anteroom in Chrome on your computer and connect Chrome first.")
             result = await asyncio.wait_for(waiter, timeout)
         except TimeoutError:
             raise ChromeReadError("Chrome did not answer in time. Try again.") from None
         finally:
             self.cancel_wait(request_id)
+            self._outbox = deque(item for item in self._outbox if item.get("message_id") != request_id)
         return result if isinstance(result, dict) else {"ok": False}
 
     async def read(self, command: str, payload: dict, timeout: float) -> dict:

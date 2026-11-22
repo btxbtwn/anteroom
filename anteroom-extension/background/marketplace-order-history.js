@@ -175,7 +175,7 @@ async function depopOrderHistory(settled, incremental = false) {
 
 // ── Poshmark ─────────────────────────────────────────────────────────────
 
-function poshmarkHistoryOrder(order, displayStatus) {
+function poshmarkHistoryOrder(order, displayStatus, region) {
   const value = amount => historyMoney(amount?.val);
   const cancelled = order?.state === 'cancelled' || Boolean(order?.cancelled_on);
   const lines = (Array.isArray(order?.line_items) ? order.line_items : [])
@@ -186,6 +186,7 @@ function poshmarkHistoryOrder(order, displayStatus) {
   // A cancelled order still shows earnings on Poshmark; none were paid.
   const zero = '0.00';
   return historyOrder({
+    currency: region === 'CA' ? 'CAD' : 'USD',
     order_id: String(order?.id ?? ''),
     status: cancelled ? 'cancelled' : 'paid',
     final: cancelled || displayStatus === 'Order Complete',
@@ -237,7 +238,7 @@ async function poshmarkOrderHistory(settled, incremental = false, region) {
         if (MARKETPLACE_LOGIN_PAGE.test(html)) throw marketplaceError('Poshmark asked to sign in again.', { code: 'signed_out' });
         throw new Error('Poshmark order page changed');
       }
-      const order = poshmarkHistoryOrder(detail, row.display_status);
+      const order = poshmarkHistoryOrder(detail, row.display_status, region);
       if (order) orders.push(order);
       else unreadable += 1;
     }
