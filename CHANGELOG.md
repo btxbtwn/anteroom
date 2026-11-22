@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1136 — 2026-11-22
+
+- Moving from Mac to Anteroom cloud now restores missing labels for the same Vendoo item and keeps any labels you already saved or cleared in the cloud.
+- Copying provider keys to your account also preserves any keys you save on the web while the copy runs.
+
 ## 0.1.1135 — 2026-11-22
 
 - Deleting a hosted account now also stops late writes to its Poshmark cloud session records.
