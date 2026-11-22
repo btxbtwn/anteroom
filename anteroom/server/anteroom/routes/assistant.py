@@ -318,6 +318,8 @@ async def _answer(
 
                         on_committed = confirm_committed
                     try:
+                        if isinstance(run, _Journal) and settle is not None:
+                            await run.prepare_settlement()
                         await asyncio.to_thread(
                             _save_answer, provider, answer, changes, memory_block, automation_block, thread_id, settle,
                             error,
@@ -640,6 +642,12 @@ class _Journal(GenerationRun):
     def __init__(self) -> None:
         super().__init__()
         self.pending: list[str] = []
+        self.flush_now = asyncio.Event()
+        self.flush_done = asyncio.Event()
+        self.flush_done.set()
+        self.flush_error: BaseException | None = None
+        self.finishing = False
+        self._saw_text = False
         self.stop_outcome: str | None = None
         self.saved_outcome: str | None = None
         self.timing_sample: tuple[business_assistant.AnswerTiming, str, int] | None = None
@@ -651,10 +659,23 @@ class _Journal(GenerationRun):
         # Pulses only keep a live connection open; followers poll the journal.
         if record and item != KEEPALIVE:
             self.pending.append(item)
+            if item.startswith("event:") or not self._saw_text:
+                if not item.startswith("event:"):
+                    self._saw_text = True
+                self.flush_now.set()
 
     def take(self) -> list[str]:
         taken, self.pending = self.pending, []
+        self.flush_now.clear()
         return taken
+
+    async def prepare_settlement(self) -> None:
+        # No new batch may be taken after this point; the final save takes
+        # anything still pending once an earlier append has completed.
+        self.finishing = True
+        await self.flush_done.wait()
+        if self.flush_error is not None:
+            raise self.flush_error
 
 
 async def answer_task(task_id: str, token: str, task) -> bool:
@@ -679,10 +700,30 @@ async def answer_task(task_id: str, token: str, task) -> bool:
             task.assistant_thread_id, settle=settle, queued_at=task.created_at,
         ))
         while not work.done():
-            await asyncio.wait({work}, timeout=background_tasks.EVENT_INTERVAL)
-            if not settled and (frames := journal.take()):
+            wake = asyncio.create_task(journal.flush_now.wait())
+            try:
+                await asyncio.wait(
+                    {work, wake},
+                    timeout=background_tasks.EVENT_INTERVAL,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            finally:
+                if not wake.done():
+                    wake.cancel()
+                    await asyncio.gather(wake, return_exceptions=True)
+            if not settled and not journal.finishing and (frames := journal.take()):
                 # Fails once the seller stops the answer, which ends the work below.
-                await asyncio.to_thread(background_tasks.append_events, task_id, token, frames)
+                journal.flush_done.clear()
+                try:
+                    await asyncio.to_thread(background_tasks.append_events, task_id, token, frames)
+                except BaseException as exc:
+                    journal.flush_error = exc
+                    raise
+                finally:
+                    journal.flush_done.set()
+            elif journal.finishing:
+                # The answer is saving; its settle callback owns the remaining frames.
+                break
         error = await work
         if not settled:
             await asyncio.to_thread(background_tasks.append_events, task_id, token, journal.take())

@@ -17,6 +17,7 @@ from anteroom.services.background_loop import BackgroundLoop
 from anteroom.services.service_context import current, use
 
 DEFAULT_WORKER_CONCURRENCY = 4
+IDLE_POLL_SECONDS = 0.25
 
 # Handlers for queued work that is not a draft task, by kind. The assistant's
 # route registers its answer here, so this service never imports a route.
@@ -252,7 +253,7 @@ async def serve(engine, stopping, *, max_concurrency: int | None = None):
                     sleep_s = 5.0
                     claimed = None
                 if claimed is None:
-                    sleep_s = sleep_s or 1.0
+                    sleep_s = sleep_s or IDLE_POLL_SECONDS
                 else:
                     task = asyncio.create_task(run_claimed(*claimed, heartbeat_loop=heartbeats))
                     active.add(task)

@@ -475,25 +475,35 @@ class Shop:
     brief: str
     tables: dict[str, list[dict[str, Any]]]
     _conn: sqlite3.Connection | None = field(default=None, init=False, repr=False)
+    _details_loaded: bool = field(default=False, init=False, repr=False)
     _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
+
+    def _ensure_conn(self, *, need_details: bool) -> sqlite3.Connection:
+        if self._conn is None or (need_details and not self._details_loaded):
+            with self._lock:
+                if self._conn is None:
+                    tables = self.tables if need_details else {**self.tables, "listing_details": []}
+                    self._conn = _lookup_database(tables)
+                    self._details_loaded = need_details
+                elif need_details and not self._details_loaded:
+                    _populate_lookup_table(self._conn, "listing_details", self.tables["listing_details"])
+                    self._details_loaded = True
+        return self._conn
 
     @property
     def lookups(self) -> sqlite3.Connection:
-        if self._conn is None:
-            with self._lock:
-                if self._conn is None:
-                    self._conn = _lookup_database(self.tables)
-        return self._conn
+        return self._ensure_conn(need_details=True)
 
-    def read_lookup[T](self, read: Callable[[sqlite3.Connection], T]) -> T:
+    def read_lookup[T](self, read: Callable[[sqlite3.Connection], T], *, need_details: bool = False) -> T:
         # Cancellation of the async waiter does not stop this worker. Hold the
         # lock for the whole read so close() cannot interrupt it.
         with self._lock:
-            return read(self.lookups)
+            return read(self._ensure_conn(need_details=need_details))
 
     def close(self) -> None:
         with self._lock:
             conn, self._conn = self._conn, None
+            self._details_loaded = False
         if conn is not None:
             conn.close()
 
@@ -535,12 +545,14 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
     inputs = read_analytics_inputs(db)
     end_read(db, keep=[line for lines in inputs.sales.values() for line in lines])
     rows = rows_from_inputs(inputs)
-    ranges = analytics_ranges(db, ANALYTICS_RANGES, now=clock, rows=rows)
+    ad_entries: list[Any] = []
+    ranges = analytics_ranges(db, ANALYTICS_RANGES, now=clock, rows=rows, out_ad_entries=ad_entries)
     everything = ranges["all"]
-    records, detail_rows = _records(db, rows, clock)
+    parsed_notes = {conv_id: note for conv_id, _title, _status, note, _box in inputs.conversations}
+    records, detail_rows = _records(db, rows, clock, parsed_notes=parsed_notes)
     changes = _price_changes(db)
     box_results = boxes.results(db, rows=rows, release=True)
-    ads = [ad_spend.entry_view(row) for row in ad_spend.list_entries(db)]
+    ads = [ad_spend.entry_view(row) for row in ad_entries]
     events = _sale_events(db)
     end_read(db)
     scout_sales = scout.outcomes(db, rows)
@@ -959,7 +971,8 @@ def lookup_label(lookup: Lookup | str) -> str:
 
 
 def _run_sql(shop: Shop, body: str) -> str:
-    return shop.read_lookup(lambda conn: run_lookup(conn, body))
+    need_details = "listing_details" in (body or "").lower()
+    return shop.read_lookup(lambda conn: run_lookup(conn, body), need_details=need_details)
 
 
 async def run_any_lookup(
@@ -1187,6 +1200,10 @@ class _Median:
         return statistics.median(self._values) if self._values else None
 
 
+def _read_only_authorizer(action: int, *_details: Any) -> int:
+    return sqlite3.SQLITE_OK if action in _READ_ACTIONS else sqlite3.SQLITE_DENY
+
+
 def _lookup_database(tables: dict[str, list[dict[str, Any]]]) -> sqlite3.Connection:
     """A throwaway copy of the shop that a lookup can read and nothing else can reach."""
     # Lookups run on a worker thread, one at a time.
@@ -1200,10 +1217,24 @@ def _lookup_database(tables: dict[str, list[dict[str, Any]]]) -> sqlite3.Connect
     lookups.commit()
     lookups.create_aggregate("median", 1, _Median)
     # Reads only from here on: no ATTACH to a real database, no PRAGMA, no writes.
-    lookups.set_authorizer(
-        lambda action, *_details: sqlite3.SQLITE_OK if action in _READ_ACTIONS else sqlite3.SQLITE_DENY,
-    )
+    lookups.set_authorizer(_read_only_authorizer)
     return lookups
+
+
+def _populate_lookup_table(lookups: sqlite3.Connection, name: str, rows: list[dict[str, Any]]) -> None:
+    """Populate a deferred lookup table once on demand, restoring the read-only authorizer."""
+    if not rows:
+        return
+    columns = TABLES[name]
+    lookups.set_authorizer(None)
+    try:
+        lookups.executemany(
+            f"INSERT INTO {name} VALUES ({', '.join('?' for _ in columns)})",
+            [[_cell(row.get(column)) for column in columns] for row in rows],
+        )
+        lookups.commit()
+    finally:
+        lookups.set_authorizer(_read_only_authorizer)
 
 
 def _cell(value: Any) -> Any:
@@ -1219,7 +1250,11 @@ def _section(title: str, payload: Any) -> str:
 
 
 def _records(
-    db: Session, rows: list[AnalyticsItem], now: datetime,
+    db: Session,
+    rows: list[AnalyticsItem],
+    now: datetime,
+    *,
+    parsed_notes: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Every listing as one slim record, plus one detail row per listing with description and full JSON."""
     from anteroom.models.conversation import Conversation
@@ -1245,8 +1280,15 @@ def _records(
         if len(batch) < LISTING_BATCH:
             break
         after = batch[-1][0]
-    notes = {conv_id: parse_notes(raw) for conv_id, raw in db.query(Conversation.id, Conversation.notes).all()}
+    if parsed_notes is None:
+        notes = {conv_id: parse_notes(raw) for conv_id, raw in db.query(Conversation.id, Conversation.notes).all()}
+    else:
+        notes = parsed_notes
     photo_sizes = _photo_sizes(db)
+    unsold_ids = {item.conversation_id for item in rows if item.status != "sold"}
+    ebay_size_choices = size_audit.prefetch_ebay_size_choices(
+        db, (listings[cid] for cid in unsold_ids if isinstance(listings.get(cid), dict)),
+    )
     # These inputs are plain values. A large shop's size audits can take longer
     # than Postgres permits an idle transaction; return the connection before
     # calculating, so the following price-history read starts a fresh transaction.
@@ -1254,51 +1296,52 @@ def _records(
     records = []
     detail_rows = []
     seen_details: set[str] = set()
-    for item in _ordered(rows):
-        listing = listings.get(item.conversation_id)
-        listing = listing if isinstance(listing, dict) else {}
-        note = notes.get(item.conversation_id, {})
-        sold = item.status == "sold"
-        days = item.days_listed
-        if item.status == "active" and item.listed_at is not None:
-            days = max(0, (now - item.listed_at).days)
-        labels = listing.get("labels") or split_vendoo_labels(note.get("vendooLabels"))
-        records.append({
-            "id": item.conversation_id,
-            "title": item.title,
-            "status": item.status,
-            "brand": item.brand or None,
-            "category": item.category or None,
-            "size": _text(listing.get("size")),
-            "condition": _text(listing.get("condition") or note.get("condition")),
-            "color": _text(listing.get("primaryColor") or listing.get("color")),
-            "labels": _joined(labels),
-            "sku": _text(listing.get("sku")),
-            "listed_on": _joined(note.get("vendooMarketplaces")),
-            "asking": item.price or None,
-            "cost": item.cost,
-            "sold_for": item.sold_price,
-            "fees": item.fees,
-            "profit": round(item.profit, 2) if sold and item.has_cost and item.sold_price is not None else None,
-            "sold_on": None if item.marketplace == "unknown" else item.marketplace,
-            "listed": item.listed_at.date().isoformat() if item.listed_at else None,
-            "sold": item.sold_at.date().isoformat() if item.sold_at else None,
-            "days": days,
-            "box": item.box_id,
-            "shipping_cost": item.shipping_cost if sold else None,
-            "shipping_credit": item.shipping_credit if sold else None,
-            "form_sizes": ", ".join(f"{name}: {size}" for name, size in size_audit.form_sizes(listing).items()) or None,
-            "photo_size": photo_sizes.get(item.conversation_id),
-            "size_issue": None if sold else size_audit.size_problems(listing, photo_sizes.get(item.conversation_id)),
-        })
-        if item.conversation_id not in seen_details:
-            seen_details.add(item.conversation_id)
-            detail_rows.append({
-                "listing_id": item.conversation_id,
-                "description": _text(listing.get("description")),
-                # Kept as a dict here; _cell serializes it only when a lookup builds the SQLite copy.
-                "details": listing or None,
+    with size_audit.with_ebay_size_choices(ebay_size_choices):
+        for item in _ordered(rows):
+            listing = listings.get(item.conversation_id)
+            listing = listing if isinstance(listing, dict) else {}
+            note = notes.get(item.conversation_id, {})
+            sold = item.status == "sold"
+            days = item.days_listed
+            if item.status == "active" and item.listed_at is not None:
+                days = max(0, (now - item.listed_at).days)
+            labels = listing.get("labels") or split_vendoo_labels(note.get("vendooLabels"))
+            records.append({
+                "id": item.conversation_id,
+                "title": item.title,
+                "status": item.status,
+                "brand": item.brand or None,
+                "category": item.category or None,
+                "size": _text(listing.get("size")),
+                "condition": _text(listing.get("condition") or note.get("condition")),
+                "color": _text(listing.get("primaryColor") or listing.get("color")),
+                "labels": _joined(labels),
+                "sku": _text(listing.get("sku")),
+                "listed_on": _joined(note.get("vendooMarketplaces")),
+                "asking": item.price or None,
+                "cost": item.cost,
+                "sold_for": item.sold_price,
+                "fees": item.fees,
+                "profit": round(item.profit, 2) if sold and item.has_cost and item.sold_price is not None else None,
+                "sold_on": None if item.marketplace == "unknown" else item.marketplace,
+                "listed": item.listed_at.date().isoformat() if item.listed_at else None,
+                "sold": item.sold_at.date().isoformat() if item.sold_at else None,
+                "days": days,
+                "box": item.box_id,
+                "shipping_cost": item.shipping_cost if sold else None,
+                "shipping_credit": item.shipping_credit if sold else None,
+                "form_sizes": ", ".join(f"{name}: {size}" for name, size in size_audit.form_sizes(listing).items()) or None,
+                "photo_size": photo_sizes.get(item.conversation_id),
+                "size_issue": None if sold else size_audit.size_problems(listing, photo_sizes.get(item.conversation_id)),
             })
+            if item.conversation_id not in seen_details:
+                seen_details.add(item.conversation_id)
+                detail_rows.append({
+                    "listing_id": item.conversation_id,
+                    "description": _text(listing.get("description")),
+                    # Kept as a dict here; _cell serializes it only when a lookup builds the SQLite copy.
+                    "details": listing or None,
+                })
     return records, detail_rows
 
 

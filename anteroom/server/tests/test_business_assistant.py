@@ -1011,8 +1011,8 @@ def test_one_question_reads_each_part_of_the_shop_once(workspace, monkeypatch):
 
     shop = business_assistant.read_shop(db, now=NOW)
     shop.lookups.close()
-    # Ad spend is read once for the eight ranges and once for the seller's own entries table.
-    assert calls == {"read_analytics_inputs": 1, "read_sale_lines": 1, "windows": 1, "list_entries": 2}
+    # Ad spend is read once and shared by the eight ranges and the seller's own entries table.
+    assert calls == {"read_analytics_inputs": 1, "read_sale_lines": 1, "windows": 1, "list_entries": 1}
 
 
 def test_every_range_the_assistant_reads_matches_analytics(workspace):
@@ -1392,10 +1392,8 @@ def test_answer_commit_is_confirmed_before_blocked_refresh(workspace, monkeypatc
             yield '\n```memory\n[{"op":"add","text":"Prefers denim."}]\n```'
 
     def append(*_args):
-        append_started.set()  # Takes pending frames while settled is still false.
-        assert save_terminal.wait(5), 'save must reach its terminal boundary'
-        if failure != 'commit':
-            raise background_tasks.TaskLeaseExpired()
+        # The save now waits for this append, so it must finish first.
+        append_started.set()
 
     def settle(*_args, **_kwargs):
         if failure == 'fence':
@@ -1415,7 +1413,14 @@ def test_answer_commit_is_confirmed_before_blocked_refresh(workspace, monkeypatc
         task = SimpleNamespace(payload={}, assistant_thread_id=None, created_at=datetime.now(UTC))
         worker = asyncio.create_task(assistant_route.answer_task('task', 'token', task))
         try:
-            await asyncio.wait_for(worker, 3)
+            if failure is None:
+                assert await asyncio.to_thread(save_terminal.wait, 3)
+                # Interrupt while post-commit refresh is still blocked.
+                worker.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(worker, 3)
+            else:
+                await asyncio.wait_for(worker, 3)
             [line] = timing_lines(caplog)
             assert f'outcome={expected} ' in line
             assert journals[0].saved_outcome == ('answered' if failure is None else None)
@@ -1974,7 +1979,188 @@ def test_history_window_moves_in_steps_starting_on_a_user_turn(workspace):
         shop.close()
 
 
+def test_size_audit_batches_ebay_schema_reads_and_never_opens_extra_sessions(workspace, monkeypatch):
+    from sqlalchemy import event
+    from anteroom.models.catalog import CategoryFieldSchema
+    from anteroom.services import category_fields
+
+    db, _client = workspace
+    category_fields.clear_memory_cache()
+    for cid in ("15687", "53159"):
+        db.add(CategoryFieldSchema(
+            marketplace="ebay",
+            category_id=cid,
+            fields=[{
+                "key": "Size", "display": "Size", "required": True, "selection_only": True,
+                "multi": False, "options": {"1": "M", "2": "L"}, "scales": {},
+            }],
+        ))
+    for index in range(10):
+        cid = "15687" if index % 2 == 0 else "53159"
+        add_listing(
+            db,
+            f"Tee {index} M",
+            {
+                "title": f"Tee {index} M",
+                "price": 25,
+                "size": "M",
+                "marketplace_category_ids": {"ebay": cid},
+                "ebay_specifics": {"size": "L" if index == 0 else "M"},
+            },
+            {"vendooStatus": "active"},
+        )
+    db.commit()
+
+    def forbid_extra_session(*_args, **_kwargs):
+        raise AssertionError("size audit must reuse the snapshot session instead of opening SessionLocal per listing")
+
+    monkeypatch.setattr(category_fields, "SessionLocal", forbid_extra_session)
+    schema_queries: list[str] = []
+
+    def seen(_conn, _cursor, statement, *_args):
+        if "category_field_schemas" in statement:
+            schema_queries.append(statement)
+
+    engine = db.get_bind()
+    event.listen(engine, "before_cursor_execute", seen)
+    try:
+        shop = business_assistant.read_shop(db, now=NOW)
+        try:
+            assert len(schema_queries) == 1
+            issues = business_assistant.run_lookup(
+                shop.lookups, "SELECT title, size_issue FROM listings WHERE size_issue IS NOT NULL",
+            )
+            assert "Tee 0 M | ebay differs from the general size" in issues
+        finally:
+            shop.close()
+
+        # Second cold snapshot hits category_fields' in-memory cache with 0 schema queries.
+        shop2 = business_assistant.read_shop(db, now=NOW)
+        shop2.close()
+        assert len(schema_queries) == 1
+    finally:
+        event.remove(engine, "before_cursor_execute", seen)
+        category_fields.clear_memory_cache()
 
 
+def test_listing_details_table_populates_lazily_only_when_referenced(workspace):
+    db, _client = workspace
+    seed(db)
+    shop = business_assistant.read_shop(db, now=NOW)
+    try:
+        res_listings = asyncio.run(business_assistant.run_any_lookup(
+            business_assistant.Lookup("sql", "SELECT count(*) FROM listings", 0, 1), shop, [],
+        ))
+        assert isinstance(res_listings, str) and res_listings.endswith("\n3")
+        assert shop._details_loaded is False
+
+        res_details = asyncio.run(business_assistant.run_any_lookup(
+            business_assistant.Lookup("sql", "SELECT count(*) FROM listing_details", 0, 1), shop, [],
+        ))
+        assert isinstance(res_details, str) and res_details.endswith("\n3")
+        assert shop._details_loaded is True
+
+        # Read-only authorizer stays active after on-demand table population.
+        denied = asyncio.run(business_assistant.run_any_lookup(
+            business_assistant.Lookup("sql", "DELETE FROM listing_details", 0, 1), shop, [],
+        ))
+        assert isinstance(denied, str) and "not authorized" in denied.lower()
+    finally:
+        shop.close()
 
 
+def test_hosted_answer_flushes_status_and_first_text_immediately(monkeypatch):
+    import time
+    from types import SimpleNamespace
+    from anteroom.services import background_tasks
+
+    flushed: list[tuple[float, list[str]]] = []
+    release_finish = asyncio.Event()
+
+    async def exercise():
+        started = time.monotonic()
+        saw_first_text = asyncio.Event()
+
+        async def fake_answer(journal, *_args, settle, **_kwargs):
+            journal.publish("event: status\ndata: Reading your shop…\n\n")
+            await asyncio.sleep(0.02)
+            journal.publish("data: Hello\n\n")
+            await asyncio.wait_for(saw_first_text.wait(), timeout=2.0)
+            await asyncio.wait_for(release_finish.wait(), timeout=2.0)
+            settle(None, None)
+
+        def append(_task_id, _token, frames):
+            flushed.append((time.monotonic() - started, list(frames)))
+            if any("data: Hello" in frame for frame in frames):
+                loop.call_soon_threadsafe(saw_first_text.set)
+                loop.call_soon_threadsafe(release_finish.set)
+
+        loop = asyncio.get_running_loop()
+        monkeypatch.setattr(assistant_route, "_require_provider", Provider)
+        monkeypatch.setattr(assistant_route, "_answer", fake_answer)
+        monkeypatch.setattr(background_tasks, "EVENT_INTERVAL", 10.0)
+        monkeypatch.setattr(background_tasks, "append_events", append)
+        monkeypatch.setattr(background_tasks, "complete_in", lambda *_, **kwargs: None)
+        monkeypatch.setattr(background_tasks, "finish", lambda *_, **kwargs: None)
+        task = SimpleNamespace(payload={}, assistant_thread_id=None, created_at=datetime.now(UTC))
+        await asyncio.wait_for(assistant_route.answer_task("task", "token", task), timeout=3.0)
+
+    asyncio.run(exercise())
+    assert any("Reading your shop…" in frame for _elapsed, frames in flushed for frame in frames)
+    assert any("data: Hello" in frame for _elapsed, frames in flushed for frame in frames)
+    assert all(elapsed < 2.0 for elapsed, _frames in flushed)
+
+
+@pytest.mark.parametrize("append_fails", [False, True])
+def test_hosted_answer_settlement_waits_for_inflight_first_text(monkeypatch, append_fails):
+    from threading import Event
+    from types import SimpleNamespace
+    from anteroom.services import background_tasks
+
+    append_started, release_append, answer_done, settled = (Event() for _ in range(4))
+    stored = []
+
+    async def answer(*_args):
+        yield "text", "Hello"
+        assert await asyncio.to_thread(append_started.wait, 3)
+        answer_done.set()
+
+    def append(_task_id, _token, frames):
+        if any("Hello" in frame for frame in frames):
+            append_started.set()
+            assert release_append.wait(3)
+            if append_fails:
+                raise background_tasks.TaskLeaseExpired()
+        assert not settled.is_set()
+        stored.extend(frames)
+
+    def complete(_db, _task_id, _token, frames, **_kwargs):
+        stored.extend(frames)
+        settled.set()
+
+    def save(_provider, _answer, _changes, _memory, _automation, _thread, settle, error, *, on_committed):
+        settle(None, error)
+        on_committed()
+
+    monkeypatch.setattr(assistant_route, "_require_provider", Provider)
+    monkeypatch.setattr(assistant_route, "_prepare", lambda *_: ([], SimpleNamespace(close=lambda: None)))
+    monkeypatch.setattr(assistant_route, "_save_answer", save)
+    monkeypatch.setattr(business_assistant, "answer", answer)
+    monkeypatch.setattr(background_tasks, "append_events", append)
+    monkeypatch.setattr(background_tasks, "complete_in", complete)
+    monkeypatch.setattr(background_tasks, "finish", lambda *_, **_kwargs: None)
+
+    async def exercise():
+        task = SimpleNamespace(payload={}, assistant_thread_id=None, created_at=datetime.now(UTC))
+        worker = asyncio.create_task(assistant_route.answer_task("task", "token", task))
+        try:
+            assert await asyncio.to_thread(answer_done.wait, 3)
+            await asyncio.sleep(0.05)
+            assert not settled.is_set()
+        finally:
+            release_append.set()
+            await asyncio.wait_for(worker, 3)
+
+    asyncio.run(exercise())
+    assert settled.is_set() is not append_fails
+    assert sum("Hello" in frame for frame in stored) == (0 if append_fails else 1)

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable
 from datetime import date
 from typing import Any
@@ -21,6 +22,7 @@ from sqlalchemy import Connection, event
 from sqlalchemy.orm import Session
 
 TTL_SECONDS = 120.0
+_CACHE_SIZE = 16
 # What the snapshot is built from. Writes to anything else (jobs, logs,
 # assistant threads) leave the copy alone.
 WATCHED_TABLES = frozenset({
@@ -29,32 +31,48 @@ WATCHED_TABLES = frozenset({
 })
 
 _lock = threading.Lock()
-_generation = 0
-_entry: tuple[tuple[Any, ...], float, Any] | None = None
+_global_generation = 0
+_seller_generations: dict[str | None, int] = {}
+# Key: (id(bind), str(engine.url), day, user_id)
+# Value: ((global_gen, seller_gen), stored_monotonic, value)
+_entries: OrderedDict[tuple[Any, ...], tuple[tuple[int, int], float, Any]] = OrderedDict()
 
 
-def invalidate_business_context() -> None:
-    """Drop the kept copy so the next question reads the shop again."""
-    global _generation, _entry
+def invalidate_business_context(user_id: str | None = None) -> None:
+    """Drop the kept copy for one seller, or for every seller when ``user_id`` is None."""
+    global _global_generation
     with _lock:
-        _generation += 1
-        _entry = None
+        if user_id is None:
+            _global_generation += 1
+            _seller_generations.clear()
+            _entries.clear()
+            return
+        _seller_generations[user_id] = _seller_generations.get(user_id, 0) + 1
+        stale = [key for key in _entries if key[3] == user_id]
+        for key in stale:
+            _entries.pop(key, None)
 
 
 def cached(db: Session, day: date, build: Callable[[], Any]) -> Any:
     """``build()``'s result, reused while nothing it reads has changed."""
-    global _entry
     bind = db.get_bind()
     engine = bind.engine if isinstance(bind, Connection) else bind
+    user_id = getattr(db, "user_id", None)
+    key = (id(bind), str(engine.url), day, user_id)
     with _lock:
-        key = (id(bind), str(engine.url), day, _generation, getattr(db, 'user_id', None))
-        if _entry is not None and _entry[0] == key and time.monotonic() - _entry[1] < TTL_SECONDS:
-            return _entry[2]
+        generation = (_global_generation, _seller_generations.get(user_id, 0))
+        hit = _entries.get(key)
+        if hit is not None and hit[0] == generation and time.monotonic() - hit[1] < TTL_SECONDS:
+            _entries.move_to_end(key)
+            return hit[2]
     value = build()
     with _lock:
         # A write that landed while this was being built makes it stale already.
-        if key[3] == _generation:
-            _entry = (key, time.monotonic(), value)
+        if (_global_generation, _seller_generations.get(user_id, 0)) == generation:
+            _entries[key] = (generation, time.monotonic(), value)
+            _entries.move_to_end(key)
+            while len(_entries) > _CACHE_SIZE:
+                _entries.popitem(last=False)
     return value
 
 
@@ -69,7 +87,7 @@ def _touches_watched(session: Session) -> bool:
 @event.listens_for(Session, "after_flush")
 def _after_flush(session: Session, _context) -> None:
     if _touches_watched(session):
-        invalidate_business_context()
+        invalidate_business_context(user_id=getattr(session, "user_id", None))
 
 
 @event.listens_for(Session, "do_orm_execute")
@@ -79,4 +97,4 @@ def _bulk_write(state) -> None:
         return
     tables = {getattr(mapper, "local_table", None) for mapper in state.all_mappers}
     if any(getattr(table, "name", None) in WATCHED_TABLES for table in tables):
-        invalidate_business_context()
+        invalidate_business_context(user_id=getattr(state.session, "user_id", None))

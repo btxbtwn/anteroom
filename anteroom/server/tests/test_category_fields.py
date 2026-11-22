@@ -80,6 +80,106 @@ class CategoryFieldsCacheTest(unittest.TestCase):
         category_fields.save_fields(self.marketplace, self.category_id, {})
         self.assertEqual(category_fields.load_fields(self.marketplace, self.category_id), {})
 
+    def test_memory_cache_serves_repeated_reads_without_db_and_invalidates_on_write(self):
+        from sqlalchemy import event
+        from anteroom.database import SessionLocal
+
+        category_fields.clear_memory_cache()
+        category_fields.save_fields(self.marketplace, self.category_id, normalize_specifics(RAW))
+        queries: list[str] = []
+        with SessionLocal() as db:
+            engine = db.get_bind()
+
+            def listen(_c, _cur, stmt, *_a):
+                if "category_field_schemas" in stmt:
+                    queries.append(stmt)
+
+            event.listen(engine, "before_cursor_execute", listen)
+            try:
+                first = category_fields.load_fields(self.marketplace, self.category_id, db=db)
+                second = category_fields.load_fields(self.marketplace, self.category_id, db=db)
+                third = category_fields.load_rows_many([(self.marketplace, self.category_id)], db=db)
+                self.assertEqual(sorted(first), ["Season", "Size", "condition"])
+                self.assertEqual(sorted(second), ["Season", "Size", "condition"])
+                self.assertIsNotNone(third[(self.marketplace, self.category_id)])
+                self.assertEqual(len(queries), 1)
+
+                category_fields.save_fields(
+                    self.marketplace, self.category_id, normalize_specifics({"Size": RAW["Size"]}),
+                )
+                refreshed = category_fields.load_fields(self.marketplace, self.category_id, db=db)
+                self.assertEqual(sorted(refreshed), ["Size"])
+            finally:
+                event.remove(engine, "before_cursor_execute", listen)
+
+    def test_read_does_not_recache_rows_invalidated_during_the_query(self):
+        from anteroom.database import SessionLocal
+        from anteroom.models.catalog import CategoryFieldSchema
+
+        for many, missing, clear_all in ((False, False, False), (False, True, True), (True, False, True)):
+            with self.subTest(many=many, missing=missing, clear_all=clear_all):
+                if missing:
+                    with SessionLocal() as db:
+                        db.query(CategoryFieldSchema).filter_by(
+                            marketplace=self.marketplace, category_id=self.category_id,
+                        ).delete()
+                        db.commit()
+                else:
+                    category_fields.save_rows(self.marketplace, self.category_id, [{"name": "old"}])
+                category_fields.clear_memory_cache()
+                fresh_entry = category_fields._fresh_entry
+                updated = False
+
+                def update_after_read(row, fresh_entry=fresh_entry, clear_all=clear_all):
+                    nonlocal updated
+                    result = fresh_entry(row)
+                    if not updated:
+                        updated = True
+                        category_fields.save_rows(self.marketplace, self.category_id, [{"name": "new"}])
+                        if clear_all:
+                            category_fields.clear_memory_cache()
+                    return result
+
+                key = (self.marketplace, self.category_id)
+                with SessionLocal() as db, mock.patch.object(category_fields, "_fresh_entry", update_after_read):
+                    result = (category_fields.load_rows_many([key], db=db)[key] if many
+                              else category_fields.load_rows(*key, db=db))
+                    self.assertEqual(result, None if missing else [{"name": "old"}])
+                self.assertEqual(category_fields.load_rows(*key), [{"name": "new"}])
+
+    def test_load_rows_many_batches_large_sqlite_queries(self):
+        from sqlalchemy import create_engine, event
+        from sqlalchemy.orm import Session
+        from anteroom.models.catalog import CategoryFieldSchema
+
+        engine = create_engine("sqlite://")
+        CategoryFieldSchema.__table__.create(engine)
+        try:
+            with Session(engine) as db:
+                db.add_all([
+                    CategoryFieldSchema(marketplace="ebay", category_id="0", fields=[{"name": "first"}]),
+                    CategoryFieldSchema(marketplace="ebay", category_id="1000", fields=[{"name": "last"}]),
+                ])
+                db.commit()
+                category_fields.clear_memory_cache()
+                queries = []
+
+                def listen(_c, _cur, stmt, *_a):
+                    if "category_field_schemas" in stmt and stmt.lstrip().upper().startswith("SELECT"):
+                        queries.append(stmt)
+
+                event.listen(engine, "before_cursor_execute", listen)
+                keys = [("ebay", str(i)) for i in range(1001)]
+                rows = category_fields.load_rows_many(keys, db=db)
+                self.assertEqual(rows[keys[0]], [{"name": "first"}])
+                self.assertIsNone(rows[keys[500]])
+                self.assertEqual(rows[keys[-1]], [{"name": "last"}])
+                self.assertEqual(set(rows), set(keys))
+                self.assertLessEqual(len(queries), 5)
+        finally:
+            category_fields.clear_memory_cache()
+            engine.dispose()
+
     def test_fields_route_serves_the_cache(self):
         category_fields.save_fields(self.marketplace, self.category_id, normalize_specifics(RAW))
         client = TestClient(app)
