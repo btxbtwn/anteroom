@@ -245,15 +245,22 @@ def _verify_stick(
     ft_hi = max(1, int(mid - w * 0.78))
     fb_lo = min(out_h - 1, int(mid + w * 0.78))
     flanks: list[float] = []
+    wood_flanks: list[float] = []
     for sl in (slice(0, ft_hi), slice(fb_lo, out_h)):
         valid_flank = in_bounds_sm[sl]
         if float(valid_flank.mean()) >= 0.25:
             flanks.append(float(strip_mask_sm[sl, sx0:sx1][valid_flank].mean()))
+            if is_tick_channel:
+                wood_flanks.append(float(wood_sm[sl, sx0:sx1][valid_flank].mean()))
     if not flanks:
         return None
     flank_wood = sum(flanks) / len(flanks)
     wood_contrast = core_wood - flank_wood
     if wood_contrast < 0.12:
+        return None
+    # In the tick channel the fitted band follows the print, not the whole stick.
+    # Continuous wood on both sides puts that printed band inside the stick.
+    if len(wood_flanks) == 2 and min(wood_flanks) >= 0.75:
         return None
 
     x0 = max(0, sx0 * 2)
@@ -276,7 +283,15 @@ def _verify_stick(
     if n_in < 1:
         return None
 
-    win_len = min(length_px, max(128, min(192, int(round(w * 4.5)))))
+    min_period = max(3.2, w * 0.08)
+    max_period = max(min_period * 1.8, min(36.0, w * 0.48))
+    freq_lo, freq_hi = 1.0 / max_period, 1.0 / min_period
+    nominal = max(128, min(192, int(round(w * 4.5))))
+    # Wide rulers put their plausible periods in a narrow band of frequencies.
+    # Only grow the window when the nominal one cannot resolve five bins.
+    if math.floor(nominal * freq_hi) - math.ceil(nominal * freq_lo) + 1 < 5:
+        nominal = math.ceil(5 / (freq_hi - freq_lo))
+    win_len = min(length_px, nominal)
     step = max(32, win_len // 2)
     starts = list(range(0, max(1, length_px - win_len + 1), step))
     if starts[-1] + win_len < length_px:
@@ -287,9 +302,7 @@ def _verify_stick(
 
     hann = np.hanning(win_len).astype(np.float32)
     freqs = np.fft.rfftfreq(win_len, d=1.0)
-    min_period = max(3.2, w * 0.08)
-    max_period = max(min_period * 1.8, min(36.0, w * 0.48))
-    valid_bins = np.nonzero((freqs >= 1.0 / max_period) & (freqs <= 1.0 / min_period))[0]
+    valid_bins = np.nonzero((freqs >= freq_lo) & (freqs <= freq_hi))[0]
     if len(valid_bins) < 5:
         return None
     n_bins = len(freqs)
@@ -301,10 +314,14 @@ def _verify_stick(
     for wi, start in enumerate(win_starts):
         segs = bands[:, start : start + win_len]
         in_sp = np.abs(np.fft.rfft((segs - segs.mean(axis=1, keepdims=True)) * hann[None, :], axis=1)) ** 2
-        row_dxs[:, wi] = np.percentile(np.abs(segs), 92, axis=1)
+        abs_segs = np.abs(segs)
         ks = valid_bins[np.argmax(in_sp[:, valid_bins], axis=1)]
         for ri in range(n_in):
             k = int(ks[ri])
+            # Bin k describes k repeats, but can be a harmonic of the tick
+            # spacing. Allow for that and for marks clipped by window edges.
+            rank = max(3, k // 2)
+            row_dxs[ri, wi] = np.partition(abs_segs[ri], -rank)[-rank]
             bg_lo = max(2, k - 12)
             bg_hi = min(n_bins, k + 13)
             bg = np.concatenate([in_sp[ri, bg_lo : max(bg_lo, k - 2)], in_sp[ri, min(bg_hi, k + 3) : bg_hi]])
@@ -315,6 +332,16 @@ def _verify_stick(
 
     med_proms = np.median(row_proms, axis=1)
     best_ri = int(np.argmax(med_proms))
+    if not is_tick_channel:
+        band_rows = in_lo + np.arange(n_in) + (k_rows - 1) / 2.0
+        edge_rows = np.flatnonzero(np.abs(band_rows - mid) >= w * 0.25)
+        if not len(edge_rows):
+            return None
+        edge_ri = int(edge_rows[np.argmax(med_proms[edge_rows])])
+        # Adjacent rows of the same printed tick can differ slightly after resampling.
+        if med_proms[edge_ri] < med_proms[best_ri] * 0.90:
+            return None
+        best_ri = edge_ri
     mp = float(med_proms[best_ri])
     dx_med = float(np.median(row_dxs[best_ri]))
     row_med_pow = np.median(row_pows, axis=1)
@@ -333,6 +360,33 @@ def _verify_stick(
     if mp < 18.0 or edge_ratio < min_edge_ratio or not contrast_ok:
         return None
     return mp * min(edge_ratio, 25.0)
+
+
+def _row_distance(row: int, other_row: int, angle_gap: float, side: int) -> int:
+    """Compare rotated rows after aligning their perpendicular directions."""
+    if angle_gap > 90.0:
+        other_row = side - 1 - other_row
+    return abs(row - other_row)
+
+
+def _bands_overlap(first: Stick, second: Stick) -> bool:
+    """Test the finite ruler rectangles on each of their separating axes."""
+    delta = (
+        (second.x1 + second.x2 - first.x1 - first.x2) / 2.0,
+        (second.y1 + second.y2 - first.y1 - first.y2) / 2.0,
+    )
+    u, v = [
+        ((s.x2 - s.x1) / s.length, (s.y2 - s.y1) / s.length) for s in (first, second)
+    ]
+    normals = (-u[1], u[0]), (-v[1], v[0])
+    for x, y in (u, v, *normals):
+        reaches = sum(
+            (s.length * abs(axis[0] * x + axis[1] * y) + s.width * abs(normal[0] * x + normal[1] * y)) / 2.0
+            for s, axis, normal in zip((first, second), (u, v), normals, strict=True)
+        )
+        if abs(delta[0] * x + delta[1] * y) >= reaches:
+            return False
+    return True
 
 
 def find_sticks(image: Image.Image, limit: int = 2) -> list[Stick]:
@@ -400,8 +454,9 @@ def find_sticks(image: Image.Image, limit: int = 2) -> list[Stick]:
             dup = False
             same_ang_count = 0
             for _, _, c_ang, c_row, c_w in ch_chosen:
-                da = min(abs(ang - c_ang), 180.0 - abs(ang - c_ang))
-                if da < 10.0 and abs(row - c_row) < max(w, c_w, 12) * 1.4:
+                gap = abs(ang - c_ang)
+                da = min(gap, 180.0 - gap)
+                if da < 10.0 and _row_distance(row, c_row, gap, side) < max(w, c_w, 12) * 1.4:
                     dup = True
                     break
                 if da < 18.0:
@@ -423,8 +478,9 @@ def find_sticks(image: Image.Image, limit: int = 2) -> list[Stick]:
         for _, c_ch, c_ang, c_row, c_w in chosen:
             if (ch == 2) != (c_ch == 2):
                 continue
-            da = min(abs(ang - c_ang), 180.0 - abs(ang - c_ang))
-            if da < 7.0 and abs(row - c_row) < max(min(w, c_w), 8) * 1.0:
+            gap = abs(ang - c_ang)
+            da = min(gap, 180.0 - gap)
+            if da < 7.0 and _row_distance(row, c_row, gap, side) < max(min(w, c_w), 8):
                 dup = True
                 break
         if not dup:
@@ -441,7 +497,8 @@ def find_sticks(image: Image.Image, limit: int = 2) -> list[Stick]:
         r_lo = max(0, base_row - max(base_w, 12))
         r_hi = min(side, base_row + max(base_w, 12) + 1)
         for da in (-2.0, -1.0, 0.0, 1.0, 2.0):
-            ang = (base_ang + da) % 180.0
+            # Keep the trial rotation in the same row frame as the coarse peak.
+            ang = base_ang + da
             rot = np.asarray(ch_canvas[ch].rotate(ang, resample=Image.Resampling.BILINEAR), dtype=np.float32) / 255.0
             profile = rot.sum(axis=1)
             for width in widths:
@@ -487,17 +544,13 @@ def find_sticks(image: Image.Image, limit: int = 2) -> list[Stick]:
     # Deduplicate parallel/overlapping detections of the same physical stick.
     verified.sort(key=lambda s: s.score, reverse=True)
     sticks: list[Stick] = []
-    min_sep = side_max * 0.08
     for st in verified:
         ang = math.degrees(math.atan2(st.y2 - st.y1, st.x2 - st.x1)) % 180.0
-        mx, my = (st.x1 + st.x2) / 2.0, (st.y1 + st.y2) / 2.0
         dup = False
         for kept in sticks:
             k_ang = math.degrees(math.atan2(kept.y2 - kept.y1, kept.x2 - kept.x1)) % 180.0
             da = min(abs(ang - k_ang), 180.0 - abs(ang - k_ang))
-            kl = max(kept.length, 1.0)
-            dist = abs((kept.y2 - kept.y1) * mx - (kept.x2 - kept.x1) * my + kept.x2 * kept.y1 - kept.y2 * kept.x1) / kl
-            if da < 15.0 and dist < max(st.width, kept.width, min_sep) * 1.5:
+            if da < 15.0 and _bands_overlap(st, kept):
                 dup = True
                 break
         if not dup:

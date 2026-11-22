@@ -115,9 +115,11 @@ def find_ruler_photos(paths: list[Path], out: Path) -> list[dict]:
             continue
         confidence = sum(float(getattr(s, "score", 0.0)) for s in sticks)
         matches.append((index, confidence, path, image, sticks))
-    if len(matches) > MAX_RULER_PHOTOS:
-        top = sorted(matches, key=lambda item: item[1], reverse=True)[:MAX_RULER_PHOTOS]
-        matches = sorted(top, key=lambda item: item[0])
+        if len(matches) > MAX_RULER_PHOTOS:
+            # Stable sort keeps the earlier upload when confidence ties.
+            matches.sort(key=lambda item: item[1], reverse=True)
+            matches.pop()
+    matches.sort(key=lambda item: item[0])
     found: list[dict] = []
     for _index, _confidence, path, image, sticks in matches:
         number = len(found) + 1
