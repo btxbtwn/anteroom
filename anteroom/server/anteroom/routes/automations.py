@@ -158,30 +158,32 @@ def _fail_executing(db: Session, approval_id: str) -> None:
 async def approve_listing(approval_id: str, body: ConfirmBody):
     """Perform the one item/action/revision/marketplace set the seller reviewed."""
     from anteroom.services.automation_actions import perform, publish_revision
+    from anteroom.services.pricing_rules import active_rules, freeze_active_rules
 
     if body.confirm is not True:
         raise HTTPException(400, "Confirm this item's marketplace action.")
-    try:
-        # A request dropped while claiming ends the claimed approval as failed rather than executing.
-        claimed = await claim_in_worker_session(
-            _claim_approval, lambda _claimed: in_worker_session(_fail_executing, approval_id), approval_id, body)
-    except AutomationError as exc:
-        raise _fail(exc) from exc
-    # Claimed: each database step below has its own short session, none held while the marketplaces answer.
-    try:
-        item = {"conversation_id": claimed["conversation_id"], "title": claimed["title"]}
-        if claimed["action"] == "publish":
-            result = await publish_revision(claimed["conversation_id"], claimed["marketplaces"], claimed["revision_id"])
-        else:
-            result = await perform(item, {"type": claimed["action"]}, claimed["marketplaces"], claimed["revision_id"], confirm=True)
-    except AutomationBusy as exc:
-        await asyncio.shield(in_worker_session(_fail_executing, approval_id))
-        raise HTTPException(409, str(exc) or "A marketplace job is running. Review a new action after it finishes.") from exc
-    except AutomationError as exc:
-        raise _fail(exc) from exc
-    except BaseException:
-        await asyncio.shield(in_worker_session(_fail_executing, approval_id))
-        raise
+    with freeze_active_rules(await asyncio.to_thread(active_rules)):
+        try:
+            # A request dropped while claiming ends the claimed approval as failed rather than executing.
+            claimed = await claim_in_worker_session(
+                _claim_approval, lambda _claimed: in_worker_session(_fail_executing, approval_id), approval_id, body)
+        except AutomationError as exc:
+            raise _fail(exc) from exc
+        # Claimed: each database step below has its own short session, none held while the marketplaces answer.
+        try:
+            item = {"conversation_id": claimed["conversation_id"], "title": claimed["title"]}
+            if claimed["action"] == "publish":
+                result = await publish_revision(claimed["conversation_id"], claimed["marketplaces"], claimed["revision_id"])
+            else:
+                result = await perform(item, {"type": claimed["action"]}, claimed["marketplaces"], claimed["revision_id"], confirm=True)
+        except AutomationBusy as exc:
+            await asyncio.shield(in_worker_session(_fail_executing, approval_id))
+            raise HTTPException(409, str(exc) or "A marketplace job is running. Review a new action after it finishes.") from exc
+        except AutomationError as exc:
+            raise _fail(exc) from exc
+        except BaseException:
+            await asyncio.shield(in_worker_session(_fail_executing, approval_id))
+            raise
     return await asyncio.shield(in_worker_session(_settle_approval, approval_id, claimed, item, result))
 
 

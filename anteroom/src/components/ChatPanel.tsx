@@ -1,8 +1,8 @@
-import { Fragment, useRef, useEffect, useLayoutEffect, useCallback } from "react";
+import { Fragment, useRef, useEffect, useLayoutEffect, useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { addToast } from "../ui/toast";
 import { api } from "../api/client";
 import { photosUploading, usePhotosUploading } from "../photoUploads";
-import { newQueuedChatMessage } from "./chatMessageQueue";
 import { CiteSelectionToolbar } from "./CiteSelectionToolbar";
 import { type ChatCitation } from "./chatCitations";
 import { ChatCitationRevealContext } from "./chatCitationContext";
@@ -10,7 +10,9 @@ import { type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { currentPhaseIndex } from "./liveTrace";
 import { assistantDisplayText, extractJson, isListingJson, isStreamError } from "./chat/assistantDisplay";
 import { useComposerImages } from "./chat/ComposerAttachments";
-import { getComposerDraft, setComposerListingPhotoBatch, useComposerDraftText } from "./chat/composerDrafts";
+import { getComposerDraft, setComposerDraftText, setComposerListingPhotoBatch, useComposerDraftText } from "./chat/composerDrafts";
+import { chatQueue, editChatMessage, newQueuedChatMessage, resolveFollowUp } from "./chat/chatQueueStore";
+import { modifierKeyLabel } from "./chat/ComposerPrimaryActions";
 import { ChatComposer } from "./chat/ChatComposer";
 import { decideComposerImageRoute, uploadComposerDraftPhotos } from "./chat/composerDraftPhotos";
 import { StreamErrorPanel, UnfinishedGenerationPanel } from "./chat/ChatErrors";
@@ -24,14 +26,15 @@ import { getLive } from "./chat/liveChatStore";
 import { useChatQueue } from "./chat/useChatQueue";
 import { useChatScroll } from "./chat/useChatScroll";
 import { useChatServerState } from "./chat/useChatServerState";
-import { useChatStream, useGenerateRecovery } from "./chat/useChatStream";
+import { canSteerLive, steerableChat, useChatStream, useGenerateRecovery } from "./chat/useChatStream";
+import { useWorkspaceRuntime } from "../app/runtime";
 import { useLiveChat } from "./chat/useLiveChat";
 import { placeTurnFolds } from "./chat/workLogModel";
 import { RegenerateListingButton } from "./ClearListingButton";
 import { Button } from "./ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
 import { Spinner } from "./ui/spinner";
-import type { ConversationActivity, ListingDocument, Message } from "../api/types";
+import type { ChatAttachmentUpload, ConversationActivity, ListingDocument, Message } from "../api/types";
 import type { ListingChatStatus } from "./ListingChatPopup";
 
 interface Props {
@@ -47,8 +50,11 @@ function messageRowPadding(m: Message): string {
   return m.role === "user" || m.role === "assistant" || m.role === "model" ? "pb-4" : "pb-2";
 }
 
+const preparingDrafts = new Set<string>();
+
 export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onStatusChange }: Props) {
   const queryClient = useQueryClient();
+  const runtime = useWorkspaceRuntime();
   const uploadingPhotos = usePhotosUploading(convId);
   const draftKey = `listing:${convId}`;
 
@@ -84,6 +90,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     handleCancel,
     handleCancelDiscovery,
     handleRetry,
+    interruptAnswer,
   } = useChatStream({
     convId,
     setInput,
@@ -95,18 +102,68 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
   });
   const serverBusy = Boolean(activity?.busy);
   const sendQueuedMessage = useCallback(
-    (text: string) => sendMessage(text, { preserveInput: true }),
-    [sendMessage],
+    async (text: string, attachments: ChatAttachmentUpload[] = []) => {
+      // Ask the server first: the activity on hand can be seconds old, and a
+      // reply just cut off by a steer saves its words as it unwinds. Sending
+      // before it has would put the follow-up ahead of that reply.
+      try {
+        const fresh = await api.conversations.activity(convId);
+        queryClient.setQueryData(["activity", convId], fresh);
+        if (fresh.busy) return false;
+      } catch {
+        // Unreachable right now: go on what is cached, as before, rather than retry in a loop.
+      }
+      return sendMessage(text, { preserveInput: true, ...(attachments.length ? { attachments } : {}) });
+    },
+    [convId, queryClient, sendMessage],
   );
-  const { pendingQueue, enqueue, handleRemoveQueued } = useChatQueue({
+  // A queued message being edited in the box, as T3 Code edits a queued run in its composer.
+  // Keyed by listing, so another listing never inherits it.
+  const [editing, setEditing] = useState<{ convId: string; id: string } | null>(null);
+  const editingQueuedId = editing?.convId === convId ? editing.id : null;
+  const setEditingQueuedId = useCallback(
+    (id: string | null) => setEditing(id ? { convId, id } : null),
+    [convId],
+  );
+  const { key: queueKey, pendingQueue, sending: queueSending, enqueue, steer, sendNow, handleRemoveQueued } = useChatQueue({
     convId,
     busy,
     serverBusy,
+    paused: editingQueuedId !== null,
     sendMessage: sendQueuedMessage,
+    interruptAnswer,
     queuedMessage,
     onQueuedMessageConsumed,
     pinChatToBottom,
   });
+  // Leaving an edit (another listing, a closed chat) gives the queued message
+  // back unchanged and leaves no half-edited copy in this listing's box.
+  const editDraftKey = useRef<string | null>(null);
+  useEffect(() => () => {
+    if (editDraftKey.current !== draftKey) return;
+    editDraftKey.current = null;
+    setComposerDraftText(draftKey, "");
+    setEditing(null);
+  }, [draftKey]);
+
+  const startEditQueued = useCallback((id: string) => {
+    const message = chatQueue(queueKey).find((item) => item.id === id);
+    if (!message || input.trim() || message.payload !== undefined || message.steer) return false;
+    editDraftKey.current = draftKey;
+    setEditingQueuedId(id);
+    setInput(message.text);
+    composerRef.current?.focus();
+    return true;
+  }, [draftKey, queueKey, input, setInput, setEditingQueuedId]);
+  const cancelEditQueued = useCallback(() => {
+    editDraftKey.current = null;
+    setEditingQueuedId(null);
+    setInput("");
+  }, [setInput, setEditingQueuedId]);
+  const editLastQueued = useCallback(() => {
+    const last = pendingQueue[pendingQueue.length - 1];
+    return Boolean(last && !editingQueuedId && startEditQueued(last.id));
+  }, [pendingQueue, editingQueuedId, startEditQueued]);
 
   const handleCite = useCallback((citation: ChatCitation) => {
     composerRef.current?.insertCitation(citation);
@@ -126,6 +183,16 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     [],
   );
   const hasListingJson = checkListingCopy(messages, listing);
+  const steerable = steerableChat(runtime.hosted, hasListingJson);
+  const canSteer = steerable
+    && streaming && !generating && !resetting && !/^saving/i.test(streamStatus.trim());
+
+  const sendFirstQueuedNow = useCallback(() => {
+    const first = pendingQueue[0];
+    if (!first || first.steer || !steerable || !canSteerLive(convId) || editingQueuedId) return false;
+    void sendNow(first.id);
+    return true;
+  }, [pendingQueue, steerable, convId, editingQueuedId, sendNow]);
   const hasListingJsonRef = useRef(hasListingJson);
   useLayoutEffect(() => { hasListingJsonRef.current = hasListingJson; }, [hasListingJson]);
 
@@ -212,22 +279,63 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     if (!busy && !serverBusy && !uploadingPhotos) void finishPhotoSend();
   }, [busy, serverBusy, uploadingPhotos, finishPhotoSend]);
 
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback((alternate = false) => {
     const text = input.trim();
     const attached = images.images;
-    if (!text && !attached.length) return;
+    if (editingQueuedId) {
+      if (!text) return;
+      editDraftKey.current = null;
+      if (!editChatMessage(queueKey, editingQueuedId, text)) {
+        setEditingQueuedId(null);
+        addToast({ type: "warning", title: "This queued message is no longer available. Your edit is in the composer." });
+        return;
+      }
+      setEditingQueuedId(null);
+      setInput("");
+      return;
+    }
+    if ((!text && !attached.length) || preparingDrafts.has(draftKey)) return;
+    const prepareAttachments = async () => {
+      preparingDrafts.add(draftKey);
+      try {
+        return await images.prepare(attached);
+      } finally {
+        preparingDrafts.delete(draftKey);
+      }
+    };
     const listingPhotoBatch = getComposerDraft(draftKey).listingPhotoBatch;
     if (listingPhotoBatch === "uploading") return;
-    // sendMessage refuses while background work runs, so hold the message instead of dropping it.
-    if (busy || serverBusy) {
-      if (attached.length) {
+    // sendMessage refuses while background work runs, so hold the message
+    // instead of dropping it, or steer it into the reply being written.
+    // A queued message checking the server goes first; this one waits behind it.
+    if (busy || serverBusy || queueSending) {
+      // Decided when the message is ready: an image upload can outlast the reply.
+      const hold = (message: ReturnType<typeof newQueuedChatMessage>) => {
+        const live = getLive(convId);
+        const running = live.streaming || live.generating || live.resetting;
+        const action = resolveFollowUp({ busy: running, canSteer: steerable && canSteerLive(convId), alternate });
+        if (action === "steer") void steer(message);
+        else enqueue(message);
+        pinChatToBottom();
+      };
+      if (!attached.length) {
+        setComposerListingPhotoBatch(draftKey, undefined);
+        hold(newQueuedChatMessage(text));
+        setInput("");
+        return;
+      }
+      // Images on a draft with no photos become its listing photos; that waits for the run.
+      if (decideComposerImageRoute(photos?.length, listingPhotoBatch) !== "chat_attachments") {
         images.setError("Images go with the next message once the current run finishes.");
         return;
       }
-      setComposerListingPhotoBatch(draftKey, undefined);
-      enqueue(newQueuedChatMessage(text));
-      setInput("");
-      pinChatToBottom();
+      void (async () => {
+        const uploads = await prepareAttachments();
+        if (uploads === null) return;
+        images.clear(attached.map((image) => image.id));
+        setInput((current) => (current.trim() === text ? "" : current));
+        hold(newQueuedChatMessage(text, { payload: { attachments: uploads } }));
+      })();
       return;
     }
     // When a draft has no listing photos yet, images attached in chat become
@@ -274,7 +382,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
       setComposerListingPhotoBatch(draftKey, undefined);
     }
     void (async () => {
-      const uploads = attached.length ? await images.prepare(attached) : [];
+      const uploads = attached.length ? await prepareAttachments() : [];
       if (uploads === null) return;
       images.clear(attached.map((image) => image.id));
       void sendMessage(text, uploads.length ? { attachments: uploads } : undefined);
@@ -282,12 +390,18 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
   }, [
     busy,
     serverBusy,
+    queueSending,
     input,
     setInput,
     sendMessage,
     finishPhotoSend,
     pinChatToBottom,
     enqueue,
+    steer,
+    steerable,
+    editingQueuedId,
+    setEditingQueuedId,
+    queueKey,
     images,
     photos,
     draftKey,
@@ -342,7 +456,11 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
   const tailLabel = busy && !resetting && livePhase < 0 && !showStreamBubble
     ? localLive ? localLabel || activityDetail : activityDetail
     : "";
-  const composerPlaceholder = busy
+  const composerPlaceholder = editingQueuedId
+    ? "Edit the queued message…"
+    : busy && canSteer
+    ? `Redirect this reply, or ${modifierKeyLabel()}+Enter to queue…`
+    : busy
     ? "Queue a follow-up…"
     : !hasPhotos
     ? "Upload photos to begin"
@@ -449,7 +567,20 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
           </div>
         ) : null}
 
-        <QueuedMessages queue={pendingQueue} onRemove={handleRemoveQueued} />
+        <QueuedMessages
+          queue={pendingQueue}
+          canSendNow={canSteer && !editingQueuedId}
+          onSendNow={(id) => { void sendNow(id); }}
+          onEdit={startEditQueued}
+          onRemove={handleRemoveQueued}
+          editingId={editingQueuedId}
+          onCancelEdit={cancelEditQueued}
+          editBlockedReason={
+            editingQueuedId ? "Finish editing the other message first"
+              : input.trim() ? "Send or clear the message box first" : null
+          }
+          imageCount={(message) => (message.payload as { attachments?: unknown[] } | undefined)?.attachments?.length ?? 0}
+        />
 
         {streamFailed ? (
           <StreamErrorPanel
@@ -484,6 +615,11 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
         onSend={handleSend}
         onStop={() => { void handleCancel(); }}
         stopLabel="Stop everything running for this listing"
+        canSteer={canSteer}
+        editingQueued={editingQueuedId !== null}
+        onCancelEdit={cancelEditQueued}
+        onSendQueuedNow={sendFirstQueuedNow}
+        onEditQueued={editLastQueued}
       />
     </div>
     </ChatCitationRevealContext>

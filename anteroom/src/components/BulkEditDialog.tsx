@@ -40,6 +40,9 @@ export function BulkEditDialog({ conversationIds, onClose }: { conversationIds: 
   const [labels, setLabels] = useState("");
   const [tagsMode, setTagsMode] = useState<ListMode>("keep");
   const [tags, setTags] = useState("");
+  const { data: presetData } = useQuery({ queryKey: ["settings-shipping-presets"], queryFn: api.settings.shippingPresets });
+  const { data: rulesData } = useQuery({ queryKey: ["settings-pricing-rules"], queryFn: api.settings.pricingRules });
+  const presets = presetData?.presets || [];
   const [categories, setCategories] = useState<Partial<Record<CategoryScope, { id: string; path: string } | null>>>({});
   const { data: dropdowns } = useQuery({ queryKey: ["catalog-dropdown-options"], queryFn: api.catalog.dropdownOptions, staleTime: Infinity });
   const choices = (field: BulkField): string[] => {
@@ -49,6 +52,8 @@ export function BulkEditDialog({ conversationIds, onClose }: { conversationIds: 
   const [error, setError] = useState<string | null>(null);
   const [review, setReview] = useState<{ edits: BulkEdits; rows: BulkReviewRow[] } | null>(null);
   const [skips, setSkips] = useState<Set<string>>(new Set());
+  const [shippingPreset, setShippingPreset] = useState("");
+  const [pricingRules, setPricingRules] = useState(false);
   const preview = useMutation({ mutationFn: (edits: BulkEdits) => api.bulkEdit.preview(conversationIds, edits), retry: false,
     onSuccess: (result, edits) => { setReview({ edits, rows: result.rows }); setSkips(new Set()); } });
   const apply = useMutation({ mutationFn: () => api.bulkEdit.apply(review!.edits, bulkReviewTokens(review!.rows.filter((row) => !skips.has(row.conversation_id)))), retry: false,
@@ -69,7 +74,7 @@ export function BulkEditDialog({ conversationIds, onClose }: { conversationIds: 
       if (categories.general) category.general = categories.general.id;
       if (categories.depop) category.depop = categories.depop.id;
       if (categories.ebay) category.ebay = categories.ebay;
-      preview.mutate(bulkEditsFromInputs(fields, labelsMode, labels, { tagsMode, tagsText: tags, category }));
+      preview.mutate(bulkEditsFromInputs(fields, labelsMode, labels, { tagsMode, tagsText: tags, category, shippingPreset, pricingRules }));
     } catch (error) { setError((error as Error).message); }
   };
   const fieldControl = (field: BulkField) => {
@@ -114,6 +119,18 @@ export function BulkEditDialog({ conversationIds, onClose }: { conversationIds: 
           <PageNote>{note}</PageNote>
         </> : null}
       </div>)}
+      {presets.length ? <div className="space-y-1">
+        <label className="flex items-center gap-2"><Checkbox checked={Boolean(shippingPreset)} disabled={busy} onCheckedChange={(checked) => setShippingPreset(checked ? presets[0].id : "")} />Apply a shipping preset</label>
+        {shippingPreset ? <Select value={shippingPreset} onValueChange={(next) => { if (next) setShippingPreset(next as string); }} disabled={busy}>
+          <SelectTrigger aria-label="Shipping preset"><SelectValue>{presets.find((preset) => preset.id === shippingPreset)?.name}</SelectValue></SelectTrigger>
+          <SelectPopup>{presets.map((preset) => <SelectItem key={preset.id} value={preset.id}>{preset.name}</SelectItem>)}</SelectPopup>
+        </Select> : null}
+        {shippingPreset ? <PageNote>Sets each item's package size, weight and the preset's marketplace shipping choices.</PageNote> : null}
+      </div> : null}
+      {rulesData?.enabled ? <div className="space-y-1">
+        <label className="flex items-center gap-2"><Checkbox checked={pricingRules} disabled={busy} onCheckedChange={(checked) => setPricingRules(checked === true)} />Apply pricing rules</label>
+        {pricingRules ? <PageNote>Every marketplace price goes back on your pricing rules, replacing prices typed on a marketplace. Live listings show unsent edits until you update them.</PageNote> : null}
+      </div> : null}
       <div className="space-y-2"><p>Tags</p><ListModeSelect label="Tags" value={tagsMode} onChange={setTagsMode} disabled={busy} />
         {tagsMode !== "keep" ? <><Input aria-label="Tags, comma separated" value={tags} disabled={busy} onChange={(event) => setTags(event.target.value)} /><PageNote>Comma-separated search tags. Etsy keeps the first 13 it accepts.</PageNote></> : null}
       </div>

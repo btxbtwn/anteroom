@@ -153,7 +153,7 @@ describe("AssistantPage", () => {
   });
 
   it("holds a follow-up asked while an answer is being written, and sends it after", () => {
-    const held: QueuedQuestion = { id: "q", text: "And last week?", createdAt: "", uploads: [], shown: [], threadId: "t" };
+    const held: QueuedQuestion = { id: "q", text: "And last week?", createdAt: "", threadId: "t" };
     // Asking mid-answer used to be dropped without a word; now it waits its turn.
     expect(askNow(true, [])).toBe("queue");
     expect(askNow(false, [])).toBe("send");

@@ -47,6 +47,10 @@ export interface Conversation {
   sold_marketplaces?: string[];
   /** Marketplaces Anteroom delisted directly, though imported history says listed. */
   removed_marketplaces?: string[];
+  /** Marketplaces where the listing is still up but not for sale. Not a sale and not a delist. */
+  inactive_marketplaces?: string[];
+  /** Marketplace prices that differ from the seller's pricing rules; empty while the rules are off. */
+  price_drift?: PriceDrift[];
   /** Units sold on Anteroom's sales ledger. An Active row with some sold reads "1 of 3 sold". */
   units_sold?: number;
   /** The most units the item was offered with. */
@@ -127,6 +131,10 @@ export interface ConversationSummary {
   sold_marketplaces?: string[];
   /** Marketplaces Anteroom delisted directly, though imported history says listed. */
   removed_marketplaces?: string[];
+  /** Marketplaces where the listing is still up but not for sale. Not a sale and not a delist. */
+  inactive_marketplaces?: string[];
+  /** Marketplace prices that differ from the seller's pricing rules; empty while the rules are off. */
+  price_drift?: PriceDrift[];
   /** Units sold on Anteroom's sales ledger. An Active row with some sold reads "1 of 3 sold". */
   units_sold?: number;
   /** The most units the item was offered with. */
@@ -211,6 +219,11 @@ export interface DirectRecord {
   price?: number | null;
   /** When Anteroom's last confirmed List put this listing up. */
   listed_at?: string | null;
+  /**
+   * Still on the marketplace but not for sale (deactivated, expired, Not For Sale), from
+   * Anteroom's latest verified read of that listing. Neither sold nor deleted.
+   */
+  inactive?: boolean;
 }
 
 /** What a refused request answers: one sentence for the seller. */
@@ -486,6 +499,17 @@ export interface PhotoStudioResult {
   /** The photos AI Studio changed, each with its new ``url`` and ``edits.studio``. */
   photos: ListingPhoto[];
   errors: PhotoStudioFailure[];
+}
+
+/** A marketplace price that is not what the seller's pricing rules give. */
+export interface PriceDrift {
+  marketplace: string;
+  /** The price the pricing rules give this marketplace. */
+  expected: number;
+  /** The price the marketplace has now. */
+  price: number;
+  /** ``override``: a price typed on that marketplace's form. ``live``: the live listing's known price. */
+  source: "override" | "live";
 }
 
 /** A region hidden on the finished frame, such as a name, address or barcode. */

@@ -62,11 +62,21 @@ interface Props {
   images: ReturnType<typeof useComposerImages>;
   busy: boolean;
   stopping?: boolean;
-  onSend: () => void;
+  /** `alternate` is Mod-Enter or a modifier-click: queue instead of steer, or the reverse. */
+  onSend: (alternate: boolean) => void;
   onStop?: () => void;
   stopLabel?: string;
   /** While busy a follow-up is queued; null when this chat cannot queue. */
   queueLabel?: string | null;
+  /** The running reply can take a steer, so a follow-up goes now by default. */
+  canSteer?: boolean;
+  /** The box holds a queued message being edited; Esc gives it back unchanged. */
+  editingQueued?: boolean;
+  onCancelEdit?: () => void;
+  /** Mod-Shift-Enter: send the first queued message now. True when it acted. */
+  onSendQueuedNow?: () => boolean;
+  /** Alt-ArrowUp: edit the last queued message. True when it acted. */
+  onEditQueued?: () => boolean;
   className?: string;
   /** Put the cursor in the box when it appears. */
   autoFocus?: boolean;
@@ -84,6 +94,11 @@ export function ChatComposer({
   onStop,
   stopLabel,
   queueLabel,
+  canSteer = false,
+  editingQueued = false,
+  onCancelEdit,
+  onSendQueuedNow,
+  onEditQueued,
   className,
   autoFocus = false,
 }: Props) {
@@ -91,14 +106,14 @@ export function ChatComposer({
   const runtime = useWorkspaceRuntime();
   const [usageOpen, setUsageOpen] = useState(false);
   // `/usage-limits` is answered here and never sent, as in T3 Code.
-  const submit = () => {
-    if (!runtime.hosted && isUsageLimitsCommand(input)) {
+  const submit = (alternate = false) => {
+    if (!editingQueued && !runtime.hosted && isUsageLimitsCommand(input)) {
       onInputChange("");
       setUsageOpen(true);
       return;
     }
     setUsageOpen(false);
-    onSend();
+    onSend(alternate);
   };
   const canSubmit = Boolean(input.trim() || images.images.length);
   const addImages = (files: File[]) => {
@@ -140,8 +155,20 @@ export function ChatComposer({
                   handleRef={composerRef}
                   value={input}
                   onChange={onInputChange}
-                  onSubmit={submit}
+                  onSubmit={() => submit()}
+                  onAlternateSubmit={() => {
+                    // Only a running turn has an opposite action; otherwise Mod-Enter is a new line.
+                    if (!busy || editingQueued || !canSubmit) return false;
+                    submit(true);
+                    return true;
+                  }}
+                  onSendQueuedNow={onSendQueuedNow}
+                  onEditQueued={onEditQueued}
                   onEscape={() => {
+                    if (editingQueued && onCancelEdit) {
+                      onCancelEdit();
+                      return true;
+                    }
                     // Esc in the box stops the run, as in ChatGPT and Claude.
                     if (!busy || stopping || !onStop) return false;
                     onStop();
@@ -180,6 +207,8 @@ export function ChatComposer({
                     onStop={onStop}
                     stopLabel={stopLabel}
                     queueLabel={queueLabel}
+                    canSteer={canSteer}
+                    editingQueued={editingQueued}
                   />
                 </div>
               </div>

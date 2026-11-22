@@ -165,6 +165,15 @@
             "title": "Id",
             "type": "string"
           },
+          "inactive_marketplaces": {
+            "default": [],
+            "description": "Marketplaces where the listing is still up but not for sale. Not a sale and not a delist.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Inactive Marketplaces",
+            "type": "array"
+          },
           "missing_sale_data": {
             "default": [],
             "description": "Sale details the sales ledger still needs from the seller.",
@@ -207,6 +216,15 @@
               }
             ],
             "title": "Price"
+          },
+          "price_drift": {
+            "default": [],
+            "description": "Marketplace prices that differ from the seller's pricing rules; empty while the rules are off.",
+            "items": {
+              "$ref": "#/components/schemas/PriceDrift"
+            },
+            "title": "Price Drift",
+            "type": "array"
           },
           "quantity": {
             "anyOf": [
@@ -546,6 +564,15 @@
             "title": "Id",
             "type": "string"
           },
+          "inactive_marketplaces": {
+            "default": [],
+            "description": "Marketplaces where the listing is still up but not for sale. Not a sale and not a delist.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Inactive Marketplaces",
+            "type": "array"
+          },
           "missing_sale_data": {
             "default": [],
             "description": "Sale details the sales ledger still needs from the seller.",
@@ -577,6 +604,15 @@
               }
             ],
             "title": "Price"
+          },
+          "price_drift": {
+            "default": [],
+            "description": "Marketplace prices that differ from the seller's pricing rules; empty while the rules are off.",
+            "items": {
+              "$ref": "#/components/schemas/PriceDrift"
+            },
+            "title": "Price Drift",
+            "type": "array"
           },
           "quantity": {
             "anyOf": [
@@ -972,6 +1008,12 @@
             "description": "Fields the marketplace rejected and the seller has not edited since.",
             "title": "Fields",
             "type": "integer"
+          },
+          "inactive": {
+            "default": false,
+            "description": "Still on the marketplace but not for sale (deactivated, expired, Not For Sale), from\nAnteroom's latest verified read of that listing. Neither sold nor deleted.",
+            "title": "Inactive",
+            "type": "boolean"
           },
           "listed_at": {
             "anyOf": [
@@ -2526,6 +2568,42 @@
           "errors"
         ],
         "title": "PhotoStudioResult",
+        "type": "object"
+      },
+      "PriceDrift": {
+        "description": "A marketplace price that is not what the seller's pricing rules give.",
+        "properties": {
+          "expected": {
+            "description": "The price the pricing rules give this marketplace.",
+            "title": "Expected",
+            "type": "number"
+          },
+          "marketplace": {
+            "title": "Marketplace",
+            "type": "string"
+          },
+          "price": {
+            "description": "The price the marketplace has now.",
+            "title": "Price",
+            "type": "number"
+          },
+          "source": {
+            "description": "``override``: a price typed on that marketplace's form. ``live``: the live listing's known price.",
+            "enum": [
+              "override",
+              "live"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "marketplace",
+          "expected",
+          "price",
+          "source"
+        ],
+        "title": "PriceDrift",
         "type": "object"
       },
       "Redaction": {

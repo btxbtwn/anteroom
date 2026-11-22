@@ -92,6 +92,10 @@ class Edits(BaseModel):
     tags_mode: ListMode = "keep"
     tags: list[str] = Field(default_factory=list, max_length=MAX_TAGS)
     category: Categories | None = None
+    shipping_preset: str | None = Field(default=None, min_length=1, max_length=64)
+    """A saved shipping preset's id: its package size, weight and marketplace shipping choices."""
+    pricing_rules: bool = False
+    """Put every marketplace price back on the seller's pricing rules."""
 
     @field_validator("labels", "tags")
     @classmethod
@@ -104,8 +108,9 @@ class Edits(BaseModel):
     @model_validator(mode="after")
     def nonempty(self):
         categories = self.category.model_dump(exclude_none=True) if self.category else {}
-        if not self.values.model_fields_set and self.labels_mode == "keep" and self.tags_mode == "keep" and not categories:
-            raise ValueError("Choose at least one field, label, tag or category action.")
+        if (not self.values.model_fields_set and self.labels_mode == "keep" and self.tags_mode == "keep" and not categories
+                and not self.shipping_preset and not self.pricing_rules):
+            raise ValueError("Choose at least one field, label, tag, category, shipping or pricing action.")
         if self.labels_mode in ("add", "remove") and not self.labels:
             raise ValueError("Enter labels to add or remove.")
         if self.tags_mode in ("add", "remove") and not self.tags:
@@ -204,13 +209,38 @@ def _merged(listing: dict, key: str, mode: str, values: list[str], limit: int) -
     return merged
 
 
-def edit_values(listing: dict, edits: Edits, categories: dict | None = None) -> dict:
+def resolve_extras(edits: Edits) -> dict:
+    """The saved preset and active rules the edit names, refused when they are gone."""
+    from anteroom.services import pricing_rules, shipping_presets
+
+    extras: dict = {}
+    if edits.shipping_preset:
+        preset = shipping_presets.find_preset(edits.shipping_preset)
+        if preset is None:
+            raise HTTPException(400, "That shipping preset could not be found. Choose another one.")
+        extras["preset"] = preset
+    if edits.pricing_rules:
+        rules = pricing_rules.active_rules()
+        if rules is None:
+            raise HTTPException(400, "Turn on pricing rules in Settings → Listings first.")
+        extras["rules"] = rules
+    return extras
+
+
+def edit_values(listing: dict, edits: Edits, categories: dict | None = None, extras: dict | None = None) -> dict:
+    from anteroom.services import pricing_rules, shipping_presets
+
     updated = copy.deepcopy(listing)
     for field, value in edits.values.model_dump(exclude_unset=True).items():
         if field == "price":
             updated = apply_price_to_listing(updated, value)
         else:
             updated[field] = value
+    extras = extras if extras is not None else resolve_extras(edits)
+    if extras.get("preset"):
+        updated, _paths = shipping_presets.applied_listing(updated, extras["preset"])
+    if extras.get("rules"):
+        updated, _markets = pricing_rules.apply_rules_to_listing(updated, extras["rules"])
     if edits.labels_mode != "keep":
         updated["labels"] = _merged(listing, "labels", edits.labels_mode, edits.labels, 30)
     if edits.tags_mode != "keep":
@@ -219,8 +249,8 @@ def edit_values(listing: dict, edits: Edits, categories: dict | None = None) -> 
     return updated
 
 
-def edited(listing: dict, edits: Edits, categories: dict | None = None) -> dict:
-    updated = edit_values(listing, edits, categories)
+def edited(listing: dict, edits: Edits, categories: dict | None = None, extras: dict | None = None) -> dict:
+    updated = edit_values(listing, edits, categories, extras)
     return prepared_listing(listing, updated) if updated != listing else updated
 
 
@@ -240,19 +270,22 @@ def _read(db: Session, conv_id: str):
 
 
 def _changes(before: dict, after: dict) -> list[dict]:
+    from anteroom.services.seller_overrides import PRICE_FOLLOWERS
+
     return [{"field": field, "old": before.get(field), "new": after.get(field)}
-            for field in sorted(before.keys() | after.keys()) if before.get(field) != after.get(field)]
+            for field in sorted(before.keys() | after.keys()) if field != PRICE_FOLLOWERS and before.get(field) != after.get(field)]
 
 
 def preview(db: Session, body: PreviewRequest) -> dict:
     categories = resolve_categories(db, body.edits)
+    extras = resolve_extras(body.edits)
     rows = []
     for conv_id in dict.fromkeys(body.conversation_ids):
         row = {"conversation_id": conv_id, "title": "Unavailable listing", "changes": [], "skip_reason": None}
         try:
             conv, revision = _read(db, conv_id)
             row["title"] = conv.title or "Untitled"
-            updated = edited(revision.listing_json, body.edits, categories)
+            updated = edited(revision.listing_json, body.edits, categories, extras)
             row.update(expected_revision_id=revision.id, expected_basis=basis(conv, revision.id), expected_result=digest(updated),
                        changes=_changes(revision.listing_json, updated))
             if not row["changes"]:
@@ -269,6 +302,7 @@ def apply(db: Session, body: ApplyRequest) -> dict:
 
     hosted = current() is not None
     categories = resolve_categories(db, body.edits)
+    extras = resolve_extras(body.edits)
     applied, skipped, seen = [], [], set()
     for reviewed in body.rows:
         conv_id = reviewed.conversation_id
@@ -285,12 +319,12 @@ def apply(db: Session, body: ApplyRequest) -> dict:
                 conv, revision = _read(db, conv_id)
                 if revision.id != reviewed.expected_revision_id or basis(conv, revision.id) != reviewed.expected_basis:
                     raise ValueError(CHANGED)
-                updated = edited(revision.listing_json, body.edits, categories)
+                updated = edited(revision.listing_json, body.edits, categories, extras)
                 if digest(updated) != reviewed.expected_result:
                     raise ValueError("The proposed changes differ from the review. Review them again")
                 if updated == revision.listing_json:
                     raise ValueError("Already has these values")
-                result = save_listing_edit(conv_id, edit_values(revision.listing_json, body.edits, categories), db, source="bulk_edit", expected_revision_id=revision.id)
+                result = save_listing_edit(conv_id, edit_values(revision.listing_json, body.edits, categories, extras), db, source="bulk_edit", expected_revision_id=revision.id)
             applied.append({"conversation_id": conv_id, "revision_id": result["revision_id"], "valid": result["validation"]["valid"]})
         except (ValueError, HTTPException) as exc:
             db.rollback()

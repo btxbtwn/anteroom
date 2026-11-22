@@ -8,6 +8,10 @@ import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, Temp
 import type { CopyPreview, CopyListingRequest, BatchCopyPreviewRow } from "./listingCopy";
 import type { ListingVideo, ListingVideoLibrary, MarketplaceMediaRules } from "./listingVideos";
 import type { BulkEdits, BulkReviewRow, BulkReviewToken, BulkEditResult } from "./bulkEdit";
+import type {
+  ListingWarnings, MarketplaceTextResult, PricingRules, PricingRulesUpdate, RuleMarketplace, ShippingPresetInput,
+  ShippingPresets, TextMode, TransformedListing,
+} from "./listingRules";
 import type { BulkDeleteResult, BulkDeleteRow } from "./bulkDelete";
 import type { LabelColor } from "../labelColors";
 import type { BulkMarketplaceAction, BulkMarketplacePerform, BulkMarketplacePreview, BulkMarketplaceResult } from "./bulkMarketplace";
@@ -960,6 +964,9 @@ export const api = {
   bulkEdit: {
     preview: (conversationIds: string[], edits: BulkEdits) => request<{ rows: BulkReviewRow[] }>("/listings/bulk-edit/preview", { method: "POST", body: JSON.stringify({ conversation_ids: conversationIds, edits }) }),
     apply: (edits: BulkEdits, rows: BulkReviewToken[]) => request<BulkEditResult>("/listings/bulk-edit/apply", { method: "POST", body: JSON.stringify({ edits, rows }) }),
+    /** Keep, shorten or write one item's marketplace text, saved as a local edit. Never sends anything. */
+    marketplaceText: (conversationId: string, body: { marketplaces: RuleMarketplace[]; mode: TextMode; expected_revision_id?: string | null }) =>
+      request<MarketplaceTextResult>(`/listings/bulk-edit/marketplace-text/${encodeURIComponent(conversationId)}`, { method: "POST", body: JSON.stringify(body) }),
   },
   bulkMarketplace: {
     preview: (conversationIds: string[], action: BulkMarketplaceAction, marketplaces: DelistMarketplace[]) =>
@@ -1257,6 +1264,25 @@ export const api = {
   },
 
   settings: {
+    pricingRules: () => request<PricingRules>("/settings/pricing-rules"),
+    setPricingRules: (body: PricingRulesUpdate) =>
+      request<PricingRules>("/settings/pricing-rules", { method: "PUT", body: JSON.stringify(body) }),
+    /** The listing with its marketplace prices back on the rules; the caller saves it. */
+    applyPricingRules: (listing: ListingData, marketplaces?: RuleMarketplace[]) =>
+      request<TransformedListing>("/settings/pricing-rules/apply", { method: "POST", body: JSON.stringify({ listing, marketplaces }) }),
+    shippingPresets: () => request<ShippingPresets>("/settings/shipping-presets"),
+    createShippingPreset: (preset: ShippingPresetInput) =>
+      request<ShippingPresets>("/settings/shipping-presets", { method: "POST", body: JSON.stringify(preset) }),
+    updateShippingPreset: (id: string, preset: ShippingPresetInput) =>
+      request<ShippingPresets>(`/settings/shipping-presets/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(preset) }),
+    deleteShippingPreset: (id: string) =>
+      request<ShippingPresets>(`/settings/shipping-presets/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    /** The listing with the preset's package and shipping fields; the caller saves it. */
+    applyShippingPreset: (id: string, listing: ListingData) =>
+      request<TransformedListing>(`/settings/shipping-presets/${encodeURIComponent(id)}/apply`, { method: "POST", body: JSON.stringify({ listing }) }),
+    listingWarnings: () => request<ListingWarnings>("/settings/listing-warnings"),
+    setListingWarnings: (body: { missing_sku?: boolean }) =>
+      request<ListingWarnings>("/settings/listing-warnings", { method: "PUT", body: JSON.stringify(body) }),
     saleDetection: () => request<SaleDetectionStatus>("/settings/sale-detection"),
     setSaleDetection: (marketplace: string, enabled: boolean) =>
       request<SaleDetectionStatus>("/settings/sale-detection", {

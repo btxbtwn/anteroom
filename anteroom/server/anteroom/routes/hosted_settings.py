@@ -72,6 +72,16 @@ for path, handler, methods in (
     ('/photoroom', settings.get_photoroom, ['GET']),
     ('/photoroom', settings.set_photoroom, ['PUT']),
     ('/photoroom', settings.delete_photoroom, ['DELETE']),
+    ('/pricing-rules', settings.get_pricing_rules, ['GET']),
+    ('/pricing-rules', settings.put_pricing_rules, ['PUT']),
+    ('/pricing-rules/apply', settings.apply_pricing_rules, ['POST']),
+    ('/shipping-presets', settings.get_shipping_presets, ['GET']),
+    ('/shipping-presets', settings.create_shipping_preset, ['POST']),
+    ('/shipping-presets/{preset_id}', settings.update_shipping_preset, ['PUT']),
+    ('/shipping-presets/{preset_id}', settings.delete_shipping_preset, ['DELETE']),
+    ('/shipping-presets/{preset_id}/apply', settings.apply_shipping_preset, ['POST']),
+    ('/listing-warnings', settings.get_listing_warnings_route, ['GET']),
+    ('/listing-warnings', settings.put_listing_warnings, ['PUT']),
 ):
     router.add_api_route(path, handler, methods=methods)
 

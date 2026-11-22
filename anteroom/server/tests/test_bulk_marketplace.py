@@ -103,6 +103,34 @@ def _perform(client, body):
     return client.post("/api/listings/marketplace-actions/perform", json=body)
 
 
+@pytest.mark.parametrize("action", ["list", "update"])
+def test_reviewed_price_uses_one_rules_read_until_dispatch(db, client, monkeypatch, action):
+    from anteroom.services import pricing_rules
+    from anteroom.services.seller_overrides import price_for
+
+    item = _item(db, live_on_ebay=action == "update")
+    config = pricing_rules.normalize({"enabled": True, "rules": {"ebay": {"percent": 10, "fixed": 0, "rounding": "none"}}})
+    monkeypatch.setattr(pricing_rules, "get_pricing_rules", lambda: config)
+    old, = _preview(client, [item.id], action, ["ebay"])
+    sent = []
+
+    async def dispatch(_body):
+        # Settings changed after the token was checked but before dispatch.
+        nonlocal config
+        config = pricing_rules.normalize({"enabled": True, "rules": {"ebay": {"percent": 30, "fixed": 0, "rounding": "none"}}})
+        sent.append(await asyncio.to_thread(price_for, {"price": 40}, "ebay"))
+        return {"ok": True}
+
+    monkeypatch.setattr(bulk_marketplace, "_dispatch", dispatch)
+    config["rules"]["ebay"]["percent"] = 20
+    assert _perform(client, _body(old)).status_code == 409
+    assert sent == []
+    reviewed, = _preview(client, [item.id], action, ["ebay"])
+    assert _perform(client, _body(reviewed)).status_code == 200
+    assert sent == [48]
+    assert price_for({"price": 40}, "ebay") == 52
+
+
 def test_preview_names_what_each_item_would_do_and_sends_nothing(db, client, calls):
     live = _item(db, "Live coat", live_on_ebay=True)
     fresh = _item(db, "Fresh coat")
@@ -349,3 +377,22 @@ def test_bulk_list_runs_beside_another_item_but_delist_waits(db, client, calls, 
     assert response.status_code == 200, response.text
     assert response.json()["ok"] is True
     assert bulk_marketplace._running == {"another-item"}
+
+
+def test_update_reviews_a_changed_effective_price_on_the_same_revision(db, client, monkeypatch):
+    from anteroom.services import pricing_rules
+
+    conv = _item(db, live_on_ebay=True)
+    current = ListingRepo(db).get_current(conv.id)
+    MarketplaceListingRepo(db).save(conv.id, "ebay", {"revision_id": current.current_revision_id, "listed_price": 44})
+    config = pricing_rules.normalize({"enabled": True, "rules": {"ebay": {"percent": 10, "fixed": 0}}})
+    monkeypatch.setattr(pricing_rules, "get_pricing_rules", lambda: config)
+    assert _preview(client, [conv.id], "update", ["ebay"])[0]["review_token"] is None
+
+    config = pricing_rules.normalize({"enabled": True, "rules": {"ebay": {"percent": 20, "fixed": 0}}})
+    changed = _preview(client, [conv.id], "update", ["ebay"])[0]
+    assert changed["revision_id"] == current.current_revision_id
+    assert changed["marketplaces"] == ["ebay"]
+    assert changed["review_token"]
+    config["enabled"] = False
+    assert _perform(client, _body(changed)).status_code == 409

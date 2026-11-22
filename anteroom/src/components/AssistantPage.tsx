@@ -11,13 +11,26 @@ import { useMobileLayout } from "../lib/useMobileLayout";
 import { AssistantAutomationCard } from "./AssistantAutomationCard";
 import { AssistantChangesCard } from "./AssistantChangesCard";
 import { type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
-import { newQueuedChatMessage, type QueuedChatMessage } from "./chatMessageQueue";
 import { coalesceSseEvents, emptySseParts, type SseParts } from "./sseCoalesce";
 import { streamingDisplayText } from "./streamingText";
 import { settleAgents } from "./liveTrace";
 import { useComposerImages, type ComposerImage } from "./chat/ComposerAttachments";
 import { getComposerDraft, hasComposerDraft, removeComposerDraftImages, restoreComposerDraftImages, setComposerDraftText, transferComposerDraftRemainder, useComposerDraftText } from "./chat/composerDrafts";
 import { ChatComposer } from "./chat/ChatComposer";
+import {
+  assignChatThread,
+  chatQueue,
+  editChatMessage,
+  enqueueChatMessage,
+  newQueuedChatMessage,
+  promoteChatMessage,
+  removeChatMessage,
+  resolveFollowUp,
+  steerChatMessage,
+  takeNextChatMessage,
+  useChatQueueItems,
+  type QueuedChatMessage,
+} from "./chat/chatQueueStore";
 import { chatTime } from "./chat/chatHistory";
 import { foldSseEvent } from "./chat/chatStream";
 import { ChatTranscript } from "./chat/ChatTranscript";
@@ -94,14 +107,34 @@ interface Props {
   onShowHistory?: () => void;
 }
 
-/** A follow-up asked while an answer is still being written, with the images sent along. */
-export interface QueuedQuestion extends QueuedChatMessage {
+/** Images sent along with a queued question; kept in memory, never in browser storage. */
+export interface AssistantQueuePayload {
   uploads: ChatAttachmentUpload[];
   shown: ChatAttachment[];
   /** Original composer attachments so a failed send can restore them to the draft. */
   attached?: ComposerImage[];
-  /** The conversation it was asked in; null on a home screen that has not started one. */
-  threadId: string | null;
+}
+
+/**
+ * A follow-up asked while an answer is still being written. `threadId` is the
+ * conversation it was asked in; null on a home screen that has not started one.
+ */
+export type QueuedQuestion = QueuedChatMessage<AssistantQueuePayload>;
+
+/** One queue for every assistant conversation; each message knows its own. */
+const ASSISTANT_QUEUE = "assistant";
+
+function queuedQuestion(
+  text: string,
+  threadId: string | null,
+  uploads: ChatAttachmentUpload[],
+  shown: ChatAttachment[],
+  attached: ComposerImage[],
+): QueuedQuestion {
+  return newQueuedChatMessage<AssistantQueuePayload>(text, {
+    threadId,
+    ...(uploads.length || attached.length ? { payload: { uploads, shown, attached } } : {}),
+  });
 }
 
 /**
@@ -195,7 +228,20 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   const [stopping, setStopping] = useState(false);
   /** True while this page follows an answer, including a reattach that has not heard anything yet. */
   const [following, setFollowing] = useState(false);
-  const [queued, setQueued] = useState<QueuedQuestion[]>([]);
+  const queuedAll = useChatQueueItems<AssistantQueuePayload>(ASSISTANT_QUEUE);
+  // This conversation's follow-ups; another conversation's wait there for the seller to come back.
+  const queued = queuedAll.filter((message) => message.threadId === threadId || (threadId === null && message.threadId == null));
+  // Keyed by conversation, so switching conversations ends the edit.
+  const [editing, setEditing] = useState<{ threadId: string | null; id: string } | null>(null);
+  const editingQueuedId = editing?.threadId === threadId ? editing.id : null;
+  const setEditingQueuedId = (id: string | null) => setEditing(id ? { threadId, id } : null);
+  /** Set when Stop is a steer, so the cut-off answer folds as one. */
+  const steered = useRef(new WeakSet<AbortController>());
+  const visibleAnswer = useRef<AbortController | null>(null);
+  const preparingAsk = useRef(false);
+  /** The answer on screen has reached the server, so cutting it off cannot lose its question. */
+  const [answerHeard, setAnswerHeard] = useState(false);
+  const stopPending = useRef(false);
   const controller = useRef<AbortController | null>(null);
   const composerRef = useRef<ComposerPromptEditorHandle | null>(null);
   const images = useComposerImages(draftKey);
@@ -385,6 +431,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
             transferComposerDraftRemainder(originDraftKey, `assistant:${id}`, question);
             transferred = true;
           }
+          assignChatThread(ASSISTANT_QUEUE, id);
           onThreadReady?.(id);
         }
       }
@@ -413,10 +460,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
           clearMatchingDraftText(`assistant:${id}`, question);
         }
         scroll.pinChatToBottom();
-        setQueued((current) => [
-          ...current,
-          { ...newQueuedChatMessage(question), uploads, shown: shownImages, attached: [...attachedImages], threadId: id },
-        ]);
+        enqueueChatMessage(ASSISTANT_QUEUE, queuedQuestion(question, id, uploads, shownImages, [...attachedImages]));
       }
       return;
     }
@@ -427,14 +471,19 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     let asking = question !== null;
     let retrying = retry;
     setFollowing(true);
+    setAnswerHeard(false);
     const asked = turnsRef.current.length;
     const baseIds = turnsRef.current.map((turn) => turn.id);
     const startedAtMs = Date.now();
     let dropped = false;
     let parts = emptySseParts();
     let stopped = false;
-    const show = () =>
+    // Once a newer follow owns the page (another conversation, a new chat), a
+    // late paint from this one must not put its answer back on screen.
+    const show = () => {
+      if (controller.current !== abort) return;
       setLive({ question, questionImages: shownImages, asked, startedAtMs, parts: { ...parts } });
+    };
     if (question !== null || retry) {
       scroll.pinChatToBottom();
       clearThreadError(id);
@@ -452,6 +501,12 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         const paint = coalesceSseEvents(() => show());
         const handlers = {
           onEvent: (event: string, data: string) => {
+            // Steerable only once the server has the question: cut off before
+            // that, the question itself would never arrive.
+            if (visibleAnswer.current !== abort && controller.current === abort) {
+              visibleAnswer.current = abort;
+              setAnswerHeard(true);
+            }
             foldSseEvent(parts, event, data);
             paint.push(event, parts);
           },
@@ -505,6 +560,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
           startedAtMs,
           endedAtMs,
           cancelled: stopped,
+          ...(stopped && steered.current.has(abort) ? { steered: true } : {}),
           baseIds,
         });
       }
@@ -526,6 +582,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         controller.current = null;
         setLive(null);
         setFollowing(false);
+        setAnswerHeard(false);
       }
     }
   };
@@ -569,43 +626,63 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         controller.current = null;
         followThread.current = null;
         setFollowing(false);
+        setAnswerHeard(false);
       }
     };
   }, [threadId]);
 
-  // Follow-ups wait for the conversation they were asked in; another thread drops them.
-  useEffect(() => {
-    setQueued((current) => {
-      const kept = current.filter((message) => message.threadId === threadId || message.threadId === followThread.current);
-      return kept.length === current.length ? current : kept;
-    });
-  }, [threadId]);
+  // Leaving an edit (another conversation, another page) gives the queued
+  // message back unchanged and leaves no half-edited copy in that box.
+  const editDraftKey = useRef<string | null>(null);
+  useEffect(() => () => {
+    if (editDraftKey.current !== draftKey) return;
+    editDraftKey.current = null;
+    setComposerDraftText(draftKey, "");
+    setEditing(null);
+  }, [draftKey]);
 
-  // Send the oldest held follow-up once the answer before it has ended.
+  // Send the oldest held follow-up of this conversation once the answer before
+  // it has ended. `following` ends a reattach that found nothing running, as
+  // after a reload, which never sets `live`.
   useEffect(() => {
-    if (live || controller.current || !queued.length) return;
-    const [next, ...rest] = queued;
-    setQueued(rest);
+    if (stopping || following || live || controller.current || editingQueuedId) return;
+    const active = followThread.current ?? threadIdRef.current;
+    // A question still waiting for its new conversation only goes from the new-chat screen.
+    const next = takeNextChatMessage<AssistantQueuePayload>(
+      ASSISTANT_QUEUE,
+      (message) => message.threadId === active || (message.threadId == null && active === null),
+    );
+    if (!next) return;
     void followRef.current(
       next.text,
-      next.uploads,
-      next.shown,
-      next.threadId ?? followThread.current ?? threadIdRef.current,
+      next.payload?.uploads ?? [],
+      next.payload?.shown ?? [],
+      next.threadId ?? active,
       false,
       false,
       draftSessionRef.current,
-      next.attached ?? [],
+      next.payload?.attached ?? [],
     );
-  }, [live, queued]);
+  }, [stopping, following, live, queuedAll, editingQueuedId]);
 
-  const ask = async (raw: string) => {
+  const ask = async (raw: string, alternate = false) => {
+    // A second Enter while the first one's images are being prepared would send it twice.
+    if (preparingAsk.current) return;
     const question = raw.trim();
     const attached = images.images;
     if (!question && !attached.length) return;
     const originThread = threadIdRef.current;
     const originSession = draftSessionRef.current;
     const originDraftKey = `assistant:${originThread ?? "__new__"}`;
-    const uploads = attached.length ? await images.prepare(attached) : [];
+    let uploads: ChatAttachmentUpload[] | null = [];
+    if (attached.length) {
+      preparingAsk.current = true;
+      try {
+        uploads = await images.prepare(attached);
+      } finally {
+        preparingAsk.current = false;
+      }
+    }
     if (uploads === null) return;
     // The live bubble shows the images by name until the saved turn brings them back.
     const shown = attached.map((image, index) => ({ id: "", name: uploads[index]?.name ?? image.file.name, mime_type: image.file.type }));
@@ -619,7 +696,9 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     }
     const stillOnOriginNew = originThread === null && draftSessionRef.current === originSession;
     const activeThread = followThread.current ?? threadIdRef.current;
-    if (targetThread === activeThread && askNow(Boolean(live || controller.current), queued) === "queue") {
+    const answer = controller.current;
+    const pending = chatQueue<AssistantQueuePayload>(ASSISTANT_QUEUE).filter((item) => item.threadId === targetThread);
+    if (targetThread === activeThread && askNow(Boolean(answer), pending) === "queue") {
       if ((originThread !== null || stillOnOriginNew) && getComposerDraft(originDraftKey).text.trim() === question) {
         setComposerDraftText(originDraftKey, "");
       }
@@ -627,22 +706,71 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         setComposerDraftText(targetDraftKey, "");
       }
       scroll.pinChatToBottom();
-      setQueued((current) => [...current, { ...newQueuedChatMessage(question), uploads, shown, attached, threadId: targetThread }]);
+      const message = queuedQuestion(question, targetThread, uploads, shown, attached);
+      // While an answer is being written a follow-up steers it by default, as in T3 Code.
+      // Read after the images are ready, not when Enter was pressed: an upload can outlast the answer.
+      const action = resolveFollowUp({ busy: Boolean(answer), canSteer: !!answer && visibleAnswer.current === answer, alternate });
+      if (action === "steer") {
+        steerChatMessage(ASSISTANT_QUEUE, message);
+        void stop(true);
+      } else {
+        enqueueChatMessage(ASSISTANT_QUEUE, message);
+      }
       return;
     }
     const clearDraft = targetThread !== null || stillOnOriginNew;
     void follow(question, uploads, shown, targetThread, false, clearDraft, originSession, attached);
   };
 
-  const stop = async () => {
+  /** Stop the answer; `steer` when a follow-up cut it off and goes next. */
+  const stop = async (steer = false) => {
+    if (stopPending.current) return;
+    stopPending.current = true;
+    const target = controller.current;
     // The server saves the partial answer before it answers; say so meanwhile.
     setStopping(true);
     try {
       await api.assistant.stop().catch(() => undefined);
-      controller.current?.abort();
+      if (steer && target && !target.signal.aborted) steered.current.add(target);
+      target?.abort();
     } finally {
+      stopPending.current = false;
       setStopping(false);
     }
+  };
+
+  /** Cut off the answer being written and send this queued follow-up next. */
+  const sendQueuedNow = (id: string) => {
+    promoteChatMessage(ASSISTANT_QUEUE, id);
+    void stop(true);
+  };
+  const startEditQueued = (id: string) => {
+    const message = chatQueue<AssistantQueuePayload>(ASSISTANT_QUEUE).find((item) => item.id === id);
+    // A question waiting for its conversation to be created moves with the box; leave it be.
+    if (!message || input.trim() || message.payload !== undefined || message.steer || message.threadId == null) return false;
+    editDraftKey.current = draftKey;
+    setEditingQueuedId(id);
+    setInput(message.text);
+    composerRef.current?.focus();
+    return true;
+  };
+  const cancelEditQueued = () => {
+    editDraftKey.current = null;
+    setEditingQueuedId(null);
+    setInput("");
+  };
+  const saveEditQueued = () => {
+    const text = input.trim();
+    if (!editingQueuedId || !text) return;
+    if (!editChatMessage(ASSISTANT_QUEUE, editingQueuedId, text)) {
+      editDraftKey.current = null;
+      setEditingQueuedId(null);
+      addToast({ type: "warning", title: "This queued message is no longer available. Your edit is in the composer." });
+      return;
+    }
+    editDraftKey.current = null;
+    setEditingQueuedId(null);
+    setInput("");
   };
 
   // Applied changes reach every page that shows a listing, a total or a box.
@@ -700,10 +828,26 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         images={images}
         busy={Boolean(live)}
         stopping={stopping}
-        onSend={() => { void ask(input); }}
+        onSend={(alternate) => {
+          if (editingQueuedId) saveEditQueued();
+          else void ask(input, alternate);
+        }}
         onStop={() => { void stop(); }}
         stopLabel="Stop answering"
         queueLabel="Send when this answer is finished"
+        canSteer={Boolean(live) && answerHeard}
+        editingQueued={editingQueuedId !== null}
+        onCancelEdit={cancelEditQueued}
+        onSendQueuedNow={() => {
+          const first = queued[0];
+          if (!live || !answerHeard || !first || first.steer || editingQueuedId) return false;
+          sendQueuedNow(first.id);
+          return true;
+        }}
+        onEditQueued={() => {
+          const last = queued[queued.length - 1];
+          return Boolean(last && !editingQueuedId && startEditQueued(last.id));
+        }}
       />
     </div>
   );
@@ -891,7 +1035,17 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
           ) : null}
           <QueuedMessages
             queue={queued}
-            onRemove={(id) => setQueued((current) => current.filter((message) => message.id !== id))}
+            canSendNow={Boolean(live) && answerHeard && !editingQueuedId}
+            onSendNow={sendQueuedNow}
+            onEdit={startEditQueued}
+            onRemove={(id) => removeChatMessage(ASSISTANT_QUEUE, id)}
+            editingId={editingQueuedId}
+            onCancelEdit={cancelEditQueued}
+            editBlockedReason={
+              editingQueuedId ? "Finish editing the other message first"
+                : input.trim() ? "Send or clear the message box first" : null
+            }
+            imageCount={(message) => (message as QueuedQuestion).payload?.uploads.length ?? 0}
           />
           {showStandaloneError || unanswered ? (
             <Alert variant="error" className="my-2">
