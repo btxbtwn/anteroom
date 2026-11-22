@@ -93,6 +93,9 @@ describe("chat queue store", () => {
     enqueueChatMessage("k", newQueuedChatMessage("only once"));
     resetChatQueuesForTest({ reload: false });
     expect(chatQueue("k")).toEqual([]);
+    // Reloading the duplicate later does not bring the other tab's messages back.
+    resetChatQueuesForTest();
+    expect(chatQueue("k")).toEqual([]);
   });
 
   it("does not send a message held for over a day without a reload", () => {

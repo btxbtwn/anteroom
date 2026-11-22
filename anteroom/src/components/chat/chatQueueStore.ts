@@ -69,7 +69,16 @@ let restoreSaved = reloaded;
 function load(): Queues {
   if (queues) return queues;
   queues = {};
-  if (!restoreSaved()) return queues;
+  if (!restoreSaved()) {
+    // A new page, a duplicated tab included, starts empty; drop any copied snapshot
+    // too, so a later reload of this tab cannot bring the other tab's messages back.
+    try {
+      storage()?.removeItem(STORAGE_KEY);
+    } catch {
+      // Storage blocked: nothing to drop.
+    }
+    return queues;
+  }
   try {
     const raw = storage()?.getItem(STORAGE_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : null;
