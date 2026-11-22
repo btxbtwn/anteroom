@@ -57,6 +57,7 @@ class ListingPromotion(SellerOwned, Base):
     like_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Marketplace evidence, distinct from pre-send likes. Unknown counts stay null.
     confirmation: Mapped[str | None] = mapped_column(String, nullable=True)
+    follow_budget: Mapped[dict[str, int] | None] = mapped_column(JSON, nullable=True)
     recipient_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     state: Mapped[str] = mapped_column(String, nullable=False, default="preview")
     note: Mapped[str | None] = mapped_column(String, nullable=True)

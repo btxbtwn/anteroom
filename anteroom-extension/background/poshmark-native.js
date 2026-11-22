@@ -831,7 +831,11 @@ async function poshmarkSendPrivateBundleOffer(client, account, payload) {
   const bundle = bundleResp?.bundle || bundleResp;
   const bundleId = String(bundle?.id || '');
   if (!bundleId) throw marketplaceError('Poshmark did not return a bundle ID.');
-  const itemCount = Number(bundle?.item_count ?? (Array.isArray(bundle?.posts) ? bundle.posts.length : 1));
+  const posts = bundle?.posts;
+  const itemCount = Number(bundle?.item_count ?? (Array.isArray(posts) ? posts.length : NaN));
+  if (itemCount !== 1 || !Array.isArray(posts) || posts.length !== 1 || String(posts[0]?.id || '') !== listingId) {
+    throw marketplaceError('Anteroom could not verify a single-item bundle at the reviewed price.');
+  }
   if (itemCount < minItems) {
     throw marketplaceError(`Bundle has ${itemCount} item(s), below the ${minItems}-item minimum.`);
   }
@@ -865,10 +869,13 @@ async function poshmarkRunFollows(client, account, config = {}) {
   const unfollowCap = Math.max(0, Math.min(POSHMARK_MAX_DAILY_UNFOLLOWS, Number(config.unfollow_cap) || 0));
   const unsubLive = Boolean(config.unsubscribe_live_shows);
 
+  const totalCap = config.remaining_follow_cap === undefined ? POSHMARK_MAX_DAILY_FOLLOWS
+    : Math.max(0, Math.min(POSHMARK_MAX_DAILY_FOLLOWS, Math.trunc(Number(config.remaining_follow_cap)) || 0));
+  let activeFollowed = 0;
   let followed = 0;
   let unfollowed = 0;
 
-  if (reciprocal) {
+  if (reciprocal && totalCap > 0) {
     const feed = await client.call('GET', `/vm-rest/users/${account.user_id}/newsfeed?type=follow&app_type=web&count=100`,
       undefined, { step: 'follow-feed', what: 'recent followers' });
     const events = Array.isArray(feed) ? feed : Array.isArray(feed?.data) ? feed.data : [];
@@ -877,7 +884,7 @@ async function poshmarkRunFollows(client, account, config = {}) {
       const uid = String(ev?.actor_id || ev?.user_id || ev?.user?.id || '');
       const created = Date.parse(ev?.created_at || '');
       if (!uid || uid === account.user_id || (Number.isFinite(created) && created < since)) continue;
-      if (followed >= POSHMARK_MAX_DAILY_FOLLOWS) break;
+      if (followed >= totalCap) break;
       await client.call('PUT', `/vm-rest/users/self/followed_users/${uid}`, {},
         { step: 'follow-reciprocal', what: 'following back a recent follower' });
       followed += 1;
@@ -885,7 +892,7 @@ async function poshmarkRunFollows(client, account, config = {}) {
   }
 
   if (newCap > 0) {
-    const remaining = Math.min(newCap, POSHMARK_MAX_DAILY_FOLLOWS - followed);
+    const remaining = Math.min(newCap, totalCap - followed);
     if (remaining > 0) {
       const active = await client.call('GET', `/vm-rest/users/active?app_type=web&count=${remaining}`,
         undefined, { step: 'active-sellers', what: 'active Poshmark sellers' });
@@ -895,6 +902,7 @@ async function poshmarkRunFollows(client, account, config = {}) {
         if (!uid || uid === account.user_id) continue;
         await client.call('PUT', `/vm-rest/users/self/followed_users/${uid}`, {},
           { step: 'follow-active', what: 'following an active seller' });
+        activeFollowed += 1;
         followed += 1;
       }
     }
@@ -922,6 +930,7 @@ async function poshmarkRunFollows(client, account, config = {}) {
     ok: true,
     state: 'done',
     followed_count: followed,
+    active_followed_count: activeFollowed,
     unfollowed_count: unfollowed,
     unsubscribed_live_shows: unsubLive,
   };

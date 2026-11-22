@@ -578,6 +578,32 @@ async def perform(promotion_id: str, shipping_discount_id: str | None = None, *,
         release_api_job(job_id)
 
 
+def _follow_allowance(db: Session, marketplace: str, config: dict) -> tuple[dict, dict[str, int]]:
+    from anteroom.services.promotion_automations import MAX_DAILY_FOLLOWS, MAX_DAILY_UNFOLLOWS
+
+    used = {"active": 0, "followed": 0, "unfollowed": 0}
+    cutoff = _now() - timedelta(hours=24)
+    recent = db.query(ListingPromotion.follow_budget).filter(
+        ListingPromotion.marketplace == marketplace, ListingPromotion.action == "follow",
+        # A completed round may have acted right up to the receipt timestamp.
+        or_(ListingPromotion.sent_at > cutoff, ListingPromotion.finished_at > cutoff),
+    )
+    for (budget,) in recent:
+        # Older sends did not track all three counts. Treat them as unknown.
+        for key, maximum in (("active", MAX_DAILY_FOLLOWS), ("followed", MAX_DAILY_FOLLOWS),
+                             ("unfollowed", MAX_DAILY_UNFOLLOWS)):
+            used[key] += budget[key] if budget is not None else maximum
+    remaining = max(0, MAX_DAILY_FOLLOWS - used["followed"])
+    active = min(remaining, max(0, int(config.get("new_active_sellers_cap") or 0) - used["active"]))
+    unfollow = max(0, min(MAX_DAILY_UNFOLLOWS, int(config.get("unfollow_cap") or 0)) - used["unfollowed"])
+    reciprocal = bool(config.get("reciprocal_24h"))
+    return {
+        "reciprocal_24h": reciprocal, "new_active_sellers_cap": active, "unfollow_cap": unfollow,
+        "unsubscribe_live_shows": bool(config.get("unsubscribe_live_shows")),
+        "remaining_follow_cap": remaining if reciprocal else active,
+    }, {"active": active, "followed": remaining if reciprocal else active, "unfollowed": unfollow}
+
+
 async def perform_account_action(
     marketplace: str,
     action: str,
@@ -601,9 +627,19 @@ async def perform_account_action(
         use_cloud = cloud_sessions.has_active_session(marketplace, db)
         require_chrome(marketplace, db=db)
         repo = JobRepo(db)
+        extra = dict(extra_payload)
         with listing_mode.guard(db, "direct"):
             if repo.get_active():
                 raise PromotionError(409, "Another automation job is queued or running. Wait for it to finish.", "busy")
+            budget = None
+            if action == "follow":
+                db.refresh(automation)
+                if not automation.enabled or automation.action != "follow":
+                    raise PromotionError(409, "This automation changed or was turned off. Nothing was sent.", "paused")
+                config, budget = _follow_allowance(db, marketplace, automation.follow_config or {})
+                if not any(budget.values()) and not config["unsubscribe_live_shows"]:
+                    raise PromotionError(409, "The rolling daily follow and unfollow budget is used.", "daily_cap")
+                extra["follow_config"] = config
             row = ListingPromotion(
                 batch_id=batch_id,
                 conversation_id=None,
@@ -614,6 +650,7 @@ async def perform_account_action(
                 automation_id=automation_id,
                 job_id=None,
                 state="sending",
+                follow_budget=budget,
                 expires_at=_now() + PREVIEW_TTL,
                 sent_at=_now(),
             )
@@ -626,7 +663,7 @@ async def perform_account_action(
             "action": action,
             "listing_id": "__account__",
             "confirm": True,
-            **extra_payload,
+            **extra,
         }
         return row.id, payload, use_cloud
 
@@ -736,8 +773,7 @@ def _start_send(db: Session, promotion_id: str, shipping_discount_id: str | None
         row.state, row.job_id, row.sent_at = "sending", job_id, _now()
         payload = {"action_id": row.id, "marketplace": row.marketplace, "action": row.action, "listing_id": row.listing_id,
                    "confirm": True, "price_cents": row.price_cents, "offer_price_cents": row.offer_price_cents,
-                   "floor_cents": row.floor_cents, "shipping_discount_id": row.shipping_discount_id,
-                   "discount_percent": row.discount_percent, "waterfall_step": row.waterfall_step}
+                   "floor_cents": row.floor_cents, "shipping_discount_id": row.shipping_discount_id}
         db.commit()
         label = (
             "Sharing" if payload["action"] == "share"
@@ -795,9 +831,14 @@ def _settle(row: ListingPromotion, result: dict | None) -> None:
                 row.note = "Shared to your followers."
             return
         if row.action == "follow":
-            followed = result.get("followed_count", 0)
-            unfollowed = result.get("unfollowed_count", 0)
-            row.recipient_count = int(followed or 0)
+            followed = result.get("followed_count")
+            unfollowed = result.get("unfollowed_count")
+            actual = {"active": result.get("active_followed_count"), "followed": followed, "unfollowed": unfollowed}
+            reserved = row.follow_budget
+            if reserved is not None and all(type(value) is int and 0 <= value <= reserved[key]
+                                            for key, value in actual.items()):
+                row.follow_budget = {key: type_cast(int, value) for key, value in actual.items()}
+            row.recipient_count = followed if type(followed) is int else None
             row.note = f"Followed {followed} and unfollowed {unfollowed} Poshmark accounts."
             return
         if row.action == "bundle_offer":

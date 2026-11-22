@@ -13,6 +13,7 @@ Approved by the seller on 2026-11-22 (see AGENTS.md Invariant):
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -664,10 +665,12 @@ async def run_auto_relist(
         delister = _default_delister
 
     if lister is None:
+        from anteroom.services.automation_actions import wait_for_native_result
         from anteroom.services.native_marketplaces import ListRequest, list_now
 
         async def _default_lister(conv_id: str, marketplace: str, revision_id: str) -> dict[str, Any]:
             res = await list_now(conv_id, cast(Any, marketplace), ListRequest(revision_id=revision_id, confirm=True))
+            res = await wait_for_native_result(conv_id, marketplace, res)
             ok = res.get("state") in LIVE_STATES and not res.get("error")
             new_id_val = res.get("listing_id") or extract_listing_id(marketplace, res.get("listing_url"))
             return {
@@ -684,13 +687,13 @@ async def run_auto_relist(
         conv_id = entry["conversation_id"]
         market = entry["marketplace"]
         old_id = entry["listing_id"]
-        has_offer = entry["local_active_offer"]
-        if not has_offer and entry["skip_active_offers"] and offer_checker is not None:
+        offer_status = True if entry["local_active_offer"] else None
+        if offer_status is None and entry["skip_active_offers"] and offer_checker is not None:
             try:
-                has_offer = bool(await offer_checker(market, old_id))
-            except Exception:  # noqa: BLE001 - conservative: do not crash loop
-                has_offer = True
-        if has_offer:
+                offer_status = await asyncio.wait_for(offer_checker(market, old_id), timeout=20)
+            except Exception:  # noqa: BLE001 - no positive clearance to delist
+                pass
+        if entry["skip_active_offers"] and offer_status is not False:
             outcomes.append(await in_worker_session(_record_log_payload, {
                 "conv_id": conv_id,
                 "marketplace": market,
@@ -698,8 +701,9 @@ async def run_auto_relist(
                 "new_listing_id": None,
                 "old_price": entry["price"],
                 "new_price": entry["price"],
-                "status": "skipped_active_offer",
-                "reason": "Skipped because this listing has an active incoming buyer offer.",
+                "status": "skipped_active_offer" if offer_status is True else "skipped_offer_unverified",
+                "reason": ("Skipped because this listing has an active incoming buyer offer." if offer_status is True
+                           else "Skipped because Anteroom could not verify incoming buyer offers."),
                 "moment": _now(),
             }))
             continue

@@ -108,6 +108,42 @@ test('Poshmark private bundle offer waits for like pause, enforces min items, an
     ],
     [`POST poshmark.com/vm-rest/users/${USER}/bundles`]: [
       200,
+      { data: { bundle: { id: 'bundle-77', item_count: 1, posts: [{ id: POST }], is_first_bundle: true, comment_count: 0 } } },
+    ],
+    'POST poshmark.com/vm-rest/bundles/bundle-77/offers': [200, { data: {} }],
+    'POST poshmark.com/vm-rest/bundles/bundle-77/comments': [200, { data: {} }],
+  });
+  await c.handleMarketplacePromotion({
+    type: 'marketplace.promote',
+    payload: {
+      marketplace: 'poshmark',
+      action: 'bundle_offer',
+      listing_id: POST,
+      confirm: true,
+      action_id: 'bundle-1',
+      price_cents: 5000,
+      offer_price_cents: 4000,
+      floor_cents: 3500,
+      shipping_discount_id: DISCOUNT,
+      bundle_pause_minutes: 15,
+      bundle_min_items: 1,
+      bundle_comment: 'Welcome! Enjoy 20% off your bundle.',
+    },
+  });
+  assert.equal(results[0].ok, true);
+  assert.equal(results[0].bundle_id, 'bundle-77');
+  assert.equal(bodies['POST poshmark.com/vm-rest/bundles/bundle-77/comments'].comment, 'Welcome! Enjoy 20% off your bundle.');
+});
+
+test('Poshmark refuses to apply a single reviewed price to a multi-item bundle', async () => {
+  const oldLike = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const { c, bodies, results } = setupWorker({
+    [`GET poshmark.com/vm-rest/posts/${POST}/likes`]: [
+      200,
+      { data: [{ user_id: 'buyer-1', username: 'happybuyer', created_at: oldLike }] },
+    ],
+    [`POST poshmark.com/vm-rest/users/${USER}/bundles`]: [
+      200,
       { data: { bundle: { id: 'bundle-77', item_count: 2, is_first_bundle: true, comment_count: 0 } } },
     ],
     'POST poshmark.com/vm-rest/bundles/bundle-77/offers': [200, { data: {} }],
@@ -130,9 +166,8 @@ test('Poshmark private bundle offer waits for like pause, enforces min items, an
       bundle_comment: 'Welcome! Enjoy 20% off your bundle.',
     },
   });
-  assert.equal(results[0].ok, true);
-  assert.equal(results[0].bundle_id, 'bundle-77');
-  assert.equal(bodies['POST poshmark.com/vm-rest/bundles/bundle-77/comments'].comment, 'Welcome! Enjoy 20% off your bundle.');
+  assert.equal(results[0].ok, false);
+  assert.equal(bodies['POST poshmark.com/vm-rest/bundles/bundle-77/offers'], undefined);
 });
 
 test('Poshmark automatic follows runs reciprocal 24h, active sellers, unfollows, and opt-in live show unsubscribe', async () => {

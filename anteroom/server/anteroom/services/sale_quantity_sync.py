@@ -269,10 +269,12 @@ def _format_adjust_sentence(updated: list[str], relisted: list[str], failed: dic
 
 
 async def _default_updater(conv_id: str, marketplace: str, revision_id: str, _new_qty: int) -> dict[str, Any]:
+    from anteroom.services.automation_actions import wait_for_native_result
     from anteroom.services.native_marketplaces import ListRequest, update_live
 
     try:
         res = await update_live(conv_id, marketplace, ListRequest(revision_id=revision_id, confirm=True))  # type: ignore[arg-type]
+        res = await wait_for_native_result(conv_id, marketplace, res)
     except Exception as exc:  # noqa: BLE001 - capture marketplace failure cleanly
         return {"ok": False, "error": str(exc)}
     ok = res.get("state") in LIVE_STATES and not res.get("error")
@@ -280,10 +282,12 @@ async def _default_updater(conv_id: str, marketplace: str, revision_id: str, _ne
 
 
 async def _default_mercari_relister(conv_id: str, revision_id: str) -> dict[str, Any]:
+    from anteroom.services.automation_actions import wait_for_native_result
     from anteroom.services.native_marketplaces import ListRequest, list_now
 
     try:
         res = await list_now(conv_id, "mercari", ListRequest(revision_id=revision_id, confirm=True))
+        res = await wait_for_native_result(conv_id, "mercari", res)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc)}
     ok = res.get("state") in LIVE_STATES and not res.get("error")

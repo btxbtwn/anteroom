@@ -393,9 +393,7 @@ def test_pending_deletion_fences_cloud_session_tables(cloud, table):  # noqa: F8
 @pytest.mark.parametrize('receipt_state', ['absent', 'pending', 'completed'])
 def test_cloud_session_fence_downgrade(migration_engine, receipt_state):  # noqa: F811
     from alembic import command
-    from anteroom.models.cloud_session import CloudSessionAudit
     from anteroom.services import schema_migrations
-    from anteroom.services.hosted_database import SellerDatabaseSession
 
     engine = migration_engine
     if receipt_state != 'absent' and engine.dialect.name != 'postgresql':
@@ -413,10 +411,14 @@ def test_cloud_session_fence_downgrade(migration_engine, receipt_state):  # noqa
     with pytest.raises(DBAPIError, match='Deletion fences cannot be removed'):
         command.downgrade(config, 'ae814be47ba5')
     assert schema_migrations.recorded_revision(engine) == '8580524be7de'
-    with SellerDatabaseSession(user_id=ALICE, bind=engine) as db:
-        db.add(CloudSessionAudit(marketplace='poshmark', event='connected'))
-        with pytest.raises(DBAPIError, match='Account deletion is pending'):
-            db.commit()
+    # The current ORM requires the latest schema. Test this older revision's
+    # database fence directly, with the same role and seller identity.
+    with pytest.raises(DBAPIError, match='Account deletion is pending'), engine.begin() as db:
+        db.execute(text('SET LOCAL ROLE anteroom_seller'))
+        db.execute(text("SELECT set_config('request.jwt.claims', :claims, true)"),
+                   {'claims': f'{{"sub":"{ALICE}"}}'})
+        db.execute(text("INSERT INTO cloud_session_audit (id, user_id, marketplace, event, created_at) "
+                        "VALUES ('downgrade-probe', :owner, 'poshmark', 'connected', now())"), {'owner': ALICE})
 
 
 def test_storage_trigger_serializes_with_deletion(migration_engine):  # noqa: F811

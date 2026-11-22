@@ -95,11 +95,7 @@ async def tick(db: Session, *, now: datetime | None = None, executor=None) -> in
                 due_drafts = _has_due_scheduled_drafts(db, moment)
                 has_relist = _has_enabled_auto_relist(db)
                 end_read(db)
-                if due_drafts:
-                    handled += await _run_scheduled_drafts(moment)
-                if has_relist:
-                    handled += await _run_auto_relist(moment)
-                return handled
+                break
             automation = db.get(Automation, run.automation_id)
             if automation is None or automation.status not in {"active", "paused"}:
                 run.status = "failed"
@@ -137,6 +133,12 @@ async def tick(db: Session, *, now: datetime | None = None, executor=None) -> in
         db.expire_all()
         handled += 1
         moment = as_utc(now or datetime.now(UTC))
+
+    if due_drafts:
+        handled += await _run_scheduled_drafts(moment)
+    if has_relist:
+        handled += await _run_auto_relist(moment)
+    return handled
 
 
 def start_automation_scheduler() -> asyncio.Task:
@@ -524,7 +526,7 @@ async def _run_auto_relist(moment: datetime) -> int:
 
     try:
         results = await run_auto_relist(now=moment)
-        return sum(1 for item in results if item.get("status") in {"relisted", "failed"})
+        return sum(1 for item in results if item.get("status") in {"completed", "failed"})
     except Exception:  # noqa: BLE001
         log.exception("auto-relist sweep failed")
         return 0

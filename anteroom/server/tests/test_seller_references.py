@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from test_seller_ownership import CONVERSATION_SETTLEMENT_DEFAULTS, JOB_LEASE_DEFAULTS, migration_engine, migration_config, read_rows, seed_previous_release  # noqa: F401
+from test_seller_ownership import CONVERSATION_SETTLEMENT_DEFAULTS, JOB_LEASE_DEFAULTS, LISTING_SCHEDULE_DEFAULTS, migration_engine, migration_config, read_rows, seed_previous_release  # noqa: F401
 from anteroom.database import Base, load_models
 from anteroom.models.conversation import Conversation, Message, Photo
 from anteroom.services import schema_migrations
@@ -163,6 +163,8 @@ def test_populated_previous_release_upgrade_preserves_records_and_old_foreign_ke
         row.update(JOB_LEASE_DEFAULTS)
     for row in before.get("conversations", []):
         row.update(CONVERSATION_SETTLEMENT_DEFAULTS)
+    for row in before.get("listings", []):
+        row.update(LISTING_SCHEDULE_DEFAULTS)
     assert read_rows(engine, names) == before
     with engine.connect() as connection:
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []

@@ -62,6 +62,16 @@
     } else if (value.type === 'marketplace.like_events') {
       keys.push('marketplace');
       if (!['poshmark', 'depop'].includes(p.marketplace)) return false;
+    } else if (value.type === 'marketplace.promote' && p.action === 'follow') {
+      keys.push('marketplace', 'action', 'listing_id', 'action_id', 'confirm', 'follow_config');
+      const cfg = p.follow_config;
+      const cap = n => Number.isInteger(n) && n >= 0 && n <= 1000;
+      if (p.marketplace !== 'poshmark' || p.listing_id !== '__account__' || p.confirm !== true
+          || !/^[A-Za-z0-9-]{6,64}$/.test(p.action_id || '') || !plain(cfg)
+          || typeof cfg.reciprocal_24h !== 'boolean' || typeof cfg.unsubscribe_live_shows !== 'boolean'
+          || !cap(cfg.remaining_follow_cap) || !cap(cfg.new_active_sellers_cap) || !cap(cfg.unfollow_cap)
+          || cfg.new_active_sellers_cap > cfg.remaining_follow_cap
+          || Object.keys(cfg).length !== 5) return false;
     } else {
       keys.push('marketplace', 'action', 'listing_id');
       const ids = { poshmark: /^[a-f0-9]{24}$/, mercari: /^m\d{6,}$/, depop: /^[a-z0-9][a-z0-9-]{0,200}$/ };
