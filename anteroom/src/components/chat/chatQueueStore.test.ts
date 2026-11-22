@@ -8,6 +8,8 @@ import {
   removeChatMessage,
   resetChatQueuesForTest,
   assignChatThread,
+  promoteChatMessage,
+  steerChatMessage,
   resolveFollowUp,
   takeNextChatMessage,
 } from "./chatQueueStore";
@@ -98,5 +100,13 @@ describe("chat queue store", () => {
     enqueueChatMessage("k", newQueuedChatMessage("fresh"));
     expect(takeNextChatMessage("k")?.text).toBe("fresh");
     expect(chatQueue("k")).toEqual([]);
+  });
+
+  it("a second steer, or send now, goes behind a steer already on its way", () => {
+    enqueueChatMessage("k", newQueuedChatMessage("waiting"));
+    steerChatMessage("k", newQueuedChatMessage("first steer"));
+    steerChatMessage("k", newQueuedChatMessage("second steer"));
+    promoteChatMessage("k", chatQueue("k").find((m) => m.text === "waiting")!.id);
+    expect(chatQueue("k").map((m) => m.text)).toEqual(["first steer", "second steer", "waiting"]);
   });
 });

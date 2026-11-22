@@ -172,12 +172,19 @@ export function promoteChatMessage(key: string, id: string) {
   const queue = chatQueue(key);
   const message = queue.find((item) => item.id === id);
   if (!message) return;
-  write(key, [{ ...message, steer: true }, ...queue.filter((item) => item.id !== id)]);
+  write(key, behindSteers(queue.filter((item) => item.id !== id), message));
 }
 
 /** Put a new message first, marked to steer. */
 export function steerChatMessage(key: string, message: QueuedChatMessage) {
-  write(key, [{ ...message, steer: true }, ...chatQueue(key)]);
+  write(key, behindSteers(chatQueue(key), message));
+}
+
+/** Ahead of everything waiting, but behind steers already on their way, which go in the order they came. */
+function behindSteers(queue: readonly QueuedChatMessage[], message: QueuedChatMessage): QueuedChatMessage[] {
+  const steering = queue.findIndex((item) => !item.steer);
+  const at = steering < 0 ? queue.length : steering;
+  return [...queue.slice(0, at), { ...message, steer: true }, ...queue.slice(at)];
 }
 
 /** The oldest message that `matches` leaves the queue; the rest stay in order. */

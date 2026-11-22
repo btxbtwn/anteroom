@@ -238,6 +238,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   /** Set when Stop is a steer, so the cut-off answer folds as one. */
   const steered = useRef(new WeakSet<AbortController>());
   const visibleAnswer = useRef<AbortController | null>(null);
+  const preparingAsk = useRef(false);
   const stopPending = useRef(false);
   const controller = useRef<AbortController | null>(null);
   const composerRef = useRef<ComposerPromptEditorHandle | null>(null);
@@ -478,7 +479,6 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     // late paint from this one must not put its answer back on screen.
     const show = () => {
       if (controller.current !== abort) return;
-      visibleAnswer.current = abort;
       setLive({ question, questionImages: shownImages, asked, startedAtMs, parts: { ...parts } });
     };
     if (question !== null || retry) {
@@ -498,6 +498,9 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         const paint = coalesceSseEvents(() => show());
         const handlers = {
           onEvent: (event: string, data: string) => {
+            // Steerable only once the server has the question: cut off before
+            // that, the question itself would never arrive.
+            visibleAnswer.current = abort;
             foldSseEvent(parts, event, data);
             paint.push(event, parts);
           },
@@ -655,13 +658,23 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   }, [stopping, following, live, queuedAll, editingQueuedId]);
 
   const ask = async (raw: string, alternate = false) => {
+    // A second Enter while the first one's images are being prepared would send it twice.
+    if (preparingAsk.current) return;
     const question = raw.trim();
     const attached = images.images;
     if (!question && !attached.length) return;
     const originThread = threadIdRef.current;
     const originSession = draftSessionRef.current;
     const originDraftKey = `assistant:${originThread ?? "__new__"}`;
-    const uploads = attached.length ? await images.prepare(attached) : [];
+    let uploads: ChatAttachmentUpload[] | null = [];
+    if (attached.length) {
+      preparingAsk.current = true;
+      try {
+        uploads = await images.prepare(attached);
+      } finally {
+        preparingAsk.current = false;
+      }
+    }
     if (uploads === null) return;
     // The live bubble shows the images by name until the saved turn brings them back.
     const shown = attached.map((image, index) => ({ id: "", name: uploads[index]?.name ?? image.file.name, mime_type: image.file.type }));
