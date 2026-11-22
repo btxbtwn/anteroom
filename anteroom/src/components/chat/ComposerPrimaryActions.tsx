@@ -110,8 +110,21 @@ export function ComposerPrimaryActions({
         </TooltipPopup>
       </Tooltip>
     ) : null;
+    // A touch screen has no modifier key, so it gets queue as a button of its own.
+    const touchQueue = canSubmit && queueLabel && canSteer ? (
+      <button
+        type="button"
+        className={cn(SEND_CLASS, "hidden bg-secondary text-foreground hover:bg-accent pointer-coarse:flex")}
+        {...keepFocus}
+        onClick={() => onSend(true)}
+        aria-label="Queue message"
+      >
+        <QueueIcon />
+      </button>
+    ) : null;
     return (
       <div className="flex items-center justify-end gap-2">
+        {touchQueue}
         {followUp}
         {onStop ? (
           <Tooltip>
