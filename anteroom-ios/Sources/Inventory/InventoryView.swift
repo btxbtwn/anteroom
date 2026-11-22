@@ -652,11 +652,45 @@ private struct InventoryFilterMenu: View {
                     CheckedLabel(title: "Not listed  \(InventoryQuery.notListedCount(source))", on: model.filters.notListed)
                 }
                 .accessibilityAddTraits(model.filters.notListed ? .isSelected : [])
+                let inactive = source.filter { !$0.inactiveMarketplaces.isEmpty }.count
+                if inactive > 0 || model.filters.inactive {
+                    Button { model.filters.inactive.toggle() } label: {
+                        CheckedLabel(title: "Inactive  \(inactive)", on: model.filters.inactive)
+                    }
+                    .accessibilityAddTraits(model.filters.inactive ? .isSelected : [])
+                }
+                let drifted = source.filter { !$0.priceDrift.isEmpty }.count
+                if drifted > 0 || model.filters.priceDrift {
+                    Button { model.filters.priceDrift.toggle() } label: {
+                        CheckedLabel(title: "Price inconsistency  \(drifted)", on: model.filters.priceDrift)
+                    }
+                    .accessibilityAddTraits(model.filters.priceDrift ? .isSelected : [])
+                }
+            }
+            let labels = InventoryQuery.labelOptions(source)
+            if !labels.isEmpty {
+                Section("Labels · include ✓ or exclude ✗") {
+                    ForEach(labels, id: \.self) { label in
+                        let state = model.filters.labelState(label)
+                        Button { model.filters.cycleLabel(label) } label: {
+                            switch state {
+                            case .include: Label(label, systemImage: "checkmark")
+                            case .exclude: Label(label, systemImage: "xmark")
+                            case .none: Text(label)
+                            }
+                        }
+                        .accessibilityLabel("\(label): \(state == .include ? "included" : state == .exclude ? "excluded" : "not filtered")")
+                    }
+                }
             }
             if model.filters.activeCount > 0 {
                 Button("Clear filters", role: .destructive) {
                     model.filters.marketplaces = []
                     model.filters.notListed = false
+                    model.filters.labels = []
+                    model.filters.excludeLabels = []
+                    model.filters.inactive = false
+                    model.filters.priceDrift = false
                 }
             }
         } label: {
@@ -1030,6 +1064,23 @@ struct ListingRowContent<Thumbnail: View>: View {
                             .padding(.vertical, 2)
                             .background(WorkspaceStyle.warning.opacity(0.14), in: Capsule())
                             .accessibilityLabel("Missing sale data: \(listing.missingSaleData.joined(separator: ", "))")
+                    }
+                    if !listing.priceDrift.isEmpty {
+                        Text("Price inconsistency")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(WorkspaceStyle.warning)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(WorkspaceStyle.warning.opacity(0.14), in: Capsule())
+                            .accessibilityLabel("Price inconsistency: "
+                                + listing.priceDrift.map { Marketplaces.name($0.marketplace) }.joined(separator: ", "))
+                    }
+                    if listing.status != "sold", !listing.inactiveMarketplaces.isEmpty {
+                        Text("Inactive")
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(WorkspaceStyle.mutedText)
+                            .accessibilityLabel("Inactive on "
+                                + listing.inactiveMarketplaces.map(Marketplaces.name).joined(separator: ", "))
                     }
                     if let hint {
                         Text("· \(hint)").foregroundStyle(WorkspaceStyle.mutedText).lineLimit(1)

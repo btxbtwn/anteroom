@@ -683,6 +683,33 @@ with TestClient(app, base_url="http://127.0.0.1:4599") as client:
         self.list("mercari")
         self.assertEqual(self.actions(), ["save_draft", "publish"])
 
+    def test_listing_a_saved_draft_refreshes_the_price_and_freezes_it_for_the_job(self):
+        from anteroom.services import pricing_rules
+
+        def config(percent):
+            return pricing_rules.normalize({"enabled": True,
+                "rules": {"mercari": {"percent": percent, "fixed": 0, "rounding": "none"}}})
+
+        with patch.object(pricing_rules, "get_pricing_rules", return_value=config(0)) as settings:
+            self.bridge.return_value = {"ok": True, "state": "draft", "draft_url": URLS["mercari"]}
+            prepared = self.client.post(f"{self.base}/mercari/draft", json={"revision_id": self.rev.id})
+            self.assertEqual(prepared.status_code, 200, prepared.text)
+            self.run_jobs()
+            self.bridge.reset_mock()
+            self.bridge.side_effect = [
+                {"ok": True, "state": "draft", "draft_url": URLS["mercari"]},
+                self.published("mercari"),
+            ]
+            settings.return_value = config(100)
+            opened = self.client.post(f"{self.base}/mercari/list", json={"revision_id": self.rev.id, "confirm": True})
+            self.assertEqual(opened.status_code, 200, opened.text)
+            settings.return_value = config(200)
+            self.run_jobs()
+        self.assertEqual(self.actions(), ["save_draft", "publish"])
+        for call in self.bridge.call_args_list:
+            self.assertEqual(call.args[2]["listing"]["mercari_specifics"]["price"], LISTING["price"] * 2)
+        self.assertEqual(self.record("mercari")["listed_price"], LISTING["price"] * 2)
+
     def test_a_form_with_its_own_photos_sends_them_and_every_other_form_keeps_the_item_photos(self):
         repo = ConversationRepo(self.db)
         [front] = repo.get_photos(self.conv.id)

@@ -26,6 +26,9 @@ import {
   notListedOnCounts,
   unsentCount,
   missingSaleCount,
+  inactiveCount,
+  priceDriftCount,
+  missingSkuCount,
   staleCounts,
   statusCounts,
   type ListingFilters as Filters,
@@ -223,6 +226,13 @@ export function ListingSidebar({
   const filterStaleCounts = useMemo(() => staleCounts(facetSource, undefined, staleThreshold), [facetSource, staleThreshold]);
   const filterUnsentCount = useMemo(() => unsentCount(facetSource), [facetSource]);
   const filterMissingSaleCount = useMemo(() => missingSaleCount(facetSource), [facetSource]);
+  const filterInactiveCount = useMemo(() => inactiveCount(facetSource), [facetSource]);
+  const { data: pricingRules } = useQuery({ queryKey: ["settings-pricing-rules"], queryFn: api.settings.pricingRules });
+  const { data: listingWarnings } = useQuery({ queryKey: ["settings-listing-warnings"], queryFn: api.settings.listingWarnings });
+  const filterPriceDriftCount = useMemo(
+    () => (pricingRules?.enabled ? priceDriftCount(facetSource) : undefined), [facetSource, pricingRules?.enabled]);
+  const filterMissingSkuCount = useMemo(
+    () => (listingWarnings?.missing_sku ? missingSkuCount(facetSource) : undefined), [facetSource, listingWarnings?.missing_sku]);
   const labels = useMemo(() => labelOptions(conversations || []), [conversations]);
   const settingsSearch = useSettingsSearch(settingsMode, onSettingsSearchResult);
   const {
@@ -412,6 +422,9 @@ export function ListingSidebar({
             notListedCount={filterNotListedCount}
             unsentCount={filterUnsentCount}
             missingSaleCount={filterMissingSaleCount}
+            inactiveCount={filterInactiveCount}
+            priceDriftCount={filterPriceDriftCount}
+            missingSkuCount={filterMissingSkuCount}
             staleCounts={filterStaleCounts}
             onChange={handleFiltersChange}
           />
@@ -425,6 +438,7 @@ export function ListingSidebar({
                 visibleMarketplaces={visibleMarketplaces}
                 nameBySku={nameBySku}
                 hint={hints.get(listing.id)}
+                warnMissingSku={Boolean(listingWarnings?.missing_sku)}
                 selecting={selecting}
                 checked={selectedIds.has(listing.id)}
                 canSelect={true}

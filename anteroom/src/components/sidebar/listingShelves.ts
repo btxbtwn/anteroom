@@ -1,4 +1,5 @@
 import type { DirectRecord } from "../../api/types";
+import type { PriceDrift } from "../../api/contract.gen";
 
 export type Listing = {
   id: string;
@@ -33,6 +34,10 @@ export type Listing = {
   vendoo_relist_pending?: string[];
   unsent_edits?: boolean;
   etsy_eligible?: boolean;
+  /** Marketplaces where the listing is still up but not for sale. */
+  inactive_marketplaces?: string[];
+  /** Marketplace prices that differ from the seller's pricing rules. */
+  price_drift?: PriceDrift[];
 };
 
 function timestampMs(value?: string | null): number {

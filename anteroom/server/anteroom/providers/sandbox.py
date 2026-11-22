@@ -91,6 +91,24 @@ def _prompt_text(messages) -> str:
     return "\n".join(parts)
 
 
+def _sandbox_preset(prompt: str) -> str | None:
+    """The shipping preset whose condition shares the most words with the sandbox item."""
+    import re
+
+    marker = "--- Shipping presets ---"
+    if marker not in prompt:
+        return None
+    # The sandbox item is a T-shirt, which sellers also call a top or a tee.
+    item = set(re.findall(r"[a-z]{3,}", str(LISTING["title"]).lower())) | {"top", "tee"}
+    best, best_score = "", 0
+    for name, condition in re.findall(r'^- "([^"]+)": (.*)$', prompt.split(marker, 1)[1], re.MULTILINE):
+        words = set(re.findall(r"[a-z]{3,}", condition.lower()))
+        score = len(item & (words | {word.rstrip("s") for word in words}))
+        if score > best_score:
+            best, best_score = name, score
+    return best
+
+
 class SandboxProvider:
     name = "sandbox"
     vision_model = "sandbox"
@@ -113,7 +131,11 @@ class SandboxProvider:
                 yield word + " "
             return
         if "json" in prompt.lower():
-            yield "```json\n" + json.dumps(LISTING, indent=2) + "\n```"
+            listing = dict(LISTING)
+            preset = _sandbox_preset(prompt)
+            if preset is not None:
+                listing["shipping_preset"] = preset
+            yield "```json\n" + json.dumps(listing, indent=2) + "\n```"
         else:
             yield REPLY
 

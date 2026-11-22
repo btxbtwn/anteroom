@@ -347,6 +347,12 @@ def _live_category_fields_prompt(db: Session, conv_id: str) -> str:
     return live_fields_prompt(listing)
 
 
+def _shipping_presets_prompt() -> str:
+    from anteroom.services.shipping_presets import generation_prompt
+
+    return generation_prompt()
+
+
 def listing_generation_messages(
     skill_rules: str,
     item_details: str,
@@ -382,6 +388,7 @@ def listing_generation_messages(
         f"{_empty_discovered_fields_prompt(db, conv_id, field_evidence) if native_forms is None else ''}"
         f"{_live_category_fields_prompt(db, conv_id) if native_forms is None else ''}"
         f"{_item_form_prompt(db, conv_id) if native_forms is None else ''}"
+        f"{_shipping_presets_prompt()}"
     )
     if native_forms is not None:
         from anteroom.services.native_contract import prompt

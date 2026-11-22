@@ -582,7 +582,7 @@ def list_open_gaps(db: Session) -> list[dict]:
     return [_gap_view(row) for row in rows]
 
 
-def approval_snapshot(db: Session, conv_id: str, marketplaces: list[str]) -> tuple[str, dict]:
+def approval_snapshot(db: Session, conv_id: str, marketplaces: list[str], *, includes_prices: bool = True) -> tuple[str, dict]:
     from anteroom.models.conversation import Photo
     from anteroom.models.listing_video import ListingVideo
     from anteroom.services.marketplace_delist import listings
@@ -604,6 +604,10 @@ def approval_snapshot(db: Session, conv_id: str, marketplaces: list[str]) -> tup
     snapshot = [_current_revision(db, conv_id), conv.title, conv.notes, conv.status, conv.settled_at,
                 [(image.id, image.checksum, image.stored_filename, image.display_order) for image in images],
                 [(video.id, video.checksum, video.stored_filename) for video in videos], targets]
+    if includes_prices:
+        from anteroom.services.pricing_rules import active_rules
+
+        snapshot.append(active_rules())
     return hashlib.sha256(json.dumps(snapshot, sort_keys=True, default=str).encode()).hexdigest(), targets
 
 
@@ -641,7 +645,7 @@ def claim_approval(db: Session, row: AutomationApproval, *, review_token: str, a
         raise AutomationError("This request differs from the reviewed action. Reload approvals.", 409)
     current, _targets = approval_snapshot(db, row.conversation_id, row.marketplaces)
     if current != row.review_basis:
-        raise AutomationError("The item, its photos or marketplace links changed. Review a new proposal.", 409)
+        raise AutomationError("The item, its photos, marketplace links or pricing rules changed. Review a new proposal.", 409)
     result = db.execute(update(AutomationApproval).where(AutomationApproval.id == row.id, AutomationApproval.status == "pending")
                         .values(status="executing", decided_at=_naive(utcnow())))
     if type_cast(CursorResult, result).rowcount != 1:

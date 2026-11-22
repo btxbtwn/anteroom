@@ -311,7 +311,7 @@ def analysis_with_photo_count(photo_count: int, analysis_text: str | None = None
     return header + "\n" + text
 
 
-def extract_listing_json(text: str) -> dict | None:
+def extract_listing_json(text: str, *, require_listing_fields: bool = True) -> dict | None:
     if not text or text.lstrip().lower().startswith("error:"):
         return None
 
@@ -339,7 +339,7 @@ def extract_listing_json(text: str) -> dict | None:
             except json.JSONDecodeError:
                 continue
             if isinstance(parsed, dict) and (
-                parsed.get("title") or parsed.get("description") or parsed.get("price") is not None
+                not require_listing_fields or parsed.get("title") or parsed.get("description") or parsed.get("price") is not None
             ):
                 return parsed
     return None
@@ -1648,6 +1648,11 @@ def persist_generated_listing(
     if not listing:
         log.warning("listing generation produced no JSON for %s", conv_id)
         return None
+    # The shipping preset the model picked from the seller's plain-English conditions.
+    from anteroom.services.shipping_presets import find_preset
+
+    choice = listing.pop("shipping_preset", None)
+    shipping_preset = find_preset(choice) if isinstance(choice, str) else None
 
     import copy
 
@@ -1663,6 +1668,12 @@ def persist_generated_listing(
     from anteroom.services.user_settings import get_ebay_inventory_location, package_dimensions_string
 
     listing["package_dimensions_in"] = package_dimensions_string()
+    if shipping_preset:
+        from anteroom.services.shipping_presets import apply_package
+
+        # The preset's box and weight replace the saved default; seller locks and
+        # an Item Details package size below still win.
+        apply_package(listing, shipping_preset, respect_locks=False)
     location = get_ebay_inventory_location()
     if location:
         listing["zipCode"] = location
@@ -1699,6 +1710,12 @@ def persist_generated_listing(
         listing["size"] = locked_size
         align_size_fields(listing, previous_size=generated_size or None)
         _drop_unformed_size_ids(listing, seed)
+    # Depop's derived parcel tier must see the same weight that will be saved.
+    from anteroom.services.seller_overrides import is_locked
+
+    for key in ("weight_lb", "weight_oz"):
+        if is_locked(seed, key):
+            listing[key] = seed.get(key)
     apply_send_readiness_fixes(listing)
     if revisions:
         selected = revisions[0].listing_json
@@ -1745,7 +1762,7 @@ def persist_generated_listing(
         package = str(seller.get("packageDimensions") or "").strip()
         if package:
             listing["package_dimensions_in"] = package
-        from anteroom.services.seller_overrides import is_locked, materialize_prices
+        from anteroom.services.seller_overrides import materialize_prices
 
         previous_listing = revisions[0].listing_json if revisions and isinstance(revisions[0].listing_json, dict) else {}
         if previous_listing.get("seller_fields"):
@@ -1803,6 +1820,11 @@ def persist_generated_listing(
         _follow_native_size_rows(listing, seed, sanitize_size_value(listing.get("size")) or pinned_size[0])
         _drop_unformed_size_ids(listing, seed)
     constrain_generated(listing, seed)
+    if shipping_preset:
+        from anteroom.services.shipping_presets import apply_marketplace_shipping
+
+        # After the native blocks are restored, so the preset's shipping choices stay.
+        apply_marketplace_shipping(listing, shipping_preset, respect_locks=False)
     cap_listing_description(listing)
     if revisions:
         from anteroom.services.seller_overrides import capture_locked, restore_locked, materialize_prices

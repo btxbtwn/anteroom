@@ -1,6 +1,7 @@
 import { ListingTemplatesSettings } from "./ListingTemplatesSettings";
 import { InventorySettings } from "./InventorySettings";
 import { DescriptionBuilder } from "./DescriptionBuilder";
+import { ListingWarningsSection, PricingRulesSection, ShippingPresetsSection } from "./ListingRulesSettings";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
@@ -485,6 +486,9 @@ export function ListingsSettings({ onOpenListing }: { onOpenListing: (id: string
       <MarketplacesSection />
       <InventorySettings />
       <PackageDimensionsSection />
+      <PricingRulesSection />
+      <ShippingPresetsSection />
+      <ListingWarningsSection />
       <HiddenFieldsSection />
       <ListingFormulasSection />
       <SettingsSection id="duplicate-check" title="Duplicate check">

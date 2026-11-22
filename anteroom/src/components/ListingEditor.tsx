@@ -22,6 +22,7 @@ import { ItemDetails } from "./ItemDetails";
 import { ListingHistory } from "./ListingHistory";
 import { blockerTarget, isEbayInventoryLocationEdit, matchingEditorField } from "./listingChanges";
 import { SoldElsewhereNotice } from "./SoldElsewhereNotice";
+import { ListingGuardrails } from "./ListingGuardrails";
 import { marketplaceName } from "./marketplaceNames";
 import { ETSY_CATEGORY_OPTIONALS } from "../marketplaceFields";
 import { depopSizeGroupingApplies } from "../marketplaceFields";
@@ -307,6 +308,10 @@ export function ListingEditor({
               if (await confirmDialog("Reload the saved listing and discard your unsaved edits?", { confirmLabel: "Discard and reload", variant: "destructive" })) edits.discard();
             }}>Discard and reload</InlineButton>
           </div>}
+          {!vendoo && (reviewTab !== "forms" || editTab === "general") && data ? (
+            <ListingGuardrails listing={listing} drift={conversation?.price_drift} inactive={conversation?.inactive_marketplaces}
+              disabled={writing || unsaved} onChange={edits.applyTransform} />
+          ) : null}
           {(reviewTab !== "forms" || editTab === "general") && (
             <>
               <PhotoTray convId={convId} onBulkListingsCreated={onBulkListingsCreated} />
@@ -488,6 +493,12 @@ export function StructuredEditor({
   };
   const vendoo = useListingMode().data?.listing_mode === "vendoo";
   const nativeTab = !vendoo && DIRECT_FORM_MARKETS.has(tab);
+  const { data: pricingRules } = useQuery({
+    queryKey: ["settings-pricing-rules"],
+    queryFn: api.settings.pricingRules,
+    enabled: Boolean(MARKETPLACE_PRICE_KEYS[tab]),
+  });
+  const rulesEnabled = pricingRules?.enabled === true;
   const [autoReloadingMarket, setAutoReloadingMarket] = React.useState<string | null>(null);
   const [reloadErrors, setReloadErrors] = React.useState(
     () => new Map<string, { kind: "refresh" | "read"; message: string }>(),
@@ -682,12 +693,9 @@ export function StructuredEditor({
     const init: Record<string, string | string[]> = {};
     fields.forEach((f) => {
       if (f.type === "inventory" || f.type === "variations" || f.type === "photos") return;
-      const value = editorFieldValue(listing, f, tab);
+      const value = editorFieldValue(listing, f, tab, rulesEnabled);
       const label = (v: string) => Object.entries(f.optionValues || {}).find(([, id]) => id === v)?.[0] ?? v;
-      const followed = marketplacePriceFollowsGeneral(listing, f, tab);
-      const shown = followed && listing?.price != null
-        ? formFieldText(listing.price)
-        : f.multi ? formFieldValues(value, f.options).map(label) : label(formFieldText(value));
+      const shown = f.multi ? formFieldValues(value, f.options).map(label) : label(formFieldText(value));
       init[f.key] = f.type !== "boolean" && f.key === "ebay_specifics.bestOffer.enabled"
         ? (/^(no|false|0|off)$/i.test(formFieldText(shown)) ? "No" : "Yes")
         : shown;
@@ -695,7 +703,7 @@ export function StructuredEditor({
       if (draft !== undefined) init[f.key] = draft;
     });
     return init;
-  }, [listing, tab, fields, drafts]);
+  }, [listing, tab, fields, drafts, rulesEnabled]);
 
   const fieldDefault = (field: EditorField) => {
     if (!field.saveAsDefault || field.locked) return null;
@@ -744,9 +752,8 @@ export function StructuredEditor({
     // Compare with the labeled value the control was showing. The form's original
     // value stays in defaultValue and must not block a later edit that matches it.
     const labelOf = (value: string) => Object.entries(field?.optionValues || {}).find(([, id]) => id === value)?.[0] ?? value;
-    const followed = field ? marketplacePriceFollowsGeneral(listing, field, tab) : false;
-    const raw = field ? editorFieldValue(listing, field, tab) : getListingEditorValue(listing, key);
-    const current = followed && listing?.price != null ? formFieldText(listing.price) : labelOf(formFieldText(raw));
+    const raw = field ? editorFieldValue(listing, field, tab, rulesEnabled) : getListingEditorValue(listing, key);
+    const current = labelOf(formFieldText(raw));
     if (text === current) return false;
     setListingEditorValue(target, key, field?.type === "number" ? coerceNumericValue(text) : text);
     return true;
@@ -926,6 +933,9 @@ export function StructuredEditor({
     : [];
   // A marketplace form that names its headings keeps them, with its order and row layout.
   const pageLayout = nativeTab && renderedFields.some((field) => field.section);
+  const staleRulePrice = nativeTab && rulesEnabled && nativeQuery.isError && renderedFields.some(
+    (field) => field.native && field.defaultValue !== undefined && marketplacePriceFollowsGeneral(listing, field, tab),
+  );
   const sections = React.useMemo(() => pageLayout ? nativeFormSections(renderedFields)
     : tab === "general" ? generalFormSections(renderedFields) : groupFieldsIntoSections(renderedFields), [pageLayout, tab, renderedFields]);
   // Only loading, errors and gaps get a line; a form that loaded fine needs none.
@@ -1171,6 +1181,11 @@ export function StructuredEditor({
         </Button>
       </div>}
       {tab !== "general" && formStatus && <p role="status" className="border-b py-3 text-xs text-muted-foreground">{formStatus}</p>}
+      {staleRulePrice && <div className="flex flex-wrap items-baseline gap-x-2 border-b py-3 text-xs text-warning-foreground">
+        <span role="status">The marketplace price shown may be out of date.</span>
+        <InlineButton type="button" disabled={saving || nativeQuery.isFetching || autoReloadingMarket !== null}
+          onClick={() => { void nativeQuery.refetch(); }}>Retry price refresh</InlineButton>
+      </div>}
       {formNotes.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
       {formNotes.length > 0 && onAskChat && <div className="pb-2">
         <Button size="xs" variant="outline" disabled={disabled}
@@ -1367,7 +1382,17 @@ function sourceValue(listing: ListingData | undefined, field: EditorField, tab: 
 }
 
 /** What a control shows before it is mapped to a choice label. */
-export function editorFieldValue(listing: ListingData | undefined, field: EditorField, tab: string): unknown {
+export function editorFieldValue(listing: ListingData | undefined, field: EditorField, tab: string, rulesEnabled = false): unknown {
+  if (marketplacePriceFollowsGeneral(listing, field, tab)) {
+    // The native form supplies the server's effective price. Before it loads,
+    // only a recorded follower is evidence that a saved copy came from rules.
+    if (rulesEnabled && field.native && field.defaultValue !== undefined) return field.defaultValue;
+    const followers = listing?._price_followers;
+    if (rulesEnabled && followers && typeof followers === "object" && field.key in followers) {
+      return (followers as Record<string, unknown>)[field.key];
+    }
+    if (listing?.price != null) return listing.price;
+  }
   if (field.key === "mercari_specifics.brand" && getListingEditorValue(listing, "mercari_specifics.noBrand") === true) return "";
   // eBay's category control shows the breadcrumb. The id lives beside it.
   if (field.key === "direct_category_ids.ebay") return resolvedEditorValue(field, listing);

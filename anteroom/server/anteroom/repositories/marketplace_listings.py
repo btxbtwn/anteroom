@@ -20,6 +20,17 @@ def _read_state(marketplace: str, state: str, listing_url: str | None) -> str:
     return "unknown" if marketplace == "depop" and state == "published" and not listing_url else state
 
 
+# A verified read's states for a listing still on the marketplace but not for sale:
+# Etsy's deactivated (inactive), expired and being-edited listings, and Poshmark's Not For Sale.
+INACTIVE_STATES = frozenset({"inactive", "expired", "edit", "not_for_sale"})
+
+
+def observed_inactive(observation, listing_id: str | None) -> bool:
+    """True when the latest verified read of this same listing found it up but not for sale."""
+    return (isinstance(observation, dict) and observation.get("state") in INACTIVE_STATES
+            and bool(listing_id) and str(observation.get("listing_id") or "") == str(listing_id))
+
+
 def as_dict(row: MarketplaceListing | None) -> dict:
     """The record as services and the API see it: set fields only, times in ISO form."""
     if row is None:
@@ -83,12 +94,14 @@ class MarketplaceListingRepo:
         query = select(MarketplaceListing.conversation_id, MarketplaceListing.marketplace,
                        MarketplaceListing.state, MarketplaceListing.listing_url,
                        MarketplaceListing.error, MarketplaceListing.error_fields, MarketplaceListing.listed_price,
-                       MarketplaceListing.listed_at)
+                       MarketplaceListing.listed_at, MarketplaceListing.listing_id,
+                       MarketplaceListing.inventory_observation)
         if conv_id:
             query = query.where(MarketplaceListing.conversation_id == conv_id)
         grouped: dict[str, dict[str, dict]] = {}
-        for conversation_id, marketplace, state, url, error, fields, price, listed_at in self.db.execute(query):
-            grouped.setdefault(conversation_id, {})[marketplace] = {
+        for (conversation_id, marketplace, state, url, error, fields, price, listed_at, listing_id,
+             observation) in self.db.execute(query):
+            record = grouped.setdefault(conversation_id, {})[marketplace] = {
                 "state": _read_state(marketplace, state, url),
                 "listing_url": url,
                 "failed": bool(error) or _read_state(marketplace, state, url) != state,
@@ -97,6 +110,9 @@ class MarketplaceListingRepo:
                 "listed_at": (listed_at if listed_at.tzinfo else listed_at.replace(tzinfo=UTC)).isoformat()
                 if listed_at else None,
             }
+            if state in LIVE_STATES and observed_inactive(observation, listing_id):
+                # Only set when true: the contract's default is False.
+                record["inactive"] = True
         return grouped
 
     def live_revisions(self, conv_id: str | None = None) -> dict[str, set[str]]:

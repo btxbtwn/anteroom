@@ -32,6 +32,8 @@ import { InputGroup, InputGroupAddon, InputGroupInput } from "./ui/input-group";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Toggle, ToggleGroup } from "./ui/toggle-group";
 import { useInventoryReadiness } from "./useInventoryReadiness";
+import { InventoryTableFilters, NO_TABLE_FILTERS, type TableFilters } from "./InventoryTableFilters";
+import { inStatusTab } from "./inventoryFilters";
 import { EmptyRow, Panel, WorkspacePage } from "./WorkspacePage";
 import { setListingSearch, useListingSearch } from "./sidebar/listingSearch";
 import "./ebay/ebay.css";
@@ -78,6 +80,10 @@ export function InventoryTablePage({
   const [activeTab, setActiveTab] = useState<InventoryTab>(initialTab);
   const [status, setStatus] = useState<ListingStatusFilter>("active");
   const [sort, setSort] = useState<ListingSortId>("recent");
+  const [tableFilters, setTableFilters] = useState<TableFilters>(NO_TABLE_FILTERS);
+  const { data: pricingRules } = useQuery({ queryKey: ["settings-pricing-rules"], queryFn: api.settings.pricingRules });
+  const { data: listingWarnings } = useQuery({ queryKey: ["settings-listing-warnings"], queryFn: api.settings.listingWarnings });
+  const warnMissingSku = Boolean(listingWarnings?.missing_sku);
   const needle = useDeferredValue(query).trim().toLowerCase();
   const { data: marketplaceSettings } = useQuery({ queryKey: ["settings-marketplaces"], queryFn: api.settings.marketplaces });
   const { data: uiPrefs } = useQuery({ queryKey: ["settings-ui"], queryFn: api.settings.ui });
@@ -98,7 +104,8 @@ export function InventoryTablePage({
   const all = useMemo(() => conversations ?? [], [conversations]);
   const searched = useMemo(() => all.filter((listing) => matchesSearch(listing, needle)), [all, needle]);
   const counts = useMemo(() => statusCounts(searched, Boolean(needle)), [searched, needle]);
-  const rows = useMemo(() => inventoryRows(all, needle, status, sort), [all, needle, status, sort]);
+  const rows = useMemo(() => inventoryRows(all, needle, status, sort, tableFilters), [all, needle, status, sort, tableFilters]);
+  const tabListings = useMemo(() => searched.filter((listing) => inStatusTab(listing, status)), [searched, status]);
   const listed = useMemo(() => listedCounts(rows, marketplaces), [rows, marketplaces]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -167,6 +174,14 @@ export function InventoryTablePage({
               </Toggle>
             ))}
           </ToggleGroup>
+          <InventoryTableFilters
+            listings={tabListings}
+            filters={tableFilters}
+            labelColors={uiPrefs?.label_colors}
+            pricingRulesOn={Boolean(pricingRules?.enabled)}
+            warnMissingSku={warnMissingSku}
+            onChange={setTableFilters}
+          />
           <Select value={sort} onValueChange={(value) => {
             if (!value) return;
             const next = value as ListingSortId;
@@ -228,6 +243,7 @@ export function InventoryTablePage({
                                   {/* Two lines fit the row; the button's tooltip has the whole title. */}
                                   <span className={cn("text-sm font-medium text-foreground", listing.sku && !nameBySku ? "truncate" : "line-clamp-2 leading-tight")}>{name}</span>
                                   {listing.sku && !nameBySku ? <span className="truncate font-mono text-2xs text-muted-foreground">{listing.sku}</span> : null}
+                                  <RowWarnings listing={listing} warnMissingSku={warnMissingSku} />
                                 </span>
                               </button>
                             </div>
@@ -266,6 +282,23 @@ export function InventoryTablePage({
   );
 }
 
+/** Guardrail warnings under the item's name: no SKU, prices off the pricing rules. */
+function RowWarnings({ listing, warnMissingSku }: { listing: Listing; warnMissingSku: boolean }) {
+  const drift = listing.price_drift || [];
+  const noSku = warnMissingSku && listing.status !== "sold" && !listing.sku?.trim();
+  if (!drift.length && !noSku) return null;
+  return (
+    <span className="flex min-w-0 gap-2 truncate text-2xs font-medium text-warning-foreground">
+      {noSku ? <span>No SKU</span> : null}
+      {drift.length ? (
+        <span title={drift.map((row) => `${marketplaceName(row.marketplace)}: ${formatMoney(row.price)} (rules say ${formatMoney(row.expected)})`).join(" · ")}>
+          Price inconsistency
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 function MarketplaceCellView({ listing, marketplace, title, onOpen, missing }: {
   listing: Listing;
   marketplace: string;
@@ -275,7 +308,7 @@ function MarketplaceCellView({ listing, marketplace, title, onOpen, missing }: {
   missing?: readonly MissingField[];
 }) {
   const cell = marketplaceCell(listing, marketplace, missing);
-  const variant = BADGE_VARIANT[cell.kind];
+  const variant = cell.inactive ? "outline" : BADGE_VARIANT[cell.kind];
   const name = marketplaceName(marketplace);
   const price = marketplacePrice(listing, marketplace);
   const priceText = price ? marketplacePriceDescription(price, name, listing.price) : null;
