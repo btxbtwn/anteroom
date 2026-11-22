@@ -149,6 +149,58 @@ def test_web_answers_run_in_the_durable_queue_and_complete_with_their_save(migra
         assert _tasks(migration_engine, thread) == []
 
 
+def test_web_answer_settlement_waits_for_first_text_append(migration_engine, jwks, signing_keys, monkeypatch):  # noqa: F811
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+    from anteroom.models.background_task import BackgroundTaskEvent
+    from anteroom.services import background_tasks, business_assistant
+
+    started, release, produced, settling = (Event() for _ in range(4))
+    append, complete = background_tasks.append_events, background_tasks.complete_in
+
+    async def answer(*_args, **_kwargs):
+        yield 'text', 'You sold '
+        assert await asyncio.to_thread(started.wait, 10)
+        produced.set()
+        yield 'text', 'one item.'
+
+    def blocked_append(task_id, token, frames):
+        if any('You sold' in frame for frame in frames):
+            started.set()
+            assert release.wait(10)
+        return append(task_id, token, frames)
+
+    def observe_settle(*args, **kwargs):
+        settling.set()
+        return complete(*args, **kwargs)
+
+    monkeypatch.setattr(assistant_route, 'get_listing_provider', lambda: Provider())
+    monkeypatch.setattr(business_assistant, 'answer', answer)
+    monkeypatch.setattr(background_tasks, 'append_events', blocked_append)
+    monkeypatch.setattr(background_tasks, 'complete_in', observe_settle)
+    with _worker_client(migration_engine, monkeypatch) as client:
+        alice = headers(signing_keys)
+        thread = client.post('/api/assistant/threads', headers=alice).json()['id']
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            response = pool.submit(client.post, '/api/assistant/messages', headers=alice,
+                                   json={'text': 'How did I do?', 'thread_id': thread})
+            try:
+                assert produced.wait(10)
+                assert not settling.wait(0.2)
+            finally:
+                release.set()
+            assert response.result(timeout=10).status_code == 200
+        [(task_id, status, error, lease)] = _tasks(migration_engine, thread)
+        assert (status, error, lease) == ('completed', None, None)
+        with Session(migration_engine) as db:
+            frames = db.scalars(select(BackgroundTaskEvent.data).where(BackgroundTaskEvent.task_id == task_id)
+                                .order_by(BackgroundTaskEvent.sequence)).all()
+        assert assistant_route.journal_text(frames) == 'You sold one item.'
+
+
 @pytest.mark.parametrize('failure,partial', [
     ('provider', ''), ('empty', ''), ('lookups', ''), ('provider', 'Half an answer.'),
     ('lookups', 'Half an answer.'), ('stalled', ''), ('prepare', ''),

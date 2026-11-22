@@ -58,3 +58,36 @@ def test_aligned_does_not_mutate_input_listing_or_specifics():
     assert updated["ebay_specifics"]["inseam"] == "32"
     assert updated["ebay_specifics"]["size"] == "34"
     assert updated["poshmark_specifics"]["size"] == "Waist 34"
+
+
+def test_prefetch_schema_failure_keeps_each_category_without_per_listing_reads(monkeypatch):
+    from unittest.mock import Mock
+    from anteroom.services import category_fields, listing_generate, size_audit
+
+    db = Mock()
+    listings = [{"marketplace_category_ids": {"ebay": cid}} for cid in ("one", "two")]
+    monkeypatch.setattr(category_fields, "load_rows_many", Mock(side_effect=RuntimeError("read failed")))
+    load_fields = Mock(side_effect=AssertionError("unexpected per-listing schema read"))
+    monkeypatch.setattr(category_fields, "load_fields", load_fields)
+
+    choices = size_audit.prefetch_ebay_size_choices(db, listings)
+    assert choices == {"one": [], "two": []}
+    db.rollback.assert_called_once()
+    with size_audit.with_ebay_size_choices(choices):
+        assert [listing_generate.ebay_size_choices(listing) for listing in listings] == [[], []]
+    load_fields.assert_not_called()
+
+
+def test_prefetch_schema_failure_recovers_database_session(monkeypatch):
+    from sqlalchemy import text
+    from anteroom.database import SessionLocal
+    from anteroom.services import category_fields, size_audit
+
+    def failed_query(_keys, *, db):
+        db.execute(text("SELECT * FROM nonexistent_category_schema_test"))
+
+    monkeypatch.setattr(category_fields, "load_rows_many", failed_query)
+    with SessionLocal() as db:
+        listings = [{"marketplace_category_ids": {"ebay": "one"}}]
+        assert size_audit.prefetch_ebay_size_choices(db, listings) == {"one": []}
+        assert db.execute(text("SELECT 1")).scalar_one() == 1

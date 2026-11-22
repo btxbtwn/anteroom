@@ -1392,10 +1392,8 @@ def test_answer_commit_is_confirmed_before_blocked_refresh(workspace, monkeypatc
             yield '\n```memory\n[{"op":"add","text":"Prefers denim."}]\n```'
 
     def append(*_args):
-        append_started.set()  # Takes pending frames while settled is still false.
-        assert save_terminal.wait(5), 'save must reach its terminal boundary'
-        if failure != 'commit':
-            raise background_tasks.TaskLeaseExpired()
+        # The save now waits for this append, so it must finish first.
+        append_started.set()
 
     def settle(*_args, **_kwargs):
         if failure == 'fence':
@@ -1415,7 +1413,14 @@ def test_answer_commit_is_confirmed_before_blocked_refresh(workspace, monkeypatc
         task = SimpleNamespace(payload={}, assistant_thread_id=None, created_at=datetime.now(UTC))
         worker = asyncio.create_task(assistant_route.answer_task('task', 'token', task))
         try:
-            await asyncio.wait_for(worker, 3)
+            if failure is None:
+                assert await asyncio.to_thread(save_terminal.wait, 3)
+                # Interrupt while post-commit refresh is still blocked.
+                worker.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(worker, 3)
+            else:
+                await asyncio.wait_for(worker, 3)
             [line] = timing_lines(caplog)
             assert f'outcome={expected} ' in line
             assert journals[0].saved_outcome == ('answered' if failure is None else None)
@@ -2104,3 +2109,58 @@ def test_hosted_answer_flushes_status_and_first_text_immediately(monkeypatch):
     assert any("Reading your shop…" in frame for _elapsed, frames in flushed for frame in frames)
     assert any("data: Hello" in frame for _elapsed, frames in flushed for frame in frames)
     assert all(elapsed < 2.0 for elapsed, _frames in flushed)
+
+
+@pytest.mark.parametrize("append_fails", [False, True])
+def test_hosted_answer_settlement_waits_for_inflight_first_text(monkeypatch, append_fails):
+    from threading import Event
+    from types import SimpleNamespace
+    from anteroom.services import background_tasks
+
+    append_started, release_append, answer_done, settled = (Event() for _ in range(4))
+    stored = []
+
+    async def answer(*_args):
+        yield "text", "Hello"
+        assert await asyncio.to_thread(append_started.wait, 3)
+        answer_done.set()
+
+    def append(_task_id, _token, frames):
+        if any("Hello" in frame for frame in frames):
+            append_started.set()
+            assert release_append.wait(3)
+            if append_fails:
+                raise background_tasks.TaskLeaseExpired()
+        assert not settled.is_set()
+        stored.extend(frames)
+
+    def complete(_db, _task_id, _token, frames, **_kwargs):
+        stored.extend(frames)
+        settled.set()
+
+    def save(_provider, _answer, _changes, _memory, _automation, _thread, settle, error, *, on_committed):
+        settle(None, error)
+        on_committed()
+
+    monkeypatch.setattr(assistant_route, "_require_provider", Provider)
+    monkeypatch.setattr(assistant_route, "_prepare", lambda *_: ([], SimpleNamespace(close=lambda: None)))
+    monkeypatch.setattr(assistant_route, "_save_answer", save)
+    monkeypatch.setattr(business_assistant, "answer", answer)
+    monkeypatch.setattr(background_tasks, "append_events", append)
+    monkeypatch.setattr(background_tasks, "complete_in", complete)
+    monkeypatch.setattr(background_tasks, "finish", lambda *_, **_kwargs: None)
+
+    async def exercise():
+        task = SimpleNamespace(payload={}, assistant_thread_id=None, created_at=datetime.now(UTC))
+        worker = asyncio.create_task(assistant_route.answer_task("task", "token", task))
+        try:
+            assert await asyncio.to_thread(answer_done.wait, 3)
+            await asyncio.sleep(0.05)
+            assert not settled.is_set()
+        finally:
+            release_append.set()
+            await asyncio.wait_for(worker, 3)
+
+    asyncio.run(exercise())
+    assert settled.is_set() is not append_fails
+    assert sum("Hello" in frame for frame in stored) == (0 if append_fails else 1)

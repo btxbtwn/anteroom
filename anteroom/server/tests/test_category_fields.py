@@ -112,6 +112,41 @@ class CategoryFieldsCacheTest(unittest.TestCase):
             finally:
                 event.remove(engine, "before_cursor_execute", listen)
 
+    def test_read_does_not_recache_rows_invalidated_during_the_query(self):
+        from anteroom.database import SessionLocal
+        from anteroom.models.catalog import CategoryFieldSchema
+
+        for many, missing, clear_all in ((False, False, False), (False, True, True), (True, False, True)):
+            with self.subTest(many=many, missing=missing, clear_all=clear_all):
+                if missing:
+                    with SessionLocal() as db:
+                        db.query(CategoryFieldSchema).filter_by(
+                            marketplace=self.marketplace, category_id=self.category_id,
+                        ).delete()
+                        db.commit()
+                else:
+                    category_fields.save_rows(self.marketplace, self.category_id, [{"name": "old"}])
+                category_fields.clear_memory_cache()
+                fresh_entry = category_fields._fresh_entry
+                updated = False
+
+                def update_after_read(row, fresh_entry=fresh_entry, clear_all=clear_all):
+                    nonlocal updated
+                    result = fresh_entry(row)
+                    if not updated:
+                        updated = True
+                        category_fields.save_rows(self.marketplace, self.category_id, [{"name": "new"}])
+                        if clear_all:
+                            category_fields.clear_memory_cache()
+                    return result
+
+                key = (self.marketplace, self.category_id)
+                with SessionLocal() as db, mock.patch.object(category_fields, "_fresh_entry", update_after_read):
+                    result = (category_fields.load_rows_many([key], db=db)[key] if many
+                              else category_fields.load_rows(*key, db=db))
+                    self.assertEqual(result, None if missing else [{"name": "old"}])
+                self.assertEqual(category_fields.load_rows(*key), [{"name": "new"}])
+
     def test_load_rows_many_batches_large_sqlite_queries(self):
         from sqlalchemy import create_engine, event
         from sqlalchemy.orm import Session

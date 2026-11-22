@@ -39,6 +39,7 @@ _QUERY_BATCH_SIZE = 400
 _SENTINEL = object()
 
 _cache_lock = threading.Lock()
+_cache_generation = 0
 # Key: (id(bind), str(engine.url), user_id, marketplace, category_id)
 # Value: (stored_monotonic, fetched_at_utc_or_none, rows_or_none)
 _memory_cache: OrderedDict[tuple[Any, ...], tuple[float, datetime | None, list[dict[str, Any]] | None]] = OrderedDict()
@@ -64,7 +65,9 @@ def _session_has_uncommitted_schema_writes(session: Session) -> bool:
 
 def clear_memory_cache(scope: tuple[int, str, str | None] | None = None) -> None:
     """Drop cached schema rows for one seller/bind scope, or everything when scope is None."""
+    global _cache_generation
     with _cache_lock:
+        _cache_generation += 1
         if scope is None:
             _memory_cache.clear()
             return
@@ -101,10 +104,13 @@ def _cache_put(
     category_id: str,
     fetched_at: datetime | None,
     rows: list[dict[str, Any]] | None,
+    generation: int,
 ) -> None:
     key = (*scope, marketplace, category_id)
     stored_rows = list(rows) if rows is not None else None
     with _cache_lock:
+        if generation != _cache_generation:
+            return
         _memory_cache[key] = (time.monotonic(), fetched_at, stored_rows)
         _memory_cache.move_to_end(key)
         while len(_memory_cache) > _MEMORY_CACHE_SIZE:
@@ -123,6 +129,8 @@ def _fresh_entry(row: CategoryFieldSchema | None) -> tuple[datetime | None, list
 def _load_one_from_session(session: Session, marketplace: str, category_id: str) -> list[dict[str, Any]] | None:
     use_cache = not _session_has_uncommitted_schema_writes(session)
     scope = _cache_scope(session) if use_cache else None
+    with _cache_lock:
+        generation = _cache_generation
     if scope is not None:
         hit = _cache_get(scope, marketplace, category_id)
         if hit is not _SENTINEL:
@@ -134,7 +142,7 @@ def _load_one_from_session(session: Session, marketplace: str, category_id: str)
     )
     fetched_at, rows = _fresh_entry(row)
     if scope is not None:
-        _cache_put(scope, marketplace, category_id, fetched_at, rows)
+        _cache_put(scope, marketplace, category_id, fetched_at, rows, generation)
     return rows
 
 
@@ -163,6 +171,8 @@ def load_rows_many(
     def query(session: Session) -> None:
         use_cache = not _session_has_uncommitted_schema_writes(session)
         scope = _cache_scope(session) if use_cache else None
+        with _cache_lock:
+            generation = _cache_generation
         missing: list[tuple[str, str]] = []
         if scope is not None:
             for pair in pairs:
@@ -188,7 +198,7 @@ def load_rows_many(
             fetched_at, rows = found.get(pair, (None, None))
             out[pair] = rows
             if scope is not None:
-                _cache_put(scope, pair[0], pair[1], fetched_at, rows)
+                _cache_put(scope, pair[0], pair[1], fetched_at, rows, generation)
 
     if db is not None:
         query(db)

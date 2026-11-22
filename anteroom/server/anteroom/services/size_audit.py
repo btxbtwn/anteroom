@@ -8,6 +8,7 @@ save would rewrite any of them. Nothing here changes a listing.
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Iterable
 
@@ -28,6 +29,7 @@ _TAG_SIZE_LINE = re.compile(r"(?im)^-\s*size:\s*(.+?)\s*$")
 _TAG_SOURCE = re.compile(r"\s*\(source:.*$", re.I)
 # The photos were looked at and no size could be read from them.
 _UNREAD = re.compile(r"^unknown\b", re.I)
+log = logging.getLogger("anteroom.size_audit")
 
 
 def form_sizes(listing: dict) -> dict[str, str]:
@@ -61,7 +63,12 @@ def prefetch_ebay_size_choices(db: Session, listings: Iterable[dict]) -> dict[st
     ))
     if not category_ids:
         return {}
-    rows_by_key = load_rows_many([("ebay", cid) for cid in category_ids], db=db)
+    try:
+        rows_by_key = load_rows_many([("ebay", cid) for cid in category_ids], db=db)
+    except Exception:  # noqa: BLE001 - without schemas sizes keep eBay's usual spelling
+        db.rollback()
+        log.info("Could not read cached eBay category schemas")
+        return {cid: [] for cid in category_ids}
     choices: dict[str, list[str]] = {}
     for cid in category_ids:
         rows = rows_by_key.get(("ebay", cid))
