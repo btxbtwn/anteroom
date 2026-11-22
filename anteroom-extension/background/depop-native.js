@@ -1086,6 +1086,22 @@ async function depopLiveFields(request, payload, product) {
 
 // One Depop step. Returns its result, or { error, safe_to_retry, ... } where
 // safe_to_retry means this step wrote nothing.
+async function depopPhotoBlob(photo) {
+  const bytes = Uint8Array.from(atob(photo.base64), char => char.charCodeAt(0));
+  const image = await createImageBitmap(new Blob([bytes], { type: photo.mime_type }));
+  const canvas = new OffscreenCanvas(1280, 1280);
+  try {
+    const context = canvas.getContext('2d');
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, 1280, 1280);
+    const scale = Math.min(1280 / image.width, 1280 / image.height);
+    context.drawImage(image, (1280 - image.width * scale) / 2, (1280 - image.height * scale) / 2, image.width * scale, image.height * scale);
+  } finally {
+    image.close();
+  }
+  return canvas.convertToBlob({ type: 'image/jpeg', quality: 0.95 });
+}
+
 async function depopApiAction(action, payload) {
   let wrote = false;
   // Narrowed to the publish-evidence budget once Depop's status read answers 404.
@@ -1235,20 +1251,7 @@ async function depopApiAction(action, payload) {
       if (destination?.protocol !== 'https:' || !DEPOP_PHOTO_HOSTS.some(suffix => destination.hostname.endsWith(suffix)) || !/^\d+$/.test(String(signed.id))) {
         throw marketplaceError('Depop did not return a photo upload address Anteroom recognises.', { code: 'schema_drift' });
       }
-      const bytes = Uint8Array.from(atob(payload.photo.base64), char => char.charCodeAt(0));
-      const image = await createImageBitmap(new Blob([bytes], { type: payload.photo.mime_type }));
-      let canvas;
-      try {
-        canvas = new OffscreenCanvas(1280, 1280);
-        const context = canvas.getContext('2d');
-        context.fillStyle = '#ffffff';
-        context.fillRect(0, 0, 1280, 1280);
-        const scale = Math.min(1280 / image.width, 1280 / image.height);
-        context.drawImage(image, (1280 - image.width * scale) / 2, (1280 - image.height * scale) / 2, image.width * scale, image.height * scale);
-      } finally {
-        image.close();
-      }
-      const file = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.95 });
+      const file = await depopPhotoBlob(payload.photo);
       // A presigned PUT replaces the same object, so it is safe to repeat.
       await marketplaceFetch(destination.href, { marketplace: 'depop', step: 'photo-upload', method: 'PUT', credentials: 'omit',
         headers: { 'Content-Type': 'image/jpeg' }, body: file, deadline: payload.deadline, retry: true, expect: 'none' })

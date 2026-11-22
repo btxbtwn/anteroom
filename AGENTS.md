@@ -119,30 +119,38 @@ Every bug fix, feature and refactor follows the same loop. Component details
 (where logs live, how to drive the app, traps) are in the `AGENTS.md` inside
 `anteroom/`, `anteroom-extension/` and `webhook-relay/`.
 
-1. **Start clean.** Work in your own worktree off a fresh `origin/main`:
+1. **Find or file the issue.** Every change has a GitHub issue before work
+   starts. Search open issues (`gh issue list --search "<words>"`) and use a
+   match; otherwise file one from the Bug, Feature or Task form, titled with the
+   symptom or outcome in the seller's words, with a **Done when** that can
+   become the test. One issue per problem: split anything that would need two
+   PRs. Name the branch after it (`<n>-<short-slug>`).
+2. **Start clean.** Work in your own worktree off a fresh `origin/main`:
    `git fetch origin && git worktree add -b <branch> ../<name> origin/main`.
    Other sessions share the main checkout; it may be on another branch, behind
    `origin/main`, or switched under you. In a new worktree, install with
    `cd anteroom && python3 -m venv .venv && .venv/bin/pip install -e ".[dev]" && npm ci`.
-2. **Diagnose before changing anything.** Read the logs, job events and fill
+3. **Diagnose before changing anything.** Read the logs, job events and fill
    logs for the failure, and find the code with `semble search`. State the root
    cause in one sentence before you write a fix. A fix you cannot explain is a
    guess.
-3. **Reproduce it as a failing test.** Pick the narrowest test that shows the
+4. **Reproduce it as a failing test.** Pick the narrowest test that shows the
    bug: pytest for backend behavior, Vitest for frontend logic, `node --test`
    for the extension, Playwright (`anteroom/e2e/`) for anything that needs
    the running app. Run it and watch it fail for the reason you stated. When a
    test truly cannot reproduce it (a live marketplace page, a real model's
    output), reproduce it in the sandbox and write the steps into the PR.
-4. **Fix the root cause** with the smallest change that does it. Watch the test
+5. **Fix the root cause** with the smallest change that does it. Watch the test
    pass, and keep it.
-5. **Verify like CI.** `./check.sh` runs CI's checks for every component you
+6. **Verify like CI.** `./check.sh` runs CI's checks for every component you
    changed, browser tests included (`--fast` skips those while iterating). For
    a visible change, look at it in the sandbox at desktop and phone sizes,
    put screenshots in the PR and show them to the seller in your reply.
-6. **Open the PR ready for review, not as a draft.** Queue it with
-   `gh pr merge <n> --auto --merge` only once it is ready to merge (see
-   **Pull requests** below). Stay with it until it merges.
+7. **Open the PR ready for review, not as a draft, linked to its issue.** The
+   description starts with `Closes #<n>` so merging into `main` closes the
+   issue (see **Pull requests** below). Queue it with
+   `gh pr merge <n> --auto --merge` only once it is ready to merge. Stay with
+   it until it merges.
 
 The type check in `./check.sh` uses CI's locked baseline mode. After fixing a
 recorded type error, regenerate the baseline with `basedpyright --writebaseline`,
@@ -275,6 +283,19 @@ CI (`.github/workflows/ci.yml`) runs these on every pull request and push to `ma
 - **Marketplace forms (not in CI, needs a signed-in browser):** after changing a native form builder, or to check whether a marketplace changed its sell page, run `anteroom-extension/tools/form-sweep/<marketplace>/sweep.js` on that marketplace's sell page (Depop, Mercari, Poshmark), then `node anteroom-extension/tools/form-sweep/<marketplace>/compare.js <downloads folder>`. Each script's header says how; the compare exits 1 on any difference.
 - **Marketplace value matrix:** a change to how a General size, condition, color or category becomes a marketplace's value keeps `anteroom/server/tests/test_marketplace_value_matrix.py` and `anteroom-extension/tests/marketplace-value-matrix.test.js` green. They run every General value through the production mapping against the option lists captured in `skills/list-this/references/`, so a refreshed form sweep that updates those lists is checked by the matrix too. Their known-gap lists only shrink: fix the mapping, then remove the entry.
 - **Secrets:** Do not track `.env`, key files, photos, or private exports. CI scans the working tree and the commits a change adds with gitleaks (`./check.sh` does too when gitleaks is installed).
+
+**Linking issues:** Every PR closes at least one issue. Put a closing keyword
+in the description, one per issue: `Closes #12, closes #14` (`Fixes` and
+`Resolves` work too; `Closes #12, #14` closes only #12). GitHub honors the
+keywords only in the description or a commit message and only for PRs into
+`main`; a keyword in a comment or a title does nothing. Use `Refs #<n>` for an
+issue the PR touches but does not finish, and keep that issue open. Check the
+link with `gh pr view <n> --json closingIssuesReferences`; the **Linked issue**
+workflow fails a PR that closes nothing (dependency bots are exempt). If you
+link or unlink an issue in the PR's Development sidebar, edit and save the PR
+description or push a commit to refresh the check. A sidebar change alone
+does not trigger the workflow. An issue found while working on another one
+gets its own issue and PR, not a line in this one.
 
 **Pull requests:** Open every PR ready for review, never as a draft: run `gh pr create` without `--draft`, so reviewers and review bots see it from the start (Codex's review on open does not run on drafts). Leave drafts that already exist as they are; mark one ready only when its own work is done. Ready for review is not ready to merge. After creating or updating a PR, always check CI (`gh pr checks`) and fix failures before considering the work done. Do not stop while required checks are pending or red. PRs never bump the version or edit `CHANGELOG.md`; do not run `bump-version.sh` in a PR. A PR that changes `anteroom/` adds one note file, `changelog.d/<branch-slug>.md`, holding `- ` bullets in the seller's words (`<slug>.minor.md` or `<slug>.major.md` only when the seller asks for that bump; see `changelog.d/README.md`). After merge, the **Version** workflow turns each merged PR's notes into one patch bump and a `## <version> — <YYYY-MM-DD>` section at the top of `CHANGELOG.md`, which the app shows under Settings → General → About → What's new, and then starts the macOS release build. The UI reads the version from the API; never hardcode it. CI's **Changelog** job (`anteroom/scripts/check-changelog.py`) fails when a PR changes `VERSION` or `CHANGELOG.md`, or when a note is malformed; run it locally with `python anteroom/scripts/check-changelog.py`.
 

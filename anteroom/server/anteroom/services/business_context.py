@@ -27,7 +27,7 @@ _CACHE_SIZE = 16
 # assistant threads) leave the copy alone.
 WATCHED_TABLES = frozenset({
     "conversations", "messages", "listings", "listing_revisions", "source_boxes", "ad_spend",
-    "sale_events", "scout_checks", "sale_snapshots",
+    "sale_events", "scout_checks", "sale_snapshots", "business_expenses", "marketplace_sales",
 })
 
 _lock = threading.Lock()
@@ -79,6 +79,9 @@ def cached(db: Session, day: date, build: Callable[[], Any]) -> Any:
 def _touches_watched(session: Session) -> bool:
     for obj in (*session.new, *session.dirty, *session.deleted):
         table = getattr(obj, "__tablename__", None)
+        # The first read can archive Vendoo sales it already includes.
+        if table == "marketplace_sales" and session.info.get("archiving_vendoo_sales"):
+            continue
         if table in WATCHED_TABLES:
             return True
     return False
@@ -87,6 +90,17 @@ def _touches_watched(session: Session) -> bool:
 @event.listens_for(Session, "after_flush")
 def _after_flush(session: Session, _context) -> None:
     if _touches_watched(session):
+        session.info["business_context_dirty"] = True
+        invalidate_business_context(user_id=getattr(session, "user_id", None))
+
+
+@event.listens_for(Session, "after_commit")
+@event.listens_for(Session, "after_rollback")
+def _after_transaction(session: Session) -> None:
+    if session.info.get("business_context_dirty"):
+        # A savepoint can finish while the watched write is still uncommitted.
+        if not session.in_nested_transaction():
+            session.info.pop("business_context_dirty")
         invalidate_business_context(user_id=getattr(session, "user_id", None))
 
 
@@ -97,4 +111,5 @@ def _bulk_write(state) -> None:
         return
     tables = {getattr(mapper, "local_table", None) for mapper in state.all_mappers}
     if any(getattr(table, "name", None) in WATCHED_TABLES for table in tables):
+        state.session.info["business_context_dirty"] = True
         invalidate_business_context(user_id=getattr(state.session, "user_id", None))

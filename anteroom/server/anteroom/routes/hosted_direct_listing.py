@@ -1,5 +1,5 @@
 """List, update and delist from the web: eBay and Etsy through their APIs, and
-Poshmark, Mercari and Depop through the seller's own Chrome.
+Poshmark, Mercari and Depop through a cloud session or the seller's own Chrome.
 
 These are the desktop handlers, run in the signed-in seller's context with
 their own tokens. Every action is one the seller starts: List and Update carry

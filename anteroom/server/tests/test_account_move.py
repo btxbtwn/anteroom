@@ -104,7 +104,18 @@ def account_for(client, keys, user=USER_ID):
 
 
 def test_a_mac_moves_into_its_sellers_account_once(cloud, mac, vault, storage, signing_keys, monkeypatch):  # noqa: F811
+    from datetime import date
+    from decimal import Decimal
+
+    from anteroom.models.business_expense import BusinessExpense
+
     client, engine = cloud
+    with Session(mac[0]) as db:
+        db.add(BusinessExpense(incurred_date=date(2026, 1, 10), amount_cents=725, currency="USD",
+                               category="mileage", vendor="", description="Sourcing trip", notes="",
+                               accounting_type="operating_expense", distance=Decimal(10), distance_unit="mi",
+                               mileage_rate_cents=Decimal("72.5"), import_source="manual"))
+        db.commit()
     secrets = {'ai-api-keys': json.dumps({'openai': 'sk-mac', 'anthropic': 'sk-ant-mac'}),
                'brave-search-api-key': 'brave-mac', 'marketplace-accounts': '{"ebay": {}}', 'relay-device': '{}'}
     monkeypatch.setattr(account_move, 'local_secrets', lambda slots: {slot: secrets[slot] for slot in secrets if slot in slots})
@@ -157,6 +168,9 @@ def test_a_mac_moves_into_its_sellers_account_once(cloud, mac, vault, storage, s
     again = account_move.move('seller@example.com', 'pw', account_for(client, signing_keys), source=mac[0], photos=mac[1])
     assert again['photos'] == 0 and again['missing_photos'] == 1 and again['refused_photos'] == 1 and again['keys'] == []
     assert len(client.get('/api/conversations', headers=alice).json()) == 1
+    expenses = client.get('/api/business-expenses', headers=alice,
+                          params={'start': '2026-01-01', 'end': '2026-01-31'}).json()
+    assert [(expense['description'], expense['amount_cents']) for expense in expenses] == [('Sourcing trip', 725)]
     assert len(storage) == 3
 
     # The same Mac cannot also move into a second account: its records are taken.
@@ -178,6 +192,27 @@ def test_import_rows_never_trust_the_mac_for_ownership_or_fields(cloud, signing_
         assert client.post('/api/account-import/rows', headers=alice, json={'table': table, 'rows': []}).status_code == 422
     assert client.put('/api/account-import/secrets', headers=alice, json={'marketplace-accounts': '{}'}).status_code == 422
     assert client.post('/api/account-import/rows', json={'table': 'conversations', 'rows': [row]}).status_code == 401
+
+
+def test_import_secrets_keeps_a_concurrent_cloud_key_save(cloud, vault, signing_keys, monkeypatch):  # noqa: F811
+    client, _ = cloud
+    update = VaultSecretStore.update
+
+    def with_concurrent_save(store, slot, mutator):
+        # A seller save commits before the import takes the Vault slot lock.
+        vault[(store.owner, slot)] = json.dumps({'openai': 'new-cloud-key'})
+        update(store, slot, mutator)
+
+    monkeypatch.setattr(VaultSecretStore, 'update', with_concurrent_save)
+    response = client.put('/api/account-import/secrets', headers=headers(signing_keys), json={
+        'ai-api-keys': json.dumps({'openai': 'mac-key', 'anthropic': 'another-mac-key'}),
+    })
+    assert response.status_code == 200
+    assert response.json() == {'saved': ['ai-api-keys']}
+    assert json.loads(vault[(USER_ID, 'ai-api-keys')]) == {
+        'openai': 'new-cloud-key',
+        'anthropic': 'another-mac-key',
+    }
 
 
 def test_move_restores_legacy_vendoo_labels_from_the_current_listing(cloud, mac, storage, signing_keys, monkeypatch):  # noqa: F811
@@ -223,6 +258,65 @@ def test_move_restores_legacy_vendoo_labels_from_the_current_listing(cloud, mac,
     }
     with Session(mac[0]) as db:
         assert db.scalar(select(Conversation.notes).where(Conversation.id == 'legacy')) == json.dumps(cases['legacy'][0])
+
+
+def test_move_fills_missing_cloud_labels_without_replacing_cloud_data(
+    cloud, mac, storage, signing_keys, monkeypatch,  # noqa: F811
+):
+    from anteroom.models.conversation import Conversation
+    from anteroom.models.listing import Listing, ListingRevision
+
+    client, engine = cloud
+    monkeypatch.setattr(account_move, 'local_secrets', lambda slots: {})
+    cloud_notes = {
+        'vendooItemId': 'vendoo-item',
+        'sellerNotes': 'Cloud edit',
+        'vendooDates': {'sold': '1970-01-01'},
+    }
+    cases = {
+        'missing': (cloud_notes, {**cloud_notes, 'vendooLabels': 'clothing, raghouse'}),
+        'edited': ({**cloud_notes, 'vendooLabels': 'Cloud label'}, None),
+        'cleared': ({**cloud_notes, 'vendooLabels': ''}, None),
+        'unknown': ({**cloud_notes, 'vendooLabels': None}, None),
+        'different': ({**cloud_notes, 'vendooItemId': 'different-item'}, None),
+        'unbound': ({'sellerNotes': 'Cloud edit'}, None),
+    }
+    with Session(mac[0]) as db:
+        for item in cases:
+            db.add(Conversation(id=item, title='Desktop title',
+                                notes=json.dumps({'vendooItemId': 'vendoo-item', 'sellerNotes': 'Desktop edit'})))
+        db.flush()
+        for item in cases:
+            db.add_all([
+                Listing(conversation_id=item, current_revision_id=f'{item}-mac'),
+                ListingRevision(id=f'{item}-mac', conversation_id=item, source='vendoo_import',
+                                listing_json={'labels': ['clothing', 'raghouse']}),
+            ])
+        db.commit()
+    with Session(engine) as db:
+        for item, (notes, _) in cases.items():
+            db.add(Conversation(id=item, user_id=USER_ID, title='Cloud title', notes=json.dumps(notes)))
+        db.flush()
+        db.add_all([
+            Listing(conversation_id='missing', user_id=USER_ID, current_revision_id='cloud-revision'),
+            ListingRevision(id='cloud-revision', conversation_id='missing', user_id=USER_ID,
+                            source='manual', listing_json={'title': 'Cloud listing'}),
+        ])
+        db.commit()
+
+    account = account_for(client, signing_keys)
+    for _ in range(2):
+        account_move.move('seller@example.com', 'pw', account, source=mac[0], photos=mac[1])
+        with Session(engine) as db:
+            for item, (original, updated) in cases.items():
+                row = db.get_one(Conversation, item)
+                assert row.title == 'Cloud title'
+                assert json.loads(row.notes or '{}') == (updated if updated is not None else original)
+                if updated is None:
+                    assert row.notes == json.dumps(original)
+            assert db.get_one(Listing, 'missing').current_revision_id == 'cloud-revision'
+    detail = client.get('/api/conversations/missing', headers=headers(signing_keys)).json()
+    assert detail['vendoo_labels'] == ['clothing', 'raghouse']
 
 
 def test_the_account_tells_the_mac_where_to_sign_in(cloud, monkeypatch):  # noqa: F811

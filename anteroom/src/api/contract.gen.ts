@@ -158,6 +158,29 @@ export interface CropBox {
   height: number;
 }
 
+export interface CsvInput {
+  content: string;
+}
+
+export interface CsvIssue {
+  row: number;
+  detail: string;
+}
+
+export interface CsvResult {
+  valid: number;
+  duplicates: number;
+  imported: number;
+  issues: CsvIssue[];
+  preview: ExpenseInput[];
+}
+
+export interface CurrencyReport {
+  currency: string;
+  incomplete_sales: number;
+  lines: ReportLine[];
+}
+
 export interface DeleteConversationResult {
   ok: boolean;
   deleted_jobs: number;
@@ -190,6 +213,53 @@ export interface DirectRecord {
 /** What a refused request answers: one sentence for the seller. */
 export interface ErrorDetail {
   detail: string;
+}
+
+export interface Expense {
+  incurred_date: string;
+  amount_cents: number;
+  currency?: string;
+  category: "inventory_purchases" | "sourcing_transportation" | "shipping_supplies" | "shipping_labels" | "platform_fees" | "software_subscriptions" | "equipment" | "home_office" | "advertising" | "mileage" | "other";
+  vendor?: string;
+  description?: string;
+  notes?: string;
+  distance?: string | null;
+  distance_unit?: "mi" | "km" | null;
+  mileage_rate_cents?: string | null;
+  origin_destination?: string | null;
+  id: string;
+  revision: number;
+  accounting_type: "operating_expense" | "inventory_purchase";
+  import_source: "manual" | "csv" | "bank";
+}
+
+export interface ExpenseInput {
+  incurred_date: string;
+  amount_cents: number;
+  currency?: string;
+  category: "inventory_purchases" | "sourcing_transportation" | "shipping_supplies" | "shipping_labels" | "platform_fees" | "software_subscriptions" | "equipment" | "home_office" | "advertising" | "mileage" | "other";
+  vendor?: string;
+  description?: string;
+  notes?: string;
+  distance?: string | null;
+  distance_unit?: "mi" | "km" | null;
+  mileage_rate_cents?: string | null;
+  origin_destination?: string | null;
+}
+
+export interface ExpenseUpdate {
+  incurred_date: string;
+  amount_cents: number;
+  currency?: string;
+  category: "inventory_purchases" | "sourcing_transportation" | "shipping_supplies" | "shipping_labels" | "platform_fees" | "software_subscriptions" | "equipment" | "home_office" | "advertising" | "mileage" | "other";
+  vendor?: string;
+  description?: string;
+  notes?: string;
+  distance?: string | null;
+  distance_unit?: "mi" | "km" | null;
+  mileage_rate_cents?: string | null;
+  origin_destination?: string | null;
+  expected_revision: number;
 }
 
 export interface HTTPValidationError {
@@ -293,6 +363,49 @@ export interface ListingValidation {
   can_send: boolean;
 }
 
+export interface MarketplaceCloudResult {
+  ok: boolean;
+  session?: MarketplaceCloudStatus | null;
+  error?: string | null;
+}
+
+export interface MarketplaceCloudSessions {
+  enabled: string[];
+  sessions: Record<string, MarketplaceCloudStatus>;
+}
+
+export interface MarketplaceCloudStatus {
+  marketplace: string;
+  state: string;
+  mode: string;
+  cloud_connected: boolean;
+  label?: string | null;
+  expires_at?: number | null;
+  expiring: boolean;
+  connected_at?: string | null;
+  last_used_at?: string | null;
+  last_error?: string | null;
+}
+
+export interface MileageAmount {
+  currency: string;
+  /** Decimal value without a currency symbol. */
+  mileage_rate_cents: string;
+  amount_cents: number;
+}
+
+export interface MileageInput {
+  incurred_date: string;
+  country: "US" | "CA";
+  /** Decimal value without a currency symbol. */
+  distance: string;
+  distance_unit: "mi" | "km";
+  /** Decimal value without a currency symbol. */
+  prior_business_km?: string;
+  northern_territory?: boolean;
+  us_rate_override_cents?: string | null;
+}
+
 export interface OfferAnalyticsMarketplace {
   marketplace: string;
   confirmed_recipients: number | null;
@@ -356,6 +469,11 @@ export interface PriceDrift {
   price: number;
   /** ``override``: a price typed on that marketplace's form. ``live``: the live listing's known price. */
   source: "override" | "live";
+}
+
+export interface ReportLine {
+  label: string;
+  amount_cents: number;
 }
 
 /** Clothing size from unsaved tag photos, never the shipping package size. */

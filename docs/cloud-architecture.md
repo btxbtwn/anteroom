@@ -133,25 +133,25 @@ The design does not assume a Mac.
 
 | Seller has | What works |
 |---|---|
-| iPhone or web only | Everything that runs on the server: generation, editing, photos, history, analytics. eBay and Etsy list through their official APIs. Once Poshmark is connected in Cloud (via a one-time Chrome extension capture when `ANTEROOM_CLOUD_MARKETPLACES=poshmark` is enabled), Poshmark listing, updating, delisting, sales checks, imports, and promotions also run server-side while Chrome is closed. |
-| Any computer with desktop Chrome | The above, plus Poshmark, Mercari, Depop actions through the Bridge extension, and one-time Poshmark Cloud session connect/reconnect. |
+| iPhone or web only | Everything that runs on the server: generation, editing, photos, history, analytics. eBay and Etsy list through their official APIs. Once Poshmark, Mercari, or Depop is connected in Cloud, listing actions, sales checks, imports, and promotions for that marketplace run server-side while Chrome is closed. |
+| Any computer with desktop Chrome | The above, plus Poshmark, Mercari, Depop actions through the Bridge extension, and one-time Cloud session connect or reconnect. |
 | The Mac app | The above, plus Mac-only work: Apple Vision background removal and local SDK sign-ins. |
 
-### Opt-in Poshmark Cloud sessions
+### Opt-in marketplace Cloud sessions
 
-Hosted accounts can optionally run Poshmark actions server-side without keeping
-Chrome open, gated behind `ANTEROOM_CLOUD_MARKETPLACES=poshmark` (off by default).
+Hosted accounts can run Poshmark, Mercari, and Depop actions server-side.
+`ANTEROOM_CLOUD_MARKETPLACES=poshmark,mercari,depop` makes all three available for sellers to connect.
 Local desktop mode is unchanged and stays strictly on local Chrome.
 
 - **One-time direct capture:** When the seller chooses **Connect in Cloud** in
   Settings → Connections and approves in the extension's `cloud-session-connect.html`
-  confirmation window, the hosted API mints a 120-second single-use upload token
-  (stored as a SHA-256 hash). The extension worker uploads only `poshmark.com`
-  cookies and User-Agent directly over HTTPS to `POST /api/cloud-sessions/poshmark/upload`
+  confirmation window, the hosted API mints a 180-second single-use upload token
+  (stored as a SHA-256 hash). The extension worker uploads only the selected marketplace’s
+  cookies and User-Agent directly over HTTPS to `POST /api/cloud-sessions/{marketplace}/upload`
   with `X-Cloud-Upload-Token` and `credentials: 'omit'`. Cookies never pass through
   page JavaScript or `window.postMessage`, and Supabase JWTs never enter the extension.
 - **Encrypted storage and process isolation:** Cookies are encrypted per seller in
-  Supabase Vault (`cloud-session-poshmark`) while `cloud_marketplace_sessions` stores
+  Supabase Vault (`cloud-session-<marketplace>`) while `cloud_marketplace_sessions` stores
   only non-secret status metadata under Postgres RLS. Web processes
   (`ANTEROOM_PROCESS_ROLE=web`) are strictly forbidden from decrypting cloud cookies;
   they forward execution to worker processes via `/internal/cloud-marketplace/execute`.
@@ -161,10 +161,8 @@ Local desktop mode is unchanged and stays strictly on local Chrome.
 
 <!-- coderabbit-ai-generated-section:v1:f6be35b883480db5b69db6020df226bf796a7b6cb3f2a5d8cee758426a607635 -->
 
-- **Fresh isolated subprocess per operation:** Workers execute each Poshmark operation
-  in a fresh single-operation Node 22 subprocess (`cloud_runner/run-poshmark.cjs`)
-  using `impit` (Chrome TLS impersonation) and `tough-cookie` (strict `poshmark.com`
-  cookie allowlist), with an optional sticky residential proxy (`ANTEROOM_CLOUD_PROXY_URL`)
+- **Fresh isolated subprocess per operation:** Workers execute each operation in a fresh Node 22 subprocess
+  (`cloud_runner/run-<marketplace>.cjs`) using `impit` and a per-marketplace `tough-cookie` jar, with an optional sticky residential proxy (`ANTEROOM_CLOUD_PROXY_URL`)
   and per-Machine concurrency cap (`ANTEROOM_CLOUD_MAX_CONCURRENCY`, default 4).
   Write-ahead operation journals persist to Postgres `cloud_operation_journals`, and
   each active listing/promotion pins its executor (`cloud` vs `chrome`) so recovery,
@@ -178,8 +176,10 @@ Local desktop mode is unchanged and stays strictly on local Chrome.
   before each delist; approved photos are loaded directly from `photo_store()` with
   SHA-256 verification.
 
-Mercari and Depop remain Chrome-only until a server-side session path is evaluated
-separately.
+Mercari and Depop uploads are verified by the worker before replacing Vault
+credentials. A verified reconnect resumes rules paused by a cloud disconnect.
+Depop uses its recent-like feed, while Mercari checks eligibility during its
+scheduled listing scans and honors the existing offer cooldown.
 
 ## Next steps (2026-10-31)
 
@@ -190,7 +190,10 @@ separately.
    `routes/hosted_account_import.py` in the account). The seller signs in with
    their password; the Mac sends its records table by table, parents first,
    and the account writes each under the verified seller through row
-   security, skipping rows it already has, so a move can run again. Photos are
+   security, keeping data on rows it already has. If both copies identify the
+   same Vendoo item, the move fills an absent Labels field from the Mac and
+   preserves any saved cloud value, including an intentionally cleared field.
+   The move can run again without duplicates. Photos are
    converted to JPEG into private Storage; settings fill in what the account
    lacks; provider keys and the ChatGPT sign-in go to Vault without replacing
    ones set on the web. eBay and Etsy reconnect in the account instead of

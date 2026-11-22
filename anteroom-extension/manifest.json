@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Anteroom Bridge",
-  "version": "0.2.84",
+  "version": "0.2.85",
   "minimum_chrome_version": "120",
   "description": "Lets Anteroom publish, update and delist your marketplace listings, save drafts, share, send offers, and read sales and likes.",
   "permissions": [
@@ -25,7 +25,9 @@
     "https://firebasestorage.googleapis.com/*",
     "https://www.ebay.com/*",
     "https://poshmark.com/*",
+    "https://mercari.com/*",
     "https://www.mercari.com/*",
+    "https://depop.com/*",
     "https://www.depop.com/*",
     "https://webapi.depop.com/*",
     "https://*.s3.amazonaws.com/*",

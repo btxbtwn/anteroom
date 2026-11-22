@@ -30,7 +30,7 @@ kill_timeout = 300
 
 [env]
   ANTEROOM_BACKGROUND_WORKER = '1'
-  ANTEROOM_CLOUD_MARKETPLACES = 'poshmark'
+  ANTEROOM_CLOUD_MARKETPLACES = 'poshmark,mercari,depop'
   # Email every distinct error to the operator (services/error_alerts.py).
   ANTEROOM_ERROR_EMAIL = '1'
   SUPABASE_URL = 'https://ytoqdgtzvutdltfkpxbu.supabase.co'

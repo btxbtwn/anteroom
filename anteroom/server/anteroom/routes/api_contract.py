@@ -29,9 +29,20 @@ from anteroom.services.photo_edits import PhotoEdits
 # ``/api/runtime``, which only the hosted app has) with the same models.
 CONTRACT_OPERATIONS: tuple[tuple[str, str], ...] = (
     ("get", "/api/runtime"),
+    ("get", "/api/cloud-sessions"),
+    ("post", "/api/cloud-sessions/{marketplace}/verify"),
+    ("delete", "/api/cloud-sessions/{marketplace}"),
     ("post", "/api/size-tags/read"),
     ("get", "/api/analytics/offers"),
     ("get", "/api/analytics/offers/log"),
+    ("get", "/api/business-expenses"),
+    ("post", "/api/business-expenses"),
+    ("put", "/api/business-expenses/{expense_id}"),
+    ("delete", "/api/business-expenses/{expense_id}"),
+    ("post", "/api/business-expenses/mileage"),
+    ("post", "/api/business-expenses/import"),
+    ("post", "/api/business-expenses/import/preview"),
+    ("get", "/api/business-expenses/profit-and-loss"),
     ("get", "/api/conversations"),
     ("post", "/api/conversations"),
     ("get", "/api/conversations/{identity}"),
@@ -42,12 +53,41 @@ CONTRACT_OPERATIONS: tuple[tuple[str, str], ...] = (
     ("get", "/api/conversations/{identity}/photos"),
     ("get", "/api/listing-sheet"),
 )
-HOSTED_ONLY_OPERATIONS = {("get", "/api/runtime")}
+HOSTED_ONLY_OPERATIONS = {
+    ("get", "/api/runtime"),
+    ("get", "/api/cloud-sessions"),
+    ("post", "/api/cloud-sessions/{marketplace}/verify"),
+    ("delete", "/api/cloud-sessions/{marketplace}"),
+}
 
 
 class ContractModel(BaseModel):
     # A docstring under a field becomes its description, and a doc comment in both clients.
     model_config = ConfigDict(use_attribute_docstrings=True)
+
+
+class MarketplaceCloudStatus(ContractModel):
+    marketplace: str
+    state: str
+    mode: str
+    cloud_connected: bool
+    label: str | None = None
+    expires_at: int | None = None
+    expiring: bool
+    connected_at: str | None = None
+    last_used_at: str | None = None
+    last_error: str | None = None
+
+
+class MarketplaceCloudSessions(ContractModel):
+    enabled: list[str]
+    sessions: dict[str, MarketplaceCloudStatus]
+
+
+class MarketplaceCloudResult(ContractModel):
+    ok: bool
+    session: MarketplaceCloudStatus | None = None
+    error: str | None = None
 
 
 class ErrorDetail(ContractModel):
