@@ -157,6 +157,10 @@ Local desktop mode is unchanged and stays strictly on local Chrome.
   they forward execution to worker processes via `/internal/cloud-marketplace/execute`.
   Disconnecting deletes the Vault slot immediately and writes an audit event to
   `cloud_session_audit`.
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:f6be35b883480db5b69db6020df226bf796a7b6cb3f2a5d8cee758426a607635 -->
+
 - **Fresh isolated subprocess per operation:** Workers execute each Poshmark operation
   in a fresh single-operation Node 22 subprocess (`cloud_runner/run-poshmark.cjs`)
   using `impit` (Chrome TLS impersonation) and `tough-cookie` (strict `poshmark.com`
@@ -165,6 +169,10 @@ Local desktop mode is unchanged and stays strictly on local Chrome.
   Write-ahead operation journals persist to Postgres `cloud_operation_journals`, and
   each active listing/promotion pins its executor (`cloud` vs `chrome`) so recovery,
   status checks, and cancellations never cross-wire between executors.
+  On Fly, cancellation goes to every private worker address. Only the worker that owns
+  the seller’s operation can confirm cancellation.
+
+<!-- /coderabbit-ai-generated:v1 -->
 - **Unchanged safety invariants:** Explicit `confirm: true` is still enforced on every
   list, update, delete, and promotion; auto-delist re-reads the seller's setting
   before each delist; approved photos are loaded directly from `photo_store()` with

@@ -48,6 +48,7 @@
     const response = await fetch(`${ORIGIN}/api/cloud-sessions/${marketplace}/upload`, {
       method: 'POST',
       credentials: 'omit',
+      signal: AbortSignal.timeout(30000),
       headers: {
         'Content-Type': 'application/json',
         'X-Cloud-Upload-Token': uploadToken,
@@ -222,7 +223,7 @@
       } catch {
         return { ok: false, error: 'The page or account changed. Return to Anteroom Settings and try again.' };
       }
-      return performCloudUpload({ marketplace: entry.marketplace, uploadToken: entry.uploadToken });
+      return () => performCloudUpload({ marketplace: entry.marketplace, uploadToken: entry.uploadToken });
     }
     async function handle(message, sender) {
       if (!message || typeof message !== 'object' || message.type !== 'cloud.connection') return undefined;
@@ -372,7 +373,7 @@
       handle: (message, sender) => message?.type === 'cloud.connection' && message.action === 'poshmark_form'
         ? readMarketplace(message, sender)
         : message?.type === 'cloud.connection' && message.action === 'marketplace_command'
-          ? relayCommand(message, sender) : serial(() => handle(message, sender)),
+          ? relayCommand(message, sender) : serial(() => handle(message, sender)).then(result => typeof result === 'function' ? result() : result),
       clear: id => serial(() => clear(id)),
       navigated: (id, change) => change.url && !site(change.url) ? serial(() => clear(id)) : Promise.resolve(),
       closedApproval: windowId => serial(async () => {

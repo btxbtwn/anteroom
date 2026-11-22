@@ -23,6 +23,7 @@ import logging
 import os
 from pathlib import Path
 import re
+import socket
 import shutil
 import threading
 import weakref
@@ -48,6 +49,7 @@ _MAX_PHOTO_BYTES = 20 * 1024 * 1024
 # Per-event-loop concurrency semaphores (M2)
 _semaphores: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = weakref.WeakKeyDictionary()
 # Active subprocess registry for cancellation: (seller_id, job_id) -> Process
+_pending: dict[tuple[str, str], threading.Event] = {}
 _active_lock = threading.Lock()
 _active_processes: dict[tuple[str, str], asyncio.subprocess.Process] = {}
 
@@ -141,8 +143,8 @@ def _load_approved_photos(approved_photos: list[dict[str, Any]] | None) -> list[
     return encoded
 
 
-async def _forward_to_worker(path: str, body: dict[str, Any], timeout: float) -> dict[str, Any]:
-    base = worker_base_url()
+async def _forward_to_worker(path: str, body: dict[str, Any], timeout: float, *, target: str | None = None) -> dict[str, Any]:
+    base = target or worker_base_url()
     token = os.environ.get("ANTEROOM_PROCESS_TOKEN", "")
     if not base or not token or not _WORKER_URL_RE.match(base):
         raise CloudExecutionUnavailable("Cloud marketplace worker is not configured.")
@@ -231,28 +233,49 @@ async def cancel(job_id: str) -> bool:
     """Cancel an in-flight cloud marketplace operation for the current seller."""
     seller = _seller_id()
     if _process_role() == "web":
-        try:
-            res = await _forward_to_worker(
-                "/internal/cloud-marketplace/cancel",
-                {"user_id": seller, "job_id": str(job_id)},
-                timeout=10.0,
-            )
-            return bool(res.get("cancelled", False))
-        except CloudExecutionUnavailable:
-            return False
+        base = worker_base_url()
+        targets = [base]
+        # Fly private DNS lists every worker Machine, including overlapping deployments.
+        if _WORKER_URL_RE.fullmatch(base) and ".internal:" in base:
+            host, port = base.removeprefix("http://").rsplit(":", 1)
+            try:
+                addresses = await asyncio.wait_for(asyncio.get_running_loop().getaddrinfo(
+                    host, int(port), family=socket.AF_INET6, type=socket.SOCK_STREAM), timeout=3)
+            except (OSError, TimeoutError):
+                return False
+            targets = list({f"http://[{address[4][0]}]:{port}" for address in addresses})
+
+        async def cancel_on(target: str) -> bool:
+            try:
+                res = await _forward_to_worker("/internal/cloud-marketplace/cancel",
+                    {"user_id": seller, "job_id": str(job_id)}, timeout=10.0, target=target)
+                return res.get("cancelled") is True
+            except CloudExecutionUnavailable:
+                return False
+
+        return any(await asyncio.gather(*(cancel_on(target) for target in targets)))
     return await cancel_local(seller, str(job_id))
 
 
 async def cancel_local(seller_id: str, job_id: str) -> bool:
     with _active_lock:
-        proc = _active_processes.get((seller_id, str(job_id)))
-    if proc is None or proc.returncode is not None:
+        key = (seller_id, str(job_id))
+        pending = _pending.get(key)
+        if pending is not None:
+            pending.set()
+        proc = _active_processes.get(key)
+    if proc is None:
+        return pending is not None
+    if proc.returncode is not None:
         return False
     try:
         if proc.stdin is not None and not proc.stdin.is_closing():
             msg = json.dumps({"type": "cancel", "job_id": str(job_id)}) + "\n"
             proc.stdin.write(msg.encode("utf-8"))
-            await proc.stdin.drain()
+            async with asyncio.timeout(5):
+                await proc.stdin.drain()
+                await proc.wait()
+            return True
     except Exception:
         pass
     try:
@@ -290,6 +313,7 @@ async def _run_subprocess(
     proc = await asyncio.create_subprocess_exec(
         node_bin,
         str(_RUNNER_SCRIPT),
+        limit=16 * 1024 * 1024,  # NDJSON includes the full cookie bundle and operation results.
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -314,6 +338,8 @@ async def _run_subprocess(
 
     async def _communicate() -> dict[str, Any]:
         assert proc.stdin is not None and proc.stdout is not None
+        if reg_key and (pending := _pending.get(reg_key)) and pending.is_set():
+            return {"result": _cancelled_before_start()}
         proc.stdin.write((json.dumps(run_payload, separators=(",", ":")) + "\n").encode("utf-8"))
         await proc.stdin.drain()
 
@@ -322,13 +348,14 @@ async def _run_subprocess(
             raw_line = await proc.stdout.readline()
             if not raw_line:
                 break
-            line = raw_line.decode("utf-8", errors="replace").strip()
+            if not raw_line.endswith(b"\n"):
+                raise ValueError("Incomplete runner frame")
+            line = raw_line.decode("utf-8").strip()
             if not line:
                 continue
-            try:
-                msg = json.loads(line)
-            except json.JSONDecodeError:
-                continue
+            msg = json.loads(line)
+            if not isinstance(msg, dict):
+                raise ValueError("Invalid runner frame")
             msg_type = msg.get("type")
             if msg_type == "journal_set":
                 seq = msg.get("seq")
@@ -391,6 +418,9 @@ async def _run_subprocess(
             "cookies_changed": False,
             "cookies": [],
         }
+    except (ValueError, OSError):
+        return {"result": {"ok": False, "safe_to_retry": False, "error_code": "uncertain",
+                           "error": "Could not read the cloud runner response."}}
     except asyncio.CancelledError:
         await _kill_process(proc)
         raise
@@ -406,10 +436,44 @@ async def _run_subprocess(
             stderr_task.cancel()
 
 
+def _cancelled_before_start() -> dict[str, Any]:
+    return {"ok": False, "safe_to_retry": True, "error_code": "cancelled", "error": "Cancelled before execution."}
+
+
 async def execute_local(
     marketplace: str,
     command: dict[str, Any],
     *,
+    photos: list[dict[str, str]] | None = None,
+    approved_photos: list[dict[str, Any]] | None = None,
+    timeout: float = _DEFAULT_TIMEOUT_S,
+) -> dict[str, Any]:
+    job_id = str((command.get("payload") or {}).get("operation_id") or command.get("job_id") or "")
+    # A status lookup can run alongside the write whose journal it reads.
+    if command.get("type") == "marketplace.result":
+        job_id = ""
+    key = (_seller_id(), job_id)
+    pending = threading.Event()
+    if job_id:
+        with _active_lock:
+            if key in _pending:
+                return {"ok": False, "safe_to_retry": False, "error_code": "uncertain", "error": "Operation already running."}
+            _pending[key] = pending
+    try:
+        return await _execute_local(marketplace, command, photos=photos, approved_photos=approved_photos,
+                                    timeout=timeout, job_id=job_id, pending=pending)
+    finally:
+        if job_id:
+            with _active_lock:
+                _pending.pop(key, None)
+
+
+async def _execute_local(
+    marketplace: str,
+    command: dict[str, Any],
+    *,
+    job_id: str,
+    pending: threading.Event,
     photos: list[dict[str, str]] | None = None,
     approved_photos: list[dict[str, Any]] | None = None,
     timeout: float = _DEFAULT_TIMEOUT_S,
@@ -426,7 +490,7 @@ async def execute_local(
             "error_code": "signed_out",
             "error": "Poshmark cloud session is not connected. Reconnect Poshmark in Settings -> Connections.",
         }
-    creds, proxy_session_id = creds_tuple
+    creds, proxy_session_id, generation = creds_tuple
     cookies = creds.get("cookies") or []
     user_agent = str(creds.get("user_agent") or "")
     proxy_url = cloud_sessions.proxy_url_for(proxy_session_id)
@@ -461,9 +525,10 @@ async def execute_local(
         "photos": photo_payloads,
         "journals": journals,
     }
-    job_id = str(command.get("job_id") or (command.get("payload") or {}).get("operation_id") or "")
 
     async with _loop_semaphore():
+        if pending.is_set():
+            return _cancelled_before_start()
         try:
             outcome = await _run_subprocess(market, seller, job_id, run_payload, timeout)
         except CloudExecutionUnavailable as exc:
@@ -493,7 +558,7 @@ async def execute_local(
     )
     if err_code == "signed_out" or verified_expired:
         try:
-            await in_worker_session(cloud_sessions.mark_session_expired, market, str(result.get("error") or ""))
+            await in_worker_session(cloud_sessions.mark_session_expired, market, str(result.get("error") or ""), generation)
         except Exception:
             log.warning("Could not mark cloud session expired for %s", market)
     elif outcome.get("cookies_changed") and isinstance(outcome.get("cookies"), list) and outcome["cookies"]:
@@ -503,6 +568,7 @@ async def execute_local(
                 market,
                 outcome["cookies"],
                 user_agent,
+                generation,
             )
         except Exception:
             log.warning("Could not refresh rotated cloud cookies for %s", market)

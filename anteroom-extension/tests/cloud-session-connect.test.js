@@ -62,10 +62,16 @@ const popupSender = {
 test('cloud_session_connect opens trusted popup and uploads directly on approve', async () => {
   const api = fakeChrome();
   const uploads = [];
+  let notify;
+  const started = new Promise(resolve => { notify = resolve; });
+  let finish;
+  const release = new Promise(resolve => { finish = resolve; });
   const bridge = createCloudConnection(api, {
     randomId: () => '33333333-3333-4333-8333-333333333333',
     uploadCloudSession: async opts => {
       uploads.push(opts);
+      notify();
+      await release;
       return { ok: true };
     },
   });
@@ -88,12 +94,12 @@ test('cloud_session_connect opens trusted popup and uploads directly on approve'
   }, popupSender);
   assert.deepEqual(details, { ok: true, email: 'seller@example.com', marketplace: 'poshmark' });
 
-  const approved = await bridge.handle({
+  const approved = bridge.handle({
     type: 'cloud.connection',
     action: 'cloud_session_approve',
     requestId: '33333333-3333-4333-8333-333333333333',
   }, popupSender);
-  assert.deepEqual(approved, { ok: true });
+  await started;
   assert.deepEqual(uploads, [{ marketplace: 'poshmark', uploadToken: TOKEN }]);
 
   // Replaying the same requestId is rejected because it was consumed immediately.
@@ -103,6 +109,8 @@ test('cloud_session_connect opens trusted popup and uploads directly on approve'
     requestId: '33333333-3333-4333-8333-333333333333',
   }, popupSender);
   assert.deepEqual(replay, { ok: false });
+  finish();
+  assert.deepEqual(await approved, { ok: true });
 });
 
 test('cloud_session_connect rejects mismatched account/token prefix and unsupported marketplaces', async () => {

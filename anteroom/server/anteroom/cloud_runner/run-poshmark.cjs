@@ -411,6 +411,9 @@ function enforcePoshmarkConfirmation(command) {
     if ((p.action === 'list' || p.action === 'update') && p.confirm !== true) {
       return { ok: false, safe_to_retry: true, error_code: 'rejected', error: 'Confirm this Poshmark action before running.' };
     }
+    if (p.listing?.poshmark_specifics?.videoId) {
+      return { ok: false, safe_to_retry: true, error_code: 'rejected', error: 'Poshmark Cloud cannot send the selected video. Remove it or use Chrome.' };
+    }
   } else if (type === 'marketplace.delete') {
     if (p.marketplace !== 'poshmark') {
       return { ok: false, safe_to_retry: true, error_code: 'rejected', error: 'Cloud runner only supports Poshmark.' };
@@ -566,8 +569,8 @@ async function runCli() {
   let activeContext = null;
   let started = false;
 
-  const writeLine = obj => {
-    process.stdout.write(`${JSON.stringify(obj)}\n`);
+  const writeLine = (obj, done) => {
+    process.stdout.write(`${JSON.stringify(obj)}\n`, done);
   };
 
   const requestJournalSync = payload =>
@@ -623,8 +626,7 @@ async function runCli() {
               activeContext = ctx;
             },
           });
-          writeLine({ type: 'result', ...outcome });
-          process.exit(0);
+          writeLine({ type: 'result', ...outcome }, () => process.exit(0));
         } catch (err) {
           writeLine({
             type: 'result',
@@ -636,8 +638,7 @@ async function runCli() {
             },
             cookies_changed: false,
             cookies: [],
-          });
-          process.exit(1);
+          }, () => process.exit(1));
         }
       })();
     }

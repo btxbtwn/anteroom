@@ -269,7 +269,7 @@ def test_web_process_role_forbids_decrypt_and_forwards_to_worker(cloud, monkeypa
             with pytest.raises(cloud_sessions.CloudSessionDecryptForbidden):
                 cloud_sessions.read_credentials_fresh(db, "poshmark")
             with pytest.raises(cloud_sessions.CloudSessionDecryptForbidden):
-                cloud_sessions.refresh_cookies(db, "poshmark", _sample_cookies())
+                cloud_sessions.refresh_cookies(db, "poshmark", _sample_cookies(), None, None)
 
         # Web process forwards execute() to worker instead of calling execute_local()
         forwarded: list[dict] = []
@@ -625,3 +625,101 @@ def test_internal_cloud_marketplace_route_requires_process_token(cloud, monkeypa
     assert ok.status_code == 200
     assert ok.json()["ok"] is True
     assert ok.json()["result"]["ok"] is True
+
+
+def test_stale_worker_cannot_modify_replacement_session(cloud, monkeypatch):  # noqa: F811
+    from anteroom.database import SessionLocal
+
+    vault = _patch_vault(monkeypatch)
+    monkeypatch.setenv("ANTEROOM_CLOUD_MARKETPLACES", "poshmark")
+    with use(for_seller(USER_ID)), SessionLocal() as db:
+        cloud_sessions.save_uploaded_session(db, "poshmark", _sample_cookies())
+        credentials = cloud_sessions.read_credentials_fresh(db, "poshmark")
+        assert credentials is not None
+        generation = credentials[2]
+        cloud_sessions.revoke_session(db, "poshmark")
+        cloud_sessions.save_uploaded_session(db, "poshmark", _sample_cookies(jwt_value=_fake_jwt(username="replacement")))
+        replacement = dict(vault.data)
+        cloud_sessions.refresh_cookies(db, "poshmark", _sample_cookies(), None, generation)
+        cloud_sessions.mark_session_expired(db, "poshmark", "old response", generation)
+        assert vault.data == replacement
+        assert cloud_sessions.has_active_session("poshmark", db)
+
+
+def test_cancel_before_slot_prevents_runner_start(monkeypatch):
+    monkeypatch.setattr(cloud_marketplace, "_seller_id", lambda: USER_ID)
+    ready = asyncio.Event()
+    sem = asyncio.Semaphore(0)
+
+    async def session(work, *args):
+        if work is cloud_sessions.read_credentials_fresh:
+            return {}, None, None
+        ready.set()
+        return {}
+
+    monkeypatch.setattr(cloud_marketplace, "in_worker_session", session)
+    monkeypatch.setattr(cloud_marketplace, "_loop_semaphore", lambda: sem)
+
+    async def run():
+        task = asyncio.create_task(cloud_marketplace.execute_local(
+            "poshmark", {"job_id": "job", "payload": {"operation_id": "operation"}}))
+        await ready.wait()
+        assert await cloud_marketplace.cancel_local(USER_ID, "operation")
+        sem.release()
+        assert (await task)["error_code"] == "cancelled"
+        assert not await cloud_marketplace.cancel_local(USER_ID, "operation")
+
+    asyncio.run(run())
+
+
+def test_cancel_reaches_worker_with_operation(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(cloud_marketplace, "_seller_id", lambda: USER_ID)
+    monkeypatch.setenv("ANTEROOM_PROCESS_ROLE", "web")
+    monkeypatch.setenv("ANTEROOM_WORKER_BASE_URL", "http://worker.process.test.internal:8080")
+    targets = set()
+
+    async def forward(path, body, timeout, target):
+        targets.add(target)
+        return {"cancelled": target == "http://[fd00::2]:8080" and body["job_id"] == "owned"}
+
+    async def run():
+        monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", AsyncMock(return_value=[
+            (0, 0, 0, "", (ip, 8080, 0, 0)) for ip in ("fd00::1", "fd00::2")]))
+        monkeypatch.setattr(cloud_marketplace, "_forward_to_worker", forward)
+        assert await cloud_marketplace.cancel("owned")
+        assert not await cloud_marketplace.cancel("absent")
+
+    asyncio.run(run())
+    assert len(targets) == 2
+
+
+def test_runner_reads_large_result_and_reports_invalid_frames(tmp_path, monkeypatch):
+    script = tmp_path / "runner.cjs"
+    monkeypatch.setattr(cloud_marketplace, "_RUNNER_SCRIPT", script)
+    for output, ok in [
+        ("JSON.stringify({type:'result',result:{ok:true, data:'v'.repeat(300000)}})", True),
+        ("'v'.repeat(17*1024*1024)", False),
+    ]:
+        script.write_text(f"process.stdin.once('data', () => console.log({output}));")
+        outcome = asyncio.run(cloud_marketplace._run_subprocess("poshmark", USER_ID, "", {}, 10))
+        assert outcome["result"]["ok"] is ok
+        if ok:
+            assert len(outcome["result"]["data"]) == 300000
+        else:
+            assert outcome["result"]["safe_to_retry"] is False
+            assert outcome["result"]["error_code"] == "uncertain"
+
+
+def test_cooperative_cancel_allows_cleanup(monkeypatch):
+    from unittest.mock import AsyncMock, Mock
+
+    process = Mock(returncode=None)
+    process.stdin.is_closing.return_value = False
+    process.stdin.drain = AsyncMock()
+    process.wait = AsyncMock(return_value=0)
+    monkeypatch.setitem(cloud_marketplace._active_processes, (USER_ID, "operation"), process)
+    assert asyncio.run(cloud_marketplace.cancel_local(USER_ID, "operation"))
+    process.wait.assert_awaited_once()
+    process.terminate.assert_not_called()

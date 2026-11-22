@@ -246,10 +246,11 @@ def _audit(db: Session, marketplace: str, event: str, detail: str | None = None)
     ))
 
 
-def _row(db: Session, marketplace: str) -> CloudMarketplaceSession | None:
-    return db.execute(
-        select(CloudMarketplaceSession).where(CloudMarketplaceSession.marketplace == marketplace)
-    ).scalar_one_or_none()
+def _row(db: Session, marketplace: str, *, lock: bool = False) -> CloudMarketplaceSession | None:
+    query = select(CloudMarketplaceSession).where(CloudMarketplaceSession.marketplace == marketplace)
+    if lock:
+        query = query.with_for_update().execution_options(populate_existing=True)
+    return db.execute(query).scalar_one_or_none()
 
 
 def serialize_session_row(marketplace: str, row: CloudMarketplaceSession | None) -> dict[str, Any]:
@@ -391,10 +392,10 @@ def save_uploaded_session(
 
     ctx = current()
     assert ctx is not None
+    row = _row(db, market, lock=True)
     if not ctx.secrets.set(vault_account(market), payload):
         raise CloudSessionError("Could not store encrypted session.")
 
-    row = _row(db, market)
     if row is None:
         row = CloudMarketplaceSession(
             user_id=_seller_id(),
@@ -432,11 +433,11 @@ def revoke_session(db: Session, marketplace: str) -> dict[str, Any]:
     market = str(marketplace or "").lower()
     if market not in SUPPORTED_CLOUD_MARKETPLACES:
         raise CloudSessionError("Unsupported cloud marketplace.")
+    row = _row(db, market, lock=True)
     ctx = current()
     if ctx is not None:
         ctx.secrets.delete(vault_account(market))
     now = utcnow()
-    row = _row(db, market)
     if row is not None:
         row.state = "revoked"
         row.account_label = None
@@ -450,10 +451,10 @@ def revoke_session(db: Session, marketplace: str) -> dict[str, Any]:
     return serialize_session_row(market, row)
 
 
-def mark_session_expired(db: Session, marketplace: str, error: str | None = None) -> None:
+def mark_session_expired(db: Session, marketplace: str, error: str, generation: datetime | None) -> None:
     market = str(marketplace or "").lower()
-    row = _row(db, market)
-    if row is None or row.state != "connected":
+    row = _row(db, market, lock=True)
+    if row is None or row.state != "connected" or row.connected_at != generation:
         return
     row.state = "expired"
     row.last_error = (error or "Poshmark asked to sign in again.")[:300]
@@ -469,22 +470,22 @@ def _assert_can_decrypt() -> None:
         )
 
 
-def read_credentials_fresh(db: Session, marketplace: str) -> tuple[dict[str, Any], str | None] | None:
+def read_credentials_fresh(db: Session, marketplace: str) -> tuple[dict[str, Any], str | None, datetime | None] | None:
     """Read freshly decrypted credentials from Vault (bypassing in-memory cache).
 
-    Refuses to run inside a ``web`` process. Returns ``(payload, proxy_session_id)``
+    Refuses to run inside a ``web`` process. Returns ``(payload, proxy_session_id, connected_at)``
     or ``None`` when no active cloud session exists.
     """
     _assert_can_decrypt()
     market = str(marketplace or "").lower()
     if not is_cloud_enabled(market):
         return None
-    row = _row(db, market)
+    row = _row(db, market, lock=True)
     if row is None or row.state != "connected":
         return None
     expires_at = _as_utc(row.expires_at)
     if expires_at is not None and expires_at <= utcnow():
-        mark_session_expired(db, market, "Your Poshmark cloud session expired.")
+        mark_session_expired(db, market, "Your Poshmark cloud session expired.", row.connected_at)
         return None
 
     ctx = current()
@@ -492,36 +493,38 @@ def read_credentials_fresh(db: Session, marketplace: str) -> tuple[dict[str, Any
     get_fresh = getattr(ctx.secrets, "get_fresh", None)
     raw = get_fresh(vault_account(market)) if callable(get_fresh) else ctx.secrets.get(vault_account(market))
     if not isinstance(raw, str) or not raw:
-        mark_session_expired(db, market, "Poshmark cloud credentials are missing. Reconnect Poshmark.")
+        mark_session_expired(db, market, "Poshmark cloud credentials are missing. Reconnect Poshmark.", row.connected_at)
         return None
     try:
         data = json.loads(raw)
     except Exception:
-        mark_session_expired(db, market, "Stored Poshmark credentials could not be read. Reconnect Poshmark.")
+        mark_session_expired(db, market, "Stored Poshmark credentials could not be read. Reconnect Poshmark.", row.connected_at)
         return None
     if not isinstance(data, dict) or not isinstance(data.get("cookies"), list):
-        mark_session_expired(db, market, "Stored Poshmark credentials are invalid. Reconnect Poshmark.")
+        mark_session_expired(db, market, "Stored Poshmark credentials are invalid. Reconnect Poshmark.", row.connected_at)
         return None
 
     now = utcnow()
     row.last_used_at = now
     row.updated_at = now
     _audit(db, market, "decrypt")
+    credentials = data, row.proxy_session_id, row.connected_at
     db.commit()
-    return data, row.proxy_session_id
+    return credentials
 
 
 def refresh_cookies(
     db: Session,
     marketplace: str,
     updated_cookies: list[dict[str, Any]],
-    user_agent: str | None = None,
+    user_agent: str | None,
+    generation: datetime | None,
 ) -> None:
     """Persist rotated cookies back to Vault once at the end of an operation."""
     _assert_can_decrypt()
     market = str(marketplace or "").lower()
-    row = _row(db, market)
-    if row is None or row.state != "connected":
+    row = _row(db, market, lock=True)
+    if row is None or row.state != "connected" or row.connected_at != generation:
         return
     try:
         cookies, label, expires_at, clean_ua = validate_and_normalize_cookies(market, updated_cookies, user_agent)

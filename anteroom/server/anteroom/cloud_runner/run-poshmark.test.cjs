@@ -228,10 +228,8 @@ test('CLI subprocess runs marketplace.sessions over stdin/stdout NDJSON', async 
 
   const stdoutLines = [];
   let stderr = '';
-  child.stdout.on('data', chunk => {
-    for (const line of chunk.toString('utf8').split('\n')) {
-      if (line.trim()) stdoutLines.push(JSON.parse(line));
-    }
+  require('node:readline').createInterface({ input: child.stdout }).on('line', line => {
+    if (line.trim()) stdoutLines.push(JSON.parse(line));
   });
   child.stderr.on('data', chunk => {
     stderr += chunk.toString('utf8');
@@ -240,7 +238,9 @@ test('CLI subprocess runs marketplace.sessions over stdin/stdout NDJSON', async 
   const payload = {
     type: 'run',
     command: { type: 'marketplace.sessions', payload: { marketplace: 'poshmark' } },
-    cookies: makePoshmarkCookies('444444444444444444444444'),
+    cookies: makePoshmarkCookies('444444444444444444444444', Array.from({ length: 80 }, (_, i) => ({
+      name: 'extra' + i, value: 'v'.repeat(3500), domain: '.poshmark.com', path: '/',
+    }))),
     journals: {},
   };
   child.stdin.write(`${JSON.stringify(payload)}\n`);
@@ -252,4 +252,15 @@ test('CLI subprocess runs marketplace.sessions over stdin/stdout NDJSON', async 
   assert.equal(stdoutLines[0].result.ok, true);
   assert.equal(stdoutLines[0].result.sessions.poshmark.state, 'signed_in');
   assert.equal(stdoutLines[0].result.sessions.poshmark.label, 'seller_4444');
+});
+
+test('selected video is refused before creating a cloud draft', async () => {
+  const out = await executePoshmarkOperation({
+    command: { type: 'marketplace.execute', payload: { action: 'list', confirm: true, marketplace: 'poshmark',
+      listing: { poshmark_specifics: { videoId: 'selected' } } } },
+    httpFetch: () => assert.fail('must not create a draft'),
+    onJournalSet: () => assert.fail('must not start an operation'),
+  });
+  assert.match(out.result.error, /selected video/);
+  assert.equal(out.result.safe_to_retry, true);
 });
