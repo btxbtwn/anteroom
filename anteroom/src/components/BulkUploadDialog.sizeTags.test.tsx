@@ -220,6 +220,45 @@ it("keeps a size mismatch warning when a re-read finds no tag", async () => {
   }
 });
 
+it.each(["34 x 30", ""])("keeps size review for %j when reordering cancels a tag read", async (typedSize) => {
+  const report = tagReads.Jeans!;
+  const read = vi.spyOn(api.sizeTags, "read");
+  const { root, size, button } = await openDialog(vi.fn(), [{
+    ...groups[1]!, files: [groups[1]!.files[0]!, new File(["x"], "tag.jpg", { type: "image/jpeg" })],
+  }]);
+  try {
+    const warning = "The tag reads 32 x 30. Check the size you typed.";
+    const note = () => document.getElementById(size("Jeans").getAttribute("aria-describedby")!)?.textContent;
+    if (typedSize) {
+      read.mockResolvedValueOnce(report);
+      await act(async () => setInput(size("Jeans"), typedSize));
+      await act(async () => button("Read size tags").click());
+      await settle(() => expect(note()).toBe(warning));
+    }
+
+    let resolveRead!: (result: SizeTagReadResult) => void;
+    read.mockImplementationOnce(() => new Promise((resolve) => { resolveRead = resolve; }));
+    await act(async () => button("Read size tags").click());
+    await settle(() => expect(resolveRead).toBeTypeOf("function"));
+    const signal = read.mock.lastCall?.[1];
+    const thumbs = document.querySelectorAll(".photo-thumb");
+    const dataTransfer = { effectAllowed: "", dropEffect: "", setData: vi.fn(), types: ["text/plain"], items: [], files: [] };
+    for (const [eventType, photo] of [["dragstart", thumbs[1]!], ["drop", thumbs[0]!]] as const) {
+      const event = new Event(eventType, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+      await act(async () => { photo.dispatchEvent(event); });
+    }
+    expect(signal?.aborted).toBe(true);
+    await act(async () => resolveRead(report));
+    const cancellation = "Photos were reordered while reading. Read size tags again or type the size.";
+    expect(size("Jeans").value).toBe(typedSize);
+    expect(size("Jeans").className).toContain("needs-review");
+    expect(note()).toBe(typedSize ? `${cancellation} ${warning}` : cancellation);
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
 it("drops a typed size's tag warning when a photo is removed, so an empty re-read can't restore it", async () => {
   const read = vi.spyOn(api.sizeTags, "read").mockImplementation(async (files) => tagReads[files[0]!.name.replace(".jpg", "")]!);
   const twoPhotos = groups.map((group) => ({ ...group, files: [...group.files, new File(["y"], `${group.folder}-2.jpg`, { type: "image/jpeg" })] }));

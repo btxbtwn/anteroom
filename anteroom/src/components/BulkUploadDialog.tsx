@@ -161,8 +161,12 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
       const clearedMeasure = row.readNote === READING_MEASUREMENTS_NOTE
         ? { readNote: "Photos were reordered while reading. Read measurements again or measure by hand." }
         : {};
+      const sizeCancellation = "Photos were reordered while reading. Read size tags again or type the size.";
       const clearedSize = row.sizeNote === READING_SIZE_NOTE
-        ? { sizeReview: row.size.trim() === "", sizeNote: "Photos were reordered while reading. Read size tags again or type the size." }
+        ? {
+            sizeReview: row.size.trim() === "" || Boolean(row.sizeWarning),
+            sizeNote: row.sizeWarning ? `${sizeCancellation} ${row.sizeWarning}` : sizeCancellation,
+          }
         : {};
       return { ...row, ...clearedMeasure, ...clearedSize, photoSet: row.photoSet + 1 };
     }));

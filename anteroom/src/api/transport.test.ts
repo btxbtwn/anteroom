@@ -156,7 +156,7 @@ describe("shared desktop and cloud API transport", () => {
     resolveToken("late-token");
   });
 
-  it("aborts a stalled upload phase after uploadTimeoutMs without cutting off post-upload inference", async () => {
+  it("aborts stalled uploads and response bodies without cutting off post-upload inference", async () => {
     vi.useFakeTimers();
     try {
       const instances: FakeTimedXhr[] = [];
@@ -174,6 +174,7 @@ describe("shared desktop and cloud API transport", () => {
         };
         onreadystatechange: (() => void) | null = null;
         onload: (() => void) | null = null;
+        onprogress: ((event: { loaded: number }) => void) | null = null;
         onerror: (() => void) | null = null;
         ontimeout: (() => void) | null = null;
         onabort: (() => void) | null = null;
@@ -183,6 +184,10 @@ describe("shared desktop and cloud API transport", () => {
         getAllResponseHeaders() { return "Content-Type: application/json\r\n"; }
         send() {}
         finishUpload() { this.uploadLoadend?.(); }
+        receiveHeaders() {
+          this.readyState = 2;
+          this.onreadystatechange?.();
+        }
         respond(status: number, body: string) {
           this.status = status;
           this.responseText = body;
@@ -217,10 +222,34 @@ describe("shared desktop and cloud API transport", () => {
       await vi.waitFor(() => expect(instances).toHaveLength(2));
       instances[1]!.finishUpload();
       expect(onSlowComplete).toHaveBeenCalledOnce();
-      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(instances[1]!.aborted).toBe(false);
+      instances[1]!.receiveHeaders();
+      await vi.advanceTimersByTimeAsync(40_000);
+      instances[1]!.onprogress?.({ loaded: 10 });
+      await vi.advanceTimersByTimeAsync(40_000);
       expect(instances[1]!.aborted).toBe(false);
       instances[1]!.respond(200, JSON.stringify({ ok: true }));
       await expect(slow).resolves.toMatchObject({ status: 200 });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(instances[1]!.aborted).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+
+      // Even an early response without upload loadend gets an idle deadline.
+      const stalledResponse = studioUpload("/api/measurements/read", new FormData());
+      const outcome = stalledResponse.catch((error: unknown) => error);
+      await vi.waitFor(() => expect(instances).toHaveLength(3));
+      const response = instances[2]!;
+      response.receiveHeaders();
+      await vi.advanceTimersByTimeAsync(40_000);
+      response.onprogress?.({ loaded: 10 });
+      await vi.advanceTimersByTimeAsync(40_000);
+      expect(response.aborted).toBe(false);
+      response.onprogress?.({ loaded: 10 });
+      await vi.advanceTimersByTimeAsync(20_000);
+      if (!response.aborted) response.respond(200, "{}");
+      expect(response.aborted).toBe(true);
+      await expect(outcome).resolves.toMatchObject({ name: "TypeError", message: "Failed to fetch" });
     } finally {
       vi.useRealTimers();
     }

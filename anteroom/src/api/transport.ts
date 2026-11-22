@@ -57,6 +57,7 @@ export interface StudioUploadOptions {
 }
 
 const DEFAULT_UPLOAD_PHASE_TIMEOUT_MS = 60_000;
+const RESPONSE_BODY_IDLE_TIMEOUT_MS = 60_000;
 
 function parseXhrHeaders(raw: string): Headers {
   const headers = new Headers();
@@ -150,6 +151,8 @@ async function executeStudioUpload(
     let settled = false;
     let uploadTimer: ReturnType<typeof setTimeout> | null = null;
     let lastUploadedBytes = 0;
+    let responseTimer: ReturnType<typeof setTimeout> | undefined;
+    let lastDownloadedBytes = 0;
     clearUploadTimer = () => {
       if (uploadTimer !== null) {
         clearTimeout(uploadTimer);
@@ -160,6 +163,7 @@ async function executeStudioUpload(
       if (settled) return;
       settled = true;
       clearUploadTimer();
+      clearTimeout(responseTimer);
       signal?.removeEventListener("abort", onAbort);
       notifyUploadComplete();
       cb();
@@ -172,6 +176,14 @@ async function executeStudioUpload(
         finish(() => reject(new TypeError("Failed to fetch")));
         xhr.abort();
       }, uploadTimeoutMs);
+    };
+    const armResponseTimer = () => {
+      if (settled) return;
+      clearTimeout(responseTimer);
+      responseTimer = setTimeout(() => {
+        finish(() => reject(new TypeError("Failed to fetch")));
+        xhr.abort();
+      }, RESPONSE_BODY_IDLE_TIMEOUT_MS);
     };
     const onAbort = () => {
       finish(() => reject(abortError(signal!)));
@@ -198,6 +210,14 @@ async function executeStudioUpload(
     xhr.onreadystatechange = () => {
       // An early error response (e.g. 429 or 413) can arrive before upload loadend.
       if (xhr.readyState >= 2) notifyUploadComplete();
+      // Inference can run before headers; only bound the wait for the response body.
+      if (xhr.readyState === 2) armResponseTimer();
+    };
+    xhr.onprogress = ({ loaded }) => {
+      if (responseTimer !== undefined && loaded > lastDownloadedBytes) {
+        lastDownloadedBytes = loaded;
+        armResponseTimer();
+      }
     };
     xhr.onload = () => {
       finish(() => {
