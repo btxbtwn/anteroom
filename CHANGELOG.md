@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1133 — 2026-11-22
+
+- Styles the listing writer picks for Etsy are kept once Etsy's form is saved with the listing, so List sends them.
+- One generated Etsy tag longer than Etsy allows no longer deletes all of the listing's Etsy tags; only that tag is left out.
+
 ## 0.1.1132 — 2026-11-22
 
 - Improve automatic yardstick and wooden folding-ruler detection on single-stick, dark-wood, striped, and plaid measurement photos while rejecting non-ruler garments and fixing edge-clipping coordinates.
