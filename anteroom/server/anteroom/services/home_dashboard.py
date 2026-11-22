@@ -11,6 +11,8 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from anteroom.models.automation import AutomationApproval, AutomationRelistGap
@@ -22,6 +24,7 @@ from anteroom.models.job import Job
 from anteroom.models.listing import Listing
 from anteroom.models.listing_promotion import ListingPromotion
 from anteroom.models.marketplace_listing import MarketplaceListing
+from anteroom.models.ownership import LOCAL_USER_ID
 
 DISMISS_TTL_DAYS = 7
 _SENT_PROMOTION_STATES = ("sent", "confirmed", "completed")
@@ -169,7 +172,7 @@ def _today_summary(
         profit = None
 
     promo_rows = (
-        db.query(ListingPromotion.action, func.count(ListingPromotion.id))
+        db.query(ListingPromotion.action, func.count(ListingPromotion.id), func.count(ListingPromotion.automation_id))
         .filter(
             ListingPromotion.state.in_(_SENT_PROMOTION_STATES),
             ListingPromotion.sent_at.is_not(None),
@@ -181,11 +184,14 @@ def _today_summary(
     )
     shares_sent = 0
     promo_offers_sent = 0
-    for action, count in promo_rows:
+    automated_promotions = 0
+    for action, count, automated_count in promo_rows:
         if action == "share":
             shares_sent += int(count or 0)
+            automated_promotions += automated_count
         elif action == "offer":
             promo_offers_sent += int(count or 0)
+            automated_promotions += automated_count
 
     ebay_offers_sent = int(
         db.query(func.count(EbayOfferAttempt.id))
@@ -210,7 +216,7 @@ def _today_summary(
         "profit_known": len(known_profit_rows),
         "shares_sent": shares_sent,
         "offers_sent": offers_sent,
-        "automation_actions": shares_sent + offers_sent,
+        "automation_actions": automated_promotions + ebay_offers_sent,
     }
 
 
@@ -320,7 +326,12 @@ def compute_goal_progress(
     }
 
 
-def _collect_attention_items(db: Session, *, now_utc: datetime) -> list[dict[str, Any]]:
+def _duplicate_key(first: str, second: str) -> str:
+    a, b = sorted((first, second))
+    return f"duplicate:{a}:{b}"
+
+
+def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: set[str]) -> list[dict[str, Any]]:
     from anteroom.services import marketplace_accounts, sale_delist_followup, similar_items
     from anteroom.services.unsent_edits import unsent_edits
 
@@ -328,7 +339,9 @@ def _collect_attention_items(db: Session, *, now_utc: datetime) -> list[dict[str
 
     # 1. Sold elsewhere / still listed alerts
     try:
-        for alert in sale_delist_followup.still_listed(db):
+        with db.begin_nested():
+            alerts = sale_delist_followup.still_listed(db)
+        for alert in alerts:
             conv_id = str(alert["conversationId"])
             sale_id = str(alert["saleId"])
             markets = ", ".join(_market_name(entry.get("marketplace")) for entry in alert.get("stillListed") or [])
@@ -349,7 +362,8 @@ def _collect_attention_items(db: Session, *, now_utc: datetime) -> list[dict[str
     # 2. Expired or disconnected marketplace sessions/connections
     seen_session_markets: set[str] = set()
     try:
-        cloud_rows = db.query(CloudMarketplaceSession).all()
+        with db.begin_nested():
+            cloud_rows = db.query(CloudMarketplaceSession).all()
         for row in cloud_rows:
             expires = _utc(row.expires_at)
             is_expired = row.state == "connected" and expires is not None and expires <= now_utc
@@ -375,7 +389,8 @@ def _collect_attention_items(db: Session, *, now_utc: datetime) -> list[dict[str
         pass
 
     try:
-        account_status = marketplace_accounts.status()
+        with db.begin_nested():
+            account_status = marketplace_accounts.status()
         for market, info in (account_status.get("accounts") or {}).items():
             if not isinstance(info, dict):
                 continue
@@ -455,12 +470,13 @@ def _collect_attention_items(db: Session, *, now_utc: datetime) -> list[dict[str
 
     # 4. Listings with unsent live edits
     try:
-        revisions = {
-            conv_id: rev_id
-            for conv_id, rev_id in db.query(Listing.conversation_id, Listing.current_revision_id).all()
-            if rev_id
-        }
-        unsent_ids = unsent_edits(db, conversations, revisions, commit_backfill=False)
+        with db.begin_nested():
+            revisions = {
+                conv_id: rev_id
+                for conv_id, rev_id in db.query(Listing.conversation_id, Listing.current_revision_id).all()
+                if rev_id
+            }
+            unsent_ids = unsent_edits(db, conversations, revisions, commit_backfill=False)
         for conv_id in sorted(unsent_ids):
             conv = conv_by_id.get(conv_id)
             if conv is None:
@@ -519,18 +535,21 @@ def _collect_attention_items(db: Session, *, now_utc: datetime) -> list[dict[str
 
     # 6. Potential duplicate / similar listings (read-only, no Storage fetches)
     try:
-        similar = similar_items.find_similar(db, compute_fingerprints=False)
-        for pair in (similar.get("pairs") or [])[:25]:
+        with db.begin_nested():
+            similar = similar_items.find_similar(
+                db, compute_fingerprints=False, limit=25,
+                include_beyond_limit=lambda a, b: _duplicate_key(a, b) in dismissed_keys,
+            )
+        for pair in similar.get("pairs") or []:
             first = pair.get("first") or {}
             second = pair.get("second") or {}
             first_id = str(first.get("id") or "")
             second_id = str(second.get("id") or "")
             if not first_id or not second_id:
                 continue
-            a, b = sorted((first_id, second_id))
             reasons = ", ".join(str(r).replace("_", " ") for r in (pair.get("reasons") or []))
             items.append({
-                "key": f"duplicate:{a}:{b}",
+                "key": _duplicate_key(first_id, second_id),
                 "kind": "duplicate_listing",
                 "priority": "low",
                 "title": f"Possible duplicate: {first.get('title') or 'Untitled'}",
@@ -573,12 +592,13 @@ def home_summary(
     )
     goals = [compute_goal_progress(db, goal, analytics_rows, now_utc=clock, tz=tz) for goal in goal_rows]
 
-    all_items = _collect_attention_items(db, now_utc=clock)
     now_naive = _naive_utc(clock)
     dismissals = {
         row.item_key: row
         for row in db.query(AttentionDismissal).filter(AttentionDismissal.expires_at > now_naive).all()
     }
+
+    all_items = _collect_attention_items(db, now_utc=clock, dismissed_keys=set(dismissals))
 
     active_items: list[dict[str, Any]] = []
     dismissed_items: list[dict[str, Any]] = []
@@ -620,7 +640,7 @@ def upsert_goal(
     metric: str,
     target: float,
     label: str | None = None,
-) -> SellerGoal:
+) -> str:
     if period not in GOAL_PERIODS:
         raise HomeGoalError(f"Period must be one of: {', '.join(GOAL_PERIODS)}.")
     if metric not in GOAL_METRICS:
@@ -633,29 +653,16 @@ def upsert_goal(
     if cleaned_label and len(cleaned_label) > 80:
         raise HomeGoalError("Goal label must be 80 characters or fewer.")
 
-    existing = (
-        db.query(SellerGoal)
-        .filter(SellerGoal.period == period, SellerGoal.metric == metric)
-        .first()
+    insert = sqlite_insert if db.get_bind().dialect.name == "sqlite" else pg_insert
+    values = {"target": float(target), "label": cleaned_label, "updated_at": _naive_utc(datetime.now(UTC))}
+    statement = insert(SellerGoal).values(
+        user_id=getattr(db, "user_id", LOCAL_USER_ID), period=period, metric=metric, **values,
     )
-    if existing is not None:
-        existing.target = float(target)
-        existing.label = cleaned_label
-        existing.updated_at = _naive_utc(datetime.now(UTC))
-        db.commit()
-        db.refresh(existing)
-        return existing
-
-    row = SellerGoal(
-        period=period,
-        metric=metric,
-        target=float(target),
-        label=cleaned_label,
-    )
-    db.add(row)
+    goal_id = db.execute(statement.on_conflict_do_update(
+        index_elements=[SellerGoal.user_id, SellerGoal.period, SellerGoal.metric], set_=values,
+    ).returning(SellerGoal.id)).scalar_one()
     db.commit()
-    db.refresh(row)
-    return row
+    return goal_id
 
 
 def update_goal(
@@ -667,8 +674,12 @@ def update_goal(
     target: float | None = None,
     label: str | None = None,
     label_provided: bool = False,
-) -> SellerGoal | None:
-    row = db.get(SellerGoal, goal_id)
+) -> str | None:
+    if db.get_bind().dialect.name == "sqlite":
+        # SQLite ignores FOR UPDATE. Reserve the writer before reading fields
+        # that a concurrent partial edit could change.
+        db.connection().exec_driver_sql("BEGIN IMMEDIATE")
+    row = db.get(SellerGoal, goal_id, with_for_update=True, populate_existing=True)
     if row is None:
         return None
     next_period = period if period is not None else row.period
@@ -703,8 +714,7 @@ def update_goal(
         row.label = cleaned
     row.updated_at = _naive_utc(datetime.now(UTC))
     db.commit()
-    db.refresh(row)
-    return row
+    return goal_id
 
 
 def delete_goal(db: Session, goal_id: str) -> bool:
@@ -730,20 +740,14 @@ def dismiss_attention_item(
     clock = _utc(now) or datetime.now(UTC)
     dismissed_at = _naive_utc(clock)
     expires_at = _naive_utc(clock + timedelta(days=DISMISS_TTL_DAYS))
-    existing = db.query(AttentionDismissal).filter(AttentionDismissal.item_key == cleaned_key).first()
-    if existing is not None:
-        existing.kind = cleaned_kind[:40]
-        existing.dismissed_at = dismissed_at
-        existing.expires_at = expires_at
-    else:
-        db.add(
-            AttentionDismissal(
-                item_key=cleaned_key,
-                kind=cleaned_kind[:40],
-                dismissed_at=dismissed_at,
-                expires_at=expires_at,
-            )
-        )
+    insert = sqlite_insert if db.get_bind().dialect.name == "sqlite" else pg_insert
+    values = {"kind": cleaned_kind[:40], "dismissed_at": dismissed_at, "expires_at": expires_at}
+    statement = insert(AttentionDismissal).values(
+        user_id=getattr(db, "user_id", LOCAL_USER_ID), item_key=cleaned_key, **values,
+    )
+    db.execute(statement.on_conflict_do_update(
+        index_elements=[AttentionDismissal.user_id, AttentionDismissal.item_key], set_=values,
+    ))
     db.commit()
     return {
         "item_key": cleaned_key,

@@ -82,7 +82,7 @@ export interface HomeSummaryResponse {
 export interface HomeMutationResponse {
   ok: boolean;
   goal_id?: string;
-  home: HomeSummaryResponse;
+  home?: HomeSummaryResponse;
 }
 
 export function browserTimeZone(): string {

@@ -1,24 +1,28 @@
 """Tests for Home Command Center: Today's Summary, Goals Tracker, and Needs Attention inbox."""
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from anteroom.database import SessionLocal
 from anteroom.main import app
 from anteroom.models.automation import Automation, AutomationApproval, AutomationRelistGap
 from anteroom.models.cloud_session import CloudMarketplaceSession
-from anteroom.models.conversation import Conversation
+from anteroom.models.conversation import Conversation, Message, Photo
 from anteroom.models.ebay_offer import EbayOfferAttempt, EbayOfferRule
 from anteroom.models.home import AttentionDismissal, SellerGoal
 from anteroom.models.job import Job
 from anteroom.models.listing import Listing, ListingRevision
+from anteroom.models.listing_evidence import ListingCorrection, SaleSnapshot
 from anteroom.models.listing_promotion import ListingPromotion
 from anteroom.models.marketplace_listing import MarketplaceListing
 from anteroom.models.marketplace_sale import MarketplaceSale
+from anteroom.models.promotion_automation import PromotionAutomation
 from anteroom.services import home_dashboard, sales_ledger
 
 
@@ -44,9 +48,14 @@ def _clean_home_tables():
             EbayOfferAttempt,
             EbayOfferRule,
             ListingPromotion,
+            PromotionAutomation,
             Job,
             MarketplaceSale,
             MarketplaceListing,
+            ListingCorrection,
+            SaleSnapshot,
+            Message,
+            Photo,
             Listing,
             ListingRevision,
             Conversation,
@@ -125,7 +134,7 @@ def test_home_summary_today_kpis_and_goals_crud():
             "source": "seller",
         }
 
-        # 3) Automation activity sent today (share + offer)
+        # 3) One manual share, one automated share, and one automated eBay offer
         db.add(
             ListingPromotion(
                 batch_id="batch-1",
@@ -138,6 +147,14 @@ def test_home_summary_today_kpis_and_goals_crud():
                 expires_at=now + timedelta(days=2),
             )
         )
+        automation = PromotionAutomation(name="Auto share", marketplace="poshmark", action="share", enabled=True)
+        db.add(automation)
+        db.flush()
+        db.add(ListingPromotion(
+            batch_id="auto-batch", conversation_id=c_listed.id, marketplace="poshmark",
+            action="share", listing_id="pm-share-1", state="sent", automation_id=automation.id,
+            sent_at=now, expires_at=now + timedelta(days=2),
+        ))
         rule = EbayOfferRule(
             account_id="acct-1",
             listing_id="eb-1",
@@ -171,7 +188,7 @@ def test_home_summary_today_kpis_and_goals_crud():
     assert today["revenue"] == pytest.approx(100.0)
     # 100 - 25 cost - 13 fee - 12 shipping = 50
     assert today["profit"] == pytest.approx(50.0)
-    assert today["shares_sent"] == 1
+    assert today["shares_sent"] == 2
     assert today["offers_sent"] == 1
     assert today["automation_actions"] == 2
 
@@ -409,3 +426,77 @@ def test_needs_attention_categories_dismiss_and_seven_day_expiry():
     )
     assert restored.status_code == 200
     assert any(i["key"] == target_item["key"] for i in restored.json()["home"]["needs_attention"])
+
+
+def test_duplicate_limit_keeps_all_unresolved_dismissals():
+    from anteroom.services import similar_items
+
+    with SessionLocal() as db:
+        # Two groups of six identical SKUs give 30 ranked pairs.
+        for group in ("A", "B"):
+            for index in range(6):
+                conv = Conversation(
+                    id=f"{group}-{index}", title=f"unique{group}{index}", status="draft",
+                    notes=json.dumps({"sku": f"shared-{group}"}),
+                )
+                db.add(conv)
+                db.flush()
+                _add_listing(db, conv, {"title": conv.title, "sku": f"shared-{group}"})
+        db.commit()
+        pairs = similar_items.find_similar(db, compute_fingerprints=False)["pairs"]
+        assert len(pairs) == 30
+        keys = [f"duplicate:{pair['first']['id']}:{pair['second']['id']}" for pair in pairs]
+        for key in [*keys[:25], keys[-1]]:
+            home_dashboard.dismiss_attention_item(db, item_key=key, kind="duplicate_listing")
+        summary = home_dashboard.home_summary(db)
+    assert {i["key"] for i in summary["needs_attention"] if i["kind"] == "duplicate_listing"} == set(keys[25:-1])
+    assert {i["key"] for i in summary["dismissed"]} == {*keys[:25], keys[-1]}
+
+
+def test_optional_query_failure_leaves_home_transaction_usable(monkeypatch):
+    from anteroom.services import sale_delist_followup
+
+    def failed_read(db):
+        db.execute(text("SELECT 1 FROM missing_optional_dashboard_table"))
+
+    with SessionLocal() as db:
+        db.add(CloudMarketplaceSession(marketplace="poshmark", state="expired"))
+        db.commit()
+        monkeypatch.setattr(sale_delist_followup, "still_listed", failed_read)
+        result = home_dashboard.home_summary(db)
+        assert any(i["key"] == "session:poshmark" for i in result["needs_attention"])
+
+
+def test_saved_delete_succeeds_if_dashboard_refresh_fails(monkeypatch):
+    client = TestClient(app)
+    with SessionLocal() as db:
+        goal_id = home_dashboard.upsert_goal(db, period="weekly", metric="sales", target=100)
+
+    def failed_refresh(db, **_kwargs):
+        db.execute(text("SELECT 1 FROM missing_dashboard_refresh_table"))
+
+    monkeypatch.setattr(home_dashboard, "home_summary", failed_refresh)
+    result = client.delete(f"/api/home/goals/{goal_id}")
+    assert result.status_code == 200
+    assert result.json() == {"ok": True}
+    with SessionLocal() as db:
+        assert db.get(SellerGoal, goal_id) is None
+
+
+def test_repeated_goal_and_dismissal_saves_replace_existing_values():
+    now = datetime.now(UTC)
+    with SessionLocal() as db:
+        goal_id = home_dashboard.upsert_goal(db, period="weekly", metric="sales", target=50)
+        assert home_dashboard.upsert_goal(db, period="weekly", metric="sales", target=200) == goal_id
+        with pytest.raises(ValueError, match="cannot exceed"):
+            home_dashboard.update_goal(db, goal_id, metric="sell_through_rate")
+        db.rollback()
+        assert db.get(SellerGoal, goal_id).target == 200
+        db.rollback()
+        home_dashboard.dismiss_attention_item(db, item_key="refresh-me", kind="old", now=now)
+        latest = home_dashboard.dismiss_attention_item(
+            db, item_key="refresh-me", kind="new", now=now + timedelta(days=1),
+        )
+        row = db.query(AttentionDismissal).one()
+        assert row.kind == "new"
+        assert row.expires_at.replace(tzinfo=UTC).isoformat() == latest["expires_at"]

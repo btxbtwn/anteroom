@@ -1,6 +1,7 @@
 """Home Command Center API: Today's Summary, Goals Tracker, and Needs Attention Inbox."""
 from __future__ import annotations
 
+import logging
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -11,6 +12,17 @@ from anteroom.database import get_db
 from anteroom.services import home_dashboard
 
 router = APIRouter(prefix="/api/home", tags=["home"])
+
+
+def _mutation_result(db: Session, timezone: str, *, goal_id: str | None = None) -> dict:
+    result: dict = {"ok": True}
+    if goal_id is not None:
+        result["goal_id"] = goal_id
+    try:
+        result["home"] = home_dashboard.home_summary(db, tz_name=timezone)
+    except Exception:
+        logging.getLogger(__name__).warning("Could not refresh Today after a saved mutation", exc_info=True)
+    return result
 
 
 class GoalCreateInput(BaseModel):
@@ -66,7 +78,7 @@ def upsert_goal(
         )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return {"ok": True, "goal_id": goal.id, "home": home_dashboard.home_summary(db, tz_name=timezone)}
+    return _mutation_result(db, timezone, goal_id=goal)
 
 
 @router.patch("/goals/{goal_id}")
@@ -90,7 +102,7 @@ def update_goal(
         raise HTTPException(422, str(exc)) from exc
     if updated is None:
         raise HTTPException(404, "Goal not found")
-    return {"ok": True, "goal_id": updated.id, "home": home_dashboard.home_summary(db, tz_name=timezone)}
+    return _mutation_result(db, timezone, goal_id=updated)
 
 
 @router.delete("/goals/{goal_id}")
@@ -102,7 +114,7 @@ def delete_goal(
     removed = home_dashboard.delete_goal(db, goal_id)
     if not removed:
         raise HTTPException(404, "Goal not found")
-    return {"ok": True, "home": home_dashboard.home_summary(db, tz_name=timezone)}
+    return _mutation_result(db, timezone)
 
 
 @router.post("/attention/dismiss")
@@ -115,7 +127,7 @@ def dismiss_attention(
         home_dashboard.dismiss_attention_item(db, item_key=body.item_key, kind=body.kind)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return {"ok": True, "home": home_dashboard.home_summary(db, tz_name=timezone)}
+    return _mutation_result(db, timezone)
 
 
 @router.post("/attention/restore")
@@ -125,4 +137,4 @@ def restore_attention(
     db: Session = Depends(get_db, scope="function"),
 ):
     home_dashboard.restore_attention_item(db, item_key=body.item_key)
-    return {"ok": True, "home": home_dashboard.home_summary(db, tz_name=timezone)}
+    return _mutation_result(db, timezone)

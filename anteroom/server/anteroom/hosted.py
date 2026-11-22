@@ -243,7 +243,7 @@ class SellerSessionMiddleware:
                 from anteroom import database
 
                 verified = await asyncio.get_running_loop().run_in_executor(
-                    state.auth_threads,
+                    state.mcp_auth_threads,
                     partial(mcp_tokens.authenticate_token, database.engine, token, hosted=True),
                 )
                 if verified is None:
@@ -474,6 +474,12 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.state.web_dir = web_dir
     # Threads start on first use and idle between requests; they need no shutdown.
     app.state.auth_threads = ThreadPoolExecutor(max_workers=AUTH_THREADS, thread_name_prefix="anteroom-auth")
+    # Keep token checkouts off the JWT verifier's workers. Use at most two
+    # connections and leave room in the steady-state pool whenever possible.
+    pool_size = int(os.environ.get("ANTEROOM_DB_POOL_SIZE", "8"))
+    app.state.mcp_auth_threads = ThreadPoolExecutor(
+        max_workers=max(1, min(2, pool_size - 1)), thread_name_prefix="anteroom-mcp-auth",
+    )
     app.state.process_role = os.environ.get('ANTEROOM_PROCESS_ROLE', 'all')
     # On Fly, `web` Machines serve sellers and device connections, and `worker`
     # Machines run drafts and the schedulers (deploy/fly/fly.toml). The Mac, the

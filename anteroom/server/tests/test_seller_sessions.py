@@ -4,6 +4,8 @@ import io
 import json
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 import urllib.error
 import uuid
 
@@ -77,6 +79,34 @@ def test_verified_identity_and_key_cache(client, signing_keys, jwks):
         assert response.headers["cache-control"] == "no-store"
         assert token not in response.text
     assert jwks["requests"] == [PROJECT_URL + "/auth/v1/.well-known/jwks.json"]
+
+
+
+def test_seller_verification_runs_while_mcp_token_workers_are_blocked(client, signing_keys, monkeypatch):
+    from anteroom.services import mcp_tokens
+
+    waiting = Event()
+    release = Event()
+
+    def blocked_auth(*_args, **_kwargs):
+        waiting.set()
+        if not release.wait(timeout=10):
+            pytest.fail("MCP authentication was never released")
+        return None
+
+    monkeypatch.setattr(mcp_tokens, "authenticate_token", blocked_auth)
+    with ThreadPoolExecutor(max_workers=5) as requests:
+        checks = [requests.submit(
+            client.post, "/api/mcp", headers={"Authorization": "Bearer arm_fixture"},
+        ) for _ in range(4)]
+        try:
+            assert waiting.wait(timeout=5)
+            account = requests.submit(get_account, client, session_token(signing_keys))
+            assert account.result(timeout=5).status_code == 200
+            assert all(not check.done() for check in checks)
+        finally:
+            release.set()
+        assert [check.result(timeout=5).status_code for check in checks] == [401] * 4
 
 
 def test_seller_identity_is_per_request(client, signing_keys):

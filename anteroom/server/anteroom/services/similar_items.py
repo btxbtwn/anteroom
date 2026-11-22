@@ -15,6 +15,7 @@ Finished with a note of where it went.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
@@ -167,7 +168,10 @@ def _pair(a: str, b: str) -> tuple[str, str]:
     return (a, b) if a < b else (b, a)
 
 
-def find_similar(db: Session, *, compute_fingerprints: bool = True) -> dict[str, Any]:
+def find_similar(
+    db: Session, *, compute_fingerprints: bool = True, limit: int = MAX_PAIRS,
+    include_beyond_limit: Callable[[str, str], bool] | None = None,
+) -> dict[str, Any]:
     """Pairs worth a look, most alike first. Reads and optionally fingerprints photos; changes no item."""
     from anteroom.models.conversation import Photo
     from anteroom.services.photos import cover_thumb_url
@@ -255,6 +259,16 @@ def find_similar(db: Session, *, compute_fingerprints: bool = True) -> dict[str,
         found.items(),
         key=lambda entry: (-entry[1]["score"], -len(entry[1]["reasons"]), entry[0]),
     )
+    selected = ranked[:limit]
+    if include_beyond_limit is not None:
+        selected = []
+        active = 0
+        for pair, entry in ranked:
+            if include_beyond_limit(*pair):
+                selected.append((pair, entry))
+            elif active < limit:
+                selected.append((pair, entry))
+                active += 1
     return {
         "total": len(ranked),
         "pairs": [
@@ -266,7 +280,7 @@ def find_similar(db: Session, *, compute_fingerprints: bool = True) -> dict[str,
                 "photo_distance": entry.get("photo_distance"),
                 "title_score": entry.get("title_score"),
             }
-            for (first, second), entry in ranked[:MAX_PAIRS]
+            for (first, second), entry in selected
         ],
     }
 

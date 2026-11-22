@@ -471,10 +471,13 @@ def _handle_single(
         try:
             result_data = _dispatch_tool(db, name, arguments, bearer_token=bearer_token)
         except KeyError:
+            db.rollback()
             return _rpc_error(msg_id, -32602, f"Unknown tool: {name}"), None
         except (McpToolError, ValueError, RevisionConflict) as exc:
+            db.rollback()
             return _rpc_result(msg_id, _tool_error_result(str(exc))), None
         except HTTPException as exc:
+            db.rollback()
             detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
             return _rpc_result(msg_id, _tool_error_result(detail)), None
         return _rpc_result(msg_id, _tool_success_result(result_data)), None
@@ -721,7 +724,7 @@ def _tool_get_sales_analytics(db: Session, args: dict[str, Any], **_kw: Any) -> 
         "previous": payload.get("previous"),
         "marketplaces": payload.get("marketplaces"),
         "stale_top": (payload.get("stale") or [])[:15],
-        "recent_sales": (payload.get("recent_sales") or [])[:20],
+        "recent_sales": (payload.get("recent") or [])[:20],
     }
 
 
@@ -864,6 +867,8 @@ def _tool_edit_listing(db: Session, args: dict[str, Any], **_kw: Any) -> dict[st
     # Validate the seller-editable projection before passing to listing_editor.
     editable_listing(stored_listing_fields(merged))
 
+    if expected_revision_id is None:
+        expected_revision_id = revision.id if revision else ""
     saved = listing_editor.save_listing_edit(
         conv_id,
         merged,
@@ -1033,7 +1038,9 @@ def _tool_manage_labels_and_notes(db: Session, args: dict[str, Any], **_kw: Any)
 
     if labels_changed and revision is not None:
         doc["labels"] = updated_labels
-        listing_editor.save_listing_edit(conv_id, doc, db, source="mcp", commit=False)
+        listing_editor.save_listing_edit(
+            conv_id, doc, db, source="mcp", expected_revision_id=revision.id, commit=False,
+        )
 
     conv.notes = merge_notes(conv.notes, note_updates)
     db.commit()
@@ -1126,14 +1133,16 @@ def _best_effort_delete_photo_files(
     if not keys:
         return
     if hasattr(db, "user_id"):
-        if bearer_token and not bearer_token.startswith("arm_"):
-            from anteroom.services.hosted_photos import storage_call
+        from anteroom.services import hosted_photos, hosted_storage
 
-            for key in keys:
-                try:
-                    storage_call("DELETE", key, bearer_token)
-                except Exception:
-                    continue
+        for key in keys:
+            try:
+                if bearer_token and bearer_token.startswith("arm_"):
+                    hosted_storage.photo_call("DELETE", key)
+                elif bearer_token:
+                    hosted_photos.storage_call("DELETE", key, bearer_token)
+            except Exception:
+                continue
         return
     from anteroom.services.photo_store import photo_store
 

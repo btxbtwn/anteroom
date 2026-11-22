@@ -279,7 +279,7 @@ def _remote_clients(mcp_url: str, *, require_token: bool) -> list[dict[str, Any]
             "name": "Anteroom",
             "mcp_server_url": mcp_url,
             "authentication": "Bearer token" if require_token else "None (local loopback) or Bearer token",
-            "headers": {"Authorization": f"Bearer {token_placeholder}"},
+            **({"headers": headers_block} if headers_block else {}),
         },
         indent=2,
     )

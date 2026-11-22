@@ -148,11 +148,19 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
   const [goalLabel, setGoalLabel] = useState("");
   const [goalFormError, setGoalFormError] = useState<string | null>(null);
 
-  const syncHome = (next: HomeSummaryResponse) => {
-    queryClient.setQueryData(queryDef.queryKey, next);
+  const syncHome = async (next: HomeSummaryResponse | undefined) => {
+    await queryClient.cancelQueries({ queryKey: queryDef.queryKey, exact: true });
+    if (next) {
+      queryClient.setQueryData(queryDef.queryKey, next);
+    } else {
+      await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
+    }
   };
 
+  const mutationScope = { id: "today-dashboard" };
+
   const saveGoal = useMutation({
+    scope: mutationScope,
     mutationFn: async () => {
       const numeric = Number(goalTarget);
       if (!Number.isFinite(numeric) || numeric <= 0) {
@@ -173,8 +181,8 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
         timezone,
       );
     },
-    onSuccess: (res) => {
-      syncHome(res.home);
+    onSuccess: async (res) => {
+      await syncHome(res.home);
       setGoalFormOpen(false);
       setEditingGoalId(null);
       setGoalTarget("");
@@ -187,16 +195,19 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
   });
 
   const removeGoal = useMutation({
+    scope: mutationScope,
     mutationFn: (goalId: string) => api.home.deleteGoal(goalId, timezone),
     onSuccess: (res) => syncHome(res.home),
   });
 
   const dismissItem = useMutation({
+    scope: mutationScope,
     mutationFn: (item: AttentionItem) => api.home.dismissAttention(item.key, item.kind, timezone),
     onSuccess: (res) => syncHome(res.home),
   });
 
   const restoreItem = useMutation({
+    scope: mutationScope,
     mutationFn: (itemKey: string) => api.home.restoreAttention(itemKey, timezone),
     onSuccess: (res) => syncHome(res.home),
   });

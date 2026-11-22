@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 
 from test_hosted_drafts import BOB, cloud, headers  # noqa: F401
 from test_seller_ownership import migration_engine  # noqa: F401
@@ -214,6 +215,7 @@ def test_mcp_tools_list_and_read_write_lifecycle_respects_safety_invariant():
     assert not err
     assert sales["sales"]["count"] >= 1
     assert sales["sales"]["revenue"] >= 65.0
+    assert any(sale["conversation_id"] == "conv-live" for sale in sales["recent_sales"])
 
     offers, err = _call_tool(client, "get_offer_activity", {"limit": 10})
     assert not err
@@ -385,8 +387,8 @@ def test_desktop_mcp_token_crud_and_optional_bearer_validation():
     assert after_revoke.status_code == 401
 
 
-def test_hosted_mcp_enforces_seller_isolation_and_blocks_non_mcp_routes(cloud, signing_keys):  # noqa: F811
-    client, _engine = cloud
+def test_hosted_mcp_enforces_seller_isolation_and_blocks_non_mcp_routes(cloud, signing_keys, monkeypatch):  # noqa: F811
+    client, engine = cloud
     alice_headers = headers(signing_keys, USER_ID)
     bob_headers = headers(signing_keys, BOB)
 
@@ -436,7 +438,132 @@ def test_hosted_mcp_enforces_seller_isolation_and_blocks_non_mcp_routes(cloud, s
     assert err is True
     assert "not found" in bob_get["error"].lower()
 
+    # Both photo removal and draft deletion use seller-scoped Storage for PAT calls.
+    import httpx
+    from anteroom.services import hosted_photos
+
+    deleted_keys = []
+
+    def delete_objects(method, _url, **kwargs):
+        assert method == "DELETE"
+        deleted_keys.extend(kwargs["json"]["prefixes"])
+        return httpx.Response(200)
+
+    monkeypatch.setenv("SUPABASE_URL", "https://storage.example.test")
+    monkeypatch.setenv("SUPABASE_SERVER_SECRET_KEY", "fixture-only")
+    monkeypatch.setattr(hosted_photos._storage, "request", delete_objects)
+    photo_keys = [f"{USER_ID}/{alice_conv_id}/{'a' * 32}.jpg", f"{USER_ID}/{alice_conv_id}/{'b' * 32}.jpg"]
+    with Session(engine) as db:
+        for i, key in enumerate(photo_keys):
+            db.add(Photo(
+                id=f"hosted-mcp-photo-{i}", user_id=USER_ID, conversation_id=alice_conv_id,
+                original_filename="original.jpg", stored_filename=key, mime_type="image/jpeg",
+                size_bytes=1234, display_order=i,
+            ))
+        db.commit()
+
+    removed, err = _call_tool(
+        client, "manage_listing_photos",
+        {"conversation_id": alice_conv_id, "action": "remove", "photo_id": "hosted-mcp-photo-0"},
+        extra_headers=alice_mcp,
+    )
+    assert not err, removed
+    assert deleted_keys == hosted_photos.with_renditions(photo_keys[0])
+    deleted, err = _call_tool(
+        client, "delete_draft_listing", {"conversation_id": alice_conv_id, "confirm": True},
+        extra_headers=alice_mcp,
+    )
+    assert not err, deleted
+    assert deleted_keys == [key for original in photo_keys for key in hosted_photos.with_renditions(original)]
+
     # Revoking Alice's token immediately cuts off her MCP access
     rev = client.delete(f"/api/settings/mcp-tokens/{alice_tok_resp.json()['id']}", headers=alice_headers)
     assert rev.status_code == 200
     assert _rpc(client, "ping", extra_headers=alice_mcp).status_code == 401
+
+def test_failed_draft_in_mcp_batch_is_not_committed():
+    def draft(req_id, title, **fields):
+        return {
+            "jsonrpc": "2.0", "method": "tools/call", "id": req_id,
+            "params": {"name": "create_draft_listing", "arguments": {"title": title, "price": 10, **fields}},
+        }
+
+    response = TestClient(app).post("/api/mcp", json=[
+        draft(1, "Saved before the rejection"),
+        draft(2, "Rejected Best Offer", ebay_specifics={"bestOffer": {"enabled": True, "autoAcceptPrice": 20}}),
+        draft(3, "Saved after the rejection"),
+    ])
+    assert response.status_code == 200
+    assert [reply["result"]["isError"] for reply in response.json()] == [False, True, False]
+    with SessionLocal() as db:
+        assert {title for (title,) in db.query(Conversation.title)} == {
+            "Saved before the rejection", "Saved after the rejection",
+        }
+
+
+@pytest.mark.parametrize(("tool", "args"), [
+    ("edit_listing", {"fields": {"price": 20}}),
+    ("manage_labels_and_notes", {"add_labels": ["new"]}),
+])
+def test_mcp_edit_conflicts_when_a_new_revision_is_saved_after_read(monkeypatch, tool, args):
+    from anteroom.services import listing_editor
+
+    client = TestClient(app)
+    created, error = _call_tool(client, "create_draft_listing", {"title": "Revision race", "price": 10})
+    assert not error
+    conv_id = created["conversation_id"]
+    save = listing_editor.save_listing_edit
+
+    def save_after_intervening_edit(conv_id, doc, db, **kwargs):
+        with SessionLocal() as other:
+            save(conv_id, {"title": "Revision race", "price": 10, "sku": "newer"}, other)
+        return save(conv_id, doc, db, **kwargs)
+
+    monkeypatch.setattr(listing_editor, "save_listing_edit", save_after_intervening_edit)
+    result, error = _call_tool(client, tool, {"conversation_id": conv_id, **args})
+    assert error, result
+    assert "changed since you reviewed it" in result["error"]
+    stored, error = _call_tool(client, "get_listing", {"conversation_id": conv_id})
+    assert not error
+    assert stored["listing"]["sku"] == "newer"
+
+
+def test_hosted_today_concurrent_mutations_stay_seller_scoped(cloud, signing_keys):  # noqa: F811
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    client, _ = cloud
+    alice = headers(signing_keys, USER_ID)
+    bob = headers(signing_keys, BOB)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        def concurrently(method, path, payloads):
+            barrier = Barrier(2, timeout=10)
+
+            def send(payload):
+                barrier.wait()
+                return client.request(method, path, headers=alice, json=payload)
+
+            return list(pool.map(send, payloads))
+
+        goals = concurrently("POST", "/api/home/goals", [
+            {"period": "weekly", "metric": "sales", "target": 50},
+            {"period": "weekly", "metric": "sales", "target": 50},
+        ])
+        assert [result.status_code for result in goals] == [200, 200]
+        goal_id = goals[0].json()["goal_id"]
+        assert goals[1].json()["goal_id"] == goal_id
+
+        updates = concurrently("PATCH", f"/api/home/goals/{goal_id}", [
+            {"metric": "sell_through_rate"},
+            {"target": 200},
+        ])
+        assert sorted(result.status_code for result in updates) == [200, 422]
+        goal = client.get("/api/home", headers=alice).json()["goals"][0]
+        assert (goal["metric"], goal["target"]) in {("sell_through_rate", 50), ("sales", 200)}
+        assert client.get("/api/home", headers=bob).json()["goals"] == []
+
+        dismissals = concurrently("POST", "/api/home/attention/dismiss", [
+            {"item_key": "shared-alert", "kind": "first"},
+            {"item_key": "shared-alert", "kind": "second"},
+        ])
+        assert [result.status_code for result in dismissals] == [200, 200]

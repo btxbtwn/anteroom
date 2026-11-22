@@ -237,4 +237,28 @@ describe("HomePage", () => {
     await settle();
     expect(api.home.restoreAttention).toHaveBeenCalledWith("unsent_edits:conv_2", expect.any(String));
   });
+
+  it("queues a restore behind a dismiss and refetches when the mutation has no snapshot", async () => {
+    let finishDismiss!: (result: { ok: boolean }) => void;
+    api.home.dismissAttention.mockReturnValueOnce(new Promise((resolve) => { finishDismiss = resolve; }));
+    await renderHome();
+
+    const button = (label: string) => [...container.querySelectorAll("button")]
+      .find((node) => node.textContent?.trim() === label)!;
+    await act(() => button("Dismiss").click());
+    await settle();
+    expect(api.home.dismissAttention).toHaveBeenCalledOnce();
+
+    await act(() => button("Dismissed").click());
+    await act(() => button("Restore").click());
+    await settle();
+    expect(api.home.restoreAttention).not.toHaveBeenCalled();
+
+    await act(() => finishDismiss({ ok: true }));
+    await settle();
+    expect(api.home.summary).toHaveBeenCalledTimes(2);
+    expect(api.home.restoreAttention).toHaveBeenCalledOnce();
+    expect(container.textContent).not.toContain("Ceramic Pitcher has unsent edits");
+  });
+
 });
