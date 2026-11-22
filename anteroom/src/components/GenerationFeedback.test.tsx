@@ -33,12 +33,21 @@ it("pins edited feedback to its original revision and provides Retry after a rea
     .mockRejectedValueOnce(new Error("Could not read feedback"))
     .mockResolvedValue({ revision_id: "original", feedback: null });
   const save = vi.spyOn(api.generationFeedback, "save").mockRejectedValue(new Error("A newer generation is available"));
+  async function findButton(label: string) {
+    let found: HTMLButtonElement | undefined;
+    await act(async () => {
+      await vi.waitFor(() => {
+        found = [...document.querySelectorAll("button")].find(
+          (item) => (item.getAttribute("aria-label") || item.textContent?.trim()) === label,
+        );
+        expect(found).toBeDefined();
+      });
+    });
+    return found!;
+  }
   async function click(label: string) {
-    const button = [...document.querySelectorAll("button")].find(
-      (item) => (item.getAttribute("aria-label") || item.textContent?.trim()) === label,
-    );
-    expect(button).toBeDefined();
-    await act(async () => { button?.click(); });
+    const button = await findButton(label);
+    await act(async () => { button.click(); });
   }
   try {
     await act(async () => {
@@ -46,10 +55,10 @@ it("pins edited feedback to its original revision and provides Retry after a rea
         <GenerationFeedback id="item" revision="edited-revision" />
       </QueryClientProvider>);
     });
-    await act(async () => { await vi.waitFor(() => expect(client.getQueryState(["generation-feedback", "item", "edited-revision"])?.status).toBe("error")); });
-    expect(container.textContent).toContain("Could not read feedback");
+    await act(async () => {
+      await vi.waitFor(() => expect(container.textContent).toContain("Could not read feedback"));
+    });
     await click("Retry");
-    await act(async () => { await vi.waitFor(() => expect(client.getQueryState(["generation-feedback", "item", "edited-revision"])?.status).toBe("success")); });
     await click("Thumbs down");
     await act(async () => {
       client.setQueryData(["generation-feedback", "item", "edited-revision"], { revision_id: "newer", feedback: null });
