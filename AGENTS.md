@@ -284,6 +284,10 @@ CI (`.github/workflows/ci.yml`) runs these on every pull request and push to `ma
 - **Marketplace value matrix:** a change to how a General size, condition, color or category becomes a marketplace's value keeps `anteroom/server/tests/test_marketplace_value_matrix.py` and `anteroom-extension/tests/marketplace-value-matrix.test.js` green. They run every General value through the production mapping against the option lists captured in `skills/list-this/references/`, so a refreshed form sweep that updates those lists is checked by the matrix too. Their known-gap lists only shrink: fix the mapping, then remove the entry.
 - **Secrets:** Do not track `.env`, key files, photos, or private exports. CI scans the working tree and the commits a change adds with gitleaks (`./check.sh` does too when gitleaks is installed).
 
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:7956d320bee6dba4cd78ed5bbabee4a585f407ab8cbcbbbb6f597fcd083de9ca -->
+
 **Linking issues:** Every PR closes at least one issue. Put a closing keyword
 in the description, one per issue: `Closes #12, closes #14` (`Fixes` and
 `Resolves` work too; `Closes #12, #14` closes only #12). GitHub honors the
@@ -291,9 +295,13 @@ keywords only in the description or a commit message and only for PRs into
 `main`; a keyword in a comment or a title does nothing. Use `Refs #<n>` for an
 issue the PR touches but does not finish, and keep that issue open. Check the
 link with `gh pr view <n> --json closingIssuesReferences`; the **Linked issue**
-workflow fails a PR that closes nothing (dependency bots are exempt). An issue
-found while working on another one gets its own issue and PR, not a line in
-this one.
+workflow fails a PR that closes nothing (dependency bots are exempt). If you
+link or unlink an issue in the PR's Development sidebar, edit and save the PR
+description or push a commit to refresh the check. A sidebar change alone
+does not trigger the workflow. An issue found while working on another one
+gets its own issue and PR, not a line in this one.
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 **Pull requests:** Open every PR ready for review, never as a draft: run `gh pr create` without `--draft`, so reviewers and review bots see it from the start (Codex's review on open does not run on drafts). Leave drafts that already exist as they are; mark one ready only when its own work is done. Ready for review is not ready to merge. After creating or updating a PR, always check CI (`gh pr checks`) and fix failures before considering the work done. Do not stop while required checks are pending or red. PRs never bump the version or edit `CHANGELOG.md`; do not run `bump-version.sh` in a PR. A PR that changes `anteroom/` adds one note file, `changelog.d/<branch-slug>.md`, holding `- ` bullets in the seller's words (`<slug>.minor.md` or `<slug>.major.md` only when the seller asks for that bump; see `changelog.d/README.md`). After merge, the **Version** workflow turns each merged PR's notes into one patch bump and a `## <version> — <YYYY-MM-DD>` section at the top of `CHANGELOG.md`, which the app shows under Settings → General → About → What's new, and then starts the macOS release build. The UI reads the version from the API; never hardcode it. CI's **Changelog** job (`anteroom/scripts/check-changelog.py`) fails when a PR changes `VERSION` or `CHANGELOG.md`, or when a note is malformed; run it locally with `python anteroom/scripts/check-changelog.py`.
 
