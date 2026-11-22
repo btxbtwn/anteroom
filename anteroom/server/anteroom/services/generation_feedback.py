@@ -46,14 +46,15 @@ def save_feedback(db: Session, conversation_id: str, body: FeedbackInput) -> dic
         raise HTTPException(404, "No generated revision found")
     if row.id != body.revision_id:
         raise HTTPException(409, "A newer generation is available. Reload before rating it.")
-    row.generation_feedback = {
+    feedback = {
         "rating": body.rating,
         "issues": list(dict.fromkeys(body.issues)) if body.rating == "down" else [],
         "note": body.note.strip() if body.rating == "down" else "",
         "rated_at": datetime.now(UTC).isoformat(),
     }
+    row.generation_feedback = feedback
     db.commit()
-    return row.generation_feedback
+    return feedback
 
 
 def feedback_summary(db: Session, *, recent_days: int = 30) -> dict:

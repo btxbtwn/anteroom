@@ -378,12 +378,12 @@ _COIN_CATEGORIES = frozenset("""
     173625 173626 173627 173628 173629 173630 173631 173643 173644 173645 173646 173647
     173648 173685 173693 176964 177492 179531 179532 179533 179534
 """.split())
-_COIN_GRADERS = dict(zip(
+_COIN_GRADERS: dict[str, str] = dict(zip(
     "pcgs ngc cacg anacs icg iccs cccs lcgs cgsuk segs nnc ntc pci acg asa other".split(),
     "14 15 16 34 35 36 37 38 39 40 41 42 43 44 45 76".split(),
     strict=True,
 ))
-_COIN_GRADES = dict(zip(
+_COIN_GRADES: dict[str, str] = dict(zip(
     "70 69 68 67 66 65 64 63 62 61 60 58 55 53 50 45 40 35 30 25 20 15 12 10 8 6 4 3 2 1".split(),
     "32 25 26 53 54 55 56 57 58 59 60 27 28 29 61 30 31 62 63 64 65 66 67 68 69 70 71 72 73 74".split(),
     strict=True,
