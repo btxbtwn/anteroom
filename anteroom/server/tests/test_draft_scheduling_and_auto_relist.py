@@ -193,6 +193,8 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         calls: list[tuple[str, list[str], str]] = []
 
         async def fake_publisher(conv_id: str, markets: list[str], rev_id: str) -> dict:
+            with self.Session() as probe:
+                self.assertEqual(probe.query(Listing).filter_by(scheduled_status="publishing").count(), 1)
             calls.append((conv_id, markets, rev_id))
             if conv_id == c_ok.id:
                 return {"ok": True, "marketplaces": {m: {"state": "published"} for m in markets}}
@@ -362,13 +364,14 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertIn("skipped_offer_unverified", {item["status"] for item in blocked})
         self.assertEqual(delist_calls, [])
 
-        async def confirmed_no_offer(_market: str, _listing_id: str) -> bool:
-            return False
-
-        outcomes = asyncio.run(
-            auto_relist.run_auto_relist(now=now, delister=fake_delister, lister=fake_lister,
-                                       offer_checker=confirmed_no_offer)
-        )
+        from unittest.mock import AsyncMock
+        with (
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch("anteroom.services.cloud_marketplace.execute", AsyncMock(return_value={
+                "ok": True, "verified": True, "has_active_offer": False,
+            })),
+        ):
+            outcomes = asyncio.run(auto_relist.run_auto_relist(now=now, delister=fake_delister, lister=fake_lister))
         self.assertEqual(len(outcomes), 2)
         statuses = {o["conversation_id"]: o["status"] for o in outcomes}
         self.assertEqual(statuses[c2.id], "skipped_active_offer")
@@ -388,6 +391,38 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         # Audit logs recorded
         logs = self.db.query(MarketplaceRelistLog).all()
         self.assertEqual(len(logs), 4)
+
+    def test_scheduled_relist_uses_marketplace_verification_before_delist(self):
+        from unittest.mock import AsyncMock
+        from anteroom.services.automation_scheduler import _run_auto_relist
+
+        conv, _, _ = self._create_draft("Scheduler relist")
+        conv.status = "listed"
+        old_id = "5f0000000000000000000081"
+        self.db.add(MarketplaceListing(id=new_id(), conversation_id=conv.id, marketplace="poshmark",
+                                      state="published", listing_id=old_id, listed_at=_now() - timedelta(days=45),
+                                      listing_url=f"https://poshmark.com/listing/{old_id}",
+                                      listed_price=58.0))
+        self.db.add(MarketplaceRelistRule(id=new_id(), marketplace="poshmark", enabled=True))
+        self.db.commit()
+        with (
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch("anteroom.services.cloud_marketplace.execute", AsyncMock(return_value={
+                "ok": True, "verified": True,
+            })) as check,
+            patch("anteroom.services.marketplace_delist.delist", AsyncMock(return_value={
+                "poshmark": {"state": "deleted"},
+            })) as delete,
+            patch("anteroom.services.native_marketplaces.list_now", AsyncMock(return_value={
+                "state": "published", "listing_id": "5f0000000000000000000082",
+            })),
+        ):
+            self.assertEqual(asyncio.run(_run_auto_relist(_now())), 0)
+            delete.assert_not_awaited()
+            check.return_value = {"ok": True, "verified": True, "has_active_offer": False}
+            self.assertEqual(asyncio.run(_run_auto_relist(_now())), 1)
+            delete.assert_awaited_once()
+        self.assertEqual(self.db.query(MarketplaceRelistLog).filter_by(status="completed").count(), 1)
 
     def test_check_active_buyer_offer_ebay_poshmark_and_mercari(self):
         import xml.etree.ElementTree as ET
@@ -555,7 +590,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
             return {"ok": True}
 
         async def fake_timeout_lister(_conv_id, _market, _rev_id):
-            return {"ok": False, "timed_out": True, "error": "Timed out waiting for poshmark."}
+            return {"ok": False, "timed_out": True, "native_job_id": "job-timeout-1", "error": "Timed out waiting for poshmark."}
 
         res = asyncio.run(auto_relist.run_auto_relist(
             marketplace="poshmark",
@@ -579,6 +614,14 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         ml_row.listing_id = new_posh
         ml_row.listing_url = f"https://poshmark.com/listing/{new_posh}"
         job.status = "completed"
+        self.db.commit()
+
+        ml_row.job_id = "another-operation"
+        self.db.commit()
+        auto_relist._reconcile_pending_relists(self.db, _now(), "poshmark")
+        self.db.refresh(pending_log)
+        self.assertEqual(pending_log.status, "relist_pending")
+        ml_row.job_id = job.id
         self.db.commit()
 
         auto_relist._reconcile_pending_relists(self.db, _now(), "poshmark")

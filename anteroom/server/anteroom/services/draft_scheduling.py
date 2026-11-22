@@ -325,7 +325,7 @@ def _claim_due_drafts(db: Session, moment: datetime) -> list[dict[str, Any]]:
             Listing.scheduled_publish_at <= moment,
         )
         .order_by(Listing.scheduled_publish_at.asc())
-        .limit(20)
+        .limit(1)
         .with_for_update(skip_locked=True)
         .all()
     )
@@ -427,15 +427,16 @@ async def run_due_scheduled_publishes(*, now: datetime | None = None, publisher=
     Releases DB connections before any external marketplace await.
     """
     moment = _as_naive_utc(now) if now is not None else _now()
-    due = await in_worker_session(_claim_due_drafts, moment)
-    if not due:
-        return []
     if publisher is None:
         from anteroom.services.automation_actions import publish_revision
 
         publisher = publish_revision
     outcomes: list[dict[str, Any]] = []
-    for entry in due:
+    for _ in range(20):
+        due = await in_worker_session(_claim_due_drafts, moment)
+        if not due:
+            break
+        entry = due[0]
         try:
             result = await publisher(entry["conversation_id"], entry["marketplaces"], entry["revision_id"])
         except Exception as exc:  # noqa: BLE001 - isolate one draft's publish failure

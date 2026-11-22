@@ -562,7 +562,12 @@ def _reconcile_pending_relists(
             .filter_by(conversation_id=row.conversation_id, marketplace=row.marketplace)
             .first()
         )
-        if ml is not None and ml.state in LIVE_STATES and ml.listing_id and ml.listing_id != row.old_listing_id:
+        job = job_repo.get(row.native_job_id) if row.native_job_id else None
+        if (ml is None or job is None or job.conversation_id != row.conversation_id
+                or ml.job_id != row.native_job_id or job.status in ACTIVE_JOB_STATUSES):
+            still_pending.add((row.conversation_id, row.marketplace))
+            continue
+        if job.status == "completed" and ml.state in LIVE_STATES and ml.listing_id and ml.listing_id != row.old_listing_id:
             swap_tracked_listing_id(
                 db,
                 row.conversation_id,
@@ -577,10 +582,6 @@ def _reconcile_pending_relists(
             row.new_listing_id = str(ml.listing_id)
             row.reason = None
             changed = True
-            continue
-        job = job_repo.get(ml.job_id) if (ml is not None and ml.job_id) else None
-        if job is not None and job.status in ACTIVE_JOB_STATUSES:
-            still_pending.add((row.conversation_id, row.marketplace))
             continue
         row.status = "down_needs_relist"
         if ml is not None and ml.error:
@@ -641,6 +642,8 @@ def _record_log(
     reason: str | None,
     moment: datetime,
     new_listing_url: str | None = None,
+    native_job_id: str | None = None,
+    attempt_id: str | None = None,
 ) -> dict[str, Any]:
     if status == "completed" and new_listing_id:
         swap_tracked_listing_id(
@@ -653,19 +656,16 @@ def _record_log(
             new_price=new_price,
             now=moment,
         )
-    row = MarketplaceRelistLog(
-        id=new_id(),
-        conversation_id=conv_id,
-        marketplace=marketplace,
-        old_listing_id=old_listing_id,
-        new_listing_id=new_listing_id,
-        old_price=old_price,
-        new_price=new_price,
-        status=status,
-        reason=reason,
-        created_at=moment,
-    )
-    db.add(row)
+    row = db.get(MarketplaceRelistLog, attempt_id) if attempt_id else None
+    if row is None:
+        row = MarketplaceRelistLog(id=attempt_id or new_id(), conversation_id=conv_id,
+                                  marketplace=marketplace, old_listing_id=old_listing_id,
+                                  old_price=old_price, new_price=new_price, created_at=moment)
+        db.add(row)
+    row.native_job_id = native_job_id
+    row.new_listing_id = new_listing_id
+    row.status = status
+    row.reason = reason
     rule = db.query(MarketplaceRelistRule).filter_by(marketplace=marketplace).first()
     if rule is not None:
         rule.last_run_at = moment
@@ -682,15 +682,6 @@ def _record_log(
 
 def _record_log_payload(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
     return _record_log(db, **payload)
-
-
-_EBAY_ACTIVE_OFFER_STATUSES = frozenset({
-    "active",
-    "pending",
-    "countered",
-    "pendingbuyerpayment",
-    "pendingbuyerconfirmation",
-})
 
 
 async def check_active_buyer_offer(marketplace: str, listing_id: str) -> bool | None:
@@ -726,11 +717,9 @@ async def check_active_buyer_offer(marketplace: str, listing_id: str) -> bool | 
         if root is None:
             return None
         offers = root.findall(".//e:BestOfferArray/e:BestOffer", NS) or root.findall(".//e:BestOffer", NS)
-        for offer in offers:
-            status = (offer.findtext("e:Status", namespaces=NS) or "").strip().lower()
-            if not status or status in _EBAY_ACTIVE_OFFER_STATUSES:
-                return True
-        return False
+        # The request explicitly filters for active offers. A new status name
+        # must not turn a returned offer into clearance to delete the listing.
+        return bool(offers) if root.tag == f"{{{NS['e']}}}GetBestOffersResponse" else None
 
     if market in ("poshmark", "depop", "mercari"):
         from anteroom.services import browser_bridge, cloud_marketplace, cloud_sessions
@@ -766,7 +755,8 @@ async def check_active_buyer_offer(marketplace: str, listing_id: str) -> bool | 
             return None
         if not isinstance(reply, dict) or reply.get("ok") is not True or reply.get("verified") is not True:
             return None
-        return bool(reply.get("has_active_offer"))
+        active = reply.get("has_active_offer")
+        return active if isinstance(active, bool) else None
 
     return None
 
@@ -830,6 +820,7 @@ async def run_auto_relist(
                 "listing_url": res.get("listing_url"),
                 "error": res.get("error"),
                 "timed_out": bool(res.get("timed_out")),
+                "native_job_id": res.get("job_id"),
             }
 
         lister = _default_lister
@@ -877,10 +868,19 @@ async def run_auto_relist(
             }))
             continue
 
+        # Commit evidence before either external write. A process interruption
+        # must leave a visible uncertain attempt, even before a job ID exists.
+        attempt_id = new_id()
+        await in_worker_session(_record_log_payload, {
+            "attempt_id": attempt_id, "conv_id": conv_id, "marketplace": market,
+            "old_listing_id": old_id, "new_listing_id": None, "old_price": entry["price"],
+            "new_price": entry["new_price"], "status": "relist_pending",
+            "reason": "Relist started; verify the marketplace outcome before retrying.", "moment": _now(),
+        })
         delist_res = await delister(conv_id, market)
         if not delist_res.get("ok"):
             outcomes.append(await in_worker_session(_record_log_payload, {
-                "conv_id": conv_id,
+                "attempt_id": attempt_id, "conv_id": conv_id,
                 "marketplace": market,
                 "old_listing_id": old_id,
                 "new_listing_id": None,
@@ -898,13 +898,14 @@ async def run_auto_relist(
             error_msg = str(list_res.get("error") or "Old listing was delisted, but relist did not confirm.")
             status = "relist_pending" if list_res.get("timed_out") else "down_needs_relist"
             outcomes.append(await in_worker_session(_record_log_payload, {
-                "conv_id": conv_id,
+                "attempt_id": attempt_id, "conv_id": conv_id,
                 "marketplace": market,
                 "old_listing_id": old_id,
                 "new_listing_id": None,
                 "old_price": entry["price"],
                 "new_price": entry["new_price"],
                 "status": status,
+                "native_job_id": list_res.get("native_job_id"),
                 "reason": error_msg,
                 "moment": _now(),
             }))
@@ -915,7 +916,7 @@ async def run_auto_relist(
             continue
 
         outcomes.append(await in_worker_session(_record_log_payload, {
-            "conv_id": conv_id,
+            "attempt_id": attempt_id, "conv_id": conv_id,
             "marketplace": market,
             "old_listing_id": old_id,
             "new_listing_id": str(new_id_val),

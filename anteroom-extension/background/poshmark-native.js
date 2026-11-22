@@ -145,7 +145,7 @@ function poshmarkRefusal(error, what) {
 
 function poshmarkClient(deadline, csrf) {
   const client = { csrf };
-  client.call = async (method, path, body, { step = 'request', what = 'the request', retry = method === 'GET', guard = true, timeoutMs = 25000 } = {}) => {
+  client.call = async (method, path, body, { step = 'request', what = 'the request', retry = method === 'GET', guard = true, timeoutMs = 25000, envelope = false } = {}) => {
     const multipart = body instanceof FormData;
     const { data } = await marketplaceFetch(`${POSHMARK}${path}${path.includes('?') ? '&' : '?'}${POSHMARK_QUERY}`, {
       marketplace: 'poshmark', step, method, retry, guard, timeoutMs, deadline: guard ? deadline : Date.now() + timeoutMs,
@@ -153,7 +153,7 @@ function poshmarkClient(deadline, csrf) {
         ...(!multipart && method !== 'GET' ? { 'Content-Type': 'application/json' } : {}) },
       ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }) });
     if (data.error) throw poshmarkRefusal(data.error, what);
-    return data.data || data;
+    return envelope ? data : (data.data || data);
   };
   // Photo uploads are safe to repeat. A 400 usually means a stale request
   // token, so the token is read again once, as Poshmark's own editor does.

@@ -365,6 +365,11 @@ test('readMarketplaceActiveOffers detects active incoming Poshmark buyer offers 
   const cleanRes = await clean.c.readMarketplaceActiveOffers({ marketplace: 'poshmark', listing_id: POST });
   assert.deepEqual(JSON.parse(JSON.stringify(cleanRes)), { ok: true, verified: true, has_active_offer: false });
 
+  const partial = setupWorker({
+    [`GET poshmark.com/vm-rest/users/${USER}/offers`]: [200, { data: [], more: { next_max_id: 'another-page' } }],
+  });
+  assert.equal((await partial.c.readMarketplaceActiveOffers({ marketplace: 'poshmark', listing_id: POST })).verified, false);
+
   const mercariRes = await clean.c.readMarketplaceActiveOffers({ marketplace: 'mercari', listing_id: 'm12345678' });
   assert.equal(mercariRes.ok, true);
   assert.equal(mercariRes.verified, false);

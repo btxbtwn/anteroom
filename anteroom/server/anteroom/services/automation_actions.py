@@ -253,7 +253,9 @@ async def wait_for_native_result(conv_id: str, marketplace: str, started: dict, 
     if timed_out:
         record = await _run_db(read_record)
         try:
-            if session_factory is None:
+            if record.get("job_id") != job_id:
+                pass  # A replacement operation must never receive this cancellation.
+            elif session_factory is None:
                 await native_marketplaces.request_cancel(job_id, {**record, "marketplace": marketplace})
             else:
                 if await _run_db(native_marketplaces._record_cancel, job_id, marketplace) and record.get("operation_id"):

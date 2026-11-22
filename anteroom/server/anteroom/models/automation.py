@@ -252,6 +252,7 @@ class MarketplaceRelistLog(SellerOwned, Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
     conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
     marketplace: Mapped[str] = mapped_column(String(32), nullable=False)
+    native_job_id: Mapped[str | None] = mapped_column(String, nullable=True)
     old_listing_id: Mapped[str | None] = mapped_column(String, nullable=True)
     new_listing_id: Mapped[str | None] = mapped_column(String, nullable=True)
     old_price: Mapped[float | None] = mapped_column(Float, nullable=True)

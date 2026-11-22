@@ -567,7 +567,7 @@ async function readMarketplaceActiveOffers(payload) {
         'GET',
         `/vm-rest/users/${account.user_id}/offers?app_type=web&status=active&count=100`,
         undefined,
-        { step: 'active-offers', what: 'active offers' },
+        { step: 'active-offers', what: 'active offers', envelope: true },
       );
       const list = Array.isArray(resp) ? resp
         : Array.isArray(resp?.data) ? resp.data
@@ -584,7 +584,11 @@ async function readMarketplaceActiveOffers(payload) {
         if (sender && sender === account.user_id) return false;
         return true;
       });
-      return { ok: true, verified: true, has_active_offer: hasActiveOffer };
+      const identifiable = list.every(o => o && (o.post_id || o.post?.id ||
+        ((o.bundle?.posts || o.posts)?.length && (o.bundle?.posts || o.posts).every(p => p?.id || p?.post_id))));
+      const complete = identifiable && list.length < 100 && !resp?.more?.next_max_id &&
+        !resp?.meta?.next_max_id && !resp?.next_cursor && !resp?.has_more;
+      return { ok: true, verified: hasActiveOffer || complete, has_active_offer: hasActiveOffer };
     }
     if (market === 'depop') {
       const { data: me } = await depopOfferCall('GET', '/presentation/api/v1/users/me/', deadline, 'account');
@@ -605,8 +609,9 @@ async function readMarketplaceActiveOffers(payload) {
         return { ok: true, verified: false, has_active_offer: false, reason: 'Unrecognized Depop active offers response.' };
       }
       const match = list.find(item => String(item?.product_id ?? item?.id ?? '') === String(product.id) || String(item?.slug ?? '') === listingId);
-      const count = match ? Number(match.active_offers_count ?? match.offers_count ?? match.count ?? 1) : 0;
-      return { ok: true, verified: true, has_active_offer: Boolean(match && count > 0) };
+      // An account page that omits this product does not clear its offers.
+      const count = match?.active_offers_count;
+      return { ok: true, verified: Number.isSafeInteger(count) && count >= 0, has_active_offer: count > 0 };
     }
     if (market === 'mercari') {
       return {
