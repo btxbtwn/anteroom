@@ -1,0 +1,97 @@
+name: Claude review
+
+# Reviews every ready pull request the way CodeRabbit did: a sticky summary
+# (walkthrough, merge risk, security risk), one review per push with inline
+# findings for only what changed since the last reviewed commit, and earlier
+# findings marked "Addressed" once fixed. Then auto-fix answers the open
+# findings. Claude only reads here; .github/review-bot/review_bot.py posts.
+# See docs/pr-review-bots.md.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+# A newer push replaces a review still running for the same pull request.
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    name: Claude review
+    # Same-repository branches only: fork pull requests get no secrets.
+    if: >-
+      !github.event.pull_request.draft &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+    outputs:
+      skip: ${{ steps.prepare.outputs.skip }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Find what to review
+        id: prepare
+        env:
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+        run: >-
+          python3 .github/review-bot/review_bot.py prepare-review
+          --pr "$PR" --base "$BASE" --out "$RUNNER_TEMP/claude-review"
+      - name: Load output schema
+        if: steps.prepare.outputs.skip == 'false'
+        id: schema
+        run: echo "json=$(jq -c . .github/review-bot/review-schema.json)" >> "$GITHUB_OUTPUT"
+      - name: Review with Claude
+        if: steps.prepare.outputs.skip == 'false'
+        id: claude
+        uses: anthropics/claude-code-action@acfe7992852970efb4fee683d63d628e3e52df67 # v1.0.286
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          allowed_bots: "claude[bot],dependabot[bot]"
+          allow_fork_prs: "false"
+          prompt: |
+            Follow .github/review-bot/review-prompt.md.
+            Repository: ${{ github.repository }}
+            Pull request: #${{ github.event.pull_request.number }}
+            Context directory: ${{ runner.temp }}/claude-review
+          claude_args: >-
+            --model opus
+            --permission-mode default
+            --add-dir ${{ runner.temp }}/claude-review
+            --allowedTools "Read,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git blame:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh issue list:*),Bash(gh issue view:*)"
+            --disallowedTools "Edit,Write,NotebookEdit,Bash(git push:*),Bash(git commit:*)"
+            --json-schema '${{ steps.schema.outputs.json }}'
+      - name: Post review
+        if: steps.prepare.outputs.skip == 'false'
+        env:
+          REVIEW_OUTPUT: ${{ steps.claude.outputs.structured_output }}
+        run: python3 .github/review-bot/review_bot.py post-review --context "$RUNNER_TEMP/claude-review"
+
+  autofix:
+    name: Claude auto-fix
+    needs: review
+    if: needs.review.outputs.skip == 'false'
+    uses: ./.github/workflows/claude-autofix.yml
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read

@@ -100,6 +100,8 @@ jobs:
         run: python3 .github/scripts/test-required-checks.py
       - name: Test sandbox browser evidence validation
         run: node --test .github/scripts/test-browser-evidence.mjs
+      - name: Test the Claude review bot
+        run: python3 .github/review-bot/test_review_bot.py
       - name: Version sync
         run: python anteroom/scripts/check-version-sync.py
       - name: Reject case-insensitive path and module collisions
