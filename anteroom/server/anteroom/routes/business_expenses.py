@@ -1,8 +1,9 @@
 """Shared desktop and hosted bookkeeping API."""
-from datetime import date
+from datetime import UTC, date, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import AwareDatetime
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -65,9 +66,16 @@ def import_expenses(body: expense_csv.CsvInput, db: Session = Depends(get_db, sc
 
 @router.get("/profit-and-loss")
 def profit_report(start: date, end: date, mode: profit_and_loss.AccountingMode = "accrual",
+                  after: AwareDatetime | None = None, before: AwareDatetime | None = None,
                   db: Session = Depends(get_db, scope="function")) -> list[profit_and_loss.CurrencyReport]:
+    after = after.astimezone(UTC) if after else None
+    before = before.astimezone(UTC) if before else None
+    if ((after and after.date() != start)
+            or (before and (before - timedelta(microseconds=1)).date() != end)
+            or (after and before and after >= before)):
+        raise HTTPException(422, "Choose date and time boundaries for the same reporting period.")
     try:
-        return profit_and_loss.report(db, start, end, mode)
+        return profit_and_loss.report(db, start, end, mode, after=after, before=before)
     except sales_ledger.LedgerError as exc:
         raise HTTPException(exc.status, str(exc)) from exc
 
@@ -78,7 +86,7 @@ def export_profit_report(start: date, end: date, mode: profit_and_loss.Accountin
     rows = (
         (start, end, mode, report.currency, line.label, f"{Decimal(line.amount_cents) / 100:.2f}",
          report.incomplete_sales)
-        for report in profit_report(start, end, mode, db) for line in report.lines
+        for report in profit_report(start, end, mode, db=db) for line in report.lines
     )
     return _csv(expense_csv.render(("start", "end", "mode", "currency", "line", "amount", "incomplete_sales"), rows),
                 "profit-and-loss.csv")

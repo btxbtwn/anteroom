@@ -538,7 +538,7 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
 
 def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[str, Any]]]]:
     """The summary as text, and the tables a lookup reads."""
-    from anteroom.services import ad_spend, boxes, box_scout, sales_records, scout
+    from anteroom.services import ad_spend, boxes, box_scout, scout
     from anteroom.database import end_read
     from anteroom.services.business_expenses import entries
     from anteroom.services.inventory_analytics import analytics_ranges, read_analytics_inputs, rows_from_inputs
@@ -549,7 +549,9 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
     end_read(db, keep=[line for lines in inputs.sales.values() for line in lines])
     rows = rows_from_inputs(inputs)
     ad_entries: list[Any] = []
-    ranges = analytics_ranges(db, ANALYTICS_RANGES, now=clock, rows=rows, out_ad_entries=ad_entries)
+    sale_lines: list[dict[str, Any]] = []
+    ranges = analytics_ranges(db, ANALYTICS_RANGES, now=clock, rows=rows,
+                              out_ad_entries=ad_entries, out_sale_records=sale_lines)
     everything = ranges["all"]
     parsed_notes = {conv_id: note for conv_id, _title, _status, note, _box in inputs.conversations}
     records, detail_rows = _records(db, rows, clock, parsed_notes=parsed_notes)
@@ -563,7 +565,6 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
         for row in db.scalars(entries(date.min, date.max))
     ]
     year_start = clock.date().replace(month=1, day=1)
-    sale_lines = sales_records.records_from_lines(sales_records.read_sale_lines(db), rows)
     year_sales = [
         sale for sale in sale_lines
         if year_start.isoformat() <= str(sale["sold_at"] or sale["received_at"])[:10] <= clock.date().isoformat()

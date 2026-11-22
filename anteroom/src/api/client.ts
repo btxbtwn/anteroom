@@ -210,6 +210,7 @@ async function rawRequest<T>(path: string, options?: RequestInit): Promise<T> {
       res.headers.get("X-Anteroom-Reason"),
     );
   }
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
 
@@ -517,7 +518,7 @@ export const api = {
     update: (id: string, body: ExpenseUpdate) => request<Expense>(`/business-expenses/${encodeURIComponent(id)}`, {
       method: "PUT", body: JSON.stringify(body),
     }),
-    remove: ({ id, revision }: Expense) => request<void>(
+    remove: ({ id, revision }: Pick<Expense, "id" | "revision">) => request<void>(
       `/business-expenses/${encodeURIComponent(id)}?expected_revision=${revision}`, { method: "DELETE" },
     ),
     mileage: (body: MileageInput) => request<MileageAmount>(

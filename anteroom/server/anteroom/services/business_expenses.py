@@ -38,6 +38,8 @@ class ExpenseInput(BaseModel):
         elif self.distance is None or self.distance_unit is None or self.mileage_rate_cents is None:
             raise ValueError("Enter the trip distance, unit and rate.")
         else:
+            self.distance = self.distance.quantize(Decimal("0.001"))
+            self.mileage_rate_cents = self.mileage_rate_cents.quantize(Decimal("0.000001"))
             self.amount_cents = round_cents(self.distance * self.mileage_rate_cents)
             if not 0 < self.amount_cents <= 999_999_999_999:
                 raise ValueError("The mileage total is outside the supported range.")

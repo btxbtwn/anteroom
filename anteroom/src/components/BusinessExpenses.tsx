@@ -151,12 +151,24 @@ function ExpenseForm({ expense, today, close }: { expense?: Expense; today: stri
   const [country, setCountry] = useState<MileageInput["country"]>(expense?.currency === "CAD" ? "CA" : "US");
   const [unit, setUnit] = useState<MileageInput["distance_unit"]>(expense?.distance_unit ?? "mi");
   const refresh = useRefreshExpenses();
-  const calculate = (form: FormData) => api.businessExpenses.mileage({
-    incurred_date: String(form.get("date") ?? ""),
-    country, distance: String(form.get("distance") ?? ""), distance_unit: unit,
-    prior_business_km: String(form.get("prior") || "0"), northern_territory: form.has("northern"),
-    us_rate_override_cents: String(form.get("rate") ?? "") || undefined,
-  });
+  const calculate = async (form: FormData) => {
+    const request: MileageInput = {
+      incurred_date: String(form.get("date") ?? ""),
+      country, distance: String(form.get("distance") ?? ""), distance_unit: unit,
+      prior_business_km: String(form.get("prior") || "0"), northern_territory: form.has("northern"),
+      us_rate_override_cents: String(form.get("rate") ?? "") || undefined,
+    };
+    if (expense?.category === "mileage" && expense.incurred_date === request.incurred_date
+      && expense.distance != null && Number(expense.distance) === Number(request.distance) && expense.distance_unit === unit
+      && (expense.currency === "CAD" ? "CA" : "US") === country && !form.get("prior") && !request.northern_territory
+      && !request.us_rate_override_cents && expense.mileage_rate_cents != null) {
+      return {
+        currency: expense.currency ?? "USD", amount_cents: expense.amount_cents,
+        mileage_rate_cents: expense.mileage_rate_cents,
+      };
+    }
+    return api.businessExpenses.mileage(request);
+  };
   const preview = useMutation({ mutationFn: calculate });
   const save = useMutation({
     mutationFn: async (form: FormData) => {
@@ -168,13 +180,7 @@ function ExpenseForm({ expense, today, close }: { expense?: Expense; today: stri
       };
       if (category === "mileage") {
         const distance = value("distance");
-        const unchanged = expense?.category === "mileage" && expense.incurred_date === body.incurred_date
-          && String(expense.distance) === distance && expense.distance_unit === unit
-          && (expense.currency === "CAD" ? "CA" : "US") === country && !value("prior") && !form.has("northern") && !value("rate");
-        const amount = unchanged ? {
-          amount_cents: expense.amount_cents, currency: expense.currency,
-          mileage_rate_cents: expense.mileage_rate_cents,
-        } : await calculate(form);
+        const amount = await calculate(form);
         Object.assign(body, amount, { distance, distance_unit: unit, origin_destination: value("route") });
       }
       return expense ? api.businessExpenses.update(expense.id, { ...body, expected_revision: expense.revision })

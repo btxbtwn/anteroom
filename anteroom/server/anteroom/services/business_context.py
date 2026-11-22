@@ -90,6 +90,14 @@ def _touches_watched(session: Session) -> bool:
 @event.listens_for(Session, "after_flush")
 def _after_flush(session: Session, _context) -> None:
     if _touches_watched(session):
+        session.info["business_context_dirty"] = True
+        invalidate_business_context(user_id=getattr(session, "user_id", None))
+
+
+@event.listens_for(Session, "after_commit")
+@event.listens_for(Session, "after_rollback")
+def _after_transaction(session: Session) -> None:
+    if session.info.pop("business_context_dirty", False):
         invalidate_business_context(user_id=getattr(session, "user_id", None))
 
 
@@ -100,4 +108,5 @@ def _bulk_write(state) -> None:
         return
     tables = {getattr(mapper, "local_table", None) for mapper in state.all_mappers}
     if any(getattr(table, "name", None) in WATCHED_TABLES for table in tables):
+        state.session.info["business_context_dirty"] = True
         invalidate_business_context(user_id=getattr(state.session, "user_id", None))

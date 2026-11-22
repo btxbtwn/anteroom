@@ -678,6 +678,7 @@ export interface InventoryAnalytics {
   units_sold?: number;
   window_start?: string | null;
   window_end?: string;
+  window_end_exclusive?: string;
   sales: AnalyticsSales;
   previous: { start: string; end: string; sales: AnalyticsSales; units_listed?: number; units_sold?: number; sell_through_rate?: number | null } | null;
   periods: AnalyticsPeriod[];

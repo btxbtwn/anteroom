@@ -25,4 +25,9 @@ test("records an expense and exports profit and loss", async ({ page, phone }, i
   await report.getByRole("button", { name: "Export CSV" }).click();
   expect((await download).suggestedFilename()).toBe("profit-and-loss.csv");
   await page.screenshot({ path: info.outputPath("profit-and-loss.png") });
+  await page.getByRole("tab", { name: "Expenses", exact: true }).click();
+  await expenses.getByRole("button", { name: "Edit", exact: true }).first().click();
+  page.once("dialog", (dialog) => dialog.accept());
+  await expenses.getByRole("button", { name: "Delete expense" }).click();
+  await expect(expenses.getByText(`Mailers ${info.project.name}`, { exact: true })).toHaveCount(0);
 });

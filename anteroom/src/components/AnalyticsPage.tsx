@@ -288,8 +288,17 @@ function SalesStats({ data, accountingMode }: { data: InventoryAnalytics; accoun
   const reportStart = data.window_start?.slice(0, 10) ?? "1970-01-01";
   const reportEnd = data.window_end?.slice(0, 10) ?? "";
   const mode = accountingMode ?? "accrual";
-  const reportParams = new URLSearchParams({ start: reportStart, end: reportEnd, mode }).toString();
-  const previousParams = reportEnd && data.window_start ? previousReportParams(reportStart, reportEnd, mode) : null;
+  const current = new URLSearchParams({ start: reportStart, end: reportEnd, mode });
+  if (data.window_start) current.set("after", data.window_start);
+  if (data.window_end_exclusive) current.set("before", data.window_end_exclusive);
+  const reportParams = current.toString();
+  const previousParams = data.previous ? new URLSearchParams({
+    start: data.previous.start.slice(0, 10),
+    end: previousEnd(data.previous.end).slice(0, 10),
+    after: data.previous.start,
+    before: data.previous.end,
+    mode,
+  }).toString() : null;
   const pnl = useQuery({
     queryKey: ["profit-and-loss", reportParams],
     queryFn: ({ signal }) => api.businessExpenses.report(reportParams, signal),
@@ -349,17 +358,6 @@ function SalesStats({ data, accountingMode }: { data: InventoryAnalytics; accoun
         negative={sales.margin != null && sales.margin < 0} />
     </StatGrid>
   );
-}
-
-function previousReportParams(start: string, end: string, mode: AccountingMode): string {
-  const day = 86_400_000;
-  const first = Date.parse(start);
-  const length = Date.parse(end) - first + day;
-  return new URLSearchParams({
-    start: new Date(first - length).toISOString().slice(0, 10),
-    end: new Date(first - day).toISOString().slice(0, 10),
-    mode,
-  }).toString();
 }
 
 /** The API's previous period ends where this one starts; name its last whole day. */

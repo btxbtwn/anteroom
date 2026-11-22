@@ -138,6 +138,7 @@ def inventory_analytics(
 def analytics_ranges(
     db, range_ids: tuple[str, ...], *, now: datetime, rows: list[AnalyticsItem],
     out_ad_entries: list[Any] | None = None,
+    out_sale_records: list[dict[str, Any]] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """``inventory_analytics`` for several ranges, reading what every range shares once.
 
@@ -149,6 +150,8 @@ def analytics_ranges(
     inputs = _RangeInputs.read(db, rows, release=True)
     if out_ad_entries is not None:
         out_ad_entries.extend(inputs.ad_entries)
+    if out_sale_records is not None:
+        out_sale_records.extend(inputs.sale_records)
     return {range_id: _range_payload(rows, inputs, range_id, now) for range_id in range_ids}
 
 
@@ -159,6 +162,7 @@ class _RangeInputs:
     events: list[Any]
     incomplete: list[dict[str, Any]]
     ad_entries: list[Any]
+    sale_records: list[dict[str, Any]]
 
     @classmethod
     def read(cls, db, rows: list[AnalyticsItem], *, release: bool = False) -> _RangeInputs:
@@ -179,7 +183,8 @@ class _RangeInputs:
         ad_entries = list_entries(db)
         if release:
             end_read(db, keep=[*(line for line, _title in lines), *ad_entries])
-        return cls(events=events, incomplete=incomplete_from(records_from_lines(lines, rows)), ad_entries=ad_entries)
+        sale_records = records_from_lines(lines, rows)
+        return cls(events=events, incomplete=incomplete_from(sale_records), ad_entries=ad_entries, sale_records=sale_records)
 
 
 def _range_payload(
@@ -526,6 +531,7 @@ def summarize(
         "units_sold": sum(item.sale_quantity for item in sales),
         "window_start": window_start.isoformat() if window_start is not None else None,
         "window_end": window_end.isoformat(),
+        "window_end_exclusive": (window_end + timedelta(microseconds=1)).isoformat(),
         "sales": _sales_stats(sales),
         "previous": previous,
         "periods": [

@@ -114,6 +114,16 @@ def test_bulk_import_inserts_across_batches_and_paginates(expenses):
     assert len(client.get(ROOT, params={**PERIOD, "page": 5}).json()) == 5
 
 
+def test_import_deduplicates_equal_mileage_decimals(expenses):
+    client, _ = expenses
+    header = "incurred_date,amount_cents,category,distance,distance_unit,mileage_rate_cents\n"
+    for distance, rate, imported in [("10", "70", 1), ("10.000", "70.000000", 0)]:
+        content = header + f"2026-01-01,700,mileage,{distance},mi,{rate}\n"
+        result = client.post(f"{ROOT}/import", json={"content": content}).json()
+        assert result["imported"] == imported
+        assert result["duplicates"] == 1 - imported
+
+
 def test_cash_expenses_and_landed_box_costs(expenses):
     client, engine = expenses
     assert client.post(ROOT, json=EXPENSE).status_code == 201
@@ -157,3 +167,13 @@ def test_report_uses_sale_proceeds_refunds_and_accrual_cogs(expenses):
     assert reports["accrual"]["COGS"] == 2500
     assert reports["accrual"]["Net Profit"] == 4200
     assert reports["cash"]["Net Profit"] == 6700
+    report = client.get(f"{ROOT}/profit-and-loss", params={
+        "start": "2026-01-10", "end": "2026-01-11", "after": "2026-01-10T12:00:00Z", "before": "2026-01-11T12:00:00Z",
+    })
+    assert report.status_code == 200, report.text
+    assert report.json() == []
+    previous = client.get(f"{ROOT}/profit-and-loss", params={
+        "start": "2026-01-09", "end": "2026-01-10", "after": "2026-01-09T12:00:00Z", "before": "2026-01-10T12:00:00Z",
+    })
+    assert previous.status_code == 200, previous.text
+    assert previous.json()[0]["lines"][-1]["amount_cents"] == 4200
