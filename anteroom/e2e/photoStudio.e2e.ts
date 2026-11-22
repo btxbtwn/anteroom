@@ -79,12 +79,19 @@ test("AI Studio edits several photos at once offline, markup and filters save, a
   await editor.getByRole("button", { name: "Markup" }).click();
   const frame = editor.locator("[data-markup-frame]");
   await expect(frame).toBeVisible();
-  const box = (await frame.boundingBox())!;
+  // The Markup preview reloads after the tab switch; draw on the settled frame.
+  const settled = async () => {
+    await expect(editor.getByText(/^(Updating|Loading photo)…$/)).toHaveCount(0);
+    return (await frame.boundingBox())!;
+  };
+  let box = await settled();
   await page.mouse.move(box.x + box.width * 0.2, box.y + box.height * 0.8);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * 0.45, box.y + box.height * 0.55, { steps: 6 });
   await page.mouse.up();
+  await expect(editor.getByText("Arrow 1")).toBeVisible();
   await editor.getByRole("button", { name: "Pixelate" }).click();
+  box = await settled();
   await page.mouse.move(box.x + box.width * 0.55, box.y + box.height * 0.1);
   await page.mouse.down();
   await page.mouse.move(box.x + box.width * 0.9, box.y + box.height * 0.2, { steps: 6 });
