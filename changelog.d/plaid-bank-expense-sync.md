@@ -1,1 +1,0 @@
-- Connect up to two banks or credit cards through Plaid and automatically import up to two years of expenses.

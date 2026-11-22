@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1145 — 2026-11-22
+
+- Connect up to two banks or credit cards through Plaid and automatically import up to two years of expenses.
+
 ## 0.1.1144 — 2026-11-22
 
 - See which items are generating in a bulk upload, retry a failed item, and open each draft for review.
