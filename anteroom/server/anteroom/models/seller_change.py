@@ -50,6 +50,7 @@ TOPIC_BY_TABLE: dict[str, str | None] = {
     "marketplace_sales": "sales",
     "business_expenses": "sales",
     "plaid_connections": "sales",
+    "plaid_transactions": "sales",
     "sale_events": "sales",
     "sale_snapshots": "sales",
     "ad_spend": "sales",
@@ -82,7 +83,6 @@ TOPIC_BY_TABLE: dict[str, str | None] = {
     "generation_timings": None,
     "listing_corrections": None,
     "photo_fingerprints": None,
-    "plaid_transactions": None,
     "vendoo_draft_cache": None,
     "seller_changes": None,
 }

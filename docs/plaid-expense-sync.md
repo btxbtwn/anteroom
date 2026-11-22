@@ -1,8 +1,7 @@
 # Plaid expense sync
 
 Set `PLAID_CLIENT_ID` and `PLAID_SECRET` in the API and scheduled worker
-environments. Set `PLAID_ENV` to `sandbox` (the default), `development`, or
-`production`. Plaid must enable Transactions for your credentials and selected
+environments. Set `PLAID_ENV` to `sandbox` (the default) or `production`. Plaid must enable Transactions for your credentials and selected
 institutions. Use the same environment and credentials on the API and worker.
 
 For hosted browser OAuth, register the app's HTTPS root URL as a Plaid Link

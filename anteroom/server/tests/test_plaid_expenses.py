@@ -123,6 +123,24 @@ def list_expenses(client):
     return {row["description"]: row for row in client.get(EXPENSES, params=RANGE).json()}
 
 
+def test_autopay_bills_import_but_credit_card_payments_are_excluded():
+    utility = plaid_expenses._expense(transaction(
+        "utility", name="COMCAST AUTOPAY PAYMENT",
+        personal_finance_category={"primary": "RENT_AND_UTILITIES"},
+    ))
+    software = plaid_expenses._expense(transaction("software", name="VENDOO AUTOPAY PAYMENT"))
+    assert utility is not None and utility.amount_cents == 1425
+    assert software is not None and software.category == "software_subscriptions"
+    assert plaid_expenses._expense(transaction(
+        "card-transfer", name="AUTOPAY PAYMENT",
+        personal_finance_category={"primary": "TRANSFER_OUT"},
+    )) is None
+    assert plaid_expenses._expense(transaction(
+        "card-payment", name="AUTOPAY PAYMENT",
+        personal_finance_category={"detailed": "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT"},
+    )) is None
+
+
 def test_unconfigured_is_safe(local, monkeypatch):
     client, _ = local
     monkeypatch.delenv("PLAID_CLIENT_ID", raising=False)
