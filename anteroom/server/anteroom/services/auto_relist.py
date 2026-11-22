@@ -540,6 +540,22 @@ PENDING_STAGE_PUBLISHING = "stage:publishing"
 PENDING_NO_JOB_GRACE = timedelta(minutes=15)
 
 
+def _has_delete_receipt(db: Session, attempt: MarketplaceRelistLog) -> bool:
+    conv = db.get(Conversation, attempt.conversation_id)
+    if conv is None:
+        return False
+    delists = parse_notes(conv.notes).get("marketplaceDelists")
+    receipt = delists.get(attempt.marketplace) if isinstance(delists, dict) else None
+    if (not isinstance(receipt, dict) or receipt.get("state") != "deleted"
+            or not attempt.old_listing_id or receipt.get("listing_id") != attempt.old_listing_id):
+        return False
+    try:
+        deleted_at = _as_naive_utc(datetime.fromisoformat(str(receipt.get("at"))))
+    except ValueError:
+        return False
+    return deleted_at is not None and deleted_at >= attempt.created_at
+
+
 def _reconcile_pending_relists(
     db: Session,
     moment: datetime,
@@ -633,6 +649,12 @@ def _reconcile_pending_relists(
             continue
         reason_text = str(row.reason or "")
         aged_out = row.created_at <= moment - PENDING_NO_JOB_GRACE
+        if (aged_out and reason_text.startswith(PENDING_STAGE_DELETING)
+                and (ml is None or ml.state not in LIVE_STATES) and _has_delete_receipt(db, row)):
+            row.status = "down_needs_relist"
+            row.reason = "The old listing is confirmed absent and no replacement was recorded. Verify the marketplace before relisting."
+            changed = True
+            continue
         if aged_out and reason_text.startswith(PENDING_STAGE_PUBLISHING) and (
             ml is None or ml.state not in LIVE_STATES or ml.listing_id != row.old_listing_id
         ):

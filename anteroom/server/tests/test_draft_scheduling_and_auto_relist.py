@@ -711,6 +711,37 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertEqual(reconciled.status, "completed")
         self.assertEqual(reconciled.new_listing_id, new_posh)
 
+    def test_interrupted_delete_reconciles_only_with_matching_delete_receipt(self):
+        moment = _now().replace(microsecond=0)
+        started = moment - timedelta(minutes=20)
+        old_id = "5f0000000000000000000081"
+        attempts = {}
+        for case, deleted_id, deleted_at in (
+            ("confirmed", old_id, started + timedelta(seconds=1)),
+            ("another listing", "5f0000000000000000000082", started + timedelta(seconds=1)),
+            ("older receipt", old_id, started - timedelta(seconds=1)),
+            ("unknown", None, started),
+        ):
+            conv, _, _ = self._create_draft(f"Interrupted delete: {case}")
+            if deleted_id is not None:
+                conv.notes = merge_notes(conv.notes, {"marketplaceDelists": {"poshmark": {
+                    "state": "deleted", "listing_id": deleted_id, "at": deleted_at.replace(tzinfo=UTC).isoformat(),
+                }}})
+            attempt = MarketplaceRelistLog(
+                id=new_id(), conversation_id=conv.id, marketplace="poshmark", old_listing_id=old_id,
+                status="relist_pending", reason="stage:deleting | Delisting old listing before relist.",
+                created_at=started,
+            )
+            self.db.add(attempt)
+            attempts[case] = attempt
+        self.db.commit()
+
+        pending = auto_relist._reconcile_pending_relists(self.db, moment, "poshmark")
+
+        self.assertEqual(attempts["confirmed"].status, "down_needs_relist")
+        self.assertEqual(pending, {(attempt.conversation_id, "poshmark")
+                                   for case, attempt in attempts.items() if case != "confirmed"})
+
     def test_schedule_validates_target_marketplaces_and_blocks_mutations_while_publishing(self):
         # Finding #4: missing eBay specifics is rejected when scheduling for ["ebay"] even if selected marketplaces is []
         c_missing, _lm, _rm = self._create_draft("Missing Ebay Fields", ebay_specifics={})
