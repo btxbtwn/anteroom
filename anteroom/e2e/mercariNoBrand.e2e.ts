@@ -23,13 +23,18 @@ test("Mercari defaults to No brand and saves the seller's checkbox choice", asyn
       await page.screenshot({ path: `${process.env.MERCARI_SCREENSHOT_DIR}/mercari-no-brand-${info.project.name}.png` });
     }
 
-    const specifics = async () => (await (await request.get(listingUrl)).json()).listing.mercari_specifics;
+    const savedNoBrand = async () => {
+      const response = await request.get(listingUrl);
+      expect(response.ok()).toBe(true);
+      // The draft may not have Mercari specifics until autosave completes.
+      return (await response.json()).listing.mercari_specifics?.noBrand;
+    };
     await checkbox.click();
     await expect(checkbox).not.toBeChecked();
-    await expect.poll(async () => (await specifics()).noBrand).toBe(false);
+    await expect.poll(savedNoBrand).toBe(false);
     await checkbox.click();
     await expect(checkbox).toBeChecked();
-    await expect.poll(async () => (await specifics()).noBrand).toBe(true);
+    await expect.poll(savedNoBrand).toBe(true);
 
     await page.reload();
     await openListing(page, phone, title);
