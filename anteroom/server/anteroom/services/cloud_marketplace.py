@@ -482,7 +482,8 @@ async def _execute_local(
     market = str(marketplace or "").lower()
     seller = _seller_id()
 
-    creds_tuple = await in_worker_session(cloud_sessions.read_credentials_fresh, market)
+    operation = str(command.get("type") or "").strip() or None
+    creds_tuple = await in_worker_session(cloud_sessions.read_credentials_fresh, market, operation)
     if creds_tuple is None:
         return {
             "ok": False,

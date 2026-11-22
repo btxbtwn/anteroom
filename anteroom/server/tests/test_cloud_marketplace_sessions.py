@@ -723,3 +723,28 @@ def test_cooperative_cancel_allows_cleanup(monkeypatch):
     assert asyncio.run(cloud_marketplace.cancel_local(USER_ID, "operation"))
     process.wait.assert_awaited_once()
     process.terminate.assert_not_called()
+
+
+def test_decrypt_audit_records_operation_type(cloud, monkeypatch):  # noqa: F811
+    from anteroom.database import SessionLocal
+
+    _, _engine = cloud
+    _patch_vault(monkeypatch)
+    monkeypatch.setenv("ANTEROOM_CLOUD_MARKETPLACES", "poshmark")
+    monkeypatch.setenv("ANTEROOM_PROCESS_ROLE", "worker")
+
+    with use(for_seller(USER_ID)):
+        with SessionLocal() as db:
+            cloud_sessions.save_uploaded_session(db, "poshmark", _sample_cookies(), "Mozilla/5.0 TestChrome")
+        with SessionLocal() as db:
+            creds = cloud_sessions.read_credentials_fresh(db, "poshmark", "marketplace.like_events")
+            assert creds is not None
+            audit = db.execute(
+                select(CloudSessionAudit)
+                .where(CloudSessionAudit.event == "decrypt")
+                .order_by(CloudSessionAudit.created_at.desc())
+            ).scalars().first()
+            assert audit is not None
+            assert audit.detail == "marketplace.like_events"
+
+
