@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1135 — 2026-11-22
+
+- Deleting a hosted account now also stops late writes to its Poshmark cloud session records.
+
+## 0.1.1134 — 2026-11-22
+
+- On iPhone, tapping a listing in Inventory opens it again.
+
 ## 0.1.1133 — 2026-11-22
 
 - Styles the listing writer picks for Etsy are kept once Etsy's form is saved with the listing, so List sends them.

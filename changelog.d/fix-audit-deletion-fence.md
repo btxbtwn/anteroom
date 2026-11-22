@@ -1,1 +1,0 @@
-- Deleting a hosted account now also stops late writes to its Poshmark cloud session records.
