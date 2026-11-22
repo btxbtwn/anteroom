@@ -236,9 +236,20 @@ def review_comment(finding: dict, allowed: dict[str, set[int]]) -> dict:
     return comment
 
 
-def render_review_body(findings: list[dict], ctx: dict) -> str:
+def render_review_body(findings: list[dict], ctx: dict, outside: list[dict] = ()) -> str:
+    """`outside`: findings on files this PR doesn't change. They can't be review
+    threads, so auto-fix and "Addressed" tracking don't see them."""
     parts = [f"**Actionable comments posted: {len(findings)}**"]
-    prompt = "\n\n".join(finding_prompt(f) for f in findings)
+    if outside:
+        rendered = "\n\n---\n\n".join(
+            f"`{f['path']}` line {f['line']}\n\n{render_finding(f).removeprefix(FINDING_MARK).strip()}" for f in outside
+        )
+        parts.append(
+            "> [!CAUTION]\n> Some findings are on files this PR doesn't change, so they can't be "
+            "posted inline or fixed automatically.\n\n"
+            + details(f"⚠️ Outside diff range comments ({len(outside)})", rendered)
+        )
+    prompt = "\n\n".join(finding_prompt(f) for f in [*findings, *outside])
     parts.append(details("🤖 Prompt to fix all issues", fence(f"{FIX_PREAMBLE}\n\n{prompt}")))
     parts.append(details("ℹ️ Review info", render_review_info(ctx)))
     return parts[0] + "\n\n---\n\n" + "\n\n".join(parts[1:])
@@ -507,9 +518,10 @@ def post_review(args) -> None:
     changed = set(changed_paths(ctx["merge_base"], ctx["head"], include_deleted=False))
     eligible = changed & (set(ctx["files"]) | allowed.keys())
     findings = [f for f in data.get("findings", []) if f["path"] in eligible]
+    outside = [f for f in data.get("findings", []) if f["path"] not in eligible]
 
     review_url = None
-    if findings:
+    if findings or outside:
         comments = [review_comment(f, allowed) for f in findings]
         review = api(
             f"repos/{repo()}/pulls/{ctx['pr']}/reviews",
@@ -517,7 +529,7 @@ def post_review(args) -> None:
             {
                 "commit_id": ctx["head"],
                 "event": "COMMENT",
-                "body": render_review_body(findings, ctx),
+                "body": render_review_body(findings, ctx, outside),
                 "comments": [c for c in comments if "subject_type" not in c],
             },
         )
@@ -545,7 +557,8 @@ def post_review(args) -> None:
         api(f"repos/{repo()}/issues/comments/{summaries[-1][0]['id']}", "PATCH", {"body": body})
     else:
         api(f"repos/{repo()}/issues/{ctx['pr']}/comments", "POST", {"body": body})
-    print(f"Posted {len(findings)} findings in review threads; {len(addressed)} addressed.")
+    print(f"Posted {len(findings)} findings in threads and {len(outside)} outside the diff; "
+          f"{len(addressed)} addressed.")
 
 
 def prepare_autofix(args) -> None:

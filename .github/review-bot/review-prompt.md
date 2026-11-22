@@ -34,7 +34,9 @@ change; a diff alone is not enough to judge a change. Use
    sound.
    - `path` is repository-relative; `line` is the line in the new file the
      finding is about (set `start_line` for a range, else null). Prefer lines
-     that appear in `pr.diff`.
+     that appear in `pr.diff`. When the change breaks code in a file the PR
+     doesn't touch (a caller, say), report it on the changed line that causes
+     it, so it becomes a thread auto-fix can answer.
    - `title`: one bolded-claim sentence, such as "Keep reconnect checks
      immediate."
    - `body`: what goes wrong, when, and the fix, in a few short sentences.

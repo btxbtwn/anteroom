@@ -9,7 +9,7 @@ workflow.
 | CodeRabbit did | Now | Where |
 |---|---|---|
 | Summary comment: walkthrough table, related issues and PRs, change type, merge risk, security risk | One sticky Claude summary comment, updated on every push | `claude-review.yml` |
-| A review per push with inline findings (severity · category · effort, "Prompt to fix") and a "Prompt to fix all issues" | The same, as a `COMMENT` review from `github-actions[bot]`. A finding on a changed file but off the diff's lines becomes a file-level comment | `claude-review.yml` |
+| A review per push with inline findings (severity · category · effort, "Prompt to fix") and a "Prompt to fix all issues" | The same, as a `COMMENT` review from `github-actions[bot]`. A finding on a changed file but off the diff's lines becomes a file-level comment. One on a file the PR doesn't change goes in the review's "Outside diff range" section, which auto-fix doesn't track | `claude-review.yml` |
 | Incremental reviews: only what changed since the last reviewed commit | The summary comment records the reviewed commit; the next push reviews only newer changes to the PR's files. A force-push or rebase that drops that commit starts a full review | `review_bot.py prepare-review` |
 | "✅ Addressed in commit …" on fixed findings | Claude checks its open findings on each push, marks the fixed ones and resolves their threads | `review_bot.py post-review` |
 | Auto-fix PRs / "Bring PR to ready" replies to its own and Codex's findings | Claude answers every open Claude and Codex finding (fixed, already addressed, inapplicable, not fixed) with what it checked, pushes one fix commit, and posts the round's result | `claude-autofix.yml` |

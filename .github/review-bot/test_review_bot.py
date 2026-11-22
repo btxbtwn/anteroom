@@ -81,6 +81,7 @@ class RenderTests(unittest.TestCase):
         body = bot.render_review_body([FINDING], ctx)
         self.assertTrue(body.startswith("**Actionable comments posted: 1**"))
         self.assertIn(f"between {'s' * 40} and {'h' * 40}", body)
+        self.assertNotIn("Outside diff range", body)
 
     def test_summary_escapes_table_cells_and_records_state(self):
         data = {
@@ -129,8 +130,9 @@ class PostReviewTests(unittest.TestCase):
         self.assertEqual([c["path"] for c in review["comments"]], ["app.py"])
         self.assertEqual((file_comment["path"], file_comment["subject_type"]), ("mode.py", "file"))
         self.assertIn(bot.FINDING_MARK, file_comment["body"])
-        self.assertNotIn("@gone.py at line", review["body"])
-        self.assertNotIn("@unchanged.py at line", review["body"])
+        self.assertIn("Outside diff range comments (2)", review["body"])
+        self.assertIn("`unchanged.py` line 3", review["body"])
+        self.assertNotIn(bot.FINDING_MARK, review["body"])
         self.assertEqual(summary.call_args.kwargs["posted"], 2)
         self.assertIn("--diff-filter=d", diff_paths.call_args.args[0])
 
