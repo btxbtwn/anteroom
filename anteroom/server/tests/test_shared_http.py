@@ -65,11 +65,24 @@ def test_hosted_lifespan_enables_and_closes_shared_http():
     from fastapi.testclient import TestClient
     from anteroom.hosted import create_app
 
+    before = set(shared_http._clients)
     app = create_app('https://shared-http-test.supabase.co')
     with TestClient(app) as client:
         assert client.get('/api/health').status_code == 200
-        registered = list(shared_http._clients.values())
-        assert len(registered) == 1
-        assert not registered[0].is_closed
-    assert registered[0].is_closed
-    assert not shared_http._clients
+        added = [http for loop, http in shared_http._clients.items() if loop not in before]
+        assert len(added) == 1
+        assert not added[0].is_closed
+    assert added[0].is_closed
+    assert set(shared_http._clients) == before
+
+
+def test_hosted_startup_failure_does_not_leak_shared_http():
+    import pytest
+    from fastapi.testclient import TestClient
+    from anteroom.hosted import create_app
+
+    before = set(shared_http._clients)
+    with pytest.raises(ValueError):
+        with TestClient(create_app('')):
+            pass
+    assert set(shared_http._clients) == before

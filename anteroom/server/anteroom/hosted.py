@@ -293,7 +293,6 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     async def lifespan(app: FastAPI):
         give_threads(asyncio.get_running_loop())
         from anteroom.services import shared_http
-        shared_http.keep_connection_on_this_loop()
         from anteroom.services.error_alerts import install_alerts, uninstall_alerts
         install_alerts()
         from anteroom.services.error_log import install_assistant_timings
@@ -418,6 +417,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         )
         app.state.background_worker = worker
         app.state.handoff = handoff
+        shared_http.keep_connection_on_this_loop()
         try:
             yield
         finally:

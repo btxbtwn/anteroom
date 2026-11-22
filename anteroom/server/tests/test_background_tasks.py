@@ -272,3 +272,34 @@ def test_claim_does_not_let_fresh_chat_overtake_aged_generation(storage):  # noq
 
     assert queue.claim(engine)[:2] == (task_id, owner)
     assert queue.claim(engine)[:2] == (chat_id, other)
+
+
+def test_claim_balances_across_sellers_when_both_have_aged_tasks(storage):  # noqa: F811
+    engine, sessions = storage
+    alice, bob = str(uuid.uuid4()), str(uuid.uuid4())
+    now = datetime.now(UTC)
+
+    def add_aged_generations(seller: str, ages_seconds: list[int]) -> list[str]:
+        ids = []
+        with sessions(seller)() as db:
+            for idx, age in enumerate(ages_seconds):
+                conv = Conversation(title=f'{seller[:4]}-aged-{idx}')
+                db.add(conv)
+                db.flush()
+                task_id = queue.enqueue(db, conv.id, 'generate', {}).id
+                db.execute(update(BackgroundTask).where(BackgroundTask.id == task_id).values(
+                    created_at=now - timedelta(seconds=age),
+                ))
+                db.commit()
+                ids.append(task_id)
+        return ids
+
+    # Alice has 3 tasks aged 120s-118s; Bob has 1 task aged 90s (both > 1 minute).
+    a1, a2, a3 = add_aged_generations(alice, [120, 119, 118])
+    (b1,) = add_aged_generations(bob, [90])
+
+    # First claim takes Alice's oldest (0 vs 0 running). Second claim balances to Bob (0 < 1)
+    # rather than draining all of Alice's older aged backlog first.
+    claimed = [queue.claim(engine)[:2] for _ in range(4)]
+    assert claimed == [(a1, alice), (b1, bob), (a2, alice), (a3, alice)]
+    assert queue.claim(engine) is None
