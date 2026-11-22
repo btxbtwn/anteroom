@@ -3,6 +3,7 @@ import csv
 import hashlib
 import io
 from datetime import date
+from itertools import batched
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
@@ -36,6 +37,7 @@ class CsvResult(BaseModel):
     duplicates: int
     imported: int
     issues: list[CsvIssue]
+    preview: list[ExpenseInput]
 
 
 def render(headers, rows) -> str:
@@ -55,7 +57,7 @@ def export(db: Session, start: date, end: date, category: Category | None) -> st
 
 def load(db: Session, content: str, *, commit: bool) -> CsvResult:
     reader = csv.DictReader(io.StringIO(content.removeprefix("\ufeff")), strict=True)
-    result = CsvResult(valid=0, duplicates=0, imported=0, issues=[])
+    result = CsvResult(valid=0, duplicates=0, imported=0, issues=[], preview=[])
     prepared: dict[str, dict[str, Any]] = {}
     try:
         headers = reader.fieldnames or []
@@ -87,7 +89,10 @@ def load(db: Session, content: str, *, commit: bool) -> CsvResult:
         result.issues.append(CsvIssue(row=reader.line_num or 1, detail=str(exc)))
     existing = set(db.scalars(select(BusinessExpense.import_key).where(BusinessExpense.import_key.in_(prepared))))
     result.duplicates += len(existing)
-    result.valid = len(prepared) - len(existing)
+    pending = {key: values for key, values in prepared.items() if key not in existing}
+    result.valid = len(pending)
+    if not commit:
+        result.preview = [ExpenseInput.model_validate(row) for row in list(pending.values())[:5]]
     if commit and not result.issues:
         bind = db.get_bind()
         assert bind is not None
@@ -95,17 +100,15 @@ def load(db: Session, content: str, *, commit: bool) -> CsvResult:
         table = BusinessExpense.__table__
         assert isinstance(table, Table)
         owner = getattr(db, "user_id", LOCAL_USER_ID)
-        for key, values in prepared.items():
-            if key in existing:
-                continue
-            statement = insert(table).values(**values, user_id=owner).on_conflict_do_nothing(
+        # Lock duplicates in the same order even when simultaneous imports have reordered rows.
+        for keys in batched(sorted(pending), 100):
+            rows = [dict(pending[key], user_id=owner) for key in keys]
+            statement = insert(table).values(rows).on_conflict_do_nothing(
                 index_elements=["user_id", "import_key"],
             ).returning(table.c.id)
-            if db.scalar(statement) is None:
-                result.duplicates += 1
-                result.valid -= 1
-            else:
-                result.imported += 1
+            result.imported += len(db.scalars(statement).all())
+        result.duplicates += result.valid - result.imported
+        result.valid = result.imported
         db.commit()
         if result.imported:
             invalidate_business_context(user_id=getattr(db, "user_id", None))

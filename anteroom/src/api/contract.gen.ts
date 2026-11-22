@@ -164,6 +164,7 @@ export interface CsvResult {
   duplicates: number;
   imported: number;
   issues: CsvIssue[];
+  preview: ExpenseInput[];
 }
 
 export interface CurrencyReport {

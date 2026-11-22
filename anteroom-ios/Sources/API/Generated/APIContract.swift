@@ -299,6 +299,7 @@ struct CsvResult: Codable, Hashable, Sendable {
     var duplicates: Int
     var imported: Int
     var issues: [CsvIssue]
+    var preview: [ExpenseInput]
 }
 
 struct CurrencyReport: Codable, Hashable, Sendable {

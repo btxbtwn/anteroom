@@ -798,6 +798,13 @@
             "title": "Issues",
             "type": "array"
           },
+          "preview": {
+            "items": {
+              "$ref": "#/components/schemas/ExpenseInput"
+            },
+            "title": "Preview",
+            "type": "array"
+          },
           "valid": {
             "title": "Valid",
             "type": "integer"
@@ -807,7 +814,8 @@
           "valid",
           "duplicates",
           "imported",
-          "issues"
+          "issues",
+          "preview"
         ],
         "title": "CsvResult",
         "type": "object"

@@ -89,11 +89,29 @@ def test_csv_preview_errors_and_retry(expenses):
     invalid = client.post(f"{ROOT}/import", json={"content": content + "2026-01-02,oops,other,Shop\n"})
     assert invalid.json()["issues"][0]["row"] == 3
     assert invalid.json()["imported"] == 0
-    assert client.post(f"{ROOT}/import/preview", json={"content": content}).json()["valid"] == 1
+    preview = client.post(f"{ROOT}/import/preview", json={"content": content}).json()
+    assert preview["valid"] == 1
+    assert [(row["incurred_date"], row["amount_cents"]) for row in preview["preview"]] == [("2026-01-01", 300)]
     assert client.get(ROOT, params=PERIOD).json() == []
     assert client.post(f"{ROOT}/import", json={"content": content}).json()["imported"] == 1
     assert client.post(f"{ROOT}/import", json={"content": content}).json()["duplicates"] == 1
     assert "'=1+1" in client.get(f"{ROOT}/expenses.csv", params=PERIOD).text
+
+
+def test_bulk_import_inserts_across_batches_and_paginates(expenses):
+    client, _ = expenses
+    content = "incurred_date,amount_cents,category,description\n" + "".join(
+        f"2026-01-01,300,other,Expense {index}\n" for index in range(205)
+    )
+    preview = client.post(f"{ROOT}/import/preview", json={"content": content}).json()
+    assert preview["valid"] == 205
+    assert len(preview["preview"]) == 5
+    assert client.post(f"{ROOT}/import", json={"content": content}).json()["imported"] == 205
+    first = client.get(ROOT, params=PERIOD).json()
+    second = client.get(ROOT, params={**PERIOD, "page": 2}).json()
+    assert len(first) == len(second) == 50
+    assert {row["id"] for row in first}.isdisjoint(row["id"] for row in second)
+    assert len(client.get(ROOT, params={**PERIOD, "page": 5}).json()) == 5
 
 
 def test_cash_expenses_and_landed_box_costs(expenses):

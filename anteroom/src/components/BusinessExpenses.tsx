@@ -273,6 +273,12 @@ function ExpenseImport({ downloadTemplate }: { downloadTemplate: () => void }) {
       {result && <p role="status" className="text-xs text-muted-foreground">
         {result.imported ? `${result.imported} imported` : `${result.valid} ready to import`} · {result.duplicates} duplicates skipped
       </p>}
+      {result && result.preview.length > 0 && <ul className="divide-y divide-border/60 text-sm">
+        {result.preview.map((row, index) => <li key={index} className="flex flex-wrap justify-between gap-2 py-2">
+          <span>{row.incurred_date} · {row.description || row.vendor || CATEGORIES[row.category]}</span>
+          <span className="tabular-nums">{expenseMoney(row.amount_cents, row.currency ?? "USD")}</span>
+        </li>)}
+      </ul>}
       {result?.issues.map((issue, index) => <FormError key={index}>Row {issue.row} · {issue.detail}</FormError>)}
     </div>
   </Panel>;
