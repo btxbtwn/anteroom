@@ -52,7 +52,7 @@ def _copy_for_alignment(listing: dict) -> dict:
 
 
 def prefetch_ebay_size_choices(db: Session, listings: Iterable[dict]) -> dict[str, list[str]]:
-    """Load eBay Size choices for every distinct category in ``listings`` in one query."""
+    """Load eBay Size choices for every distinct category in ``listings`` in batches."""
     from anteroom.services.category_fields import load_rows_many
     from anteroom.services.vendoo_specifics import specs_from_rows
 

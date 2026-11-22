@@ -112,6 +112,39 @@ class CategoryFieldsCacheTest(unittest.TestCase):
             finally:
                 event.remove(engine, "before_cursor_execute", listen)
 
+    def test_load_rows_many_batches_large_sqlite_queries(self):
+        from sqlalchemy import create_engine, event
+        from sqlalchemy.orm import Session
+        from anteroom.models.catalog import CategoryFieldSchema
+
+        engine = create_engine("sqlite://")
+        CategoryFieldSchema.__table__.create(engine)
+        try:
+            with Session(engine) as db:
+                db.add_all([
+                    CategoryFieldSchema(marketplace="ebay", category_id="0", fields=[{"name": "first"}]),
+                    CategoryFieldSchema(marketplace="ebay", category_id="1000", fields=[{"name": "last"}]),
+                ])
+                db.commit()
+                category_fields.clear_memory_cache()
+                queries = []
+
+                def listen(_c, _cur, stmt, *_a):
+                    if "category_field_schemas" in stmt and stmt.lstrip().upper().startswith("SELECT"):
+                        queries.append(stmt)
+
+                event.listen(engine, "before_cursor_execute", listen)
+                keys = [("ebay", str(i)) for i in range(1001)]
+                rows = category_fields.load_rows_many(keys, db=db)
+                self.assertEqual(rows[keys[0]], [{"name": "first"}])
+                self.assertIsNone(rows[keys[500]])
+                self.assertEqual(rows[keys[-1]], [{"name": "last"}])
+                self.assertEqual(set(rows), set(keys))
+                self.assertLessEqual(len(queries), 5)
+        finally:
+            category_fields.clear_memory_cache()
+            engine.dispose()
+
     def test_fields_route_serves_the_cache(self):
         category_fields.save_fields(self.marketplace, self.category_id, normalize_specifics(RAW))
         client = TestClient(app)

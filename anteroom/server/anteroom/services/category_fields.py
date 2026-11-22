@@ -34,6 +34,8 @@ log = logging.getLogger("anteroom.category_fields")
 SCHEMA_MAX_AGE = timedelta(days=7)
 _MEMORY_TTL_SECONDS = 300.0
 _MEMORY_CACHE_SIZE = 512
+# Keep both SQLite's expression depth and its older 999-parameter limit in bounds.
+_QUERY_BATCH_SIZE = 400
 _SENTINEL = object()
 
 _cache_lock = threading.Lock()
@@ -118,10 +120,6 @@ def _fresh_entry(row: CategoryFieldSchema | None) -> tuple[datetime | None, list
     return fetched_at, list(row.fields or [])
 
 
-def _fresh_rows(row: CategoryFieldSchema | None) -> list[dict[str, Any]] | None:
-    return _fresh_entry(row)[1]
-
-
 def _load_one_from_session(session: Session, marketplace: str, category_id: str) -> list[dict[str, Any]] | None:
     use_cache = not _session_has_uncommitted_schema_writes(session)
     scope = _cache_scope(session) if use_cache else None
@@ -156,7 +154,7 @@ def load_rows_many(
     *,
     db: Session | None = None,
 ) -> dict[tuple[str, str], list[dict[str, Any]] | None]:
-    """Batch-read cached schema rows for several ``(marketplace, category_id)`` pairs in one query."""
+    """Batch-read cached schema rows for several ``(marketplace, category_id)`` pairs."""
     pairs = list(dict.fromkeys((str(m), str(c)) for m, c in keys if m and c))
     out: dict[tuple[str, str], list[dict[str, Any]] | None] = {pair: None for pair in pairs}
     if not pairs:
@@ -177,14 +175,15 @@ def load_rows_many(
             missing = pairs
         if not missing:
             return
-        clauses = [
-            and_(CategoryFieldSchema.marketplace == marketplace, CategoryFieldSchema.category_id == category_id)
-            for marketplace, category_id in missing
-        ]
         found: dict[tuple[str, str], tuple[datetime | None, list[dict[str, Any]] | None]] = {}
-        for row in session.query(CategoryFieldSchema).filter(or_(*clauses)).all():
-            pair = (str(row.marketplace), str(row.category_id))
-            found[pair] = _fresh_entry(row)
+        for start in range(0, len(missing), _QUERY_BATCH_SIZE):
+            clauses = [
+                and_(CategoryFieldSchema.marketplace == marketplace, CategoryFieldSchema.category_id == category_id)
+                for marketplace, category_id in missing[start:start + _QUERY_BATCH_SIZE]
+            ]
+            for row in session.query(CategoryFieldSchema).filter(or_(*clauses)).all():
+                pair = (str(row.marketplace), str(row.category_id))
+                found[pair] = _fresh_entry(row)
         for pair in missing:
             fetched_at, rows = found.get(pair, (None, None))
             out[pair] = rows
