@@ -528,6 +528,25 @@ def test_mcp_edit_conflicts_when_a_new_revision_is_saved_after_read(monkeypatch,
     assert stored["listing"]["sku"] == "newer"
 
 
+def test_hosted_pat_photo_cleanup_invokes_hosted_storage_delete(monkeypatch):
+    from types import SimpleNamespace
+    from anteroom.services import hosted_storage, mcp_http
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(hosted_storage, "photo_call", lambda method, key, data=None: calls.append((method, key)) or b"")
+    fake_hosted_db = SimpleNamespace(user_id=USER_ID)
+    stored_key = f"{USER_ID}/conv-1/{'a' * 32}.jpg"
+    source_key = f"{USER_ID}/conv-1/{'b' * 32}.jpg"
+
+    mcp_http._best_effort_delete_photo_files(
+        fake_hosted_db,  # type: ignore[arg-type]
+        stored_key,
+        source_key,
+        bearer_token="arm_test_token_value",
+    )
+    assert calls == [("DELETE", stored_key), ("DELETE", source_key)]
+
+
 def test_hosted_today_concurrent_mutations_stay_seller_scoped(cloud, signing_keys):  # noqa: F811
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier

@@ -466,6 +466,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
                 await asyncio.to_thread(task_signals.stop)
                 await asyncio.to_thread(uninstall_alerts)
                 await shared_http.close_connection()
+                await asyncio.to_thread(app.state.mcp_auth_threads.shutdown, wait=True, cancel_futures=True)
 
     app = FastAPI(
         title="Anteroom hosted API", version=app_version(), lifespan=lifespan,

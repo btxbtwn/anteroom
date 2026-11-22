@@ -109,6 +109,14 @@ def test_seller_verification_runs_while_mcp_token_workers_are_blocked(client, si
         assert [check.result(timeout=5).status_code for check in checks] == [401] * 4
 
 
+def test_mcp_auth_threads_shut_down_on_lifespan_exit(jwks):
+    app = create_app(PROJECT_URL)
+    with TestClient(app):
+        assert app.state.mcp_auth_threads is not app.state.auth_threads
+    with pytest.raises(RuntimeError):
+        app.state.mcp_auth_threads.submit(lambda: None)
+
+
 def test_seller_identity_is_per_request(client, signing_keys):
     other_seller = str(uuid.uuid4())
     assert get_account(client, session_token(signing_keys, sub=other_seller)).json() == {"user_id": other_seller}
