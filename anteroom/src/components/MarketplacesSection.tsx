@@ -7,7 +7,7 @@ import { ApiRequestError } from "../api/transport";
 import { pollMs } from "../api/polling";
 import type { DelistMarketplace, MarketplaceListing, MarketplaceListings, MarketplaceMark, SaleMarketplace, SellerSale } from "../api/marketplaceListings";
 import type { NativeDraft, NativeDrafts, NativeMarketplace, PreflightCheck, PreflightGap } from "../api/nativeMarketplaces";
-import { EXTENSION_SESSION_MARKETS, type ExtensionSessionConnect, type ExtensionSessionMarket } from "../api/marketplaceSessions";
+import { EXTENSION_SESSION_MARKETS, type ExtensionSessionConnect, type ExtensionSessionMarket, type ExtensionSessions } from "../api/marketplaceSessions";
 import { isBusyRefusal, useWaitlist, type WaitingAction } from "../lib/marketplaceWaitlist";
 import { cn } from "../lib/utils";
 import { usePhoneLayout } from "../lib/usePhoneLayout";
@@ -437,19 +437,19 @@ export function MarketplacesLayout({
       if (kind === "reset") return api.nativeMarketplaces.reset(convId, marketplace);
       if (kind === "reconnect") {
         if (marketplace === "ebay" || marketplace === "etsy") return await api.directConnections.connect(marketplace);
-        if (marketplace === "poshmark" && runtime.hosted && runtime.account) {
-          const cached = queryClient.getQueryData<{ sessions?: { poshmark?: { mode?: string; cloud_available?: boolean } }; chrome_connected?: boolean }>(["marketplace-sessions"]);
-          const posh = cached?.sessions?.poshmark;
-          if (posh?.cloud_available && (posh.mode === "cloud" || cached?.chrome_connected === false)) {
-            const { token } = await api.cloudSessions.connectToken("poshmark");
+        if ((EXTENSION_SESSION_MARKETS as readonly string[]).includes(marketplace)) {
+          const market = marketplace as ExtensionSessionMarket;
+          const cached = queryClient.getQueryData<ExtensionSessions>(["marketplace-sessions"]);
+          const session = cached?.sessions[market];
+          if (runtime.hosted && runtime.account && session?.cloud_available
+              && (session.mode === "cloud" || cached?.chrome_connected === false)) {
+            const { token, seller_region } = await api.cloudSessions.connectToken(market);
             const { cloudExtension } = await import("../api/cloudExtension");
-            const res = await cloudExtension(runtime.account).connectCloudSession("poshmark", token);
-            if (!res.ok) throw new Error(res.error || "Open Settings → Connections in Chrome to reconnect Poshmark in Cloud.");
+            const res = await cloudExtension(runtime.account).connectCloudSession(market, token, seller_region);
+            if (!res.ok) throw new Error(res.error || "Open Settings → Connections in desktop Chrome to reconnect in Cloud.");
             return { ok: true, signed_in: false };
           }
-        }
-        if ((EXTENSION_SESSION_MARKETS as readonly string[]).includes(marketplace)) {
-          return await api.marketplaceSessions.connect(marketplace as ExtensionSessionMarket);
+          return await api.marketplaceSessions.connect(market);
         }
         return undefined;
       }

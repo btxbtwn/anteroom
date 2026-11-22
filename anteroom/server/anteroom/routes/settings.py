@@ -598,6 +598,24 @@ def _marketplaces_payload(selected: list[str]) -> dict:
     }
 
 
+class SellerRegionConfig(BaseModel):
+    country: Literal["US", "CA", "GB", "AU"]
+
+
+@router.get("/seller-region")
+def get_seller_region():
+    from anteroom.services.seller_region import seller_region
+
+    return seller_region()
+
+
+@router.put("/seller-region")
+def put_seller_region(config: SellerRegionConfig):
+    from anteroom.services.seller_region import set_seller_region
+
+    return set_seller_region(config.country)
+
+
 @router.get("/marketplaces")
 def get_marketplaces():
     from anteroom.services.marketplaces import get_selected_marketplaces
@@ -1116,6 +1134,7 @@ class AgentClientSnippet(BaseModel):
 
 
 class AgentConnectionStatus(BaseModel):
+    hosted: bool = False
     installed: bool
     on_path: bool
     path: str | None
@@ -1123,11 +1142,13 @@ class AgentConnectionStatus(BaseModel):
     version_error: str | None = None
     base_url: str
     remote_base_url: str | None
+    mcp_url: str | None = None
     login_command: str
     remote_login_command: str | None
     install_command: str | None
     hint: str | None
     clients: list[AgentClientSnippet]
+    remote_clients: list[AgentClientSnippet] = Field(default_factory=list)
 
 
 class AgentConnectionTest(BaseModel):
@@ -1135,6 +1156,11 @@ class AgentConnectionTest(BaseModel):
     detail: str
     version: str | None = None
     base_url: str | None = None
+
+
+class McpTokenCreateConfig(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    expires_in_days: int | None = Field(default=None, ge=1, le=365)
 
 
 @router.get("/agent", response_model=AgentConnectionStatus)
@@ -1150,6 +1176,33 @@ def test_agent_connection():
     from anteroom.services.agent_connection import test_connection
 
     return test_connection()
+
+
+@router.get("/mcp-tokens")
+def list_mcp_tokens(db: Session = Depends(get_db, scope="function")):
+    from anteroom.services import mcp_tokens
+
+    return {"tokens": mcp_tokens.list_tokens(db)}
+
+
+@router.post("/mcp-tokens", status_code=201)
+def create_mcp_token(body: McpTokenCreateConfig, db: Session = Depends(get_db, scope="function")):
+    from anteroom.services import mcp_tokens
+
+    try:
+        return mcp_tokens.create_token(db, name=body.name, expires_in_days=body.expires_in_days)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.delete("/mcp-tokens/{token_id}")
+def revoke_mcp_token(token_id: str, db: Session = Depends(get_db, scope="function")):
+    from anteroom.services import mcp_tokens
+
+    revoked = mcp_tokens.revoke_token(db, token_id)
+    if not revoked:
+        raise HTTPException(404, "Access token not found")
+    return {"ok": True}
 
 
 @router.get("/tailscale")
@@ -1261,3 +1314,138 @@ def put_sale_detection(body: SaleDetectionConfig):
     if not body.enabled:
         clear_check_error(body.marketplace)
     return _sale_detection_status()
+
+
+class PricingRuleConfig(BaseModel):
+    percent: float = Field(ge=-90, le=500)
+    fixed: float = Field(ge=-1000, le=1000)
+    rounding: Literal["none", "99", "whole"] = "none"
+
+
+class PricingRulesConfig(BaseModel):
+    enabled: bool | None = None
+    anchor: Literal["general", "ebay", "poshmark", "mercari", "depop", "etsy"] | None = None
+    rules: dict[Literal["ebay", "poshmark", "mercari", "depop", "etsy"], PricingRuleConfig] | None = None
+    reset: bool = False
+    """Put every marketplace rule back on the typical-fee defaults for the anchor."""
+
+
+@router.get("/pricing-rules")
+def get_pricing_rules():
+    from anteroom.services.pricing_rules import settings_payload
+
+    return {"ok": True, **settings_payload()}
+
+
+@router.put("/pricing-rules")
+def put_pricing_rules(body: PricingRulesConfig):
+    from anteroom.services import pricing_rules
+
+    try:
+        rules = {market: rule.model_dump() for market, rule in body.rules.items()} if body.rules is not None else None
+        if body.reset:
+            rules = pricing_rules.default_rules(body.anchor or pricing_rules.get_pricing_rules()["anchor"])
+        saved = pricing_rules.set_pricing_rules(enabled=body.enabled, anchor=body.anchor, rules=rules)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, **pricing_rules.settings_payload(saved)}
+
+
+class ListingTransform(BaseModel):
+    listing: dict
+    marketplaces: list[Literal["ebay", "poshmark", "mercari", "depop", "etsy"]] | None = None
+
+
+@router.post("/pricing-rules/apply")
+def apply_pricing_rules(body: ListingTransform):
+    """The listing with its marketplace prices back on the rules. Saves nothing and sends nothing:
+    the editor saves the result like any other edit."""
+    from anteroom.services import pricing_rules
+
+    rules = pricing_rules.active_rules()
+    if rules is None:
+        raise HTTPException(400, "Turn on pricing rules in Settings → Listings first.")
+    listing, changed = pricing_rules.apply_rules_to_listing(body.listing, rules, body.marketplaces)
+    return {"listing": listing, "changed": changed}
+
+
+class ShippingPresetConfig(BaseModel):
+    name: str = Field(max_length=200)
+    usage_condition: str = Field(default="", max_length=1000)
+    length: int | None = None
+    width: int | None = None
+    height: int | None = None
+    weight_lb: int | None = None
+    weight_oz: int | None = None
+    marketplaces: dict[str, dict[str, str | int | None]] = Field(default_factory=dict)
+
+
+@router.get("/shipping-presets")
+def get_shipping_presets():
+    from anteroom.services import shipping_presets
+
+    return {"ok": True, **shipping_presets.payload()}
+
+
+def _save_preset(body: ShippingPresetConfig, preset_id: str | None) -> dict:
+    from anteroom.services import shipping_presets
+
+    try:
+        shipping_presets.save_shipping_preset(body.model_dump(), preset_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"ok": True, **shipping_presets.payload()}
+
+
+@router.post("/shipping-presets")
+def create_shipping_preset(body: ShippingPresetConfig):
+    return _save_preset(body, None)
+
+
+@router.put("/shipping-presets/{preset_id}")
+def update_shipping_preset(preset_id: str, body: ShippingPresetConfig):
+    return _save_preset(body, preset_id)
+
+
+@router.delete("/shipping-presets/{preset_id}")
+def delete_shipping_preset(preset_id: str):
+    from anteroom.services import shipping_presets
+
+    try:
+        shipping_presets.delete_shipping_preset(preset_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return {"ok": True, **shipping_presets.payload()}
+
+
+@router.post("/shipping-presets/{preset_id}/apply")
+def apply_shipping_preset(preset_id: str, body: ListingTransform):
+    """The listing with the preset's package and shipping fields. Saves nothing and sends nothing."""
+    from anteroom.services import shipping_presets
+
+    preset = shipping_presets.find_preset(preset_id)
+    if preset is None:
+        raise HTTPException(404, "That shipping preset could not be found.")
+    listing, paths = shipping_presets.applied_listing(body.listing, preset)
+    return {"listing": listing, "paths": paths}
+
+
+class ListingWarningsConfig(BaseModel):
+    missing_sku: bool | None = None
+
+
+@router.get("/listing-warnings")
+def get_listing_warnings_route():
+    from anteroom.services.user_settings import get_listing_warnings
+
+    return {"ok": True, **get_listing_warnings()}
+
+
+@router.put("/listing-warnings")
+def put_listing_warnings(body: ListingWarningsConfig):
+    from anteroom.services.user_settings import set_listing_warnings
+
+    try:
+        return {"ok": True, **set_listing_warnings(body.model_dump(exclude_none=True))}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc

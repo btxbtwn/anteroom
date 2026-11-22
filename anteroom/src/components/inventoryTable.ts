@@ -4,6 +4,7 @@ import type { DirectRecord } from "../api/types";
 import {
   DEFAULT_LISTING_FILTERS,
   filterListings,
+  type ListingFilters,
   sortListings,
   visibleInInventory,
   type ListingSortId,
@@ -21,6 +22,11 @@ export interface MarketplaceCell {
   url: string | null;
   /** The fields still needed, by name, when the cell counts some. */
   detail?: string;
+  /**
+   * A live listing that is still up but not for sale. It stays "listed" for
+   * every action (it can still be updated or delisted); only its label changes.
+   */
+  inactive?: boolean;
 }
 
 export type TableListing = {
@@ -29,6 +35,8 @@ export type TableListing = {
   vendoo_sold_dates?: Record<string, string>;
   direct_records?: Record<string, DirectRecord>;
   removed_marketplaces?: string[];
+  /** Still up there but not for sale: shown as Inactive, never as sold or delisted. */
+  inactive_marketplaces?: string[];
   /** Where Anteroom recorded the sale: the record there can still read live. */
   sold_marketplaces?: string[];
 };
@@ -50,6 +58,9 @@ export function marketplaceCell(listing: TableListing, marketplace: string, miss
   if (listing.vendoo_sold_dates?.[marketplace]
     || (listing.sold_marketplaces || []).some((id) => (ALIASES[id] || id) === marketplace)) return { kind: "sold", label: "Sold", url };
   if (record && LIVE.has(record.state)) {
+    if (record.inactive || (listing.inactive_marketplaces || []).includes(marketplace)) {
+      return { kind: "listed", label: "Inactive", url, detail: "Still on the marketplace, but not for sale", inactive: true };
+    }
     return { kind: "listed", label: record.state === "pending_review" ? "In review" : "Listed", url };
   }
   if (record && BUSY.has(record.state)) return { kind: "working", label: "Working", url: null };
@@ -90,8 +101,9 @@ export function inventoryRows<T extends Listing>(
   needle: string,
   status: ListingStatusFilter,
   sort: ListingSortId,
+  extra: Partial<ListingFilters> = {},
 ): T[] {
-  const visible = filterListings([...listings], needle, { ...DEFAULT_LISTING_FILTERS, status, sort })
+  const visible = filterListings([...listings], needle, { ...DEFAULT_LISTING_FILTERS, ...extra, status, sort })
     .filter((listing) => visibleInInventory(listing, status, Boolean(needle)));
   const active = visible.filter((listing) => !listing.settled_at).sort((left, right) => activeAnchorMs(right) - activeAnchorMs(left));
   const settled = visible.filter((listing) => listing.settled_at)

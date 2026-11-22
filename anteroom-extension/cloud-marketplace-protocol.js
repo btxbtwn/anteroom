@@ -43,9 +43,9 @@
   // Named commands other than marketplace actions, each with exactly the inputs it takes:
   // a maximum string length, the set of values allowed, or the pattern a value must match.
   const READS = {
-    'marketplace.sales_history': { marketplace: new Set(['depop', 'poshmark', 'mercari']), settled: 'order_ids' },
-    'marketplace.sessions': {},
-    'marketplace.connect': { marketplace: new Set(['depop', 'poshmark', 'mercari']) },
+    'marketplace.sales_history': { marketplace: new Set(['depop', 'poshmark', 'mercari']), settled: 'order_ids', seller_region: new Set(['CA']) },
+    'marketplace.sessions': { seller_region: new Set(['CA']) },
+    'marketplace.connect': { marketplace: MARKETPLACES, seller_region: new Set(['CA']) },
     // Inventory import: a page of the seller's own active listings, or one of them.
     'marketplace.import.page': { marketplace: MARKETPLACES, cursor: 300 },
     'marketplace.import.listing': { marketplace: MARKETPLACES, listing_id: /^[a-z0-9][a-z0-9-]{0,200}$/ },
@@ -181,6 +181,8 @@
     if (value.type === 'job.cancel') return /^[A-Za-z0-9-]{1,64}$/.test(String(payload.job_id || '')) ? value : null;
     // Video is not part of the web app; a relayed List never carries one.
     if (!MARKETPLACES.has(payload.marketplace) || payload.video) return null;
+    if (value.type === 'marketplace.delete' && Object.hasOwn(payload, 'seller_region') &&
+        (payload.marketplace !== 'poshmark' || payload.seller_region !== 'CA')) return null;
     return value;
   }
   function photos(value) {

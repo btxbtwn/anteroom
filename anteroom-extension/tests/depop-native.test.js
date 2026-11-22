@@ -3,6 +3,44 @@ const assert = require('node:assert/strict');
 const { loadWorker, call, reply } = require('./worker-context');
 const DRAFT = 'https://www.depop.com/sellinghub/drafts/edit/123456/';
 const listing = { title: 'Test', description: 'Private draft', price: 12 };
+
+test('regional Depop drafts use local currency and Canadian seller shipping', async () => {
+  const c = loadWorker();
+  const canadian = { ...listing, _seller_region: 'CA', depop_specifics: { domesticShippingPrice: '7.50' } };
+  const resolved = await c.depopShippingFields(canadian, null, Date.now() + 1000);
+  const draft = c.depopDraftWriteBody(canadian, resolved.fields, []);
+  assert.equal(draft.price_currency, 'CAD');
+  assert.equal(draft.national_shipping_cost, '7.50');
+  assert.equal(draft.shipping_methods.length, 0);
+  assert.ok(c.depopDraftMatches({ ...draft, national_shipping_cost: 7.5 }, canadian, resolved.fields));
+  assert.ok(!c.depopDraftMatches({ ...draft, national_shipping_cost: 6 }, canadian, resolved.fields));
+  assert.ok(!c.depopDraftMatches({ ...draft, national_shipping_cost: undefined }, canadian, resolved.fields));
+  const free = { ...resolved.fields, national_shipping_cost: '0.00' };
+  assert.ok(c.depopDraftMatches({ ...draft, national_shipping_cost: 0 }, canadian, free));
+  for (const invalid of [false, ' ', { amount: false }]) {
+    assert.ok(!c.depopDraftMatches({ ...draft, national_shipping_cost: invalid }, canadian, free));
+  }
+  assert.ok(c.depopDraftMatches({ ...draft, price_currency: 'USD', national_shipping_cost: undefined }, listing, resolved.fields));
+  const missing = await c.depopShippingFields({ ...canadian, depop_specifics: {} }, null, Date.now() + 1000);
+  assert.equal(missing.problem.field, 'depop_specifics.domesticShippingPrice');
+
+  for (const [region, currency, provider] of [['GB', 'GBP', 'evri'], ['AU', 'AUD', 'auspost']]) {
+    const regional = { ...listing, _seller_region: region };
+    const lookups = [];
+    c.depopAccountRead = async path => {
+      lookups.push(path);
+      return path.includes('addresses') ? [{ id: 8, country_code: region }] : [
+        { id: provider, parcel_sizes: [{ id: 'small', title: 'Small', suggested: true, cost: '4.80' }] },
+      ];
+    };
+    const shipping = await c.depopShippingFields(regional, null, Date.now() + 1000);
+    assert.equal(shipping.fields.shipping_methods[0].shipping_provider_id, provider);
+    assert.equal(shipping.fields.national_shipping_cost, '4.80');
+    assert.match(lookups[1], new RegExp(`item_currency=${currency}`));
+    assert.doesNotMatch(lookups[1], /USPS/);
+    assert.equal(c.depopDraftWriteBody(regional, shipping.fields, []).price_currency, currency);
+  }
+});
 // Depop's taxonomy, as the listing site splits it: attributes, then size sets.
 const ATTRIBUTES = {
   department: [{ id: 'menswear' }, { id: 'womenswear' }, { id: 'kidswear' }, { id: 'everything-else' }],

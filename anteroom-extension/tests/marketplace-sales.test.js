@@ -49,6 +49,19 @@ test('Poshmark reports a known listing missing from the live closet when that li
   assert.equal(calls.some(url => url.includes(`/vm-rest/posts/${live}`)), false);
 });
 
+test('Canadian Poshmark sale checks use the Canadian closet and listing endpoints', async () => {
+  const sold = 'a'.repeat(24);
+  const seller = 'c'.repeat(24);
+  const { c, calls } = worker({
+    [`poshmark.ca/vm-rest/posts/${sold}`]: [200, { data: { creator_id: seller, inventory: { status: 'sold_out' } } }],
+    'poshmark.ca/vm-rest/users/': [200, { data: [] }],
+  });
+  const result = await c.readMarketplaceSales('poshmark', [sold], 'CA');
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), { ok: true, sales: [{ listing_id: sold }] });
+  assert.equal(calls.length, 3);
+  assert.ok(calls.every(url => new URL(url).host === 'poshmark.ca'));
+});
+
 test('Poshmark stops once every known listing is still in the closet', async () => {
   const live = 'bbbbbbbbbbbbbbbbbbbbbbbb';
   const seller = 'cccccccccccccccccccccccc';

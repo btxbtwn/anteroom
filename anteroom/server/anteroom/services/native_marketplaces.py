@@ -199,7 +199,7 @@ def draft_url(marketplace: str, value: str) -> str:
     pattern, host = (
         (r"/your/shops/me/listing-editor/edit/\d+/?", "www.etsy.com") if marketplace == "etsy"
         else (r"/sellinghub/drafts/edit/[A-Za-z0-9_-]{1,80}/?", "www.depop.com") if marketplace == "depop"
-        else (r"/edit-listing/[a-f0-9]{24}", "poshmark.com") if marketplace == "poshmark"
+        else (r"/edit-listing/[a-f0-9]{24}", "poshmark.ca" if parsed.netloc == "poshmark.ca" else "poshmark.com") if marketplace == "poshmark"
         else (r"/sell/draft/[A-Za-z0-9_-]+/", "www.mercari.com")
     )
     if (parsed.scheme != "https" or parsed.netloc != host or not re.fullmatch(pattern, parsed.path)
@@ -376,7 +376,11 @@ def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequest) -
     snapshot = revision.listing_json
     if not isinstance(snapshot, dict):
         raise NativeMarketplaceError(400, "The saved listing could not be read.")
-    snapshot = direct_preflight.prepare(db, conv, snapshot, marketplace)
+    from anteroom.services.pricing_rules import SNAPSHOT_RULES, freeze_active_rules
+
+    with freeze_active_rules() as rules:
+        snapshot = direct_preflight.prepare(db, conv, snapshot, marketplace)
+        snapshot[SNAPSHOT_RULES] = rules
     from anteroom.services.listing_videos import VIDEO_MARKETPLACES, selected_video
 
     if marketplace in VIDEO_MARKETPLACES:
@@ -499,6 +503,7 @@ def _after_preview(db: Session, marketplace: str, body: ListRequest, snapshot: d
 def _open_job(db: Session, conv_id: str, marketplace: str, body: ListRequest, kind: str, snapshot: dict,
               photos: list, deleted_here: bool, relist_rule_id: str | None = None) -> tuple[dict, str, list[str]]:
     from anteroom.services import approved_photos, listing_mode
+    from anteroom.services.pricing_rules import SNAPSHOT_RULES
 
     name = NAMES[marketplace]
     job = None
@@ -536,7 +541,13 @@ def _open_job(db: Session, conv_id: str, marketplace: str, body: ListRequest, ki
                 previous_photos = (previous_job.listing_snapshot or {}).get(approved_photos.KEY, []) if previous_job else []
                 previous_versions = [(row["id"], row["checksum"]) for row in previous_photos]
                 current_versions = [(row["id"], row["checksum"]) for row in snapshot[approved_photos.KEY]]
-                if previous_versions != current_versions:
+                previous_snapshot = (previous_job.listing_snapshot or {}) if previous_job else {}
+                # A saved draft can carry an older price even on the same revision.
+                pricing_changed = (
+                    SNAPSHOT_RULES not in previous_snapshot
+                    or price_for(previous_snapshot, marketplace) != price_for(snapshot, marketplace)
+                )
+                if previous_versions != current_versions or pricing_changed:
                     steps = ["save_draft", "publish"]
             job = repo.create(conv_id, body.revision_id, snapshot, status="dispatched", current_step=f"native_{marketplace}_{steps[0]}")
             claim_api_job(db, job.id)
@@ -644,12 +655,30 @@ def _active(db: Session, job_id: str, conv_id: str, marketplace: str) -> bool:
             and not job_cancel_requested(job_id) and _record(db, conv_id, marketplace).get("job_id") == job_id)
 
 
-def _for_chrome(snapshot: dict) -> dict:
+def _for_chrome(snapshot: dict, marketplace: str) -> dict:
     """The listing as Chrome receives it. The marketplaces' saved form contracts stay on the
     server: Chrome never reads them, and they can be megabytes, past what the Bridge accepts."""
     from anteroom.services.native_contract import KEY
+    from anteroom.services.pricing_rules import SNAPSHOT_RULES
+    from anteroom.services.seller_overrides import CANONICAL_PRICE, PRICE_FOLLOWERS
+    from anteroom.services.seller_region import seller_region
 
-    return {key: value for key, value in snapshot.items() if key != KEY}
+    listing = {
+        key: value
+        for key, value in snapshot.items()
+        if key not in {KEY, SNAPSHOT_RULES, PRICE_FOLLOWERS, "_seller_region"}
+    }
+    if SNAPSHOT_RULES in snapshot and (price := price_for(snapshot, marketplace)) is not None:
+        # The Bridge reads the legacy payload fields. Use the same frozen
+        # price as the server, even when the saved native block was restored.
+        block, key = CANONICAL_PRICE[marketplace].split(".", 1)
+        listing[block] = {**(listing[block] if isinstance(listing.get(block), dict) else {}), key: price}
+        if marketplace == "depop":
+            listing["price"] = price
+    region = seller_region().country
+    if region != "US":
+        listing["_seller_region"] = region
+    return listing
 
 
 def _execute_payload(marketplace: str, step: str, record: dict, snapshot: dict, photos: list, warning: str) -> dict:
@@ -659,7 +688,7 @@ def _execute_payload(marketplace: str, step: str, record: dict, snapshot: dict, 
     return {
         "marketplace": marketplace, "action": step, "confirm": step in {"publish", "list", "update"},
         "operation_id": record["operation_id"], "draft_url": record.get("draft_url"), "listing_id": record.get("listing_id"),
-        "listing": _for_chrome(snapshot), "local_draft_id": record.get("local_draft_id"), "revision_id": record.get("revision_id"),
+        "listing": _for_chrome(snapshot, marketplace), "local_draft_id": record.get("local_draft_id"), "revision_id": record.get("revision_id"),
         **({"video": snapshot.get("_native_video")} if marketplace == "poshmark" else {}),
         "photos": [{"id": p.id, "mime_type": p.mime_type} for p in photos],
         **extra,
@@ -674,7 +703,7 @@ def _result_context(db: Session, conv_id: str, marketplace: str, record: dict, s
             "expected_photo_count": (len(snapshot["_approved_photos"]) if "_approved_photos" in snapshot
                                      else len(record["photo_ids"]) if record.get("photo_ids") is not None
                                      else len(_photos(db, conv_id, snapshot, marketplace)[0]) if first_save or marketplace == "poshmark" else None),
-            "listing": _for_chrome(snapshot)}
+            "listing": _for_chrome(snapshot, marketplace)}
 
 
 async def _send_cancel(operation_id: str) -> None:
@@ -819,7 +848,7 @@ async def _execute_step(job_id: str, conv_id: str, marketplace: str, step: str, 
             if checked is not None:
                 stored = await _joined_worker_session(_apply_result, conv_id, marketplace, job_id, step, checked)
         return stored
-    payload = _execute_payload(marketplace, step, binding, snapshot, photos, warning)
+    payload = await asyncio.to_thread(_execute_payload, marketplace, step, binding, snapshot, photos, warning)
     if binding.get("executor") == "cloud":
         from anteroom.services import cloud_marketplace
 

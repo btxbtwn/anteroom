@@ -311,14 +311,18 @@ function ChromeSessionRow({
 }) {
   const queryClient = useQueryClient();
   const { account } = useWorkspaceRuntime();
+  const name = EXTENSION_SESSION_NAMES[marketplace];
   const [hint, setHint] = useState<string | null>(null);
-  const [cloudPending, setCloudPending] = useState(false);
+  const [cloudPendingUntil, setCloudPendingUntil] = useState(0);
   const sessions = useQuery({
     queryKey: ["marketplace-sessions"],
     queryFn: api.marketplaceSessions.status,
     enabled: chromeReady || hosted,
     retry: false,
-    refetchInterval: cloudPending ? () => pollMs(2_000) : (chromeReady || hosted) ? () => pollMs(60_000) : false,
+    refetchInterval: (query) => {
+      if (Date.now() < cloudPendingUntil && !query.state.data?.sessions[marketplace]?.cloud_connected) return pollMs(2_000);
+      return chromeReady || hosted ? pollMs(60_000) : false;
+    },
   });
   const session = sessions.data?.sessions[marketplace];
   const cloudAvailable = hosted && Boolean(session?.cloud_available);
@@ -338,40 +342,47 @@ function ChromeSessionRow({
   const cloudConnect = useMutation({
     mutationFn: async () => {
       if (!account) throw new Error("Sign in to your Anteroom account first.");
-      if (marketplace !== "poshmark") throw new Error("Cloud sessions are only available for Poshmark.");
-      const { token } = await api.cloudSessions.connectToken(marketplace);
+      const { token, seller_region } = await api.cloudSessions.connectToken(marketplace);
       const { cloudExtension } = await import("../../api/cloudExtension");
-      const response = await cloudExtension(account).connectCloudSession("poshmark", token);
+      const response = await cloudExtension(account).connectCloudSession(marketplace, token, seller_region);
       if (!response.ok) {
         throw new Error(
-          response.error || "Install or update Anteroom Bridge in Chrome (v0.2.84+), sign in to Poshmark in Chrome, then press Connect in Cloud again.",
+          response.error || `Update Anteroom Bridge in desktop Chrome, sign in to ${name}, then choose Connect in Cloud.`,
         );
       }
       return response;
     },
     onSuccess: () => {
-      setCloudPending(true);
-      setHint("Confirm in the Anteroom Bridge popup window to connect Poshmark in the cloud.");
+      setCloudPendingUntil(Date.now() + 180_000);
+      setHint(`Confirm the ${name} connection in the Anteroom Bridge popup.`);
       void queryClient.invalidateQueries({ queryKey: ["marketplace-sessions"] });
     },
     onError: () => {
-      setCloudPending(false);
+      setCloudPendingUntil(0);
       setHint(null);
     },
   });
   const cloudDisconnect = useMutation({
     mutationFn: () => api.cloudSessions.disconnect(marketplace),
     onSuccess: () => {
-      setCloudPending(false);
+      setCloudPendingUntil(0);
       setHint(null);
       void queryClient.invalidateQueries({ queryKey: ["marketplace-sessions"] });
     },
   });
+  const cloudVerify = useMutation({
+    mutationFn: async () => {
+      const result = await api.cloudSessions.verify(marketplace);
+      if (!result.ok) throw new Error(result.error || `Could not verify the ${name} cloud sign-in.`);
+    },
+    onMutate: () => setHint(null),
+    onSuccess: () => setHint(`${name} cloud sign-in verified.`),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["marketplace-sessions"] }),
+  });
   const state = connect.isPending || connect.error || (connect.data && !connect.data.signed_in)
     ? { tone: "warning" as const, label: "Sign-in not confirmed" }
     : chromeSessionPresentation(session, chromeReady, undefined, unavailable);
-  const name = EXTENSION_SESSION_NAMES[marketplace];
-  const error = connect.error?.message || cloudConnect.error?.message || cloudDisconnect.error?.message || null;
+  const error = connect.error?.message || cloudConnect.error?.message || cloudDisconnect.error?.message || cloudVerify.error?.message || null;
   const effectiveSignedIn = cloudConnected || (chromeReady && session?.state === "signed_in");
   const salesBlocked = effectiveSignedIn
     ? null
@@ -380,10 +391,10 @@ function ChromeSessionRow({
       : !chromeReady
         ? "Connect Chrome to detect sales"
         : "Sign in to detect sales";
-  const description = cloudAvailable && marketplace === "poshmark"
-    ? "Lists, checks sales, auto-delists, shares, and sends offers on Poshmark — even when Chrome is closed."
+  const description = cloudAvailable
+    ? "Run listing actions, sales checks, and enabled automations while Chrome is closed."
     : CHROME_SESSION_DETAILS[marketplace];
-  const busy = connect.isPending || cloudConnect.isPending || cloudDisconnect.isPending;
+  const busy = connect.isPending || cloudConnect.isPending || cloudDisconnect.isPending || cloudVerify.isPending;
 
   return (
     <SettingsRow
@@ -407,6 +418,10 @@ function ChromeSessionRow({
           {cloudAvailable ? (
             cloudConnected ? (
               <>
+                <Button size="xs" variant="outline" disabled={busy} onClick={() => cloudVerify.mutate()}>
+                  {cloudVerify.isPending ? <Spinner /> : null}
+                  Test Cloud
+                </Button>
                 <Button size="xs" variant="outline" disabled={busy} onClick={() => cloudConnect.mutate()}>
                   {cloudConnect.isPending ? <Spinner /> : null}
                   Reconnect in Cloud
@@ -422,6 +437,12 @@ function ChromeSessionRow({
                   {cloudConnect.isPending ? <Spinner /> : null}
                   {session?.cloud_state === "expired" ? "Reconnect in Cloud" : "Connect in Cloud"}
                 </Button>
+                {session?.cloud_state === "expired" ? (
+                  <Button size="xs" variant="outline" disabled={busy} onClick={() => cloudDisconnect.mutate()}>
+                    {cloudDisconnect.isPending ? <Spinner /> : null}
+                    Disconnect Cloud
+                  </Button>
+                ) : null}
                 {chromeReady ? (
                   <Button size="xs" variant="ghost" disabled={busy} onClick={() => connect.mutate()}>
                     {connect.isPending ? <Spinner /> : null}
@@ -439,7 +460,7 @@ function ChromeSessionRow({
         </span>
       }
     >
-      {hint && !cloudConnected ? <SettingsNote>{hint}</SettingsNote> : null}
+      {hint && (!cloudConnected || cloudVerify.isSuccess) ? <SettingsNote>{hint}</SettingsNote> : null}
       {error ? <SettingsNote tone="error">{error}</SettingsNote> : null}
       {session?.mode === "cloud" && session.last_error && !cloudConnected ? <SettingsNote tone="error">{session.last_error}</SettingsNote> : null}
       {effectiveSignedIn && checkError ? <SettingsNote tone="error">Sale check failed: {checkError}</SettingsNote> : null}
@@ -471,8 +492,8 @@ function HostedChromeSessions({ salesSwitch, checks }: {
       <SettingsRow
         title="Where the sign-in lives"
         description={anyCloudAvailable
-          ? "Poshmark can optionally store an encrypted session in Anteroom Cloud so it keeps working when Chrome is closed (disconnect anytime). Depop and Mercari stay signed in through Bridge’s Chrome."
-          : "Depop, Poshmark and Mercari stay signed in through Bridge’s Chrome; Anteroom only checks whether each is signed in."}
+          ? "Connect in desktop Chrome with Anteroom Bridge. Anteroom encrypts cloud sign-ins and you can disconnect them anytime."
+          : "Depop, Poshmark, and Mercari use the sign-ins in your Chrome profile."}
         control={
           <Button
             size="xs"

@@ -667,7 +667,7 @@ function SheetStatusAction({
     cachedDoc?.current_revision_id ?? null,
   );
   const canList = canListFromSheet(listing, status, sheetRow, canAct, effectiveRevision);
-  const variant = BADGE_VARIANT[status.kind];
+  const variant = status.inactive ? "outline" : BADGE_VARIANT[status.kind];
   const marketLabel = marketplaceName(marketplace);
   const title = listing.title || "Untitled";
 

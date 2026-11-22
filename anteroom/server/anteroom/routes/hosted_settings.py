@@ -3,7 +3,7 @@
 Desktop sign-in terminals, filesystem utilities and machine settings are not
 mounted here. Their hosted equivalents require a registered worker.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from anteroom.repositories.queries import ConversationRepo
 from anteroom.services.hosted_database import get_seller_db
 
@@ -55,6 +55,8 @@ def subscription_models(provider: str):
 # start browser sessions, write marketplace listings, or use machine settings.
 for path, handler, methods in (
     ('/marketplaces', settings.get_marketplaces, ['GET']),
+    ('/seller-region', settings.get_seller_region, ['GET']),
+    ('/seller-region', settings.put_seller_region, ['PUT']),
     ('/marketplaces', settings.set_marketplaces, ['PUT']),
     ('/package-dimensions', settings.get_package_dimensions, ['GET']),
     ('/package-dimensions', settings.set_package_dimensions, ['PUT']),
@@ -68,6 +70,16 @@ for path, handler, methods in (
     ('/formulas', settings.put_listing_formulas, ['PUT']),
     ('/sale-detection', settings.get_sale_detection_route, ['GET']),
     ('/sale-detection', settings.put_sale_detection, ['PUT']),
+    ('/pricing-rules', settings.get_pricing_rules, ['GET']),
+    ('/pricing-rules', settings.put_pricing_rules, ['PUT']),
+    ('/pricing-rules/apply', settings.apply_pricing_rules, ['POST']),
+    ('/shipping-presets', settings.get_shipping_presets, ['GET']),
+    ('/shipping-presets', settings.create_shipping_preset, ['POST']),
+    ('/shipping-presets/{preset_id}', settings.update_shipping_preset, ['PUT']),
+    ('/shipping-presets/{preset_id}', settings.delete_shipping_preset, ['DELETE']),
+    ('/shipping-presets/{preset_id}/apply', settings.apply_shipping_preset, ['POST']),
+    ('/listing-warnings', settings.get_listing_warnings_route, ['GET']),
+    ('/listing-warnings', settings.put_listing_warnings, ['PUT']),
 ):
     router.add_api_route(path, handler, methods=methods)
 
@@ -105,3 +117,17 @@ def restore_all(body: settings.RestoreAllHiddenFields, db=Depends(get_seller_db,
 def restore_matching(body: settings.RestoreMatchingHiddenFields, db=Depends(get_seller_db, scope="function")):
     require_conversation(db, body.conversation_id)
     return settings.restore_matching_hidden_fields(body)
+
+
+@router.get('/agent', response_model=settings.AgentConnectionStatus)
+def hosted_agent_connection(request: Request):
+    from anteroom.services.agent_connection import describe_hosted
+
+    forwarded_proto = (request.headers.get('x-forwarded-proto') or request.url.scheme or 'https').split(',')[0].strip()
+    host = (request.headers.get('x-forwarded-host') or request.headers.get('host') or 'myanteroom.com').split(',')[0].strip()
+    return describe_hosted(f"{forwarded_proto}://{host}")
+
+
+router.add_api_route('/mcp-tokens', settings.list_mcp_tokens, methods=['GET'])
+router.add_api_route('/mcp-tokens', settings.create_mcp_token, methods=['POST'], status_code=201)
+router.add_api_route('/mcp-tokens/{token_id}', settings.revoke_mcp_token, methods=['DELETE'])

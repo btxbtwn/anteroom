@@ -2,7 +2,7 @@
   "name": "anteroom-cloud-runner",
   "version": "1.0.0",
   "private": true,
-  "description": "Isolated single-operation Node runner for server-side Poshmark cloud sessions.",
+  "description": "Isolated single-operation Node runner for marketplace cloud sessions.",
   "engines": {
     "node": ">=20"
   },

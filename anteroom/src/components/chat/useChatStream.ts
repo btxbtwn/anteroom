@@ -269,6 +269,7 @@ export function useChatStream({
       failedAction: null,
       userCancelled: false,
       restoreInputOnAbort: false,
+      steered: false,
     });
     if (!opts?.preserveInput) setInput("");
     const stillMine = () => getLive(convId).controller === controller;
@@ -344,7 +345,8 @@ export function useChatStream({
       if (stillMine() && isStreamError(assembled)) patchLive(convId, { failedAction: "send" });
       const finished = stillMine();
       if (finished) {
-        patchLive(convId, { streaming: false, controller: null });
+        // A steer that landed as the reply ended finds nothing left to cut off.
+        patchLive(convId, { streaming: false, controller: null, userCancelled: false, steered: false });
         if (!isStreamError(assembled)) foldLiveTurn(convId);
       }
       await refreshListingQueries(queryClient, convId);
@@ -361,8 +363,8 @@ export function useChatStream({
       if (isAbortError(e)) {
         if (!stillMine()) return true;
         if (getLive(convId).userCancelled) {
-          const restore = getLive(convId).restoreInputOnAbort;
-          foldLiveTurn(convId, { cancelled: true });
+          const { restoreInputOnAbort: restore, steered } = getLive(convId);
+          foldLiveTurn(convId, { cancelled: true, steered });
           patchLive(convId, {
             streamText: "",
             streamTrace: [],
@@ -374,7 +376,10 @@ export function useChatStream({
             controller: null,
             userCancelled: false,
             restoreInputOnAbort: false,
+            steered: false,
           });
+          // The steered answer's partial reply is saved server-side; show it.
+          if (steered) void refreshListingQueries(queryClient, convId);
           if (restore) {
             if (opts?.preserveInput) setInput((current) => current || text);
             else setInput(text);
@@ -421,6 +426,22 @@ export function useChatStream({
     setStopping(false);
   }, [convId, queryClient]);
 
+  /**
+   * Cut off the reply being written so a steered follow-up can go next, as
+   * T3 Code's steer does for a provider that cannot take input mid-turn.
+   * Closing the reply's request is all it takes on the Mac: the server keeps
+   * the words written so far, and a save already under way, and the fills and
+   * jobs Stop would end keep going. False when nothing steerable runs.
+   */
+  const interruptAnswer = useCallback(async () => {
+    const liveState = getLive(convId);
+    if (!canSteerLive(convId)) return false;
+    patchLive(convId, { userCancelled: true, restoreInputOnAbort: false, steered: true });
+    liveState.controller?.abort();
+    await queryClient.invalidateQueries({ queryKey: ["activity", convId] });
+    return true;
+  }, [convId, queryClient]);
+
   const handleCancelDiscovery = useCallback(async () => {
     const probeId = activeProbe?.id;
     // Take the open request before clearing it, so it can still be aborted.
@@ -462,7 +483,39 @@ export function useChatStream({
     void handleGenerate();
   }, [failedAction, lastSendText, sendMessage, handleGenerate, activeProbe?.id, handleCancelDiscovery, convId, streamText]);
 
-  return { stopping, streamFromFetch, handleGenerate, sendMessage, handleCancel, handleCancelDiscovery, handleRetry };
+  return {
+    stopping,
+    streamFromFetch,
+    handleGenerate,
+    sendMessage,
+    handleCancel,
+    handleCancelDiscovery,
+    handleRetry,
+    interruptAnswer,
+  };
+}
+
+/**
+ * A reply can take a steer while it is still being written. Generation is a
+ * pipeline that cannot change course, so a follow-up queues behind it, and
+ * behind a reply that is already saving its edits. The caller also rules out
+ * the web app, where a reply is a durable task whose cancel ends the whole
+ * listing's work and whose cut-off words are not kept, and a listing without
+ * copy yet, whose chat messages go to generation.
+ */
+export function canSteerLive(convId: string): boolean {
+  const live = getLive(convId);
+  return Boolean(live.controller)
+    && live.streaming
+    && !live.generating
+    && !live.resetting
+    && !live.userCancelled
+    && !/^saving/i.test(live.streamStatus.trim());
+}
+
+/** Whether this listing's chat steers at all; see canSteerLive. */
+export function steerableChat(hosted: boolean, hasListingCopy: boolean): boolean {
+  return !hosted && hasListingCopy;
 }
 
 /** Reattach to a generate the server is still running, and settle one that already finished. */

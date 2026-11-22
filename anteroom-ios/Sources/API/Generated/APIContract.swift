@@ -3,6 +3,32 @@
 
 import Foundation
 
+struct AccountSummary: Codable, Hashable, Sendable {
+    var name: String
+    var mask: String?
+    var type: String
+    var subtype: String?
+}
+
+struct ConnectionStatus: Identifiable, Codable, Hashable, Sendable {
+    var id: String
+    var institutionName: String
+    var accounts: [AccountSummary]
+    var lastSyncedAt: String?
+    var lastError: String?
+    var hasCursor: Bool
+    /// One of: waiting, current, error, disconnecting.
+    var status: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, accounts, status
+        case institutionName = "institution_name"
+        case lastSyncedAt = "last_synced_at"
+        case lastError = "last_error"
+        case hasCursor = "has_cursor"
+    }
+}
+
 /// One listing with the seller's notes.
 struct Conversation: Identifiable, Codable, Hashable, Sendable {
     var id: String
@@ -33,6 +59,10 @@ struct Conversation: Identifiable, Codable, Hashable, Sendable {
     var soldMarketplaces: [String] = []
     /// Marketplaces Anteroom delisted directly, though imported history says listed.
     var removedMarketplaces: [String] = []
+    /// Marketplaces where the listing is still up but not for sale. Not a sale and not a delist.
+    var inactiveMarketplaces: [String] = []
+    /// Marketplace prices that differ from the seller's pricing rules; empty while the rules are off.
+    var priceDrift: [PriceDrift] = []
     /// Units sold on Anteroom's sales ledger. An Active row with some sold reads "1 of 3 sold".
     var unitsSold: Int = 0
     /// The most units the item was offered with.
@@ -78,6 +108,8 @@ struct Conversation: Identifiable, Codable, Hashable, Sendable {
         case directRecords = "direct_records"
         case soldMarketplaces = "sold_marketplaces"
         case removedMarketplaces = "removed_marketplaces"
+        case inactiveMarketplaces = "inactive_marketplaces"
+        case priceDrift = "price_drift"
         case unitsSold = "units_sold"
         case soldAt = "sold_at"
         case vendooListingURLs = "vendoo_listing_urls"
@@ -115,6 +147,8 @@ extension Conversation {
         directRecords = try values.decodeIfPresent([String: DirectRecord].self, forKey: .directRecords) ?? [:]
         soldMarketplaces = try values.decodeIfPresent([String].self, forKey: .soldMarketplaces) ?? []
         removedMarketplaces = try values.decodeIfPresent([String].self, forKey: .removedMarketplaces) ?? []
+        inactiveMarketplaces = try values.decodeIfPresent([String].self, forKey: .inactiveMarketplaces) ?? []
+        priceDrift = try values.decodeIfPresent([PriceDrift].self, forKey: .priceDrift) ?? []
         unitsSold = try values.decodeIfPresent(Int.self, forKey: .unitsSold) ?? 0
         quantity = try values.decodeIfPresent(Int.self, forKey: .quantity)
         soldAt = try values.decodeIfPresent(String.self, forKey: .soldAt)
@@ -180,6 +214,10 @@ struct ConversationSummary: Identifiable, Codable, Hashable, Sendable {
     var soldMarketplaces: [String] = []
     /// Marketplaces Anteroom delisted directly, though imported history says listed.
     var removedMarketplaces: [String] = []
+    /// Marketplaces where the listing is still up but not for sale. Not a sale and not a delist.
+    var inactiveMarketplaces: [String] = []
+    /// Marketplace prices that differ from the seller's pricing rules; empty while the rules are off.
+    var priceDrift: [PriceDrift] = []
     /// Units sold on Anteroom's sales ledger. An Active row with some sold reads "1 of 3 sold".
     var unitsSold: Int = 0
     /// The most units the item was offered with.
@@ -224,6 +262,8 @@ struct ConversationSummary: Identifiable, Codable, Hashable, Sendable {
         case directRecords = "direct_records"
         case soldMarketplaces = "sold_marketplaces"
         case removedMarketplaces = "removed_marketplaces"
+        case inactiveMarketplaces = "inactive_marketplaces"
+        case priceDrift = "price_drift"
         case unitsSold = "units_sold"
         case soldAt = "sold_at"
         case vendooListingURLs = "vendoo_listing_urls"
@@ -261,6 +301,8 @@ extension ConversationSummary {
         directRecords = try values.decodeIfPresent([String: DirectRecord].self, forKey: .directRecords) ?? [:]
         soldMarketplaces = try values.decodeIfPresent([String].self, forKey: .soldMarketplaces) ?? []
         removedMarketplaces = try values.decodeIfPresent([String].self, forKey: .removedMarketplaces) ?? []
+        inactiveMarketplaces = try values.decodeIfPresent([String].self, forKey: .inactiveMarketplaces) ?? []
+        priceDrift = try values.decodeIfPresent([PriceDrift].self, forKey: .priceDrift) ?? []
         unitsSold = try values.decodeIfPresent(Int.self, forKey: .unitsSold) ?? 0
         quantity = try values.decodeIfPresent(Int.self, forKey: .quantity)
         soldAt = try values.decodeIfPresent(String.self, forKey: .soldAt)
@@ -339,9 +381,12 @@ struct DirectRecord: Codable, Hashable, Sendable {
     var price: Double?
     /// When Anteroom's last confirmed List put this listing up.
     var listedAt: String?
+    /// Still on the marketplace but not for sale (deactivated, expired, Not For Sale), from
+    /// Anteroom's latest verified read of that listing. Neither sold nor deleted.
+    var inactive: Bool = false
 
     enum CodingKeys: String, CodingKey {
-        case state, failed, fields, price
+        case state, failed, fields, price, inactive
         case listingURL = "listing_url"
         case listedAt = "listed_at"
     }
@@ -356,6 +401,7 @@ extension DirectRecord {
         fields = try values.decodeIfPresent(Int.self, forKey: .fields) ?? 0
         price = try values.decodeIfPresent(Double.self, forKey: .price)
         listedAt = try values.decodeIfPresent(String.self, forKey: .listedAt)
+        inactive = try values.decodeIfPresent(Bool.self, forKey: .inactive) ?? false
     }
 }
 
@@ -382,7 +428,7 @@ struct Expense: Identifiable, Codable, Hashable, Sendable {
     var revision: Int
     /// One of: operating_expense, inventory_purchase.
     var accountingType: String
-    /// One of: manual, csv, bank.
+    /// One of: manual, csv, plaid.
     var importSource: String
 
     enum CodingKeys: String, CodingKey {
@@ -694,6 +740,39 @@ struct ListingValidation: Codable, Hashable, Sendable {
     }
 }
 
+struct MarketplaceCloudResult: Codable, Hashable, Sendable {
+    var ok: Bool
+    var session: MarketplaceCloudStatus?
+    var error: String?
+}
+
+struct MarketplaceCloudSessions: Codable, Hashable, Sendable {
+    var enabled: [String]
+    var sessions: [String: MarketplaceCloudStatus]
+}
+
+struct MarketplaceCloudStatus: Codable, Hashable, Sendable {
+    var marketplace: String
+    var state: String
+    var mode: String
+    var cloudConnected: Bool
+    var label: String?
+    var expiresAt: Int?
+    var expiring: Bool
+    var connectedAt: String?
+    var lastUsedAt: String?
+    var lastError: String?
+
+    enum CodingKeys: String, CodingKey {
+        case marketplace, state, mode, label, expiring
+        case cloudConnected = "cloud_connected"
+        case expiresAt = "expires_at"
+        case connectedAt = "connected_at"
+        case lastUsedAt = "last_used_at"
+        case lastError = "last_error"
+    }
+}
+
 struct MileageAmount: Codable, Hashable, Sendable {
     var currency: String
     /// Decimal value without a currency symbol.
@@ -836,6 +915,56 @@ extension PhotoEdits {
         contrast = try values.decodeIfPresent(Double.self, forKey: .contrast) ?? 0
         background = try values.decodeIfPresent(String.self, forKey: .background)
     }
+}
+
+struct PlaidExchange: Codable, Hashable, Sendable {
+    var publicToken: String
+    var institutionName: String = "Connected institution"
+
+    enum CodingKeys: String, CodingKey {
+        case publicToken = "public_token"
+        case institutionName = "institution_name"
+    }
+}
+
+extension PlaidExchange {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        publicToken = try values.decode(String.self, forKey: .publicToken)
+        institutionName = try values.decodeIfPresent(String.self, forKey: .institutionName) ?? "Connected institution"
+    }
+}
+
+struct PlaidLinkToken: Codable, Hashable, Sendable {
+    var linkToken: String
+    var redirectUri: String?
+
+    enum CodingKeys: String, CodingKey {
+        case linkToken = "link_token"
+        case redirectUri = "redirect_uri"
+    }
+}
+
+struct PlaidStatus: Codable, Hashable, Sendable {
+    var configured: Bool
+    var maxConnections: Int
+    var connections: [ConnectionStatus]
+
+    enum CodingKeys: String, CodingKey {
+        case configured, connections
+        case maxConnections = "max_connections"
+    }
+}
+
+/// A marketplace price that is not what the seller's pricing rules give.
+struct PriceDrift: Codable, Hashable, Sendable {
+    var marketplace: String
+    /// The price the pricing rules give this marketplace.
+    var expected: Double
+    /// The price the marketplace has now.
+    var price: Double
+    /// ``override``: a price typed on that marketplace's form. ``live``: the live listing's known price.
+    var source: String
 }
 
 struct ReportLine: Codable, Hashable, Sendable {

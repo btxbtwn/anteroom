@@ -1,6 +1,46 @@
 {
   "components": {
     "schemas": {
+      "AccountSummary": {
+        "properties": {
+          "mask": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mask"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "subtype": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtype"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type"
+        ],
+        "title": "AccountSummary",
+        "type": "object"
+      },
       "Body_read_size_tags_api_size_tags_read_post": {
         "properties": {
           "files": {
@@ -16,6 +56,73 @@
           "files"
         ],
         "title": "Body_read_size_tags_api_size_tags_read_post",
+        "type": "object"
+      },
+      "ConnectionStatus": {
+        "properties": {
+          "accounts": {
+            "items": {
+              "$ref": "#/components/schemas/AccountSummary"
+            },
+            "title": "Accounts",
+            "type": "array"
+          },
+          "has_cursor": {
+            "title": "Has Cursor",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "institution_name": {
+            "title": "Institution Name",
+            "type": "string"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_synced_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Synced At"
+          },
+          "status": {
+            "enum": [
+              "waiting",
+              "current",
+              "error",
+              "disconnecting"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "institution_name",
+          "accounts",
+          "last_synced_at",
+          "last_error",
+          "has_cursor",
+          "status"
+        ],
+        "title": "ConnectionStatus",
         "type": "object"
       },
       "Conversation": {
@@ -76,6 +183,15 @@
             "title": "Id",
             "type": "string"
           },
+          "inactive_marketplaces": {
+            "default": [],
+            "description": "Marketplaces where the listing is still up but not for sale. Not a sale and not a delist.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Inactive Marketplaces",
+            "type": "array"
+          },
           "missing_sale_data": {
             "default": [],
             "description": "Sale details the sales ledger still needs from the seller.",
@@ -118,6 +234,15 @@
               }
             ],
             "title": "Price"
+          },
+          "price_drift": {
+            "default": [],
+            "description": "Marketplace prices that differ from the seller's pricing rules; empty while the rules are off.",
+            "items": {
+              "$ref": "#/components/schemas/PriceDrift"
+            },
+            "title": "Price Drift",
+            "type": "array"
           },
           "quantity": {
             "anyOf": [
@@ -457,6 +582,15 @@
             "title": "Id",
             "type": "string"
           },
+          "inactive_marketplaces": {
+            "default": [],
+            "description": "Marketplaces where the listing is still up but not for sale. Not a sale and not a delist.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Inactive Marketplaces",
+            "type": "array"
+          },
           "missing_sale_data": {
             "default": [],
             "description": "Sale details the sales ledger still needs from the seller.",
@@ -488,6 +622,15 @@
               }
             ],
             "title": "Price"
+          },
+          "price_drift": {
+            "default": [],
+            "description": "Marketplace prices that differ from the seller's pricing rules; empty while the rules are off.",
+            "items": {
+              "$ref": "#/components/schemas/PriceDrift"
+            },
+            "title": "Price Drift",
+            "type": "array"
           },
           "quantity": {
             "anyOf": [
@@ -884,6 +1027,12 @@
             "title": "Fields",
             "type": "integer"
           },
+          "inactive": {
+            "default": false,
+            "description": "Still on the marketplace but not for sale (deactivated, expired, Not For Sale), from\nAnteroom's latest verified read of that listing. Neither sold nor deleted.",
+            "title": "Inactive",
+            "type": "boolean"
+          },
           "listed_at": {
             "anyOf": [
               {
@@ -1025,7 +1174,7 @@
             "enum": [
               "manual",
               "csv",
-              "bank"
+              "plaid"
             ],
             "title": "Import Source",
             "type": "string"
@@ -1755,6 +1904,152 @@
         "title": "ListingValidation",
         "type": "object"
       },
+      "MarketplaceCloudResult": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MarketplaceCloudStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "MarketplaceCloudResult",
+        "type": "object"
+      },
+      "MarketplaceCloudSessions": {
+        "properties": {
+          "enabled": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Enabled",
+            "type": "array"
+          },
+          "sessions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/MarketplaceCloudStatus"
+            },
+            "title": "Sessions",
+            "type": "object"
+          }
+        },
+        "required": [
+          "enabled",
+          "sessions"
+        ],
+        "title": "MarketplaceCloudSessions",
+        "type": "object"
+      },
+      "MarketplaceCloudStatus": {
+        "properties": {
+          "cloud_connected": {
+            "title": "Cloud Connected",
+            "type": "boolean"
+          },
+          "connected_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connected At"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "expiring": {
+            "title": "Expiring",
+            "type": "boolean"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "marketplace": {
+            "title": "Marketplace",
+            "type": "string"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "marketplace",
+          "state",
+          "mode",
+          "cloud_connected",
+          "expiring"
+        ],
+        "title": "MarketplaceCloudStatus",
+        "type": "object"
+      },
       "MileageAmount": {
         "properties": {
           "amount_cents": {
@@ -2158,6 +2453,114 @@
           }
         },
         "title": "PhotoEdits",
+        "type": "object"
+      },
+      "PlaidExchange": {
+        "properties": {
+          "institution_name": {
+            "default": "Connected institution",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Institution Name",
+            "type": "string"
+          },
+          "public_token": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Public Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "public_token"
+        ],
+        "title": "PlaidExchange",
+        "type": "object"
+      },
+      "PlaidLinkToken": {
+        "properties": {
+          "link_token": {
+            "title": "Link Token",
+            "type": "string"
+          },
+          "redirect_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Redirect Uri"
+          }
+        },
+        "required": [
+          "link_token"
+        ],
+        "title": "PlaidLinkToken",
+        "type": "object"
+      },
+      "PlaidStatus": {
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "connections": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectionStatus"
+            },
+            "title": "Connections",
+            "type": "array"
+          },
+          "max_connections": {
+            "title": "Max Connections",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "configured",
+          "max_connections",
+          "connections"
+        ],
+        "title": "PlaidStatus",
+        "type": "object"
+      },
+      "PriceDrift": {
+        "description": "A marketplace price that is not what the seller's pricing rules give.",
+        "properties": {
+          "expected": {
+            "description": "The price the pricing rules give this marketplace.",
+            "title": "Expected",
+            "type": "number"
+          },
+          "marketplace": {
+            "title": "Marketplace",
+            "type": "string"
+          },
+          "price": {
+            "description": "The price the marketplace has now.",
+            "title": "Price",
+            "type": "number"
+          },
+          "source": {
+            "description": "``override``: a price typed on that marketplace's form. ``live``: the live listing's known price.",
+            "enum": [
+              "override",
+              "live"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "marketplace",
+          "expected",
+          "price",
+          "source"
+        ],
+        "title": "PriceDrift",
         "type": "object"
       },
       "ReportLine": {
@@ -2705,6 +3108,174 @@
         "summary": "Calculate Mileage"
       }
     },
+    "/api/business-expenses/plaid/connections/{connection_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Disconnect"
+      }
+    },
+    "/api/business-expenses/plaid/connections/{connection_id}/sync": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sync"
+      }
+    },
+    "/api/business-expenses/plaid/exchange": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaidExchange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Exchange"
+      }
+    },
+    "/api/business-expenses/plaid/link-token": {
+      "post": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "connection_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Connection Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaidLinkToken"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Link Token"
+      }
+    },
+    "/api/business-expenses/plaid/status": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaidStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Status"
+      }
+    },
     "/api/business-expenses/profit-and-loss": {
       "get": {
         "parameters": [
@@ -2890,6 +3461,99 @@
           }
         },
         "summary": "Update Expense"
+      }
+    },
+    "/api/cloud-sessions": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketplaceCloudSessions"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Cloud Sessions"
+      }
+    },
+    "/api/cloud-sessions/{marketplace}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "marketplace",
+            "required": true,
+            "schema": {
+              "title": "Marketplace",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketplaceCloudResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Disconnect Cloud Session"
+      }
+    },
+    "/api/cloud-sessions/{marketplace}/verify": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "marketplace",
+            "required": true,
+            "schema": {
+              "title": "Marketplace",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketplaceCloudResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify Cloud Session"
       }
     },
     "/api/conversations": {

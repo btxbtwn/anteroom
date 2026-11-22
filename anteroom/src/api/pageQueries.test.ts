@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const { api } = vi.hoisted(() => {
   const read = (name: string) => vi.fn(async () => ({ read: name }));
   return { api: {
+    home: { summary: read("home") },
     settings: { ui: read("settings-ui") },
     salesLedger: { list: read("sales-ledger") },
     analytics: { overview: read("overview") },
@@ -20,12 +21,12 @@ const { api } = vi.hoisted(() => {
 vi.mock("./client", () => ({ api }));
 
 import {
-  automationsQuery, boxesQuery, directConnectionsQuery, ebayFinancesQuery, lastThirtyDays, prefetchPageReads,
+  automationsQuery, boxesQuery, directConnectionsQuery, ebayFinancesQuery, homeQuery, lastThirtyDays, prefetchPageReads,
   salesLedgerQuery, salesOverviewQuery, settingsUiQuery, sourcingQuery,
 } from "./pageQueries";
 
 const NOW = Date.parse("2026-11-08T14:24:00Z");
-const allViews = { views: new Set(["analytics", "sourcing", "automations", "marketplaces"]), features: new Set(["ebay_offers", "marketplace_sessions"]) };
+const allViews = { views: new Set(["home", "analytics", "sourcing", "automations", "marketplaces"]), features: new Set(["ebay_offers", "marketplace_sessions"]) };
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -39,7 +40,7 @@ describe("page prefetch", () => {
     await prefetchPageReads(client, allViews, NOW);
     const { start, end } = lastThirtyDays(NOW);
     for (const key of [
-      settingsUiQuery.queryKey, sourcingQuery.queryKey, boxesQuery.queryKey, automationsQuery.queryKey,
+      settingsUiQuery.queryKey, homeQuery().queryKey, sourcingQuery.queryKey, boxesQuery.queryKey, automationsQuery.queryKey,
       directConnectionsQuery.queryKey, ebayFinancesQuery(start, end).queryKey,
       salesLedgerQuery({ start, end, q: "", attention: "all", sort: "newest" }, 1).queryKey,
       salesOverviewQuery(start, end, "all").queryKey,
@@ -53,7 +54,7 @@ describe("page prefetch", () => {
     await prefetchPageReads(client, { views: new Set(["sourcing"]), features: new Set() }, NOW);
     expect(api.sourcing.get).toHaveBeenCalledTimes(1);
     expect(api.settings.ui).toHaveBeenCalledTimes(1);
-    for (const read of [api.automations.list, api.ebayOffers.status, api.promotionAutomations.list, api.salesLedger.list, api.directConnections.status, api.ebay.read]) {
+    for (const read of [api.home.summary, api.automations.list, api.ebayOffers.status, api.promotionAutomations.list, api.salesLedger.list, api.directConnections.status, api.ebay.read]) {
       expect(read).not.toHaveBeenCalled();
     }
   });
@@ -85,6 +86,7 @@ describe("page prefetch", () => {
         return value;
       });
     };
+    track(api.home.summary, { read: "home" });
     track(api.settings.ui, { read: "settings-ui" });
     track(api.salesLedger.list, { read: "sales-ledger" });
     track(api.analytics.overview, { read: "overview" });

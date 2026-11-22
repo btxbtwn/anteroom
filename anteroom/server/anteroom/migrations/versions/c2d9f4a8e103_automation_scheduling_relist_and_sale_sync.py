@@ -1,7 +1,7 @@
 """Scheduled draft publishing, per-marketplace auto-relist, waterfall/bundle/follow promotions, and 60-day sale sync log.
 
 Revision ID: c2d9f4a8e103
-Revises: 049b76a1ce20
+Revises: 9b37679ce820
 Create Date: 2026-11-22 10:45:00.000000
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 
 revision = 'c2d9f4a8e103'
-down_revision = '049b76a1ce20'
+down_revision = '9b37679ce820'
 branch_labels = None
 depends_on = None
 

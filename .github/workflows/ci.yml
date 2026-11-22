@@ -471,6 +471,10 @@ jobs:
       - name: Install cloud runner dependencies
         working-directory: anteroom/server/anteroom/cloud_runner
         run: npm ci --no-audit --no-fund
+      - name: Check cloud runners
+        if: matrix.group == 1
+        working-directory: anteroom/server/anteroom/cloud_runner
+        run: node --test '*.test.cjs'
       - name: Verify duration artifacts with xdist
         if: matrix.group == 1
         run: |

@@ -132,6 +132,15 @@ interface Props {
   onSubmit: () => void;
   /** Esc in the box. Returns true when it acted (it stopped a running reply). */
   onEscape?: () => boolean;
+  /**
+   * Queue and steer keys, as in T3 Code. Each returns true when it acted;
+   * otherwise the key does what it normally does (Mod-Enter starts a new line).
+   * Mod-Enter submits with the opposite follow-up action, Mod-Shift-Enter sends
+   * the first queued message now, Alt-ArrowUp edits the last queued one.
+   */
+  onAlternateSubmit?: () => boolean;
+  onSendQueuedNow?: () => boolean;
+  onEditQueued?: () => boolean;
   placeholder: string;
   handleRef: RefObject<ComposerPromptEditorHandle | null>;
   /** Files pasted into the box (images). Returning true keeps them out of the text. */
@@ -145,11 +154,25 @@ interface Props {
  * inline as chips exactly where the seller dropped them, serialized back to a
  * markdown prompt whose quotes are links.
  */
-export function ComposerPromptEditor({ value, onChange, onSubmit, onEscape, placeholder, handleRef, onPasteFiles, autoFocus = false }: Props) {
+export function ComposerPromptEditor({
+  value,
+  onChange,
+  onSubmit,
+  onEscape,
+  onAlternateSubmit,
+  onSendQueuedNow,
+  onEditQueued,
+  placeholder,
+  handleRef,
+  onPasteFiles,
+  autoFocus = false,
+}: Props) {
   const submitRef = useRef(onSubmit);
   submitRef.current = onSubmit;
   const escapeRef = useRef(onEscape);
   escapeRef.current = onEscape;
+  const queueKeysRef = useRef({ onAlternateSubmit, onSendQueuedNow, onEditQueued });
+  queueKeysRef.current = { onAlternateSubmit, onSendQueuedNow, onEditQueued };
   const pasteFilesRef = useRef(onPasteFiles);
   pasteFilesRef.current = onPasteFiles;
   const placeholderRef = useRef(placeholder);
@@ -177,7 +200,12 @@ export function ComposerPromptEditor({ value, onChange, onSubmit, onEscape, plac
       Placeholder.configure({ placeholder: () => placeholderRef.current }),
       Extension.create({
         name: "composer-submit",
+        // Ahead of StarterKit's hard break, which also claims Mod-Enter.
+        priority: 1000,
         addKeyboardShortcuts: () => ({
+          "Mod-Enter": () => queueKeysRef.current.onAlternateSubmit?.() ?? false,
+          "Mod-Shift-Enter": () => queueKeysRef.current.onSendQueuedNow?.() ?? false,
+          "Alt-ArrowUp": () => queueKeysRef.current.onEditQueued?.() ?? false,
           Enter: () => {
             // On a phone keyboard Return starts a new line and the send button sends, as in T3 Code.
             if (softwareKeyboardOpen()) return false;

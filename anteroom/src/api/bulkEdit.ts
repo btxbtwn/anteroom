@@ -11,8 +11,12 @@ export interface BulkEdits {
   tags_mode?: ListMode;
   tags?: string[];
   category?: BulkCategories;
+  /** A saved shipping preset's id: its package size, weight and marketplace shipping. */
+  shipping_preset?: string;
+  /** Put every marketplace price back on the seller's pricing rules. */
+  pricing_rules?: boolean;
 }
-export interface BulkExtras { tagsMode: ListMode; tagsText: string; category: BulkCategories }
+export interface BulkExtras { tagsMode: ListMode; tagsText: string; category: BulkCategories; shippingPreset?: string; pricingRules?: boolean }
 
 function splitList(text: string): string[] {
   return [...new Set(text.split(",").map((value) => value.trim()).filter(Boolean))];
@@ -43,11 +47,16 @@ export function bulkEditsFromInputs(fields: Partial<Record<BulkField, string>>, 
   const tags = splitList(extras?.tagsText ?? "");
   const category = Object.fromEntries(Object.entries(extras?.category ?? {}).filter(([, value]) => value)) as BulkCategories;
   const hasCategory = Object.keys(category).length > 0;
-  if (!Object.keys(values).length && labelsMode === "keep" && tagsMode === "keep" && !hasCategory) throw new Error("Choose at least one field, label, tag or category action.");
+  const shippingPreset = extras?.shippingPreset || "";
+  const pricingRules = Boolean(extras?.pricingRules);
+  if (!Object.keys(values).length && labelsMode === "keep" && tagsMode === "keep" && !hasCategory && !shippingPreset && !pricingRules) {
+    throw new Error("Choose at least one field, label, tag, category, shipping or pricing action.");
+  }
   if ((labelsMode === "add" || labelsMode === "remove") && !labels.length) throw new Error("Enter labels to add or remove.");
   if ((tagsMode === "add" || tagsMode === "remove") && !tags.length) throw new Error("Enter tags to add or remove.");
   return { values, labels_mode: labelsMode, labels,
-    ...(tagsMode !== "keep" ? { tags_mode: tagsMode, tags } : {}), ...(hasCategory ? { category } : {}) };
+    ...(tagsMode !== "keep" ? { tags_mode: tagsMode, tags } : {}), ...(hasCategory ? { category } : {}),
+    ...(shippingPreset ? { shipping_preset: shippingPreset } : {}), ...(pricingRules ? { pricing_rules: true } : {}) };
 }
 export function bulkReviewTokens(rows: BulkReviewRow[]): BulkReviewToken[] {
   return rows.filter((row) => !row.skip_reason && row.changes.length > 0).map(({ conversation_id, expected_revision_id, expected_basis, expected_result }) => ({ conversation_id, expected_revision_id, expected_basis, expected_result }));

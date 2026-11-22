@@ -1,13 +1,17 @@
 import { listingScreenRead } from "./listingScreen";
 import { reportError } from "./errorReports";
 import type { VendooDraft } from "./vendooDraft";
-import type { CsvInput, CsvResult, CurrencyReport, Expense, ExpenseInput, ExpenseUpdate, MileageAmount, MileageInput, OfferLogResponse } from "./contract.gen";
+import type { ConnectionStatus, CsvInput, CsvResult, CurrencyReport, Expense, ExpenseInput, ExpenseUpdate, MarketplaceCloudResult, MileageAmount, MileageInput, OfferLogResponse, PlaidExchange, PlaidLinkToken, PlaidStatus } from "./contract.gen";
 import { ApiRequestError, currentHostedSession, retryAfterMs, studioFetch, studioUpload, hasHostedApiSession } from "./transport";
 import { trackPhotoUpload } from "../photoUploads";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
 import type { CopyPreview, CopyListingRequest, BatchCopyPreviewRow } from "./listingCopy";
 import type { ListingVideo, ListingVideoLibrary, MarketplaceMediaRules } from "./listingVideos";
 import type { BulkEdits, BulkReviewRow, BulkReviewToken, BulkEditResult } from "./bulkEdit";
+import type {
+  ListingWarnings, MarketplaceTextResult, PricingRules, PricingRulesUpdate, RuleMarketplace, ShippingPresetInput,
+  ShippingPresets, TextMode, TransformedListing,
+} from "./listingRules";
 import type { BulkDeleteResult, BulkDeleteRow } from "./bulkDelete";
 import type { LabelColor } from "../labelColors";
 import type { BulkMarketplaceAction, BulkMarketplacePerform, BulkMarketplacePreview, BulkMarketplaceResult } from "./bulkMarketplace";
@@ -87,7 +91,8 @@ import type {
   RelistGap, ScheduledPublishLog,
 } from "./automations";
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
-import type { AgentConnectionStatus, AgentConnectionTest } from "./agentConnection";
+import type { AgentConnectionStatus, AgentConnectionTest, McpAccessToken, McpTokenCreateResponse } from "./agentConnection";
+import { browserTimeZone, type GoalMetric, type GoalPeriod, type HomeMutationResponse, type HomeSummaryResponse } from "./home";
 import type {
   DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus,
   SaleSyncOutcome, SaleTrackerResponse, StillListedResponse,
@@ -515,7 +520,32 @@ function postHostedPhoto(convId: string, file: File, marketplace?: string): Prom
   return studioFetch(`${BASE}/drafts/${encodeURIComponent(convId)}/photos${query}`, { method: "POST", body: file });
 }
 
+export type GenerationRating = {
+  rating: "up" | "down";
+  issues: string[];
+  note: string;
+};
+
+export type SellerCountry = "US" | "CA" | "GB" | "AU";
+type SellerRegion = { country: SellerCountry; currency: string; ebay_marketplace: string; poshmark_domain: string | null; marketplaces: string[] };
+
 export const api = {
+  plaid: {
+    status: (signal: AbortSignal) => read<PlaidStatus>("/business-expenses/plaid/status", { signal }),
+    linkToken: (connectionId?: string) => request<PlaidLinkToken>(
+      `/business-expenses/plaid/link-token${connectionId ? `?connection_id=${encodeURIComponent(connectionId)}` : ""}`,
+      { method: "POST" },
+    ),
+    exchange: (body: PlaidExchange) => request<ConnectionStatus>("/business-expenses/plaid/exchange", {
+      method: "POST", body: JSON.stringify(body),
+    }),
+    sync: (id: string) => request<ConnectionStatus>(
+      `/business-expenses/plaid/connections/${encodeURIComponent(id)}/sync`, { method: "POST" },
+    ),
+    disconnect: (id: string) => request<void>(
+      `/business-expenses/plaid/connections/${encodeURIComponent(id)}`, { method: "DELETE" },
+    ),
+  },
   businessExpenses: {
     list: (params: string, signal: AbortSignal) => read<Expense[]>(`/business-expenses?${params}`, { signal }),
     report: (params: string, signal: AbortSignal) => read<CurrencyReport[]>(`/business-expenses/profit-and-loss?${params}`, { signal }),
@@ -934,8 +964,10 @@ export const api = {
   cloudSessions: {
     connectToken: (marketplace: ExtensionSessionMarket) =>
       request<CloudConnectTokenResponse>(`/cloud-sessions/${marketplace}/connect-token`, { method: "POST" }),
+    verify: (marketplace: ExtensionSessionMarket) =>
+      request<MarketplaceCloudResult>(`/cloud-sessions/${marketplace}/verify`, { method: "POST" }),
     disconnect: (marketplace: ExtensionSessionMarket) =>
-      request<OkResponse>(`/cloud-sessions/${marketplace}`, { method: "DELETE" }),
+      request<MarketplaceCloudResult>(`/cloud-sessions/${marketplace}`, { method: "DELETE" }),
   },
   marketplaceListings: {
     get: (convId: string, options?: ReadOptions) => read<MarketplaceListings>(`/conversations/${convId}/marketplace-listings`, options),
@@ -1010,6 +1042,9 @@ export const api = {
   bulkEdit: {
     preview: (conversationIds: string[], edits: BulkEdits) => request<{ rows: BulkReviewRow[] }>("/listings/bulk-edit/preview", { method: "POST", body: JSON.stringify({ conversation_ids: conversationIds, edits }) }),
     apply: (edits: BulkEdits, rows: BulkReviewToken[]) => request<BulkEditResult>("/listings/bulk-edit/apply", { method: "POST", body: JSON.stringify({ edits, rows }) }),
+    /** Keep, shorten or write one item's marketplace text, saved as a local edit. Never sends anything. */
+    marketplaceText: (conversationId: string, body: { marketplaces: RuleMarketplace[]; mode: TextMode; expected_revision_id?: string | null }) =>
+      request<MarketplaceTextResult>(`/listings/bulk-edit/marketplace-text/${encodeURIComponent(conversationId)}`, { method: "POST", body: JSON.stringify(body) }),
   },
   bulkMarketplace: {
     preview: (conversationIds: string[], action: BulkMarketplaceAction, marketplaces: DelistMarketplace[]) =>
@@ -1098,6 +1133,13 @@ export const api = {
       data_dir?: string;
     }>("/status", options),
 
+  generationFeedback: {
+    get: (id: string) => read<{ revision_id: string; feedback: GenerationRating | null } | null>(`/conversations/${id}/generation-feedback`),
+    save: (id: string, revisionId: string, feedback: GenerationRating) => request<GenerationRating>(`/conversations/${id}/generation-feedback`, {
+      method: "PUT", body: JSON.stringify({ revision_id: revisionId, ...feedback }),
+    }),
+    summary: () => read<{ up: number; down: number; issues: Record<string, number> }>("/generation-feedback"),
+  },
   conversations: {
     copyBatchPreview: (ids: string[]) => request<{ rows: BatchCopyPreviewRow[] }>("/listings/copies/preview", { method: "POST", body: JSON.stringify({ conversation_ids: ids }) }),
     copyResult: (id: string, requestId: string) => request<Conversation>(`/conversations/${id}/copy-result/${requestId}`),
@@ -1120,6 +1162,8 @@ export const api = {
       request<Conversation>(`/conversations/${id}/unsettle`, { method: "POST" }),
     stop: (id: string) =>
       request<{ ok: boolean }>(`/conversations/${id}/stop`, { method: "POST" }),
+    cancelGeneration: (id: string) =>
+      request<{ ok: boolean }>(`/conversations/${id}/generate/cancel`, { method: "POST" }),
     activity: (id: string, options?: ReadOptions) => read<ConversationActivity>(`/conversations/${id}/activity`, options),
     messages: (id: string, options?: ReadOptions) => read<Message[]>(`/conversations/${id}/messages`, options),
     /** The item's photos, or with `marketplace` the photos added on that marketplace's form only. */
@@ -1305,6 +1349,25 @@ export const api = {
   },
 
   settings: {
+    pricingRules: () => request<PricingRules>("/settings/pricing-rules"),
+    setPricingRules: (body: PricingRulesUpdate) =>
+      request<PricingRules>("/settings/pricing-rules", { method: "PUT", body: JSON.stringify(body) }),
+    /** The listing with its marketplace prices back on the rules; the caller saves it. */
+    applyPricingRules: (listing: ListingData, marketplaces?: RuleMarketplace[]) =>
+      request<TransformedListing>("/settings/pricing-rules/apply", { method: "POST", body: JSON.stringify({ listing, marketplaces }) }),
+    shippingPresets: () => request<ShippingPresets>("/settings/shipping-presets"),
+    createShippingPreset: (preset: ShippingPresetInput) =>
+      request<ShippingPresets>("/settings/shipping-presets", { method: "POST", body: JSON.stringify(preset) }),
+    updateShippingPreset: (id: string, preset: ShippingPresetInput) =>
+      request<ShippingPresets>(`/settings/shipping-presets/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(preset) }),
+    deleteShippingPreset: (id: string) =>
+      request<ShippingPresets>(`/settings/shipping-presets/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    /** The listing with the preset's package and shipping fields; the caller saves it. */
+    applyShippingPreset: (id: string, listing: ListingData) =>
+      request<TransformedListing>(`/settings/shipping-presets/${encodeURIComponent(id)}/apply`, { method: "POST", body: JSON.stringify({ listing }) }),
+    listingWarnings: () => request<ListingWarnings>("/settings/listing-warnings"),
+    setListingWarnings: (body: { missing_sku?: boolean }) =>
+      request<ListingWarnings>("/settings/listing-warnings", { method: "PUT", body: JSON.stringify(body) }),
     saleDetection: () => request<SaleDetectionStatus>("/settings/sale-detection"),
     setSaleDetection: (marketplace: string, enabled: boolean) =>
       request<SaleDetectionStatus>("/settings/sale-detection", {
@@ -1447,6 +1510,10 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(models),
       }),
+    sellerRegion: () => read<SellerRegion>("/settings/seller-region"),
+    setSellerRegion: (country: SellerCountry) => request<SellerRegion>("/settings/seller-region", {
+      method: "PUT", body: JSON.stringify({ country }),
+    }),
     marketplaces: () =>
       request<{
         available: { id: string; label: string; fillable: boolean }[];
@@ -1615,6 +1682,18 @@ export const api = {
       }>("/settings/formulas", { method: "PUT", body: JSON.stringify(body) }),
     agent: () => request<AgentConnectionStatus>("/settings/agent"),
     testAgent: () => request<AgentConnectionTest>("/settings/agent/test", { method: "POST" }),
+    mcpTokens: {
+      list: () => request<{ tokens: McpAccessToken[] }>("/settings/mcp-tokens"),
+      create: (body: { name: string; expires_in_days?: number | null }) =>
+        request<McpTokenCreateResponse>("/settings/mcp-tokens", {
+          method: "POST",
+          body: JSON.stringify(body),
+        }),
+      revoke: (tokenId: string) =>
+        request<{ ok: boolean }>(`/settings/mcp-tokens/${encodeURIComponent(tokenId)}`, {
+          method: "DELETE",
+        }),
+    },
     tailscale: () =>
       request<{
         available: boolean;
@@ -1752,6 +1831,43 @@ export const api = {
         "/updates/versions/install",
         { method: "POST", body: JSON.stringify({ tag, snapshot: snapshot ?? null }) },
       ),
+  },
+
+  home: {
+    summary: (timezone = browserTimeZone()) =>
+      request<HomeSummaryResponse>(`/home?timezone=${encodeURIComponent(timezone)}`),
+    upsertGoal: (
+      body: { period: GoalPeriod; metric: GoalMetric; target: number; label?: string | null },
+      timezone = browserTimeZone(),
+    ) =>
+      request<HomeMutationResponse>(`/home/goals?timezone=${encodeURIComponent(timezone)}`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    updateGoal: (
+      goalId: string,
+      body: { period?: GoalPeriod; metric?: GoalMetric; target?: number; label?: string | null },
+      timezone = browserTimeZone(),
+    ) =>
+      request<HomeMutationResponse>(
+        `/home/goals/${encodeURIComponent(goalId)}?timezone=${encodeURIComponent(timezone)}`,
+        { method: "PATCH", body: JSON.stringify(body) },
+      ),
+    deleteGoal: (goalId: string, timezone = browserTimeZone()) =>
+      request<HomeMutationResponse>(
+        `/home/goals/${encodeURIComponent(goalId)}?timezone=${encodeURIComponent(timezone)}`,
+        { method: "DELETE" },
+      ),
+    dismissAttention: (itemKey: string, kind: string, timezone = browserTimeZone()) =>
+      request<HomeMutationResponse>(`/home/attention/dismiss?timezone=${encodeURIComponent(timezone)}`, {
+        method: "POST",
+        body: JSON.stringify({ item_key: itemKey, kind }),
+      }),
+    restoreAttention: (itemKey: string, timezone = browserTimeZone()) =>
+      request<HomeMutationResponse>(`/home/attention/restore?timezone=${encodeURIComponent(timezone)}`, {
+        method: "POST",
+        body: JSON.stringify({ item_key: itemKey }),
+      }),
   },
 
   changelog: () =>

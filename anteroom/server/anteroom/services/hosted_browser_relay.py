@@ -31,7 +31,7 @@ from collections import deque
 from anteroom.services import bridge_approvals
 from anteroom.services.marketplace_diagnostics import failure_context
 from anteroom.services.marketplace_errors import report_exception, report_result
-from anteroom.services.extension_connection import MARKETPLACE_ACTIONS, ReplyWaits
+from anteroom.services.extension_connection import MARKETPLACE_ACTIONS, MARKETPLACE_REGIONS, ReplyWaits, needs_regional_bridge
 
 logger = logging.getLogger(__name__)
 
@@ -135,7 +135,10 @@ class BrowserRelay(ReplyWaits):
             if loop.is_closed():
                 return False
             return await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(self.deliver_local(message), loop))
-        capability = COMMANDS.get(str(message.get("type")))
+        command_type = str(message.get("type"))
+        if needs_regional_bridge(command_type, message.get("payload") or {}) and not self._can(MARKETPLACE_REGIONS):
+            return False
+        capability = COMMANDS.get(command_type)
         if capability is None or not self._can(capability):
             return False
         # The page and Bridge take exactly these fields; the socket envelope's others stay here.
@@ -185,7 +188,14 @@ class BrowserRelay(ReplyWaits):
         self.note_seen(capabilities)
         self._loop = asyncio.get_running_loop()
         deadline = time.monotonic() + timeout
-        while not self._outbox:
+        while True:
+            index = next((index for index, queued in enumerate(self._outbox)
+                          if MARKETPLACE_REGIONS in capabilities
+                          or not needs_regional_bridge(str(queued.get("type")), queued.get("payload") or {})), None)
+            if index is not None:
+                command = self._outbox[index]
+                del self._outbox[index]
+                break
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return None
@@ -196,12 +206,11 @@ class BrowserRelay(ReplyWaits):
                 return None
             finally:
                 self._seen_at = time.monotonic()
-        command = self._outbox.popleft()
         if (sent := self._sent.get(str(command.get("message_id")))) is not None:
             sent["delivered"] = time.monotonic()
         # Signed as the page takes it, so the approval's few minutes start now.
         photos = None
-        if (bridge_approvals.signs_every_command(self._capabilities)
+        if (bridge_approvals.signs_every_command(capabilities)
                 and command.get("type") in bridge_approvals.PHOTO_COMMANDS and command.get("job_id")):
             try:
                 photos = await approved_photo_hashes(str(command["job_id"]))
@@ -209,7 +218,7 @@ class BrowserRelay(ReplyWaits):
                 # The page went away while the photos were read: the next poll takes the command.
                 self._outbox.appendleft(command)
                 raise
-        return bridge_approvals.signed(self.owner, command, self._capabilities, photos)
+        return bridge_approvals.signed(self.owner, command, capabilities, photos)
 
     async def read_local(self, command: str, payload: dict, timeout: float) -> dict:
         """One named command other than a marketplace action, run in the seller's Chrome,
@@ -246,15 +255,15 @@ class BrowserRelay(ReplyWaits):
         if not isinstance(request_id, str):
             raise ChromeReadError("Chrome did not answer in time. Try again.")
         waiter = self.register_wait(request_id, message.get("job_id"))
-        if not await self.deliver_local(message):
-            self.cancel_wait(request_id)
-            raise ChromeReadError("Open Anteroom in Chrome on your computer and connect Chrome first.")
         try:
+            if not await self.deliver_local(message):
+                raise ChromeReadError("Open Anteroom in Chrome on your computer and connect Chrome first.")
             result = await asyncio.wait_for(waiter, timeout)
         except TimeoutError:
             raise ChromeReadError("Chrome did not answer in time. Try again.") from None
         finally:
             self.cancel_wait(request_id)
+            self._outbox = deque(item for item in self._outbox if item.get("message_id") != request_id)
         return result if isinstance(result, dict) else {"ok": False}
 
     async def read(self, command: str, payload: dict, timeout: float) -> dict:

@@ -95,7 +95,7 @@ struct MarketplaceActionsTests {
         precondition(one.title == "List “Blue shirt” on eBay?" && one.button == "List on eBay")
         precondition(!one.message.contains("Chrome"))
         let chrome = MarketplaceActions.listQuestion(title: "Blue shirt", marketplace: "depop")
-        precondition(chrome.message.contains("Depop goes through Chrome on your computer"))
+        precondition(chrome.message.contains("connected cloud session"))
         let update = MarketplaceActions.updateQuestion(title: "Blue shirt", marketplace: "poshmark")
         precondition(update.title == "Update the live Poshmark listing for “Blue shirt” with what's saved in Anteroom?")
         precondition(update.button == "Update on Poshmark" && update.message.contains("already up") && update.message.contains("Chrome"))
@@ -104,7 +104,7 @@ struct MarketplaceActionsTests {
         precondition(delist.message.contains("• eBay: ended\n• Mercari: deleted"))
         let everywhere = MarketplaceActions.listEverywhereQuestion(title: "Blue shirt", marketplaces: ["ebay", "etsy", "depop"])
         precondition(everywhere.title == "List “Blue shirt” on 3 marketplaces?" && everywhere.button == "List on 3 marketplaces")
-        precondition(everywhere.message.contains("eBay, Etsy and Depop") && everywhere.message.contains("Depop goes through Chrome"))
+        precondition(everywhere.message.contains("eBay, Etsy and Depop") && everywhere.message.contains("connected cloud session"))
         precondition(MarketplaceActions.listEverywhereQuestion(title: "Blue shirt", marketplaces: ["ebay"]) == one)
 
         // A rate limit counts down from the marketplace's retry time.

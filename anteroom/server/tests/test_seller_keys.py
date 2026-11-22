@@ -38,6 +38,11 @@ CASES = [
                           expires_at=datetime.now(UTC) + timedelta(hours=1))),
 ]
 
+PLAID_CASES = [
+    ("plaid_connections", dict(institution_id="bank", institution_name="Bank", environment="sandbox", accounts=[])),
+    ("plaid_transactions", dict(import_key="transaction", imported_revision=1)),
+]
+
 
 def owned_values(values, seller):
     return values | ({"job_id": f"job-{seller}"} if "job_id" in values else {})
@@ -55,7 +60,7 @@ def prepare(engine, revision="head"):
                                {"job": f"job-{seller}", "item": f"item-{seller}", "seller": seller})
 
 
-@pytest.mark.parametrize("table_name,values", CASES, ids=[case[0] for case in CASES])
+@pytest.mark.parametrize("table_name,values", CASES + PLAID_CASES, ids=[case[0] for case in CASES + PLAID_CASES])
 def test_independent_shops_can_reuse_keys_but_same_shop_cannot(migration_engine, table_name, values):  # noqa: F811
     engine = migration_engine
     prepare(engine)

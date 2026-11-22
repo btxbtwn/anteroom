@@ -12,6 +12,8 @@ export type BulkRegenerateProgress = {
   total: number;
   id: string;
   phase: "dropping" | "resetting" | "generating" | "finishing";
+  started?: boolean;
+  waiting?: boolean;
 };
 
 export type BulkRegenerateFailure = {
@@ -22,7 +24,7 @@ export type BulkRegenerateFailure = {
 export type BulkRegenerateResult = {
   completed: string[];
   failed: BulkRegenerateFailure[];
-  /** Wipe was stopped before the rewrite, so generate never started. */
+  /** Generation stopped before submission. */
   skipped: string[];
   cancelled: boolean;
 };
@@ -105,7 +107,7 @@ export type BulkRegenerateDeps = {
   /** False when Stop dropped the wipe and this listing should stay cleared. */
   accepted(id: string): boolean;
   /** Resolve when the generate stream finishes. Reject when the rewrite fails. */
-  generate(id: string): Promise<void>;
+  generate(id: string): Promise<void | false>;
   /** True while post-generate work is still writing this listing. */
   pending(id: string): Promise<boolean>;
   sleep(ms: number): Promise<void>;
@@ -257,7 +259,10 @@ export async function runBulkRegenerate(
     // leave the chat and generated fields discarded with nothing written back.
     control.onProgress?.({ ...progress, phase: "generating" });
     try {
-      await deps.generate(id);
+      if (await deps.generate(id) === false) {
+        result.skipped.push(id);
+        return;
+      }
     } catch (err) {
       result.failed.push({ id, message: errorText(err) });
       return;
@@ -303,8 +308,10 @@ export async function followListingGeneration(
     sleep?: (ms: number) => Promise<void>;
     maxAttempts?: number;
     onStarted?: () => void;
+    onWaiting?: (waiting: boolean) => void;
+    submissionSignal?: AbortSignal;
   } = {},
-): Promise<void> {
+): Promise<void | false> {
   const fetchImpl = options.fetchImpl ?? studioFetch;
   const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   const maxAttempts = options.maxAttempts ?? 20;
@@ -313,7 +320,31 @@ export async function followListingGeneration(
   let attempt = 0;
   let lastError = "Listing generation did not finish.";
 
+  async function waitToRetry(ms: number) {
+    const signal = options.submissionSignal;
+    if (started || !signal) {
+      await sleep(ms);
+      return;
+    }
+    if (signal.aborted) return;
+    try {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(finish, ms);
+        function finish() {
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", finish);
+          resolve();
+        }
+        signal.addEventListener("abort", finish, { once: true });
+        options.onWaiting?.(true);
+      });
+    } finally {
+      options.onWaiting?.(false);
+    }
+  }
+
   while (attempt < maxAttempts) {
+    if (!started && options.submissionSignal?.aborted) return false;
     attempt += 1;
     const resume = started;
     const url = `/api/conversations/${encodeURIComponent(convId)}/generate${resume ? "?resume=1" : ""}`;
@@ -330,6 +361,13 @@ export async function followListingGeneration(
       continue;
     }
     if (!res.ok) {
+      if (res.status === 429 && attempt < maxAttempts) {
+        const retryAfter = Number(res.headers.get("Retry-After"));
+        if (Number.isFinite(retryAfter) && retryAfter > 0 && retryAfter <= 120) {
+          await waitToRetry(retryAfter * 1000);
+          continue;
+        }
+      }
       throw new Error(await responseError(res));
     }
     started = true;
@@ -339,8 +377,9 @@ export async function followListingGeneration(
     }
     let content = "";
     let sawDone = false;
+    let error = "";
     try {
-      ({ content, sawDone } = await readGenerationSse(res));
+      ({ content, sawDone, error } = await readGenerationSse(res));
     } catch (err) {
       lastError = errorText(err);
       await sleep(Math.min(1500 * attempt, 5000));
@@ -351,6 +390,7 @@ export async function followListingGeneration(
       await sleep(Math.min(1500 * attempt, 5000));
       continue;
     }
+    if (error.trim()) throw new Error(error.trim());
     const trimmed = content.trim();
     if (/^error:/i.test(trimmed)) {
       throw new Error(trimmed.replace(/^error:\s*/i, "") || "Could not rewrite this listing.");
@@ -385,8 +425,9 @@ async function responseError(res: Response): Promise<string> {
   return fallback;
 }
 
-export function parseGenerationSse(text: string): { content: string; sawDone: boolean } {
+export function parseGenerationSse(text: string): { content: string; sawDone: boolean; error: string } {
   let content = "";
+  let error = "";
   let sawDone = false;
   let eventType = "message";
   for (const line of text.split("\n")) {
@@ -394,16 +435,18 @@ export function parseGenerationSse(text: string): { content: string; sawDone: bo
     eventType = next.eventType;
     if (next.done) sawDone = true;
     if (next.text) content += next.text;
+    if (next.error) error += next.error;
   }
-  return { content, sawDone };
+  return { content, sawDone, error };
 }
 
-async function readGenerationSse(res: Response): Promise<{ content: string; sawDone: boolean }> {
+async function readGenerationSse(res: Response): Promise<ReturnType<typeof parseGenerationSse>> {
   const reader = res.body?.getReader();
   if (!reader) return parseGenerationSse(await res.text());
   const decoder = new TextDecoder();
   let buffer = "";
   let content = "";
+  let error = "";
   let sawDone = false;
   let eventType = "message";
   while (true) {
@@ -417,20 +460,22 @@ async function readGenerationSse(res: Response): Promise<{ content: string; sawD
       eventType = next.eventType;
       if (next.done) sawDone = true;
       if (next.text) content += next.text;
+      if (next.error) error += next.error;
     }
   }
   if (buffer) {
     const next = applyGenerationSseLine(buffer, eventType);
     if (next.done) sawDone = true;
     if (next.text) content += next.text;
+    if (next.error) error += next.error;
   }
-  return { content, sawDone };
+  return { content, sawDone, error };
 }
 
 function applyGenerationSseLine(
   raw: string,
   eventType: string,
-): { eventType: string; done: boolean; text: string } {
+): { eventType: string; done: boolean; text: string; error?: string } {
   const line = raw.replace(/\r$/, "");
   if (!line) return { eventType: "message", done: false, text: "" };
   if (line.startsWith(":")) return { eventType, done: false, text: "" };
@@ -440,6 +485,7 @@ function applyGenerationSseLine(
   if (!line.startsWith("data:")) return { eventType, done: false, text: "" };
   const chunk = line.startsWith("data: ") ? line.slice(6) : line.slice(5);
   if (chunk === "[DONE]") return { eventType: "message", done: true, text: "" };
+  if (eventType === "error") return { eventType, done: false, text: "", error: chunk + "\n" };
   if (eventType !== "message") return { eventType, done: false, text: "" };
   return { eventType, done: false, text: chunk };
 }

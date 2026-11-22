@@ -421,7 +421,12 @@ async def _fill_etsy(listing: dict, path: str) -> bool:
 
 
 def _catalogs(db) -> dict[str, list[dict]]:
-    return {**native_rows(), "ebay": tree_leaves(db, "ebay")}
+    from anteroom.services.seller_region import seller_region
+
+    # The synced tree is US-only. Other sites use the live suggestion path
+    # where available, or leave the category for the seller to choose.
+    ebay = tree_leaves(db, "ebay") if seller_region(db=db).ebay_marketplace == "EBAY_US" else []
+    return {**native_rows(), "ebay": ebay}
 
 
 async def apply_native_categories(

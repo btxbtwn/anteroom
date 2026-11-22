@@ -154,6 +154,7 @@ def test_populated_previous_release_upgrade_preserves_records_and_old_foreign_ke
     for row in before.get("listing_revisions", []):
         row["inventory_quantity"] = None
         row["normalized_hash"] = None
+        row["generation_feedback"] = None
         row["inventory_fields"] = {
             "sku": None, "price": 42, "quantity": None, "cost": None, "brand": None,
             "category_path": None, "title": "Vintage coat", "type": None,

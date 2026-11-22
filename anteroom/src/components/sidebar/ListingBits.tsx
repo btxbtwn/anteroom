@@ -102,7 +102,7 @@ export function ListingTag({ tone, title, children }: { tone: "info" | "warning"
   return (
     <span
       className={cn(
-        "rounded-full px-1.5 py-px text-2xs font-medium leading-tight",
+        "shrink-0 whitespace-nowrap rounded-full px-1.5 py-px text-2xs font-medium leading-tight",
         tone === "info" ? "bg-primary/12 text-primary" : "bg-warning/14 text-warning-foreground",
       )}
       title={title}

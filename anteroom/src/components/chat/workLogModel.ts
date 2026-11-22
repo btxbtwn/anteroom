@@ -195,13 +195,16 @@ export interface FoldedTurn {
   startedAtMs: number;
   endedAtMs: number;
   cancelled: boolean;
+  /** Cut off so the seller's next message could go straight in (a steer). */
+  steered?: boolean;
   /** Message ids that existed when the turn started; the turn's own messages are the rest. */
   baseIds: string[];
 }
 
-export function turnFoldLabel(turn: Pick<FoldedTurn, "startedAtMs" | "endedAtMs" | "cancelled">): string {
+export function turnFoldLabel(turn: Pick<FoldedTurn, "startedAtMs" | "endedAtMs" | "cancelled" | "steered">): string {
   const elapsed = turn.endedAtMs - turn.startedAtMs;
   const duration = Number.isFinite(elapsed) && elapsed >= 0 ? formatDuration(elapsed) : null;
+  if (turn.steered) return duration ? `Cut off by your next message after ${duration}` : "Cut off by your next message";
   if (turn.cancelled) return duration ? `You stopped after ${duration}` : "You stopped this response";
   return duration ? `Worked for ${duration}` : "Worked";
 }

@@ -335,10 +335,16 @@ All eBay Item Specifics fields. Use Appendix values. Omit fields that do not app
 
 Use these lists only to select valid dropdown values. Outputs should still be the clean one-line Field: Value format.
 
-## **eBay Optional Fields - Value Lists**
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:f578abcbb1f20d15afb60c576b8c2084bf3e04784fb7bd8427912d9f5de7d9db -->
+
+## **eBay Apparel Optional Fields - Value Lists**
 
 * “Show Optional Fields” – REQUIRED  
-* Fill every applicable optional row. Leave a row out only when the attribute literally does not apply (MPN, UPC, Character, Theme, Strap Type, Accents, Country of Origin, Sleeve Type). Never write Does Not Apply. Fabric Weight: leave blank unless a numeric oz/gsm value is evidenced — never Lightweight. Never leave Features, Neckline, Season, Fit, Pattern, Occasion, Closure, Unit Quantity, or Unit Type blank.  
+* Fill every applicable optional row. Leave a row out only when the attribute literally does not apply (MPN, UPC, Character, Theme, Strap Type, Accents, Country of Origin, Sleeve Type). Never write Does Not Apply. Fabric Weight: leave blank unless a numeric oz/gsm value is evidenced — never Lightweight. Fill Features, Neckline, Season, Fit, Pattern, Occasion, Closure, Unit Quantity, and Unit Type when the apparel category offers them and they apply.
+
+<!-- /coderabbit-ai-generated:v1 -->
 * Accents: Beaded, Bow, Button, Crochet, Embroidered, Fringe, Fur Trim, Glitter, Jewel, Logo, Pleated, Quilted, Rhinestone, Ruffle, Sequin, Strap, Studded, Tasseled, Zipper  
 * Character: (if applicable) Disney, Marvel, Band name, etc.  
 * Closure: Zip, Button, Snap, Tie, Pullover, Hook & Eye, Elastic, Toggle, Velcro, Drawstring, Clasp, Lace-up, Magnetic  

@@ -48,6 +48,7 @@ def _preload_form_caches(
     if marketplace == "ebay":
         from anteroom.services.ebay_listings import ebay_category_id
         from anteroom.services.listing_result import ListingProblem
+        from anteroom.services.seller_region import seller_region
 
         try:
             category = ebay_category_id(snapshot)
@@ -55,12 +56,12 @@ def _preload_form_caches(
             category = ""
         schemas: dict[tuple[str, str], list[dict] | None] = {}
         if re.fullmatch(r"[1-9]\d{0,14}", category):
+            site = seller_region(db=db).ebay_marketplace
             schemas = category_fields.load_rows_many(
                 (
-                    (marketplace_schemas.EBAY_ASPECTS, category),
-                    (marketplace_schemas.EBAY_CONDITIONS, category),
-                    (marketplace_schemas.EBAY_LISTING_TYPES, category),
-                    (marketplace_schemas.EBAY_LISTING_STRUCTURE, category),
+                    (marketplace_schemas.ebay_schema_cache_key(kind, site), category)
+                    for kind in (marketplace_schemas.EBAY_ASPECTS, marketplace_schemas.EBAY_CONDITIONS,
+                                 marketplace_schemas.EBAY_LISTING_TYPES, marketplace_schemas.EBAY_LISTING_STRUCTURE)
                 ),
                 db=db,
             )
@@ -313,7 +314,9 @@ async def _ebay_choices(snapshot: dict) -> list[dict]:
 
 async def ebay_form(snapshot: dict) -> dict:
     from anteroom.services import marketplace_schemas
-    from anteroom.services.ebay_listings import (CHARITY_PERCENTS, CONDITION_IDS, best_offer_terms, condition_description,
+    from anteroom.services.ebay_fields import ebay_optional_raw
+    from anteroom.services.ebay_listings import (CHARITY_PERCENTS, CONDITION_IDS, best_offer_terms, card_condition,
+                                                      coin_condition, collectible_condition_options, condition_description,
                                                       ebay_aspects, ebay_category_id, ebay_condition, seller_sku)
     from anteroom.services.seller_overrides import price_for
 
@@ -360,11 +363,16 @@ async def ebay_form(snapshot: dict) -> dict:
     selling = raw_selling
     payment, shipping_policy, location, returns = raw_choices
     aspects = ebay_aspects(snapshot, snapshot.get("form") or {})
+    condition_code, _ = card_condition(snapshot, category) or coin_condition(snapshot, category) or (ebay_condition(snapshot), [])
+    condition_row = next((row for row in schema if row.get("id") == "condition"), None)
+    supported_conditions = {str(choice["id"]) for choice in (condition_row or {}).get("values", [])}
+    descriptor_options = (collectible_condition_options(category, condition_code)
+                          if CONDITION_IDS[condition_code] in supported_conditions else {})
 
     def aspect_field(row: dict, section: str) -> dict:
         name = row["name"]
         condition = row["id"] == "condition"
-        value = CONDITION_IDS[ebay_condition(snapshot)] if condition else aspects.get(name, [])
+        value = CONDITION_IDS[condition_code] if condition else aspects.get(name, [])
         if not row["multi"] and isinstance(value, list):
             value = value[0] if value else ""
         values = row.get("values") or []
@@ -396,7 +404,6 @@ async def ebay_form(snapshot: dict) -> dict:
     # Auction prices, offers and variations all travel with the category. The
     # editor shows the ones the current format uses, so a format change does
     # not load the form again.
-    condition_row = next((row for row in schema if row.get("id") == "condition"), None)
     schedule = details.get("schedule")
     if not isinstance(schedule, dict):
         schedule = {}
@@ -438,9 +445,13 @@ async def ebay_form(snapshot: dict) -> dict:
         field("ebay_specifics.customAspectValue", "Custom detail", details.get("customAspectValue") or "",
               section=EBAY_SPECIFIC_SECTIONS["optional"], width="half", reveal="Add custom item specific"),
         *([aspect_field(condition_row, "Condition")] if condition_row else []),
-        field("ebay_specifics.conditionDescription", "Condition description", condition_description(snapshot, snapshot.get("form") or {}),
+        *[field(f"ebay_specifics.{name}", name, ebay_optional_raw(details, name), section="Condition",
+                required=bool(options), selection_only=bool(options), options=options,
+                options_source="marketplace", max_length=30 if not options else None)
+          for name, options in descriptor_options.items()],
+        *([] if descriptor_options else [field("ebay_specifics.conditionDescription", "Condition description", condition_description(snapshot, snapshot.get("form") or {}),
               input_type="textarea", max_length=1000, section="Condition",
-              help="Let the buyer know what makes your item unique, including any interesting features or flaws."),
+              help="Let the buyer know what makes your item unique, including any interesting features or flaws.")]),
         field("ebay_specifics.description", "Item description", _shared(snapshot, "ebay", "description"), section="Description",
               help="Describe the item you're selling and provide complete and accurate details. Use a clear and concise "
                    "format to keep your description mobile-friendly."),

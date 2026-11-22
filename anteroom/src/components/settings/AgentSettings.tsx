@@ -1,10 +1,22 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { CheckIcon, CopyIcon } from "lucide-react";
+import { CheckIcon, CopyIcon, KeyRoundIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { api } from "../../api/client";
+import type { McpAccessToken, McpTokenCreateResponse } from "../../api/agentConnection";
+import { useWorkspaceRuntime } from "../../app/runtime";
+import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Spinner } from "../ui/spinner";
 import { SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
+
+const EXPIRY_OPTIONS = [
+  { value: "none", label: "Never expires" },
+  { value: "30", label: "30 days" },
+  { value: "90", label: "90 days" },
+  { value: "365", label: "1 year" },
+] as const;
 
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
@@ -30,126 +42,325 @@ function CommandBlock({ text }: { text: string }) {
   );
 }
 
+function formatDate(iso: string | null): string {
+  if (!iso) return "Never";
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  return parsed.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
 export function AgentSettings() {
+  const runtime = useWorkspaceRuntime();
   const { data, isPending, error } = useQuery({
     queryKey: ["settings-agent"],
     queryFn: api.settings.agent,
   });
+  const tokensQuery = useQuery({
+    queryKey: ["settings-mcp-tokens"],
+    queryFn: api.settings.mcpTokens.list,
+  });
   const test = useMutation({ mutationFn: api.settings.testAgent });
+
+  const [tokenName, setTokenName] = useState("");
+  const [expiryChoice, setExpiryChoice] = useState<string>("90");
+  const [createdToken, setCreatedToken] = useState<McpTokenCreateResponse | null>(null);
+
+  const createToken = useMutation({
+    mutationFn: api.settings.mcpTokens.create,
+    onSuccess: (created) => {
+      setCreatedToken(created);
+      setTokenName("");
+      void tokensQuery.refetch?.();
+    },
+  });
+
+  const revokeToken = useMutation({
+    mutationFn: api.settings.mcpTokens.revoke,
+    onSuccess: () => {
+      void tokensQuery.refetch?.();
+    },
+  });
+
+  const isHosted = runtime.hosted || data?.hosted === true;
   const installed = data?.installed === true;
+  const tokens: McpAccessToken[] = tokensQuery.data?.tokens ?? [];
+  const activeTokenCount = tokens.filter((t) => t.active).length;
+  const remoteClients = data?.remote_clients ?? [];
+
+  const handleCreateToken = (event: React.FormEvent) => {
+    event.preventDefault();
+    const trimmed = tokenName.trim();
+    if (!trimmed) return;
+    const expires_in_days = expiryChoice === "none" ? null : Number(expiryChoice);
+    createToken.mutate({ name: trimmed, expires_in_days });
+  };
 
   return (
     <>
-      <SettingsSection id="agent-cli" title="Connect an agent">
+      <SettingsSection id="agent-remote-mcp" title="Remote MCP server">
         <SettingsRow
-          title="anteroom command"
-          description="Lets an agent on this Mac do what the app allows; it never publishes or deletes without your confirmation."
-          status={
-            isPending
-              ? "Looking up the command…"
-              : installed
-                ? `${data.on_path ? "Installed and on your PATH" : "Installed"}${data.version ? `, version ${data.version}` : ""}.`
-                : "Not installed."
-          }
-          control={
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
-              disabled={test.isPending}
-              onClick={() => test.mutate()}
-            >
-              {test.isPending ? <Spinner /> : null}
-              Test connection
-            </Button>
-          }
+          id="agent-mcp-url"
+          title="Streamable HTTP endpoint"
+          description="Connect Claude, ChatGPT, Gemini, or any MCP client. Agents can read inventory, analytics, offers, sourcing ROI, and Needs Attention — and stage local drafts or edits. They can never publish, update live marketplaces, or delist."
         >
-          {data?.path ? (
+          {data?.mcp_url ? (
             <div className="flex items-start gap-2">
               <div className="min-w-0 flex-1">
-                <CommandBlock text={data.path} />
+                <CommandBlock text={data.mcp_url} />
               </div>
-              <CopyButton text={data.path} label="Copy command path" />
+              <CopyButton text={data.mcp_url} label="Copy MCP endpoint URL" />
             </div>
+          ) : isPending ? (
+            <SettingsNote>Loading MCP endpoint…</SettingsNote>
           ) : null}
-          {data?.install_command ? (
-            <div className="flex items-start gap-2">
-              <div className="min-w-0 flex-1">
-                <CommandBlock text={data.install_command} />
-              </div>
-              <CopyButton text={data.install_command} label="Copy install command" />
-            </div>
-          ) : null}
-          {data?.hint ? <SettingsNote>{data.hint}</SettingsNote> : null}
-          {data?.version_error ? <SettingsNote tone="warning">{data.version_error}</SettingsNote> : null}
           {error ? <SettingsNote tone="error">{error.message}</SettingsNote> : null}
-          {test.data ? (
-            <SettingsNote tone={test.data.ok ? "success" : "error"}>{test.data.detail}</SettingsNote>
-          ) : null}
-          {test.error ? <SettingsNote tone="error">{test.error.message}</SettingsNote> : null}
         </SettingsRow>
+
         <SettingsRow
-          id="agent-address"
-          title="Address"
-          description="Use the local address on this Mac, or the Tailscale address from another machine once Tailscale HTTPS is on."
+          id="agent-mcp-tokens"
+          title="Access tokens"
+          description="Personal tokens authenticate MCP clients to your account only. Tokens cannot publish or delist listings and cannot access other API routes."
+          status={
+            tokensQuery.isPending
+              ? "Loading tokens…"
+              : activeTokenCount === 0
+                ? "No active tokens."
+                : `${activeTokenCount} active ${activeTokenCount === 1 ? "token" : "tokens"}.`
+          }
         >
-          {data?.base_url ? (
-            <div className="flex items-start gap-2">
-              <div className="min-w-0 flex-1">
-                <CommandBlock text={data.base_url} />
+          <form onSubmit={handleCreateToken} className="flex flex-wrap items-center gap-2">
+            <Input
+              type="text"
+              value={tokenName}
+              onChange={(event) => setTokenName(event.target.value)}
+              placeholder="Token label (e.g. Claude on iPad)"
+              aria-label="New MCP access token label"
+              className="min-w-48 flex-1"
+              maxLength={120}
+            />
+            <Select value={expiryChoice} onValueChange={(value) => setExpiryChoice(value ?? "90")}>
+              <SelectTrigger size="sm" className="w-36" aria-label="Token expiration">
+                <SelectValue>
+                  {EXPIRY_OPTIONS.find((opt) => opt.value === expiryChoice)?.label ?? "90 days"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup>
+                {EXPIRY_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+            <Button type="submit" size="sm" disabled={createToken.isPending || !tokenName.trim()}>
+              {createToken.isPending ? <Spinner /> : <PlusIcon />}
+              Create token
+            </Button>
+          </form>
+
+          {createToken.error ? <SettingsNote tone="error">{createToken.error.message}</SettingsNote> : null}
+          {revokeToken.error ? <SettingsNote tone="error">{revokeToken.error.message}</SettingsNote> : null}
+          {tokensQuery.error ? <SettingsNote tone="error">{tokensQuery.error.message}</SettingsNote> : null}
+
+          {createdToken ? (
+            <div className="flex flex-col gap-2 rounded-lg border border-border bg-muted/40 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                  <KeyRoundIcon className="size-3.5 text-muted-foreground" />
+                  Copy your new token now — it will not be shown again.
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => setCreatedToken(null)}
+                >
+                  Hide
+                </Button>
               </div>
-              <CopyButton text={data.base_url} label="Copy local address" />
-            </div>
-          ) : null}
-          {data?.login_command ? (
-            <div className="flex items-start gap-2">
-              <div className="min-w-0 flex-1">
-                <CommandBlock text={data.login_command} />
-              </div>
-              <CopyButton text={data.login_command} label="Copy login command" />
-            </div>
-          ) : null}
-          {data?.remote_base_url ? (
-            <div className="flex items-start gap-2">
-              <div className="min-w-0 flex-1">
-                <CommandBlock text={data.remote_base_url} />
-              </div>
-              <CopyButton text={data.remote_base_url} label="Copy Tailscale address" />
-            </div>
-          ) : null}
-          {data?.remote_login_command ? (
-            <div className="flex items-start gap-2">
-              <div className="min-w-0 flex-1">
-                <CommandBlock text={data.remote_login_command} />
-              </div>
-              <CopyButton text={data.remote_login_command} label="Copy Tailscale login command" />
-            </div>
-          ) : null}
-        </SettingsRow>
-      </SettingsSection>
-      <SettingsSection id="agent-clients" title="Agent apps">
-        {(data?.clients ?? []).map((client) => (
-          <SettingsRow key={client.id} id={`agent-${client.id}`} title={client.label} description={client.where}>
-            {client.command ? (
               <div className="flex items-start gap-2">
                 <div className="min-w-0 flex-1">
-                  <CommandBlock text={client.command} />
+                  <CommandBlock text={createdToken.token} />
                 </div>
-                <CopyButton text={client.command} label={`Copy ${client.label} command`} />
+                <CopyButton text={createdToken.token} label="Copy new access token" />
               </div>
-            ) : null}
-            <div className="flex items-start gap-2">
-              <div className="min-w-0 flex-1">
-                <CommandBlock text={client.snippet} />
-              </div>
-              <CopyButton text={client.snippet} label={`Copy ${client.label} config`} />
             </div>
-          </SettingsRow>
-        ))}
-        {!isPending && data && data.clients.length === 0 ? (
-          <SettingsRow title="No setup yet" description="The app did not return a client snippet." />
-        ) : null}
+          ) : null}
+
+          {tokens.length > 0 ? (
+            <div className="divide-y divide-border/60 rounded-lg border border-border/60 bg-card/30">
+              {tokens.map((tok) => (
+                <div key={tok.id} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5 text-xs">
+                  <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate font-medium text-foreground">{tok.name}</span>
+                      <Badge variant={tok.active ? "secondary" : "outline"} size="sm">
+                        {tok.active ? "Active" : "Revoked"}
+                      </Badge>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-muted-foreground tabular-nums">
+                      <span className="font-mono">{tok.token_prefix}…</span>
+                      <span>Created {formatDate(tok.created_at)}</span>
+                      <span>Last used {formatDate(tok.last_used_at)}</span>
+                      {tok.expires_at ? <span>Expires {formatDate(tok.expires_at)}</span> : null}
+                    </div>
+                  </div>
+                  {tok.active ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      disabled={revokeToken.isPending}
+                      onClick={() => revokeToken.mutate(tok.id)}
+                      aria-label={`Revoke ${tok.name}`}
+                    >
+                      <Trash2Icon />
+                      Revoke
+                    </Button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </SettingsRow>
       </SettingsSection>
+
+      {remoteClients.length > 0 ? (
+        <SettingsSection id="agent-remote-clients" title="Claude, ChatGPT, and Gemini setup">
+          {remoteClients.map((client) => (
+            <SettingsRow key={client.id} id={`agent-remote-${client.id}`} title={client.label} description={client.where}>
+              {client.command ? (
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <CommandBlock text={client.command} />
+                  </div>
+                  <CopyButton text={client.command} label={`Copy ${client.label} command`} />
+                </div>
+              ) : null}
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <CommandBlock text={client.snippet} />
+                </div>
+                <CopyButton text={client.snippet} label={`Copy ${client.label} config`} />
+              </div>
+            </SettingsRow>
+          ))}
+        </SettingsSection>
+      ) : null}
+
+      {!isHosted ? (
+        <>
+          <SettingsSection id="agent-cli" title="Connect an agent">
+            <SettingsRow
+              title="anteroom command"
+              description="Lets an agent on this Mac do what the app allows; it never publishes or deletes without your confirmation."
+              status={
+                isPending
+                  ? "Looking up the command…"
+                  : installed
+                    ? `${data.on_path ? "Installed and on your PATH" : "Installed"}${data.version ? `, version ${data.version}` : ""}.`
+                    : "Not installed."
+              }
+              control={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  disabled={test.isPending}
+                  onClick={() => test.mutate()}
+                >
+                  {test.isPending ? <Spinner /> : null}
+                  Test connection
+                </Button>
+              }
+            >
+              {data?.path ? (
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <CommandBlock text={data.path} />
+                  </div>
+                  <CopyButton text={data.path} label="Copy command path" />
+                </div>
+              ) : null}
+              {data?.install_command ? (
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <CommandBlock text={data.install_command} />
+                  </div>
+                  <CopyButton text={data.install_command} label="Copy install command" />
+                </div>
+              ) : null}
+              {data?.hint ? <SettingsNote>{data.hint}</SettingsNote> : null}
+              {data?.version_error ? <SettingsNote tone="warning">{data.version_error}</SettingsNote> : null}
+              {test.data ? (
+                <SettingsNote tone={test.data.ok ? "success" : "error"}>{test.data.detail}</SettingsNote>
+              ) : null}
+              {test.error ? <SettingsNote tone="error">{test.error.message}</SettingsNote> : null}
+            </SettingsRow>
+            <SettingsRow
+              id="agent-address"
+              title="Address"
+              description="Use the local address on this Mac, or the Tailscale address from another machine once Tailscale HTTPS is on."
+            >
+              {data?.base_url ? (
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <CommandBlock text={data.base_url} />
+                  </div>
+                  <CopyButton text={data.base_url} label="Copy local address" />
+                </div>
+              ) : null}
+              {data?.login_command ? (
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <CommandBlock text={data.login_command} />
+                  </div>
+                  <CopyButton text={data.login_command} label="Copy login command" />
+                </div>
+              ) : null}
+              {data?.remote_base_url ? (
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <CommandBlock text={data.remote_base_url} />
+                  </div>
+                  <CopyButton text={data.remote_base_url} label="Copy Tailscale address" />
+                </div>
+              ) : null}
+              {data?.remote_login_command ? (
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <CommandBlock text={data.remote_login_command} />
+                  </div>
+                  <CopyButton text={data.remote_login_command} label="Copy Tailscale login command" />
+                </div>
+              ) : null}
+            </SettingsRow>
+          </SettingsSection>
+          <SettingsSection id="agent-clients" title="Agent apps">
+            {(data?.clients ?? []).map((client) => (
+              <SettingsRow key={client.id} id={`agent-${client.id}`} title={client.label} description={client.where}>
+                {client.command ? (
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <CommandBlock text={client.command} />
+                    </div>
+                    <CopyButton text={client.command} label={`Copy ${client.label} command`} />
+                  </div>
+                ) : null}
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <CommandBlock text={client.snippet} />
+                  </div>
+                  <CopyButton text={client.snippet} label={`Copy ${client.label} config`} />
+                </div>
+              </SettingsRow>
+            ))}
+            {!isPending && data && data.clients.length === 0 ? (
+              <SettingsRow title="No setup yet" description="The app did not return a client snippet." />
+            ) : null}
+          </SettingsSection>
+        </>
+      ) : null}
     </>
   );
 }

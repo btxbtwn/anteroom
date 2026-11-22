@@ -44,7 +44,10 @@ interface Props {
 }
 
 export function AnalyticsPage({ onOpenListing }: Props) {
-  const [view, setView] = useState("Sales records");
+  const [view, setView] = useState(() =>
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).has("oauth_state_id")
+      ? "Expenses" : "Sales records",
+  );
   const [mode, setMode] = useState<AccountingMode>("accrual");
   return <WorkspacePage width="expanded"><h1 className="sr-only">Analytics</h1><WorkspaceTabs label="Analytics views" main items={["Sales records", "Inventory analytics", "Expenses", "Profit & loss"]} value={view} onChange={setView}>
     {view === "Sales records"

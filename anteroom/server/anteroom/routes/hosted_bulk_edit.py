@@ -1,9 +1,12 @@
 """Reviewed account field edits, using the shared inventory editor."""
-from fastapi import APIRouter, Depends, HTTPException
+import functools
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from anteroom.services import bulk_edit
 from anteroom.services.category_tree import categories_ready
-from anteroom.services.hosted_database import get_seller_db
+from anteroom.services.hosted_database import get_seller_db, in_seller_session
+from anteroom.services.marketplace_text import TextRequest, prepare
 
 router = APIRouter(prefix='/api/listings/bulk-edit', tags=['inventory'])
 
@@ -32,3 +35,9 @@ def preview(body: bulk_edit.PreviewRequest, db=Depends(get_seller_db, scope="fun
 def apply(body: bulk_edit.ApplyRequest, db=Depends(get_seller_db, scope="function")):
     require_supported(db, body.edits)
     return bulk_edit.apply(db, body)
+
+
+@router.post('/marketplace-text/{conv_id}')
+async def marketplace_text(conv_id: str, body: TextRequest, request: Request):
+    """Keep, shorten or write one item's marketplace titles and descriptions, saved locally."""
+    return await prepare(functools.partial(in_seller_session, request), conv_id, body)

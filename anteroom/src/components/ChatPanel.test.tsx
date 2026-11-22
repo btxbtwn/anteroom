@@ -7,6 +7,8 @@ import { ChatPanel } from "./ChatPanel";
 import type { ChatComposer } from "./chat/ChatComposer";
 import { getComposerDraft, resetComposerDrafts, setComposerDraftImages, setComposerDraftText } from "./chat/composerDrafts";
 
+import * as composerImages from "./chat/composerImages";
+import { chatQueue, enqueueChatMessage, newQueuedChatMessage, removeChatMessage } from "./chat/chatQueueStore";
 import { getLive, patchLive, resetChatLive } from "./chat/liveChatStore";
 
 const { uploadPhotos, handleGenerate, sendMessage } = vi.hoisted(() => ({
@@ -26,14 +28,17 @@ vi.mock("./chat/useChatServerState", () => ({
 vi.mock("./chat/useChatStream", () => ({
   useGenerateRecovery: () => {},
   useChatStream: () => ({ handleGenerate, sendMessage }),
+  canSteerLive: () => false,
+  steerableChat: () => false,
 }));
 vi.mock("./chat/ChatTranscript", () => ({
   ChatTranscript: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 vi.mock("./chat/ChatComposer", () => ({
-  ChatComposer: ({ images, onSend }: ComponentProps<typeof ChatComposer>) => (
+  ChatComposer: ({ images, onSend, onEditQueued }: ComponentProps<typeof ChatComposer>) => (
     <>
-      <button onClick={onSend}>Send</button>
+      <button data-edit onClick={onEditQueued}>Edit</button>
+      <button onClick={() => onSend(false)}>Send</button>
       {images.error && <p role="alert">{images.error}</p>}
     </>
   ),
@@ -83,6 +88,47 @@ describe("listing photo uploads from chat", () => {
     expect(button).toBeDefined();
     await act(async () => button?.click());
   }
+
+  it("preserves edited text when another listing panel removes the queued item", async () => {
+    const item = newQueuedChatMessage("original");
+    enqueueChatMessage(draftKey, item);
+    patchLive("listing-a", { streaming: true });
+    await renderChat();
+    await act(async () => container.querySelector<HTMLButtonElement>("[data-edit]")!.click());
+    expect(getComposerDraft(draftKey).text).toBe("original");
+    await act(async () => {
+      removeChatMessage(draftKey, item.id);
+      setComposerDraftText(draftKey, "keep my edit");
+    });
+    await send();
+    expect(getComposerDraft(draftKey).text).toBe("keep my edit");
+    expect(chatQueue(draftKey)).toEqual([]);
+  });
+
+  it("prepares a busy draft only once and leaves it intact for retry after failure", async () => {
+    await uploadPhotos(); // The server-state fixture now reports an existing listing photo.
+    patchLive("listing-a", { streaming: true });
+    const attachment = { id: "tag", file: new File(["tag"], "tag.jpg", { type: "image/jpeg" }) };
+    setComposerDraftImages(draftKey, [attachment]);
+    setComposerDraftText(draftKey, "check tag");
+    const first = deferred<composerImages.PreparedImage>();
+    const prepare = vi.spyOn(composerImages, "prepareComposerImage").mockReturnValueOnce(first.promise)
+      .mockResolvedValue({ ok: true, name: "tag.jpg", dataUrl: "data:image/jpeg;base64,AQ==" });
+    try {
+      await renderChat();
+      await send();
+      await send();
+      expect(prepare).toHaveBeenCalledTimes(1);
+      await act(async () => { first.resolve({ ok: false, reason: "unreadable" }); });
+      expect(getComposerDraft(draftKey).images).toEqual([attachment]);
+      expect(getComposerDraft(draftKey).text).toBe("check tag");
+      await send();
+      expect(chatQueue(draftKey).map(item => item.text)).toEqual(["check tag"]);
+    } finally {
+      prepare.mockRestore();
+      await act(async () => { for (const item of chatQueue(draftKey)) removeChatMessage(draftKey, item.id); });
+    }
+  });
 
   it.each([false, true])("retries a partial upload after reopening chat (replaced: %s)", async (replace) => {
     const front = new File(["front"], "front.jpg", { type: "image/jpeg" });

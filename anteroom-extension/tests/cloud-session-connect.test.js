@@ -59,7 +59,8 @@ const popupSender = {
   url: 'chrome-extension://ext-id/cloud-session-connect.html#req',
 };
 
-test('cloud_session_connect opens trusted popup and uploads directly on approve', async () => {
+for (const marketplace of ['poshmark', 'mercari', 'depop']) {
+test(`cloud_session_connect opens trusted ${marketplace} popup and uploads directly on approve`, async () => {
   const api = fakeChrome();
   const uploads = [];
   let notify;
@@ -81,7 +82,7 @@ test('cloud_session_connect opens trusted popup and uploads directly on approve'
     action: 'cloud_session_connect',
     accountId: ACCOUNT,
     email: 'seller@example.com',
-    marketplace: 'poshmark',
+    marketplace,
     uploadToken: TOKEN,
   }, pageSender);
   assert.deepEqual(start, { ok: true, state: 'pending' });
@@ -92,7 +93,7 @@ test('cloud_session_connect opens trusted popup and uploads directly on approve'
     action: 'cloud_session_details',
     requestId: '33333333-3333-4333-8333-333333333333',
   }, popupSender);
-  assert.deepEqual(details, { ok: true, email: 'seller@example.com', marketplace: 'poshmark' });
+  assert.deepEqual(details, { ok: true, email: 'seller@example.com', marketplace });
 
   const approved = bridge.handle({
     type: 'cloud.connection',
@@ -100,7 +101,7 @@ test('cloud_session_connect opens trusted popup and uploads directly on approve'
     requestId: '33333333-3333-4333-8333-333333333333',
   }, popupSender);
   await started;
-  assert.deepEqual(uploads, [{ marketplace: 'poshmark', uploadToken: TOKEN }]);
+  assert.deepEqual(uploads, [{ marketplace, uploadToken: TOKEN }]);
 
   // Replaying the same requestId is rejected because it was consumed immediately.
   const replay = await bridge.handle({
@@ -112,6 +113,7 @@ test('cloud_session_connect opens trusted popup and uploads directly on approve'
   finish();
   assert.deepEqual(await approved, { ok: true });
 });
+}
 
 test('cloud_session_connect rejects mismatched account/token prefix and unsupported marketplaces', async () => {
   const api = fakeChrome();
@@ -132,7 +134,7 @@ test('cloud_session_connect rejects mismatched account/token prefix and unsuppor
     action: 'cloud_session_connect',
     accountId: ACCOUNT,
     email: 'seller@example.com',
-    marketplace: 'depop',
+    marketplace: 'ebay',
     uploadToken: TOKEN,
   }, pageSender);
   assert.equal(badMarket.ok, false);

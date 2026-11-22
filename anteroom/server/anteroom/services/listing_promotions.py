@@ -68,10 +68,11 @@ NAMES = {"poshmark": "Poshmark", "mercari": "Mercari", "depop": "Depop"}
 
 
 class PromotionError(RuntimeError):
-    def __init__(self, status_code: int, detail: str, code: str | None = None):
+    def __init__(self, status_code: int, detail: str, code: str | None = None, *, cloud_signed_out: bool = False):
         super().__init__(detail)
         self.status_code = status_code
         self.code = code
+        self.cloud_signed_out = cloud_signed_out
 
 
 def normalize_waterfall_steps(steps: list[dict] | None, *, min_discount: int = 1) -> list[dict] | None:
@@ -451,8 +452,11 @@ async def _review_remote(row: ListingPromotion, listing_id: str) -> None:
             # The price the marketplace's item read returned before refusing, when the Bridge gives it.
             if isinstance(price := facts.get("price_cents"), int) and not isinstance(price, bool) and price > 0:
                 row.price_cents = price
-            raise PromotionError(409, held, facts.get("error_code"))
-        raise PromotionError(409, str(facts.get("error") or "The marketplace did not answer."), facts.get("error_code"))
+            reason = held
+        else:
+            reason = str(facts.get("error") or "The marketplace did not answer.")
+        code = facts.get("error_code")
+        raise PromotionError(409, reason, code, cloud_signed_out=use_cloud and code == "signed_out")
     row.price_cents = int(facts["price_cents"])
     row.like_count = int(facts.get("like_count") or 0)
     if row.action not in ("offer", "bundle_offer"):
@@ -560,7 +564,8 @@ def _choose_shipping(row: ListingPromotion, shipping_discount_id: str | None) ->
 
 
 async def perform(promotion_id: str, shipping_discount_id: str | None = None, *, gap_ms: int | None = None,
-                  new_like_at: datetime | None = None, extra_payload: dict | None = None) -> dict:
+                  new_like_at: datetime | None = None, extra_payload: dict | None = None,
+                  include_executor: bool = False) -> dict:
     """Send one reviewed row, once. The caller has the seller's explicit confirmation or enabled automation.
 
     The checks, the job claim and the durable ``sending`` mark are committed before Cloud or Chrome is asked;
@@ -596,7 +601,10 @@ async def perform(promotion_id: str, shipping_discount_id: str | None = None, *,
             result = None
         # Shielded: a dropped request must not leave the send recorded as in progress.
         finish = asyncio.ensure_future(in_worker_session(_finish_send, promotion_id, job_id, result))
-        return await asyncio.shield(finish)
+        settled = await asyncio.shield(finish)
+        if include_executor:
+            settled["executor"] = "cloud" if use_cloud else "chrome"
+        return settled
     except BaseException:
         if finish is not None:
             with contextlib.suppress(BaseException):

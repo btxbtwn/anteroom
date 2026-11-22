@@ -29,6 +29,9 @@ from anteroom.services.photo_edits import PhotoEdits
 # ``/api/runtime``, which only the hosted app has) with the same models.
 CONTRACT_OPERATIONS: tuple[tuple[str, str], ...] = (
     ("get", "/api/runtime"),
+    ("get", "/api/cloud-sessions"),
+    ("post", "/api/cloud-sessions/{marketplace}/verify"),
+    ("delete", "/api/cloud-sessions/{marketplace}"),
     ("post", "/api/size-tags/read"),
     ("get", "/api/analytics/offers"),
     ("get", "/api/analytics/offers/log"),
@@ -40,6 +43,11 @@ CONTRACT_OPERATIONS: tuple[tuple[str, str], ...] = (
     ("post", "/api/business-expenses/import"),
     ("post", "/api/business-expenses/import/preview"),
     ("get", "/api/business-expenses/profit-and-loss"),
+    ("get", "/api/business-expenses/plaid/status"),
+    ("post", "/api/business-expenses/plaid/link-token"),
+    ("post", "/api/business-expenses/plaid/exchange"),
+    ("post", "/api/business-expenses/plaid/connections/{connection_id}/sync"),
+    ("delete", "/api/business-expenses/plaid/connections/{connection_id}"),
     ("get", "/api/conversations"),
     ("post", "/api/conversations"),
     ("get", "/api/conversations/{identity}"),
@@ -50,12 +58,41 @@ CONTRACT_OPERATIONS: tuple[tuple[str, str], ...] = (
     ("get", "/api/conversations/{identity}/photos"),
     ("get", "/api/listing-sheet"),
 )
-HOSTED_ONLY_OPERATIONS = {("get", "/api/runtime")}
+HOSTED_ONLY_OPERATIONS = {
+    ("get", "/api/runtime"),
+    ("get", "/api/cloud-sessions"),
+    ("post", "/api/cloud-sessions/{marketplace}/verify"),
+    ("delete", "/api/cloud-sessions/{marketplace}"),
+}
 
 
 class ContractModel(BaseModel):
     # A docstring under a field becomes its description, and a doc comment in both clients.
     model_config = ConfigDict(use_attribute_docstrings=True)
+
+
+class MarketplaceCloudStatus(ContractModel):
+    marketplace: str
+    state: str
+    mode: str
+    cloud_connected: bool
+    label: str | None = None
+    expires_at: int | None = None
+    expiring: bool
+    connected_at: str | None = None
+    last_used_at: str | None = None
+    last_error: str | None = None
+
+
+class MarketplaceCloudSessions(ContractModel):
+    enabled: list[str]
+    sessions: dict[str, MarketplaceCloudStatus]
+
+
+class MarketplaceCloudResult(ContractModel):
+    ok: bool
+    session: MarketplaceCloudStatus | None = None
+    error: str | None = None
 
 
 class ErrorDetail(ContractModel):
@@ -129,6 +166,21 @@ class DirectRecord(ContractModel):
     """The live listing's price on this marketplace, when Anteroom knows it."""
     listed_at: str | None = None
     """When Anteroom's last confirmed List put this listing up."""
+    inactive: bool = False
+    """Still on the marketplace but not for sale (deactivated, expired, Not For Sale), from
+    Anteroom's latest verified read of that listing. Neither sold nor deleted."""
+
+
+class PriceDrift(ContractModel):
+    """A marketplace price that is not what the seller's pricing rules give."""
+
+    marketplace: str
+    expected: float
+    """The price the pricing rules give this marketplace."""
+    price: float
+    """The price the marketplace has now."""
+    source: Literal["override", "live"]
+    """``override``: a price typed on that marketplace's form. ``live``: the live listing's known price."""
 
 
 class ConversationSummary(ContractModel):
@@ -163,6 +215,10 @@ class ConversationSummary(ContractModel):
     """Marketplaces a sold item sold on, from Anteroom's sales and Mark as sold. Their listing records may still read live."""
     removed_marketplaces: list[str] = []
     """Marketplaces Anteroom delisted directly, though imported history says listed."""
+    inactive_marketplaces: list[str] = []
+    """Marketplaces where the listing is still up but not for sale. Not a sale and not a delist."""
+    price_drift: list[PriceDrift] = []
+    """Marketplace prices that differ from the seller's pricing rules; empty while the rules are off."""
     units_sold: int = 0
     """Units sold on Anteroom's sales ledger. An Active row with some sold reads "1 of 3 sold"."""
     quantity: int | None = None

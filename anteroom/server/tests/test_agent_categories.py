@@ -270,6 +270,17 @@ class GeneralCategoryMapTest(unittest.TestCase):
         self.assertEqual(listing["direct_category_ids"]["ebay"], "15687")
         self.assertNotIn("subcategory", listing["poshmark_specifics"])
 
+    def test_regional_desktop_save_uses_live_ebay_instead_of_the_us_tree(self):
+        previous = {"title": "Tee", "category_path": "Old"}
+        listing = {**previous, "category_path": GENERAL_TEE}
+        search = AsyncMock(return_value={"id": "199999", "path": "Regional shirts"})
+        with patch("anteroom.services.seller_region.read_settings", return_value={"seller_region": "CA"}), \
+                patch("anteroom.services.direct_categories._ebay_leaf", new=search), \
+                patch("anteroom.services.direct_categories._etsy_leaf", new=AsyncMock(return_value=None)):
+            map_general_category(self.db, previous, listing)
+        search.assert_awaited_once()
+        self.assertEqual(listing["direct_category_ids"]["ebay"], "199999")
+
     def test_it_also_maps_when_called_inside_a_running_loop(self):
         import asyncio
 
@@ -327,6 +338,15 @@ class GeneralCategoryMatchTest(unittest.TestCase):
         self.assertEqual(ids["ebay"], "15687")
         self.assertEqual(ids["etsy"], "482")
         self.assertEqual(ids["depop"], "menswear_tshirts")
+
+    def test_regional_hosted_save_does_not_write_a_us_ebay_category(self):
+        previous = {"title": "Tee", "category_path": "Old", "direct_category_ids": {"ebay": "12345"}}
+        listing = {**previous, "category_path": GENERAL_TEE}
+        ebay, etsy = _no_network()
+        with ebay, etsy, patch("anteroom.services.seller_region.read_settings", return_value={"seller_region": "CA"}):
+            match_general_category(self.db, previous, listing)
+        self.assertNotIn("ebay", listing["direct_category_ids"])
+        self.assertEqual(listing["direct_category_ids"]["depop"], "menswear_tshirts")
 
     def test_a_category_picked_on_a_form_stays(self):
         previous = {"category_path": "Old", "direct_category_ids": {"etsy": "mine"}, "seller_fields": ["direct_category_ids.etsy"]}

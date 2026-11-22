@@ -89,6 +89,17 @@ class MarketplaceDelistTest(unittest.TestCase):
         self.assertIsInstance(self.ebay.await_args.args[1], dict)
         self.etsy.assert_not_called()
 
+    def test_poshmark_delist_keeps_the_site_of_the_saved_listing(self):
+        canadian = URLS["poshmark"].replace("poshmark.com", "poshmark.ca")
+        self.conv.notes = merge_notes(self.conv.notes, {"vendooListingUrls": {**URLS, "poshmark": canadian}})
+        self.db.commit()
+        result = self.client.post(f"{self.base}/delist", json={"marketplaces": ["poshmark"], "confirm": True})
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(self.bridge.await_args.args[2], {
+            "marketplace": "poshmark", "listing_id": "6aae234280cb08338a8cb591",
+            "seller_region": "CA", "confirm": True,
+        })
+
     def test_the_marketplace_it_sold_on_is_never_deleted(self):
         self.db.add(MarketplaceSale(marketplace="ebay", order_id="o1", line_id="l1", conversation_id=self.conv.id))
         self.db.commit()

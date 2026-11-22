@@ -46,7 +46,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsSectionId, string>
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionId = "general";
 
 /** Sections the web app has; the others need the Mac. */
-export const HOSTED_SETTINGS_SECTIONS: readonly SettingsSectionId[] = ["general", "listings", "providers", "connections", "experimental", "help"];
+export const HOSTED_SETTINGS_SECTIONS: readonly SettingsSectionId[] = ["general", "listings", "providers", "connections", "agents", "experimental", "help"];
 
 /** Sections the hosted web app offers; managed AI handles the model automatically so Providers is hidden. */
 export function hostedSettingsSections(managedAI = false): readonly SettingsSectionId[] {
@@ -67,6 +67,7 @@ export function settingsSearchItemsFor(hosted: boolean, managedAI = false): read
     (item) =>
       (item.section === "general" && item.id !== "setup-guide") ||
       item.section === "listings" ||
+      item.section === "agents" ||
       item.section === "experimental" ||
       item.section === "help" ||
       (!managedAI && item.section === "providers" && !["chatgpt", "claude", "cursor", "brave"].includes(item.id)) ||
@@ -290,8 +291,8 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     id: "agent-cli",
     title: "Connect an agent",
     section: "agents",
-    targetId: "agent-cli",
-    searchTerms: ["anteroom", "cli", "command line", "mcp", "cursor", "claude desktop", "claude code", "agent"],
+    targetId: "agent-remote-mcp",
+    searchTerms: ["anteroom", "cli", "command line", "mcp", "remote mcp", "access token", "claude", "chatgpt", "gemini", "cursor", "claude desktop", "claude code", "agent"],
   },
   {
     id: "tailscale-https",
