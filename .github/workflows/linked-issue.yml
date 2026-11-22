@@ -1,0 +1,37 @@
+name: Linked issue
+
+# Every PR closes at least one issue: a closing keyword in the description
+# ("Closes #12") or an issue linked under Development. Merging into main then
+# closes the issue. Dependency bots are exempt.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  linked-issue:
+    name: Linked issue
+    if: github.event.pull_request.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require an issue this PR closes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          issues=$(gh api graphql \
+            -F owner="$OWNER" -F repo="$REPO" -F number="$NUMBER" \
+            -f query='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){closingIssuesReferences(first:10){nodes{number}}}}}' \
+            --jq '[.data.repository.pullRequest.closingIssuesReferences.nodes[].number | "#\(.)"] | join(" ")')
+          if [ -z "$issues" ]; then
+            echo "::error::This PR closes no issue. Add 'Closes #<n>' to the description (one keyword per issue), or file one with the Bug, Feature or Task form first."
+            exit 1
+          fi
+          echo "Merging closes $issues"
