@@ -85,7 +85,7 @@ fi
 if component backend; then
   # The cloud marketplace runner tests start its Node script, which needs its
   # own packages (CI's "Install cloud runner dependencies" step).
-  run "Anteroom cloud runner dependencies" bash -c "cd anteroom/server/anteroom/cloud_runner && { [[ -d node_modules ]] || npm ci --no-audit --no-fund; }"
+  run "Anteroom cloud runner dependencies" bash -c "cd anteroom/server/anteroom/cloud_runner && { npm ls --all >/dev/null 2>&1 || npm ci --no-audit --no-fund; }"
   run "Anteroom backend" bash -c "cd anteroom && ANTEROOM_DATA_DIR=\$(mktemp -d) '$PY' -m pytest -q -n auto"
   if [[ "$FAST" == "1" ]]; then
     skip "Anteroom backend on Postgres" "--fast"
@@ -157,7 +157,7 @@ if component extension; then
 fi
 
 if component relay; then
-  run "Webhook relay" bash -c "cd webhook-relay && { [[ -d node_modules ]] || npm ci; } && npm test"
+  run "Webhook relay" bash -c "cd webhook-relay && { { [[ -x node_modules/.bin/vitest ]] && npm ls --all --include=dev >/dev/null 2>&1; } || npm ci --include=dev; } && npm test"
 fi
 
 if changed '^skills/'; then
