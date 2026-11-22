@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1141 — 2026-11-22
+
+- Add a remote and local Streamable HTTP MCP server (`/api/mcp`) with seller-scoped access tokens in Settings → Agents and copy-ready setup for Claude, ChatGPT, and Gemini.
+- Add a Today command center with today's sales and automation snapshot, configurable profit/sales/listing/sell-through goals with pacing, and a Needs Attention inbox with 7-day dismiss and restore.
+
 ## 0.1.1140 — 2026-11-22
 
 - Connect Mercari and Depop in Cloud so listing actions, inventory imports, sales checks, and offers can run with Chrome closed.

@@ -28,6 +28,8 @@ from anteroom.routes import automations as automations_route
 from anteroom.routes.error_reports import router as error_reports_router
 from anteroom.routes import errors as errors_route
 from anteroom.routes import listing_videos
+from anteroom.routes import home as home_route
+from anteroom.routes import mcp as mcp_route
 from anteroom.routes.vendoo_drafts import router as vendoo_drafts_router
 
 
@@ -286,6 +288,8 @@ app.include_router(updates.router)
 app.include_router(changelog.router)
 app.include_router(desktop.router)
 app.include_router(error_reports_router)
+app.include_router(home_route.router)
+app.include_router(mcp_route.router)
 
 dist_dir = frontend_dist_dir()
 if dist_dir.exists():
