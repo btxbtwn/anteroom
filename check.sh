@@ -83,6 +83,15 @@ fi
 # Backend tests also inspect frontend, extension and skill sources. The shared
 # selector retains those dependencies without rebuilding an unchanged frontend.
 if component backend; then
+  # The cloud marketplace runner tests start its Node script, which needs its
+  # own packages (CI's "Install cloud runner dependencies" step).
+  run "Anteroom cloud runner dependencies" bash -c "
+    cd anteroom/server/anteroom/cloud_runner || exit 1
+    # npm ls accepts a missing optional native binding.
+    if ! npm ls --all >/dev/null 2>&1 || ! node -e \"require('impit')\" >/dev/null 2>&1; then
+      npm ci --include=optional --no-audit --no-fund && node -e \"require('impit')\"
+    fi
+  "
   run "Anteroom backend" bash -c "cd anteroom && ANTEROOM_DATA_DIR=\$(mktemp -d) '$PY' -m pytest -q -n auto"
   if [[ "$FAST" == "1" ]]; then
     skip "Anteroom backend on Postgres" "--fast"
@@ -154,7 +163,7 @@ if component extension; then
 fi
 
 if component relay; then
-  run "Webhook relay" bash -c "cd webhook-relay && { [[ -d node_modules ]] || npm ci; } && npm test"
+  run "Webhook relay" bash -c "cd webhook-relay && { { [[ -x node_modules/.bin/vitest ]] && npm ls --all --include=dev >/dev/null 2>&1; } || npm ci --include=dev; } && npm test"
 fi
 
 if changed '^skills/'; then
