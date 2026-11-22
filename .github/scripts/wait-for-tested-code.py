@@ -21,10 +21,12 @@ is checked. It exits 1 if a check fails, is cancelled, never appears or does
 not finish in time.
 
 When recorded and live production are still on the pinned pre-recovery base
-(b73c5347, 0.1.1011), the single historical Postgres failure on fa824f9a (fixed
-in #1653) may be superseded only after all other commits in the span pass push
-CI and the exact Descendant verification receipt for b28ba4b3 (run 44662061597,
-attempt 1, artifact 14596571781) is live-verified against GitHub and local Git.
+(a1a55df0, 0.1.1091), the single historical failure on d19adbff (#1717: two
+Alembic heads, fixed in #1728 / 6d72c5e3) may be superseded only after all other
+commits in the span pass push CI and an exact Descendant verification receipt
+is live-verified against GitHub and local Git. The spent fa824f9a / 0.1.1011
+checkpoint was removed once production moved past b73c5347. Until a new receipt
+is pinned in HISTORICAL_RECOVERY_CHECKPOINT, that failure blocks every deploy.
 Once Deploy hosted succeeds and records a newer Deployed commit, the checkpoint
 never matches again and ordinary gating applies unchanged.
 """
@@ -79,27 +81,13 @@ PRE_RENAME_PREFIXES = (
     ("vendoo-ios/", "anteroom-ios/"),
 )
 
-# Single-base recovery checkpoint for historical fa824f9a (fixed in #1653).
-# Inert once Deploy hosted records a commit after b73c5347 (or after artifact
-# 14596571781 expires on 2026-12-20); remove this pin in a cleanup PR once
-# production is verified past b73c5347.
-HISTORICAL_RECOVERY_CHECKPOINT = recovery_evidence.EvidencePin(
-    repository="btxbtwn/anteroom",
-    repository_id=1183824317,
-    workflow_id=422931456,
-    target="b28ba4b361071373731b93bc49c12b4bf78326e9",
-    tree="07ff8975695a4182c00c2605b5679d56e493c67b",
-    production_base="b73c534707b9ef9bd70e4dc589b9c4b10863a852",
-    workflow_blob="a0a097906554252a26f35c957169ec6d0e3c93db",
-    ci_blob="3ee3a2df9cda1261e08aa55a2ee639ab9075c380",
-    run_id=44662061597,
-    attempt=1,
-    receipt_artifact_id=14596571781,
-    receipt_digest="sha256:4d0f38c8b8125c78810c0eecfb9301e74bd73a8e3f2df148cb38879c328ed791",
-)
+# Spent fa824f9a / 0.1.1011 pin removed after production reached a1a55df0.
+# Pin a Descendant verification receipt here (production_base=a1a55df0) before
+# Deploy hosted can supersede d19adbff; None fails closed.
+HISTORICAL_RECOVERY_CHECKPOINT: recovery_evidence.EvidencePin | None = None
 HISTORICAL_BASE_FLY_APP = "peaceful-meadowstone-6944"
-HISTORICAL_BASE_IMAGE_DIGEST = "sha256:9a4b1bccee97d53d903e23d5ec0a8cbf6bb71b043cbb35a1ed88c165947c60ac"
-HISTORICAL_BASE_DB_REVISION = "d0e4f3a92b68"
+HISTORICAL_BASE_IMAGE_DIGEST = "sha256:cdc7323a7eb2f8ac00f2a9f3e96bd737abec9ce16c0aa2de7cdb3a77e14ebd7e"
+HISTORICAL_BASE_DB_REVISION = "85dab8d3327c"
 HISTORICAL_BASE_FLY_GROUPS = ("app", "worker")
 ALEMBIC_CURRENT_RE = re.compile(r"([0-9a-f]{12})(?: \(head\))?")
 FLY_APP_RE = re.compile(r"[a-z0-9][a-z0-9-]*")

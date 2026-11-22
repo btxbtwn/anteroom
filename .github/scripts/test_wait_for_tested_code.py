@@ -176,6 +176,8 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
             target=self.target,
             tree=self.tree,
             production_base=self.prod,
+            historical_failure=self.hist,
+            correcting_merge=self.corr,
             workflow_blob=self.wf_blob,
             ci_blob=self.ci_blob,
             run_id=42,
@@ -219,19 +221,16 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
         raise AssertionError(f"Unexpected API path: {path}")
 
     def test_committed_pin_matches_exact_documented_receipt(self):
-        pin = self.gate.HISTORICAL_RECOVERY_CHECKPOINT
-        self.assertEqual(pin.repository, "btxbtwn/anteroom")
-        self.assertEqual(pin.repository_id, 1183824317)
-        self.assertEqual(pin.workflow_id, 422931456)
-        self.assertEqual(pin.target, "b28ba4b361071373731b93bc49c12b4bf78326e9")
-        self.assertEqual(pin.production_base, "b73c534707b9ef9bd70e4dc589b9c4b10863a852")
-        self.assertEqual(pin.run_id, 44662061597)
-        self.assertEqual(pin.attempt, 1)
-        self.assertEqual(pin.receipt_artifact_id, 14596571781)
+        # Spent 0.1.1011 pin removed; a new d19adbff receipt must be pinned before
+        # Deploy hosted can supersede that historical failure.
+        self.assertIsNone(self.gate.HISTORICAL_RECOVERY_CHECKPOINT)
         self.assertEqual(
-            pin.receipt_digest,
-            "sha256:4d0f38c8b8125c78810c0eecfb9301e74bd73a8e3f2df148cb38879c328ed791",
+            self.gate.HISTORICAL_BASE_IMAGE_DIGEST,
+            "sha256:cdc7323a7eb2f8ac00f2a9f3e96bd737abec9ce16c0aa2de7cdb3a77e14ebd7e",
         )
+        self.assertEqual(self.gate.HISTORICAL_BASE_DB_REVISION, "85dab8d3327c")
+        self.assertEqual(verification.HISTORICAL, "d19adbff5a34609dd5c2b7ada19966ae4aeafce8")
+        self.assertEqual(verification.CORRECTED, "6d72c5e3d9d1ee4256f7c754c749a2e19a01818c")
 
     def test_valid_checkpoint_passes_when_base_live_version_and_receipt_match(self):
         report = self.gate.verify_historical_checkpoint(
@@ -543,11 +542,12 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
 
     def test_migration_success_then_rollout_failure_blocks_checkpoint_reuse(self):
         """Simulate Attempt 1 migrating DB then failing before moving web or recording Deployed commit."""
+        base_revision = self.gate.HISTORICAL_BASE_DB_REVISION
         live_state = {
             "recorded_production": self.prod,
             "health_version": "0.1.1011",
             "machines": self._base_machines(),
-            "db_revision": "d0e4f3a92b68",
+            "db_revision": base_revision,
         }
         effects = []
 
@@ -622,11 +622,11 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
         rc2, err2 = run_recovery_attempt()
         self.assertEqual(rc2, 1)
         self.assertIn("a70c21f496e8", err2)
-        self.assertIn("d0e4f3a92b68", err2)
+        self.assertIn(base_revision, err2)
         self.assertEqual(effects, [], "Attempt 2 must fail closed before any build/migration/rollout effect")
 
         # Worker drifted to new image while web still reports 0.1.1011 and DB was reset -> still fails closed.
-        live_state["db_revision"] = "d0e4f3a92b68"
+        live_state["db_revision"] = base_revision
         live_state["machines"] = self._base_machines(worker_label="v0.1.1048-deadbeef")
         rc3, err3 = run_recovery_attempt()
         self.assertEqual(rc3, 1)
