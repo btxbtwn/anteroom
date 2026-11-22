@@ -57,8 +57,9 @@ test("a follow-up sent while an answer streams cuts it off and goes next", async
   await expect(answers.first()).toContainText("Sandbox is streaming");
   await expect(answers.first()).not.toContainText("The end.");
   // The follow-up gets its own full answer (the sandbox streams it slowly too).
-  await expect(streaming).toHaveCount(0, { timeout: 30_000 });
-  await expect(answers).toHaveCount(2);
+  // There can be a moment with no live row between the interrupted answer and its successor.
+  await expect(answers).toHaveCount(2, { timeout: 30_000 });
+  await expect(streaming).toHaveCount(0);
   await expect(answers.last()).toContainText("The end.");
 });
 

@@ -1,5 +1,6 @@
 import { Fragment, useRef, useEffect, useLayoutEffect, useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { addToast } from "../ui/toast";
 import { api } from "../api/client";
 import { photosUploading, usePhotosUploading } from "../photoUploads";
 import { CiteSelectionToolbar } from "./CiteSelectionToolbar";
@@ -48,6 +49,8 @@ interface Props {
 function messageRowPadding(m: Message): string {
   return m.role === "user" || m.role === "assistant" || m.role === "model" ? "pb-4" : "pb-2";
 }
+
+const preparingDrafts = new Set<string>();
 
 export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onStatusChange }: Props) {
   const queryClient = useQueryClient();
@@ -135,23 +138,25 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
   });
   // Leaving an edit (another listing, a closed chat) gives the queued message
   // back unchanged and leaves no half-edited copy in this listing's box.
-  useEffect(() => {
-    if (!editingQueuedId) return;
-    return () => {
-      setComposerDraftText(draftKey, "");
-      setEditing(null);
-    };
-  }, [editingQueuedId, draftKey]);
+  const editDraftKey = useRef<string | null>(null);
+  useEffect(() => () => {
+    if (editDraftKey.current !== draftKey) return;
+    editDraftKey.current = null;
+    setComposerDraftText(draftKey, "");
+    setEditing(null);
+  }, [draftKey]);
 
   const startEditQueued = useCallback((id: string) => {
     const message = chatQueue(queueKey).find((item) => item.id === id);
     if (!message || input.trim() || message.payload !== undefined || message.steer) return false;
+    editDraftKey.current = draftKey;
     setEditingQueuedId(id);
     setInput(message.text);
     composerRef.current?.focus();
     return true;
-  }, [queueKey, input, setInput, setEditingQueuedId]);
+  }, [draftKey, queueKey, input, setInput, setEditingQueuedId]);
   const cancelEditQueued = useCallback(() => {
+    editDraftKey.current = null;
     setEditingQueuedId(null);
     setInput("");
   }, [setInput, setEditingQueuedId]);
@@ -279,12 +284,25 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     const attached = images.images;
     if (editingQueuedId) {
       if (!text) return;
-      editChatMessage(queueKey, editingQueuedId, text);
+      editDraftKey.current = null;
+      if (!editChatMessage(queueKey, editingQueuedId, text)) {
+        setEditingQueuedId(null);
+        addToast({ type: "warning", title: "This queued message is no longer available. Your edit is in the composer." });
+        return;
+      }
       setEditingQueuedId(null);
       setInput("");
       return;
     }
-    if (!text && !attached.length) return;
+    if ((!text && !attached.length) || preparingDrafts.has(draftKey)) return;
+    const prepareAttachments = async () => {
+      preparingDrafts.add(draftKey);
+      try {
+        return await images.prepare(attached);
+      } finally {
+        preparingDrafts.delete(draftKey);
+      }
+    };
     const listingPhotoBatch = getComposerDraft(draftKey).listingPhotoBatch;
     if (listingPhotoBatch === "uploading") return;
     // sendMessage refuses while background work runs, so hold the message
@@ -311,7 +329,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
         return;
       }
       void (async () => {
-        const uploads = await images.prepare(attached);
+        const uploads = await prepareAttachments();
         if (uploads === null) return;
         images.clear(attached.map((image) => image.id));
         setInput((current) => (current.trim() === text ? "" : current));
@@ -363,7 +381,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
       setComposerListingPhotoBatch(draftKey, undefined);
     }
     void (async () => {
-      const uploads = attached.length ? await images.prepare(attached) : [];
+      const uploads = attached.length ? await prepareAttachments() : [];
       if (uploads === null) return;
       images.clear(attached.map((image) => image.id));
       void sendMessage(text, uploads.length ? { attachments: uploads } : undefined);

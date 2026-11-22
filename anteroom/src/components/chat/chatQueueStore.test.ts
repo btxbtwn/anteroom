@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   chatQueue,
   editChatMessage,
@@ -34,6 +34,18 @@ describe("chat queue store", () => {
     editChatMessage("k", first.id, "first, edited");
     removeChatMessage("k", second.id);
     expect(chatQueue("k").map((m) => m.text)).toEqual(["first, edited"]);
+  });
+
+  it("takes an in-memory message even when storage reads and writes throw", () => {
+    const blocked = () => { throw new Error("Storage unavailable"); };
+    vi.stubGlobal("sessionStorage", { getItem: blocked, setItem: blocked, removeItem: blocked });
+    try {
+      enqueueChatMessage("k", newQueuedChatMessage("still here"));
+      expect(takeNextChatMessage("k")?.text).toBe("still here");
+      expect(takeNextChatMessage("k")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("saves text across a reload but never images", () => {

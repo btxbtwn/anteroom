@@ -236,7 +236,9 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   const editingQueuedId = editing?.threadId === threadId ? editing.id : null;
   const setEditingQueuedId = (id: string | null) => setEditing(id ? { threadId, id } : null);
   /** Set when Stop is a steer, so the cut-off answer folds as one. */
-  const steeringRef = useRef(false);
+  const steered = useRef(new WeakSet<AbortController>());
+  const visibleAnswer = useRef<AbortController | null>(null);
+  const stopPending = useRef(false);
   const controller = useRef<AbortController | null>(null);
   const composerRef = useRef<ComposerPromptEditorHandle | null>(null);
   const images = useComposerImages(draftKey);
@@ -472,8 +474,11 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     let dropped = false;
     let parts = emptySseParts();
     let stopped = false;
-    const show = () =>
+    const show = () => {
+      if (controller.current !== abort) return;
+      visibleAnswer.current = abort;
       setLive({ question, questionImages: shownImages, asked, startedAtMs, parts: { ...parts } });
+    };
     if (question !== null || retry) {
       scroll.pinChatToBottom();
       clearThreadError(id);
@@ -544,7 +549,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
           startedAtMs,
           endedAtMs,
           cancelled: stopped,
-          ...(stopped && steeringRef.current ? { steered: true } : {}),
+          ...(stopped && steered.current.has(abort) ? { steered: true } : {}),
           baseIds,
         });
       }
@@ -615,17 +620,17 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
 
   // Leaving an edit (another conversation, another page) gives the queued
   // message back unchanged and leaves no half-edited copy in that box.
-  useEffect(() => {
-    if (!editingQueuedId) return;
-    return () => {
-      setComposerDraftText(draftKey, "");
-      setEditing(null);
-    };
-  }, [editingQueuedId, draftKey]);
+  const editDraftKey = useRef<string | null>(null);
+  useEffect(() => () => {
+    if (editDraftKey.current !== draftKey) return;
+    editDraftKey.current = null;
+    setComposerDraftText(draftKey, "");
+    setEditing(null);
+  }, [draftKey]);
 
   // Send the oldest held follow-up of this conversation once the answer before it has ended.
   useEffect(() => {
-    if (live || controller.current || editingQueuedId) return;
+    if (stopping || following || live || controller.current || editingQueuedId) return;
     const active = followThread.current ?? threadIdRef.current;
     const next = takeNextChatMessage<AssistantQueuePayload>(
       ASSISTANT_QUEUE,
@@ -642,7 +647,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
       draftSessionRef.current,
       next.payload?.attached ?? [],
     );
-  }, [live, queuedAll, editingQueuedId]);
+  }, [stopping, following, live, queuedAll, editingQueuedId]);
 
   const ask = async (raw: string, alternate = false) => {
     const question = raw.trim();
@@ -665,7 +670,9 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     }
     const stillOnOriginNew = originThread === null && draftSessionRef.current === originSession;
     const activeThread = followThread.current ?? threadIdRef.current;
-    if (targetThread === activeThread && askNow(Boolean(live || controller.current), queued) === "queue") {
+    const answer = controller.current;
+    const pending = chatQueue<AssistantQueuePayload>(ASSISTANT_QUEUE).filter((item) => item.threadId === targetThread);
+    if (targetThread === activeThread && askNow(Boolean(answer), pending) === "queue") {
       if ((originThread !== null || stillOnOriginNew) && getComposerDraft(originDraftKey).text.trim() === question) {
         setComposerDraftText(originDraftKey, "");
       }
@@ -675,7 +682,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
       scroll.pinChatToBottom();
       const message = queuedQuestion(question, targetThread, uploads, shown, attached);
       // While an answer is being written a follow-up steers it by default, as in T3 Code.
-      const action = resolveFollowUp({ busy: Boolean(live || controller.current), canSteer: Boolean(live), alternate });
+      const action = resolveFollowUp({ busy: Boolean(answer), canSteer: !!answer && visibleAnswer.current === answer, alternate });
       if (action === "steer") {
         steerChatMessage(ASSISTANT_QUEUE, message);
         void stop(true);
@@ -690,13 +697,17 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
 
   /** Stop the answer; `steer` when a follow-up cut it off and goes next. */
   const stop = async (steer = false) => {
-    steeringRef.current = steer;
+    if (stopPending.current) return;
+    stopPending.current = true;
+    const target = controller.current;
     // The server saves the partial answer before it answers; say so meanwhile.
     setStopping(true);
     try {
       await api.assistant.stop().catch(() => undefined);
-      controller.current?.abort();
+      if (steer && target && !target.signal.aborted) steered.current.add(target);
+      target?.abort();
     } finally {
+      stopPending.current = false;
       setStopping(false);
     }
   };
@@ -710,19 +721,27 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     const message = chatQueue<AssistantQueuePayload>(ASSISTANT_QUEUE).find((item) => item.id === id);
     // A question waiting for its conversation to be created moves with the box; leave it be.
     if (!message || input.trim() || message.payload !== undefined || message.steer || message.threadId == null) return false;
+    editDraftKey.current = draftKey;
     setEditingQueuedId(id);
     setInput(message.text);
     composerRef.current?.focus();
     return true;
   };
   const cancelEditQueued = () => {
+    editDraftKey.current = null;
     setEditingQueuedId(null);
     setInput("");
   };
   const saveEditQueued = () => {
     const text = input.trim();
     if (!editingQueuedId || !text) return;
-    editChatMessage(ASSISTANT_QUEUE, editingQueuedId, text);
+    if (!editChatMessage(ASSISTANT_QUEUE, editingQueuedId, text)) {
+      editDraftKey.current = null;
+      setEditingQueuedId(null);
+      addToast({ type: "warning", title: "This queued message is no longer available. Your edit is in the composer." });
+      return;
+    }
+    editDraftKey.current = null;
     setEditingQueuedId(null);
     setInput("");
   };

@@ -140,7 +140,10 @@ export function removeChatMessage(key: string, id: string) {
 }
 
 export function editChatMessage(key: string, id: string, text: string) {
-  write(key, chatQueue(key).map((message) => (message.id === id ? { ...message, text } : message)));
+  const items = chatQueue(key);
+  if (!items.some((message) => message.id === id)) return false;
+  write(key, items.map((message) => (message.id === id ? { ...message, text } : message)));
+  return true;
 }
 
 /**
