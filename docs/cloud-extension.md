@@ -279,3 +279,13 @@ with the `www` host.
    and Depop, the worker verifies the account before the hosted API writes the
    encrypted payload to Supabase Vault.
 
+
+## Listing videos
+
+Bridge 0.2.86 reads a web listing's video for Poshmark through the signed
+link the hosted API adds to `payload.video.url` when the page takes a
+`marketplace.execute` command (`services/hosted_browser_relay.with_video_link`),
+so the approval covers the link. The Bridge fetches only
+`https://<project>.supabase.co/storage/v1/object/sign/anteroom-photos/…` (or a
+loopback sandbox), without credentials, and still checks the size and type
+against the approved revision. Without a link it reads the Mac's loopback route.
