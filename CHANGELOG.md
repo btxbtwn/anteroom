@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1126 — 2026-11-22
+
+- The business assistant answers faster, keeps prompts smaller on large shops, and can run several lookups in a single turn.
+- Business assistant lookups now support `median()` and suggest the closest matching brand, category, size, or store when a filter matches nothing.
+
 ## 0.1.1125 — 2026-11-21
 
 - Attaching photos in the listing chat composer on a draft with no photos yet now uploads them as the listing's photos and starts listing generation instead of leaving the draft with zero photos.
