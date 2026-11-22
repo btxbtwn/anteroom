@@ -629,6 +629,15 @@ describe("useChatStream send", () => {
     expect(getLive(convId)).toMatchObject({ failedAction: null, streaming: false });
   });
 
+  it("reads an error event as a failure whatever case its prefix is in", async () => {
+    routes = () => sse("event: error", "data: error: The provider timed out", "", DONE);
+    const { chat } = mountChat();
+
+    await act(async () => { await chat().sendMessage("Fill occasion"); });
+
+    expect(getLive(convId)).toMatchObject({ failedAction: "send", streamText: "Error: The provider timed out" });
+  });
+
   it("names the step, not the reconnect, when a dropped answer cannot be followed", async () => {
     routes = (url) => {
       // The status arrives, then the connection breaks on the next read.

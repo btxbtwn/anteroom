@@ -174,7 +174,7 @@ function applySseLine(
     // carries the "Error:" mark the chat reads as a failed turn.
     state.parts.content = continued
       ? state.parts.content + text
-      : /^Error:/i.test(chunk) ? chunk : `Error: ${chunk}`;
+      : `Error: ${chunk.replace(/^error:\s*/i, "")}`;
   } else if (state.eventType === "thinking") state.parts.thinking += text;
   else if (state.eventType === "status") state.parts.status = continued ? state.parts.status + text : text;
   else if (!TRACE_ONLY_EVENTS.has(state.eventType)) state.parts.content += text;
