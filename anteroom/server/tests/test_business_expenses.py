@@ -1,4 +1,6 @@
 from datetime import date, datetime
+from decimal import Decimal
+from hashlib import sha256
 
 import pytest
 from alembic import command
@@ -8,12 +10,13 @@ from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import Session
 
 from anteroom.database import get_db
+from anteroom.models.business_expense import BusinessExpense
 from anteroom.models.marketplace_sale import MarketplaceSale
 from anteroom.models.sourcing import SourceBox
 from anteroom.routes.business_expenses import router
 from anteroom.services.account_deletion import seller_tables
 from anteroom.services.account_import import imported_tables
-from anteroom.services.business_expenses import MileageInput, mileage
+from anteroom.services.business_expenses import ExpenseInput, MileageInput, mileage
 from anteroom.services.sales_ledger import order_basis
 
 ROOT = "/api/business-expenses"
@@ -100,7 +103,6 @@ def test_csv_preview_errors_and_retry(expenses):
 
 @pytest.mark.parametrize("bulk", [False, True])
 def test_context_refreshed_after_outer_commit(expenses, bulk):
-    from anteroom.models.business_expense import BusinessExpense
     from anteroom.services.business_context import cached
 
     client, engine = expenses
@@ -148,6 +150,34 @@ def test_import_deduplicates_equal_mileage_decimals(expenses):
         result = client.post(f"{ROOT}/import", json={"content": content}).json()
         assert result["imported"] == imported
         assert result["duplicates"] == 1 - imported
+
+
+@pytest.mark.parametrize("edited", [False, True])
+def test_import_recognizes_legacy_mileage_key(expenses, edited):
+    client, engine = expenses
+    original = ExpenseInput(
+        incurred_date=date(2026, 1, 1), amount_cents=700, category="mileage",
+        distance=Decimal("10"), distance_unit="mi", mileage_rate_cents=Decimal("70"),
+    )
+    # Recreate the serialized values from before the validator quantized them.
+    legacy = original.model_copy(update={"distance": Decimal("10"), "mileage_rate_cents": Decimal("70")})
+    with Session(engine) as db:
+        row = BusinessExpense(**original.model_dump(), accounting_type="operating_expense",
+                              import_source="csv", import_key=sha256(legacy.model_dump_json().encode()).hexdigest())
+        db.add(row)
+        db.commit()
+        if edited:
+            row.notes = "Added after import"
+            db.commit()
+
+    header = "incurred_date,amount_cents,category,distance,distance_unit,mileage_rate_cents\n"
+    spellings = ["10,mi,70"] if edited else ["10,mi,70", "10.000,mi,70.000000"]
+    for spelling in spellings:
+        content = header + f"2026-01-01,700,mileage,{spelling}\n"
+        for endpoint in ("import/preview", "import"):
+            result = client.post(f"{ROOT}/{endpoint}", json={"content": content}).json()
+            assert (result["valid"], result["imported"], result["duplicates"]) == (0, 0, 1)
+    assert len(client.get(ROOT, params=PERIOD).json()) == 1
 
 
 def test_cash_expenses_and_landed_box_costs(expenses):

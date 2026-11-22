@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import { pollMs } from "../api/polling";
 import type { CsvResult, Expense, ExpenseInput, MileageInput } from "../api/contract.gen";
 import { downloadFile } from "./downloadFile";
 import { Button } from "./ui/button";
@@ -74,8 +75,10 @@ export function BusinessExpenses({ report, mode, setMode }: {
     queryKey: ["profit-and-loss", reportParams],
     queryFn: ({ signal }) => api.businessExpenses.report(reportParams, signal),
     enabled: valid && report,
+    refetchInterval: () => pollMs(60_000),
   });
   const active = report ? pnl : expenses;
+  const reportRows = pnl.isError ? undefined : pnl.data;
   const download = (url: string, filename: string) => {
     setDownloadError("");
     void downloadFile(url, filename).catch((error: unknown) => setDownloadError(String(error)));
@@ -105,8 +108,8 @@ export function BusinessExpenses({ report, mode, setMode }: {
     </>}
     {valid && active.isPending && <PageSkeleton />}
     {valid && active.error && <FormError>{active.error.message}</FormError>}
-    {valid && (report ? pnl.data?.length === 0 : expenses.data?.length === 0) && <EmptyRow>No records in this period.</EmptyRow>}
-    {report ? pnl.data?.map((currency) => <Panel key={currency.currency}>
+    {valid && (report ? reportRows?.length === 0 : expenses.data?.length === 0) && <EmptyRow>No records in this period.</EmptyRow>}
+    {report ? reportRows?.map((currency) => <Panel key={currency.currency}>
       <div className="space-y-2 p-3 sm:p-4">
         <h3 className="text-sm font-medium">{currency.currency}</h3>
         {currency.incomplete_sales > 0 && <p className="text-xs text-muted-foreground">

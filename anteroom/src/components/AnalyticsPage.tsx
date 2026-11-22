@@ -309,20 +309,22 @@ function SalesStats({ data, accountingMode }: { data: InventoryAnalytics; accoun
     queryFn: ({ signal }) => api.businessExpenses.report(previousParams ?? "", signal),
     enabled: Boolean(accountingMode && previousParams),
   });
+  const report = pnl.isError ? undefined : pnl.data;
+  const previousReport = previousPnl.isError ? undefined : previousPnl.data;
   return (
     <StatGrid className="grid-cols-2">
       <Stat label="Revenue" value={sales.count > 0 && sales.revenue_known === 0 ? null : formatCurrency(sales.revenue)} hint={revenueHint(sales)}
         change={compareChange(sales, previous, "revenue", sales.revenue, previous?.revenue ?? null, formatCurrency)} />
       {accountingMode && data.window_end ? <>
         {pnl.isError ? <Stat label="Profit" value={null} hint="Could not load profit and loss." /> : null}
-        {pnl.isPending || pnl.data?.length === 0 ? <Stat label="Profit" value={null} /> : null}
-        {pnl.data?.map((currency) => {
+        {pnl.isPending || report?.length === 0 ? <Stat label="Profit" value={null} /> : null}
+        {report?.map((currency) => {
           const current = currency.lines.find((line) => line.label === "Net Profit")?.amount_cents ?? 0;
-          const prior = previousPnl.data?.find((row) => row.currency === currency.currency);
+          const prior = previousReport?.find((row) => row.currency === currency.currency);
           const priorAmount = prior?.lines.find((line) => line.label === "Net Profit")?.amount_cents
-            ?? (previousPnl.data ? 0 : null);
+            ?? (previousReport ? 0 : null);
           const format = (value: number) => expenseMoney(value, currency.currency);
-          return <Stat key={currency.currency} label={pnl.data.length > 1 ? `Profit (${currency.currency})` : "Profit"}
+          return <Stat key={currency.currency} label={report.length > 1 ? `Profit (${currency.currency})` : "Profit"}
             value={currency.currency === "Unassigned" ? null : format(current)} negative={current < 0}
             hint={currency.incomplete_sales ? `${currency.incomplete_sales} sales have incomplete figures` : undefined}
             change={priorAmount == null || currency.incomplete_sales || prior?.incomplete_sales
