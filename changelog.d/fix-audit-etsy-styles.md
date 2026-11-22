@@ -1,0 +1,2 @@
+- Styles the listing writer picks for Etsy are kept once Etsy's form is saved with the listing, so List sends them.
+- One generated Etsy tag longer than Etsy allows no longer deletes all of the listing's Etsy tags; only that tag is left out.
