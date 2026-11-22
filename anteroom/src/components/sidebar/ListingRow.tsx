@@ -118,9 +118,10 @@ export const ListingRow = memo(function ListingRow({
     [importedRows, listing.direct_marketplaces, visibleMarketplaces, listing.removed_marketplaces, listing.sold_marketplaces],
   );
   const inactive = new Set(listing.inactive_marketplaces || []);
-  // Still up there but not for sale: shown as Inactive, never as sold or delisted.
+  // An inactive observation does not supersede a recorded sale.
   const listedMarketplaces = popupStatuses.filter((row) => row.id !== "general" && statusIsListed(row.status))
-    .map((row) => (inactive.has(row.id) ? { ...row, status: "INACTIVE" } : row));
+    .map((row) => (inactive.has(row.id) && row.status !== "SOLD" && row.status !== "SHIPPED"
+      ? { ...row, status: "INACTIVE" } : row));
   const drift = listing.price_drift || [];
   const missingSkuWarning = warnMissingSku && status !== "sold" && !String(listing.sku || "").trim();
   // One short tag keeps the status readable in a narrow sidebar; its tooltip lists every warning.
