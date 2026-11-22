@@ -108,5 +108,6 @@ export function useChatQueue({
 
   const handleRemoveQueued = useCallback((id: string) => removeChatMessage(key, id), [key]);
 
-  return { key, pendingQueue, enqueue, steer, sendNow, handleRemoveQueued };
+  /** True while a queued message is on its way, its server check included; a new message waits behind it. */
+  return { key, pendingQueue, sending, enqueue, steer, sendNow, handleRemoveQueued };
 }

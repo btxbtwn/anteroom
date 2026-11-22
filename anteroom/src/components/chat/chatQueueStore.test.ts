@@ -92,4 +92,11 @@ describe("chat queue store", () => {
     resetChatQueuesForTest({ reload: false });
     expect(chatQueue("k")).toEqual([]);
   });
+
+  it("does not send a message held for over a day without a reload", () => {
+    enqueueChatMessage("k", { ...newQueuedChatMessage("stale"), createdAt: new Date(Date.now() - 2 * 24 * 3600_000).toISOString() });
+    enqueueChatMessage("k", newQueuedChatMessage("fresh"));
+    expect(takeNextChatMessage("k")?.text).toBe("fresh");
+    expect(chatQueue("k")).toEqual([]);
+  });
 });

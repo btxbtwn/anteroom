@@ -125,7 +125,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     (id: string | null) => setEditing(id ? { convId, id } : null),
     [convId],
   );
-  const { key: queueKey, pendingQueue, enqueue, steer, sendNow, handleRemoveQueued } = useChatQueue({
+  const { key: queueKey, pendingQueue, sending: queueSending, enqueue, steer, sendNow, handleRemoveQueued } = useChatQueue({
     convId,
     busy,
     serverBusy,
@@ -307,7 +307,8 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     if (listingPhotoBatch === "uploading") return;
     // sendMessage refuses while background work runs, so hold the message
     // instead of dropping it, or steer it into the reply being written.
-    if (busy || serverBusy) {
+    // A queued message checking the server goes first; this one waits behind it.
+    if (busy || serverBusy || queueSending) {
       // Decided when the message is ready: an image upload can outlast the reply.
       const hold = (message: ReturnType<typeof newQueuedChatMessage>) => {
         const live = getLive(convId);
@@ -389,6 +390,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
   }, [
     busy,
     serverBusy,
+    queueSending,
     input,
     setInput,
     sendMessage,

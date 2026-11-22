@@ -185,9 +185,14 @@ export function takeNextChatMessage<P = unknown>(
   key: string,
   matches: (message: QueuedChatMessage<P>) => boolean = () => true,
 ): QueuedChatMessage<P> | null {
-  const queue = chatQueue<P>(key);
+  const oldest = Date.now() - SAVED_FOR_MS;
+  const all = chatQueue<P>(key);
+  // A page left open for days must not send a message from long ago either.
+  const queue = all.filter((message) => Date.parse(message.createdAt) >= oldest);
   const next = queue.find(matches) ?? null;
-  if (next) write(key, queue.filter((message) => message !== next) as QueuedChatMessage[]);
+  if (next || queue.length !== all.length) {
+    write(key, queue.filter((message) => message !== next) as QueuedChatMessage[]);
+  }
   return next;
 }
 
