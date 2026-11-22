@@ -598,6 +598,19 @@ class LoadAnalyticsTest(unittest.TestCase):
         bad = client.get("/api/analytics?range=nope")
         self.assertEqual(bad.status_code, 400)
 
+    def test_loader_sets_fallback_sold_quantity_from_listing_quantity(self):
+        bare_sold = ConversationRepo(self.db).create(title="Multi Tee")
+        bare_sold.notes = json.dumps({
+            "marketplaceMarks": {
+                "ebay": {"state": "sold", "at": NOW.isoformat()},
+                "depop": {"state": "sold", "at": NOW.isoformat()},
+            },
+        })
+        listing_persistence.save_revision(self.db, bare_sold.id, {"title": "Multi Tee", "quantity": 2}, source="import")
+        self.db.commit()
+        row = next(item for item in load_rows(self.db) if item.conversation_id == bare_sold.id)
+        self.assertEqual(row.status, "sold")
+        self.assertEqual(row.sale_quantity, 2)
 
 
 class StaleListingsTest(unittest.TestCase):

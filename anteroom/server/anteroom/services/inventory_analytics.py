@@ -419,7 +419,7 @@ def rows_from_inputs(inputs: AnalyticsInputs) -> list[AnalyticsItem]:
         if (effective != "sold" or not sales) and not merged_away:
             # Not sold, or sold with no sale on record (a bare Vendoo label or mark).
             fallback_sold = effective == "sold" and not sales
-            rows.append(replace(base, sold_at=derived.sold_at) if fallback_sold else base)
+            rows.append(replace(base, sold_at=derived.sold_at, sale_quantity=derived.quantity) if fallback_sold else base)
         rows.extend([replace(sale, stock=False) for sale in sales] if merged_away else sales)
     return rows
 
