@@ -201,6 +201,23 @@ class SummarizeAnalyticsTest(unittest.TestCase):
         self.assertEqual(payload["previous"]["sales"]["count"], 2)
         self.assertEqual(payload["previous"]["sales"]["revenue"], 30)
 
+    def test_unit_counts_and_sell_through_compare_the_same_windows(self):
+        start = NOW - timedelta(days=30)
+        rows = [
+            _item(conversation_id="current", sold_at=start, listed_at=start, listing_quantity=4, sale_quantity=2),
+            _item(conversation_id="prior", sold_at=start - timedelta(days=1), listed_at=start - timedelta(days=1),
+                  listing_quantity=3, sale_quantity=3),
+            _item(conversation_id="stock", status="active", listed_at=start, listing_quantity=5),
+            _item(conversation_id="current", sold_at=start + timedelta(days=1), listed_at=start, listing_quantity=4),
+        ]
+        result = summarize(rows, range_id="30d", now=NOW)
+        self.assertEqual(result["units_listed"], 9)
+        self.assertEqual(result["units_sold"], 3)
+        self.assertEqual(result["previous"]["units_listed"], 3)
+        self.assertEqual(result["previous"]["units_sold"], 3)
+        self.assertEqual(result["sell_through_rate"], 66.7)
+        self.assertEqual(result["previous"]["sell_through_rate"], 50)
+
     def test_comparison_respects_every_selected_range(self):
         for range_id, start in [
             ("90d", NOW - timedelta(days=90)),

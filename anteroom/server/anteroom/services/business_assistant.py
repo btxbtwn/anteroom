@@ -35,7 +35,7 @@ import time
 from collections import Counter
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -275,6 +275,7 @@ TABLES = {
     "sales_by_brand": BRAND_COLUMNS,
     "sales_by_marketplace": MARKETPLACE_COLUMNS,
     "sales_over_time": OVER_TIME_COLUMNS,
+    "business_expenses": ("incurred_date", "category", "accounting_type", "currency", "amount_cents"),
 }
 _RANGE_LABELS = {
     "wtd": "this week so far (Monday to now)",
@@ -537,9 +538,11 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
 
 def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[str, Any]]]]:
     """The summary as text, and the tables a lookup reads."""
-    from anteroom.services import ad_spend, boxes, box_scout, scout
+    from anteroom.services import ad_spend, boxes, box_scout, sales_records, scout
     from anteroom.database import end_read
+    from anteroom.services.business_expenses import entries
     from anteroom.services.inventory_analytics import analytics_ranges, read_analytics_inputs, rows_from_inputs
+    from anteroom.services.profit_and_loss import report
 
     # Release each read before calculations or a potentially blocking lock.
     inputs = read_analytics_inputs(db)
@@ -554,6 +557,21 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
     box_results = boxes.results(db, rows=rows, release=True)
     ads = [ad_spend.entry_view(row) for row in ad_entries]
     events = _sale_events(db)
+    expense_rows = [
+        {"incurred_date": row.incurred_date.isoformat(), "category": row.category,
+         "accounting_type": row.accounting_type, "currency": row.currency, "amount_cents": row.amount_cents}
+        for row in db.scalars(entries(date.min, date.max))
+    ]
+    year_start = clock.date().replace(month=1, day=1)
+    sale_lines = sales_records.records_from_lines(sales_records.read_sale_lines(db), rows)
+    year_sales = [
+        sale for sale in sale_lines
+        if year_start.isoformat() <= str(sale["sold_at"] or sale["received_at"])[:10] <= clock.date().isoformat()
+    ]
+    profit_and_loss = {
+        mode: [currency.model_dump() for currency in report(db, year_start, clock.date(), mode, year_sales)]
+        for mode in ("accrual", "cash")
+    }
     end_read(db)
     scout_sales = scout.outcomes(db, rows)
     automation_lines = _automation_lines(db)
@@ -590,6 +608,7 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
 
         }),
         _sales_by_range(ranges),
+        _section("Profit and loss this year by currency (amounts in cents)", profit_and_loss),
         _sales_over_time(everything["periods"]),
         _top_groups(ranges, "marketplaces", "Sales by marketplace", "sales_by_marketplace"),
         _top_groups(ranges, "categories", "Sales by category", "sales_by_category"),
@@ -618,6 +637,7 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
             "boxes": box_results["boxes"],
             "ad_spend": ads,
             "sale_events": events,
+            "business_expenses": expense_rows,
             "sourcing_boxes": tab_boxes,
             **breakdowns,
             "sales_over_time": over_time,

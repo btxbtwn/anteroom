@@ -104,7 +104,18 @@ def account_for(client, keys, user=USER_ID):
 
 
 def test_a_mac_moves_into_its_sellers_account_once(cloud, mac, vault, storage, signing_keys, monkeypatch):  # noqa: F811
+    from datetime import date
+    from decimal import Decimal
+
+    from anteroom.models.business_expense import BusinessExpense
+
     client, engine = cloud
+    with Session(mac[0]) as db:
+        db.add(BusinessExpense(incurred_date=date(2026, 1, 10), amount_cents=725, currency="USD",
+                               category="mileage", vendor="", description="Sourcing trip", notes="",
+                               accounting_type="operating_expense", distance=Decimal(10), distance_unit="mi",
+                               mileage_rate_cents=Decimal("72.5"), import_source="manual"))
+        db.commit()
     secrets = {'ai-api-keys': json.dumps({'openai': 'sk-mac', 'anthropic': 'sk-ant-mac'}),
                'brave-search-api-key': 'brave-mac', 'marketplace-accounts': '{"ebay": {}}', 'relay-device': '{}'}
     monkeypatch.setattr(account_move, 'local_secrets', lambda slots: {slot: secrets[slot] for slot in secrets if slot in slots})
@@ -157,6 +168,9 @@ def test_a_mac_moves_into_its_sellers_account_once(cloud, mac, vault, storage, s
     again = account_move.move('seller@example.com', 'pw', account_for(client, signing_keys), source=mac[0], photos=mac[1])
     assert again['photos'] == 0 and again['missing_photos'] == 1 and again['refused_photos'] == 1 and again['keys'] == []
     assert len(client.get('/api/conversations', headers=alice).json()) == 1
+    expenses = client.get('/api/business-expenses', headers=alice,
+                          params={'start': '2026-01-01', 'end': '2026-01-31'}).json()
+    assert [(expense['description'], expense['amount_cents']) for expense in expenses] == [('Sourcing trip', 725)]
     assert len(storage) == 3
 
     # The same Mac cannot also move into a second account: its records are taken.

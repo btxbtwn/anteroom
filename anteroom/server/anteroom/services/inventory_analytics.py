@@ -14,11 +14,11 @@ import math
 import statistics
 import threading
 from collections import OrderedDict
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import inspect as sa_inspect, text
+from sqlalchemy import func, inspect as sa_inspect, text
 
 if TYPE_CHECKING:
     from anteroom.services.sale_events import EventWindow
@@ -88,6 +88,8 @@ class AnalyticsItem:
     # True when a marketplace order or a Vendoo sale record stands behind this
     # row, rather than a check finding a listing marked sold.
     order_backed: bool = False
+    listing_quantity: int = 1
+    sale_quantity: int = 1
 
     @property
     def has_cost(self) -> bool:
@@ -212,6 +214,7 @@ class AnalyticsInputs:
     conversations: list[tuple[str, Any, Any, dict, Any]]
     statuses: dict[str, Any]
     sales: dict[str, list[Any]]
+    listed_at: dict[str, datetime] = field(default_factory=dict)
 
 
 def load_rows(db, conversation_id: str | None = None) -> list[AnalyticsItem]:
@@ -311,6 +314,7 @@ def _unbound(row):
 def _read_analytics_inputs(db, conversation_id: str | None) -> AnalyticsInputs:
     from anteroom.models.conversation import Conversation
     from anteroom.models.listing import Listing, ListingRevision
+    from anteroom.models.marketplace_listing import MarketplaceListing
     from anteroom.models.sourcing import SourceBox
     from anteroom.services.item_status import paid_lines, statuses
     from anteroom.services.vendoo_import import parse_notes
@@ -345,7 +349,14 @@ def _read_analytics_inputs(db, conversation_id: str | None) -> AnalyticsInputs:
     lines = paid_lines(db, {conversation_id} if conversation_id else None)
     own = statuses(db, [(conv_id, notes) for conv_id, _title, _status, notes, _box in conversations],
                    preloaded_lines=lines)
-    return AnalyticsInputs(facets, box_share, conversations, own, lines)
+    listed_at = dict(
+        db.query(MarketplaceListing.conversation_id, func.min(MarketplaceListing.listed_at))
+        .filter(MarketplaceListing.listed_at.is_not(None))
+        .filter(MarketplaceListing.conversation_id == conversation_id if conversation_id else True)
+        .group_by(MarketplaceListing.conversation_id)
+        .all()
+    )
+    return AnalyticsInputs(facets, box_share, conversations, own, lines, listed_at)
 
 
 def rows_from_inputs(inputs: AnalyticsInputs) -> list[AnalyticsItem]:
@@ -366,6 +377,9 @@ def rows_from_inputs(inputs: AnalyticsInputs) -> list[AnalyticsItem]:
         if not isinstance(sale, dict):
             sale = {}
         listed_text = str(dates.get("listed") or "")
+        native_date = inputs.listed_at.get(conv_id)
+        if not listed_text and native_date is not None:
+            listed_text = native_date.isoformat()
         derived = own[conv_id]
         effective = str(status) if str(status or "") in _BUSY else derived.status
         sale_cost = _amount(sale.get("cost"))
@@ -386,6 +400,7 @@ def rows_from_inputs(inputs: AnalyticsInputs) -> list[AnalyticsItem]:
             days_listed=None,
             box_id=box_id,
             labels=tuple(split_vendoo_labels(notes.get("vendooLabels"))),
+            listing_quantity=derived.quantity,
         )
         # A send in flight keeps its one row, as before; its sales count once it settles.
         own_lines = lines.get(conv_id, [])
@@ -442,6 +457,7 @@ def _ledger_row(base: AnalyticsItem, line, listed_text: str, days_between) -> An
         # A sale without its own item cost uses the item's Cost of Goods.
         cost=item_cost if item_cost is not None else (base.cost * units if base.cost is not None else None),
         sale_id=line.id,
+        sale_quantity=units,
     )
 
 
@@ -472,6 +488,13 @@ def summarize(
         if index is not None:
             period_sales[index].append(item)
 
+    inventory = _inventory(items, now)
+    listing_dates = {item.conversation_id: (item.listed_at, item.listing_quantity)
+                     for item in items if item.listed_at is not None}
+    units_listed = sum(
+        quantity for listed_at, quantity in listing_dates.values()
+        if (window_start is None or window_start <= listed_at) and listed_at <= window_end
+    )
     previous = None
     if window_start is not None:
         span = window_end - window_start
@@ -487,16 +510,22 @@ def summarize(
             "start": previous_start.isoformat(),
             "end": window_start.isoformat(),
             "sales": _sales_stats(previous_sales),
+            "units_listed": sum(quantity for listed_at, quantity in listing_dates.values()
+                                if previous_start <= listed_at < window_start),
+            "units_sold": sum(item.sale_quantity for item in previous_sales),
+            "sell_through_rate": _period_sell_through(len(previous_sales), inventory["active"]),
         }
-    inventory = _inventory(items, now)
-    available = len(sales) + inventory["active"]
     return {
         "range": range_id,
         "undated_sales": sum(1 for item in items if item.status == "sold" and item.sold_at is None),
         "periods_truncated": truncated,
         "inventory": inventory,
         # Snapshot-based rate: period sales plus inventory still available today.
-        "sell_through_rate": round(len(sales) / available * 100, 1) if available else None,
+        "sell_through_rate": _period_sell_through(len(sales), inventory["active"]),
+        "units_listed": units_listed,
+        "units_sold": sum(item.sale_quantity for item in sales),
+        "window_start": window_start.isoformat() if window_start is not None else None,
+        "window_end": window_end.isoformat(),
         "sales": _sales_stats(sales),
         "previous": previous,
         "periods": [
@@ -598,6 +627,11 @@ def _category_label(value: Any) -> str:
     if ">" in text:
         return text.split(">")[-1].strip()
     return text
+
+
+def _period_sell_through(sold: int, active: int) -> float | None:
+    available = sold + active
+    return round(sold / available * 100, 1) if available else None
 
 
 def _inventory(items: list[AnalyticsItem], now: datetime) -> dict[str, Any]:

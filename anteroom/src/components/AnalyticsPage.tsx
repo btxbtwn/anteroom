@@ -1,4 +1,5 @@
 import { SalesLedger } from "./SalesLedger";
+import { AccountingChoice, BusinessExpenses, expenseMoney, type AccountingMode } from "./BusinessExpenses";
 import { WorkspaceTabs } from "./ebay/WorkspaceTabs";
 import "./ebay/ebay.css";
 import { useState } from "react";
@@ -44,14 +45,19 @@ interface Props {
 
 export function AnalyticsPage({ onOpenListing }: Props) {
   const [view, setView] = useState("Sales records");
-  return <WorkspacePage width="expanded"><h1 className="sr-only">Analytics</h1><WorkspaceTabs label="Analytics views" main items={["Sales records", "Inventory analytics"]} value={view} onChange={setView}>
+  const [mode, setMode] = useState<AccountingMode>("accrual");
+  return <WorkspacePage width="expanded"><h1 className="sr-only">Analytics</h1><WorkspaceTabs label="Analytics views" main items={["Sales records", "Inventory analytics", "Expenses", "Profit & loss"]} value={view} onChange={setView}>
     {view === "Sales records"
       ? <SalesLedger onOpenListing={onOpenListing} />
-      : <InventoryAnalyticsView onOpenListing={onOpenListing} />}
+      : view === "Inventory analytics" ? <InventoryAnalyticsView onOpenListing={onOpenListing} mode={mode} setMode={setMode} />
+        : <BusinessExpenses key={view} report={view === "Profit & loss"} mode={mode} setMode={setMode} />}
   </WorkspaceTabs></WorkspacePage>;
 }
 
-export function InventoryAnalyticsView({ onOpenListing }: Props) {
+export function InventoryAnalyticsView({ onOpenListing, mode = "accrual", setMode }: Props & {
+  mode?: AccountingMode;
+  setMode?: (mode: AccountingMode) => void;
+}) {
   const [range, setRange] = useState<AnalyticsRange>("12m");
   const [breakdownSearch, setBreakdownSearch] = useState("");
   const [rankMetric, setRankMetric] = useState<RankMetric>("revenue");
@@ -79,6 +85,7 @@ export function InventoryAnalyticsView({ onOpenListing }: Props) {
             <SelectTrigger aria-label="Sales period" className="w-44"><SelectValue>{PERIODS.find(item => item.id === range)?.label}</SelectValue></SelectTrigger>
             <SelectPopup>{PERIODS.map(item => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectPopup>
           </Select>
+          {setMode && <AccountingChoice mode={mode} setMode={setMode} />}
           <Button size="icon-sm" variant="ghost" aria-label="Refresh analytics" title="Refresh analytics"
             disabled={query.isFetching || (custom && !customValid)} onClick={() => void query.refetch()}>
             <RefreshCwIcon aria-hidden className={cn(query.isFetching && "animate-spin")} />
@@ -121,7 +128,7 @@ export function InventoryAnalyticsView({ onOpenListing }: Props) {
       {data && (!custom || customValid) ? (
         <>
           <PageSection aria-label={heading} title={heading}>
-            <SalesStats data={data} />
+            <SalesStats data={data} accountingMode={setMode ? mode : undefined} />
             {data.previous ? <PageNote>Compared with {dayRange(data.previous.start, previousEnd(data.previous.end))}.</PageNote> : null}
             {data.undated_sales > 0 ? (
               <PageNote>
@@ -270,24 +277,57 @@ function InventoryStrip({ inventory }: { inventory: InventoryAnalytics["inventor
 }
 
 /** Same names, order and wording as the figures on Sales records. */
-function SalesStats({ data }: { data: InventoryAnalytics }) {
+function SalesStats({ data, accountingMode }: { data: InventoryAnalytics; accountingMode?: AccountingMode }) {
   const sales = data.sales;
   const previous = data.previous?.sales ?? null;
+  const unitsSold = data.units_sold ?? sales.count;
+  const reportStart = data.window_start?.slice(0, 10) ?? "1970-01-01";
+  const reportEnd = data.window_end?.slice(0, 10) ?? "";
+  const mode = accountingMode ?? "accrual";
+  const reportParams = new URLSearchParams({ start: reportStart, end: reportEnd, mode }).toString();
+  const previousParams = reportEnd && data.window_start ? previousReportParams(reportStart, reportEnd, mode) : null;
+  const pnl = useQuery({
+    queryKey: ["profit-and-loss", reportParams],
+    queryFn: ({ signal }) => api.businessExpenses.report(reportParams, signal),
+    enabled: Boolean(accountingMode && data.window_end),
+  });
+  const previousPnl = useQuery({
+    queryKey: ["profit-and-loss", previousParams],
+    queryFn: ({ signal }) => api.businessExpenses.report(previousParams ?? "", signal),
+    enabled: Boolean(accountingMode && previousParams),
+  });
   return (
     <StatGrid className="grid-cols-2">
       <Stat label="Revenue" value={sales.count > 0 && sales.revenue_known === 0 ? null : formatCurrency(sales.revenue)} hint={revenueHint(sales)}
         change={compareChange(sales, previous, "revenue", sales.revenue, previous?.revenue ?? null, formatCurrency)} />
-      <Stat
+      {accountingMode && data.window_end ? <>
+        {pnl.isError ? <Stat label="Profit" value={null} hint="Could not load profit and loss." /> : null}
+        {pnl.isPending || pnl.data?.length === 0 ? <Stat label="Profit" value={null} /> : null}
+        {pnl.data?.map((currency) => {
+          const current = currency.lines.find((line) => line.label === "Net Profit")?.amount_cents ?? 0;
+          const prior = previousPnl.data?.find((row) => row.currency === currency.currency);
+          const priorAmount = prior?.lines.find((line) => line.label === "Net Profit")?.amount_cents
+            ?? (previousPnl.data ? 0 : null);
+          const format = (value: number) => expenseMoney(value, currency.currency);
+          return <Stat key={currency.currency} label={pnl.data.length > 1 ? `Profit (${currency.currency})` : "Profit"}
+            value={currency.currency === "Unassigned" ? null : format(current)} negative={current < 0}
+            hint={currency.incomplete_sales ? `${currency.incomplete_sales} sales have incomplete figures` : undefined}
+            change={priorAmount == null || currency.incomplete_sales || prior?.incomplete_sales
+              ? undefined : formatChange(current, priorAmount, format)} />;
+        })}
+      </> : <Stat
         label="Profit"
         value={sales.profit == null ? null : formatCurrency(sales.profit)}
         negative={sales.profit != null && sales.profit < 0}
         hint={profitHint(sales)}
         change={compareChange(sales, previous, "profit", sales.profit, previous?.profit ?? null, formatCurrency)}
-      />
+      />}
+      {data.units_listed != null && <Stat label="Units listed" value={String(data.units_listed)}
+        change={data.previous?.units_listed != null ? formatChange(data.units_listed, data.previous.units_listed, String) : undefined} />}
       <Stat
-        label="Items sold"
-        value={String(sales.count)}
-        change={previous ? formatChange(sales.count, previous.count, String) : undefined}
+        label={data.units_sold == null ? "Items sold" : "Units sold"}
+        value={String(unitsSold)}
+        change={previous ? formatChange(unitsSold, data.previous?.units_sold ?? previous.count, String) : undefined}
         hint={sales.average_price == null ? undefined : `${formatCurrency(sales.average_price)} average sale`}
       />
       <Stat
@@ -297,11 +337,25 @@ function SalesStats({ data }: { data: InventoryAnalytics }) {
         change={previous && sales.median_days != null && previous.median_days != null
           ? formatChange(sales.median_days, previous.median_days, formatDays) : undefined}
       />
-      <Stat label="Sell-through" value={data.sell_through_rate == null ? null : `${data.sell_through_rate}%`} hint={SELL_THROUGH_HINT} />
+      <Stat label="Sell-through" value={data.sell_through_rate == null ? null : `${data.sell_through_rate}%`} hint={SELL_THROUGH_HINT}
+        change={data.sell_through_rate != null && data.previous?.sell_through_rate != null
+          ? formatChange(data.sell_through_rate, data.previous.sell_through_rate, (value) => `${Number(value.toFixed(1))} pp`)
+          : undefined} />
       <Stat label="Profit margin" value={sales.margin == null ? null : `${sales.margin}%`} hint="Profit ÷ revenue, on sales with a cost"
         negative={sales.margin != null && sales.margin < 0} />
     </StatGrid>
   );
+}
+
+function previousReportParams(start: string, end: string, mode: AccountingMode): string {
+  const day = 86_400_000;
+  const first = Date.parse(start);
+  const length = Date.parse(end) - first + day;
+  return new URLSearchParams({
+    start: new Date(first - length).toISOString().slice(0, 10),
+    end: new Date(first - day).toISOString().slice(0, 10),
+    mode,
+  }).toString();
 }
 
 /** The API's previous period ends where this one starts; name its last whole day. */

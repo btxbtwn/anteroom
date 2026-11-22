@@ -27,7 +27,7 @@ _CACHE_SIZE = 16
 # assistant threads) leave the copy alone.
 WATCHED_TABLES = frozenset({
     "conversations", "messages", "listings", "listing_revisions", "source_boxes", "ad_spend",
-    "sale_events", "scout_checks", "sale_snapshots",
+    "sale_events", "scout_checks", "sale_snapshots", "business_expenses", "marketplace_sales",
 })
 
 _lock = threading.Lock()
@@ -79,6 +79,9 @@ def cached(db: Session, day: date, build: Callable[[], Any]) -> Any:
 def _touches_watched(session: Session) -> bool:
     for obj in (*session.new, *session.dirty, *session.deleted):
         table = getattr(obj, "__tablename__", None)
+        # The first read can archive Vendoo sales it already includes.
+        if table == "marketplace_sales" and session.info.get("archiving_vendoo_sales"):
+            continue
         if table in WATCHED_TABLES:
             return True
     return False

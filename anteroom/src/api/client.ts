@@ -1,7 +1,7 @@
 import { listingScreenRead } from "./listingScreen";
 import { reportError } from "./errorReports";
 import type { VendooDraft } from "./vendooDraft";
-import type { OfferLogResponse } from "./contract.gen";
+import type { CsvInput, CsvResult, CurrencyReport, Expense, ExpenseInput, MileageAmount, MileageInput, OfferLogResponse } from "./contract.gen";
 import { ApiRequestError, currentHostedSession, retryAfterMs, studioFetch, studioUpload, hasHostedApiSession } from "./transport";
 import { trackPhotoUpload } from "../photoUploads";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
@@ -508,6 +508,22 @@ function postHostedPhoto(convId: string, file: File, marketplace?: string): Prom
 }
 
 export const api = {
+  businessExpenses: {
+    list: (params: string, signal: AbortSignal) => read<Expense[]>(`/business-expenses?${params}`, { signal }),
+    report: (params: string, signal: AbortSignal) => read<CurrencyReport[]>(`/business-expenses/profit-and-loss?${params}`, { signal }),
+    save: (body: ExpenseInput, id?: string) => request<Expense>(
+      id ? `/business-expenses/${encodeURIComponent(id)}` : "/business-expenses",
+      { method: id ? "PUT" : "POST", body: JSON.stringify(body) },
+    ),
+    remove: (id: string) => request<void>(`/business-expenses/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    mileage: (body: MileageInput) => request<MileageAmount>(
+      "/business-expenses/mileage", { method: "POST", body: JSON.stringify(body) },
+    ),
+    import: (body: CsvInput, preview: boolean) => request<CsvResult>(
+      preview ? "/business-expenses/import/preview" : "/business-expenses/import",
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  },
   vendooDraft: {
     check: (id: string) => request<VendooDraft>(`/conversations/${id}/vendoo-draft/check`, { method: "POST" }),
     status: (id: string) => request<VendooDraft>(`/conversations/${id}/vendoo-draft`),

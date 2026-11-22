@@ -674,8 +674,12 @@ export interface InventoryAnalytics {
   periods_truncated: boolean;
   inventory: AnalyticsInventory;
   sell_through_rate: number | null;
+  units_listed?: number;
+  units_sold?: number;
+  window_start?: string | null;
+  window_end?: string;
   sales: AnalyticsSales;
-  previous: { start: string; end: string; sales: AnalyticsSales } | null;
+  previous: { start: string; end: string; sales: AnalyticsSales; units_listed?: number; units_sold?: number; sell_through_rate?: number | null } | null;
   periods: AnalyticsPeriod[];
   marketplaces: AnalyticsGroup[];
   categories: AnalyticsGroup[];

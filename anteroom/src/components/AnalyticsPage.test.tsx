@@ -62,6 +62,16 @@ function render(payload: InventoryAnalytics) {
 }
 
 describe("InventoryAnalyticsView", () => {
+  it("compares units listed and sell-through with the preceding period", () => {
+    const html = render({
+      ...data, units_listed: 4,
+      previous: data.previous && { ...data.previous, units_listed: 2, sell_through_rate: 50 },
+    });
+    expect(html).toContain("Units listed");
+    expect(html).toContain("Up 2 (100%)");
+    expect(html).toContain("Up 16.7 pp");
+  });
+
   it("shows current inventory without an obsolete sync timestamp", () => {
     const html = render(data);
     expect(html).toContain("Current inventory:");
