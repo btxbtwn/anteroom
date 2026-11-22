@@ -176,6 +176,8 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
             target=self.target,
             tree=self.tree,
             production_base=self.prod,
+            historical_failure=self.hist,
+            correcting_merge=self.corr,
             workflow_blob=self.wf_blob,
             ci_blob=self.ci_blob,
             run_id=42,

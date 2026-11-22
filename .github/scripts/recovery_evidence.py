@@ -38,6 +38,10 @@ class EvidencePin:
     target: str
     tree: str
     production_base: str
+    # Pair that produced this receipt; archived pins keep their own, independent
+    # of verification_evidence.HISTORICAL / CORRECTED for the next recovery.
+    historical_failure: str
+    correcting_merge: str
     workflow_blob: str
     ci_blob: str
     run_id: int
@@ -51,7 +55,10 @@ class EvidencePin:
         for name in ('repository_id', 'workflow_id', 'run_id', 'attempt', 'receipt_artifact_id'):
             if type(getattr(self, name)) is not int or getattr(self, name) < 1:
                 raise ValueError('Repository, workflow, run, attempt and artifact IDs must be positive integers.')
-        for name in ('target', 'tree', 'production_base', 'workflow_blob', 'ci_blob'):
+        for name in (
+            'target', 'tree', 'production_base', 'historical_failure', 'correcting_merge',
+            'workflow_blob', 'ci_blob',
+        ):
             evidence.require_sha(getattr(self, name))
         if not DIGEST.fullmatch(self.receipt_digest):
             raise ValueError('An explicit SHA-256 receipt archive digest is required.')
@@ -68,7 +75,7 @@ def expected_source(pin, git):
     if (pin.target not in main or pin.production_base not in main
             or main.index(pin.target) >= main.index(pin.production_base)):
         raise ValueError('Target must follow the exact base on main first-parent history.')
-    for ancestor in (evidence.HISTORICAL, evidence.CORRECTED):
+    for ancestor in (pin.historical_failure, pin.correcting_merge):
         git('merge-base', '--is-ancestor', ancestor, pin.target)
     if (git('rev-parse', pin.target+'^{tree}') != pin.tree
             or git('rev-parse', pin.target+':'+evidence.WORKFLOW) != pin.workflow_blob
@@ -79,7 +86,7 @@ def expected_source(pin, git):
                             pin.production_base+'..'+pin.target).split('\0') if p]
     return {'schema': 1, 'repository': pin.repository, 'target': pin.target, 'tree': pin.tree,
             'production_base': pin.production_base, 'production_base_is_live_verified': False,
-            'historical_failure': evidence.HISTORICAL, 'correcting_merge': evidence.CORRECTED,
+            'historical_failure': pin.historical_failure, 'correcting_merge': pin.correcting_merge,
             'span': span,
             'native_changes': [p for p in files if p.startswith(('anteroom-ios/', 'contracts/'))
                                or p == 'anteroom/server/anteroom/desktop.py'],

@@ -23,6 +23,8 @@ class RecoveryEvidenceTests(unittest.TestCase):
         self.pin = recovery.EvidencePin(
             repository='example/project', repository_id=10, workflow_id=20,
             target='a'*40, tree='b'*40, production_base='c'*40,
+            historical_failure=verification.HISTORICAL,
+            correcting_merge=verification.CORRECTED,
             workflow_blob='d'*40, ci_blob='e'*40, run_id=42, attempt=1,
             receipt_artifact_id=100, receipt_digest='sha256:'+'0'*64)
         self.run = {'id': 42, 'workflow_id': 20, 'head_sha': self.pin.target,
@@ -114,6 +116,27 @@ class RecoveryEvidenceTests(unittest.TestCase):
         self.assertEqual(result['live_reconciliation'], 'not performed')
         self.assertEqual(result['native_changes'], ['anteroom-ios/example.swift'])
         self.assertTrue(all(p.startswith('actions/runs/42') for p in self.calls))
+
+    def test_expected_source_uses_pin_pair_not_module_constants(self):
+        # Archived receipts keep the pair that produced them, even after the
+        # module-level HISTORICAL/CORRECTED constants move to a newer recovery.
+        archived_hist = '1' * 40
+        archived_corr = '2' * 40
+        self.assertNotEqual(archived_hist, verification.HISTORICAL)
+        self.assertNotEqual(archived_corr, verification.CORRECTED)
+        pin = replace(self.pin, historical_failure=archived_hist, correcting_merge=archived_corr)
+        self.git_values = {
+            **self.git_values,
+            ('rev-list', '--first-parent', 'origin/main'): '\n'.join(
+                ['f' * 40, pin.target, archived_corr, archived_hist, pin.production_base]
+            ),
+            ('rev-list', '--first-parent', '--reverse', pin.production_base + '..' + pin.target): '\n'.join(
+                [archived_hist, archived_corr, pin.target]
+            ),
+        }
+        source = recovery.expected_source(pin, self.git)
+        self.assertEqual(source['historical_failure'], archived_hist)
+        self.assertEqual(source['correcting_merge'], archived_corr)
 
     def test_all_run_provenance_bindings_are_required(self):
         for key, bad in [('id', 43), ('workflow_id', 21), ('head_sha', 'f'*40),

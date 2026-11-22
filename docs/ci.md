@@ -159,11 +159,18 @@ python3 .github/scripts/recovery_evidence.py \
   --target b28ba4b361071373731b93bc49c12b4bf78326e9 \
   --tree 07ff8975695a4182c00c2605b5679d56e493c67b \
   --production-base b73c534707b9ef9bd70e4dc589b9c4b10863a852 \
+  --historical-failure fa824f9af17c7676458894df4b12c7af046b3e6c \
+  --correcting-merge 5cc7fea11067baf1b93d1519b57b0fd93be2db19 \
   --workflow-blob a0a097906554252a26f35c957169ec6d0e3c93db \
   --ci-blob 3ee3a2df9cda1261e08aa55a2ee639ab9075c380 \
   --run-id 44662061597 --attempt 1 --receipt-artifact-id 14596571781 \
   --receipt-digest sha256:4d0f38c8b8125c78810c0eecfb9301e74bd73a8e3f2df148cb38879c328ed791
 ```
+
+The pin carries its own `historical_failure` / `correcting_merge` pair (here the
+spent `fa824f9a` / `#1653` pair). Module-level `verification_evidence.HISTORICAL`
+/ `CORRECTED` name the next recovery (`d19adbff` / `6d72c5e3`) and must not
+replace the archived pair when inspecting this receipt.
 
 A successful standalone inspection explicitly returns `deployment_authorized: false`,
 `runtime_authority: disabled` and `live_reconciliation: not performed`. On its
