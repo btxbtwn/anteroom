@@ -2,7 +2,10 @@ name: Linked issue
 
 # Every PR closes at least one issue: a closing keyword in the description
 # ("Closes #12") or an issue linked under Development. Merging into main then
-# closes the issue. Dependency bots are exempt.
+# closes the issue. Dependency bots are exempt. Linking or unlinking under
+# Development fires no pull_request event, so after a sidebar change re-run
+# this check (or edit the description); prefer the keyword, which an edit
+# re-checks.
 on:
   pull_request:
     types: [opened, edited, reopened, synchronize, ready_for_review]
@@ -31,7 +34,7 @@ jobs:
             -f query='query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){closingIssuesReferences(first:10){nodes{number}}}}}' \
             --jq '[.data.repository.pullRequest.closingIssuesReferences.nodes[].number | "#\(.)"] | join(" ")')
           if [ -z "$issues" ]; then
-            echo "::error::This PR closes no issue. Add 'Closes #<n>' to the description (one keyword per issue), or file one with the Bug, Feature or Task form first."
+            echo "::error::This PR closes no issue. Add 'Closes #<n>' to the description (one keyword per issue), or file one with the Bug, Feature or Task form first. Linked it under Development instead? Re-run this check: sidebar links do not trigger it."
             exit 1
           fi
           echo "Merging closes $issues"
