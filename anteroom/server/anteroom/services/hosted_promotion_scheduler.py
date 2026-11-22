@@ -35,8 +35,14 @@ async def check_seller(owner: str, recovered: set[str]) -> None:
         await promotion_automations.tick(skip_cloud=True)
 
 
+# Bound concurrent promotion checks on the web Machine so periodic 60s ticks
+# never crowd out interactive page loads on the shared DB pool.
+MAX_CONCURRENT_SELLERS = 2
+
+
 async def check_ready_sellers(recovered: set[str]) -> None:
     ready = set(ready_sellers(MARKETPLACE_PROMOTIONS))
+    slots = asyncio.Semaphore(MAX_CONCURRENT_SELLERS)
 
     def check_disconnected(owner):
         with use(for_seller(owner)), SessionLocal() as db:
@@ -44,10 +50,11 @@ async def check_ready_sellers(recovered: set[str]) -> None:
 
     async def check(owner):
         try:
-            if owner in ready:
-                await check_seller(owner, recovered)
-            else:
-                await asyncio.to_thread(check_disconnected, owner)
+            async with slots:
+                if owner in ready:
+                    await check_seller(owner, recovered)
+                else:
+                    await asyncio.to_thread(check_disconnected, owner)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - a seller's failed round must not stop others

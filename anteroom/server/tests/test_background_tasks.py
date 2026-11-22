@@ -196,3 +196,61 @@ def test_progress_events_check_the_lease_once_per_write(storage, leased_session)
             queue.append_events(task_id, token, ['data: late\n\n'])
     with sessions(owner)() as db:
         assert queue.journal(db, task_id)[-1] == 'data: three\n\n'
+
+
+def test_claim_prioritizes_interactive_work_and_balances_across_sellers(storage):  # noqa: F811
+    from anteroom.models.assistant import AssistantThread
+
+    engine, sessions = storage
+    alice, bob = str(uuid.uuid4()), str(uuid.uuid4())
+
+    def add_draft_tasks(seller: str, kinds: list[str]) -> list[str]:
+        ids = []
+        with sessions(seller)() as db:
+            for idx, kind in enumerate(kinds):
+                conv = Conversation(title=f'{seller[:4]}-{kind}-{idx}')
+                db.add(conv)
+                db.flush()
+                ids.append(queue.enqueue(db, conv.id, kind, {}).id)
+        return ids
+
+    # Alice queues 3 bulk generations first, then Bob queues 2 generations, 1 chat and 1 assistant answer.
+    a1, a2, a3 = add_draft_tasks(alice, ['generate', 'generate', 'generate'])
+    b1, b2, b_chat = add_draft_tasks(bob, ['generate', 'generate', 'chat'])
+    with sessions(bob)() as db:
+        thread = AssistantThread()
+        db.add(thread)
+        db.flush()
+        b_assist_task = queue.add_answer(db, thread.id, {'question': 'What sold today?'})
+        db.commit()
+        b_assist = b_assist_task.id
+
+    # Interactive work (chat + assistant) is claimed before Alice's earlier bulk generations.
+    first_two = [queue.claim(engine), queue.claim(engine)]
+    assert [row[:2] for row in first_two] == [(b_chat, bob), (b_assist, bob)]
+
+    # Finish Bob's interactive tasks so both sellers start the generation pass at 0 running.
+    for task_id, _owner, token in first_two:
+        with service_context.use(replace(runtime(bob), session_factory=sessions(bob))):
+            queue.finish(task_id, token)
+
+    # Generation tasks balance across sellers instead of draining all of Alice's backlog first:
+    # a1 (0 vs 0, oldest), then b1 (Bob 0 running < Alice 1 running), then a2 (1 vs 1), then b2 (1 < 2), then a3.
+    claimed_gen = [queue.claim(engine)[:2] for _ in range(5)]
+    assert claimed_gen == [(a1, alice), (b1, bob), (a2, alice), (b2, bob), (a3, alice)]
+    assert queue.claim(engine) is None
+
+
+def test_solo_seller_still_claims_all_tasks_without_artificial_cap(storage):  # noqa: F811
+    engine, sessions = storage
+    alice = str(uuid.uuid4())
+    expected = []
+    with sessions(alice)() as db:
+        for idx in range(4):
+            conv = Conversation(title=f'Solo-{idx}')
+            db.add(conv)
+            db.flush()
+            expected.append(queue.enqueue(db, conv.id, 'generate', {}).id)
+    claimed = [queue.claim(engine)[0] for _ in range(4)]
+    assert claimed == expected
+    assert queue.claim(engine) is None

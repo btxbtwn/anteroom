@@ -31,6 +31,7 @@ import {
   pkceChallenge,
   randomToken,
   sha256Hex,
+  timingSafeEqual,
   verifyEbaySignature,
   verifyEtsySignature,
 } from "./verify.js";
@@ -216,8 +217,14 @@ async function handleEtsyWebhook(request, env) {
 
 // --- Devices ----------------------------------------------------------------
 
+function isHostedRegister(request, env) {
+  const expected = env.HOSTED_REGISTER_SECRET;
+  const presented = request.headers.get("x-anteroom-register-secret");
+  return Boolean(expected && presented && timingSafeEqual(presented, expected));
+}
+
 async function handleRegister(request, env) {
-  if (env.REGISTRATION_LIMITER) {
+  if (env.REGISTRATION_LIMITER && !isHostedRegister(request, env)) {
     const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
     const { success } = await env.REGISTRATION_LIMITER.limit({ key: ip });
     if (!success) return json({ error: "too many registrations, try again in a minute" }, 429);
@@ -406,6 +413,12 @@ async function handleEtsyProxy(request, env, deviceId, path) {
     return json({ error: "this Etsy account is not linked to this device" }, 403);
   }
   if (!/^[A-Za-z0-9_\-/.]+$/.test(path) || path.includes("..")) return json({ error: "bad path" }, 400);
+  if (env.ETSY_PROXY_LIMITER) {
+    const { success } = await env.ETSY_PROXY_LIMITER.limit({ key: deviceId });
+    if (!success) {
+      return json({ error: "too many Etsy requests, try again shortly" }, 429, { "retry-after": "5" });
+    }
+  }
   return etsyForward(env, request, path, etsyToken);
 }
 

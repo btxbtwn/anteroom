@@ -191,3 +191,37 @@ def test_mercari_preview_cooldown_is_seller_scoped(cloud, signing_keys, monkeypa
     assert command['type'] == 'marketplace.promotion_check'
     assert not thread.is_alive() and second['response'].status_code == 200
     assert second['response'].json()['rows'][0]['state'] == 'preview'
+
+
+def test_promotion_scheduler_bounds_concurrent_sellers_per_tick(monkeypatch):
+    import asyncio
+    import time
+    import uuid
+    from anteroom.services import hosted_promotion_scheduler
+
+    hosted_browser_relay._relays.clear()
+    sellers = [str(uuid.uuid4()) for _ in range(6)]
+    for seller in sellers:
+        relay = hosted_browser_relay.relay_for(seller)
+        relay._capabilities = frozenset({'marketplace.actions', 'marketplace.promotions'})
+        relay._seen_at = time.monotonic()
+
+    active = 0
+    peak = 0
+    checked = []
+
+    async def slow_check(owner: str, _recovered: set[str]) -> None:
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.02)
+        checked.append(owner)
+        active -= 1
+
+    monkeypatch.setattr(hosted_promotion_scheduler, 'check_seller', slow_check)
+    try:
+        asyncio.run(hosted_promotion_scheduler.check_ready_sellers(set()))
+    finally:
+        hosted_browser_relay._relays.clear()
+    assert set(checked) == set(sellers)
+    assert peak <= hosted_promotion_scheduler.MAX_CONCURRENT_SELLERS

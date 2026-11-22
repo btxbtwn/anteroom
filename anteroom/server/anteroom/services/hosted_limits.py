@@ -8,6 +8,7 @@ than one Machine each keeps its own count.
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 import time
 from collections import OrderedDict
@@ -32,11 +33,23 @@ BODY_RECEIVE_SECONDS = 120.0
 STREAM_CHUNK_BYTES = 64 * 1024
 
 
+def _upload_slots_limit(override: int | None = None) -> int:
+    if override is not None:
+        return max(1, int(override))
+    raw = os.environ.get('ANTEROOM_UPLOAD_SLOTS')
+    if raw is None or not raw.strip():
+        return UPLOAD_SLOTS
+    try:
+        return max(1, int(raw.strip()))
+    except ValueError:
+        return UPLOAD_SLOTS
+
+
 class UploadSlots:
     """At most one upload per seller (unless ``per_seller=False``), and ``total`` across sellers."""
 
-    def __init__(self, total: int = UPLOAD_SLOTS, wait: float = UPLOAD_WAIT_SECONDS):
-        self._total = asyncio.Semaphore(total)
+    def __init__(self, total: int | None = None, wait: float = UPLOAD_WAIT_SECONDS):
+        self._total = asyncio.Semaphore(_upload_slots_limit(total))
         self._wait = wait
         # Seller -> [lock, holders]. Removed when nobody holds or waits for it.
         self._sellers: dict[str, list] = {}

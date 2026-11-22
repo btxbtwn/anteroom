@@ -200,6 +200,23 @@ describe("devices", () => {
     expect(limit).toHaveBeenCalledWith({ key: "10.9.9.9" });
   });
 
+  it("lets the hosted server bypass the per-IP registration limiter only with the shared secret", async () => {
+    const limit = vi.spyOn(env.REGISTRATION_LIMITER, "limit").mockResolvedValue({ success: false });
+    const bad = await relay("/devices", {
+      method: "POST",
+      headers: { "cf-connecting-ip": "10.9.9.8", "x-anteroom-register-secret": "wrong" },
+    });
+    expect(bad.status).toBe(429);
+    expect(limit).toHaveBeenCalledTimes(1);
+
+    const ok = await relay("/devices", {
+      method: "POST",
+      headers: { "cf-connecting-ip": "10.9.9.8", "x-anteroom-register-secret": "test-hosted-register-secret" },
+    });
+    expect(ok.status).toBe(201);
+    expect(limit).toHaveBeenCalledTimes(1);
+  });
+
   it("registers devices with separate tokens and refuses unknown ones", async () => {
     const a = await register();
     const b = await register();
@@ -364,6 +381,20 @@ describe("Etsy", () => {
     expect(upstream.url).toBe("https://api.etsy.com/v3/application/shops/52/receipts?limit=5");
     expect(upstream.headers.get("x-api-key")).toBe("test-keystring:test-shared-secret");
     expect((await call(b.token)).status).toBe(403);
+  });
+
+  it("enforces per-device Etsy proxy rate limits so one seller cannot starve others", async () => {
+    const a = await register();
+    await connectEtsy(a.token, { userId: "783", shopId: "53" });
+    const limit = vi.spyOn(env.ETSY_PROXY_LIMITER, "limit").mockResolvedValue({ success: false });
+    const refused = await relay(
+      "/studio/etsy/v3/application/shops/53/receipts?limit=5",
+      authed(a.token, { headers: { "x-etsy-authorization": "Bearer 783.access" } }),
+    );
+    expect(refused.status).toBe(429);
+    expect(refused.headers.get("retry-after")).toBe("5");
+    expect(limit).toHaveBeenCalledWith({ key: a.deviceId });
+    expect(calls.some((c) => c.url.includes("/shops/53/receipts"))).toBe(false);
   });
 
   it("refreshes tokens only for the device's own Etsy account", async () => {

@@ -224,3 +224,32 @@ def test_ruler_load_and_measure_read_enforce_pixel_cap_and_max_side(tmp_path):
     assert abs(stick_line[1] - round(4000 * (3072 / 4500))) <= 1
 
 
+def test_image_decode_allows_two_concurrent_decodes(monkeypatch):
+    from anteroom.services import image_decode
+
+    assert image_decode.DEFAULT_DECODE_CONCURRENCY == 2
+    sample = _png(64, 64, "RGB")
+    real_open = image_decode.Image.open
+    both_inside = threading.Barrier(2, timeout=3)
+    errors: list[Exception] = []
+
+    def synchronized_open(fp):
+        both_inside.wait()
+        return real_open(fp)
+
+    monkeypatch.setattr(image_decode.Image, "open", synchronized_open)
+
+    def run():
+        try:
+            image_decode.decode(sample, max_side=64)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=run) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(5)
+    assert not errors
+
+

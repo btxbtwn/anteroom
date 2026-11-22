@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from anteroom.models.conversation import Conversation, Photo
 from anteroom.services import hosted_photos as photos
 from anteroom.services.hosted_database import get_seller_db, in_seller_session
+from anteroom.services.hosted_limits import hold_upload_slot, read_bounded_body
 
 router = APIRouter(prefix='/api/drafts/{draft_id}/photos')
 log = logging.getLogger(__name__)
@@ -74,17 +75,18 @@ def save_photo(db, draft_id, key, data, width, height, marketplace=None):
 
 @router.post('', response_model=PhotoResponse, status_code=201)
 async def upload_photo(draft_id: str, request: Request, marketplace: Literal['poshmark', 'mercari', 'depop', 'ebay', 'etsy'] | None = None):
-    # Check ownership before reading bytes. Read a raw body, avoiding an unbounded
-    # multipart spool before the handler has an opportunity to enforce the limit.
-    # The body, decoder and Storage can take time; no session is open while
-    # waiting. The draft is checked and locked again only to save the row.
+    # Check ownership before reading bytes. Hold one per-seller upload slot
+    # across body receive and Pillow normalization so concurrent uploads cannot
+    # exhaust Machine RAM or starve other sellers, then release before Storage I/O.
     await in_seller_session(request, require_draft, draft_id)
-    data = bytearray()
-    async for chunk in request.stream():
-        if len(data) + len(chunk) > photos.MAX_BYTES:
-            raise HTTPException(413, f'Choose a photo of {photos.MAX_BYTES // (1024 * 1024)} MB or smaller')
-        data.extend(chunk)
-    image, width, height = await asyncio.to_thread(photos.normalize, bytes(data))
+    async with hold_upload_slot(request, per_seller=True):
+        data = await read_bounded_body(
+            request,
+            photos.MAX_BYTES,
+            too_large_detail=f'Choose a photo of {photos.MAX_BYTES // (1024 * 1024)} MB or smaller',
+        )
+        image, width, height = await asyncio.to_thread(photos.normalize, bytes(data))
+        del data
     token = request.headers['authorization'].partition(' ')[2]
     key = photos.new_key(request.state.seller.user_id, draft_id)
     await asyncio.to_thread(photos.storage_call, 'POST', key, token, image)

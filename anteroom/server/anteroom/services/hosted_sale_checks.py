@@ -16,6 +16,11 @@ from anteroom.services.service_context import use
 log = logging.getLogger(__name__)
 
 
+# Bound concurrent Chrome sale checks on the web Machine so periodic 30s ticks
+# never crowd out interactive page loads on the shared DB pool.
+MAX_CONCURRENT_SELLERS = 2
+
+
 async def check_seller(seller: str) -> None:
     try:
         with use(for_seller(seller)):
@@ -28,7 +33,13 @@ async def check_seller(seller: str) -> None:
 
 
 async def check_ready_sellers() -> None:
-    await asyncio.gather(*(check_seller(seller) for seller in ready_sellers(order_history.CAPABILITY)))
+    slots = asyncio.Semaphore(MAX_CONCURRENT_SELLERS)
+
+    async def bounded(seller: str) -> None:
+        async with slots:
+            await check_seller(seller)
+
+    await asyncio.gather(*(bounded(seller) for seller in ready_sellers(order_history.CAPABILITY)))
 
 
 async def serve() -> None:

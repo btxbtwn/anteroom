@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from anteroom.services import box_scout, sold_listings
+from anteroom.services.hosted_limits import limit_seller_submissions
 
 router = APIRouter(prefix="/api/sourcing", tags=["sourcing"])
 
@@ -312,7 +313,8 @@ def get_sourcing_evidence(theme: str = Query(min_length=1)):
 
 
 @router.post("/refresh", response_model=SourcingResponse)
-def refresh_sourcing():
+def refresh_sourcing(request: Request):
+    limit_seller_submissions(request)
     if not box_scout.read_state()["prefs"]["zip"]:
         raise HTTPException(status_code=422, detail="Enter a 5-digit US ZIP code first.")
     box_scout.refresh_in_background()

@@ -20,6 +20,7 @@ from anteroom.routes.api_contract import (
     ListingValidation,
 )
 from anteroom.services.etsy_fields import etsy_eligible
+from anteroom.services.hosted_limits import limit_seller_submissions
 from anteroom.services.validation import validate_listing
 from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
 from anteroom.repositories.queries import ListingRepo, ConversationRepo
@@ -188,7 +189,7 @@ def preview_price_drop(conv_id: str, db: Session = Depends(get_db, scope="functi
         raise HTTPException(400, str(exc)) from exc
 
 
-@router.post("/api/conversations/{conv_id}/price-drop/comps")
+@router.post("/api/conversations/{conv_id}/price-drop/comps", dependencies=[Depends(limit_seller_submissions)])
 def stream_price_drop_comps(conv_id: str, db: Session = Depends(get_db, scope="function")):
     """Stream sold comps as each source answers, with the suggestion they imply.
 
