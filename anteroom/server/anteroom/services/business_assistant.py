@@ -838,14 +838,18 @@ async def answer(
         batch = lookups[:LOOKUPS_PER_ROUND]
         skipped = len(lookups) - len(batch)
         results: list[str | list[dict[str, Any]]] = []
+        image_offset = 0
         for item in batch:
             yield "status", lookup_label(item)
             lookup_started = time.monotonic()
             timing.lookups += 1
             try:
-                results.append(await run_any_lookup(item, shop, viewed))
+                lookup_result = await run_any_lookup(item, shop, viewed, image_offset=image_offset)
             finally:
                 timing.lookup_ms = min(TIMING_CAP_MS, timing.lookup_ms + elapsed_ms(lookup_started))
+            results.append(lookup_result)
+            if isinstance(lookup_result, list):
+                image_offset += sum(part.get("type") == "image_url" for part in lookup_result)
         result = _combined(batch, results, skipped)
         texts = [result] if isinstance(result, str) else [part["text"] for part in result if part.get("type") == "text"]
         links.allow(texts)
@@ -958,12 +962,14 @@ def _run_sql(shop: Shop, body: str) -> str:
     return shop.read_lookup(lambda conn: run_lookup(conn, body))
 
 
-async def run_any_lookup(lookup: Lookup, shop: Shop, viewed: list[str]) -> str | list[dict[str, Any]]:
+async def run_any_lookup(
+    lookup: Lookup, shop: Shop, viewed: list[str], *, image_offset: int = 0,
+) -> str | list[dict[str, Any]]:
     """Run one lookup and return what goes back to the model; a failure comes back as its reason."""
     name = "view_box_media" if lookup.kind == "media" else _lookup_name(lookup.body)
     try:
         if lookup.kind == "media":
-            return await view_box_media(shop, lookup.body, viewed)
+            return await view_box_media(shop, lookup.body, viewed, image_offset=image_offset)
         return await asyncio.to_thread(_run_sql, shop, lookup.body)
     except Exception as exc:  # noqa: BLE001 - the model is told, so it never answers from nothing
         log.exception("assistant lookup failed")
@@ -1129,7 +1135,9 @@ def _sourcing_rows(lookups: sqlite3.Connection) -> list[dict[str, Any]]:
     return [dict(zip(("id", "store", "title", "url"), row, strict=True)) for row in cursor.fetchall()]
 
 
-async def view_box_media(shop: Shop, body: str, viewed: list[str]) -> str | list[dict[str, Any]]:
+async def view_box_media(
+    shop: Shop, body: str, viewed: list[str], *, image_offset: int = 0,
+) -> str | list[dict[str, Any]]:
     """The photos and video frames of the boxes asked for, as image parts the model can see.
 
     Up to ``box_media.MAX_BOXES_PER_ANSWER`` boxes in one answer, however many
@@ -1161,7 +1169,7 @@ async def view_box_media(shop: Shop, body: str, viewed: list[str]) -> str | list
             chosen.append(row)
     views = await box_media.view_boxes(chosen) if chosen else []
     viewed.extend(view.box_id for view in views if view.viewed)
-    text, parts = box_media.describe(views, skipped=skipped)
+    text, parts = box_media.describe(views, skipped=skipped, image_offset=image_offset)
     return [{"type": "text", "text": text}, *parts] if parts else text
 
 

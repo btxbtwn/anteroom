@@ -1028,7 +1028,7 @@ def test_cancelled_lookup_records_attempt_and_wait(monkeypatch):
     clock = [0.0]
     monkeypatch.setattr(business_assistant, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
 
-    async def cancelled(*_args):
+    async def cancelled(*_args, **_kwargs):
         clock[0] = 8.0
         raise asyncio.CancelledError()
 
@@ -1828,28 +1828,33 @@ def test_sql_and_box_media_lookups_combine_text_then_images(workspace, monkeypat
     db, _client = workspace
     seed(db)
     base_shop = business_assistant.read_shop(db, now=NOW)
-    sourcing_row = {
+    first_box = {
         "id": "raghouse:1", "store": "Raghouse", "title": "Vintage Tees 20 pcs",
         "url": "https://raghouse.example/lot/1",
     }
+    second_box = {**first_box, "id": "raghouse:2", "title": "Denim", "url": "https://raghouse.example/lot/2"}
     shop = business_assistant.Shop(
         brief=base_shop.brief,
-        tables={**base_shop.tables, "sourcing_boxes": [sourcing_row]},
+        tables={**base_shop.tables, "sourcing_boxes": [first_box, second_box]},
     )
 
     async def fake_view_boxes(chosen):
         return [
             box_media.BoxView(
                 box_id=row["id"], title=row["title"], store=row["store"], url=row["url"],
-                images=[("photo 1 of 1", "data:image/jpeg;base64,AAAA")], photos_on_page=1,
+                images=(
+                    [("front", "data:image/jpeg;base64,AAAA"), ("back", "data:image/jpeg;base64,BBBB")]
+                    if row["id"] == first_box["id"] else [("detail", "data:image/jpeg;base64,CCCC")]
+                ),
             )
             for row in chosen
         ]
 
     monkeypatch.setattr(box_media, "view_boxes", fake_view_boxes)
     mixed = (
+        f"{FENCE}view_box_media\nraghouse:1\n{FENCE}\n"
         f"{FENCE}sql\n-- total listings\nSELECT count(*) AS total FROM listings\n{FENCE}\n"
-        f"{FENCE}view_box_media\nraghouse:1\n{FENCE}"
+        f"{FENCE}view_box_media\nraghouse:2\n{FENCE}"
     )
     provider = Provider((mixed,), ("Looked at both.",))
     try:
@@ -1863,13 +1868,17 @@ def test_sql_and_box_media_lookups_combine_text_then_images(workspace, monkeypat
         base_shop.close()
 
     statuses = [text for kind, text in events if kind == "status"]
-    assert statuses == ["Looking up total listings…", "Looking at the box photos…"]
+    assert statuses == ["Looking at the box photos…", "Looking up total listings…", "Looking at the box photos…"]
     fed_back = provider.calls[1][-1]["content"]
     assert isinstance(fed_back, list)
     assert fed_back[0]["type"] == "text"
-    assert "Lookup 1 of 2 (total listings):" in fed_back[0]["text"]
-    assert "Lookup 2 of 2 (box photos):" in fed_back[0]["text"]
-    assert any(part.get("type") == "image_url" for part in fed_back[1:])
+    assert "Lookup 2 of 3 (total listings):" in fed_back[0]["text"]
+    assert "Box raghouse:1 (Vintage Tees 20 pcs, Raghouse): VIEWED — images 1-2: #1 front; #2 back" in fed_back[0]["text"]
+    assert "Box raghouse:2 (Denim, Raghouse): VIEWED — images 3-3: #3 detail" in fed_back[0]["text"]
+    assert fed_back[1:] == [
+        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data}"}}
+        for data in ("AAAA", "BBBB", "CCCC")
+    ]
 
 
 def test_failing_and_good_lookups_in_one_round_both_report(workspace, monkeypatch):
