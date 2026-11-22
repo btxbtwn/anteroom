@@ -5,7 +5,9 @@ import hashlib
 import json
 import logging
 import re
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from anteroom.services import listing_persistence
@@ -905,19 +907,33 @@ def ebay_size(listing: dict, block: dict, size: str) -> str:
     return size_choice(spelled, choices) or size_choice(size, choices) or spelled
 
 
-def ebay_size_choices(listing: dict, block: dict | None = None) -> list[str]:
-    """The Size choices of the listing's eBay category, from the cached category schema, or none."""
-    from anteroom.services.category_fields import load_fields
+_ebay_size_choices_override: ContextVar[dict[str, list[str]] | None] = ContextVar(
+    "_ebay_size_choices_override", default=None,
+)
 
-    ids = listing.get("marketplace_category_ids")
-    block = block if isinstance(block, dict) else {}
-    category_id = str((ids.get("ebay") if isinstance(ids, dict) else "") or block.get("categoryId") or "").strip()
-    if not category_id:
-        return []
+
+@contextmanager
+def using_ebay_size_choices(choices_by_category: dict[str, list[str]]) -> Iterator[None]:
+    """Use preloaded eBay Size choices by category id inside this block instead of per-listing DB reads."""
+    token = _ebay_size_choices_override.set(choices_by_category)
     try:
-        specs = load_fields("ebay", category_id) or {}
-    except Exception:  # noqa: BLE001 - without a cached schema the size keeps eBay's usual spelling
-        log.info("No cached eBay schema for %s", category_id)
+        yield
+    finally:
+        _ebay_size_choices_override.reset(token)
+
+
+def ebay_category_id(listing: dict, block: dict | None = None) -> str:
+    ids = listing.get("marketplace_category_ids")
+    if block is None:
+        raw_block = listing.get("ebay_specifics")
+        block = raw_block if isinstance(raw_block, dict) else {}
+    elif not isinstance(block, dict):
+        block = {}
+    return str((ids.get("ebay") if isinstance(ids, dict) else "") or block.get("categoryId") or "").strip()
+
+
+def ebay_size_choices_from_specs(specs: dict[str, Any] | None) -> list[str]:
+    if not specs:
         return []
     spec = next((spec for spec in specs.values() if (spec.display or spec.key).strip().casefold() == "size"), None)
     if spec is None:
@@ -926,6 +942,24 @@ def ebay_size_choices(listing: dict, block: dict | None = None) -> list[str]:
     for scale in spec.scales.values():
         labels.extend((scale.get("options") or {}).values())
     return labels
+
+
+def ebay_size_choices(listing: dict, block: dict | None = None) -> list[str]:
+    """The Size choices of the listing's eBay category, from the cached category schema, or none."""
+    from anteroom.services.category_fields import load_fields
+
+    category_id = ebay_category_id(listing, block)
+    if not category_id:
+        return []
+    prefetched = _ebay_size_choices_override.get()
+    if prefetched is not None and category_id in prefetched:
+        return prefetched[category_id]
+    try:
+        specs = load_fields("ebay", category_id) or {}
+    except Exception:  # noqa: BLE001 - without a cached schema the size keeps eBay's usual spelling
+        log.info("No cached eBay schema for %s", category_id)
+        return []
+    return ebay_size_choices_from_specs(specs)
 
 
 def propagate_general_size(listing: dict, *, previous_size: str | None = None) -> bool:

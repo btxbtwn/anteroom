@@ -135,6 +135,7 @@ def inventory_analytics(
 
 def analytics_ranges(
     db, range_ids: tuple[str, ...], *, now: datetime, rows: list[AnalyticsItem],
+    out_ad_entries: list[Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """``inventory_analytics`` for several ranges, reading what every range shares once.
 
@@ -144,6 +145,8 @@ def analytics_ranges(
         if range_id not in ANALYTICS_RANGES:
             raise ValueError(range_id)
     inputs = _RangeInputs.read(db, rows, release=True)
+    if out_ad_entries is not None:
+        out_ad_entries.extend(inputs.ad_entries)
     return {range_id: _range_payload(rows, inputs, range_id, now) for range_id in range_ids}
 
 

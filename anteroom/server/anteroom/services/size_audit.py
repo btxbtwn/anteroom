@@ -8,15 +8,20 @@ save would rewrite any of them. Nothing here changes a listing.
 
 from __future__ import annotations
 
-import copy
 import re
+from collections.abc import Iterable
+
+from sqlalchemy.orm import Session
 
 from anteroom.models.sizes import size_key
 from anteroom.services.listing_generate import (
     _SIZE_SPECIFIC_KEYS,
     align_size_fields,
+    ebay_category_id,
+    ebay_size_choices_from_specs,
     sanitize_listing_sizes,
     sanitize_size_value,
+    using_ebay_size_choices,
 )
 
 _TAG_SIZE_LINE = re.compile(r"(?im)^-\s*size:\s*(.+?)\s*$")
@@ -36,9 +41,40 @@ def form_sizes(listing: dict) -> dict[str, str]:
     return sizes
 
 
+def _copy_for_alignment(listing: dict) -> dict:
+    """Shallow-copy ``listing`` and the marketplace specifics blocks alignment may modify."""
+    copied = dict(listing)
+    for key in _SIZE_SPECIFIC_KEYS:
+        block = copied.get(key)
+        if isinstance(block, dict):
+            copied[key] = dict(block)
+    return copied
+
+
+def prefetch_ebay_size_choices(db: Session, listings: Iterable[dict]) -> dict[str, list[str]]:
+    """Load eBay Size choices for every distinct category in ``listings`` in one query."""
+    from anteroom.services.category_fields import load_rows_many
+    from anteroom.services.vendoo_specifics import specs_from_rows
+
+    category_ids = list(dict.fromkeys(
+        cid for listing in listings if isinstance(listing, dict) and (cid := ebay_category_id(listing))
+    ))
+    if not category_ids:
+        return {}
+    rows_by_key = load_rows_many([("ebay", cid) for cid in category_ids], db=db)
+    choices: dict[str, list[str]] = {}
+    for cid in category_ids:
+        rows = rows_by_key.get(("ebay", cid))
+        choices[cid] = ebay_size_choices_from_specs(specs_from_rows(rows)) if rows else []
+    return choices
+
+
+with_ebay_size_choices = using_ebay_size_choices
+
+
 def aligned(listing: dict, *, previous_size: str | None = None) -> dict:
     """A copy of ``listing`` with its sizes as a save would leave them."""
-    updated = copy.deepcopy(listing)
+    updated = _copy_for_alignment(listing)
     sanitize_listing_sizes(updated)
     align_size_fields(updated, previous_size=previous_size)
     return updated

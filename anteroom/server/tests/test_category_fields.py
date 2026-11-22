@@ -80,6 +80,38 @@ class CategoryFieldsCacheTest(unittest.TestCase):
         category_fields.save_fields(self.marketplace, self.category_id, {})
         self.assertEqual(category_fields.load_fields(self.marketplace, self.category_id), {})
 
+    def test_memory_cache_serves_repeated_reads_without_db_and_invalidates_on_write(self):
+        from sqlalchemy import event
+        from anteroom.database import SessionLocal
+
+        category_fields.clear_memory_cache()
+        category_fields.save_fields(self.marketplace, self.category_id, normalize_specifics(RAW))
+        queries: list[str] = []
+        with SessionLocal() as db:
+            engine = db.get_bind()
+
+            def listen(_c, _cur, stmt, *_a):
+                if "category_field_schemas" in stmt:
+                    queries.append(stmt)
+
+            event.listen(engine, "before_cursor_execute", listen)
+            try:
+                first = category_fields.load_fields(self.marketplace, self.category_id, db=db)
+                second = category_fields.load_fields(self.marketplace, self.category_id, db=db)
+                third = category_fields.load_rows_many([(self.marketplace, self.category_id)], db=db)
+                self.assertEqual(sorted(first), ["Season", "Size", "condition"])
+                self.assertEqual(sorted(second), ["Season", "Size", "condition"])
+                self.assertIsNotNone(third[(self.marketplace, self.category_id)])
+                self.assertEqual(len(queries), 1)
+
+                category_fields.save_fields(
+                    self.marketplace, self.category_id, normalize_specifics({"Size": RAW["Size"]}),
+                )
+                refreshed = category_fields.load_fields(self.marketplace, self.category_id, db=db)
+                self.assertEqual(sorted(refreshed), ["Size"])
+            finally:
+                event.remove(engine, "before_cursor_execute", listen)
+
     def test_fields_route_serves_the_cache(self):
         category_fields.save_fields(self.marketplace, self.category_id, normalize_specifics(RAW))
         client = TestClient(app)

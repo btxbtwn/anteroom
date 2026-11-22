@@ -640,6 +640,8 @@ class _Journal(GenerationRun):
     def __init__(self) -> None:
         super().__init__()
         self.pending: list[str] = []
+        self.flush_now = asyncio.Event()
+        self._saw_text = False
         self.stop_outcome: str | None = None
         self.saved_outcome: str | None = None
         self.timing_sample: tuple[business_assistant.AnswerTiming, str, int] | None = None
@@ -651,9 +653,14 @@ class _Journal(GenerationRun):
         # Pulses only keep a live connection open; followers poll the journal.
         if record and item != KEEPALIVE:
             self.pending.append(item)
+            if item.startswith("event:") or not self._saw_text:
+                if not item.startswith("event:"):
+                    self._saw_text = True
+                self.flush_now.set()
 
     def take(self) -> list[str]:
         taken, self.pending = self.pending, []
+        self.flush_now.clear()
         return taken
 
 
@@ -679,7 +686,17 @@ async def answer_task(task_id: str, token: str, task) -> bool:
             task.assistant_thread_id, settle=settle, queued_at=task.created_at,
         ))
         while not work.done():
-            await asyncio.wait({work}, timeout=background_tasks.EVENT_INTERVAL)
+            wake = asyncio.create_task(journal.flush_now.wait())
+            try:
+                await asyncio.wait(
+                    {work, wake},
+                    timeout=background_tasks.EVENT_INTERVAL,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            finally:
+                if not wake.done():
+                    wake.cancel()
+                    await asyncio.gather(wake, return_exceptions=True)
             if not settled and (frames := journal.take()):
                 # Fails once the seller stops the answer, which ends the work below.
                 await asyncio.to_thread(background_tasks.append_events, task_id, token, frames)

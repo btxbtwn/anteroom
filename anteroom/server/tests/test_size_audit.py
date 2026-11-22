@@ -33,3 +33,28 @@ def test_the_same_size_written_another_way_is_not_a_problem(general, tag):
 ])
 def test_a_different_size_on_the_tag_is_flagged(general, tag):
     assert size_problems(_listing(general), tag) == "the photos read a different size"
+
+
+def test_aligned_does_not_mutate_input_listing_or_specifics():
+    original = {
+        "title": "Levi's Vintage Jeans Blue",
+        "brand": "Levi's",
+        "department": "Men",
+        "category_path": "Men > Jeans",
+        "size": "34x32",
+        "ebay_specifics": {"size": "34x32"},
+        "poshmark_specifics": {"size": "34x32"},
+        "depop_specifics": {"size": "34x32"},
+        "mercari_specifics": {"size": "34x32"},
+        "etsy_specifics": {"size": "34x32"},
+    }
+    snapshot = {
+        key: dict(val) if isinstance(val, dict) else val
+        for key, val in original.items()
+    }
+    updated = aligned(original)
+    assert original == snapshot
+    assert updated["size"] == "34"
+    assert updated["ebay_specifics"]["inseam"] == "32"
+    assert updated["ebay_specifics"]["size"] == "34"
+    assert updated["poshmark_specifics"]["size"] == "Waist 34"

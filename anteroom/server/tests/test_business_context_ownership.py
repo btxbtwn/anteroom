@@ -14,6 +14,11 @@ def test_same_database_and_day_never_reuse_another_sellers_business_context():
         assert business_context.cached(alice, today, lambda: {'private sales': 'Alice'}) == {'private sales': 'Alice'}
         assert business_context.cached(bob, today, lambda: {'private sales': 'Bob'}) == {'private sales': 'Bob'}
         assert business_context.cached(bob, today, lambda: {'unexpected rebuild': True}) == {'private sales': 'Bob'}
+        # Bob's read does not evict Alice, and Alice never sees Bob's data.
+        assert business_context.cached(alice, today, lambda: {'unexpected rebuild': True}) == {'private sales': 'Alice'}
+        # Invalidating Alice drops only Alice's snapshot; Bob stays warm.
+        business_context.invalidate_business_context(user_id='alice')
+        assert business_context.cached(bob, today, lambda: {'unexpected rebuild': True}) == {'private sales': 'Bob'}
         assert business_context.cached(alice, today, lambda: {'updated sales': 'Alice'}) == {'updated sales': 'Alice'}
     finally:
         business_context.invalidate_business_context()
