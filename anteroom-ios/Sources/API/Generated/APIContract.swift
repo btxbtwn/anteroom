@@ -33,6 +33,10 @@ struct Conversation: Identifiable, Codable, Hashable, Sendable {
     var soldMarketplaces: [String] = []
     /// Marketplaces Anteroom delisted directly, though imported history says listed.
     var removedMarketplaces: [String] = []
+    /// Marketplaces where the listing is still up but not for sale. Not a sale and not a delist.
+    var inactiveMarketplaces: [String] = []
+    /// Marketplace prices that differ from the seller's pricing rules; empty while the rules are off.
+    var priceDrift: [PriceDrift] = []
     /// Units sold on Anteroom's sales ledger. An Active row with some sold reads "1 of 3 sold".
     var unitsSold: Int = 0
     /// The most units the item was offered with.
@@ -78,6 +82,8 @@ struct Conversation: Identifiable, Codable, Hashable, Sendable {
         case directRecords = "direct_records"
         case soldMarketplaces = "sold_marketplaces"
         case removedMarketplaces = "removed_marketplaces"
+        case inactiveMarketplaces = "inactive_marketplaces"
+        case priceDrift = "price_drift"
         case unitsSold = "units_sold"
         case soldAt = "sold_at"
         case vendooListingURLs = "vendoo_listing_urls"
@@ -115,6 +121,8 @@ extension Conversation {
         directRecords = try values.decodeIfPresent([String: DirectRecord].self, forKey: .directRecords) ?? [:]
         soldMarketplaces = try values.decodeIfPresent([String].self, forKey: .soldMarketplaces) ?? []
         removedMarketplaces = try values.decodeIfPresent([String].self, forKey: .removedMarketplaces) ?? []
+        inactiveMarketplaces = try values.decodeIfPresent([String].self, forKey: .inactiveMarketplaces) ?? []
+        priceDrift = try values.decodeIfPresent([PriceDrift].self, forKey: .priceDrift) ?? []
         unitsSold = try values.decodeIfPresent(Int.self, forKey: .unitsSold) ?? 0
         quantity = try values.decodeIfPresent(Int.self, forKey: .quantity)
         soldAt = try values.decodeIfPresent(String.self, forKey: .soldAt)
@@ -180,6 +188,10 @@ struct ConversationSummary: Identifiable, Codable, Hashable, Sendable {
     var soldMarketplaces: [String] = []
     /// Marketplaces Anteroom delisted directly, though imported history says listed.
     var removedMarketplaces: [String] = []
+    /// Marketplaces where the listing is still up but not for sale. Not a sale and not a delist.
+    var inactiveMarketplaces: [String] = []
+    /// Marketplace prices that differ from the seller's pricing rules; empty while the rules are off.
+    var priceDrift: [PriceDrift] = []
     /// Units sold on Anteroom's sales ledger. An Active row with some sold reads "1 of 3 sold".
     var unitsSold: Int = 0
     /// The most units the item was offered with.
@@ -224,6 +236,8 @@ struct ConversationSummary: Identifiable, Codable, Hashable, Sendable {
         case directRecords = "direct_records"
         case soldMarketplaces = "sold_marketplaces"
         case removedMarketplaces = "removed_marketplaces"
+        case inactiveMarketplaces = "inactive_marketplaces"
+        case priceDrift = "price_drift"
         case unitsSold = "units_sold"
         case soldAt = "sold_at"
         case vendooListingURLs = "vendoo_listing_urls"
@@ -261,6 +275,8 @@ extension ConversationSummary {
         directRecords = try values.decodeIfPresent([String: DirectRecord].self, forKey: .directRecords) ?? [:]
         soldMarketplaces = try values.decodeIfPresent([String].self, forKey: .soldMarketplaces) ?? []
         removedMarketplaces = try values.decodeIfPresent([String].self, forKey: .removedMarketplaces) ?? []
+        inactiveMarketplaces = try values.decodeIfPresent([String].self, forKey: .inactiveMarketplaces) ?? []
+        priceDrift = try values.decodeIfPresent([PriceDrift].self, forKey: .priceDrift) ?? []
         unitsSold = try values.decodeIfPresent(Int.self, forKey: .unitsSold) ?? 0
         quantity = try values.decodeIfPresent(Int.self, forKey: .quantity)
         soldAt = try values.decodeIfPresent(String.self, forKey: .soldAt)
@@ -311,9 +327,12 @@ struct DirectRecord: Codable, Hashable, Sendable {
     var price: Double?
     /// When Anteroom's last confirmed List put this listing up.
     var listedAt: String?
+    /// Still on the marketplace but not for sale (deactivated, expired, Not For Sale), from
+    /// Anteroom's latest verified read of that listing. Neither sold nor deleted.
+    var inactive: Bool = false
 
     enum CodingKeys: String, CodingKey {
-        case state, failed, fields, price
+        case state, failed, fields, price, inactive
         case listingURL = "listing_url"
         case listedAt = "listed_at"
     }
@@ -328,6 +347,7 @@ extension DirectRecord {
         fields = try values.decodeIfPresent(Int.self, forKey: .fields) ?? 0
         price = try values.decodeIfPresent(Double.self, forKey: .price)
         listedAt = try values.decodeIfPresent(String.self, forKey: .listedAt)
+        inactive = try values.decodeIfPresent(Bool.self, forKey: .inactive) ?? false
     }
 }
 
@@ -618,6 +638,17 @@ extension PhotoEdits {
         contrast = try values.decodeIfPresent(Double.self, forKey: .contrast) ?? 0
         background = try values.decodeIfPresent(String.self, forKey: .background)
     }
+}
+
+/// A marketplace price that is not what the seller's pricing rules give.
+struct PriceDrift: Codable, Hashable, Sendable {
+    var marketplace: String
+    /// The price the pricing rules give this marketplace.
+    var expected: Double
+    /// The price the marketplace has now.
+    var price: Double
+    /// ``override``: a price typed on that marketplace's form. ``live``: the live listing's known price.
+    var source: String
 }
 
 /// Clothing size from unsaved tag photos, never the shipping package size.

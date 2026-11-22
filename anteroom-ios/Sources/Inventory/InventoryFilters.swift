@@ -100,6 +100,13 @@ struct InventoryFilters: Equatable, Sendable {
     /// Turns the marketplace picks around: keep listings missing from one of
     /// them, or, with none picked, the listings no marketplace carries.
     var notListed = false
+    /// Labels a listing must wear one of (✓), and labels it must not wear (✗), as on the web.
+    var labels: [String] = []
+    var excludeLabels: [String] = []
+    /// Still up somewhere but not for sale there.
+    var inactive = false
+    /// Marketplace prices that drifted from the seller's pricing rules.
+    var priceDrift = false
     var sort: ListingSort = .recent
 
     /// Only sold listings have a sale date, so sorting by it opens the Sold
@@ -110,7 +117,28 @@ struct InventoryFilters: Equatable, Sendable {
     }
 
     /// The status tab shows itself, so this counts only the menu filters.
-    var activeCount: Int { max(marketplaces.count, notListed ? 1 : 0) }
+    var activeCount: Int {
+        max(marketplaces.count, notListed ? 1 : 0) + labels.count + excludeLabels.count
+            + (inactive ? 1 : 0) + (priceDrift ? 1 : 0)
+    }
+
+    enum LabelState: Equatable, Sendable { case none, include, exclude }
+
+    func labelState(_ label: String) -> LabelState {
+        labels.contains(label) ? .include : excludeLabels.contains(label) ? .exclude : .none
+    }
+
+    /// One tap moves a label from off, to included, to excluded, and back off.
+    mutating func cycleLabel(_ label: String) {
+        let state = labelState(label)
+        labels.removeAll { $0 == label }
+        excludeLabels.removeAll { $0 == label }
+        switch state {
+        case .none: labels.append(label)
+        case .include: excludeLabels.append(label)
+        case .exclude: break
+        }
+    }
 }
 
 enum Marketplaces {
@@ -163,8 +191,9 @@ struct MarketplaceBadge: Hashable, Sendable {
         }
         switch record?.state {
         case "published", "pending_review":
-            label = record?.state == "pending_review" ? "In review" : "Listed"
-            tone = .good
+            // Still up but not for sale: neither sold nor delisted, and still live for every action.
+            label = record?.inactive == true ? "Inactive" : record?.state == "pending_review" ? "In review" : "Listed"
+            tone = record?.inactive == true ? .neutral : .good
             price = record?.price
             if let price, let basePrice {
                 priceDiffers = (price * 100).rounded() != (basePrice * 100).rounded()
@@ -340,6 +369,11 @@ enum InventoryQuery {
 
     static func matchesFilters(_ listing: ConversationSummary, _ filters: InventoryFilters) -> Bool {
         guard inTab(listing, filters.status) else { return false }
+        let own = Set(listing.vendooLabels.map { $0.lowercased() })
+        if !filters.labels.isEmpty, !filters.labels.contains(where: { own.contains($0.lowercased()) }) { return false }
+        if filters.excludeLabels.contains(where: { own.contains($0.lowercased()) }) { return false }
+        if filters.inactive, listing.inactiveMarketplaces.isEmpty { return false }
+        if filters.priceDrift, listing.priceDrift.isEmpty { return false }
         let listed = listing.filterMarketplaces
         if filters.notListed {
             if filters.marketplaces.isEmpty { return listed.isEmpty }
@@ -496,5 +530,16 @@ struct QueryMemo<Key: Equatable, Value> {
         let value = compute()
         last = (key, value)
         return value
+    }
+}
+
+extension InventoryQuery {
+    /// Every label the inventory carries, deduplicated ignoring case, as the web lists them.
+    static func labelOptions(_ listings: [ConversationSummary]) -> [String] {
+        var seen: [String: String] = [:]
+        for label in listings.flatMap(\.vendooLabels) where seen[label.lowercased()] == nil {
+            seen[label.lowercased()] = label
+        }
+        return seen.values.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 }

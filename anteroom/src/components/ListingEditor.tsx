@@ -22,6 +22,7 @@ import { ItemDetails } from "./ItemDetails";
 import { ListingHistory } from "./ListingHistory";
 import { blockerTarget, isEbayInventoryLocationEdit, matchingEditorField } from "./listingChanges";
 import { SoldElsewhereNotice } from "./SoldElsewhereNotice";
+import { ListingGuardrails } from "./ListingGuardrails";
 import { marketplaceName } from "./marketplaceNames";
 import { ETSY_CATEGORY_OPTIONALS } from "../marketplaceFields";
 import { depopSizeGroupingApplies } from "../marketplaceFields";
@@ -307,6 +308,10 @@ export function ListingEditor({
               if (await confirmDialog("Reload the saved listing and discard your unsaved edits?", { confirmLabel: "Discard and reload", variant: "destructive" })) edits.discard();
             }}>Discard and reload</InlineButton>
           </div>}
+          {!vendoo && (reviewTab !== "forms" || editTab === "general") && data ? (
+            <ListingGuardrails listing={listing} drift={conversation?.price_drift} inactive={conversation?.inactive_marketplaces}
+              disabled={writing || unsaved} onChange={edits.save} />
+          ) : null}
           {(reviewTab !== "forms" || editTab === "general") && (
             <>
               <PhotoTray convId={convId} onBulkListingsCreated={onBulkListingsCreated} />

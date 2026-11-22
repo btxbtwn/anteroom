@@ -1249,3 +1249,26 @@ def set_business_note(note: object) -> str:
 
     update_settings(mutator)
     return text
+
+
+LISTING_WARNINGS_KEY = "listing_warnings"
+LISTING_WARNING_KINDS = ("missing_sku",)
+
+
+def get_listing_warnings() -> dict[str, bool]:
+    """The optional inventory warnings the seller turned on. All start off."""
+    raw = read_settings().get(LISTING_WARNINGS_KEY)
+    stored = raw if isinstance(raw, dict) else {}
+    return {kind: stored.get(kind) is True for kind in LISTING_WARNING_KINDS}
+
+
+def set_listing_warnings(values: dict[str, object]) -> dict[str, bool]:
+    if any(kind not in LISTING_WARNING_KINDS or not isinstance(value, bool) for kind, value in values.items()):
+        raise ValueError("Choose which listing warnings are on.")
+
+    def mutator(payload: dict) -> None:
+        current = payload.get(LISTING_WARNINGS_KEY)
+        payload[LISTING_WARNINGS_KEY] = {**(current if isinstance(current, dict) else {}), **values}
+
+    update_settings(mutator)
+    return get_listing_warnings()

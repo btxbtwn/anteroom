@@ -200,8 +200,30 @@ def _market_locked(paths: set[str], marketplace: str) -> str | None:
     return None
 
 
-def price_for(listing: dict | None, marketplace: str) -> int | float | None:
-    """The price a marketplace is sent: an explicit override, else the item price."""
+def _active_rules() -> dict | None:
+    from anteroom.services.pricing_rules import active_rules
+
+    return active_rules()
+
+
+def followed_price(listing: dict, marketplace: str, rules: dict | None) -> Decimal | None:
+    """The price a marketplace that follows the item takes: the item price, or the pricing rules' price."""
+    if rules:
+        from anteroom.services.pricing_rules import rule_price
+
+        return rule_price(listing, marketplace, rules)
+    return money(listing.get("price"))
+
+
+def _as_number(amount: Decimal | None) -> int | float | None:
+    return None if amount is None else price_number(str(amount))
+
+
+def price_for(listing: dict | None, marketplace: str, *, rules: dict | None | bool = True) -> int | float | None:
+    """The price a marketplace is sent: an explicit override, else the item price through the pricing rules.
+
+    ``rules`` defaults to the seller's saved rules; pass a rules dict or None to skip the read.
+    """
     if not isinstance(listing, dict):
         return None
     locked = _market_locked(locked_paths(listing), marketplace)
@@ -209,6 +231,9 @@ def price_for(listing: dict | None, marketplace: str) -> int | float | None:
         amount = price_number(get_path(listing, locked))
         if amount is not None:
             return amount
+    active = _active_rules() if rules is True else rules
+    if active and marketplace in CANONICAL_PRICE:
+        return _as_number(followed_price(listing, marketplace, active))
     return price_number(listing.get("price"))
 
 
@@ -303,24 +328,31 @@ def apply_price_policy(previous: dict, submitted: dict) -> None:
     price stays, and is locked. One that still equals the old item price — the
     recommended price that was copied onto every marketplace — takes the new
     item price. A price that already differed, and that this save did not touch,
-    is an override and is locked.
+    is an override and is locked. With pricing rules on, "the item price" is the
+    price the rules give each marketplace.
     """
     if not isinstance(submitted, dict):
         return
     previous = previous if isinstance(previous, dict) else {}
     locks = locked_paths(previous) | locked_paths(submitted)
-    old = money(previous.get("price"))
-    new = money(submitted.get("price"))
-    new_number = price_number(submitted.get("price"))
+    rules = _active_rules()
     edited = _changed_paths(previous, submitted)
-    if "price" in edited and new is not None:
+    if "price" in edited and money(submitted.get("price")) is not None:
         locks.add("price")
 
     paths = list(dict.fromkeys([*_price_paths(previous), *_price_paths(submitted), *CANONICAL_PRICE.values()]))
+    anchor = (rules or {}).get("anchor")
+    if anchor in CANONICAL_PRICE:
+        # Rules priced from a marketplace settle that marketplace first: the others follow it.
+        paths.sort(key=lambda path: marketplace_of(path) != anchor)
     for path in paths:
         market = marketplace_of(path)
         if not market:
             continue
+        # What a following price was, and is now: the item price, or the rules' price.
+        old = followed_price(previous, market, rules)
+        new = followed_price({**submitted, SELLER_FIELDS: sorted(locks)}, market, rules)
+        new_number = _as_number(new)
         parent = ".".join(path.split(".")[:-1])
         parent_exists = isinstance(get_path(previous, parent), dict) or isinstance(get_path(submitted, parent), dict)
         if not parent_exists:
@@ -349,9 +381,13 @@ def apply_price_policy(previous: dict, submitted: dict) -> None:
             continue
         if new_number is None:
             continue
+        # A price equal to the previous item price followed it before pricing
+        # rules were turned on, so it follows the rules now.
+        previous_general = money(previous.get("price"))
         follower = (
             previous_amount is None
             or (old is not None and previous_amount == old)
+            or (previous_general is not None and previous_amount == previous_general)
             or (submitted_amount is not None and old is not None and submitted_amount == old)
         )
         if follower:
@@ -363,12 +399,12 @@ def apply_price_policy(previous: dict, submitted: dict) -> None:
 
 
 def sync_unlocked_prices(listing: dict) -> bool:
-    """Point every unlocked marketplace price at the item price."""
+    """Point every unlocked marketplace price at the item price, through the pricing rules when they are on."""
     if not isinstance(listing, dict):
         return False
-    general = price_number(listing.get("price"))
-    if general is None:
+    if price_number(listing.get("price")) is None:
         return False
+    rules = _active_rules()
     locks = locked_paths(listing)
     changed = False
     paths = list(dict.fromkeys([*CANONICAL_PRICE.values(), *_price_paths(listing)]))
@@ -385,7 +421,8 @@ def sync_unlocked_prices(listing: dict) -> bool:
                 set_path(listing, path, held)
                 changed = True
             continue
-        if get_path(listing, path) is None or money(get_path(listing, path)) == money(general):
+        general = _as_number(followed_price(listing, market, rules))
+        if general is None or get_path(listing, path) is None or money(get_path(listing, path)) == money(general):
             continue
         set_path(listing, path, general)
         changed = True

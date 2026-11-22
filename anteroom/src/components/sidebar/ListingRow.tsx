@@ -1,3 +1,4 @@
+import { marketplaceName } from "../marketplaceNames";
 import { ListingTemplatesDialog } from "../ListingTemplatesDialog";
 import { CopyListingDialog } from "../CopyListingDialog";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
@@ -30,6 +31,7 @@ export const ListingRow = memo(function ListingRow({
   visibleMarketplaces,
   nameBySku = false,
   hint,
+  warnMissingSku = false,
   selecting = false,
   checked = false,
   canSelect = false,
@@ -45,6 +47,8 @@ export const ListingRow = memo(function ListingRow({
   nameBySku?: boolean;
   /** What Anteroom suggests doing next, such as "Ready to generate". */
   hint?: string;
+  /** The seller turned on the missing-SKU warning in Settings → Listings. */
+  warnMissingSku?: boolean;
   selecting?: boolean;
   checked?: boolean;
   canSelect?: boolean;
@@ -113,7 +117,12 @@ export const ListingRow = memo(function ListingRow({
     ),
     [importedRows, listing.direct_marketplaces, visibleMarketplaces, listing.removed_marketplaces, listing.sold_marketplaces],
   );
-  const listedMarketplaces = popupStatuses.filter((row) => row.id !== "general" && statusIsListed(row.status));
+  const inactive = new Set(listing.inactive_marketplaces || []);
+  // Still up there but not for sale: shown as Inactive, never as sold or delisted.
+  const listedMarketplaces = popupStatuses.filter((row) => row.id !== "general" && statusIsListed(row.status))
+    .map((row) => (inactive.has(row.id) ? { ...row, status: "INACTIVE" } : row));
+  const drift = listing.price_drift || [];
+  const missingSkuWarning = warnMissingSku && status !== "sold" && !String(listing.sku || "").trim();
   const activate = () => {
     // While selecting on a phone the whole row is the checkbox, as in Mail's edit mode.
     if (selecting && !canHover()) {
@@ -243,6 +252,15 @@ export const ListingRow = memo(function ListingRow({
                 Missing sale data
               </ListingTag>
             ) : null}
+            {drift.length ? (
+              <ListingTag tone="warning" title={drift.map((row) => `${marketplaceName(row.marketplace)}: ${row.price} (rules say ${row.expected})`).join(" · ")}>
+                Price inconsistency
+              </ListingTag>
+            ) : null}
+            {missingSkuWarning ? <ListingTag tone="warning" title="This listing has no SKU">No SKU</ListingTag> : null}
+            {inactive.size && status !== "sold" ? (
+              <ListingTag tone="info" title={`Up but not for sale on ${[...inactive].map(marketplaceName).join(", ")}`}>Inactive</ListingTag>
+            ) : null}
             {partial ? <span className="truncate text-xs text-sidebar-muted-foreground">{partial}</span> : null}
             {quantity ? <span className="shrink-0 text-xs tabular-nums text-sidebar-muted-foreground">· {quantity}</span> : null}
             {hint ? <span className="min-w-0 truncate text-xs text-sidebar-muted-foreground" title={hint}>· {hint}</span> : null}
@@ -255,7 +273,7 @@ export const ListingRow = memo(function ListingRow({
               aria-label={marketplacesLabel(listedMarketplaces)}
             >
               {listedMarketplaces.map((row) => (
-                <span key={row.id} className={cn("inline-flex", row.status === "SOLD" && "opacity-55")}>
+                <span key={row.id} className={cn("inline-flex", (row.status === "SOLD" || row.status === "INACTIVE") && "opacity-55")}>
                   <MarketplaceLogo id={row.id} label={`${row.label} · ${row.status.toLowerCase()}`} size={20} fit="wordmark" />
                 </span>
               ))}

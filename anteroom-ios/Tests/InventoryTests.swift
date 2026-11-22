@@ -307,6 +307,34 @@ struct InventoryTests {
         precondition(abs(fractionalDate!.timeIntervalSince(wholeDate!) - 0.25) < 0.0001)
         precondition(ServerDate.parse(nil) == nil && ServerDate.parse("") == nil && ServerDate.parse("not-a-date") == nil)
 
+        // Labels include and exclude together; Inactive and price drift narrow like the web.
+        let guarded = try JSONDecoder().decode([ConversationSummary].self, from: Data(#"""
+        [
+          {"id":"s","title":"Summer dress","status":"active","created_at":"2026-10-01T10:00:00","updated_at":"2026-10-01T10:00:00","vendoo_labels":["Summer"],"direct_marketplaces":["ebay"]},
+          {"id":"k","title":"Summer top","status":"active","created_at":"2026-10-01T10:00:00","updated_at":"2026-10-01T10:00:00","vendoo_labels":["Summer","Consigned"],"direct_marketplaces":["ebay"]},
+          {"id":"w","title":"Coat","status":"active","created_at":"2026-10-01T10:00:00","updated_at":"2026-10-01T10:00:00","vendoo_labels":["Winter"],"direct_marketplaces":["etsy"],
+           "direct_records":{"etsy":{"state":"published","inactive":true}},"inactive_marketplaces":["etsy"],
+           "price_drift":[{"marketplace":"mercari","expected":55,"price":70,"source":"override"}]}
+        ]
+        """#.utf8))
+        var labelled = InventoryFilters()
+        labelled.cycleLabel("Summer")
+        labelled.cycleLabel("Consigned")
+        labelled.cycleLabel("Consigned")
+        precondition(labelled.labelState("Consigned") == .exclude && labelled.activeCount == 2)
+        precondition(ids(guarded.filter { InventoryQuery.matchesFilters($0, labelled) }) == ["s"])
+        labelled.cycleLabel("Consigned")
+        precondition(labelled.excludeLabels.isEmpty)
+        var flagged = InventoryFilters()
+        flagged.inactive = true
+        precondition(ids(guarded.filter { InventoryQuery.matchesFilters($0, flagged) }) == ["w"])
+        flagged = InventoryFilters()
+        flagged.priceDrift = true
+        precondition(ids(guarded.filter { InventoryQuery.matchesFilters($0, flagged) }) == ["w"])
+        precondition(InventoryQuery.labelOptions(guarded) == ["Consigned", "Summer", "Winter"])
+        let inactiveBadge = guarded[2].marketplaceBadges().first { $0.marketplace == "etsy" }
+        precondition(inactiveBadge?.label == "Inactive" && inactiveBadge?.tone == .neutral)
+
         print("Inventory tests passed")
     }
 

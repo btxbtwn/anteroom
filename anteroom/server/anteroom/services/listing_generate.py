@@ -1648,6 +1648,11 @@ def persist_generated_listing(
     if not listing:
         log.warning("listing generation produced no JSON for %s", conv_id)
         return None
+    # The shipping preset the model picked from the seller's plain-English conditions.
+    from anteroom.services.shipping_presets import find_preset
+
+    choice = listing.pop("shipping_preset", None)
+    shipping_preset = find_preset(choice) if isinstance(choice, str) else None
 
     import copy
 
@@ -1663,6 +1668,12 @@ def persist_generated_listing(
     from anteroom.services.user_settings import get_ebay_inventory_location, package_dimensions_string
 
     listing["package_dimensions_in"] = package_dimensions_string()
+    if shipping_preset:
+        from anteroom.services.shipping_presets import apply_package
+
+        # The preset's box and weight replace the saved default; seller locks and
+        # an Item Details package size below still win.
+        apply_package(listing, shipping_preset, respect_locks=False)
     location = get_ebay_inventory_location()
     if location:
         listing["zipCode"] = location
@@ -1803,6 +1814,11 @@ def persist_generated_listing(
         _follow_native_size_rows(listing, seed, sanitize_size_value(listing.get("size")) or pinned_size[0])
         _drop_unformed_size_ids(listing, seed)
     constrain_generated(listing, seed)
+    if shipping_preset:
+        from anteroom.services.shipping_presets import apply_marketplace_shipping
+
+        # After the native blocks are restored, so the preset's shipping choices stay.
+        apply_marketplace_shipping(listing, shipping_preset, respect_locks=False)
     cap_listing_description(listing)
     if revisions:
         from anteroom.services.seller_overrides import capture_locked, restore_locked, materialize_prices

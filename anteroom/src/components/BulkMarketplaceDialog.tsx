@@ -3,7 +3,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { BulkMarketplaceAction, BulkMarketplacePreview } from "../api/bulkMarketplace";
 import type { DelistMarketplace } from "../api/marketplaceListings";
-import { reviewedTasks, runMarketplaceTasks, type MarketplaceTask } from "../bulkMarketplace";
+import { prepareMarketplaceText, reviewedTasks, runMarketplaceTasks, type MarketplaceTask, type TextPrepResult } from "../bulkMarketplace";
+import { TEXT_MODES, type TextMode } from "../api/listingRules";
 import { marketplaceName } from "./marketplaceNames";
 import { PriceDialog } from "./PriceDropParts";
 import { PageError, PageNote } from "./WorkspacePage";
@@ -50,8 +51,26 @@ export function BulkMarketplaceDialog({
   const [activeIds, setActiveIds] = useState<ReadonlySet<string>>(new Set());
   const [stopRequested, setStopRequested] = useState(false);
   const stop = useRef(false);
+  const [textMode, setTextMode] = useState<TextMode>("keep");
+  const [textResults, setTextResults] = useState<TextPrepResult[] | null>(null);
+  const [textProgress, setTextProgress] = useState<number | null>(null);
+  // Only List, Relist and Update send text; the other actions leave it alone.
+  const writesText = action === "list" || action === "relist" || action === "update";
   const preview = useMutation({
-    mutationFn: (ids: string[]) => api.bulkMarketplace.preview(ids, action, chosen),
+    mutationFn: async (ids: string[]) => {
+      if (writesText && textMode !== "keep") {
+        setTextProgress(0);
+        try {
+          // Saved locally before the review, so the review shows what would be sent.
+          setTextResults(await prepareMarketplaceText(ids, chosen, textMode, api.bulkEdit.marketplaceText, setTextProgress));
+        } finally {
+          setTextProgress(null);
+        }
+      } else {
+        setTextResults(null);
+      }
+      return api.bulkMarketplace.preview(ids, action, chosen);
+    },
     retry: false,
     onSuccess: (result) => { setReview(result); setUnchecked(new Set()); setConfirmed(false); setTasks(null); },
   });
@@ -90,7 +109,9 @@ export function BulkMarketplaceDialog({
     </Button>
   </> : <>
     <Button variant="outline" disabled={busy} onClick={onClose}>Cancel</Button>
-    <Button disabled={busy || !chosen.length} onClick={() => preview.mutate(conversationIds)}>{preview.isPending ? "Checking…" : "Review items"}</Button>
+    <Button disabled={busy || !chosen.length} onClick={() => preview.mutate(conversationIds)}>
+      {textProgress !== null ? `Preparing text ${textProgress} of ${conversationIds.length}…` : preview.isPending ? "Checking…" : "Review items"}
+    </Button>
   </>;
   return <PriceDialog title={tasks ? `${verb.label} results` : review ? `Review ${verb.label.toLowerCase()}` : `Marketplace actions for ${conversationIds.length} ${conversationIds.length === 1 ? "item" : "items"}`}
     className="max-w-3xl" busy={busy} onClose={onClose} footer={footer}
@@ -107,6 +128,7 @@ export function BulkMarketplaceDialog({
       {remaining.length && !run.isPending ? <PageNote>Review remaining checks what each marketplace has now. Nothing is sent again until you confirm a new review.</PageNote> : null}
     </div> : review ? <div className="space-y-3">
       <PageNote>{verb.note}</PageNote>
+      {textResults ? <TextSummary results={textResults} titles={new Map(review.rows.map((row) => [row.conversation_id, row.title || "Untitled item"]))} /> : null}
       <ul className="space-y-2">{review.rows.map((row) => <li key={row.conversation_id} className="min-w-0 space-y-1 rounded-lg border p-3">
         <label className="flex items-center gap-2 font-medium">
           <Checkbox aria-label={`Include ${row.title || "item"}`} disabled={Boolean(row.skip_reason) || busy}
@@ -145,6 +167,25 @@ export function BulkMarketplaceDialog({
             : "Choose each marketplace by name. None is chosen for you."}
         </PageNote>
       </fieldset>
+      {writesText ? <fieldset><legend className="mb-3 font-medium">Marketplace text</legend>
+        <RadioGroup name="bulk-marketplace-text" className="gap-2" value={textMode} disabled={busy} onValueChange={(value) => setTextMode(value as TextMode)}>
+          {TEXT_MODES.map((entry) => <label key={entry.id} className="flex items-start gap-2">
+            <Radio value={entry.id} className="mt-0.5" />
+            <span><span className="font-medium">{entry.label}</span><span className="block text-xs text-muted-foreground">{entry.detail}</span></span>
+          </label>)}
+        </RadioGroup>
+        {textMode !== "keep" ? <PageNote className="mt-2">The text is saved on each marketplace's form in Anteroom before the review. Nothing is sent until you confirm.</PageNote> : null}
+      </fieldset> : null}
     </div>}
   </PriceDialog>;
+}
+
+function TextSummary({ results, titles }: { results: TextPrepResult[]; titles: Map<string, string> }) {
+  const changed = results.filter((result) => result.ok && result.changed).length;
+  const failed = results.filter((result) => !result.ok);
+  return <div className="space-y-1 rounded-lg border p-3 text-xs">
+    <p className="font-medium">Marketplace text: {changed} {changed === 1 ? "item" : "items"} updated in Anteroom
+      {failed.length ? ` · ${failed.length} kept as they were` : ""}</p>
+    {failed.map((result) => <p key={result.id} className="text-muted-foreground">{titles.get(result.id) || "An item"}: {result.error}</p>)}
+  </div>;
 }
