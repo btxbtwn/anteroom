@@ -9,7 +9,7 @@ workflow.
 | CodeRabbit did | Now | Where |
 |---|---|---|
 | Summary comment: walkthrough table, related issues and PRs, change type, merge risk, security risk | One sticky Claude summary comment, updated on every push | `claude-review.yml` |
-| A review per push with inline findings (severity · category · effort, "Prompt to fix") and a "Prompt to fix all issues" | The same, as a `COMMENT` review from `github-actions[bot]`. Findings outside the diff go in the review body | `claude-review.yml` |
+| A review per push with inline findings (severity · category · effort, "Prompt to fix") and a "Prompt to fix all issues" | The same, as a `COMMENT` review from `github-actions[bot]`. A finding on a changed file but off the diff's lines becomes a file-level comment | `claude-review.yml` |
 | Incremental reviews: only what changed since the last reviewed commit | The summary comment records the reviewed commit; the next push reviews only newer changes to the PR's files. A force-push or rebase that drops that commit starts a full review | `review_bot.py prepare-review` |
 | "✅ Addressed in commit …" on fixed findings | Claude checks its open findings on each push, marks the fixed ones and resolves their threads | `review_bot.py post-review` |
 | Auto-fix PRs / "Bring PR to ready" replies to its own and Codex's findings | Claude answers every open Claude and Codex finding (fixed, already addressed, inapplicable, not fixed) with what it checked, pushes one fix commit, and posts the round's result | `claude-autofix.yml` |
@@ -21,17 +21,21 @@ workflow.
 
 1. Open or push: Codex and Claude review. Claude's review job runs
    `review_bot.py prepare-review`, then Claude reads the code and returns JSON
-   (`review-schema.json`), then `post-review` posts it. The workflow denies Claude's file-edit, commit and push tools. Its job token
-   can write pull requests and issues; those tool restrictions do not remove the credential.
+   (`review-schema.json`), then `post-review` posts it. The workflow allows
+   Claude only reading tools there (no edits, commits, pushes or comment
+   commands); the job's token can still write comments, so this is a tool
+   restriction, not a missing credential.
 2. Auto-fix runs right after Claude's review, and again whenever Codex submits
-   a review. Claude verifies each open finding, fixes the real ones, runs the
-   narrowest tests, and commits. `post-autofix` then:
-   - refuses to push changes to `.github/`, `anteroom/VERSION`, `VERSION` or `CHANGELOG.md`;
-   - turns auto-merge off if it was on, as AGENTS.md requires before pushing
-     to a queued PR;
-   - pushes with the Claude GitHub App token, so CI and the review run on the
-     new commit (a push with the workflow token would start no CI);
-   - replies to inline findings in their threads and to review-body findings in linked PR comments.
+   a review. It first pauses auto-merge, as AGENTS.md requires before pushing
+   to a queued PR. Claude verifies each open finding, fixes the real ones, runs
+   the narrowest tests, commits and pushes. Its push uses the Claude GitHub App
+   token, so CI and the review run on the new commit (a push with the workflow
+   token would start no CI), and the action's wrapper only pushes to the PR's
+   branch. Claude cannot edit `.github/`, `anteroom/VERSION` or `CHANGELOG.md`.
+   `post-autofix` then:
+   - turns auto-merge back on if it was on and nothing was pushed;
+   - flags a pushed change to a protected path as blocking;
+   - replies in every finding's thread and posts the round's result.
 3. The fix commit starts the next review, which marks addressed findings and
    may lead to another auto-fix round, up to the limit.
 
@@ -42,8 +46,7 @@ anything.
 ## Setup
 
 1. Install the [Claude GitHub App](https://github.com/apps/claude) on this
-   repository. Auto-fix pushes with its token; without it auto-fix still
-   replies but does not push.
+   repository. Auto-fix pushes with its token.
 2. On a machine signed in to the Claude subscription, run `claude setup-token`
    and store the token:
    ```bash

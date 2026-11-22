@@ -2,11 +2,12 @@ name: Claude auto-fix
 
 # Answers every open Claude and Codex review finding ("Bring PR to ready"):
 # verifies it against the current code, fixes the real ones, replies in each
-# thread and posts the round's result. Claude commits; review_bot.py pushes
-# with the Claude GitHub App token, so CI runs on the new commit, and turns
-# auto-merge off first. At most three pushed rounds per pull request.
-# Auto-fix never publishes listings or touches .github/, VERSION or
-# CHANGELOG.md. See docs/pr-review-bots.md.
+# thread and posts the round's result. Auto-merge is paused first (AGENTS.md:
+# never push to a queued PR). Claude pushes its fix with the Claude GitHub
+# App token, which starts CI and is revoked when the action ends; auto-merge
+# comes back on only if nothing was pushed. At most three pushed rounds.
+# Auto-fix never publishes listings or touches .github/, anteroom/VERSION
+# or CHANGELOG.md. See docs/pr-review-bots.md.
 
 on:
   workflow_call:
@@ -100,6 +101,13 @@ jobs:
         if: steps.prepare.outputs.skip == 'false'
         id: schema
         run: echo "json=$(jq -c . .github/review-bot/autofix-schema.json)" >> "$GITHUB_OUTPUT"
+      - name: Pause auto-merge
+        if: steps.prepare.outputs.skip == 'false'
+        id: automerge
+        run: |
+          queued="$(gh pr view "$PR" --repo "$GITHUB_REPOSITORY" --json autoMergeRequest --jq '.autoMergeRequest != null')"
+          if [ "$queued" = "true" ]; then gh pr merge "$PR" --repo "$GITHUB_REPOSITORY" --disable-auto; fi
+          echo "was_queued=$queued" >> "$GITHUB_OUTPUT"
       - name: Fix with Claude
         if: steps.prepare.outputs.skip == 'false'
         id: claude
@@ -117,15 +125,14 @@ jobs:
             --model opus
             --permission-mode acceptEdits
             --add-dir ${{ runner.temp }}/claude-autofix
-            --allowedTools "Read,Glob,Grep,Edit,Write,Bash(cd:*),Bash(ls:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git add:*),Bash(git commit:*),Bash(./check.sh --fast:*),Bash(.venv/bin/python -m pytest:*),Bash(anteroom/.venv/bin/python -m pytest:*),Bash(.venv/bin/ruff:*),Bash(anteroom/.venv/bin/ruff:*),Bash(npx vitest:*),Bash(npm test:*),Bash(npm run lint:*),Bash(node --test:*),Bash(gh pr view:*)"
-            --disallowedTools "Bash(git push:*),Edit(.github/**),Write(.github/**),Edit(VERSION),Edit(anteroom/VERSION),Write(anteroom/VERSION),Edit(CHANGELOG.md)"
+            --allowedTools "Read,Glob,Grep,Edit,Write,Bash(cd:*),Bash(ls:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(./check.sh --fast:*),Bash(.venv/bin/python -m pytest:*),Bash(anteroom/.venv/bin/python -m pytest:*),Bash(.venv/bin/ruff:*),Bash(anteroom/.venv/bin/ruff:*),Bash(npx vitest:*),Bash(npm test:*),Bash(npm run lint:*),Bash(node --test:*),Bash(gh pr view:*)"
+            --disallowedTools "Edit(.github/**),Write(.github/**),Edit(anteroom/VERSION),Write(anteroom/VERSION),Edit(CHANGELOG.md),Write(CHANGELOG.md)"
             --json-schema '${{ steps.schema.outputs.json }}'
-      - name: Push fix and reply to findings
+      - name: Reply to findings
         if: steps.prepare.outputs.skip == 'false' && !cancelled()
         env:
           AUTOFIX_OUTPUT: ${{ steps.claude.outputs.structured_output }}
-          # The Claude GitHub App token: pushes made with it start CI.
-          PUSH_TOKEN: ${{ steps.claude.outputs.github_token }}
+          WAS_QUEUED: ${{ steps.automerge.outputs.was_queued }}
           BRANCH: ${{ steps.pr.outputs.branch }}
         run: >-
           python3 .github/review-bot/review_bot.py post-autofix
