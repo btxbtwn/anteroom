@@ -7,6 +7,8 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from test_hosted_drafts import BOB, cloud, headers  # noqa: F401
@@ -15,7 +17,8 @@ from test_seller_sessions import USER_ID, jwks, signing_keys  # noqa: F401
 
 from anteroom.database import SessionLocal
 from anteroom.main import app
-from anteroom.models.conversation import Conversation, Photo
+from anteroom.models.background_task import BackgroundTask
+from anteroom.models.conversation import Conversation, Message, Photo
 from anteroom.models.job import Job
 from anteroom.models.listing import Listing, ListingRevision
 from anteroom.models.marketplace_listing import MarketplaceListing
@@ -49,8 +52,6 @@ def _call_tool(client: TestClient, name: str, arguments: dict | None = None, ext
 
 @pytest.fixture(autouse=True)
 def _clean_mcp_tables():
-    from anteroom.models.background_task import BackgroundTask
-    from anteroom.models.conversation import Message
     from anteroom.models.listing_evidence import ListingCorrection, SaleSnapshot
 
     with SessionLocal() as db:
@@ -453,7 +454,16 @@ def test_hosted_mcp_enforces_seller_isolation_and_blocks_non_mcp_routes(cloud, s
     monkeypatch.setenv("SUPABASE_SERVER_SECRET_KEY", "fixture-only")
     monkeypatch.setattr(hosted_photos._storage, "request", delete_objects)
     photo_keys = [f"{USER_ID}/{alice_conv_id}/{'a' * 32}.jpg", f"{USER_ID}/{alice_conv_id}/{'b' * 32}.jpg"]
+    message_key, task_key = (f"{USER_ID}/{alice_conv_id}/{char * 32}.jpg" for char in ("c", "d"))
     with Session(engine) as db:
+        db.add(Message(
+            user_id=USER_ID, conversation_id=alice_conv_id, role="user", text="Inspect this",
+            attachments=[{"id": message_key}],
+        ))
+        db.add(BackgroundTask(
+            user_id=USER_ID, conversation_id=alice_conv_id, kind="chat", status="completed",
+            payload={"attachments": [{"id": task_key}]},
+        ))
         for i, key in enumerate(photo_keys):
             db.add(Photo(
                 id=f"hosted-mcp-photo-{i}", user_id=USER_ID, conversation_id=alice_conv_id,
@@ -474,12 +484,39 @@ def test_hosted_mcp_enforces_seller_isolation_and_blocks_non_mcp_routes(cloud, s
         extra_headers=alice_mcp,
     )
     assert not err, deleted
-    assert deleted_keys == [key for original in photo_keys for key in hosted_photos.with_renditions(original)]
+    assert deleted["deleted_photos"] == 1
+    assert sorted(deleted_keys) == sorted(
+        key for original in [*photo_keys, message_key, task_key] for key in hosted_photos.with_renditions(original)
+    )
 
     # Revoking Alice's token immediately cuts off her MCP access
     rev = client.delete(f"/api/settings/mcp-tokens/{alice_tok_resp.json()['id']}", headers=alice_headers)
     assert rev.status_code == 200
     assert _rpc(client, "ping", extra_headers=alice_mcp).status_code == 401
+
+
+def test_hosted_mcp_draft_delete_holds_conversation_lock_at_idle_check(cloud, signing_keys, monkeypatch):  # noqa: F811
+    client, engine = cloud
+    alice = headers(signing_keys, USER_ID)
+    created, error = _call_tool(client, "create_draft_listing", {"title": "Locked draft"}, extra_headers=alice)
+    assert not error, created
+    identity = created["conversation_id"]
+    assert_not_busy = mcp_http._assert_not_busy
+
+    def check_lock(db, conv_id):
+        assert conv_id == identity
+        with Session(engine) as other, pytest.raises(OperationalError) as exc:
+            other.scalar(select(Conversation.id).where(Conversation.id == conv_id).with_for_update(nowait=True))
+        assert getattr(exc.value.orig, "sqlstate", None) == "55P03"
+        assert_not_busy(db, conv_id)
+
+    monkeypatch.setattr(mcp_http, "_assert_not_busy", check_lock)
+    result, error = _call_tool(
+        client, "delete_draft_listing", {"conversation_id": identity, "confirm": True}, extra_headers=alice,
+    )
+    assert not error, result
+    assert result["deleted"]
+
 
 def test_failed_draft_in_mcp_batch_is_not_committed():
     def draft(req_id, title, **fields):

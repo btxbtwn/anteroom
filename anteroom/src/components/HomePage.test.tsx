@@ -261,4 +261,52 @@ describe("HomePage", () => {
     expect(container.textContent).not.toContain("Ceramic Pitcher has unsent edits");
   });
 
+  it.each([false, true])("keeps a newer goal form when an earlier save completes (queued: %s)", async (queued) => {
+    let finishDismiss!: (result: { ok: boolean }) => void;
+    let finishSave!: (result: { ok: boolean; home: HomeSummaryResponse }) => void;
+    if (queued) api.home.dismissAttention.mockReturnValueOnce(new Promise((resolve) => { finishDismiss = resolve; }));
+    api.home.updateGoal.mockReturnValueOnce(new Promise((resolve) => { finishSave = resolve; }));
+    await renderHome();
+
+    const button = (label: string) => [...container.querySelectorAll("button")]
+      .find((node) => node.getAttribute("aria-label") === label || node.textContent?.trim() === label)!;
+    const target = () => container.querySelector<HTMLInputElement>('[aria-label="Goal target"]');
+    const setTarget = (value: string) => {
+      const input = target()!;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+
+    if (queued) {
+      await act(() => button("Dismiss").click());
+      await settle();
+    }
+    await act(() => button("Edit Monthly Profit").click());
+    await act(() => setTarget("2400"));
+    await act(() => button("Save changes").click());
+    await settle();
+    expect(api.home.updateGoal).toHaveBeenCalledTimes(queued ? 0 : 1);
+
+    await act(() => button("Edit Weekly Listings").click());
+    await act(() => setTarget("28"));
+    if (queued) {
+      await act(() => finishDismiss({ ok: true }));
+      await settle();
+    }
+    expect(api.home.updateGoal).toHaveBeenNthCalledWith(
+      1, "goal_1", { period: "monthly", metric: "profit", target: 2400, label: null }, expect.any(String),
+    );
+    await act(() => finishSave({ ok: true, home: sampleHome }));
+    await settle();
+    expect(target()?.value).toBe("28");
+
+    api.home.updateGoal.mockResolvedValueOnce({ ok: true, home: sampleHome });
+    await act(() => button("Save changes").click());
+    await settle();
+    expect(api.home.updateGoal).toHaveBeenNthCalledWith(
+      2, "goal_2", { period: "weekly", metric: "listings", target: 28, label: null }, expect.any(String),
+    );
+    expect(target()).toBeNull();
+  });
+
 });

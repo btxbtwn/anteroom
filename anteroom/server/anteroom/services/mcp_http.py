@@ -1064,7 +1064,13 @@ def _tool_delete_draft_listing(
     if args.get("confirm") is not True:
         raise McpToolError("Set confirm=true to delete this unsent local draft.")
 
-    conv = ConversationRepo(db).get(conv_id)
+    hosted = hasattr(db, "user_id")
+    # Hosted task submission takes the same lock. Keep it through the idle
+    # check and commit so deletion cannot erase newly accepted work.
+    conv = (
+        db.get(Conversation, conv_id, populate_existing=True, with_for_update=True)
+        if hosted else ConversationRepo(db).get(conv_id)
+    )
     if conv is None:
         raise McpToolError("Listing not found.")
 
@@ -1084,12 +1090,17 @@ def _tool_delete_draft_listing(
         )
 
     photos = db.scalars(select(Photo).where(Photo.conversation_id == conv_id)).all()
-    photo_keys = [(p.stored_filename, p.source_filename) for p in photos]
+    if hosted:
+        from anteroom.services import hosted_listing_delete
 
-    db.execute(delete(BackgroundTask).where(BackgroundTask.conversation_id == conv_id))
-    for model in (Listing, ListingRevision, Photo, Message, ListingCorrection, SaleSnapshot):
-        db.execute(delete(model).where(model.conversation_id == conv_id))
-    db.execute(delete(Conversation).where(Conversation.id == conv_id))
+        storage_keys = hosted_listing_delete.remove_unsent_draft(db, conv_id)
+        photo_keys = [(key, None) for key in storage_keys]
+    else:
+        photo_keys = [(p.stored_filename, p.source_filename) for p in photos]
+        db.execute(delete(BackgroundTask).where(BackgroundTask.conversation_id == conv_id))
+        for model in (Listing, ListingRevision, Photo, Message, ListingCorrection, SaleSnapshot):
+            db.execute(delete(model).where(model.conversation_id == conv_id))
+        db.execute(delete(Conversation).where(Conversation.id == conv_id))
     db.commit()
 
     for stored_key, source_key in photo_keys:
@@ -1099,7 +1110,7 @@ def _tool_delete_draft_listing(
         "ok": True,
         "conversation_id": conv_id,
         "deleted": True,
-        "deleted_photos": len(photo_keys),
+        "deleted_photos": len(photos),
         "delisted_from_marketplaces": False,
     }
 

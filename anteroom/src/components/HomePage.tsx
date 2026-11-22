@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRightIcon,
@@ -141,6 +141,7 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
 
   const [attentionTab, setAttentionTab] = useState<"Active" | "Dismissed">("Active");
   const [goalFormOpen, setGoalFormOpen] = useState(false);
+  const goalFormVersion = useRef(0);
   const [editingGoalId, setEditingGoalId] = useState<string | null>(null);
   const [goalPeriod, setGoalPeriod] = useState<GoalPeriod>("monthly");
   const [goalMetric, setGoalMetric] = useState<GoalMetric>("profit");
@@ -161,35 +162,22 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
 
   const saveGoal = useMutation({
     scope: mutationScope,
-    mutationFn: async () => {
-      const numeric = Number(goalTarget);
-      if (!Number.isFinite(numeric) || numeric <= 0) {
-        throw new Error("Enter a target greater than zero.");
-      }
-      if (goalMetric === "sell_through_rate" && numeric > 100) {
-        throw new Error("Sell-through rate target cannot exceed 100%.");
-      }
-      if (editingGoalId) {
-        return api.home.updateGoal(
-          editingGoalId,
-          { period: goalPeriod, metric: goalMetric, target: numeric, label: goalLabel.trim() || null },
-          timezone,
-        );
-      }
-      return api.home.upsertGoal(
-        { period: goalPeriod, metric: goalMetric, target: numeric, label: goalLabel.trim() || null },
-        timezone,
-      );
-    },
-    onSuccess: async (res) => {
+    mutationFn: ({ id, body }: {
+      id: string | null;
+      body: Parameters<typeof api.home.upsertGoal>[0];
+      formVersion: number;
+    }) => id ? api.home.updateGoal(id, body, timezone) : api.home.upsertGoal(body, timezone),
+    onSuccess: async (res, { formVersion }) => {
       await syncHome(res.home);
+      if (goalFormVersion.current !== formVersion) return;
       setGoalFormOpen(false);
       setEditingGoalId(null);
       setGoalTarget("");
       setGoalLabel("");
       setGoalFormError(null);
     },
-    onError: (err) => {
+    onError: (err, { formVersion }) => {
+      if (goalFormVersion.current !== formVersion) return;
       setGoalFormError(err instanceof Error ? err.message : "Could not save goal.");
     },
   });
@@ -213,6 +201,7 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
   });
 
   const openNewGoalForm = () => {
+    goalFormVersion.current++;
     setEditingGoalId(null);
     setGoalPeriod("monthly");
     setGoalMetric("profit");
@@ -223,6 +212,7 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
   };
 
   const openEditGoalForm = (goal: SellerGoalProgress) => {
+    goalFormVersion.current++;
     setEditingGoalId(goal.id);
     setGoalPeriod(goal.period);
     setGoalMetric(goal.metric);
@@ -233,6 +223,7 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
   };
 
   const cancelGoalForm = () => {
+    goalFormVersion.current++;
     setGoalFormOpen(false);
     setEditingGoalId(null);
     setGoalFormError(null);
@@ -240,8 +231,22 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
 
   const handleGoalSubmit = (event: React.FormEvent) => {
     event.preventDefault();
+    if (saveGoal.isPending) return;
+    const target = Number(goalTarget);
+    if (!Number.isFinite(target) || target <= 0) {
+      setGoalFormError("Enter a target greater than zero.");
+      return;
+    }
+    if (goalMetric === "sell_through_rate" && target > 100) {
+      setGoalFormError("Sell-through rate target cannot exceed 100%.");
+      return;
+    }
     setGoalFormError(null);
-    saveGoal.mutate();
+    saveGoal.mutate({
+      id: editingGoalId,
+      body: { period: goalPeriod, metric: goalMetric, target, label: goalLabel.trim() || null },
+      formVersion: goalFormVersion.current,
+    });
   };
 
   const metricOption = METRIC_OPTIONS.find((opt) => opt.value === goalMetric) ?? METRIC_OPTIONS[0]!;
