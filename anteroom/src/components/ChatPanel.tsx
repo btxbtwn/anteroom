@@ -25,7 +25,8 @@ import { getLive } from "./chat/liveChatStore";
 import { useChatQueue } from "./chat/useChatQueue";
 import { useChatScroll } from "./chat/useChatScroll";
 import { useChatServerState } from "./chat/useChatServerState";
-import { canSteerLive, useChatStream, useGenerateRecovery } from "./chat/useChatStream";
+import { canSteerLive, steerableChat, useChatStream, useGenerateRecovery } from "./chat/useChatStream";
+import { useWorkspaceRuntime } from "../app/runtime";
 import { useLiveChat } from "./chat/useLiveChat";
 import { placeTurnFolds } from "./chat/workLogModel";
 import { RegenerateListingButton } from "./ClearListingButton";
@@ -50,6 +51,7 @@ function messageRowPadding(m: Message): string {
 
 export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onStatusChange }: Props) {
   const queryClient = useQueryClient();
+  const runtime = useWorkspaceRuntime();
   const uploadingPhotos = usePhotosUploading(convId);
   const draftKey = `listing:${convId}`;
 
@@ -124,9 +126,11 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
   // back unchanged and leaves no half-edited copy in this listing's box.
   useEffect(() => {
     if (!editingQueuedId) return;
-    return () => setComposerDraftText(draftKey, "");
+    return () => {
+      setComposerDraftText(draftKey, "");
+      setEditing(null);
+    };
   }, [editingQueuedId, draftKey]);
-  const canSteer = streaming && !generating && !resetting && !/^saving/i.test(streamStatus.trim());
 
   const startEditQueued = useCallback((id: string) => {
     const message = chatQueue(queueKey).find((item) => item.id === id);
@@ -144,12 +148,6 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     const last = pendingQueue[pendingQueue.length - 1];
     return Boolean(last && !editingQueuedId && startEditQueued(last.id));
   }, [pendingQueue, editingQueuedId, startEditQueued]);
-  const sendFirstQueuedNow = useCallback(() => {
-    const first = pendingQueue[0];
-    if (!first || first.steer || !canSteerLive(convId) || editingQueuedId) return false;
-    void sendNow(first.id);
-    return true;
-  }, [pendingQueue, convId, editingQueuedId, sendNow]);
 
   const handleCite = useCallback((citation: ChatCitation) => {
     composerRef.current?.insertCitation(citation);
@@ -169,6 +167,16 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     [],
   );
   const hasListingJson = checkListingCopy(messages, listing);
+  const steerable = steerableChat(runtime.hosted, hasListingJson);
+  const canSteer = steerable
+    && streaming && !generating && !resetting && !/^saving/i.test(streamStatus.trim());
+
+  const sendFirstQueuedNow = useCallback(() => {
+    const first = pendingQueue[0];
+    if (!first || first.steer || !steerable || !canSteerLive(convId) || editingQueuedId) return false;
+    void sendNow(first.id);
+    return true;
+  }, [pendingQueue, steerable, convId, editingQueuedId, sendNow]);
   const hasListingJsonRef = useRef(hasListingJson);
   useLayoutEffect(() => { hasListingJsonRef.current = hasListingJson; }, [hasListingJson]);
 
@@ -271,8 +279,11 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     // sendMessage refuses while background work runs, so hold the message
     // instead of dropping it, or steer it into the reply being written.
     if (busy || serverBusy) {
-      const action = resolveFollowUp({ busy: true, canSteer: canSteerLive(convId), alternate });
+      // Decided when the message is ready: an image upload can outlast the reply.
       const hold = (message: ReturnType<typeof newQueuedChatMessage>) => {
+        const live = getLive(convId);
+        const running = live.streaming || live.generating || live.resetting;
+        const action = resolveFollowUp({ busy: running, canSteer: steerable && canSteerLive(convId), alternate });
         if (action === "steer") void steer(message);
         else enqueue(message);
         pinChatToBottom();
@@ -356,6 +367,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     pinChatToBottom,
     enqueue,
     steer,
+    steerable,
     editingQueuedId,
     setEditingQueuedId,
     queueKey,

@@ -18,6 +18,7 @@ import { useComposerImages, type ComposerImage } from "./chat/ComposerAttachment
 import { getComposerDraft, hasComposerDraft, removeComposerDraftImages, restoreComposerDraftImages, setComposerDraftText, transferComposerDraftRemainder, useComposerDraftText } from "./chat/composerDrafts";
 import { ChatComposer } from "./chat/ChatComposer";
 import {
+  assignChatThread,
   chatQueue,
   editChatMessage,
   enqueueChatMessage,
@@ -229,7 +230,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   const [following, setFollowing] = useState(false);
   const queuedAll = useChatQueueItems<AssistantQueuePayload>(ASSISTANT_QUEUE);
   // This conversation's follow-ups; another conversation's wait there for the seller to come back.
-  const queued = queuedAll.filter((message) => message.threadId === threadId || message.threadId == null);
+  const queued = queuedAll.filter((message) => message.threadId === threadId || (threadId === null && message.threadId == null));
   // Keyed by conversation, so switching conversations ends the edit.
   const [editing, setEditing] = useState<{ threadId: string | null; id: string } | null>(null);
   const editingQueuedId = editing?.threadId === threadId ? editing.id : null;
@@ -425,6 +426,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
             transferComposerDraftRemainder(originDraftKey, `assistant:${id}`, question);
             transferred = true;
           }
+          assignChatThread(ASSISTANT_QUEUE, id);
           onThreadReady?.(id);
         }
       }

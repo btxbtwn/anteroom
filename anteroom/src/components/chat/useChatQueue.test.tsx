@@ -130,4 +130,20 @@ describe("held chat follow-ups", () => {
       ["first", false],
     ]);
   });
+
+  it("a listing's queue still sends while another listing is mid-send", async () => {
+    let finishA: (started: boolean) => void = () => {};
+    const sendMessage = vi.fn((text: string) =>
+      text === "for a" ? new Promise<boolean>((resolve) => { finishA = resolve; }) : Promise.resolve(true));
+    const { render } = mountQueue(sendMessage);
+    enqueueChatMessage(listingQueueKey("b"), newQueuedChatMessage("for b"));
+    render({ convId: "a", busy: true, serverBusy: false, queued: "for a" });
+    render({ convId: "a", busy: false, serverBusy: false, queued: null });
+    await act(async () => {});
+    expect(sendMessage).toHaveBeenCalledWith("for a", []);
+    render({ convId: "b", busy: false, serverBusy: false, queued: null });
+    await act(async () => {});
+    expect(sendMessage).toHaveBeenCalledWith("for b", []);
+    finishA(true);
+  });
 });

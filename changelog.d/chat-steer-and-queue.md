@@ -1,2 +1,2 @@
-- A message you send while chat is still answering now goes straight in and cuts off that answer, keeping what it already wrote. Press Ctrl/⌘+Enter to queue it for afterwards instead.
+- In the assistant, and in a listing's chat in the Mac app, a message you send while an answer is still being written now goes straight in: it cuts that answer off, keeping what it already wrote, and is answered next. Press Ctrl/⌘+Enter, or the queue button on a phone, to queue it for afterwards instead.
 - Queued chat messages stay put when you switch listings, close the chat or reload, and each one can be sent now, edited or removed. Messages with images can be queued too.

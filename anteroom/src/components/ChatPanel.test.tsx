@@ -26,6 +26,8 @@ vi.mock("./chat/useChatServerState", () => ({
 vi.mock("./chat/useChatStream", () => ({
   useGenerateRecovery: () => {},
   useChatStream: () => ({ handleGenerate, sendMessage }),
+  canSteerLive: () => false,
+  steerableChat: () => false,
 }));
 vi.mock("./chat/ChatTranscript", () => ({
   ChatTranscript: ({ children }: { children: ReactNode }) => <>{children}</>,

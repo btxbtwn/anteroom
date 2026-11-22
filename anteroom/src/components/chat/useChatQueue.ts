@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect } from "react";
 import type { ChatAttachmentUpload } from "../../api/types";
 import {
   enqueueChatMessage,
@@ -15,6 +15,9 @@ import { getLive } from "./liveChatStore";
 
 /** Images a queued listing follow-up carries, already prepared for upload. */
 export type ListingQueuePayload = { attachments: ChatAttachmentUpload[] };
+
+/** Listings sending a queued message right now; one at a time per listing, any number across them. */
+const draining = new Set<string>();
 
 export function listingQueueKey(convId: string) {
   return `listing:${convId}`;
@@ -52,7 +55,6 @@ export function useChatQueue({
 }: Options) {
   const key = listingQueueKey(convId);
   const pendingQueue = useChatQueueItems<ListingQueuePayload>(key);
-  const drainLockRef = useRef(false);
 
   // Ask-chat prompts from the inspector join the same queue as typed follow-ups.
   useEffect(() => {
@@ -66,16 +68,16 @@ export function useChatQueue({
   // serverBusy is a dependency, not a cache read: the fill a chat save starts
   // ends after the reply does, and the held follow-up must send when it ends.
   useEffect(() => {
-    if (busy || serverBusy || paused || pendingQueue.length === 0 || drainLockRef.current) return;
+    if (busy || serverBusy || paused || pendingQueue.length === 0 || draining.has(key)) return;
     const liveState = getLive(convId);
     if (liveState.streaming || liveState.generating || liveState.resetting) return;
     const next = takeNextChatMessage<ListingQueuePayload>(key);
     if (!next) return;
-    drainLockRef.current = true;
+    draining.add(key);
     void sendMessage(next.text, next.payload?.attachments ?? []).then((started) => {
       if (!started) returnChatMessage(key, next);
     }).finally(() => {
-      drainLockRef.current = false;
+      draining.delete(key);
     });
   }, [busy, serverBusy, paused, pendingQueue, sendMessage, convId, key]);
 

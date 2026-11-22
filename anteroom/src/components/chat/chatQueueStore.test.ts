@@ -7,6 +7,7 @@ import {
   newQueuedChatMessage,
   removeChatMessage,
   resetChatQueuesForTest,
+  assignChatThread,
   resolveFollowUp,
   takeNextChatMessage,
 } from "./chatQueueStore";
@@ -56,5 +57,28 @@ describe("chat queue store", () => {
     expect(resolveFollowUp({ busy: true, canSteer: true, alternate: true })).toBe("queue");
     expect(resolveFollowUp({ busy: true, canSteer: false, alternate: false })).toBe("queue");
     expect(resolveFollowUp({ busy: true, canSteer: false, alternate: true })).toBe("queue");
+  });
+
+  it("does not send a message another tab already sent", () => {
+    enqueueChatMessage("k", newQueuedChatMessage("once"));
+    // The other tab took it: storage no longer holds it.
+    localStorage.removeItem("anteroom.chatQueue.v1");
+    expect(takeNextChatMessage("k")).toBeNull();
+  });
+
+  it("drops a saved message older than a day instead of sending it out of the blue", () => {
+    const old = { id: "old", text: "stale", createdAt: new Date(Date.now() - 2 * 24 * 3600_000).toISOString() };
+    const fresh = { id: "new", text: "fresh", createdAt: new Date().toISOString() };
+    localStorage.setItem("anteroom.chatQueue.v1", JSON.stringify({ k: [old, fresh] }));
+    expect(chatQueue("k").map((m) => m.text)).toEqual(["fresh"]);
+  });
+
+  it("keeps a question asked before its conversation existed in memory, then files it there", () => {
+    enqueueChatMessage("assistant", newQueuedChatMessage("before the thread", { threadId: null }));
+    expect(localStorage.getItem("anteroom.chatQueue.v1")).toBeNull();
+    assignChatThread("assistant", "t1");
+    expect(chatQueue("assistant").map((m) => m.threadId)).toEqual(["t1"]);
+    resetChatQueuesForTest();
+    expect(chatQueue("assistant").map((m) => [m.text, m.threadId])).toEqual([["before the thread", "t1"]]);
   });
 });
