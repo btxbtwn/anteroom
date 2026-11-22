@@ -160,15 +160,22 @@ def _save_connection(row: PlaidConnection, token: str) -> None:
             vault.write_in_session(db, slot, token)
             db.commit()
         return
-    try:
+    # Keep a manageable row even if the desktop process exits during a Keychain
+    # write. Only activate it once the credential has been stored.
+    row.disconnecting = True
+    connection_id = row.id
+    with database.SessionLocal() as db:
+        _insert_connection(db, row)
+        db.commit()
+    with database.SessionLocal() as db:
+        _lock_seller(db)
+        pending = _connection(db, connection_id)
+        if pending.sync_version != 0:
+            raise PlaidConflict("This connection is being disconnected.")
         if not keychain.write_slot(slot, token):
             raise CredentialStorageUnavailable()
-        with database.SessionLocal() as db:
-            _insert_connection(db, row)
-            db.commit()
-    except Exception:
-        keychain.delete_slot(slot)
-        raise
+        pending.disconnecting = False
+        db.commit()
 
 
 async def _revoke(client: PlaidClient, token: str) -> None:
@@ -428,6 +435,7 @@ def _begin_disconnect(db: Session, connection_id: str) -> str:
     _lock_seller(db)
     row = _connection(db, connection_id)
     row.disconnecting = True
+    row.sync_version += 1
     environment = row.environment
     db.commit()
     return environment
@@ -435,14 +443,14 @@ def _begin_disconnect(db: Session, connection_id: str) -> str:
 
 def _finish_disconnect(connection_id: str) -> None:
     vault = _vault()
-    if vault is None and not keychain.delete_slot(_slot(connection_id)):
-        raise CredentialStorageUnavailable()
     with database.SessionLocal() as db:
         _lock_seller(db)
         if (row := db.get(PlaidConnection, connection_id)) is not None:
             if vault is not None:
                 assert isinstance(db, SellerDatabaseSession)
                 vault.write_in_session(db, _slot(connection_id), None)
+            elif not keychain.delete_slot(_slot(connection_id)):
+                raise CredentialStorageUnavailable()
             db.delete(row)
         db.commit()
 
@@ -450,9 +458,13 @@ def _finish_disconnect(connection_id: str) -> None:
 async def disconnect(client: PlaidClient | None, connection_id: str) -> None:
     environment = await database.in_worker_session(_begin_disconnect, connection_id)
     if client and client.environment == environment:
-        token = await database.run_worker_db_step(keychain.read_slot, _slot(connection_id))
-        if token:
-            await _revoke(client, token)
+        try:
+            token = await database.run_worker_db_step(keychain.read_slot, _slot(connection_id))
+        except CredentialStorageUnavailable:
+            logger.warning("Plaid Item revocation skipped because the credential could not be read")
+        else:
+            if token:
+                await _revoke(client, token)
     await database.run_worker_db_step(_finish_disconnect, connection_id)
 
 

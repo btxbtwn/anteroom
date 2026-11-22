@@ -9,7 +9,7 @@ import pytest
 from alembic import command
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, func, inspect, select, text
+from sqlalchemy import create_engine, event, func, inspect, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -21,7 +21,7 @@ from anteroom.models.business_expense import BusinessExpense
 from anteroom.models.plaid import PlaidConnection, PlaidTransaction
 from anteroom.routes import business_expenses, plaid
 from anteroom.services import keychain, plaid_expenses
-from anteroom.services.hosted_context import HostedSettingsStore, VaultSecretStore
+from anteroom.services.hosted_context import CredentialStorageUnavailable, HostedSettingsStore, VaultSecretStore
 from anteroom.services.plaid_client import PlaidClient
 from anteroom.services.service_context import ServiceContext, use
 
@@ -293,6 +293,69 @@ def test_three_simultaneous_exchanges_never_exceed_capacity(local, provider):
     assert len(client.get(f"{ROOT}/status").json()["connections"]) == 2
 
 
+def test_disconnect_attempts_wipe_when_credential_read_fails(local, provider, monkeypatch):
+    client, _ = local
+    _, calls, _ = provider
+    connection = connect(client)
+    path = f"{ROOT}/connections/{connection['id']}"
+    slot = f"plaid:{connection['id']}"
+    read = keychain.read_slot
+    delete = keychain.delete_slot
+
+    def unavailable(_slot):
+        raise CredentialStorageUnavailable()
+
+    monkeypatch.setattr(keychain, "read_slot", unavailable)
+    monkeypatch.setattr(keychain, "delete_slot", lambda _: False)
+    assert client.delete(path).status_code == 503
+    assert read(slot) == "test-access-bank"
+    assert client.get(f"{ROOT}/status").json()["connections"][0]["status"] == "disconnecting"
+    monkeypatch.setattr(keychain, "delete_slot", delete)
+    assert client.delete(path).status_code == 204
+    assert read(slot) is None
+    assert not any(path == "/item/remove" for path, _ in calls)
+
+
+def test_interrupted_desktop_registration_keeps_credential_manageable(local, provider, monkeypatch):
+    client, engine = local
+    write = keychain.write_slot
+
+    def interrupt(slot, token):
+        assert write(slot, token)
+        raise SystemExit()
+
+    monkeypatch.setattr(keychain, "write_slot", interrupt)
+    row = PlaidConnection(id="interrupted", institution_id="ins-bank", institution_name="Bank",
+                          environment="sandbox", accounts=[])
+    with pytest.raises(SystemExit):
+        plaid_expenses._save_connection(row, "test-access-bank")
+    with Session(engine) as db:
+        assert plaid_expenses._due(db, "sandbox") == []
+    assert client.get(f"{ROOT}/status").json()["connections"][0]["status"] == "disconnecting"
+    assert client.delete(f"{ROOT}/connections/interrupted").status_code == 204
+    assert keychain.read_slot("plaid:interrupted") is None
+
+
+def test_plaid_downgrade_refuses_linked_items(local, provider):
+    client, engine = local
+    item = connect(client)
+    with pytest.raises(RuntimeError, match="Disconnect"):
+        command.downgrade(migration_config(engine), "049b76a1ce20")
+    assert client.delete(f"{ROOT}/connections/{item['id']}").status_code == 204
+    command.downgrade(migration_config(engine), "049b76a1ce20")
+    assert "plaid_connections" not in inspect(engine).get_table_names()
+
+
+def test_hosted_plaid_downgrade_refuses_orphaned_vault_slot(vault_storage):  # noqa: F811
+    engine, sessions = vault_storage
+    secrets = VaultSecretStore(sessions(ALICE), ALICE)
+    secrets.set("plaid:orphaned", "fixture-token")
+    with pytest.raises(RuntimeError, match="Vault credentials"):
+        command.downgrade(migration_config(engine), "049b76a1ce20")
+    assert secrets.get_fresh("plaid:orphaned") == "fixture-token"
+    assert "plaid_connections" in inspect(engine).get_table_names()
+
+
 def test_scheduler_selects_only_due_connections(local, provider):
     client, engine = local
     connect(client)
@@ -312,9 +375,19 @@ def test_hosted_never_checks_out_a_seller_slot_during_plaid_http(vault_storage, 
     from anteroom.services.hosted_database import active_seller_session
     from anteroom.services.account_import import imported_tables
 
+    checked_out = set()
+
+    @event.listens_for(engine, "checkout")
+    def checkout(_connection, record, _proxy):
+        checked_out.add(record)
+
+    @event.listens_for(engine, "checkin")
+    def checkin(_connection, record):
+        checked_out.remove(record)
+
     async def check(self, path, **body):
         assert active_seller_session(ALICE) is None
-        assert engine.pool.checkedout() == 0 if hasattr(engine.pool, "checkedout") else True
+        assert not checked_out
         return await original(self, path, **body)
 
     monkeypatch.setattr(PlaidClient, "post", check)

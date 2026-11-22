@@ -75,7 +75,15 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    if op.get_bind().dialect.name == "postgresql":
+    bind = op.get_bind()
+    hosted = bind.dialect.name == "postgresql"
+    if hosted:
+        op.execute("LOCK TABLE public.plaid_connections IN ACCESS EXCLUSIVE MODE")
+    if bind.scalar(sa.text("SELECT EXISTS (SELECT 1 FROM plaid_connections)")):
+        raise RuntimeError("Disconnect all Plaid connections before downgrading the database.")
+    if hosted:
+        if bind.scalar(sa.text("SELECT EXISTS (SELECT 1 FROM public.user_secret_references WHERE account LIKE 'plaid:%')")):
+            raise RuntimeError("Clear remaining Plaid Vault credentials before downgrading the database.")
         op.execute("DROP FUNCTION anteroom_private.plaid_owners()")
     for table in reversed(TABLES):
         op.drop_table(table)
