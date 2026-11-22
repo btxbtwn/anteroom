@@ -4,11 +4,14 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import StaleDataError
 
 from anteroom.database import get_db
 from anteroom.models.business_expense import BusinessExpense
 from anteroom.services import expense_csv, profit_and_loss, sales_ledger
-from anteroom.services.business_expenses import Category, Expense, ExpenseInput, MileageAmount, MileageInput, entries, mileage, save
+from anteroom.services.business_expenses import (
+    Category, Expense, ExpenseInput, ExpenseUpdate, MileageAmount, MileageInput, entries, mileage, save,
+)
 
 router = APIRouter(prefix="/api/business-expenses", tags=["business-expenses"])
 
@@ -88,22 +91,34 @@ def create_expense(body: ExpenseInput, db: Session = Depends(get_db, scope="func
     return result
 
 
-def _find(db: Session, expense_id: str) -> BusinessExpense:
+def _changed() -> HTTPException:
+    return HTTPException(409, "This expense changed elsewhere. Reopen it to see the latest version.")
+
+
+def _find(db: Session, expense_id: str, expected_revision: int) -> BusinessExpense:
     expense = db.get(BusinessExpense, expense_id)
     if expense is None:
         raise HTTPException(404, "Expense not found.")
+    if expense.revision != expected_revision:
+        raise _changed()
     return expense
 
 
 @router.put("/{expense_id}")
-def update_expense(expense_id: str, body: ExpenseInput, db: Session = Depends(get_db, scope="function")) -> Expense:
-    result = save(db, _find(db, expense_id), body)
-    db.commit()
-    return result
+def update_expense(expense_id: str, body: ExpenseUpdate, db: Session = Depends(get_db, scope="function")) -> Expense:
+    try:
+        result = save(db, _find(db, expense_id, body.expected_revision), body)
+        db.commit()
+        return result
+    except StaleDataError as exc:
+        raise _changed() from exc
 
 
 @router.delete("/{expense_id}", status_code=204)
-def delete_expense(expense_id: str, db: Session = Depends(get_db, scope="function")) -> Response:
-    db.delete(_find(db, expense_id))
-    db.commit()
+def delete_expense(expense_id: str, expected_revision: int = Query(ge=1), db: Session = Depends(get_db, scope="function")) -> Response:
+    try:
+        db.delete(_find(db, expense_id, expected_revision))
+        db.commit()
+    except StaleDataError as exc:
+        raise _changed() from exc
     return Response(status_code=204)

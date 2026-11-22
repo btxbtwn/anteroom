@@ -378,13 +378,14 @@ struct Expense: Identifiable, Codable, Hashable, Sendable {
     var mileageRateCents: String?
     var originDestination: String?
     var id: String
+    var revision: Int
     /// One of: operating_expense, inventory_purchase.
     var accountingType: String
     /// One of: manual, csv, bank.
     var importSource: String
 
     enum CodingKeys: String, CodingKey {
-        case currency, category, vendor, description, notes, distance, id
+        case currency, category, vendor, description, notes, distance, id, revision
         case incurredDate = "incurred_date"
         case amountCents = "amount_cents"
         case distanceUnit = "distance_unit"
@@ -410,6 +411,7 @@ extension Expense {
         mileageRateCents = try values.decodeIfPresent(String.self, forKey: .mileageRateCents)
         originDestination = try values.decodeIfPresent(String.self, forKey: .originDestination)
         id = try values.decode(String.self, forKey: .id)
+        revision = try values.decode(Int.self, forKey: .revision)
         accountingType = try values.decode(String.self, forKey: .accountingType)
         importSource = try values.decode(String.self, forKey: .importSource)
     }
@@ -454,6 +456,51 @@ extension ExpenseInput {
         distanceUnit = try values.decodeIfPresent(String.self, forKey: .distanceUnit)
         mileageRateCents = try values.decodeIfPresent(String.self, forKey: .mileageRateCents)
         originDestination = try values.decodeIfPresent(String.self, forKey: .originDestination)
+    }
+}
+
+struct ExpenseUpdate: Codable, Hashable, Sendable {
+    var incurredDate: String
+    var amountCents: Int
+    var currency: String = "USD"
+    /// One of: inventory_purchases, sourcing_transportation, shipping_supplies, shipping_labels, platform_fees, software_subscriptions, equipment, home_office, advertising, mileage, other.
+    var category: String
+    var vendor: String = ""
+    var description: String = ""
+    var notes: String = ""
+    var distance: String?
+    /// One of: mi, km.
+    var distanceUnit: String?
+    var mileageRateCents: String?
+    var originDestination: String?
+    var expectedRevision: Int
+
+    enum CodingKeys: String, CodingKey {
+        case currency, category, vendor, description, notes, distance
+        case incurredDate = "incurred_date"
+        case amountCents = "amount_cents"
+        case distanceUnit = "distance_unit"
+        case mileageRateCents = "mileage_rate_cents"
+        case originDestination = "origin_destination"
+        case expectedRevision = "expected_revision"
+    }
+}
+
+extension ExpenseUpdate {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        incurredDate = try values.decode(String.self, forKey: .incurredDate)
+        amountCents = try values.decode(Int.self, forKey: .amountCents)
+        currency = try values.decodeIfPresent(String.self, forKey: .currency) ?? "USD"
+        category = try values.decode(String.self, forKey: .category)
+        vendor = try values.decodeIfPresent(String.self, forKey: .vendor) ?? ""
+        description = try values.decodeIfPresent(String.self, forKey: .description) ?? ""
+        notes = try values.decodeIfPresent(String.self, forKey: .notes) ?? ""
+        distance = try values.decodeIfPresent(String.self, forKey: .distance)
+        distanceUnit = try values.decodeIfPresent(String.self, forKey: .distanceUnit)
+        mileageRateCents = try values.decodeIfPresent(String.self, forKey: .mileageRateCents)
+        originDestination = try values.decodeIfPresent(String.self, forKey: .originDestination)
+        expectedRevision = try values.decode(Int.self, forKey: .expectedRevision)
     }
 }
 

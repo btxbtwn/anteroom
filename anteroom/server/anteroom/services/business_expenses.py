@@ -46,8 +46,13 @@ class ExpenseInput(BaseModel):
 
 class Expense(ExpenseInput):
     id: str
+    revision: int
     accounting_type: Literal["operating_expense", "inventory_purchase"]
     import_source: Literal["manual", "csv", "bank"]
+
+
+class ExpenseUpdate(ExpenseInput):
+    expected_revision: int = Field(ge=1, exclude=True)
 
 
 def round_cents(amount: Decimal) -> int:

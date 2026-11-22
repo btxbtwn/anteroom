@@ -1057,6 +1057,10 @@
             ],
             "title": "Origin Destination"
           },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
           "vendor": {
             "default": "",
             "maxLength": 256,
@@ -1069,6 +1073,7 @@
           "amount_cents",
           "category",
           "id",
+          "revision",
           "accounting_type",
           "import_source"
         ],
@@ -1187,6 +1192,126 @@
           "category"
         ],
         "title": "ExpenseInput",
+        "type": "object"
+      },
+      "ExpenseUpdate": {
+        "properties": {
+          "amount_cents": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 999999999999.0,
+            "title": "Amount Cents",
+            "type": "integer"
+          },
+          "category": {
+            "enum": [
+              "inventory_purchases",
+              "sourcing_transportation",
+              "shipping_supplies",
+              "shipping_labels",
+              "platform_fees",
+              "software_subscriptions",
+              "equipment",
+              "home_office",
+              "advertising",
+              "mileage",
+              "other"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "currency": {
+            "default": "USD",
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "maxLength": 512,
+            "title": "Description",
+            "type": "string"
+          },
+          "distance": {
+            "anyOf": [
+              {
+                "description": "Decimal value without a currency symbol.",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance"
+          },
+          "distance_unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "mi",
+                  "km"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Unit"
+          },
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "incurred_date": {
+            "format": "date",
+            "title": "Incurred Date",
+            "type": "string"
+          },
+          "mileage_rate_cents": {
+            "anyOf": [
+              {
+                "description": "Decimal value without a currency symbol.",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mileage Rate Cents"
+          },
+          "notes": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Notes",
+            "type": "string"
+          },
+          "origin_destination": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Destination"
+          },
+          "vendor": {
+            "default": "",
+            "maxLength": 256,
+            "title": "Vendor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "incurred_date",
+          "amount_cents",
+          "category",
+          "expected_revision"
+        ],
+        "title": "ExpenseUpdate",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -2649,6 +2774,16 @@
               "title": "Expense Id",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "expected_revision",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Expected Revision",
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -2684,7 +2819,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ExpenseInput"
+                "$ref": "#/components/schemas/ExpenseUpdate"
               }
             }
           },

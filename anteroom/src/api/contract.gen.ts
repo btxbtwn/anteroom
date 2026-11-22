@@ -214,6 +214,7 @@ export interface Expense {
   mileage_rate_cents?: string | null;
   origin_destination?: string | null;
   id: string;
+  revision: number;
   accounting_type: "operating_expense" | "inventory_purchase";
   import_source: "manual" | "csv" | "bank";
 }
@@ -230,6 +231,21 @@ export interface ExpenseInput {
   distance_unit?: "mi" | "km" | null;
   mileage_rate_cents?: string | null;
   origin_destination?: string | null;
+}
+
+export interface ExpenseUpdate {
+  incurred_date: string;
+  amount_cents: number;
+  currency?: string;
+  category: "inventory_purchases" | "sourcing_transportation" | "shipping_supplies" | "shipping_labels" | "platform_fees" | "software_subscriptions" | "equipment" | "home_office" | "advertising" | "mileage" | "other";
+  vendor?: string;
+  description?: string;
+  notes?: string;
+  distance?: string | null;
+  distance_unit?: "mi" | "km" | null;
+  mileage_rate_cents?: string | null;
+  origin_destination?: string | null;
+  expected_revision: number;
 }
 
 export interface HTTPValidationError {

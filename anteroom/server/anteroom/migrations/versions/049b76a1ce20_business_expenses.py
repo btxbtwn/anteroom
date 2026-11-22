@@ -18,6 +18,7 @@ def upgrade() -> None:
     op.create_table(
         "business_expenses",
         sa.Column("id", sa.String(), primary_key=True),
+        sa.Column("revision", sa.Integer(), nullable=False, server_default="1"),
         sa.Column("user_id", sa.String(36), nullable=False, server_default=LOCAL_OWNER),
         sa.Column("incurred_date", sa.Date(), nullable=False),
         sa.Column("amount_cents", sa.BigInteger(), nullable=False),

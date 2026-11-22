@@ -55,9 +55,15 @@ def test_crud_and_ownership_registry(expenses):
     assert row["currency"] == "USD"
     assert client.get(ROOT, params={**PERIOD, "category": "other"}).json() == []
     route = f"{ROOT}/{row['id']}"
-    assert client.put(route, json={**EXPENSE, "category": "inventory_purchases"}).json()["accounting_type"] == "inventory_purchase"
-    assert client.delete(route).status_code == 204
-    assert client.delete(route).status_code == 404
+    change = {**EXPENSE, "category": "inventory_purchases", "expected_revision": row["revision"]}
+    saved = client.put(route, json=change).json()
+    assert saved["accounting_type"] == "inventory_purchase"
+    assert saved["revision"] == row["revision"] + 1
+    assert client.put(route, json=change).status_code == 409
+    assert client.delete(route, params={"expected_revision": row["revision"]}).status_code == 409
+    delete_params = {"expected_revision": saved["revision"]}
+    assert client.delete(route, params=delete_params).status_code == 204
+    assert client.delete(route, params=delete_params).status_code == 404
     assert client.get(ROOT, params=PERIOD).json() == []
     assert "business_expenses" in {table.name for table in seller_tables()}
     assert "business_expenses" in {table.name for table in imported_tables()}

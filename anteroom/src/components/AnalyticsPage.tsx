@@ -3,7 +3,7 @@ import { AccountingChoice, BusinessExpenses, expenseMoney, type AccountingMode }
 import { WorkspaceTabs } from "./ebay/WorkspaceTabs";
 import "./ebay/ebay.css";
 import { useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRightIcon, RefreshCwIcon } from "lucide-react";
 import { api } from "../api/client";
 import type { AnalyticsGroup, AnalyticsRange, InventoryAnalytics } from "../api/types";
@@ -63,6 +63,7 @@ export function InventoryAnalyticsView({ onOpenListing, mode = "accrual", setMod
   const [rankMetric, setRankMetric] = useState<RankMetric>("revenue");
   const [customStart, setCustomStart] = useState(() => isoDay(addDays(new Date(), -29)));
   const [customEnd, setCustomEnd] = useState(() => isoDay(new Date()));
+  const queryClient = useQueryClient();
   const custom = range === "custom";
   const customValid = customStart !== "" && customEnd !== "" && customStart <= customEnd;
   const query = useQuery({
@@ -87,7 +88,10 @@ export function InventoryAnalyticsView({ onOpenListing, mode = "accrual", setMod
           </Select>
           {setMode && <AccountingChoice mode={mode} setMode={setMode} />}
           <Button size="icon-sm" variant="ghost" aria-label="Refresh analytics" title="Refresh analytics"
-            disabled={query.isFetching || (custom && !customValid)} onClick={() => void query.refetch()}>
+            disabled={query.isFetching || (custom && !customValid)} onClick={() => {
+              void query.refetch();
+              void queryClient.invalidateQueries({ queryKey: ["profit-and-loss"] });
+            }}>
             <RefreshCwIcon aria-hidden className={cn(query.isFetching && "animate-spin")} />
           </Button>
           {query.isFetching && data ? <span className="sr-only" role="status">Updating analytics…</span> : null}

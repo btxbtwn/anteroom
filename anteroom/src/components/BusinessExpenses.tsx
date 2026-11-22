@@ -177,7 +177,8 @@ function ExpenseForm({ expense, today, close }: { expense?: Expense; today: stri
         } : await calculate(form);
         Object.assign(body, amount, { distance, distance_unit: unit, origin_destination: value("route") });
       }
-      return api.businessExpenses.save(body, expense?.id);
+      return expense ? api.businessExpenses.update(expense.id, { ...body, expected_revision: expense.revision })
+        : api.businessExpenses.create(body);
     },
     onSuccess: async () => { await refresh(); close(); },
   });
@@ -228,7 +229,7 @@ function ExpenseForm({ expense, today, close }: { expense?: Expense; today: stri
         }}>Calculate mileage</Button>}
         <Button type="button" variant="outline" disabled={busy} onClick={close}>Cancel</Button>
         {expense && <Button type="button" variant="ghost" disabled={busy}
-          onClick={() => { if (window.confirm("Delete this expense?")) remove.mutate(expense.id); }}>Delete expense</Button>}
+          onClick={() => { if (window.confirm("Delete this expense?")) remove.mutate(expense); }}>Delete expense</Button>}
       </div>
     </form>
   </Panel>;

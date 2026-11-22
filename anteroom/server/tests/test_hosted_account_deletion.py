@@ -107,7 +107,8 @@ def test_seller_deletes_only_their_own_account(cloud, signing_keys, monkeypatch)
     })
     assert bob_import.status_code == 200, bob_import.text
     assert bob_import.json()['imported'] == 1
-    assert client.put(f"{expense_path}/{alice_expense.json()['id']}", headers=bob, json=expense).status_code == 404
+    assert client.put(f"{expense_path}/{alice_expense.json()['id']}", headers=bob,
+                      json={**expense, 'expected_revision': alice_expense.json()['revision']}).status_code == 404
     bob_expenses = client.get(expense_path, headers=bob, params={'start': '2026-01-01', 'end': '2026-01-31'}).json()
     assert [row['amount_cents'] for row in bob_expenses] == [200]
     bob_before = owned_rows(engine, BOB)

@@ -2,7 +2,7 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Date, Index, Numeric, String, Text
+from sqlalchemy import BigInteger, Date, Index, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from anteroom.database import Base
@@ -18,6 +18,9 @@ class BusinessExpense(SellerOwned, Base):
     )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    __mapper_args__ = {"version_id_col": revision}
+
     incurred_date: Mapped[date] = mapped_column(Date)
     amount_cents: Mapped[int] = mapped_column(BigInteger)
     currency: Mapped[str] = mapped_column(String(3), server_default="USD")
