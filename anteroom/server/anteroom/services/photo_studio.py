@@ -23,6 +23,7 @@ from PIL import Image
 from anteroom.models.conversation import Photo
 from anteroom.repositories.queries import ConversationRepo
 from anteroom.services import photo_edits, photoroom
+from anteroom.services.media_handoff import finish_media_handoff
 from anteroom.services.photo_edits import PhotoEdits, StudioEdit
 from anteroom.services.photo_store import photo_store
 from anteroom.services.photoroom import PhotoroomError, StudioOptions
@@ -50,8 +51,8 @@ def _read_photo(db, conv_id: str, photo_id: str) -> tuple[str, str]:
         db.rollback()
 
 
-def _store_result(served: str, mime_type: str, result: bytes, options: StudioOptions) -> str:
-    """Save Photoroom's answer in the photo's own format; returns its key."""
+def _store_result(key: str, mime_type: str, result: bytes, options: StudioOptions) -> None:
+    """Save Photoroom's answer in the photo's own format."""
     with Image.open(BytesIO(result)) as answer:
         answer.load()
         img = answer.convert("RGBA")
@@ -66,9 +67,7 @@ def _store_result(served: str, mime_type: str, result: bytes, options: StudioOpt
         out = img
     buffer = BytesIO()
     out.save(buffer, fmt, **({"quality": 95} if fmt in ("JPEG", "WEBP") else {}))
-    key = photo_store().edited_key(served)
     photo_store().put(key, buffer.getvalue())
-    return key
 
 
 def _save(db, conv_id: str, photo_id: str, served: str, key: str, options: StudioOptions) -> Photo:
@@ -86,13 +85,25 @@ async def _one(run_db: RunDb, conv_id: str, photo_id: str, options: StudioOption
     data = await asyncio.to_thread(photo_store().read, served)
     result = await photoroom.edit(data, options)
     del data
-    key = await asyncio.to_thread(_store_result, served, mime_type, result, options)
-    try:
-        return await run_db(_save, conv_id, photo_id, served, key, options)
-    except BaseException:
-        # The photo changed or the save failed: the unused result must not linger.
-        await asyncio.to_thread(photo_edits.cleanup_uploaded, key)
-        raise
+    key = photo_store().edited_key(served)
+
+    async def persist() -> Photo:
+        try:
+            await asyncio.to_thread(_store_result, key, mime_type, result, options)
+            return await run_db(_save, conv_id, photo_id, served, key, options)
+        except Exception:
+            # A refresh or acknowledgement can fail after commit. Read through
+            # a fresh session; if ownership is unknown, keep the object.
+            if not await run_db(_uses_result, conv_id, photo_id, key):
+                await asyncio.to_thread(photo_edits.cleanup_uploaded, key)
+            raise
+
+    return await finish_media_handoff(persist())
+
+
+def _uses_result(db, conv_id: str, photo_id: str, key: str) -> bool:
+    row = db.query(Photo.edits).filter_by(conversation_id=conv_id, id=photo_id).first()
+    return row is not None and photo_edits.studio_key(row.edits) == key
 
 
 def _failure(photo_id: str, error: BaseException) -> dict:

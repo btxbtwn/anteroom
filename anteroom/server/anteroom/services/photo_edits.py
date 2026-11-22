@@ -513,7 +513,11 @@ def write_edit(source_filename: str, mime_type: str, edits: PhotoEdits) -> dict:
     img.save(buffer, fmt, **options)
     contents = buffer.getvalue()
     stored_name = photo_store().edited_key(source_filename)
-    photo_store().put(stored_name, contents)
+    try:
+        photo_store().put(stored_name, contents)
+    except Exception:
+        cleanup_uploaded(stored_name)
+        raise
     return {
         "stored_filename": stored_name,
         "size_bytes": len(contents),
@@ -676,7 +680,12 @@ def apply_photo_edit(
         except BaseException:
             db.rollback()
             if not committed and uploaded_key:
-                cleanup_uploaded(uploaded_key)
+                # A commit acknowledgement may be lost after the row is durable.
+                saved = db.query(Photo.id).filter_by(id=photo_id, conversation_id=conv_id,
+                                                      stored_filename=uploaded_key).first()
+                end_read(db)
+                if saved is None:
+                    cleanup_uploaded(uploaded_key)
             raise
 
         # Phase 4: best-effort post-commit cleanup outside any DB transaction.

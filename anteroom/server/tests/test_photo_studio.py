@@ -486,3 +486,20 @@ def test_studio_and_vision_background_are_not_combined():
     with pytest.raises(ValidationError, match="AI Studio already set"):
         PhotoEdits(background="#FFFFFF", studio={"key": "x.jpg", "options": {"remove_background": True}})
     assert json.loads(PhotoEdits().model_dump_json())["annotations"] == []
+
+
+def test_studio_commit_with_lost_acknowledgement_keeps_both_files(env, monkeypatch):
+    monkeypatch.setenv("ANTEROOM_SANDBOX", "1")
+    replace = ConversationRepo.replace_photo_file
+
+    def lost_ack(*args, **kwargs):
+        replace(*args, **kwargs)
+        raise RuntimeError("lost commit acknowledgement")
+
+    monkeypatch.setattr(ConversationRepo, "replace_photo_file", lost_ack)
+    photo = env.photos[0]
+    response = env.client.post(env.studio, json={"photo_ids": [photo.id], "options": {"flat_lay": True}})
+    assert response.json()["errors"]
+    env.db.refresh(photo)
+    assert (env.dir / photo.stored_filename).is_file()
+    assert (env.dir / photo.edits["studio"]["key"]).is_file()

@@ -210,3 +210,58 @@ def test_relayed_poshmark_command_carries_a_signed_video_link(monkeypatch):
 
     monkeypatch.setattr(hosted_videos, 'signed_url', broken)
     assert asyncio.run(hosted_browser_relay.with_video_link(command)) is command
+
+
+@pytest.mark.parametrize("stage", ["upload", "insert"])
+def test_video_cancellation_waits_for_file_ownership(monkeypatch, stage):
+    from types import SimpleNamespace
+    from fastapi import UploadFile
+    from threading import Event
+    from anteroom.routes import hosted_listing_videos as route
+    from anteroom.services import service_context
+
+    entered, release = Event(), Event()
+    stored, rows = set(), set()
+
+    def gate(where):
+        if stage == where:
+            entered.set()
+            assert release.wait(5)
+
+    def store(key, path, _mime):
+        gate("upload")
+        assert path.read_bytes() == CLIP
+        stored.add(key)
+
+    async def session(_request, work, *args):
+        if work is route._insert:
+            await asyncio.to_thread(gate, "insert")
+            rows.add(args[1])
+        if work is route._saved:
+            return args[0] in rows
+
+    async def noop(_request):
+        pass
+
+    monkeypatch.setattr(route, "in_seller_session", session)
+    monkeypatch.setattr(service_context, "current", lambda: SimpleNamespace(seller_id=USER_ID))
+    monkeypatch.setattr(hosted_videos, "upload", store)
+    monkeypatch.setattr(hosted_videos, "delete", stored.discard)
+    monkeypatch.setattr(route, "release_upload_slot", noop)
+
+    async def run():
+        task = asyncio.create_task(route.upload("listing1", None, UploadFile(io.BytesIO(CLIP), filename="clip.mp4")))
+        try:
+            assert await asyncio.to_thread(entered.wait, 5)
+            task.cancel()
+            await asyncio.sleep(0)
+            task.cancel()
+            await asyncio.sleep(0)
+            assert not task.done()
+        finally:
+            release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert len(rows) == 1 and rows == stored
+
+    asyncio.run(run())

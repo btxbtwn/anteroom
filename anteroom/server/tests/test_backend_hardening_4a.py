@@ -598,6 +598,7 @@ def test_safe_fetch_overall_wall_clock_timeout_stops_slow_drip_body(monkeypatch)
 def test_hosted_csp_pins_supabase_origin_and_falls_back_when_unset():
     pinned = _build_csp("https://my-proj.supabase.co/some/path")
     assert "connect-src 'self' https://my-proj.supabase.co wss://my-proj.supabase.co;" in pinned
+    assert "media-src 'self' https://my-proj.supabase.co;" in pinned
     assert "img-src 'self' data: blob: https://my-proj.supabase.co;" in pinned
     assert "*.supabase.co" not in pinned
     # Retained for pywebview WKWebView API bootstrap.
@@ -605,6 +606,7 @@ def test_hosted_csp_pins_supabase_origin_and_falls_back_when_unset():
 
     fallback = _build_csp("")
     assert "connect-src 'self' https://*.supabase.co wss://*.supabase.co;" in fallback
+    assert "media-src 'self';" in fallback
     assert "img-src 'self' data: blob:;" in fallback
 
 

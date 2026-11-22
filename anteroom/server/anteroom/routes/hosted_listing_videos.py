@@ -20,6 +20,8 @@ from anteroom.services import hosted_videos, listing_videos as videos
 from anteroom.services.hosted_database import get_seller_db, in_seller_session
 from anteroom.services.hosted_limits import bounded_route_class, release_upload_slot, stream_upload_to_path
 
+from anteroom.services.media_handoff import finish_media_handoff
+
 # A multipart form around the file adds a little.
 _MAX_BODY = hosted_videos.MAX_BYTES + 1024 * 1024
 TOO_LARGE = 'Videos must be 150 MB or smaller (the most any marketplace takes).'
@@ -83,18 +85,19 @@ async def upload(conv_id: str, request: Request, file: UploadFile = File(...)):
         # The body is in; Storage and the database need no upload slot.
         await release_upload_slot(request)
         key = hosted_videos.new_key(context.seller_id, conv_id)
-        await asyncio.to_thread(hosted_videos.upload, key, path, metadata['mime_type'])
-    name = Path(file.filename or 'video').name[:200]
-    try:
-        return await in_seller_session(request, _insert, conv_id, key, checksum, name, size, metadata)
-    except BaseException:
-        # A refused save must not leave an unreachable object behind; a saved one keeps its file.
-        try:
-            if not await in_seller_session(request, _saved, key):
-                await asyncio.to_thread(hosted_videos.delete, key)
-        except Exception:  # noqa: BLE001 - the original error is the one to report
-            pass
-        raise
+        name = Path(file.filename or 'video').name[:200]
+
+        async def persist() -> dict:
+            try:
+                await asyncio.to_thread(hosted_videos.upload, key, path, metadata['mime_type'])
+                return await in_seller_session(request, _insert, conv_id, key, checksum, name, size, metadata)
+            except Exception:
+                # Reconcile even a lost upload/commit acknowledgement.
+                if not await in_seller_session(request, _saved, key):
+                    await asyncio.to_thread(hosted_videos.delete, key)
+                raise
+
+        return await finish_media_handoff(persist())
 
 
 def _key(db, video_id: str) -> str:

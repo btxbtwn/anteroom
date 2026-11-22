@@ -145,16 +145,18 @@ def _build_csp(supabase_url: str) -> str:
         http_origin = f"{parsed.scheme}://{parsed.netloc}"
         ws_scheme = "wss" if parsed.scheme == "https" else "ws"
         ws_origin = f"{ws_scheme}://{parsed.netloc}"
+        media_src = f"'self' {http_origin}"
         img_src = f"'self' data: blob: {http_origin}"
         connect_src = f"'self' {http_origin} {ws_origin}"
     else:
+        media_src = "'self'"
         img_src = "'self' data: blob:"
         connect_src = "'self' https://*.supabase.co wss://*.supabase.co"
     # pywebview builds its native API methods with Function(). WebKit
     # applies this policy to that bootstrap as well as to page scripts.
     return (
         "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; "
-        f"img-src {img_src}; connect-src {connect_src}; "
+        f"img-src {img_src}; media-src {media_src}; connect-src {connect_src}; "
         "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
     )
 
