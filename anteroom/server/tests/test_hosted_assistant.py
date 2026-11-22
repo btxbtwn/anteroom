@@ -315,6 +315,15 @@ def test_shop_snapshot_waits_for_the_sales_archive_lock_outside_a_transaction(
                 return outcomes(session, rows)
 
             monkeypatch.setattr(scout, 'outcomes', read_scout)
+            recent = scout.recent
+
+            def delayed_recent(session):
+                # A pause before the next Scout query must not leave the
+                # track-record transaction idle past the same deadline.
+                time.sleep(.25)
+                return recent(session)
+
+            monkeypatch.setattr(scout, 'recent', delayed_recent)
             shop = business_assistant.read_shop(db, now=NOW)
             assert 'Coat M' in business_assistant.run_lookup(shop.lookups, 'SELECT title FROM listings')
             shop.lookups.close()

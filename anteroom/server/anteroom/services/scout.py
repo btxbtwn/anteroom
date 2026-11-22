@@ -219,10 +219,15 @@ def outcomes(db: Session, rows: list | None = None) -> dict[str, float]:
     }
 
 
-def track_record(db: Session, sold: dict[str, float] | None = None) -> dict[str, Any]:
+def track_record(
+    db: Session, sold: dict[str, float] | None = None, *, release: bool = False,
+) -> dict[str, Any]:
     """How close the estimates have come to real sales."""
     sold = outcomes(db) if sold is None else sold
     checks = db.query(ScoutCheck.id, ScoutCheck.estimate, ScoutCheck.decision).all()
+    if release:
+        # The snapshot only reads here, and these scalar rows survive rollback.
+        db.rollback()
     ratios = [sold[cid] / estimate for cid, estimate, _ in checks if cid in sold and estimate]
     return {
         "checks": len(checks),

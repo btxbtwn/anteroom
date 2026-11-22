@@ -545,7 +545,7 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
     end_read(db)
     scout_sales = scout.outcomes(db, rows)
     automation_lines = _automation_lines(db)
-    scout_record = scout.track_record(db, scout_sales)
+    scout_record = scout.track_record(db, scout_sales, release=True)
     scout_recent = [
         {key: check[key] for key in ("title", "asking_price", "estimate", "comps_count", "decision",
                                      "sold_price", "created_at")}
