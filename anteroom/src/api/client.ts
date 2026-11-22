@@ -511,7 +511,10 @@ function postHostedPhoto(convId: string, file: File, marketplace?: string): Prom
 export const api = {
   plaid: {
     status: (signal: AbortSignal) => read<PlaidStatus>("/business-expenses/plaid/status", { signal }),
-    linkToken: () => request<PlaidLinkToken>("/business-expenses/plaid/link-token", { method: "POST" }),
+    linkToken: (connectionId?: string) => request<PlaidLinkToken>(
+      `/business-expenses/plaid/link-token${connectionId ? `?connection_id=${encodeURIComponent(connectionId)}` : ""}`,
+      { method: "POST" },
+    ),
     exchange: (body: PlaidExchange) => request<ConnectionStatus>("/business-expenses/plaid/exchange", {
       method: "POST", body: JSON.stringify(body),
     }),

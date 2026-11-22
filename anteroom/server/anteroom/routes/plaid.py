@@ -50,10 +50,10 @@ def status(db: Session = Depends(get_db, scope="function")) -> expenses.PlaidSta
 
 
 @router.post("/link-token")
-async def link_token() -> PlaidLinkToken:
+async def link_token(connection_id: str | None = None) -> PlaidLinkToken:
     client = _client()
     redirect_uri = client.redirect_uri() if current() else None
-    token = await _call(expenses.link_token(client, redirect_uri))
+    token = await _call(expenses.link_token(client, redirect_uri, connection_id))
     return PlaidLinkToken(link_token=token, redirect_uri=redirect_uri)
 
 

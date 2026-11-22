@@ -97,6 +97,8 @@ def test_seller_deletes_only_their_own_account(cloud, signing_keys, monkeypatch)
     removed = []
     monkeypatch.setattr('anteroom.services.hosted_photos.remove_objects',
                         lambda keys, token: removed.append((list(keys), token)))
+    monkeypatch.setattr(PlaidClient, 'configured', lambda: PlaidClient('sandbox', 'fixture', 'fixture'))
+    monkeypatch.setattr(PlaidClient, 'post', lambda *_args, **_kwargs: pytest.fail('No Plaid Items to revoke'))
     alice, bob = headers(signing_keys), headers(signing_keys, BOB)
     seed(engine, ALICE)
     bob_item = seed(engine, BOB)
@@ -206,6 +208,8 @@ def test_vault_credentials_of_only_the_deleted_seller_go(vault_storage, monkeypa
         VaultSecretStore(sessions(owner), owner).set(slot, f'fixture-plaid-{owner}')
         if owner == BOB:
             bob_slot = slot
+        else:
+            alice_slot = slot
     calls = []
     checked_out = set()
 
@@ -222,8 +226,10 @@ def test_vault_credentials_of_only_the_deleted_seller_go(vault_storage, monkeypa
         with engine.connect() as db:
             assert db.scalar(text('SELECT anteroom_private.account_write_allowed(:owner)'), {'owner': ALICE}) is False
         calls.append((path, access_token))
-        if plaid_offline:
+        if plaid_offline and len(calls) == 1:
             raise PlaidError()
+        if plaid_offline:
+            raise PlaidError('ITEM_NOT_FOUND')
         return {}
 
     from anteroom import database
@@ -231,8 +237,15 @@ def test_vault_credentials_of_only_the_deleted_seller_go(vault_storage, monkeypa
     monkeypatch.setattr(account_deletion, '_read_relay_device', lambda: None)
     monkeypatch.setattr(PlaidClient, 'configured', lambda: PlaidClient('sandbox', 'fixture', 'fixture'))
     monkeypatch.setattr(PlaidClient, 'post', post)
+    if plaid_offline:
+        with pytest.raises(account_deletion.AccountDeletionRefused, match='Could not revoke') as refused:
+            asyncio.run(account_deletion.delete_account(ALICE, 'fixture-jwt'))
+        assert refused.value.status == 503
+        assert VaultSecretStore(sessions(ALICE), ALICE).get(alice_slot) == f'fixture-plaid-{ALICE}'
+        with engine.connect() as db:
+            assert db.scalar(text('SELECT count(*) FROM plaid_connections WHERE user_id = :owner'), {'owner': ALICE}) == 1
     asyncio.run(account_deletion.delete_account(ALICE, 'fixture-jwt'))
-    assert calls == [('/item/remove', f'fixture-plaid-{ALICE}')]
+    assert calls == [('/item/remove', f'fixture-plaid-{ALICE}')] * (2 if plaid_offline else 1)
     with engine.connect() as db:
         names = set(db.scalars(text('SELECT name FROM vault.secrets')))
         assert names == {f'anteroom:{BOB}:marketplace-accounts', f'anteroom:{BOB}:ai-api-keys', f'anteroom:{BOB}:{bob_slot}'}

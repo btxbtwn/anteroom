@@ -108,20 +108,42 @@ describe("Connected banks and cards", () => {
     Object.assign(window, { Plaid: { create } });
     const previous = window.location.href;
     window.history.replaceState({}, "", "/?oauth_state_id=fixture");
-    sessionStorage.setItem("anteroom-plaid-link:seller-1", "first-seller-link");
-    sessionStorage.setItem("anteroom-plaid-link:seller-2", "second-seller-link");
+    const otherSellerLink = JSON.stringify({ token: "first-seller-link" });
+    sessionStorage.setItem("anteroom-plaid-link:seller-1", otherSellerLink);
+    sessionStorage.setItem("anteroom-plaid-link:seller-2", JSON.stringify({ token: "second-seller-link" }));
     try {
       await render(empty, "seller-2");
       expect(create).toHaveBeenCalledWith(expect.objectContaining({
         token: "second-seller-link", receivedRedirectUri: expect.stringContaining("oauth_state_id=fixture"),
       }));
       expect(api.plaid.linkToken).not.toHaveBeenCalled();
-      expect(sessionStorage.getItem("anteroom-plaid-link:seller-1")).toBe("first-seller-link");
+      expect(sessionStorage.getItem("anteroom-plaid-link:seller-1")).toBe(otherSellerLink);
       expect(sessionStorage.getItem("anteroom-plaid-link:seller-2")).toBeNull();
       expect(window.location.search).toBe("");
     } finally {
       window.history.replaceState({}, "", previous);
       sessionStorage.clear();
+      Reflect.deleteProperty(window, "Plaid");
+    }
+  });
+
+  it("uses Link update mode and syncs the same connection without exchanging a token", async () => {
+    const create = vi.fn(({ onSuccess }: { onSuccess: (token: string) => void }) => ({
+      open: () => onSuccess(""), destroy: () => {},
+    }));
+    Object.assign(window, { Plaid: { create } });
+    try {
+      await render({ ...empty, connections: [{ ...bank, status: "error", last_error: "Sign in again" },
+        { ...bank, id: "other" }] });
+      vi.mocked(api.plaid.linkToken).mockResolvedValue({ link_token: "update-token" });
+      vi.mocked(api.plaid.sync).mockResolvedValue(bank);
+      await act(async () => button("Reconnect").click());
+      await settle();
+      expect(api.plaid.linkToken).toHaveBeenCalledWith("bank");
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ token: "update-token" }));
+      expect(api.plaid.sync).toHaveBeenCalledWith("bank", expect.anything());
+      expect(api.plaid.exchange).not.toHaveBeenCalled();
+    } finally {
       Reflect.deleteProperty(window, "Plaid");
     }
   });

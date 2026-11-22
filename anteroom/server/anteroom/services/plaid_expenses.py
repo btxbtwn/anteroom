@@ -116,14 +116,26 @@ def _connection(db: Session, connection_id: str) -> PlaidConnection:
     return row
 
 
-async def link_token(client: PlaidClient, redirect_uri: str | None) -> str:
-    await database.in_worker_session(_require_capacity)
+async def link_token(client: PlaidClient, redirect_uri: str | None, connection_id: str | None = None) -> str:
+    if connection_id is None:
+        await database.in_worker_session(_require_capacity)
+        options = {
+            "products": ["transactions"], "transactions": {"days_requested": HISTORY_DAYS},
+            "account_filters": {"depository": {"account_subtypes": ["all"]},
+                                "credit": {"account_subtypes": ["credit card"]}},
+        }
+    else:
+        environment, _, _, disconnecting = await database.in_worker_session(_snapshot, connection_id)
+        if disconnecting or environment != client.environment:
+            raise PlaidConflict("This connection cannot be reauthorized in the current Plaid environment.")
+        token = await database.run_worker_db_step(keychain.read_slot, _slot(connection_id))
+        if not token:
+            raise PlaidConflict("The Plaid credential is missing. Disconnect this institution and connect it again.")
+        # Link update mode keeps the Item and its access token. Resume from its existing cursor.
+        options = {"access_token": token}
     payload = await client.post(
         "/link/token/create", user={"client_user_id": seller_id()}, client_name="Anteroom",
-        country_codes=["US", "CA"], language="en", products=["transactions"],
-        account_filters={"depository": {"account_subtypes": ["all"]},
-                         "credit": {"account_subtypes": ["credit card"]}},
-        transactions={"days_requested": HISTORY_DAYS},
+        country_codes=["US", "CA"], language="en", **options,
         **({"redirect_uri": redirect_uri} if redirect_uri else {}),
     )
     return _required_string(payload, "link_token")
@@ -186,7 +198,7 @@ async def _revoke(client: PlaidClient, token: str) -> None:
 
 
 async def revoke_hosted_items(client: PlaidClient, owner: str, connection_ids: list[str]) -> None:
-    """Attempt revocation before hosted account deletion clears the seller's Vault."""
+    """Revoke Items before hosted account deletion clears the seller's Vault."""
     if not connection_ids:
         return
     secrets = for_seller(owner).secrets
@@ -196,7 +208,13 @@ async def revoke_hosted_items(client: PlaidClient, owner: str, connection_ids: l
         return [token for connection_id in connection_ids if (token := secrets.get_fresh(_slot(connection_id)))]
 
     tokens = await database.run_worker_db_step(read_tokens)
-    await asyncio.gather(*(_revoke(client, token) for token in tokens))
+    for token in tokens:
+        try:
+            await client.post("/item/remove", access_token=token)
+        except PlaidError as exc:
+            # A retry may replay a removal that already succeeded at Plaid.
+            if exc.code not in {"ITEM_NOT_FOUND", "INVALID_ACCESS_TOKEN"}:
+                raise
 
 
 async def exchange(client: PlaidClient, public_token: str, institution_name: str) -> ConnectionStatus:
@@ -336,6 +354,8 @@ def _expense(row: dict) -> ExpenseInput | None:
 
 
 def _import_key(environment: str, transaction_id: str) -> str:
+    # Keep same-ID replays idempotent after disconnect. A new Item may return new
+    # IDs for overlapping history. Matching date, merchant and amount can merge real purchases.
     return sha256(f"plaid:{environment}:{transaction_id}".encode()).hexdigest()
 
 
@@ -448,6 +468,8 @@ def _finish_disconnect(connection_id: str) -> None:
         if (row := db.get(PlaidConnection, connection_id)) is not None:
             if vault is not None:
                 assert isinstance(db, SellerDatabaseSession)
+                if not db.scalar(text("SELECT anteroom_private.account_write_allowed(:owner)"), {"owner": seller_id()}):
+                    raise PlaidConflict("Account deletion is pending. Continue deleting your account to disconnect Plaid.")
                 vault.write_in_session(db, _slot(connection_id), None)
             elif not keychain.delete_slot(_slot(connection_id)):
                 raise CredentialStorageUnavailable()

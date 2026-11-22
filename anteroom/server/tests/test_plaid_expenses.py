@@ -70,8 +70,11 @@ def provider(monkeypatch):
         match path:
             case "/link/token/create":
                 assert body["user"]["client_user_id"]
-                assert body["products"] == ["transactions"]
-                assert body["transactions"] == {"days_requested": 730}
+                if "access_token" in body:
+                    assert "products" not in body and "transactions" not in body and "account_filters" not in body
+                else:
+                    assert body["products"] == ["transactions"]
+                    assert body["transactions"] == {"days_requested": 730}
                 return httpx.Response(200, json={"link_token": "fixture-link"})
             case "/item/public_token/exchange":
                 return httpx.Response(200, json={"access_token": "test-access-" + body["public_token"]})
@@ -291,6 +294,36 @@ def test_three_simultaneous_exchanges_never_exceed_capacity(local, provider):
         attempts = [workers.submit(client.post, f"{ROOT}/exchange", json={"public_token": str(i)}) for i in range(3)]
     assert sorted(attempt.result().status_code for attempt in attempts) == [201, 201, 409]
     assert len(client.get(f"{ROOT}/status").json()["connections"]) == 2
+
+
+def test_reauthorization_keeps_item_and_cursor_even_at_capacity(local, provider):
+    client, _ = local
+    pages, calls, _ = provider
+    pages[None] = page("existing-cursor", added=[transaction("original")])
+    connection = connect(client)
+    connect(client, "Other", "other")
+    calls.clear()
+
+    path = f"{ROOT}/connections/{connection['id']}"
+    assert client.post(f"{ROOT}/link-token", params={"connection_id": "missing"}).status_code == 404
+    assert client.post(f"{ROOT}/link-token", params={"connection_id": connection["id"]}).json()["link_token"] == "fixture-link"
+    assert calls[0][1]["access_token"] == "test-access-bank"
+    pages["existing-cursor"] = page("updated-cursor", modified=[transaction("original", amount=24)])
+    assert client.post(f"{path}/sync").json()["id"] == connection["id"]
+    assert [kind for kind, _ in calls] == ["/link/token/create", "/transactions/sync"]
+    assert calls[1][1]["cursor"] == "existing-cursor"
+    assert list_expenses(client)["Pirate Ship"]["amount_cents"] == 2400
+
+
+def test_relink_replays_existing_ids_and_keeps_distinct_identical_purchases(local, provider):
+    client, _ = local
+    pages, _, _ = provider
+    pages[None] = page("original", added=[transaction("old")])
+    first = connect(client)
+    assert client.delete(f"{ROOT}/connections/{first['id']}").status_code == 204
+    pages[None] = page("relink", added=[transaction("old"), transaction("new")])
+    assert connect(client)["id"] != first["id"]
+    assert len(client.get(EXPENSES, params=RANGE).json()) == 2
 
 
 def test_disconnect_attempts_wipe_when_credential_read_fails(local, provider, monkeypatch):

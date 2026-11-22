@@ -21,7 +21,7 @@ from anteroom.models.job import ACTIVE_JOB_STATUSES, Job
 from anteroom.models.marketplace_listing import UNSETTLED_STATES, MarketplaceListing
 from anteroom.models.plaid import PlaidConnection
 from anteroom.services.hosted_database import SellerDatabaseSession
-from anteroom.services.plaid_client import PlaidClient
+from anteroom.services.plaid_client import PlaidClient, PlaidError
 
 # Seller tables the restricted role may only read; anteroom_private.delete_account() clears them.
 DELETED_BY_DATABASE = frozenset({'user_secret_references'})
@@ -82,17 +82,18 @@ def _lock_deletion(db: SellerDatabaseSession, owner: str) -> None:
 
 
 @_retry_deadlocks
-def _stage_plaid_cleanup(owner: str, environment: str) -> list[str]:
+def _stage_plaid_cleanup(owner: str) -> list[tuple[str, str]]:
     with _session(owner) as db:
         _lock_deletion(db, owner)
         _check(db)
         db.execute(text('SELECT * FROM anteroom_private.stage_account_deletion()'))
-        ids = list(db.scalars(select(PlaidConnection.id).where(
-            PlaidConnection.user_id == owner,
-            PlaidConnection.environment == environment,
-        )))
+        # Keep the connection rows as the durable Plaid cleanup targets. The
+        # receipt fences new Items while these rows and their Vault slots remain.
+        targets = [(connection_id, environment) for connection_id, environment in db.execute(
+            select(PlaidConnection.id, PlaidConnection.environment).where(PlaidConnection.user_id == owner)
+        )]
         db.commit()
-    return ids
+    return targets
 
 
 @_retry_deadlocks
@@ -157,16 +158,21 @@ async def delete_account(owner: str, token: str) -> None:
     # receipt survives deletion of listing rows and a restart of this request.
     # Auth and Vault remain available to a fresh retry until cleanup succeeds.
     relay_device = await asyncio.to_thread(_read_relay_device)
-    if plaid := PlaidClient.configured():
+    targets = await asyncio.to_thread(_stage_plaid_cleanup, owner)
+    if targets:
         from anteroom.services.plaid_expenses import revoke_hosted_items
 
-        # Fence new connections before revoking; keep the rows and credentials
-        # until this step returns so an interrupted attempt can be repeated.
-        ids = await asyncio.to_thread(_stage_plaid_cleanup, owner, plaid.environment)
+        plaid = PlaidClient.configured()
+        if plaid is None or any(environment != plaid.environment for _, environment in targets):
+            raise AccountDeletionRefused(503, 'Plaid is unavailable for your bank connections. '
+                                              'Contact Anteroom support to finish deleting your account.')
         try:
-            await revoke_hosted_items(plaid, owner, ids)
+            await revoke_hosted_items(plaid, owner, [connection_id for connection_id, _ in targets])
         except CredentialStorageUnavailable:
             raise AccountDeletionRefused(503, 'Could not read your bank connection credentials. '
+                                              'Try deleting your account again in a minute.') from None
+        except PlaidError:
+            raise AccountDeletionRefused(503, 'Could not revoke your bank connections in Plaid. '
                                               'Try deleting your account again in a minute.') from None
     keys = await asyncio.to_thread(_delete_records, owner)
     forget_catalog_state(owner)

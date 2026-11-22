@@ -10,6 +10,7 @@ import { FormError, Panel } from "./WorkspacePage";
 
 const statusKey = ["plaid-status"];
 const linkScriptUrl = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
+type LinkSession = { token: string; connectionId?: string };
 
 interface LinkHandler {
   open: () => void;
@@ -77,8 +78,10 @@ export function ConnectedBanks() {
     queryClient.invalidateQueries({ queryKey: ["profit-and-loss"] }),
   ]);
   const exchange = useMutation({ mutationFn: api.plaid.exchange, onSettled: refresh });
+  const reconnect = useMutation({ mutationFn: api.plaid.sync, onSettled: refresh });
   const mutateExchange = exchange.mutate;
-  const openLink = useCallback(async (resume?: { token: string; url: string }) => {
+  const syncReconnected = reconnect.mutate;
+  const openLink = useCallback(async (connectionId?: string, resume?: LinkSession & { url: string }) => {
     const clearResume = () => {
       if (resumeKey) sessionStorage.removeItem(resumeKey);
       if (resume) {
@@ -95,7 +98,7 @@ export function ConnectedBanks() {
     };
     try {
       const [token, link] = await Promise.all([
-        resume ? Promise.resolve({ link_token: resume.token, redirect_uri: undefined }) : api.plaid.linkToken(),
+        resume ? Promise.resolve({ link_token: resume.token, redirect_uri: undefined }) : api.plaid.linkToken(connectionId),
         loadLink(),
       ]);
       if (!mounted.current) return;
@@ -103,7 +106,7 @@ export function ConnectedBanks() {
         if (new URL(token.redirect_uri).origin !== window.location.origin) {
           throw new Error("Plaid's configured return address does not match this Anteroom site.");
         }
-        sessionStorage.setItem(resumeKey, token.link_token);
+        sessionStorage.setItem(resumeKey, JSON.stringify({ token: token.link_token, connectionId }));
       }
       activeLink.current = link.create({
         token: token.link_token,
@@ -112,7 +115,8 @@ export function ConnectedBanks() {
           if (!mounted.current) return;
           clearResume();
           close();
-          mutateExchange({ public_token, institution_name: metadata.institution?.name });
+          if (connectionId) syncReconnected(connectionId);
+          else mutateExchange({ public_token, institution_name: metadata.institution?.name });
         },
         onExit: (error) => {
           if (!mounted.current) return;
@@ -126,36 +130,43 @@ export function ConnectedBanks() {
       close();
       if (mounted.current) setLinkError(error instanceof Error ? error.message : "Plaid Link could not open.");
     }
-  }, [mutateExchange, resumeKey]);
+  }, [mutateExchange, resumeKey, syncReconnected]);
 
   useEffect(() => {
     const url = new URL(window.location.href);
     if (!url.searchParams.has("oauth_state_id") || !resumeKey) return;
     // Wait through the development StrictMode effect replay before opening Link.
     const timer = window.setTimeout(() => {
-      const token = sessionStorage.getItem(resumeKey);
-      if (!token) {
+      let saved: LinkSession | undefined;
+      try {
+        const value = sessionStorage.getItem(resumeKey);
+        if (value) saved = JSON.parse(value) as LinkSession;
+      } catch {
+        sessionStorage.removeItem(resumeKey);
+      }
+      if (!saved?.token) {
         url.searchParams.delete("oauth_state_id");
         window.history.replaceState(window.history.state, "", url);
         setLinkError("Plaid could not resume this connection. Start again in the same browser tab.");
         return;
       }
       setOpening(true);
-      void openLink({ token, url: url.href });
+      void openLink(saved.connectionId, { ...saved, url: url.href });
     }, 0);
     return () => window.clearTimeout(timer);
   }, [openLink, resumeKey]);
 
-  const connect = () => {
+  const connect = (connectionId?: string) => {
     setOpening(true);
     setLinkError("");
     exchange.reset();
-    void openLink();
+    reconnect.reset();
+    void openLink(connectionId);
   };
 
   const data = status.data;
   const full = data && data.connections.length >= data.max_connections;
-  const connecting = opening || exchange.isPending;
+  const connecting = opening || exchange.isPending || reconnect.isPending;
   return <Panel>
     <section aria-label="Connected banks and cards" className="space-y-2 p-3 sm:p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -163,7 +174,7 @@ export function ConnectedBanks() {
           <h3 className="text-sm font-medium">Connected banks &amp; cards</h3>
           {data && <p className="text-xs tabular-nums text-muted-foreground">{data.connections.length}/{data.max_connections} connected</p>}
         </div>
-        {data?.configured && <Button variant="outline" disabled={connecting || full} onClick={connect}>
+        {data?.configured && <Button variant="outline" disabled={connecting || full} onClick={() => connect()}>
           {exchange.isPending ? "Importing expenses…" : opening ? "Opening Plaid…" : "Connect bank or card"}
         </Button>}
       </div>
@@ -176,23 +187,26 @@ export function ConnectedBanks() {
         Connect an institution to import up to two years of expenses.
       </p>}
       {full && <p className="text-sm text-muted-foreground">Disconnect an institution to connect another.</p>}
-      {(linkError || exchange.error) && <FormError>{linkError || exchange.error?.message}</FormError>}
+      {(linkError || exchange.error || reconnect.error) &&
+        <FormError>{linkError || exchange.error?.message || reconnect.error?.message}</FormError>}
       {!!data?.connections.length && <ul className="divide-y divide-border/60">
         {data.connections.map((connection) => <BankConnection key={connection.id} connection={connection}
-          configured={data.configured} refresh={refresh} />)}
+          configured={data.configured} connecting={connecting} reconnect={() => connect(connection.id)} refresh={refresh} />)}
       </ul>}
     </section>
   </Panel>;
 }
 
-function BankConnection({ connection, configured, refresh }: {
+function BankConnection({ connection, configured, connecting, reconnect, refresh }: {
   connection: ConnectionStatus;
   configured: boolean;
+  connecting: boolean;
+  reconnect: () => void;
   refresh: () => Promise<unknown>;
 }) {
   const sync = useMutation({ mutationFn: () => api.plaid.sync(connection.id), onSettled: refresh });
   const disconnect = useMutation({ mutationFn: () => api.plaid.disconnect(connection.id), onSettled: refresh });
-  const busy = sync.isPending || disconnect.isPending;
+  const busy = connecting || sync.isPending || disconnect.isPending;
   const confirmDisconnect = async () => {
     if (await confirmDialog(`Disconnect ${connection.institution_name}?\nPreviously imported expenses will stay in your books.`,
       { variant: "destructive", confirmLabel: "Disconnect" })) disconnect.mutate();
@@ -212,6 +226,8 @@ function BankConnection({ connection, configured, refresh }: {
         </p>
       </div>
       <div className="flex flex-wrap gap-2">
+        {configured && connection.status === "error" &&
+          <Button variant="outline" disabled={busy} onClick={reconnect}>Reconnect</Button>}
         <Button variant="outline" disabled={busy || !configured || connection.status === "disconnecting"}
           onClick={() => sync.mutate()}>{sync.isPending ? "Syncing…" : "Sync now"}</Button>
         <Button variant="ghost" disabled={busy} onClick={() => void confirmDisconnect()}>

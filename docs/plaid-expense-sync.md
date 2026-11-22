@@ -17,4 +17,9 @@ worker is running. Use **Sync now** for an immediate check.
 Use a business account for cleaner reports. The category assigned from Plaid
 and the merchant name is an estimate. Review categories and exclude any
 personal transactions. Exclusions and seller edits persist through sync.
-Disconnecting removes the credential and keeps imported expenses.
+Use **Reconnect** if your bank asks you to sign in again. Plaid Link updates
+the existing connection, and Anteroom continues syncing from the saved cursor.
+Disconnecting removes the credential and keeps imported expenses. Connecting
+again after a disconnect starts a new Plaid Item and requests history again.
+Anteroom recognizes previously seen Plaid transaction IDs. If Plaid assigns new
+IDs to overlapping history, review those imports for duplicates.
