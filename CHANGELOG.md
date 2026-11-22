@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1143 — 2026-11-22
+
+- In the assistant, and in a listing's chat in the Mac app, a message you send while an answer is still being written now goes straight in: it cuts that answer off, keeping what it already wrote, and is answered next. Press Ctrl/⌘+Enter, or the queue button on a phone, to queue it for afterwards instead.
+- Queued chat messages stay put when you switch listings, close the chat or reload the page, and each one can be sent now, edited or removed. Messages with images can be queued too.
+
 ## 0.1.1142 — 2026-11-22
 
 - Set pricing rules in Settings → Listings: pick a main price and let each marketplace's price follow it, with typical-fee offsets, your own percent and dollar adjustments, and .99 or whole-dollar endings (Poshmark always uses whole dollars). Prices you type on a marketplace stay yours.
