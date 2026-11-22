@@ -1,0 +1,1 @@
+- Pace hosted cloud recent-likes checks with randomized jitter (4–7 minutes by default, configurable via `ANTEROOM_CLOUD_LIKE_CHECK_INTERVAL_S`) plus startup stagger, bound cloud scheduler DB steps, and record the cloud command type in `cloud_session_audit` decrypt events.

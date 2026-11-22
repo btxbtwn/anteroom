@@ -470,7 +470,11 @@ def _assert_can_decrypt() -> None:
         )
 
 
-def read_credentials_fresh(db: Session, marketplace: str) -> tuple[dict[str, Any], str | None, datetime | None] | None:
+def read_credentials_fresh(
+    db: Session,
+    marketplace: str,
+    operation: str | None = None,
+) -> tuple[dict[str, Any], str | None, datetime | None] | None:
     """Read freshly decrypted credentials from Vault (bypassing in-memory cache).
 
     Refuses to run inside a ``web`` process. Returns ``(payload, proxy_session_id, connected_at)``
@@ -507,7 +511,7 @@ def read_credentials_fresh(db: Session, marketplace: str) -> tuple[dict[str, Any
     now = utcnow()
     row.last_used_at = now
     row.updated_at = now
-    _audit(db, market, "decrypt")
+    _audit(db, market, "decrypt", detail=operation)
     credentials = data, row.proxy_session_id, row.connected_at
     db.commit()
     return credentials
