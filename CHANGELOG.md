@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1130 — 2026-11-22
+
+- Keep bulk photo uploads and measurement reads on the active account session, cancel stale reads cleanly when you reorder photos or close the dialog, and avoid stalling on slow upload connections.
+
 ## 0.1.1129 — 2026-11-22
 
 - Improve automated checks for saving Mercari brand choices and retrying shipping options.
