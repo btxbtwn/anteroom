@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1127 — 2026-11-22
+
+- Add opt-in Poshmark Cloud sessions for hosted accounts so Poshmark listing, updates, delisting, sales checks, inventory imports, and promotions can run in the cloud while Chrome is closed (enabled via `ANTEROOM_CLOUD_MARKETPLACES=poshmark`).
+
 ## 0.1.1126 — 2026-11-22
 
 - The business assistant answers faster, keeps prompts smaller on large shops, and can run several lookups in a single turn.

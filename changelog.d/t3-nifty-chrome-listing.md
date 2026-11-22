@@ -1,1 +1,0 @@
-- Add opt-in Poshmark Cloud sessions for hosted accounts so Poshmark listing, updates, delisting, sales checks, inventory imports, and promotions can run in the cloud while Chrome is closed (enabled via `ANTEROOM_CLOUD_MARKETPLACES=poshmark`).
