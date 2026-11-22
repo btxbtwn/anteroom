@@ -12,3 +12,31 @@
     if (schemeMeta) schemeMeta.setAttribute("content", light ? "light" : "dark");
   } catch (e) {}
 })();
+
+// The application cannot report errors or offer a reload until its modules run.
+// The ID only exists on the static shell, which React replaces when it starts.
+(function () {
+  function showRecovery(failed) {
+    var shell = document.getElementById("cloud-startup");
+    if (!shell) return;
+    var status = shell.querySelector(".startup-status");
+    var reload = shell.querySelector(".startup-reload");
+    if (failed) {
+      status.setAttribute("role", "alert");
+      status.querySelector(".startup-spinner").hidden = true;
+    }
+    status.querySelector("p").textContent = failed
+      ? "Could not load Anteroom. Reload to try again."
+      : "Taking longer than usual. You can keep waiting or reload.";
+    reload.onclick = function () { window.location.reload(); };
+    reload.hidden = false;
+  }
+
+  var slow = window.setTimeout(function () { showRecovery(false); }, 10000);
+  window.addEventListener("error", function (event) {
+    if (event.target instanceof HTMLScriptElement && event.target.type === "module") {
+      window.clearTimeout(slow);
+      showRecovery(true);
+    }
+  }, true);
+})();

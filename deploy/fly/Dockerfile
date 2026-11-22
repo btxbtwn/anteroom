@@ -13,7 +13,8 @@ COPY anteroom-extension/manifest.json /src/anteroom-extension/manifest.json
 ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_PUBLISHABLE_KEY
 RUN node -e 'if (!process.env.VITE_SUPABASE_URL || !process.env.VITE_SUPABASE_PUBLISHABLE_KEY) throw new Error("Cloud public configuration is required")' \
-    && ANTEROOM_HOSTED_BUILD=1 npm run build
+    && ANTEROOM_HOSTED_BUILD=1 npm run build \
+    && test -s dist/assets/theme-boot.js
 
 FROM node:22-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS cloud-runner
 WORKDIR /src/cloud_runner

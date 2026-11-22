@@ -22,6 +22,33 @@ for (const theme of ["light", "dark"]) {
   });
 }
 
+test("a failed application download shows how to reload before React starts", async ({ page }, info) => {
+  await page.route("**/src/cloud/main.tsx", route => route.abort("failed"), { times: 1 });
+  await page.goto("/?sign-in");
+  await expect(page.getByRole("alert")).toHaveText("Could not load Anteroom. Reload to try again.");
+  await expect(page.locator(".startup-spinner")).toBeHidden();
+  const reload = page.getByRole("button", { name: "Reload Anteroom" });
+  await expect(reload).toBeVisible();
+  await page.screenshot({ path: info.outputPath("startup-download-failed.png") });
+  await reload.click();
+  await expect(page.getByLabel("Email address")).toBeVisible();
+});
+
+test("a slow application download offers a reload while the browser waits", async ({ page }) => {
+  await page.clock.install();
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  await page.route("**/src/cloud/main.tsx", async route => { await gate; await route.continue(); });
+  try {
+    await page.goto("/?sign-in", { waitUntil: "commit" });
+    await expect(page.getByRole("status")).toHaveText("Getting things ready…");
+    await page.clock.fastForward(10_000);
+    await expect(page.getByRole("status")).toContainText("Taking longer than usual");
+    await expect(page.getByRole("button", { name: "Reload Anteroom" })).toBeVisible();
+  } finally { release(); }
+  await expect(page.getByLabel("Email address")).toBeVisible();
+});
+
 test("workspace startup supports a slow response, reload and an actionable error", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/?sign-in");
