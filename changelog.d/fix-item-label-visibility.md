@@ -1,0 +1,2 @@
+- Moving from Mac to Anteroom cloud now restores missing labels for the same Vendoo item and keeps any labels you already saved or cleared in the cloud.
+- Copying provider keys to your account also preserves any keys you save on the web while the copy runs.
