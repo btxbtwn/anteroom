@@ -53,9 +53,10 @@ These override everything below.
   Playwright's web server missed its 120 s start, every iPhone test timed
   out, and the backend run took two hours. Finish the smoke first, then
   check fix branches one after another.
-- Give each fix worktree its own `anteroom/.venv` (`python3.12 -m venv .venv
-  && .venv/bin/pip install -e ".[dev]"`, about 40 s with a warm cache) and
-  its own `npm ci`. Do not symlink another worktree's venv: pytest imports
+- Give each fix worktree its own `anteroom/.venv` and npm install. From the
+  fix worktree root, run
+  `cd anteroom && python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]" && npm ci`.
+  Do not symlink another worktree's venv: pytest imports
   the fix worktree's `server`, but tests that start a subprocess (the
   `test_config.py` adoption tests) import the editable install, which is
   the other worktree's code. That gave a false backend failure on #1698
