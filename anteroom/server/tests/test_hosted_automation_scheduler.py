@@ -166,3 +166,28 @@ def test_scheduler_concurrency_env_validation(monkeypatch):
     assert scheduler._scheduler_concurrency() == 1
     monkeypatch.setenv("ANTEROOM_AUTOMATION_CONCURRENCY", "not-a-number")
     assert scheduler._scheduler_concurrency() == scheduler.DEFAULT_SCHEDULER_CONCURRENCY
+
+
+def test_scheduled_draft_and_relist_can_take_the_only_database_slot(monkeypatch):
+    from unittest.mock import Mock
+
+    from anteroom.services import automation_scheduler as common
+
+    for name in ("_recover_stale", "end_read"):
+        monkeypatch.setattr(common, name, Mock())
+    for name in ("_bridge_busy", "_resume_waiting", "_claim_next"):
+        monkeypatch.setattr(common, name, Mock(return_value=None))
+    for name in ("_has_due_scheduled_drafts", "_has_enabled_auto_relist"):
+        monkeypatch.setattr(common, name, Mock(return_value=True))
+
+    async def sweep(_moment):
+        async with common.db_slot():
+            return 1
+
+    async def run():
+        with common.bind_db_gate(asyncio.Semaphore(1)):
+            return await asyncio.wait_for(common.tick(Mock()), timeout=1)
+
+    monkeypatch.setattr(common, "_run_scheduled_drafts", sweep)
+    monkeypatch.setattr(common, "_run_auto_relist", sweep)
+    assert asyncio.run(run()) == 2

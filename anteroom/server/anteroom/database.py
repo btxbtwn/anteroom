@@ -239,7 +239,7 @@ def load_models() -> None:
     from anteroom.models.scout import ScoutCheck  # noqa: F401
     from anteroom.models.listing_evidence import ListingCorrection, SaleSnapshot  # noqa: F401
     from anteroom.models.sale_event import SaleEvent  # noqa: F401
-    from anteroom.models.marketplace_sale import MarketplaceSale  # noqa: F401
+    from anteroom.models.marketplace_sale import MarketplaceSale, SaleSyncEvent  # noqa: F401
     from anteroom.models.business_expense import BusinessExpense  # noqa: F401
     from anteroom.models.plaid import PlaidConnection, PlaidTransaction  # noqa: F401
     from anteroom.models.marketplace_listing import MarketplaceListing  # noqa: F401
@@ -257,6 +257,9 @@ def load_models() -> None:
         AutomationRelistGap,
         AutomationRun,
         ItemPriceBaseline,
+        MarketplaceRelistLog,
+        MarketplaceRelistRule,
+        ScheduledPublishLog,
     )
     from anteroom.models.generation_timing import GenerationTiming  # noqa: F401
     from anteroom.models.cloud_session import (  # noqa: F401

@@ -264,3 +264,39 @@ test('selected video is refused before creating a cloud draft', async () => {
   assert.match(out.result.error, /selected video/);
   assert.equal(out.result.safe_to_retry, true);
 });
+
+test('follow/unfollow caps above 1,000/day are refused before any network calls', async () => {
+  let called = 0;
+  const httpFetch = async () => {
+    called += 1;
+    return mockResponse({ body: {} });
+  };
+  const cookies = makePoshmarkCookies('bbbbbbbbbbbbbbbbbbbbbbbb');
+
+  for (const follow_config of [
+    { new_active_sellers_cap: 1001, unfollow_cap: 0 },
+    { new_active_sellers_cap: 0, unfollow_cap: 1500 },
+  ]) {
+    const out = await executeMarketplaceOperation({
+      marketplace: 'poshmark',
+      command: {
+        type: 'marketplace.promote',
+        job_id: 'j-follow-cap',
+        payload: {
+          marketplace: 'poshmark',
+          action: 'follow',
+          confirm: true,
+          listing_id: '__account__',
+          action_id: 'act-follow-1',
+          follow_config,
+        },
+      },
+      cookies,
+      httpFetch,
+    });
+    assert.equal(out.result.ok, false);
+    assert.equal(out.result.safe_to_retry, true);
+    assert.equal(out.result.error_code, 'rejected');
+  }
+  assert.equal(called, 0);
+});

@@ -1310,13 +1310,20 @@ class SaleDetectionConfig(BaseModel):
     marketplace: str | None = None
     enabled: bool | None = None
     autodelist: bool | None = None
+    auto_adjust_quantity: bool | None = None
 
 
 def _sale_detection_status() -> dict:
     from anteroom.services.chrome_sales import check_errors
-    from anteroom.services.user_settings import autodelist_enabled, get_sale_detection
+    from anteroom.services.user_settings import auto_adjust_quantity_enabled, autodelist_enabled, get_sale_detection
 
-    return {"ok": True, "enabled": get_sale_detection(), "autodelist": autodelist_enabled(), "checks": check_errors()}
+    return {
+        "ok": True,
+        "enabled": get_sale_detection(),
+        "autodelist": autodelist_enabled(),
+        "auto_adjust_quantity": auto_adjust_quantity_enabled(),
+        "checks": check_errors(),
+    }
 
 
 @router.get("/sale-detection")
@@ -1327,12 +1334,21 @@ def get_sale_detection_route():
 @router.put("/sale-detection")
 def put_sale_detection(body: SaleDetectionConfig):
     from anteroom.services.chrome_sales import clear_check_error
-    from anteroom.services.user_settings import set_autodelist, set_sale_detection
+    from anteroom.services.user_settings import set_auto_adjust_quantity, set_autodelist, set_sale_detection
 
-    if body.autodelist is None and (body.marketplace is None or body.enabled is None):
-        raise HTTPException(400, "Name the marketplace, or choose whether to delist the other marketplaces.")
+    if (
+        body.autodelist is None
+        and body.auto_adjust_quantity is None
+        and (body.marketplace is None or body.enabled is None)
+    ):
+        raise HTTPException(
+            400,
+            "Name the marketplace, or choose whether to delist or adjust quantities on other marketplaces.",
+        )
     if body.autodelist is not None:
         set_autodelist(body.autodelist)
+    if body.auto_adjust_quantity is not None:
+        set_auto_adjust_quantity(body.auto_adjust_quantity)
     if body.marketplace is None and body.enabled is None:
         return _sale_detection_status()
     if body.marketplace is None or body.enabled is None:

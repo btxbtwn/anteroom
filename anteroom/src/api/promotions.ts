@@ -1,8 +1,24 @@
 export type PromotionMarketplace = "poshmark" | "mercari" | "depop";
-export type PromotionAction = "share" | "offer";
+export type PromotionAction = "share" | "offer" | "bundle_offer" | "follow";
 export type PromotionState = "preview" | "skipped" | "sending" | "done" | "failed" | "unknown" | "checked";
 
 export interface ShippingOption { id: string; label: string; min_offer_cents: number | null }
+
+export interface WaterfallStep {
+  discount_percent: number;
+  delay_minutes: number;
+  shipping_label?: string | null;
+}
+
+export type ShareMode = "self" | "party" | "community";
+export type HourlyIntensity = "none" | "low" | "medium" | "high";
+
+export interface FollowConfig {
+  reciprocal_24h?: boolean;
+  new_active_sellers_cap?: number;
+  unfollow_cap?: number;
+  unsubscribe_live_shows?: boolean;
+}
 
 export interface Promotion {
   id: string;
@@ -16,6 +32,7 @@ export interface Promotion {
   offer_price: string | null;
   floor: string | null;
   discount_percent: number | null;
+  waterfall_step?: number | null;
   like_count: number | null;
   shipping_options: ShippingOption[];
   shipping_discount_id: string | null;
@@ -60,10 +77,17 @@ export interface PromotionAutomationBody {
   daily_cap?: number;
   times?: string[];
   timezone?: string;
+  share_modes?: ShareMode[];
+  hourly_schedule?: Record<string, HourlyIntensity> | null;
   discount_percent?: number;
   minimum_price?: string | null;
   min_likes?: number;
   shipping_label?: string | null;
+  waterfall_steps?: WaterfallStep[] | null;
+  bundle_pause_minutes?: number | null;
+  bundle_min_items?: number | null;
+  bundle_comment?: string | null;
+  follow_config?: FollowConfig | null;
 }
 
 export interface PromotionRun {
@@ -76,17 +100,33 @@ export interface PromotionRun {
   note: string | null;
 }
 
-export interface PromotionAutomation extends Required<Omit<PromotionAutomationBody, "shipping_label" | "share_order" | "speed" | "daily_cap" | "timezone" | "discount_percent" | "min_likes">> {
+export interface PromotionAutomation {
   id: string;
+  marketplace: PromotionMarketplace;
+  action: PromotionAction;
+  name: string;
   enabled: boolean;
   available: boolean;
+  scope: "all" | "items";
+  conversation_ids: string[];
+  excluded_ids: string[];
+  min_days_listed: number;
   share_order: ShareOrder | null;
   speed: ShareSpeed | null;
   daily_cap: number | null;
+  times: string[];
   timezone: string | null;
+  share_modes?: ShareMode[] | null;
+  hourly_schedule?: Record<string, HourlyIntensity> | null;
   discount_percent: number | null;
+  minimum_price: string | null;
   min_likes: number | null;
   shipping_label: string | null;
+  waterfall_steps?: WaterfallStep[] | null;
+  bundle_pause_minutes?: number | null;
+  bundle_min_items?: number | null;
+  bundle_comment?: string | null;
+  follow_config?: FollowConfig | null;
   paused_reason: string | null;
   next_run_at: string | null;
   last_run: PromotionRun | null;
@@ -98,7 +138,12 @@ export interface PromotionAutomations {
   awaiting_capture: PromotionSupport;
   speeds: ShareSpeed[];
   orders: ShareOrder[];
+  share_modes?: ShareMode[];
+  hourly_intensities?: HourlyIntensity[];
+  posh_party_times_pt?: string[];
   max_daily_cap: number;
+  max_daily_follows?: number;
+  max_daily_unfollows?: number;
   shipping_labels: string[];
 }
 

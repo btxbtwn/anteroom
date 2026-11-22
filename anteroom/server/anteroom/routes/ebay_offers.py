@@ -18,9 +18,15 @@ class Selection(BaseModel):
     minimum_price: str = Field(max_length=20)
 
 
+class WaterfallStep(BaseModel):
+    discount_percent: Annotated[int, Field(strict=True, ge=5, le=99)]
+    delay_minutes: Annotated[int, Field(strict=True, ge=0, le=43200)]
+
+
 class PreviewRequest(BaseModel):
     selections: list[Selection] = Field(min_length=1, max_length=50)
     discount_percent: Annotated[int, Field(strict=True, ge=5, le=99)]
+    waterfall_steps: list[WaterfallStep] | None = Field(default=None, max_length=5)
 
 
 class Approval(BaseModel):
@@ -35,6 +41,7 @@ class Confirm(BaseModel):
 class AllListingsApproval(Confirm):
     discount_percent: Annotated[int, Field(strict=True, ge=5, le=99)]
     minimum_price: str | None = Field(default=None, max_length=20)
+    waterfall_steps: list[WaterfallStep] | None = Field(default=None, max_length=5)
 
 
 def _error(exc: Exception) -> HTTPException:
@@ -53,7 +60,8 @@ def status(db: Session = Depends(get_db, scope="function")):
 @router.post("/preview")
 async def preview(body: PreviewRequest):
     try:
-        return await ebay_offers.preview([item.model_dump() for item in body.selections], body.discount_percent)
+        steps = [s.model_dump() for s in body.waterfall_steps] if body.waterfall_steps else None
+        return await ebay_offers.preview([item.model_dump() for item in body.selections], body.discount_percent, waterfall_steps=steps)
     except (ValueError, SignInRequired, ebay_api.EbayError, httpx.HTTPError) as exc:
         raise _error(exc) from exc
 
@@ -82,7 +90,8 @@ def pause_all(db: Session = Depends(get_db, scope="function")):
 @router.post("/enable-all")
 def enable_all(body: AllListingsApproval, db: Session = Depends(get_db, scope="function")):
     try:
-        return ebay_offers.enable_all(db, body.discount_percent, body.minimum_price)
+        steps = [s.model_dump() for s in body.waterfall_steps] if body.waterfall_steps else None
+        return ebay_offers.enable_all(db, body.discount_percent, body.minimum_price, waterfall_steps=steps)
     except (ValueError, SignInRequired) as exc:
         raise _error(exc) from exc
 

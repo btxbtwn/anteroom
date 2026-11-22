@@ -136,6 +136,9 @@ async function checkPoshmarkPromotion(payload, deadline) {
 async function sharePoshmark(payload, deadline) {
   const account = await poshmarkAccount();
   const client = poshmarkClient(deadline, await poshmarkCsrf(deadline));
+  if (payload.share_mode === 'community' || payload.listing_id === '__account__') {
+    return await poshmarkCommunityShares(client, account, payload.max_shares);
+  }
   await poshmarkOwnPost(client, account, payload.listing_id);
   // Space shares the way a person would, across batches and restarts. A
   // scheduled round may ask for a slower pace, never a faster one.
@@ -144,8 +147,44 @@ async function sharePoshmark(payload, deadline) {
   const wait = last + gap + Math.floor(Math.random() * POSHMARK_SHARE_JITTER_MS) - Date.now();
   if (wait > 0) await marketplaceSleep(Math.min(wait, gap + POSHMARK_SHARE_JITTER_MS));
   await chrome.storage.local.set({ [POSHMARK_LAST_SHARE_KEY]: Date.now() });
-  await client.call('PUT', `/vm-rest/users/self/shared_posts/${payload.listing_id}`, {}, { step: 'share', what: 'the share' });
-  return { ok: true, state: 'done' };
+  const modes = Array.isArray(payload.share_modes) && payload.share_modes.length ? payload.share_modes : ['self'];
+  let sharedParty = false;
+  if (modes.includes('party') && payload.party_window) {
+    const partyId = await poshmarkActiveParty(client);
+    if (partyId) {
+      await poshmarkShareToParty(client, payload.listing_id, partyId);
+      sharedParty = true;
+    }
+  }
+  const shouldSelfShare = modes.includes('self');
+  if (shouldSelfShare) {
+    await client.call('PUT', `/vm-rest/users/self/shared_posts/${payload.listing_id}`, {}, { step: 'share', what: 'the share' });
+  }
+  if (!shouldSelfShare && !sharedParty) {
+    throw marketplaceError('No active Posh Party is open right now.', { code: 'no_active_party' });
+  }
+  return { ok: true, state: 'done', ...(sharedParty && !shouldSelfShare ? { share_mode: 'party' } : {}) };
+}
+
+async function bundleOfferPoshmark(payload, deadline) {
+  const offer = Number(payload.offer_price_cents);
+  const floor = Number(payload.floor_cents);
+  if (!Number.isInteger(offer) || offer <= 0 || offer % 100 || !Number.isInteger(floor) || floor <= 0 || offer < floor) {
+    throw marketplaceError('This bundle offer is below your floor or not whole dollars. Review it again.');
+  }
+  const account = await poshmarkAccount();
+  const client = poshmarkClient(deadline, await poshmarkCsrf(deadline));
+  const post = await poshmarkOwnPost(client, account, payload.listing_id);
+  if (poshmarkCents(post.price_amount) !== Number(payload.price_cents)) {
+    throw marketplaceError('The Poshmark price changed since your review. Review the bundle offer again.');
+  }
+  return await poshmarkSendPrivateBundleOffer(client, account, payload);
+}
+
+async function followPoshmark(payload, deadline) {
+  const account = await poshmarkAccount();
+  const client = poshmarkClient(deadline, await poshmarkCsrf(deadline));
+  return await poshmarkRunFollows(client, account, payload.follow_config || {});
 }
 
 async function offerPoshmark(payload, deadline) {
@@ -479,7 +518,15 @@ async function offerDepop(payload, deadline) {
 }
 
 const MARKETPLACE_PROMOTIONS = {
-  poshmark: { id: /^[a-f0-9]{24}$/, check: checkPoshmarkPromotion, share: sharePoshmark, offer: offerPoshmark },
+  poshmark: {
+    id: /^[a-f0-9]{24}$/,
+    actions: ['share', 'offer', 'bundle_offer', 'follow'],
+    check: checkPoshmarkPromotion,
+    share: sharePoshmark,
+    offer: offerPoshmark,
+    bundle_offer: bundleOfferPoshmark,
+    follow: followPoshmark,
+  },
   mercari: { id: /^m\d{6,20}$/, actions: ['offer'], check: checkMercariPromotion, offer: offerMercari },
   depop: { id: /^[a-z0-9][a-z0-9-]{2,120}$/, actions: ['offer'], check: checkDepopPromotion, offer: offerDepop },
 };
@@ -492,6 +539,96 @@ function promotionRefusal(error) {
   }
   // A write whose answer was lost is uncertain; everything else is a refusal.
   return marketplaceFailure(error, error?.code !== 'uncertain' && error?.rejected !== false);
+}
+
+const INACTIVE_OFFER_STATUSES = new Set(['declined', 'expired', 'cancelled', 'canceled', 'accepted', 'completed', 'rejected']);
+
+function poshmarkOfferMatchesPost(offer, listingId) {
+  if (!offer || typeof offer !== 'object') return false;
+  if (String(offer.post_id || offer.post?.id || '') === listingId) return true;
+  const bundlePosts = Array.isArray(offer.bundle?.posts) ? offer.bundle.posts
+    : Array.isArray(offer.posts) ? offer.posts : [];
+  return bundlePosts.some(post => String(post?.id || post?.post_id || '') === listingId);
+}
+
+async function readMarketplaceActiveOffers(payload) {
+  const market = String(payload?.marketplace || '');
+  const listingId = String(payload?.listing_id || '');
+  const entry = MARKETPLACE_PROMOTIONS[market];
+  if (!entry || !entry.id.test(listingId)) {
+    return marketplaceFailure(marketplaceError('Name a marketplace listing to check active offers.'), true);
+  }
+  const deadline = Date.now() + 20000;
+  try {
+    if (market === 'poshmark') {
+      const account = await poshmarkAccount();
+      const client = poshmarkClient(deadline, '');
+      const post = await poshmarkOwnPost(client, account, listingId);
+      if (post.has_active_offer === true || Number(post.active_offer_count || 0) > 0) {
+        return { ok: true, verified: true, has_active_offer: true };
+      }
+      const resp = await client.call(
+        'GET',
+        `/vm-rest/users/${account.user_id}/offers?app_type=web&status=active&count=100`,
+        undefined,
+        { step: 'active-offers', what: 'active offers', envelope: true },
+      );
+      const list = Array.isArray(resp) ? resp
+        : Array.isArray(resp?.data) ? resp.data
+        : Array.isArray(resp?.offers) ? resp.offers
+        : null;
+      if (!list) {
+        return { ok: true, verified: false, has_active_offer: false, reason: 'Unrecognized Poshmark active offers response.' };
+      }
+      const hasActiveOffer = list.some(offer => {
+        if (!poshmarkOfferMatchesPost(offer, listingId)) return false;
+        const status = String(offer.status || offer.state || '').trim().toLowerCase();
+        if (status && INACTIVE_OFFER_STATUSES.has(status)) return false;
+        const sender = String(offer.creator_id || offer.sender_id || offer.initiator_id || '');
+        if (sender && sender === account.user_id) return false;
+        return true;
+      });
+      const identifiable = list.every(o => o && (o.post_id || o.post?.id ||
+        ((o.bundle?.posts || o.posts)?.length && (o.bundle?.posts || o.posts).every(p => p?.id || p?.post_id))));
+      const complete = identifiable && list.length < 100 && !resp?.more?.next_max_id &&
+        !resp?.meta?.next_max_id && !resp?.next_cursor && !resp?.has_more;
+      return { ok: true, verified: hasActiveOffer || complete, has_active_offer: hasActiveOffer };
+    }
+    if (market === 'depop') {
+      const { data: me } = await depopOfferCall('GET', '/presentation/api/v1/users/me/', deadline, 'account');
+      const { data: product } = await depopOfferCall('GET', `/presentation/api/v1/products/by-slug/${encodeURIComponent(listingId)}/`, deadline, 'read');
+      if (String(product?.slug ?? '') !== listingId || !/^\d{1,15}$/.test(String(product?.id ?? ''))) {
+        return { ok: true, verified: false, has_active_offer: false, reason: 'Depop did not return this listing.' };
+      }
+      const owner = product.user_id ?? product.seller?.id ?? product.user?.id;
+      if (owner == null || String(owner) !== String(me?.id)) {
+        throw marketplaceError('This Depop listing belongs to another account.');
+      }
+      const { data } = await depopOfferCall('GET', '/presentation/api/v1/offers/me/products/', deadline, 'active-offers');
+      const list = Array.isArray(data) ? data
+        : Array.isArray(data?.products) ? data.products
+        : Array.isArray(data?.objects) ? data.objects
+        : null;
+      if (!list) {
+        return { ok: true, verified: false, has_active_offer: false, reason: 'Unrecognized Depop active offers response.' };
+      }
+      const match = list.find(item => String(item?.product_id ?? item?.id ?? '') === String(product.id) || String(item?.slug ?? '') === listingId);
+      // An account page that omits this product does not clear its offers.
+      const count = match?.active_offers_count;
+      return { ok: true, verified: Number.isSafeInteger(count) && count >= 0, has_active_offer: count > 0 };
+    }
+    if (market === 'mercari') {
+      return {
+        ok: false,
+        verified: false,
+        error_code: 'unsupported',
+        error: 'Mercari unattended relisting is unavailable until incoming buyer offers can be verified.',
+      };
+    }
+    return { ok: true, verified: false, has_active_offer: false, reason: 'Unsupported marketplace.' };
+  } catch (error) {
+    return marketplaceFailure(error, true);
+  }
 }
 
 async function checkMarketplacePromotion(payload) {
@@ -507,8 +644,12 @@ async function checkMarketplacePromotion(payload) {
 
 async function runMarketplacePromotion(payload) {
   const entry = MARKETPLACE_PROMOTIONS[payload?.marketplace];
+  const isAccountAction = payload?.marketplace === 'poshmark' && (
+    payload.action === 'follow' || (payload.action === 'share' && payload.share_mode === 'community')
+  ) && String(payload.listing_id || '') === '__account__';
   if (!entry || !(entry.actions || ['share', 'offer']).includes(payload.action) || payload.confirm !== true
-      || !entry.id.test(String(payload.listing_id || '')) || !/^[a-z0-9-]{6,64}$/i.test(String(payload.action_id || ''))) {
+      || (!isAccountAction && !entry.id.test(String(payload.listing_id || '')))
+      || !/^[a-z0-9-]{6,64}$/i.test(String(payload.action_id || ''))) {
     return marketplaceFailure(marketplaceError('Confirm a share or offer on a named marketplace listing.'), true);
   }
   try { return await entry[payload.action](payload, Date.now() + PROMOTION_DEADLINE_MS); }

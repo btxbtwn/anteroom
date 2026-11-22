@@ -18,6 +18,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -49,11 +50,22 @@ class PromotionAutomation(SellerOwned, Base):
     daily_cap: Mapped[int | None] = mapped_column(Integer, nullable=True)
     times: Mapped[Any] = mapped_column(JSON, nullable=True)
     timezone: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Poshmark sharing upgrades: party/community share modes and 24-hour intensity schedule.
+    share_modes: Mapped[Any] = mapped_column(JSON, nullable=True)
+    hourly_schedule: Mapped[Any] = mapped_column(JSON, nullable=True)
     # Offers only. No shipping label means no shipping discount.
     discount_percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
     minimum_price_cents: Mapped[int | None] = mapped_column(Integer, nullable=True)
     min_likes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     shipping_label: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Waterfall multi-step offer sequence: [{step, discount_percent, delay_minutes, shipping_label?}].
+    waterfall_steps: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # Poshmark private bundle offers: pause window after buyer likes, min items, optional first comment.
+    bundle_pause_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    bundle_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    bundle_min_items: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Poshmark automatic follows: reciprocal 24h, new active sellers cap, unfollow cap, live-show unsubscribe.
+    follow_config: Mapped[Any] = mapped_column(JSON, nullable=True)
     paused_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

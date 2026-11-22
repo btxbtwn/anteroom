@@ -449,7 +449,8 @@ async function executeMarketplaceOperation({
   const allowed = ['marketplace.execute', 'marketplace.result', 'marketplace.delete',
     'marketplace.promote', 'marketplace.promotion_check', 'marketplace.promotion_result',
     'marketplace.sessions', 'marketplace.verify_session', 'marketplace.sales', 'marketplace.sales_history',
-    'marketplace.import.page', 'marketplace.import.listing', 'marketplace.like_events'];
+    'marketplace.import.page', 'marketplace.import.listing', 'marketplace.like_events',
+    'marketplace.active_offers'];
   if (marketplace === 'poshmark') allowed.push('marketplace.form');
   if (!allowed.includes(type)) {
     return { result: { ok: false, safe_to_retry: true, error_code: 'rejected', error: 'Unsupported cloud command.' },
@@ -470,6 +471,21 @@ async function executeMarketplaceOperation({
   }
   if (refusal) {
     return { result: refusal, cookies_changed: false, cookies };
+  }
+  if (type === 'marketplace.promote' && payload.action === 'follow') {
+    const cfg = payload.follow_config || {};
+    if (Number(cfg.new_active_sellers_cap || 0) > 1000 || Number(cfg.unfollow_cap || 0) > 1000) {
+      return {
+        result: {
+          ok: false,
+          safe_to_retry: true,
+          error_code: 'rejected',
+          error: 'Follow and unfollow caps cannot exceed 1,000 per day.',
+        },
+        cookies_changed: false,
+        cookies,
+      };
+    }
   }
 
   const jar = buildCookieJar(cookies, marketplace);

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../api/client";
 import { pollMs } from "../../api/polling";
-import type { EbayOffer, EbayOfferSelection } from "../../api/ebayOffers";
+import type { EbayOffer, EbayOfferSelection, EbayWaterfallStep } from "../../api/ebayOffers";
 import { Button } from "../ui/button";
 import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
@@ -11,6 +11,73 @@ import { Spinner } from "../ui/spinner";
 import { SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
 import { confirmDialog } from "../../ui/confirmDialog";
 import { useWorkspaceRuntime } from "../../app/runtime";
+
+export const MAX_WATERFALL_DELAY_MINUTES = 43200;
+
+export interface WaterfallDraftStep {
+  discount: string;
+  delayMinutes: string;
+}
+
+export interface WaterfallValidationResult {
+  valid: boolean;
+  steps: EbayWaterfallStep[] | undefined;
+  rowErrors: (string | null)[];
+}
+
+export function validateWaterfallDraft(steps: WaterfallDraftStep[]): WaterfallValidationResult {
+  if (!steps.length) {
+    return { valid: true, steps: undefined, rowErrors: [] };
+  }
+  const parsed: EbayWaterfallStep[] = [];
+  const rowErrors: (string | null)[] = [];
+  let prevDiscount: number | null = null;
+  let prevDelay: number | null = null;
+
+  for (const step of steps) {
+    const discountText = step.discount.trim();
+    const delayText = step.delayMinutes.trim();
+    const discountIsInt = /^\d+$/.test(discountText);
+    const delayIsInt = /^\d+$/.test(delayText);
+    const discountValue = discountIsInt ? Number(discountText) : NaN;
+    const delayValue = delayIsInt ? Number(delayText) : NaN;
+
+    let error: string | null = null;
+    if (!discountIsInt || !Number.isSafeInteger(discountValue) || discountValue < 5 || discountValue > 99) {
+      error = "Discount must be a whole number between 5% and 99%.";
+    } else if (!delayIsInt || !Number.isSafeInteger(delayValue) || delayValue < 0 || delayValue > MAX_WATERFALL_DELAY_MINUTES) {
+      error = `Delay must be a whole number between 0 and ${MAX_WATERFALL_DELAY_MINUTES.toLocaleString()} minutes.`;
+    } else if (prevDiscount !== null && discountValue <= prevDiscount) {
+      error = "Discount must be higher than the previous step.";
+    } else if (prevDelay !== null && delayValue < prevDelay) {
+      error = "Delay cannot be shorter than the previous step.";
+    }
+
+    rowErrors.push(error);
+    if (error === null) {
+      parsed.push({ discount_percent: discountValue, delay_minutes: delayValue });
+      prevDiscount = discountValue;
+      prevDelay = delayValue;
+    }
+  }
+
+  const valid = rowErrors.every((entry) => entry === null);
+  return { valid, steps: valid ? parsed : undefined, rowErrors };
+}
+
+export function formatEnableAllConfirmMessage(
+  discountPercent: number,
+  minimumPrice: string,
+  waterfallSteps?: EbayWaterfallStep[],
+): string {
+  const minimumText = minimumPrice ? `Offers below $${minimumPrice} are skipped.` : "No minimum price will apply.";
+  const waterfallText = waterfallSteps?.length
+    ? ` Waterfall steps: ${waterfallSteps
+      .map((step, index) => `Step ${index + 1}: ${step.discount_percent}% off after ${step.delay_minutes} min`)
+      .join("; ")}.`
+    : "";
+  return `Enable ${discountPercent}% off offers on all current and future eBay listings in Anteroom? ${minimumText}${waterfallText} This replaces individual automatic offer rules. Anteroom checks every 15 minutes while running and sends to all buyers eBay marks eligible.`;
+}
 
 export function EbayOffersSettings() {
   const queryClient = useQueryClient();
@@ -25,9 +92,24 @@ export function EbayOffersSettings() {
   const [scope, setScope] = useState<"selected" | "all" | null>(null);
   const [allDiscount, setAllDiscount] = useState<string | null>(null);
   const [allMinimum, setAllMinimum] = useState<string | null>(null);
+  const [waterfallDraft, setWaterfallDraft] = useState<WaterfallDraftStep[] | null>(null);
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["ebay-offers"] });
+  const data = status.data;
+  const activeWaterfall: WaterfallDraftStep[] = waterfallDraft ?? (data?.allListings.waterfallSteps ?? []).map((step) => ({
+    discount: String(step.discount_percent),
+    delayMinutes: String(step.delay_minutes),
+  }));
+  const waterfallValidation = validateWaterfallDraft(activeWaterfall);
   const preview = useMutation({
-    mutationFn: (selections: EbayOfferSelection[]) => api.ebayOffers.preview(selections, Number(discount)),
+    mutationFn: ({
+      selections,
+      discountPercent,
+      waterfallSteps,
+    }: {
+      selections: EbayOfferSelection[];
+      discountPercent: number;
+      waterfallSteps?: EbayWaterfallStep[];
+    }) => api.ebayOffers.preview(selections, discountPercent, waterfallSteps),
     retry: false,
     onSuccess: (result) => { setOffers(result.offers); setNotice(null); },
     onSettled: refresh,
@@ -66,17 +148,28 @@ export function EbayOffersSettings() {
     retry: false,
   });
   const enableAll = useMutation({
-    mutationFn: ({ discountPercent, minimumPrice }: { discountPercent: number; minimumPrice: string }) =>
-      api.ebayOffers.enableAll(discountPercent, minimumPrice),
+    mutationFn: ({
+      discountPercent,
+      minimumPrice,
+      waterfallSteps,
+    }: {
+      discountPercent: number;
+      minimumPrice: string;
+      waterfallSteps?: EbayWaterfallStep[];
+    }) => api.ebayOffers.enableAll(discountPercent, minimumPrice, waterfallSteps),
     retry: false,
-    onSuccess: () => setNotice("Automatic offers enabled for all current and future eBay listings in Anteroom. The next check is within 15 minutes."),
+    onSuccess: () => {
+      setWaterfallDraft(null);
+      setAllDiscount(null);
+      setAllMinimum(null);
+      setNotice("Automatic offers enabled for all current and future eBay listings in Anteroom. The next check is within 15 minutes.");
+    },
     onSettled: refresh,
   });
-  const data = status.data;
   const globalDiscount = allDiscount ?? String(data?.allListings.discountPercent ?? 10);
   const globalMinimum = allMinimum ?? data?.allListings.minimumPrice ?? "";
   const allEnabled = data?.allListings.enabled === true;
-  const allUnchanged = allEnabled && Number(globalDiscount) === data.allListings.discountPercent
+  const allUnchanged = allEnabled && waterfallDraft === null && Number(globalDiscount) === data.allListings.discountPercent
     && (globalMinimum === "" ? data.allListings.minimumPrice === ""
       : data.allListings.minimumPrice !== "" && Number(globalMinimum) === Number(data.allListings.minimumPrice));
   const activeScope = scope ?? (data?.allListings.enabled ? "all" : "selected");
@@ -98,6 +191,21 @@ export function EbayOffersSettings() {
     preview.reset();
     action.reset();
   }
+
+  function updateWaterfallDraft(next: WaterfallDraftStep[]) {
+    setWaterfallDraft(next);
+    changed();
+  }
+
+  const addWaterfallStep = () => {
+    const prev = activeWaterfall[activeWaterfall.length - 1];
+    const prevDiscount = prev && /^\d+$/.test(prev.discount.trim()) ? Number(prev.discount.trim()) : null;
+    const prevDelay = prev && /^\d+$/.test(prev.delayMinutes.trim()) ? Number(prev.delayMinutes.trim()) : null;
+    const baseDiscount = activeScope === "all" ? Number(globalDiscount) : Number(discount);
+    const nextDiscount = prevDiscount !== null ? Math.min(99, prevDiscount + 5) : (Number.isInteger(baseDiscount) && baseDiscount >= 5 && baseDiscount <= 99 ? baseDiscount : 10);
+    const nextDelay = prevDelay !== null ? Math.min(MAX_WATERFALL_DELAY_MINUTES, prevDelay + 1440) : 15;
+    updateWaterfallDraft([...activeWaterfall, { discount: String(nextDiscount), delayMinutes: String(nextDelay) }]);
+  };
 
   return (
     <SettingsSection id="ebay-offers" title="eBay offers" hideTitle>
@@ -122,10 +230,42 @@ export function EbayOffersSettings() {
           </fieldset>
           {data.allListings.enabled ? <p role="status" className="text-xs text-success-foreground">
             All current and future listings: {data.allListings.discountPercent}% off
-            {data.allListings.minimumPrice ? ` · minimum $${data.allListings.minimumPrice}` : " · no minimum price"}.
+            {data.allListings.minimumPrice ? ` · minimum $${data.allListings.minimumPrice}` : " · no minimum price"}
+            {data.allListings.waterfallSteps?.length ? ` · ${data.allListings.waterfallSteps.length}-step waterfall` : ""}.
           </p> : null}
           <Button size="xs" variant="outline" disabled={busy || !(data.allListings.enabled || data.listings.some((item) => item.enabled))}
             onClick={() => pause.mutate(undefined)}>Pause all</Button>
+          <div className="space-y-2 rounded-lg border border-border/60 p-3 text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="font-medium text-foreground">Waterfall offer steps (optional)</p>
+                <p className="text-muted-foreground">Increase the discount over time if a watcher has not accepted. Respects floor prices and eBay cooldowns.</p>
+              </div>
+              {activeWaterfall.length < 5 ? (
+                <Button size="xs" variant="outline" disabled={busy} onClick={addWaterfallStep}>Add step</Button>
+              ) : null}
+            </div>
+            {activeWaterfall.map((step, idx) => (
+              <div key={idx} className="space-y-1 border-t border-border/50 pt-2">
+                <div className="flex flex-wrap items-end gap-2">
+                  <span className="pb-1.5 font-medium text-muted-foreground">Step {idx + 1}</span>
+                  <label className="w-24 space-y-1">Discount (%)
+                    <Input type="number" min={5} max={99} step={1} value={step.discount} disabled={busy}
+                      onChange={(e) => updateWaterfallDraft(activeWaterfall.map((s, i) => (i === idx ? { ...s, discount: e.target.value } : s)))} />
+                  </label>
+                  <label className="w-28 space-y-1">Delay (minutes)
+                    <Input type="number" min={0} max={MAX_WATERFALL_DELAY_MINUTES} step={1} value={step.delayMinutes} disabled={busy}
+                      onChange={(e) => updateWaterfallDraft(activeWaterfall.map((s, i) => (i === idx ? { ...s, delayMinutes: e.target.value } : s)))} />
+                  </label>
+                  <Button size="xs" variant="ghost" disabled={busy}
+                    onClick={() => updateWaterfallDraft(activeWaterfall.filter((_, i) => i !== idx))}>Remove</Button>
+                </div>
+                {waterfallValidation.rowErrors[idx] ? (
+                  <p role="alert" className="text-xs text-destructive-foreground">{waterfallValidation.rowErrors[idx]}</p>
+                ) : null}
+              </div>
+            ))}
+          </div>
           {activeScope === "all" ? <div className="space-y-3 rounded-lg border border-border/60 p-3">
             <p className="text-xs text-muted-foreground">Include every current eBay listing in Anteroom and automatically include future listings as they are listed or imported. No individual selection is needed.</p>
             <div className="flex flex-wrap gap-3">
@@ -138,10 +278,17 @@ export function EbayOffersSettings() {
                   value={globalMinimum} disabled={busy} onChange={(event) => { setAllMinimum(event.target.value); setNotice(null); }} />
               </label>
             </div>
-            <Button size="sm" variant={allEnabled ? "outline" : "default"} disabled={busy || !globalValid || allUnchanged}
+            <Button size="sm" variant={allEnabled ? "outline" : "default"} disabled={busy || !globalValid || !waterfallValidation.valid || allUnchanged}
               aria-busy={enableAll.isPending} onClick={async () => {
-              const approved = await confirmDialog(`Enable ${globalDiscount}% off offers on all current and future eBay listings in Anteroom? ${globalMinimum ? `Offers below $${globalMinimum} are skipped.` : "No minimum price will apply."} This replaces individual automatic offer rules. Anteroom checks every 15 minutes while running and sends to all buyers eBay marks eligible.`, { confirmLabel: "Enable automatic offers" });
-              if (approved) enableAll.mutate({ discountPercent: Number(globalDiscount), minimumPrice: globalMinimum });
+              if (!waterfallValidation.valid) return;
+              const discountPercent = Number(globalDiscount);
+              const minimumPrice = globalMinimum;
+              const waterfallSteps = waterfallValidation.steps;
+              const approved = await confirmDialog(
+                formatEnableAllConfirmMessage(discountPercent, minimumPrice, waterfallSteps),
+                { confirmLabel: "Enable automatic offers" },
+              );
+              if (approved) enableAll.mutate({ discountPercent, minimumPrice, waterfallSteps });
             }}>{enableAll.isPending ? <><Spinner />Saving offer settings…</>
               : allUnchanged ? "Offers enabled for all current and future listings"
                 : allEnabled ? "Save offer settings" : "Enable offers for all current and future listings"}</Button>
@@ -176,11 +323,18 @@ export function EbayOffersSettings() {
             </div>)}
             {!visible.length ? <p className="px-3 py-4 text-xs text-muted-foreground">{data.listings.length ? "No matching listings." : "No unsold listings with eBay links. Import them from eBay, or list from Anteroom."}</p> : null}
           </div>
-          <Button size="sm" variant="outline" disabled={busy || !selectedListings.length || selectedListings.length > 50 || !discountValid || !floorsValid}
+          <Button size="sm" variant="outline" disabled={busy || !selectedListings.length || selectedListings.length > 50 || !discountValid || !floorsValid || !waterfallValidation.valid}
             onClick={() => {
+              if (!waterfallValidation.valid) return;
               setOffers(null);
-              preview.mutate(selectedListings.map((item) => ({ conversation_id: item.conversationId,
-                minimum_price: minimums[item.conversationId] ?? item.minimumPrice })));
+              preview.mutate({
+                selections: selectedListings.map((item) => ({
+                  conversation_id: item.conversationId,
+                  minimum_price: minimums[item.conversationId] ?? item.minimumPrice,
+                })),
+                discountPercent: Number(discount),
+                waterfallSteps: waterfallValidation.steps,
+              });
             }}>
             {preview.isPending ? <Spinner /> : null}Preview {selectedListings.length || "selected"} {selectedListings.length === 1 ? "listing" : "listings"}
           </Button>

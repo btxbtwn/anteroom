@@ -348,6 +348,17 @@ class ListingPromotionsTest(unittest.TestCase):
         stale = {"finished": True, "result": {"ok": False, "safe_to_retry": False, "error_code": "uncertain"}}
         self.assertEqual(listing_promotions._record_check(self.db, row["id"], stale)["state"], "done")
 
+    def test_account_check_recovers_cloud_receipt_without_a_listing_job(self):
+        row = ListingPromotion(batch_id="batch", marketplace="poshmark", listing_id="__account__",
+                               action="follow", state="unknown", title="Follow", expires_at=datetime.now(UTC))
+        self.db.add(row)
+        self.db.commit()
+        receipt = {"finished": True, "result": {"ok": True, "state": "done", "followed_count": 3}}
+        with patch("anteroom.services.cloud_sessions.load_journals", return_value={f"promotion_{row.id}": receipt}):
+            checked = self.client.post(f"/api/promotions/{row.id}/check").json()
+        self.assertEqual((checked["state"], checked["recipient_count"]), ("done", 3))
+        self.bridge.assert_not_awaited()
+
     def test_late_check_reply_does_not_overwrite_manual_acknowledgment(self):
         row = self.preview(action="share")
         self.sent = {"ok": False, "safe_to_retry": False, "error_code": "uncertain"}
@@ -387,6 +398,9 @@ class ListingPromotionsTest(unittest.TestCase):
         self.assertEqual(listing_promotions.mark_interrupted(self.db, "job-1"), 1)
         self.assertEqual(self.db.get(ListingPromotion, row["id"]).state, "unknown")
         history = self.client.get("/api/promotions").json()
-        self.assertEqual(history["supported"], {"poshmark": ["offer", "share"], "mercari": ["offer"], "depop": ["offer"]})
+        self.assertEqual(
+            history["supported"],
+            {"poshmark": ["bundle_offer", "follow", "offer", "share"], "mercari": ["offer"], "depop": ["offer"]},
+        )
         self.assertEqual(history["awaiting_capture"], {})
         self.assertEqual(history["history"][0]["state"], "unknown")

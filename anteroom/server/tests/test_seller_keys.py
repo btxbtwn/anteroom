@@ -87,6 +87,8 @@ def test_upgrade_keeps_all_keyed_records_and_matches_models(migration_engine):  
     after = read_rows(engine, names)
     for row in after["ebay_actions"]:
         assert row.pop("ad_listing_ids") is None
+    for row in after["ebay_offer_rules"]:
+        assert row.pop("waterfall_steps") is None
     assert after == before
     with engine.connect() as connection:
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []

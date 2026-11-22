@@ -25,6 +25,8 @@ import { Skeleton } from "./ui/skeleton";
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
 import { PromotionDetails, PromotionEditor, confirmPromotionOn, usePromotionAutomations } from "./MarketplaceAutomations";
+import { AutoRelistSection } from "./AutoRelistSection";
+import { ScheduledDraftsSection } from "./ScheduledDraftsSection";
 import { AUTOMATION_KINDS, ebayOffersRow, promotionRow, scheduledRow, type AutomationKind, type AutomationRowView } from "./automationRows";
 import { emptyPromotionForm, formFromAutomation, type PromotionAutomationForm } from "./promotionAutomationsFormat";
 import { EbayOffersSettings } from "./settings/EbayOffersSettings";
@@ -232,7 +234,7 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
   const loading = list.isLoading || (hasEbayOffers && ebay.isLoading) || (hasPromotions && promotions.isLoading);
   const listError = list.error || (hasPromotions ? promotions.error : null) || (hasEbayOffers ? ebay.error : null);
   const kinds = AUTOMATION_KINDS.filter((item) => (item.kind === "ebay_offers" ? hasEbayOffers
-    : item.kind === "share" || item.kind === "offer" ? hasPromotions : true));
+    : item.kind === "share" || item.kind === "offer" || item.kind === "bundle_offer" || item.kind === "follow" ? hasPromotions : true));
   const empty = !tasks.length && !ebayStatus && !sharing.length;
 
   const panelBack = panel && "picked" in panel && panel.picked ? () => openPanel({ kind: "pick" }) : undefined;
@@ -241,7 +243,7 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
     <WorkspacePage>
       <PageHeader
         title="Automations"
-        description="Price drops, relists, offers and sharing; nothing lists or delists until you approve each item."
+        description="Price drops, relists, waterfall offers, sharing, and follows — nothing lists or delists until you approve each item unless you opt in to scheduled publishing or auto-relist."
         actions={(
           <Button size="sm" onClick={() => openPanel({ kind: "pick" })}>
             <PlusIcon />
@@ -404,6 +406,10 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
         )}
       </PageSection>
 
+      <ScheduledDraftsSection onOpenListing={onOpenListing} />
+
+      <AutoRelistSection />
+
       <Sheet open={panelOpen} onOpenChange={setPanelOpen}>
         <SheetPopup side="right" className="max-w-xl">
           {panel?.kind === "pick" ? (
@@ -438,7 +444,15 @@ export function AutomationsPage({ onOpenListing }: { onOpenListing: (id: string)
             </PanelLayout>
           ) : panel?.kind === "promotion" ? (
             <PanelLayout
-              title={`${panel.form.id ? "Edit" : "New"} ${panel.form.action === "share" ? "sharing schedule" : "offer rule"}`}
+              title={`${panel.form.id ? "Edit" : "New"} ${
+                panel.form.action === "share"
+                  ? "sharing schedule"
+                  : panel.form.action === "bundle_offer"
+                    ? "private bundle offer"
+                    : panel.form.action === "follow"
+                      ? "follow rule"
+                      : "offer rule"
+              }`}
               onBack={panelBack}
             >
               <PromotionEditor

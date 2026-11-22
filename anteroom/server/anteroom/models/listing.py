@@ -9,6 +9,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Computed,
     DateTime,
     ForeignKey,
@@ -16,6 +17,8 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
+    false,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import JSONB
@@ -37,6 +40,14 @@ class Listing(SellerOwned, Base):
     current_revision_id: Mapped[str | None] = mapped_column(String, nullable=True)
     validation_status: Mapped[str | None] = mapped_column(String, nullable=True)
     validation_errors: Mapped[Any] = mapped_column(JSON, nullable=True)
+    # Seller opt-in draft scheduling (off by default; unscheduled automatically on edit).
+    ready_to_list: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    scheduled_publish_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    scheduled_marketplaces: Mapped[Any] = mapped_column(JSON, nullable=True)
+    scheduled_revision_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    scheduled_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    scheduled_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    scheduled_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime | None] = mapped_column(DateTime, default=utcnow, onupdate=utcnow, nullable=True)
 
     conversation: Mapped[Conversation] = relationship("Conversation", back_populates="listing", primaryjoin="and_(Conversation.id == foreign(Listing.conversation_id), Conversation.user_id == Listing.user_id)")

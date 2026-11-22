@@ -22,6 +22,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "./ui/menu";
 import { Spinner } from "./ui/spinner";
+import { DraftScheduleControl } from "./DraftScheduleControl";
 import { MarketplaceMessagesContext, uniqueMarketplaceMessages } from "./marketplaceMessages";
 
 type Marketplace = DelistMarketplace;
@@ -934,6 +935,11 @@ export function MarketplacesLayout({
           })()}
         </section>
       )}
+      {!soldSomewhere && !selectedMarketplace && Boolean(selected) ? (
+        <div className="mb-3">
+          <DraftScheduleControl convId={convId} />
+        </div>
+      ) : null}
       <FieldsShownContext.Provider value={reportFields}>
         <MarketplaceMessagesContext value={shownMessages}>{children}</MarketplaceMessagesContext>
       </FieldsShownContext.Provider>

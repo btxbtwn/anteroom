@@ -24,7 +24,7 @@ from datetime import UTC, datetime, timedelta
 from functools import partial
 from types import SimpleNamespace
 
-from sqlalchemy import and_, or_, update
+from sqlalchemy import and_, func, or_, update
 from sqlalchemy.orm import Session
 
 from anteroom.database import claim_in_worker_session, in_worker_session, run_worker_db_step
@@ -43,7 +43,7 @@ log = logging.getLogger("anteroom.listing_promotions")
 
 # What each marketplace's own site lets Anteroom do. See docs/direct-form-parity.md.
 SUPPORTED: dict[str, frozenset[str]] = {
-    "poshmark": frozenset({"share", "offer"}),
+    "poshmark": frozenset({"share", "offer", "bundle_offer", "follow"}),
     "mercari": frozenset({"offer"}),
     "depop": frozenset({"offer"}),
 }
@@ -53,6 +53,8 @@ AWAITING_CAPTURE: dict[str, frozenset[str]] = {}
 # Marketplaces whose offers carry a seller shipping discount the seller picks.
 SHIPPING_DISCOUNTS = frozenset({"poshmark"})
 MAX_ITEMS = 100
+MAX_WATERFALL_STEPS = 5
+MAX_WATERFALL_DELAY_MINUTES = 30 * 24 * 60
 PREVIEW_TTL = timedelta(minutes=15)
 OFFER_COOLDOWN = timedelta(hours=24)
 MERCARI_COOLDOWN_NOTE = "Mercari's offer eligibility cooldown is still active."
@@ -71,6 +73,126 @@ class PromotionError(RuntimeError):
         self.status_code = status_code
         self.code = code
         self.cloud_signed_out = cloud_signed_out
+
+
+def normalize_waterfall_steps(steps: list[dict] | None, *, min_discount: int = 1) -> list[dict] | None:
+    """Validate and normalize multi-step waterfall offer definitions.
+
+    Example: [{"discount_percent": 10, "delay_minutes": 15},
+              {"discount_percent": 15, "delay_minutes": 1440},
+              {"discount_percent": 20, "delay_minutes": 2880}]
+    """
+    if not steps:
+        return None
+    if not isinstance(steps, list) or len(steps) > MAX_WATERFALL_STEPS:
+        raise PromotionError(400, f"Configure between 1 and {MAX_WATERFALL_STEPS} waterfall steps.")
+    normalized: list[dict] = []
+    prev_discount = 0
+    prev_delay = -1
+    for idx, raw in enumerate(steps, start=1):
+        if not isinstance(raw, dict):
+            raise PromotionError(400, "Each waterfall step must specify a discount and delay.")
+        discount = raw.get("discount_percent")
+        delay = raw.get("delay_minutes")
+        if type(discount) is not int or not min_discount <= discount <= 99:
+            raise PromotionError(400, f"Waterfall step {idx} discount must be between {min_discount}% and 99%.")
+        if type(delay) is not int or not 0 <= delay <= MAX_WATERFALL_DELAY_MINUTES:
+            raise PromotionError(400, f"Waterfall step {idx} delay must be between 0 and {MAX_WATERFALL_DELAY_MINUTES} minutes.")
+        if discount <= prev_discount:
+            raise PromotionError(400, "Each waterfall step must increase the discount over the previous step.")
+        if delay < prev_delay:
+            raise PromotionError(400, "Waterfall step delays cannot go backward.")
+        normalized.append({"step": idx, "discount_percent": discount, "delay_minutes": delay})
+        prev_discount = discount
+        prev_delay = delay
+    return normalized
+
+
+def next_waterfall_step(
+    db: Session,
+    marketplace: str,
+    listing_id: str,
+    action: str,
+    steps: list[dict] | None,
+    *,
+    now: datetime | None = None,
+    new_like_at: datetime | None = None,
+) -> tuple[dict | None, str | None]:
+    """Return (next_step_dict, skip_reason) for a listing under a waterfall sequence.
+
+    Always respects both the step's delay and the marketplace 24-hour cooldown
+    between consecutive steps on the same listing.
+    """
+    if not steps:
+        return None, None
+    moment = now or _now()
+    last = (
+        db.query(ListingPromotion)
+        .filter(
+            ListingPromotion.marketplace == marketplace,
+            ListingPromotion.listing_id == listing_id,
+            ListingPromotion.action == action,
+            ListingPromotion.state == "done",
+            ListingPromotion.sent_at.isnot(None),
+        )
+        .order_by(ListingPromotion.sent_at.desc())
+        .first()
+    )
+    if last is None:
+        first = steps[0]
+        if new_like_at is not None and first["delay_minutes"] > 0:
+            due_at = new_like_at + timedelta(minutes=first["delay_minutes"])
+            if moment < due_at:
+                return None, f"waiting {first['delay_minutes']}m before waterfall step 1"
+        return first, None
+
+    last_step = int(last.waterfall_step or 1)
+    # If a new buyer liked the listing after the final step completed, restart at step 1.
+    if last_step >= len(steps):
+        if new_like_at is not None and last.sent_at and new_like_at > last.sent_at:
+            first = steps[0]
+            if first["delay_minutes"] > 0 and moment < new_like_at + timedelta(minutes=first["delay_minutes"]):
+                return None, f"waiting {first['delay_minutes']}m before waterfall step 1"
+            return first, None
+        return None, "all waterfall offer steps already sent"
+
+    upcoming = steps[last_step]
+    assert last.sent_at is not None
+    step_delta = max(OFFER_COOLDOWN, timedelta(minutes=int(upcoming["delay_minutes"])))
+    if moment < last.sent_at + step_delta:
+        return None, f"waiting for waterfall step {upcoming['step']} cooldown"
+    return upcoming, None
+
+
+def first_seen_waterfall_like_at(
+    db: Session,
+    marketplace: str,
+    listing_id: str,
+    action: str,
+) -> datetime | None:
+    """Earliest persisted timestamp where a regular scan saw eligible likes waiting for waterfall step 1."""
+    last_done_at = (
+        db.query(func.max(ListingPromotion.sent_at))
+        .filter(
+            ListingPromotion.marketplace == marketplace,
+            ListingPromotion.listing_id == listing_id,
+            ListingPromotion.action == action,
+            ListingPromotion.state == "done",
+            ListingPromotion.sent_at.isnot(None),
+        )
+        .scalar()
+    )
+    query = db.query(func.min(ListingPromotion.created_at)).filter(
+        ListingPromotion.marketplace == marketplace,
+        ListingPromotion.listing_id == listing_id,
+        ListingPromotion.action == action,
+        ListingPromotion.state == "skipped",
+        ListingPromotion.waterfall_step == 1,
+        ListingPromotion.note.like("waiting % before waterfall step 1%"),
+    )
+    if last_done_at is not None:
+        query = query.filter(ListingPromotion.created_at > last_done_at)
+    return query.scalar()
 
 
 def available(marketplace: str, action: str) -> bool:
@@ -94,6 +216,7 @@ def out(row: ListingPromotion) -> dict:
         "id": row.id, "batch_id": row.batch_id, "conversation_id": row.conversation_id, "marketplace": row.marketplace,
         "action": row.action, "listing_id": row.listing_id, "title": row.title, "price": _money(row.price_cents),
         "offer_price": _money(row.offer_price_cents), "floor": _money(row.floor_cents), "discount_percent": row.discount_percent,
+        "waterfall_step": row.waterfall_step, "buyer_handle": row.buyer_handle,
         "like_count": row.like_count, "shipping_options": row.shipping_options or [],
         "confirmation": row.confirmation, "recipient_count": row.recipient_count,
         "shipping_discount_id": row.shipping_discount_id, "shipping_discount_label": row.shipping_discount_label,
@@ -149,7 +272,7 @@ def blocking(db: Session, marketplace: str, listing_id: str, action: str, *, new
                     and isinstance(row.finished_at, datetime) and row.finished_at.tzinfo is None
                     and timedelta(0) <= now - row.finished_at < wait):
                 return MERCARI_COOLDOWN_NOTE
-    if action == "offer" and any(row.sent_at and row.sent_at > _now() - OFFER_COOLDOWN
+    if action in ("offer", "bundle_offer") and any(row.sent_at and row.sent_at > _now() - OFFER_COOLDOWN
                                  and (new_like_at is None or row.sent_at >= new_like_at) for row in rows):
         return "An offer was sent on this listing in the last 24 hours."
     return None
@@ -221,10 +344,10 @@ def require_chrome(marketplace: str | None = None, *, db: Session | None = None)
 
 
 def new_row(conv: Conversation, marketplace: str, action: str, batch_id: str, discount_percent: int | None = None,
-            automation_id: str | None = None) -> ListingPromotion:
+            automation_id: str | None = None, waterfall_step: int | None = None) -> ListingPromotion:
     return ListingPromotion(batch_id=batch_id, conversation_id=conv.id, marketplace=marketplace, action=action, listing_id="",
-                            title=conv.title, discount_percent=discount_percent, automation_id=automation_id,
-                            state="preview", expires_at=_now() + PREVIEW_TTL)
+                            title=conv.title, discount_percent=discount_percent, waterfall_step=waterfall_step,
+                            automation_id=automation_id, state="preview", expires_at=_now() + PREVIEW_TTL)
 
 
 def offer_floor(db: Session, row: ListingPromotion) -> int:
@@ -232,7 +355,7 @@ def offer_floor(db: Session, row: ListingPromotion) -> int:
     saved = db.query(MarketplaceOfferFloor).filter_by(marketplace=row.marketplace, listing_id=row.listing_id).first()
     if row.automation_id:
         automation = db.query(PromotionAutomation).filter_by(id=row.automation_id).populate_existing().first()
-        if not automation or automation.action != "offer" or automation.marketplace != row.marketplace:
+        if not automation or automation.action not in ("offer", "bundle_offer") or automation.action != row.action or automation.marketplace != row.marketplace:
             raise PromotionError(409, "This offer rule changed. Review it again.")
         return max(automation.minimum_price_cents or 1, saved.floor_cents if saved else 1)
     if not saved:
@@ -265,7 +388,7 @@ def _review_local(db: Session, row: ListingPromotion, conv: Conversation, floor_
     if reason:
         raise PromotionError(409, reason)
     assert listing_id is not None
-    if row.action == "offer":
+    if row.action in ("offer", "bundle_offer"):
         if floor_price not in (None, ""):
             try:
                 _save_floor(db, row.marketplace, listing_id, conv.id, money_cents(floor_price))
@@ -282,9 +405,10 @@ async def _review_remote(row: ListingPromotion, listing_id: str) -> None:
     from anteroom.services import cloud_marketplace, cloud_sessions
 
     name = NAMES.get(row.marketplace, row.marketplace)
+    check_action = "offer" if row.action == "bundle_offer" else row.action
     payload = {
-        "marketplace": row.marketplace, "action": row.action, "listing_id": listing_id,
-        **({"discount_percent": row.discount_percent} if row.action == "offer" else {}),
+        "marketplace": row.marketplace, "action": check_action, "listing_id": listing_id,
+        **({"discount_percent": row.discount_percent} if row.action in ("offer", "bundle_offer") else {}),
     }
     diagnostic_inputs = {**payload, "floor_cents": row.floor_cents}
     started = time.monotonic()
@@ -335,7 +459,7 @@ async def _review_remote(row: ListingPromotion, listing_id: str) -> None:
         raise PromotionError(409, reason, code, cloud_signed_out=use_cloud and code == "signed_out")
     row.price_cents = int(facts["price_cents"])
     row.like_count = int(facts.get("like_count") or 0)
-    if row.action != "offer":
+    if row.action not in ("offer", "bundle_offer"):
         return
     low, high = facts.get("minimum_discount_percent"), facts.get("maximum_discount_percent")
     if facts.get("offer_price_cents") is None:
@@ -440,7 +564,8 @@ def _choose_shipping(row: ListingPromotion, shipping_discount_id: str | None) ->
 
 
 async def perform(promotion_id: str, shipping_discount_id: str | None = None, *, gap_ms: int | None = None,
-                  new_like_at: datetime | None = None, include_executor: bool = False) -> dict:
+                  new_like_at: datetime | None = None, extra_payload: dict | None = None,
+                  include_executor: bool = False) -> dict:
     """Send one reviewed row, once. The caller has the seller's explicit confirmation or enabled automation.
 
     The checks, the job claim and the durable ``sending`` mark are committed before Cloud or Chrome is asked;
@@ -453,6 +578,10 @@ async def perform(promotion_id: str, shipping_discount_id: str | None = None, *,
         _start_send, partial(_abandon_send, promotion_id), promotion_id, shipping_discount_id, new_like_at)
     if gap_ms and payload["action"] == "share":
         payload["gap_ms"] = gap_ms
+    if extra_payload:
+        for key, value in extra_payload.items():
+            if value is not None and key not in ("action_id", "marketplace", "action", "listing_id", "confirm", "floor_cents"):
+                payload[key] = value
     finish: asyncio.Future | None = None
     try:
         try:
@@ -488,6 +617,187 @@ async def perform(promotion_id: str, shipping_discount_id: str | None = None, *,
         release_api_job(job_id)
 
 
+def _follow_allowance(db: Session, marketplace: str, config: dict) -> tuple[dict, dict[str, int]]:
+    from anteroom.services.promotion_automations import MAX_DAILY_FOLLOWS, MAX_DAILY_UNFOLLOWS
+
+    used = {"active": 0, "followed": 0, "unfollowed": 0}
+    cutoff = _now() - timedelta(hours=24)
+    recent = db.query(ListingPromotion.follow_budget).filter(
+        ListingPromotion.marketplace == marketplace, ListingPromotion.action == "follow",
+        # A completed round may have acted right up to the receipt timestamp.
+        or_(ListingPromotion.sent_at > cutoff, ListingPromotion.finished_at > cutoff),
+    )
+    for (budget,) in recent:
+        # Older sends did not track all three counts. Treat them as unknown.
+        for key, maximum in (("active", MAX_DAILY_FOLLOWS), ("followed", MAX_DAILY_FOLLOWS),
+                             ("unfollowed", MAX_DAILY_UNFOLLOWS)):
+            used[key] += budget[key] if budget is not None else maximum
+    remaining = max(0, MAX_DAILY_FOLLOWS - used["followed"])
+    active = min(remaining, max(0, int(config.get("new_active_sellers_cap") or 0) - used["active"]))
+    unfollow = max(0, min(MAX_DAILY_UNFOLLOWS, int(config.get("unfollow_cap") or 0)) - used["unfollowed"])
+    reciprocal = bool(config.get("reciprocal_24h"))
+    return {
+        "reciprocal_24h": reciprocal, "new_active_sellers_cap": active, "unfollow_cap": unfollow,
+        "unsubscribe_live_shows": bool(config.get("unsubscribe_live_shows")),
+        "remaining_follow_cap": remaining if reciprocal else active,
+    }, {"active": active, "followed": remaining if reciprocal else active, "unfollowed": unfollow}
+
+
+def has_active_account_send(db: Session) -> bool:
+    return db.query(ListingPromotion.id).filter(
+        ListingPromotion.listing_id == "__account__",
+        ListingPromotion.state == "sending",
+    ).first() is not None
+
+
+def _poshmark_bundle_floors(db: Session, row: ListingPromotion) -> dict[str, int]:
+    """Verified per-listing floors (in cents) for multi-item Poshmark bundle offers."""
+    from anteroom.services.marketplace_delist import listings_for
+
+    shared_min: int | None = None
+    if row.automation_id:
+        automation = db.get(PromotionAutomation, row.automation_id)
+        if automation and automation.minimum_price_cents:
+            shared_min = int(automation.minimum_price_cents)
+
+    result: dict[str, int] = {}
+    for saved in db.query(MarketplaceOfferFloor).filter_by(marketplace="poshmark").all():
+        if saved.listing_id and saved.floor_cents and saved.floor_cents > 0:
+            result[str(saved.listing_id)] = max(int(saved.floor_cents), shared_min or 1)
+
+    if shared_min is not None and shared_min > 0:
+        convs = db.query(Conversation).filter(Conversation.status != "sold").all()
+        known = listings_for(db, convs)
+        for conv in convs:
+            listing_id, reason = live_entry(known.get(conv.id, {}).get("poshmark") or {}, "poshmark")
+            if listing_id and not reason:
+                result.setdefault(listing_id, shared_min)
+
+    if row.listing_id and row.floor_cents and row.floor_cents > 0:
+        result[row.listing_id] = max(result.get(row.listing_id, 0), int(row.floor_cents))
+    return result
+
+
+async def _abandon_account_send(started: tuple[str, dict, bool]) -> None:
+    promotion_id = started[0]
+    await in_worker_session(_finish_send, promotion_id, None, {
+        "ok": False,
+        "safe_to_retry": True,
+        "release_budget": True,
+        "error": "Stopped before it was sent. Nothing was sent.",
+    })
+
+
+async def perform_account_action(
+    marketplace: str,
+    action: str,
+    *,
+    automation_id: str,
+    batch_id: str,
+    extra_payload: dict,
+) -> dict:
+    """Execute an account-level promotion action (e.g., Poshmark community shares or automatic follows).
+
+    Commits a durable ``ListingPromotion`` journal row before asking Cloud or Chrome,
+    serializes against active jobs/account sends, and settles interrupted runs as ``unknown``.
+    """
+    from anteroom.services import cloud_marketplace, cloud_sessions
+
+    def _start_account(db: Session) -> tuple[str, dict, bool]:
+        from anteroom.services.promotion_automations import MAX_DAILY_SHARES, _shares_today
+
+        if not available(marketplace, action):
+            raise PromotionError(409, "Anteroom cannot send this on that marketplace yet.")
+        automation = db.get(PromotionAutomation, automation_id)
+        if not automation or not automation.enabled or automation.action != action or automation.marketplace != marketplace:
+            raise PromotionError(409, "This automation changed or was turned off. Nothing was sent.", "paused")
+        use_cloud = cloud_sessions.has_active_session(marketplace, db)
+        require_chrome(marketplace, db=db)
+        repo = JobRepo(db)
+        extra = dict(extra_payload)
+        with listing_mode.guard(db, "direct"):
+            if repo.get_active() or has_active_account_send(db):
+                raise PromotionError(409, "Another automation job is queued or running. Wait for it to finish.", "busy")
+            db.refresh(automation)
+            if not automation.enabled or automation.action != action or automation.marketplace != marketplace:
+                raise PromotionError(409, "This automation changed or was turned off. Nothing was sent.", "paused")
+            budget: dict[str, int] | None = None
+            if action == "follow":
+                config, budget = _follow_allowance(db, marketplace, automation.follow_config or {})
+                if not any(budget.values()) and not config["unsubscribe_live_shows"]:
+                    raise PromotionError(409, "The rolling daily follow and unfollow budget is used.", "daily_cap")
+                extra["follow_config"] = config
+            elif action == "share" and extra.get("share_mode") == "community":
+                if "community" not in (automation.share_modes or []):
+                    raise PromotionError(409, "This automation changed or was turned off. Nothing was sent.", "paused")
+                cap = int(automation.daily_cap or MAX_DAILY_SHARES)
+                remaining = max(0, cap - _shares_today(db, marketplace, _now()))
+                requested = int(extra.get("max_shares") or 50)
+                allowed = min(max(0, requested), remaining, 50)
+                if allowed <= 0:
+                    raise PromotionError(409, f"Reached the daily cap of {cap:,} shares.", "daily_cap")
+                extra["max_shares"] = allowed
+                budget = {"max_shares": allowed}
+            row_id = new_id()
+            row = ListingPromotion(
+                id=row_id,
+                batch_id=batch_id,
+                conversation_id=None,
+                marketplace=marketplace,
+                action=action,
+                listing_id="__account__",
+                title=automation.name,
+                automation_id=automation_id,
+                job_id=f"{'cloud' if use_cloud else 'chrome'}-account:{row_id}",
+                state="sending",
+                follow_budget=budget,
+                expires_at=_now() + PREVIEW_TTL,
+                sent_at=_now(),
+            )
+            db.add(row)
+            db.flush()
+            db.commit()
+        payload = {
+            "action_id": row.id,
+            "marketplace": marketplace,
+            "action": action,
+            "listing_id": "__account__",
+            "confirm": True,
+            **extra,
+        }
+        return row.id, payload, use_cloud
+
+    promotion_id, payload, use_cloud = await claim_in_worker_session(
+        _start_account, _abandon_account_send)
+    finish: asyncio.Future | None = None
+    try:
+        try:
+            if use_cloud:
+                result = await cloud_marketplace.execute(
+                    marketplace,
+                    {"type": "marketplace.promote", "job_id": promotion_id, "payload": payload},
+                    timeout=180,
+                )
+            else:
+                result = await browser_bridge.request(SimpleNamespace(id=promotion_id), "marketplace.promote", payload, timeout=180)
+        except (
+            browser_bridge.BrowserBridgeError,
+            cloud_marketplace.CloudExecutionUnavailable,
+            cloud_sessions.CloudSessionError,
+        ):
+            result = None
+        finish = asyncio.ensure_future(in_worker_session(_finish_send, promotion_id, None, result))
+        return await asyncio.shield(finish)
+    except BaseException:
+        if finish is not None:
+            with contextlib.suppress(BaseException):
+                await asyncio.shield(finish)
+            if not finish.cancelled() and finish.exception() is None:
+                raise
+        await asyncio.shield(in_worker_session(_interrupted_send, promotion_id, None))
+        raise
+
+
 async def _abandon_send(promotion_id: str, started: tuple[str, dict, bool]) -> None:
     job_id = started[0]
     try:
@@ -516,7 +826,7 @@ def _start_send(db: Session, promotion_id: str, shipping_discount_id: str | None
     assert conv is not None
     if blocked := blocking(db, row.marketplace, row.listing_id, row.action, new_like_at=new_like_at):
         raise PromotionError(409, blocked)
-    if row.action == "offer":
+    if row.action in ("offer", "bundle_offer"):
         if row.offer_price_cents is None or row.floor_cents is None or row.offer_price_cents < row.floor_cents:
             raise PromotionError(409, "This offer is below your floor.")
         minimum = offer_floor(db, row)
@@ -529,7 +839,7 @@ def _start_send(db: Session, promotion_id: str, shipping_discount_id: str | None
     repo = JobRepo(db)
     listing = ListingRepo(db).get_current(conv.id)
     with listing_mode.guard(db, "direct"):
-        if repo.get_active():
+        if repo.get_active() or has_active_account_send(db):
             raise PromotionError(409, "Another automation job is queued or running. Wait for it to finish.", "busy")
         # Again under the seller's lock (shared by every Machine on Postgres):
         # a send another Machine finished since the check above stops this one.
@@ -543,13 +853,23 @@ def _start_send(db: Session, promotion_id: str, shipping_discount_id: str | None
     job_id = job.id
     try:
         if row.automation_id:
+            automation = db.get(PromotionAutomation, row.automation_id)
+            allowed_discounts: set[int | None] = set()
+            if automation is not None:
+                allowed_discounts.add(automation.discount_percent)
+                for step in automation.waterfall_steps or []:
+                    if isinstance(step, dict) and isinstance(step.get("discount_percent"), int):
+                        allowed_discounts.add(step["discount_percent"])
             # Committed with ``sending`` below, so a pause either lands first and stops this send or waits for it.
             approval = update(PromotionAutomation).where(
                 PromotionAutomation.id == row.automation_id, PromotionAutomation.enabled.is_(True),
             )
-            if row.action == "offer":
+            if row.action in ("offer", "bundle_offer"):
+                if row.discount_percent not in allowed_discounts:
+                    db.rollback()
+                    repo.update_status(job_id, "failed", STEP, error="The automation discount changed before this was sent.")
+                    raise PromotionError(409, "This automation changed or was turned off. Nothing was sent.", "paused")
                 approval = approval.where(
-                    PromotionAutomation.discount_percent == row.discount_percent,
                     or_(PromotionAutomation.min_likes.is_(None),
                         PromotionAutomation.min_likes <= (row.like_count or 0)),
                     PromotionAutomation.shipping_label == (row.shipping_discount_label if row.shipping_discount_id else None),
@@ -563,12 +883,22 @@ def _start_send(db: Session, promotion_id: str, shipping_discount_id: str | None
                 raise PromotionError(409, "This automation changed or was turned off. Nothing was sent.", "paused")
         # Durable before Cloud or Chrome is asked: a crash from here on is unknown, never resent.
         row.state, row.job_id, row.sent_at = "sending", job_id, _now()
-        payload = {"action_id": row.id, "marketplace": row.marketplace, "action": row.action, "listing_id": row.listing_id,
-                   "confirm": True, "price_cents": row.price_cents, "offer_price_cents": row.offer_price_cents,
-                   "floor_cents": row.floor_cents, "shipping_discount_id": row.shipping_discount_id}
+        payload: dict = {"action_id": row.id, "marketplace": row.marketplace, "action": row.action, "listing_id": row.listing_id,
+                         "confirm": True, "price_cents": row.price_cents, "offer_price_cents": row.offer_price_cents,
+                         "floor_cents": row.floor_cents, "shipping_discount_id": row.shipping_discount_id}
+        if row.action == "bundle_offer":
+            if row.discount_percent is not None:
+                payload["discount_percent"] = row.discount_percent
+            if row.waterfall_step is not None:
+                payload["waterfall_step"] = row.waterfall_step
+            payload["bundle_item_floors"] = _poshmark_bundle_floors(db, row)
         db.commit()
-        repo.add_event(job_id, "native_progress", STEP, {"marketplace": payload["marketplace"], "step": payload["action"],
-                                                         "label": "Sharing" if payload["action"] == "share" else "Sending offer"})
+        label = (
+            "Sharing" if payload["action"] == "share"
+            else "Sending bundle offer" if payload["action"] == "bundle_offer"
+            else "Sending offer"
+        )
+        repo.add_event(job_id, "native_progress", STEP, {"marketplace": payload["marketplace"], "step": payload["action"], "label": label})
     except PromotionError:
         release_api_job(job_id)
         raise
@@ -581,23 +911,25 @@ def _start_send(db: Session, promotion_id: str, shipping_discount_id: str | None
     return job_id, payload, use_cloud
 
 
-def _finish_send(db: Session, promotion_id: str, job_id: str, result: dict | None) -> dict:
+def _finish_send(db: Session, promotion_id: str, job_id: str | None, result: dict | None) -> dict:
     row = _get(db, promotion_id)
     _settle(row, result)
     error_code = (result or {}).get("error_code")
     db.commit()
-    JobRepo(db).update_status(job_id, "completed" if row.state == "done" else "failed", STEP,
-                              error=None if row.state == "done" else (row.note or "")[:300])
+    if job_id is not None:
+        JobRepo(db).update_status(job_id, "completed" if row.state == "done" else "failed", STEP,
+                                  error=None if row.state == "done" else (row.note or "")[:300])
     return {**out(row), "error_code": error_code, "stop": error_code in STOP_CODES}
 
 
-def _interrupted_send(db: Session, promotion_id: str, job_id: str) -> None:
+def _interrupted_send(db: Session, promotion_id: str, job_id: str | None) -> None:
     db.rollback()
     fresh = db.get(ListingPromotion, promotion_id)
     if fresh and fresh.state == "sending":
         fresh.state, fresh.note = "unknown", UNKNOWN_NOTE
         db.commit()
-    JobRepo(db).update_status(job_id, "failed", STEP, error="The action stopped before it finished.")
+    if job_id is not None:
+        JobRepo(db).update_status(job_id, "failed", STEP, error="The action stopped before it finished.")
 
 
 def _settle(row: ListingPromotion, result: dict | None) -> None:
@@ -607,7 +939,49 @@ def _settle(row: ListingPromotion, result: dict | None) -> None:
     elif result.get("ok") is True and result.get("state") == "done":
         row.state = "done"
         if row.action == "share":
-            row.note = "Shared to your followers."
+            mode = str(result.get("share_mode") or "self")
+            if mode == "party":
+                row.note = "Shared to the active Posh Party."
+            elif mode == "community":
+                count = result.get("recipient_count")
+                if type(count) is int and count >= 0:
+                    row.recipient_count = count
+                    row.follow_budget = {"max_shares": count}
+                    row.note = f"Returned {count} community shares."
+                else:
+                    row.recipient_count = None
+                    row.note = "Shared community listings."
+            else:
+                row.note = "Shared to your followers."
+            return
+        if row.action == "follow":
+            followed = result.get("followed_count")
+            unfollowed = result.get("unfollowed_count")
+            actual = {"active": result.get("active_followed_count"), "followed": followed, "unfollowed": unfollowed}
+            reserved = row.follow_budget
+            if reserved is not None and all(type(value) is int and 0 <= value <= reserved[key]
+                                            for key, value in actual.items()):
+                row.follow_budget = {key: type_cast(int, value) for key, value in actual.items()}
+            row.recipient_count = followed if type(followed) is int else None
+            row.note = f"Followed {followed} and unfollowed {unfollowed} Poshmark accounts."
+            return
+        if row.action == "bundle_offer":
+            count = result.get("recipient_count")
+            row.recipient_count = count if isinstance(count, int) else None
+            bundle_total = result.get("bundle_total_price_cents")
+            if type(bundle_total) is int and bundle_total > 0:
+                row.price_cents = bundle_total
+            bundle_offer = result.get("bundle_offer_price_cents")
+            if type(bundle_offer) is int and bundle_offer > 0:
+                row.offer_price_cents = bundle_offer
+            bundle_floor = result.get("bundle_floor_cents")
+            if type(bundle_floor) is int and bundle_floor > 0:
+                row.floor_cents = bundle_floor
+            row.buyer_handle = str(result.get("buyer_handle") or "")[:120] or None
+            row.confirmation = str(result.get("confirmation") or "request_accepted")
+            price = dollars(row.offer_price_cents) if row.offer_price_cents is not None else ""
+            step_label = f" (waterfall step {row.waterfall_step})" if row.waterfall_step else ""
+            row.note = f"Poshmark accepted the ${price} private bundle offer{step_label}."
             return
         assert row.offer_price_cents is not None
         price = dollars(row.offer_price_cents)
@@ -634,6 +1008,11 @@ def _settle(row: ListingPromotion, result: dict | None) -> None:
         row.state = "failed"
         row.note = str(result.get("error") or "The marketplace refused this.")[:300]
         row.marketplace_message = scrub(result.get("marketplace_message"))
+        if row.listing_id == "__account__":
+            if row.action == "follow":
+                row.follow_budget = {"active": 0, "followed": 0, "unfollowed": 0}
+            elif row.action == "share":
+                row.follow_budget = {"max_shares": 0}
     else:
         row.state, row.note = "unknown", UNKNOWN_NOTE
         row.marketplace_message = scrub(result.get("marketplace_message"))
@@ -663,14 +1042,22 @@ def _check_target(db: Session, promotion_id: str) -> tuple[dict | None, str, dic
         return out(row), "", None
     executor = None
     if row.job_id:
-        job = JobRepo(db).get(row.job_id)
-        if job and isinstance(job.listing_snapshot, dict):
-            promo = job.listing_snapshot.get("promotion")
-            if isinstance(promo, dict):
-                executor = promo.get("executor")
-    if executor == "cloud":
+        if row.job_id.startswith("cloud-account:"):
+            executor = "cloud"
+        elif row.job_id.startswith("chrome-account:"):
+            executor = "chrome"
+        else:
+            job = JobRepo(db).get(row.job_id)
+            if job and isinstance(job.listing_snapshot, dict):
+                promo = job.listing_snapshot.get("promotion")
+                if isinstance(promo, dict):
+                    executor = promo.get("executor")
+    if executor == "cloud" or (not row.job_id and row.listing_id == "__account__"):
         journals = cloud_sessions.load_journals(db, row.marketplace)
         stored = journals.get(f"promotion_{promotion_id}")
+        if executor != "cloud" and stored is None:
+            # Account actions can also run in Chrome; consult its journal next.
+            return None, row.id, None
         answer = {
             "ok": True,
             "known": stored is not None,
@@ -687,7 +1074,9 @@ def _record_check(db: Session, promotion_id: str, answer: dict) -> dict:
         return out(row)
     # Check replies can arrive out of order. Stage their changes separately,
     # then fence the write so a verified completion or manual check wins.
-    staged = ListingPromotion(action=row.action, marketplace=row.marketplace, offer_price_cents=row.offer_price_cents,
+    staged = ListingPromotion(action=row.action, marketplace=row.marketplace, listing_id=row.listing_id,
+                              price_cents=row.price_cents, offer_price_cents=row.offer_price_cents,
+                              floor_cents=row.floor_cents, follow_budget=row.follow_budget,
                               state=row.state, note=row.note, marketplace_message=row.marketplace_message,
                               confirmation=row.confirmation, recipient_count=row.recipient_count, finished_at=row.finished_at)
     if answer.get("finished") and isinstance(answer.get("result"), dict):
@@ -696,7 +1085,9 @@ def _record_check(db: Session, promotion_id: str, answer: dict) -> dict:
         staged.note = ("Chrome started this but has no result. " if answer.get("known") else "Chrome has no record of this. ") + UNKNOWN_NOTE
     db.execute(update(ListingPromotion).where(ListingPromotion.id == promotion_id, ListingPromotion.state == "unknown").values(
         state=staged.state, note=staged.note, marketplace_message=staged.marketplace_message,
-        confirmation=staged.confirmation, recipient_count=staged.recipient_count, finished_at=staged.finished_at))
+        confirmation=staged.confirmation, recipient_count=staged.recipient_count, finished_at=staged.finished_at,
+        price_cents=staged.price_cents, offer_price_cents=staged.offer_price_cents, floor_cents=staged.floor_cents,
+        follow_budget=staged.follow_budget))
     db.commit()
     db.refresh(row)
     return out(row)
