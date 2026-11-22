@@ -674,7 +674,11 @@ function StudioTools({ convId, photo, photos, unsaved, onSaved, onRunning, onReb
   onDone: () => void;
 }) {
   const mounted = useRef(true);
-  useEffect(() => () => { mounted.current = false; }, []);
+  useEffect(() => {
+    // Set on every mount: StrictMode mounts, unmounts and mounts again in development.
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const { data: key } = useQuery({ queryKey: ["settings-photoroom"], queryFn: api.settings.photoroom, staleTime: 60_000 });
   const [choice, setChoice] = useState<StudioChoice>({
     removeBackground: true, background: DEFAULT_BACKDROP, effect: "none", shadow: false,
