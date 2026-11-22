@@ -76,6 +76,11 @@ struct InventoryView: View {
                 path = open.map { [$0] } ?? []
             }
         }
+        // Back on the list, the next row opens on General. A tap gesture on the
+        // row would do this too, but it takes the tap from the row's link.
+        .onChange(of: path.isEmpty) { _, empty in
+            if empty { preferredEditorTab = "general" }
+        }
         .onChange(of: model.listings.map(\.id)) { _, ids in
             if let listing = open, !ids.contains(listing.id) { open = nil }
             if let id = quickEditListingID, !ids.contains(id) { quickEditListingID = nil }
@@ -118,7 +123,6 @@ struct InventoryView: View {
             } else {
                 row.frame(maxWidth: .infinity, alignment: .leading)
                     .background { NavigationLink(value: listing) { EmptyView() }.opacity(0) }
-                    .simultaneousGesture(TapGesture().onEnded { preferredEditorTab = "general" })
             }
             if !selecting {
                 Menu { actions(listing) } label: {

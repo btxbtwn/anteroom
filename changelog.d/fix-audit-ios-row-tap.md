@@ -1,0 +1,1 @@
+- On iPhone, tapping a listing in Inventory opens it again.
