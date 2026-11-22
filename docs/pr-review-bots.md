@@ -33,7 +33,10 @@ workflow.
    token would start no CI), and the action's wrapper only pushes to the PR's
    branch. Claude cannot edit `.github/`, `anteroom/VERSION` or `CHANGELOG.md`.
    `post-autofix` then:
-   - turns auto-merge back on if it was on and nothing was pushed;
+   - counts a finding as fixed only when Claude's own commit is on the branch;
+   - turns auto-merge back on only if it was on, nothing was pushed, nothing
+     blocks, and the branch is still at the commit it checked (the request
+     names that commit, so it cannot apply to a newer one);
    - flags a pushed change to a protected path as blocking;
    - replies in every finding's thread and posts the round's result.
 3. The fix commit starts the next review, which marks addressed findings and

@@ -12,9 +12,9 @@ the model a write token:
                    inline findings, mark fixed findings "Addressed"
   prepare-autofix  collect open Claude and Codex findings, enforce the
                    repair-round limit
-  post-autofix     find the fix commit Claude pushed, restore auto-merge when
-                   nothing was pushed, reply to every finding and post the
-                   round's result
+  post-autofix     check that Claude's fix commit reached the branch, reply to
+                   every finding, restore auto-merge only when nothing was
+                   pushed and nothing blocks, and post the round's result
 
 See docs/pr-review-bots.md.
 """
@@ -417,8 +417,8 @@ def render_autofix_result(state: dict, *, blocking: str | None, auto_merge_disab
         lines = ["**Auto-fix finished and the readiness conditions were satisfied.**"]
     if auto_merge_disabled:
         lines.append(
-            "Auto-merge was turned off before the fix was pushed. Queue the PR again once "
-            "the new commit has passed CI and review."
+            "Auto-merge was turned off for this round and stays off. Queue the PR again once "
+            "its current commit has passed CI and review and nothing blocks it."
         )
     lines.append(
         f"Round {state.get('round', 0)} of {MAX_ROUNDS}. This is the auto-fix result for commit "
@@ -448,6 +448,32 @@ def render_autofix_reply(result: dict, *, head: str, fixed_in: str | None) -> st
 
 def protected_changes(paths: list[str]) -> list[str]:
     return [p for p in paths if any(p.startswith(g) if g.endswith("/") else p == g for g in PROTECTED_PATHS)]
+
+
+def classify_push(head_before: str, local: str, remote: str, local_on_remote: bool) -> tuple[bool, str | None]:
+    """Whether Claude's own fix commit reached the branch, and what blocks if not."""
+    if local != head_before and local_on_remote:
+        return True, None
+    if local != head_before:
+        return False, "Claude committed a fix, but it is not on the pull request's branch."
+    if remote != head_before:
+        return False, "The branch changed while auto-fix ran."
+    return False, None
+
+
+def should_restore_auto_merge(was_queued: bool, pushed: bool, blocking: str | None, remote: str, head: str) -> bool:
+    return was_queued and not pushed and not blocking and remote == head
+
+
+def restore_auto_merge(pr: int, head: str) -> None:
+    """Queue auto-merge again, only while the branch is still at `head`."""
+    node_id = api(f"repos/{repo()}/pulls/{pr}")["node_id"]
+    graphql(
+        "mutation($id: ID!, $oid: GitObjectID!) { enablePullRequestAutoMerge(input: "
+        "{pullRequestId: $id, expectedHeadOid: $oid, mergeMethod: MERGE}) { clientMutationId } }",
+        id=node_id,
+        oid=head,
+    )
 
 
 # --- Commands ------------------------------------------------------------------
@@ -592,29 +618,17 @@ def post_autofix(args) -> None:
     git("fetch", "--quiet", "origin", f"refs/heads/{args.branch}")
     remote = git("rev-parse", "FETCH_HEAD").strip()
     local = git("rev-parse", "HEAD").strip()
-    pushed = remote != head_before and is_ancestor(head_before, remote)
-    head_after = remote if pushed else head_before
-    blocking = None
+    pushed, blocking = classify_push(head_before, local, remote, is_ancestor(local, remote))
+    head_after = local if pushed else head_before
     if pushed:
-        forbidden = protected_changes(changed_paths(head_before, remote))
+        forbidden = protected_changes(changed_paths(head_before, local))
         if forbidden:
             blocking = f"The fix changed protected paths ({', '.join(forbidden)}); revert those changes."
-    elif local != head_before:
-        blocking = "Claude committed a fix but did not push it."
-    elif remote != head_before:
-        blocking = "The branch was rewritten while auto-fix ran."
-    if not pushed:
+    else:
         for r in results.values():
             if r["outcome"] == "fixed":
                 r["outcome"] = "not_fixed"
                 r["explanation"] += " (The fix was not pushed.)"
-
-    # Auto-merge was paused before Claude ran. A new commit needs its own CI
-    # and review, so it stays off; with nothing pushed it goes back on.
-    was_queued = os.environ.get("WAS_QUEUED") == "true"
-    if was_queued and not pushed:
-        run("gh", "pr", "merge", str(ctx["pr"]), "--auto", "--merge", "--repo", repo())
-    auto_merge_disabled = was_queued and pushed
 
     for comment_id, result in results.items():
         body = render_autofix_reply(result, head=head_after, fixed_in=head_after if pushed else None)
@@ -623,10 +637,21 @@ def post_autofix(args) -> None:
     unresolved = [cid for cid, r in results.items() if r["outcome"] == "not_fixed"]
     if not blocking and unresolved:
         blocking = data.get("blocking") or f"{len(unresolved)} finding(s) could not be fixed automatically."
+    # Auto-merge was paused before Claude ran. It comes back only for the
+    # exact commit this round checked, with nothing pushed and nothing left
+    # blocking; a new commit needs its own CI and review first.
+    was_queued = os.environ.get("WAS_QUEUED") == "true"
+    auto_merge_off = was_queued
+    if should_restore_auto_merge(was_queued, pushed, blocking, remote, head_before):
+        try:
+            restore_auto_merge(ctx["pr"], head_before)
+            auto_merge_off = False
+        except (subprocess.CalledProcessError, RuntimeError) as error:
+            print(f"Could not turn auto-merge back on: {error}", file=sys.stderr)
     state = {"head": head_after, "pushed": pushed, "open": unresolved,
              "round": ctx["round"], "reason": "blocked" if blocking else "ready"}
     api(f"repos/{repo()}/issues/{ctx['pr']}/comments", "POST",
-        {"body": render_autofix_result(state, blocking=blocking, auto_merge_disabled=auto_merge_disabled)})
+        {"body": render_autofix_result(state, blocking=blocking, auto_merge_disabled=auto_merge_off)})
 
 
 def main() -> None:

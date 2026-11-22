@@ -147,6 +147,22 @@ class AutofixTests(unittest.TestCase):
         self.assertIn("Auto-merge was turned off", result)
         self.assertIn("Round 2 of 3", result)
 
+    def test_fixed_needs_claudes_own_commit_on_the_branch(self):
+        self.assertEqual(bot.classify_push("a", "fix", "fix", True), (True, None))
+        self.assertEqual(bot.classify_push("a", "fix", "later", True), (True, None))
+        pushed, blocking = bot.classify_push("a", "fix", "maintainer", False)
+        self.assertFalse(pushed)
+        self.assertIn("not on the pull request's branch", blocking)
+        self.assertEqual(bot.classify_push("a", "a", "other", False), (False, "The branch changed while auto-fix ran."))
+        self.assertEqual(bot.classify_push("a", "a", "a", True), (False, None))
+
+    def test_auto_merge_returns_only_for_the_unchanged_unblocked_head(self):
+        self.assertTrue(bot.should_restore_auto_merge(True, False, None, "a", "a"))
+        self.assertFalse(bot.should_restore_auto_merge(False, False, None, "a", "a"))
+        self.assertFalse(bot.should_restore_auto_merge(True, True, None, "b", "a"))
+        self.assertFalse(bot.should_restore_auto_merge(True, False, "1 finding left", "a", "a"))
+        self.assertFalse(bot.should_restore_auto_merge(True, False, None, "b", "a"))
+
     def test_protected_paths(self):
         self.assertEqual(
             bot.protected_changes([".github/workflows/ci.yml", "anteroom/VERSION", "anteroom/VERSIONS.md", "CHANGELOG.md", "docs/x.md"]),
