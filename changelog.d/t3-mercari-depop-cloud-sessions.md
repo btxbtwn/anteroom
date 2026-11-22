@@ -1,0 +1,2 @@
+- Connect Mercari and Depop in Cloud so listing actions, inventory imports, sales checks, and offers can run with Chrome closed.
+- Test marketplace cloud sign-ins in Connections and resume eligible automations when you reconnect.

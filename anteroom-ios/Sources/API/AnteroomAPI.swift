@@ -1079,6 +1079,18 @@ final class AnteroomAPI: Sendable {
 
     // MARK: Marketplaces
 
+    func marketplaceCloudSessions() async throws -> MarketplaceCloudSessions {
+        try await decode(request("GET", "api/cloud-sessions"))
+    }
+
+    func verifyMarketplaceCloudSession(_ marketplace: String) async throws -> MarketplaceCloudResult {
+        try await decode(request("POST", "api/cloud-sessions/\(marketplace)/verify"))
+    }
+
+    func disconnectMarketplaceCloudSession(_ marketplace: String) async throws {
+        _ = try await send(request("DELETE", "api/cloud-sessions/\(marketplace)"))
+    }
+
     func marketplaceAccounts() async throws -> DirectConnections {
         try await decode(request("GET", "api/marketplace-accounts"))
     }

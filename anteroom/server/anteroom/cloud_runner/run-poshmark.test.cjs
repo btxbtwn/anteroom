@@ -5,13 +5,13 @@ const assert = require('node:assert/strict');
 const { spawn } = require('node:child_process');
 const path = require('node:path');
 const {
-  executePoshmarkOperation,
+  executeMarketplaceOperation,
   isAllowedHost,
   isPoshmarkCookieHost,
   assertAllowedUrl,
   buildCookieJar,
-  createPoshmarkFetch,
-} = require('./run-poshmark.cjs');
+  createMarketplaceFetch,
+} = require('./marketplace-runner.cjs');
 
 function makeJwt(claims) {
   const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
@@ -81,7 +81,7 @@ test('host allowlist and cookie hygiene', async () => {
 
   const jar = buildCookieJar(makePoshmarkCookies('aaaaaaaaaaaaaaaaaaaaaaaa'));
   const seen = [];
-  const fetchFn = createPoshmarkFetch({
+  const fetchFn = createMarketplaceFetch({
     jar,
     userAgent: 'TestChrome/131',
     httpFetch: async (url, init) => {
@@ -129,7 +129,7 @@ test('confirmation gates refuse unconfirmed mutations with zero network calls', 
     { type: 'marketplace.delete', job_id: 'j3', payload: { marketplace: 'poshmark', listing_id: 'cccccccccccccccccccccccc' } },
     { type: 'marketplace.promote', job_id: 'j4', payload: { marketplace: 'poshmark', action: 'share', listing_id: 'cccccccccccccccccccccccc', action_id: 'act-123456' } },
   ]) {
-    const out = await executePoshmarkOperation({ command, cookies, httpFetch });
+    const out = await executeMarketplaceOperation({ command, cookies, httpFetch });
     assert.equal(out.result.ok, false);
     assert.equal(out.result.safe_to_retry, true);
     assert.equal(out.result.error_code, 'rejected');
@@ -161,12 +161,12 @@ test('seller isolation and Set-Cookie persistence across operations', async () =
   };
 
   const [resA, resB] = await Promise.all([
-    executePoshmarkOperation({
+    executeMarketplaceOperation({
       command: { type: 'marketplace.verify_session', payload: { marketplace: 'poshmark' } },
       cookies: makePoshmarkCookies(sellerA),
       httpFetch,
     }),
-    executePoshmarkOperation({
+    executeMarketplaceOperation({
       command: { type: 'marketplace.verify_session', payload: { marketplace: 'poshmark' } },
       cookies: makePoshmarkCookies(sellerB),
       httpFetch,
@@ -185,7 +185,7 @@ test('seller isolation and Set-Cookie persistence across operations', async () =
 });
 
 test('live session verification reports a rejected unexpired session as expired', async () => {
-  const out = await executePoshmarkOperation({
+  const out = await executeMarketplaceOperation({
     command: { type: 'marketplace.verify_session', payload: { marketplace: 'poshmark' } },
     cookies: makePoshmarkCookies('111111111111111111111111'),
     httpFetch: async () => mockResponse({ status: 401, body: 'Unauthorized' }),
@@ -196,7 +196,7 @@ test('live session verification reports a rejected unexpired session as expired'
 
 test('write-ahead journal failure blocks Poshmark mutation cleanly', async () => {
   let networkCalls = 0;
-  const out = await executePoshmarkOperation({
+  const out = await executeMarketplaceOperation({
     command: {
       type: 'marketplace.execute',
       job_id: 'job-wa-1',
@@ -255,7 +255,7 @@ test('CLI subprocess runs marketplace.sessions over stdin/stdout NDJSON', async 
 });
 
 test('selected video is refused before creating a cloud draft', async () => {
-  const out = await executePoshmarkOperation({
+  const out = await executeMarketplaceOperation({
     command: { type: 'marketplace.execute', payload: { action: 'list', confirm: true, marketplace: 'poshmark',
       listing: { poshmark_specifics: { videoId: 'selected' } } } },
     httpFetch: () => assert.fail('must not create a draft'),

@@ -225,10 +225,6 @@ struct MarketplaceActionsView: View {
                 if row.tone == .busy { ProgressView().controlSize(.small) }
                 Text(row.label).font(.subheadline.weight(.medium)).foregroundStyle(color(row.tone))
             }
-            if MarketplaceActions.throughChrome.contains(row.marketplace) {
-                Text("Requires desktop Chrome with Bridge connected")
-                    .font(.footnote).foregroundStyle(WorkspaceStyle.mutedText)
-            }
             if let detail = row.detail { Text(detail).font(.footnote).foregroundStyle(WorkspaceStyle.mutedText) }
             // Anteroom's own words lead; the marketplace's raw reply is there for whoever wants it.
             if let said = row.said {
