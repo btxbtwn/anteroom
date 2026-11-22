@@ -370,7 +370,7 @@ def apply_price_policy(previous: dict, submitted: dict) -> None:
         previous_amount = money(get_path(previous, path)) if get_path(previous, path) is not None else None
         submitted_amount = money(get_path(submitted, path)) if get_path(submitted, path) is not None else None
         touched = path in edited
-        if touched and submitted_amount is not None and new is not None and submitted_amount != new:
+        if touched and submitted_amount is not None and submitted_amount != new:
             locks.add(path)
             continue
         if touched and (submitted_amount is None or (new is not None and submitted_amount == new)):

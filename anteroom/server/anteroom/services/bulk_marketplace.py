@@ -90,6 +90,18 @@ def _token(action: str, marketplaces: list[str], basis: str) -> str:
     return hashlib.sha256(json.dumps([action, marketplaces, basis]).encode()).hexdigest()
 
 
+def _same_price(db: Session, marketplace: str, record: dict, revision_id: str | None) -> bool:
+    from anteroom.services.seller_overrides import money, price_for
+
+    listed_price = money(record.get("listed_price"))
+    if listed_price is None:
+        # Legacy records without a confirmed price still rely on revision identity.
+        return True
+    revision = ListingRepo(db).get_revision(revision_id)
+    current_price = money(price_for(revision.listing_json if revision else None, marketplace))
+    return current_price is None or current_price == listed_price
+
+
 def review_row(db: Session, conv_id: str, action: str, marketplaces: list[str]) -> dict:
     """What ``action`` would do for one item on the named marketplaces, with a token for exactly that."""
     from anteroom.services.automations import approval_snapshot
@@ -117,7 +129,8 @@ def review_row(db: Session, conv_id: str, action: str, marketplaces: list[str]) 
         record = records.get(marketplace) or {}
         reason = _target_reason(action, marketplace, known.get(marketplace) or {}, record)
         if (not reason and action == "update" and record.get("state") == "published"
-                and record.get("revision_id") and record.get("revision_id") == row["revision_id"]):
+                and record.get("revision_id") and record.get("revision_id") == row["revision_id"]
+                and _same_price(db, marketplace, record, row["revision_id"])):
             reason = f"Already up to date on {_name(marketplace)}."
         if reason:
             row["skipped"].append({"marketplace": marketplace, "reason": reason})
@@ -134,8 +147,11 @@ def review_row(db: Session, conv_id: str, action: str, marketplaces: list[str]) 
 def preview(db: Session, body: PreviewRequest) -> dict:
     """Review only. Nothing is sent to a marketplace."""
     marketplaces: list[str] = [*dict.fromkeys(body.marketplaces)]
-    return {"action": body.action, "marketplaces": marketplaces,
-            "rows": [review_row(db, conv_id, body.action, marketplaces) for conv_id in dict.fromkeys(body.conversation_ids)]}
+    from anteroom.services.pricing_rules import freeze_active_rules
+
+    with freeze_active_rules():
+        return {"action": body.action, "marketplaces": marketplaces,
+                "rows": [review_row(db, conv_id, body.action, marketplaces) for conv_id in dict.fromkeys(body.conversation_ids)]}
 
 
 async def perform(body: PerformRequest) -> dict:

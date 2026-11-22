@@ -377,3 +377,22 @@ def test_bulk_list_runs_beside_another_item_but_delist_waits(db, client, calls, 
     assert response.status_code == 200, response.text
     assert response.json()["ok"] is True
     assert bulk_marketplace._running == {"another-item"}
+
+
+def test_update_reviews_a_changed_effective_price_on_the_same_revision(db, client, monkeypatch):
+    from anteroom.services import pricing_rules
+
+    conv = _item(db, live_on_ebay=True)
+    current = ListingRepo(db).get_current(conv.id)
+    MarketplaceListingRepo(db).save(conv.id, "ebay", {"revision_id": current.current_revision_id, "listed_price": 44})
+    config = pricing_rules.normalize({"enabled": True, "rules": {"ebay": {"percent": 10, "fixed": 0}}})
+    monkeypatch.setattr(pricing_rules, "get_pricing_rules", lambda: config)
+    assert _preview(client, [conv.id], "update", ["ebay"])[0]["review_token"] is None
+
+    config = pricing_rules.normalize({"enabled": True, "rules": {"ebay": {"percent": 20, "fixed": 0}}})
+    changed = _preview(client, [conv.id], "update", ["ebay"])[0]
+    assert changed["revision_id"] == current.current_revision_id
+    assert changed["marketplaces"] == ["ebay"]
+    assert changed["review_token"]
+    config["enabled"] = False
+    assert _perform(client, _body(changed)).status_code == 409

@@ -54,6 +54,7 @@ export function PricingRulesSection() {
     onSuccess: (payload) => {
       queryClient.setQueryData(["settings-pricing-rules"], payload);
       setDrafts({});
+      void queryClient.invalidateQueries({ queryKey: ["native-editor-form"] });
       // Drift warnings on every row follow the new rules.
       void queryClient.invalidateQueries({ queryKey: ["conversations"] });
     },

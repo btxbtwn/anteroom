@@ -237,3 +237,15 @@ def test_unlocked_poshmark_anchor_uses_whole_dollars():
     assert price_for(listing, "ebay") == 26
     assert sync_unlocked_prices(listing)
     assert listing["poshmark_specifics"]["poshmarkPrice"] == 26
+
+
+def test_price_typed_while_the_rule_yields_no_price_stays_an_override():
+    turn_on(ebay={"percent": 10, "fixed": 0, "rounding": "none"})
+    saved = {"price": 20, "ebay_specifics": {"price": 20}}
+    assert sync_unlocked_prices(saved)
+    turn_on(ebay={"percent": 0, "fixed": -50, "rounding": "none"})
+    edited = prepare_user_listing(saved, {**saved, "ebay_specifics": {"price": 19}})
+    turn_on(ebay={"percent": 20, "fixed": 0, "rounding": "none"})
+    renamed = prepare_user_listing(edited, {**edited, "title": "Renamed"})
+    assert "ebay_specifics.price" in renamed["seller_fields"]
+    assert price_for(renamed, "ebay") == 19

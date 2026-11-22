@@ -4,7 +4,7 @@ import type { MarketplaceFormField } from "../api/types";
 import { StructuredEditor } from "./ListingEditor";
 
 const { state, choices, inventories } = vi.hoisted(() => ({
-  state: { fields: [] as MarketplaceFormField[] },
+  state: { fields: [] as MarketplaceFormField[], rulesEnabled: false },
   choices: vi.fn(),
   inventories: vi.fn(),
 }));
@@ -13,7 +13,7 @@ vi.mock("@tanstack/react-query", async original => ({
   useQuery: ({ queryKey }: { queryKey: string[] }) => ({
     data: queryKey[0] === "native-editor-form"
       ? { marketplace: "mercari", native: true, fields: state.fields }
-      : undefined,
+      : queryKey[0] === "settings-pricing-rules" ? { enabled: state.rulesEnabled } : undefined,
   }),
   useMutation: () => ({ mutate: vi.fn(), isPending: false }),
   useQueryClient: () => ({ setQueryData: vi.fn() }),
@@ -31,14 +31,15 @@ function field(path: string, extra: Partial<MarketplaceFormField> = {}): Marketp
     selection_only: false, section: "Details", ...extra };
 }
 
-function render(disabled = false, onChange = vi.fn()) {
-  return renderToStaticMarkup(<StructuredEditor convId="item" listing={{ title: "Original" }} tab="mercari"
+function render(disabled = false, onChange = vi.fn(), listing = { title: "Original" }) {
+  return renderToStaticMarkup(<StructuredEditor convId="item" listing={listing} tab="mercari"
     target={null} disabled={disabled} onChange={onChange} />);
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   state.fields = [];
+  state.rulesEnabled = false;
 });
 
 describe("native row layout", () => {
@@ -47,6 +48,13 @@ describe("native row layout", () => {
     const html = render();
     expect(html).toContain('value="Original"');
     expect(choices.mock.calls[0][0].value).toBe("Nike");
+  });
+
+  it("renders the native rule price in the editable control", () => {
+    state.rulesEnabled = true;
+    state.fields = [field("mercari_specifics.price", { label: "Mercari price", value: 24, input_type: "number" })];
+    const listing = { title: "Original", price: 20, mercari_specifics: { price: 22 } };
+    expect(render(false, vi.fn(), listing)).toMatch(/data-listing-field="mercari_specifics.price"[^>]*value="24"/);
   });
 
   it("uses native widths even for Category and preserves heading and field order", () => {

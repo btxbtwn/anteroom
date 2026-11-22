@@ -1,3 +1,6 @@
+import { MARKETPLACE_PRICE_KEYS } from "../components/nativeFieldCommit";
+import { getListingEditorValue } from "../listingPaths";
+import type { PricingRules } from "./listingRules";
 import type { QueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import { invalidateSheetForListing, refreshInventory } from "./inventoryRefresh";
@@ -5,6 +8,12 @@ import { ApiRequestError } from "./transport";
 import type { ConversationSummary, ListingData, ListingDocument } from "./types";
 import { listingCategorySignature } from "../components/nativeFormStability";
 import { notifyUnsavedWork, registerUnsavedWork } from "../lib/unsavedWork";
+
+function priceInputs(listing: ListingData | undefined): string {
+  const locks = sellerLocks(listing?.seller_fields).filter(path => /price$/i.test(path));
+  return JSON.stringify([listing?.price, listing?._price_followers, locks.map(path => [path, getListingEditorValue(listing, path)]),
+    Object.values(MARKETPLACE_PRICE_KEYS).map(path => getListingEditorValue(listing, path))]);
+}
 
 function sellerLocks(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((path): path is string => typeof path === "string") : [];
@@ -144,6 +153,10 @@ class ListingEdits {
         });
         if (listingCategorySignature(previous?.listing) !== listingCategorySignature(result.listing)) {
           void this.client.invalidateQueries({ queryKey: ["listing-fields", this.id] });
+        }
+        if (this.client.getQueryData<PricingRules>(["settings-pricing-rules"])?.enabled
+            && priceInputs(previous?.listing) !== priceInputs(result.listing)) {
+          void this.client.invalidateQueries({ queryKey: ["native-editor-form", this.id] });
         }
         invalidateSheetForListing(this.client, this.id);
         if (!pending) {
