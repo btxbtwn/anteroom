@@ -239,6 +239,8 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   const steered = useRef(new WeakSet<AbortController>());
   const visibleAnswer = useRef<AbortController | null>(null);
   const preparingAsk = useRef(false);
+  /** The answer on screen has reached the server, so cutting it off cannot lose its question. */
+  const [answerHeard, setAnswerHeard] = useState(false);
   const stopPending = useRef(false);
   const controller = useRef<AbortController | null>(null);
   const composerRef = useRef<ComposerPromptEditorHandle | null>(null);
@@ -469,6 +471,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     let asking = question !== null;
     let retrying = retry;
     setFollowing(true);
+    setAnswerHeard(false);
     const asked = turnsRef.current.length;
     const baseIds = turnsRef.current.map((turn) => turn.id);
     const startedAtMs = Date.now();
@@ -500,7 +503,10 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
           onEvent: (event: string, data: string) => {
             // Steerable only once the server has the question: cut off before
             // that, the question itself would never arrive.
-            visibleAnswer.current = abort;
+            if (visibleAnswer.current !== abort && controller.current === abort) {
+              visibleAnswer.current = abort;
+              setAnswerHeard(true);
+            }
             foldSseEvent(parts, event, data);
             paint.push(event, parts);
           },
@@ -576,6 +582,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         controller.current = null;
         setLive(null);
         setFollowing(false);
+        setAnswerHeard(false);
       }
     }
   };
@@ -619,6 +626,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         controller.current = null;
         followThread.current = null;
         setFollowing(false);
+        setAnswerHeard(false);
       }
     };
   }, [threadId]);
@@ -827,12 +835,12 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         onStop={() => { void stop(); }}
         stopLabel="Stop answering"
         queueLabel="Send when this answer is finished"
-        canSteer={Boolean(live)}
+        canSteer={Boolean(live) && answerHeard}
         editingQueued={editingQueuedId !== null}
         onCancelEdit={cancelEditQueued}
         onSendQueuedNow={() => {
           const first = queued[0];
-          if (!live || !first || first.steer || editingQueuedId) return false;
+          if (!live || !answerHeard || !first || first.steer || editingQueuedId) return false;
           sendQueuedNow(first.id);
           return true;
         }}
@@ -1027,7 +1035,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
           ) : null}
           <QueuedMessages
             queue={queued}
-            canSendNow={Boolean(live) && !editingQueuedId}
+            canSendNow={Boolean(live) && answerHeard && !editingQueuedId}
             onSendNow={sendQueuedNow}
             onEdit={startEditQueued}
             onRemove={(id) => removeChatMessage(ASSISTANT_QUEUE, id)}
