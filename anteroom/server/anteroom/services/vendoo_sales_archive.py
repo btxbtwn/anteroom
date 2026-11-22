@@ -63,7 +63,11 @@ def ensure_archived(db: Session) -> None:
                 context.settings.load(db)
         if archived():
             return
-        count = archive(db)
+        db.info["archiving_vendoo_sales"] = True
+        try:
+            count = archive(db)
+        finally:
+            db.info.pop("archiving_vendoo_sales", None)
 
         def mark(payload: dict) -> None:
             payload[ARCHIVED_KEY] = datetime.now(UTC).isoformat()

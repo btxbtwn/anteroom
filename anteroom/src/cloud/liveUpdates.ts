@@ -21,6 +21,7 @@ export const TOPIC_QUERY_KEYS: Record<string, readonly string[]> = {
     "status", "conversations", "conversation", "listing", "listing-fields", "messages", "revisions", "revision",
     "published-versions", "marketplace-listings", "marketplace-statuses", "native-marketplaces", "native-editor-form",
     "native-preflight", "listing-videos", "similar-items", "suggestions", "activity", "analytics", "sales-ledger",
+    "profit-and-loss",
   ],
   photos: ["photos", "conversations", "conversation", "listing", "marketplace-media"],
   jobs: ["status", "jobs", "queue", "fill-log", "activity", "conversations", "marketplace-statuses"],
@@ -29,12 +30,13 @@ export const TOPIC_QUERY_KEYS: Record<string, readonly string[]> = {
     "ebay-listing-defaults", "ebay-listing-profiles", "etsy-listing-defaults", "etsy-listing-profiles", "status",
   ],
   assistant: ["assistant"],
-  sales: ["marketplace-sales", "sales-ledger", "sale-calendar", "sale-detection", "analytics", "conversations"],
+  sales: ["marketplace-sales", "sales-ledger", "sale-calendar", "sale-detection", "analytics", "conversations",
+    "business-expenses", "profit-and-loss"],
   automations: [
     "automations", "automation-approvals", "automation-gaps", "promotion-automations", "promotions",
     "promotion-floors", "ebay-offers", "price-drop-preview", "offer-analytics", "offer-log",
   ],
-  sourcing: ["sourcing", "boxes", "scout"],
+  sourcing: ["sourcing", "boxes", "scout", "profit-and-loss"],
 };
 
 export function queryKeyMatchesTopic(topic: string, queryKey: QueryKey): boolean {
