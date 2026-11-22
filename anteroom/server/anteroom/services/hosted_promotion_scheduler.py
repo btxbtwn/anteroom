@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 import time
 
 from anteroom.database import SessionLocal, in_worker_session, limit_worker_db_steps, run_worker_db_step
@@ -22,9 +23,12 @@ from anteroom.services.service_context import use
 log = logging.getLogger(__name__)
 
 # Cloud sessions spawn a fresh worker subprocess and hit the marketplace's
-# recent-likes feed directly; polling every 5 minutes cuts background traffic
-# and Vault decrypts 5x while still sending offers promptly after a like.
+# recent-likes feed directly; polling roughly every 4-7 minutes (with jitter
+# and startup stagger) cuts background traffic and Vault decrypts ~5x while
+# avoiding synchronized spikes across sellers after a deploy.
 CLOUD_LIKE_CHECK_INTERVAL_S = 300.0
+CLOUD_LIKE_JITTER_RANGE = (0.8, 1.4)
+CLOUD_LIKE_INITIAL_STAGGER_S = 120.0
 
 
 def _cloud_like_check_interval_s() -> float:
@@ -86,6 +90,11 @@ async def serve() -> None:
         await check_ready_sellers(recovered)
 
 
+def _arm_next_cloud_like_check(now: float, interval: float) -> float:
+    low, high = CLOUD_LIKE_JITTER_RANGE
+    return now + max(60.0, random.uniform(interval * low, interval * high))
+
+
 def _due_cloud_like_markets(
     owner: str,
     marketplaces: tuple[str, ...],
@@ -99,10 +108,15 @@ def _due_cloud_like_markets(
     interval = _cloud_like_check_interval_s()
     due: list[str] = []
     for market in marketplaces:
-        last = like_checks.get((owner, market))
-        if last is None or (current_time - last) >= interval:
+        key = (owner, market)
+        next_due = like_checks.get(key)
+        if next_due is None:
+            stagger = random.uniform(0.0, min(interval, CLOUD_LIKE_INITIAL_STAGGER_S))
+            next_due = current_time + stagger
+            like_checks[key] = next_due
+        if current_time >= next_due:
             due.append(market)
-            like_checks[(owner, market)] = current_time
+            like_checks[key] = _arm_next_cloud_like_check(current_time, interval)
     return tuple(due)
 
 
@@ -144,10 +158,11 @@ async def check_cloud_sellers(
                 like_checks.pop(stale, None)
     if not owners_by_seller:
         return
-    await asyncio.gather(*(
-        check_cloud_seller(seller, tuple(markets), recovered, like_checks)
-        for seller, markets in owners_by_seller.items()
-    ))
+    with limit_worker_db_steps(asyncio.Semaphore(MAX_CONCURRENT_DB_STEPS)):
+        await asyncio.gather(*(
+            check_cloud_seller(seller, tuple(markets), recovered, like_checks)
+            for seller, markets in owners_by_seller.items()
+        ))
 
 
 async def serve_cloud(engine) -> None:

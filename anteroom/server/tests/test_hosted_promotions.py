@@ -257,7 +257,9 @@ def test_cloud_like_checks_pace_to_interval_while_scheduled_ticks_still_run(monk
     from anteroom.services import cloud_sessions, hosted_promotion_scheduler as scheduler, promotion_automations
 
     clock = [1000.0]
+    draws = iter([45.0, 360.0, 270.0])
     monkeypatch.setattr(scheduler.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(scheduler.random, 'uniform', lambda low, high: next(draws))
     monkeypatch.setattr(scheduler, 'for_seller', lambda owner: owner)
     monkeypatch.setattr(scheduler, 'use', lambda _ctx: nullcontext())
     monkeypatch.setattr(scheduler, 'in_worker_session', AsyncMock())
@@ -270,24 +272,33 @@ def test_cloud_like_checks_pace_to_interval_while_scheduled_ticks_still_run(monk
     recovered: set[str] = set()
     like_checks: dict[tuple[str, str], float] = {}
 
-    # First cycle checks likes and runs tick.
+    # Initial tick staggers the first like check by 45s while still running scheduled ticks.
     asyncio.run(scheduler.check_cloud_sellers(object(), recovered, like_checks))
-    assert likes.await_count == 1
+    assert likes.await_count == 0
     assert tick.await_count == 1
+    assert like_checks[(USER_ID, 'poshmark')] == 1045.0
 
-    # 60s later: like check is skipped (below 300s interval), scheduled tick still runs.
+    # Once the stagger elapses, the like check runs and arms the next jittered due time (+360s).
     clock[0] += 60.0
     asyncio.run(scheduler.check_cloud_sellers(object(), recovered, like_checks))
     assert likes.await_count == 1
     assert tick.await_count == 2
+    assert like_checks[(USER_ID, 'poshmark')] == 1420.0
 
-    # After interval elapses: like check runs again.
-    clock[0] += 240.0
+    # Before the jittered due time: like check is skipped, scheduled tick still runs.
+    clock[0] += 300.0
     asyncio.run(scheduler.check_cloud_sellers(object(), recovered, like_checks))
-    assert likes.await_count == 2
+    assert likes.await_count == 1
     assert tick.await_count == 3
 
-    # Disconnecting prunes the seller so reconnecting triggers an immediate check.
+    # After the jittered due time elapses: like check runs again.
+    clock[0] += 60.0
+    asyncio.run(scheduler.check_cloud_sellers(object(), recovered, like_checks))
+    assert likes.await_count == 2
+    assert tick.await_count == 4
+    assert like_checks[(USER_ID, 'poshmark')] == 1690.0
+
+    # Disconnecting prunes the seller so reconnecting triggers a fresh cycle.
     monkeypatch.setattr(cloud_sessions, 'active_owners', lambda _engine, _market: [])
     asyncio.run(scheduler.check_cloud_sellers(object(), recovered, like_checks))
     assert like_checks == {}
