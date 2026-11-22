@@ -104,7 +104,9 @@ def test_the_brief_summarizes_the_shop_and_points_to_the_rows(workspace):
         assert f"--- {heading}" in brief
     assert "\n30d | 1 | 48 | 32 | 1 | " in brief.split("--- Sales by range ---")[1]
     assert "\n30d Levi's | 1 | 48 | 32 | 1 | " in brief.split("--- Brands ---")[1]
-    assert '"store":"Raghouse"' in brief and '"spend":31.0' in brief
+    assert '"store":"Raghouse"' in brief.split("--- Wholesale boxes by store ---")[1]
+    assert "| Raghouse | Mixed denim |" in brief.split("--- Wholesale boxes bought")[1]
+    assert "etsy | 2026-09-01 | 2026-09-30 | 31" in brief.split("--- Ad spend the seller recorded ---")[1]
     assert "No sourcing check has finished yet" in brief.split("--- Sourcing buy list ---")[1]
     assert "--- Best boxes on the Sourcing tab (0 of 0) ---\nNo boxes in the last sourcing check." in brief
     assert "What the seller says" not in brief
@@ -263,8 +265,8 @@ def test_a_lookup_reads_the_copy_and_nothing_else(workspace, tmp_path):
     lookups = business_assistant.read_shop(db, now=NOW).lookups
 
     assert business_assistant.run_lookup(
-        lookups, "-- sold sizes\nSELECT size, sold_for, json_extract(details, '$.ebay_specifics.Rise') AS rise,"
-                 " description FROM listings WHERE status = 'sold';",
+        lookups, "-- sold sizes\nSELECT l.size, l.sold_for, json_extract(d.details, '$.ebay_specifics.Rise') AS rise,"
+                 " d.description FROM listings l JOIN listing_details d ON d.listing_id = l.id WHERE l.status = 'sold';",
     ) == "Lookup result (1 rows):\nsize | sold_for | rise | description\n34 | 48.0 | Mid | Classic straight leg denim."
     assert f"{coat.id} | 150.0 | 120.0" in business_assistant.run_lookup(
         lookups, "SELECT listing_id, old_price, new_price FROM price_changes")
@@ -400,7 +402,7 @@ def ask_through(client, monkeypatch, *turns):
     (f"{FENCE}sql\n{FENCE}", "Lookup sql failed: the sql block was empty. Put one SELECT in it."),
     (f"{FENCE}sql\n-- just a comment\n{FENCE}", "Lookup sql failed: the sql block was empty."),
     (f"{FENCE}sql\nSELECT * FROM sourcing_box\n{FENCE}",
-     "Lookup sourcing_box failed: no such table: sourcing_box. The tables are: listings, price_changes"),
+     "Lookup sourcing_box failed: no such table: sourcing_box. The tables are: listings, listing_details, price_changes"),
     (f"{FENCE}sql\nSELECT title FROM listings WHERE size = '99'\n{FENCE}",
      "Lookup result: 0 rows matched WHERE size = '99'.\ntitle"),
     (f"{FENCE}sql\nSELECT nope FROM listings\n{FENCE}", "Lookup listings failed: no such column: nope."),
@@ -592,6 +594,47 @@ def test_stop_keeps_what_was_written_and_a_second_question_waits_its_turn(worksp
 
     assert asyncio.run(scenario()) == 409
     assert [row.text for row in business_assistant.list_messages(db)] == ["What sold?", "Half of it "]
+
+
+@pytest.mark.parametrize("stop_while_streaming", [False, True], ids=["stop-during-close", "repeated-stop"])
+def test_stop_during_lookup_cleanup_preserves_streamed_text(workspace, monkeypatch, stop_while_streaming):
+    import threading
+
+    db, _client = workspace
+    release_close = threading.Event()
+    close = business_assistant.Shop.close
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        closing = asyncio.Event()
+
+        def paused_close(shop):
+            loop.call_soon_threadsafe(closing.set)
+            assert release_close.wait(5), "test did not release lookup cleanup"
+            close(shop)
+
+        monkeypatch.setattr(business_assistant.Shop, "close", paused_close)
+        provider = SlowProvider()
+        await start_answer(db, provider)
+        if stop_while_streaming:
+            first_stop = asyncio.create_task(assistant_route.stop())
+        else:
+            provider.release.set()
+            first_stop = None
+        try:
+            await asyncio.wait_for(closing.wait(), 5)
+            second_stop = asyncio.create_task(assistant_route.stop())
+            # Let the Stop handler request cancellation before releasing cleanup.
+            await asyncio.sleep(0)
+        finally:
+            release_close.set()
+        assert await asyncio.wait_for(second_stop, 5) == {"ok": True}
+        if first_stop is not None:
+            assert await asyncio.wait_for(first_stop, 5) == {"ok": True}
+
+    asyncio.run(scenario())
+    expected = "Half of it " if stop_while_streaming else "Half of it done."
+    assert [row.text for row in business_assistant.list_messages(db)] == ["What sold?", expected]
 
 
 def changes_reply(*entries):
@@ -1026,7 +1069,7 @@ def test_cancelled_lookup_records_attempt_and_wait(monkeypatch):
     clock = [0.0]
     monkeypatch.setattr(business_assistant, 'time', SimpleNamespace(monotonic=lambda: clock[0]))
 
-    async def cancelled(*_args):
+    async def cancelled(*_args, **_kwargs):
         clock[0] = 8.0
         raise asyncio.CancelledError()
 
@@ -1124,8 +1167,7 @@ def test_empty_hosted_answer_logs_after_finish(monkeypatch, caplog, failure_name
 
     caplog.set_level('INFO', logger='anteroom.assistant')
     monkeypatch.setattr(assistant_route, '_require_provider', Provider)
-    monkeypatch.setattr(assistant_route, '_prepare', lambda *_: ([], SimpleNamespace(
-        lookups=SimpleNamespace(close=lambda: None))))
+    monkeypatch.setattr(assistant_route, '_prepare', lambda *_: ([], SimpleNamespace(close=lambda: None)))
     monkeypatch.setattr(background_tasks, 'append_events', lambda *_: None)
 
     async def empty(*_):
@@ -1362,8 +1404,7 @@ def test_answer_commit_is_confirmed_before_blocked_refresh(workspace, monkeypatc
 
     monkeypatch.setattr(assistant_route, '_Journal', Journal)
     monkeypatch.setattr(assistant_route, 'SessionLocal', sessions)
-    monkeypatch.setattr(assistant_route, '_prepare', lambda *_: ([], SimpleNamespace(
-        lookups=SimpleNamespace(close=lambda: None))))
+    monkeypatch.setattr(assistant_route, '_prepare', lambda *_: ([], SimpleNamespace(close=lambda: None)))
     monkeypatch.setattr(assistant_route, '_require_provider', WaitingProvider)
     monkeypatch.setattr(background_tasks, 'EVENT_INTERVAL', .001)
     monkeypatch.setattr(background_tasks, 'append_events', append)
@@ -1410,10 +1451,530 @@ def test_listing_details_are_read_a_batch_at_a_time(workspace, monkeypatch):
     engine = db.get_bind()
     event.listen(engine, "before_cursor_execute", seen)
     try:
-        records = business_assistant._records(db, load_rows(db), NOW)
+        records, detail_rows = business_assistant._records(db, load_rows(db), NOW)
     finally:
         event.remove(engine, "before_cursor_execute", seen)
 
     assert len(statements) == 3 and all("LIMIT" in statement for statement in statements)
-    assert sorted(json.loads(record["details"])["description"] for record in records) == [
+    assert len(records) == 5
+    assert sorted(detail["details"]["description"] for detail in detail_rows) == [
         f"Shirt number {n}" for n in range(5)]
+
+
+def test_the_lookup_copy_is_built_only_when_a_lookup_runs(workspace, monkeypatch):
+    db, _client = workspace
+    seed(db)
+    built = 0
+    real = business_assistant._lookup_database
+
+    def counted(tables):
+        nonlocal built
+        built += 1
+        return real(tables)
+
+    monkeypatch.setattr(business_assistant, "_lookup_database", counted)
+    shop = business_assistant.read_shop(db, now=NOW)
+    assert built == 0
+    shop.close()
+    assert built == 0
+
+    first = shop.lookups
+    second = shop.lookups
+    assert first is second and built == 1
+    shop.close()
+
+
+def test_stopping_during_lookup_build_keeps_the_event_loop_responsive(monkeypatch):
+    import sqlite3
+    import threading
+
+    tables = {name: [] for name in business_assistant.TABLES}
+    shop = business_assistant.Shop(brief="", tables=tables)
+    monkeypatch.setattr(assistant_route, "_prepare", lambda *_: ([], shop))
+    provider = Provider((f"{FENCE}sql\nSELECT 1\n{FENCE}",))
+    real_build = business_assistant._lookup_database
+    real_close = shop.close
+    release = threading.Event()
+    built = []
+
+    async def exercise():
+        loop = asyncio.get_running_loop()
+        building = asyncio.Event()
+        closing = asyncio.Event()
+
+        def build(tables):
+            loop.call_soon_threadsafe(building.set)
+            # Bound the wait so a regression cannot deadlock the test.
+            if not release.wait(3):
+                raise TimeoutError("The event loop did not release the lookup build")
+            conn = real_build(tables)
+            built.append(conn)
+            return conn
+
+        def close():
+            loop.call_soon_threadsafe(closing.set)
+            real_close()
+
+        monkeypatch.setattr(business_assistant, "_lookup_database", build)
+        monkeypatch.setattr(shop, "close", close)
+        work = asyncio.create_task(assistant_route._answer(assistant_route._Journal(), provider, "What sold?"))
+        try:
+            await asyncio.wait_for(building.wait(), 5)
+            work.cancel()
+            await asyncio.wait_for(closing.wait(), 5)
+            assert not work.done(), "Cleanup blocked the event loop until the build timed out"
+        finally:
+            release.set()
+            if not work.done():
+                await asyncio.gather(work, return_exceptions=True)
+        assert work.cancelled()
+
+    asyncio.run(exercise())
+    (conn,) = built
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        conn.execute("SELECT 1")
+
+
+def test_an_answer_without_a_lookup_never_builds_the_copy(workspace, monkeypatch):
+    db, client = workspace
+    seed(db)
+    built = 0
+    real = business_assistant._lookup_database
+
+    def counted(tables):
+        nonlocal built
+        built += 1
+        return real(tables)
+
+    monkeypatch.setattr(business_assistant, "_lookup_database", counted)
+    monkeypatch.setattr(assistant_route, "get_listing_provider", lambda: Provider(("No.",)))
+    response = client.post("/api/assistant/messages", json={"text": "Any sales?"})
+    assert response.status_code == 200 and "No." in response.text
+    assert built == 0
+
+
+def test_the_copy_is_built_off_the_event_loop(workspace, monkeypatch):
+    from anteroom.services import box_media
+
+    db, _client = workspace
+    seed(db)
+    real = business_assistant._lookup_database
+    built_on_loop: list[bool] = []
+
+    def checked(tables):
+        try:
+            asyncio.get_running_loop()
+            built_on_loop.append(True)
+        except RuntimeError:
+            built_on_loop.append(False)
+        return real(tables)
+
+    async def fake_view_boxes(chosen):
+        return [box_media.BoxView(box_id=row["id"], title=row["title"], store=row["store"], url=row["url"])
+                for row in chosen]
+
+    monkeypatch.setattr(business_assistant, "_lookup_database", checked)
+    monkeypatch.setattr(box_media, "view_boxes", fake_view_boxes)
+
+    async def exercise():
+        shop_sql = business_assistant.read_shop(db, now=NOW)
+        try:
+            result = await business_assistant.run_any_lookup(
+                business_assistant.Lookup("sql", "SELECT count(*) FROM listings", 0, 1), shop_sql, [],
+            )
+            assert isinstance(result, str) and result.endswith("\n3")
+        finally:
+            shop_sql.close()
+
+        shop_media = business_assistant.read_shop(db, now=NOW)
+        try:
+            await business_assistant.run_any_lookup(
+                business_assistant.Lookup("media", "raghouse:1", 0, 1), shop_media, [],
+            )
+        finally:
+            shop_media.close()
+
+    asyncio.run(exercise())
+    assert built_on_loop == [False, False]
+
+
+def test_sold_listings_skip_the_size_audit(workspace, monkeypatch):
+    from anteroom.services import size_audit
+
+    db, _client = workspace
+    sold_item = add_listing(
+        db, "Sold Shorts M",
+        {"price": 25, "size": "M", "ebay_specifics": {"size": "34"}, "poshmark_specifics": {"size": "L"}},
+        sold(25, "ebay", "2026-08-01T00:00:00+00:00", "2026-09-10T00:00:00+00:00"),
+    )
+    add_listing(
+        db, "Active Shorts M",
+        {"price": 25, "size": "M", "ebay_specifics": {"size": "34"}},
+        {"vendooStatus": "active"},
+    )
+    audited: list[str] = []
+    real = size_audit.size_problems
+
+    def tracked(listing, photo):
+        audited.append(str(listing.get("title") or ""))
+        return real(listing, photo)
+
+    monkeypatch.setattr(size_audit, "size_problems", tracked)
+    shop = business_assistant.read_shop(db, now=NOW)
+    try:
+        assert audited == ["Active Shorts M"]
+        result = business_assistant.run_lookup(
+            shop.lookups, f"SELECT size_issue FROM listings WHERE id = '{sold_item.id}'",
+        )
+        assert result == "Lookup result (1 rows):\nsize_issue\n"
+    finally:
+        shop.close()
+
+
+def test_select_star_on_listings_fits_a_large_shop(workspace):
+    db, _client = workspace
+    seed(db)
+    long_description = "Measurements and fabric notes. " * 70
+    for n in range(60):
+        add_listing(
+            db, f"Vintage Tee {n}",
+            {"price": 24, "brand": "Nike", "size": "M", "description": long_description,
+             "ebay_specifics": {"Department": "Men", "Material": "Cotton"}},
+            {"vendooStatus": "active", "vendooDates": {"listed": "2026-09-01T00:00:00+00:00"}},
+        )
+    shop = business_assistant.read_shop(db, now=NOW)
+    try:
+        result = business_assistant.run_lookup(shop.lookups, "SELECT * FROM listings")
+        assert result.startswith("Lookup result (63 rows):\n")
+        assert "there are more" not in result
+    finally:
+        shop.close()
+
+
+def test_listing_details_has_one_row_per_listing_including_drafts(workspace):
+    db, _client = workspace
+    _box, jeans, coat = seed(db)
+    shop = business_assistant.read_shop(db, now=NOW)
+    try:
+        assert business_assistant.run_lookup(
+            shop.lookups, "SELECT count(*) FROM listing_details",
+        ).endswith("\n3")
+        joined = business_assistant.run_lookup(
+            shop.lookups,
+            "SELECT l.status, d.description, json_extract(d.details, '$.price') FROM listings l "
+            "JOIN listing_details d ON d.listing_id = l.id ORDER BY l.status",
+        )
+        assert "active |  | 120" in joined
+        assert "draft |  | 15" in joined
+        assert "sold | Classic straight leg denim. | 60" in joined
+        assert f"{jeans.id}" in business_assistant.run_lookup(shop.lookups, "SELECT listing_id FROM listing_details")
+        assert f"{coat.id}" in business_assistant.run_lookup(shop.lookups, "SELECT listing_id FROM listing_details")
+    finally:
+        shop.close()
+
+
+def test_boxes_ads_and_events_stay_capped_in_the_brief(workspace):
+    from datetime import timedelta
+
+    from anteroom.models.sale_event import SaleEvent
+
+    db, _client = workspace
+    small = business_assistant.read_shop(db, now=NOW)
+    try:
+        small_len = len(small.brief)
+    finally:
+        small.close()
+
+    for n in range(80):
+        boxes.create_box(
+            db,
+            store=f"Supplier {n % 4}",
+            title=f"Wholesale Lot Number {n}",
+            price=100 + n,
+            shipping=15,
+            pieces=20,
+            bought_at=NOW - timedelta(days=80 - n),
+        )
+    for n in range(40):
+        start = date(2026, 1, 1) + timedelta(days=n * 5)
+        db.add(AdSpend(
+            marketplace=("ebay", "poshmark", "etsy")[n % 3],
+            start_date=start,
+            end_date=start + timedelta(days=4),
+            spend=20.0 + n,
+            notes=f"Campaign note {n}",
+        ))
+    for n in range(30):
+        start = date(2026, 1, 1) + timedelta(days=n * 7)
+        db.add(SaleEvent(
+            title=f"Promo Event {n}",
+            marketplace="ebay",
+            start_date=start,
+            end_date=start + timedelta(days=3),
+            timezone="UTC",
+            discount_percent=15.0,
+            items=[],
+            status="ended",
+            notes=f"Event note {n}",
+        ))
+    db.commit()
+
+    big = business_assistant.read_shop(db, now=NOW)
+    try:
+        assert len(big.brief) < small_len + 10_000
+        assert "Only the latest 15 of 80 boxes are shown" in big.brief
+        assert "Wholesale Lot Number 79" in big.brief
+        assert "Wholesale Lot Number 0" not in big.brief
+        assert "Only the latest 10 of 40 entries are shown" in big.brief
+        assert "Only the latest 10 of 30 events are shown" in big.brief
+        assert business_assistant.run_lookup(big.lookups, "SELECT count(*) FROM boxes").endswith("\n80")
+        assert business_assistant.run_lookup(big.lookups, "SELECT count(*) FROM ad_spend").endswith("\n40")
+        assert business_assistant.run_lookup(big.lookups, "SELECT count(*) FROM sale_events").endswith("\n30")
+        assert "sell_through_by_age" in business_assistant.run_lookup(
+            big.lookups, "SELECT sell_through_by_age FROM boxes LIMIT 1",
+        )
+    finally:
+        big.close()
+
+
+def test_median_aggregate_handles_numbers_nulls_empty_and_text(workspace):
+    db, _client = workspace
+    seed(db)
+    # Seed asking prices: 15, 60, 120 -> median 60.
+    shop = business_assistant.read_shop(db, now=NOW)
+    try:
+        assert business_assistant.run_lookup(
+            shop.lookups, "SELECT median(asking) AS med FROM listings",
+        ) == "Lookup result (1 rows):\nmed\n60.0"
+        assert business_assistant.run_lookup(
+            shop.lookups, "SELECT median(asking) AS med FROM listings WHERE 1 = 0",
+        ) == "Lookup result (1 rows):\nmed\n"
+        assert business_assistant.run_lookup(
+            shop.lookups, "SELECT median(sold_for) AS med FROM listings WHERE status = 'draft'",
+        ) == "Lookup result (1 rows):\nmed\n"
+        assert business_assistant.run_lookup(
+            shop.lookups, "SELECT median(title) AS med FROM listings",
+        ) == "Lookup result (1 rows):\nmed\n"
+    finally:
+        shop.close()
+
+    add_listing(db, "Extra Shirt", {"price": 30}, {"vendooStatus": "active"})
+    even_shop = business_assistant.read_shop(db, now=NOW)
+    try:
+        # Asking prices: 15, 30, 60, 120 -> median 45.0.
+        assert business_assistant.run_lookup(
+            even_shop.lookups, "SELECT median(asking) AS med FROM listings",
+        ) == "Lookup result (1 rows):\nmed\n45.0"
+    finally:
+        even_shop.close()
+
+
+def test_zero_row_lookup_suggests_closest_whitelisted_values(workspace):
+    db, _client = workspace
+    seed(db)
+    shop = business_assistant.read_shop(db, now=NOW)
+    try:
+        # Case-only difference on a whitelisted column gets a hint.
+        case_diff = business_assistant.run_lookup(
+            shop.lookups, "SELECT title FROM listings WHERE brand = 'levi''s'",
+        )
+        assert case_diff.startswith("Lookup result: 0 rows matched WHERE brand = 'levi''s'.\ntitle\n")
+        assert "Values in listings.brand closest to 'levi's': Levi's (1 row). Use one only if it names the same thing." in case_diff
+
+        # Close spelling on sales_by_brand resolves that table instead of listings.
+        by_brand = business_assistant.run_lookup(
+            shop.lookups, "SELECT * FROM sales_by_brand WHERE brand = 'levis'",
+        )
+        assert "Values in sales_by_brand.brand closest to 'levis': Levi's (" in by_brand
+
+        # Unrelated value gets no hint.
+        no_match = business_assistant.run_lookup(
+            shop.lookups, "SELECT title FROM listings WHERE size = '99'",
+        )
+        assert no_match == "Lookup result: 0 rows matched WHERE size = '99'.\ntitle"
+
+        # Non-whitelisted column (title) gets no hint.
+        non_whitelisted = business_assistant.run_lookup(
+            shop.lookups, "SELECT id FROM listings WHERE title = 'Levi''s 501'",
+        )
+        assert non_whitelisted == "Lookup result: 0 rows matched WHERE title = 'Levi''s 501'.\nid"
+
+        # A literal shaped like SQL injection cannot alter the hint query.
+        attack = business_assistant.run_lookup(
+            shop.lookups,
+            "SELECT title FROM listings WHERE brand = 'x'' UNION SELECT name FROM sqlite_master --'",
+        )
+        assert attack.startswith("Lookup result: 0 rows matched")
+        assert "sqlite_master" not in attack.split("\n", 2)[-1]
+        assert "Values in " not in attack
+    finally:
+        shop.close()
+
+
+def test_multiple_sql_lookups_run_in_one_round(workspace, monkeypatch):
+    db, client = workspace
+    seed(db)
+    two_blocks = (
+        f"{FENCE}sql\n-- sold sizes\nSELECT size, count(*) FROM listings WHERE status = 'sold' GROUP BY size\n{FENCE}\n"
+        f"{FENCE}sql\n-- active coats\nSELECT title, asking FROM listings WHERE status = 'active'\n{FENCE}"
+    )
+    provider, response = ask_through(client, monkeypatch, (two_blocks,), ("Size 34 sold and the coat is $120.",))
+
+    assert len(provider.calls) == 2
+    assert "event: status\ndata: Looking up sold sizes…" in response
+    assert "event: status\ndata: Looking up active coats…" in response
+    assert "SELECT" not in response and "Size 34 sold and the coat is $120." in response
+    assert provider.calls[1][-1] == {
+        "role": "user",
+        "content": (
+            "Lookup 1 of 2 (sold sizes):\n"
+            "Lookup result (1 rows):\nsize | count(*)\n34 | 1\n\n"
+            "Lookup 2 of 2 (active coats):\n"
+            "Lookup result (1 rows):\ntitle | asking\nCarhartt | Chore Coat | 120.0"
+        ),
+    }
+
+
+def test_more_than_three_lookups_in_one_round_are_capped(workspace):
+    db, _client = workspace
+    seed(db)
+    four_blocks = "\n".join(
+        f"{FENCE}sql\n-- query {n}\nSELECT {n} AS n\n{FENCE}" for n in range(1, 5)
+    )
+    provider = Provider((four_blocks,), ("Done.",))
+    shop = business_assistant.read_shop(db, now=NOW)
+    timing = business_assistant.AnswerTiming()
+    try:
+        async def collect():
+            return [event async for event in business_assistant.answer(
+                provider, [{"role": "user", "content": "Check four things"}], shop, timing=timing,
+            )]
+        events = asyncio.run(collect())
+    finally:
+        shop.close()
+
+    assert len(provider.calls) == 2
+    assert timing.lookups == 3
+    statuses = [text for kind, text in events if kind == "status"]
+    assert statuses == ["Looking up query 1…", "Looking up query 2…", "Looking up query 3…"]
+    fed_back = provider.calls[1][-1]["content"]
+    assert "Lookup 3 of 3 (query 3):" in fed_back
+    assert "Lookup 4 of" not in fed_back
+    assert "1 more lookup was not run: at most 3 run at once." in fed_back
+
+
+def test_sql_and_box_media_lookups_combine_text_then_images(workspace, monkeypatch):
+    from anteroom.services import box_media
+
+    db, _client = workspace
+    seed(db)
+    base_shop = business_assistant.read_shop(db, now=NOW)
+    first_box = {
+        "id": "raghouse:1", "store": "Raghouse", "title": "Vintage Tees 20 pcs",
+        "url": "https://raghouse.example/lot/1",
+    }
+    second_box = {**first_box, "id": "raghouse:2", "title": "Denim", "url": "https://raghouse.example/lot/2"}
+    shop = business_assistant.Shop(
+        brief=base_shop.brief,
+        tables={**base_shop.tables, "sourcing_boxes": [first_box, second_box]},
+    )
+
+    async def fake_view_boxes(chosen):
+        return [
+            box_media.BoxView(
+                box_id=row["id"], title=row["title"], store=row["store"], url=row["url"],
+                images=(
+                    [("front", "data:image/jpeg;base64,AAAA"), ("back", "data:image/jpeg;base64,BBBB")]
+                    if row["id"] == first_box["id"] else [("detail", "data:image/jpeg;base64,CCCC")]
+                ),
+            )
+            for row in chosen
+        ]
+
+    monkeypatch.setattr(box_media, "view_boxes", fake_view_boxes)
+    mixed = (
+        f"{FENCE}view_box_media\nraghouse:1\n{FENCE}\n"
+        f"{FENCE}sql\n-- total listings\nSELECT count(*) AS total FROM listings\n{FENCE}\n"
+        f"{FENCE}view_box_media\nraghouse:2\n{FENCE}"
+    )
+    provider = Provider((mixed,), ("Looked at both.",))
+    try:
+        async def collect():
+            return [event async for event in business_assistant.answer(
+                provider, [{"role": "user", "content": "Check listings and photos"}], shop,
+            )]
+        events = asyncio.run(collect())
+    finally:
+        shop.close()
+        base_shop.close()
+
+    statuses = [text for kind, text in events if kind == "status"]
+    assert statuses == ["Looking at the box photos…", "Looking up total listings…", "Looking at the box photos…"]
+    fed_back = provider.calls[1][-1]["content"]
+    assert isinstance(fed_back, list)
+    assert fed_back[0]["type"] == "text"
+    assert "Lookup 2 of 3 (total listings):" in fed_back[0]["text"]
+    assert "Box raghouse:1 (Vintage Tees 20 pcs, Raghouse): VIEWED — images 1-2: #1 front; #2 back" in fed_back[0]["text"]
+    assert "Box raghouse:2 (Denim, Raghouse): VIEWED — images 3-3: #3 detail" in fed_back[0]["text"]
+    assert fed_back[1:] == [
+        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{data}"}}
+        for data in ("AAAA", "BBBB", "CCCC")
+    ]
+
+
+def test_failing_and_good_lookups_in_one_round_both_report(workspace, monkeypatch):
+    db, client = workspace
+    seed(db)
+    blocks = (
+        f"{FENCE}sql\n-- broken query\nSELECT nope FROM listings\n{FENCE}\n"
+        f"{FENCE}sql\n-- listing count\nSELECT count(*) FROM listings\n{FENCE}"
+    )
+    provider, response = ask_through(client, monkeypatch, (blocks,), ("There are 3 listings.",))
+
+    assert len(provider.calls) == 2
+    assert "There are 3 listings." in response
+    fed_back = provider.calls[1][-1]["content"]
+    assert "Lookup 1 of 2 (broken query):\nLookup listings failed: no such column: nope." in fed_back
+    assert "Lookup 2 of 2 (listing count):\nLookup result (1 rows):\ncount(*)\n3" in fed_back
+
+
+def test_history_window_moves_in_steps_starting_on_a_user_turn(workspace):
+    db, _client = workspace
+    shop = business_assistant.read_shop(db, now=NOW)
+    try:
+        thread = business_assistant.create_thread(db)
+        for index in range(21):
+            role = "user" if index % 2 == 0 else "assistant"
+            business_assistant.add_message(db, role, f"turn {index}", thread_id=thread.id)
+        at_21 = business_assistant.build_messages(db, "turn 20", shop, thread_id=thread.id)
+        assert len(at_21) == 22  # system + all 21 saved rows
+        assert at_21[1] == {"role": "user", "content": "turn 0"}
+
+        first_seen: list[dict] = []
+        for length in range(22, 41):
+            role = "user" if (length - 1) % 2 == 0 else "assistant"
+            text = f"turn {length - 1}"
+            business_assistant.add_message(db, role, text, thread_id=thread.id)
+            if length >= 31:
+                messages = business_assistant.build_messages(db, text, shop, thread_id=thread.id)
+                first_seen.append(messages[1])
+        assert len(first_seen) == 10
+        assert all(first == {"role": "user", "content": "turn 10"} for first in first_seen)
+
+        # If a stepped boundary lands on an assistant row, advance to the next user turn.
+        shifted = business_assistant.create_thread(db)
+        business_assistant.add_message(db, "user", "extra user 0", thread_id=shifted.id)
+        for index in range(1, 32):
+            role = "user" if index % 2 == 1 else "assistant"
+            business_assistant.add_message(db, role, f"shifted {index}", thread_id=shifted.id)
+        # Index 10 is assistant; history must start at index 11 (user).
+        shifted_msgs = business_assistant.build_messages(db, "shifted 31", shop, thread_id=shifted.id)
+        assert shifted_msgs[1] == {"role": "user", "content": "shifted 11"}
+    finally:
+        shop.close()
+
+
+
+
+
+

@@ -1,0 +1,2 @@
+- The business assistant answers faster, keeps prompts smaller on large shops, and can run several lookups in a single turn.
+- Business assistant lookups now support `median()` and suggest the closest matching brand, category, size, or store when a filter matches nothing.

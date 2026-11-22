@@ -603,12 +603,14 @@ async def view_boxes(boxes: list[dict[str, Any]], *, client: httpx.AsyncClient |
         return list(await asyncio.gather(*(one(box, shared) for box in boxes)))
 
 
-def describe(views: list[BoxView], *, skipped: list[str] | None = None) -> tuple[str, list[dict[str, Any]]]:
+def describe(
+    views: list[BoxView], *, skipped: list[str] | None = None, image_offset: int = 0,
+) -> tuple[str, list[dict[str, Any]]]:
     """The lookup result: a text that says what each attached image is, and the image parts in that order."""
-    lines = ["Lookup view_box_media result. Images below are attached in this order, after any images the seller "
-             "attached to the question:"]
+    lines = ["Lookup view_box_media result. Image numbers refer to the lookup attachments in this reply, "
+             "excluding any images the seller attached to the question:"]
     parts: list[dict[str, Any]] = []
-    number = 0
+    number = image_offset
     for view in views:
         head = f"- Box {view.box_id} ({view.title}, {view.store})"
         if not view.viewed:

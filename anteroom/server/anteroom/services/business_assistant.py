@@ -8,12 +8,12 @@ current buy list with its best boxes, ad spend, sale events, and sourcing
 checks — and the exact tables it can look the rest up in. The brief is read
 fresh each time, so an answer reflects Anteroom's records as they are now.
 
-Every row behind the summary can be looked up. Each listing with its
-description and full field values, every Sourcing-tab box, and the sales
-breakdowns are copied into a throwaway in-memory SQLite database, and the model
-may ask for a ``SELECT`` over it before it answers. The copy is the only thing a
-lookup can touch. The summary stays small, so a question does not spend the
-seller's model usage on rows it never needed.
+Every row behind the summary can be looked up. Each listing, its description and
+full field values (in ``listing_details``), every Sourcing-tab box, and the sales
+breakdowns are copied into a throwaway in-memory SQLite database on first lookup,
+and the model may ask for a ``SELECT`` over it before it answers. The copy is the
+only thing a lookup can touch. The summary stays small, so a question does not
+spend the seller's model usage on rows it never needed.
 
 It reads, and it proposes. A reply may end with changes to listings, which are
 kept with the reply for the seller to apply or dismiss
@@ -24,11 +24,13 @@ a marketplace.
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 import logging
 import re
 import sqlite3
 import statistics
+import threading
 import time
 from collections import Counter
 from collections.abc import AsyncIterator, Callable
@@ -55,13 +57,17 @@ from anteroom.services.inventory_analytics import ANALYTICS_RANGES, AnalyticsIte
 log = logging.getLogger("anteroom.business_assistant")
 
 # Earlier turns sent back with a question, so a follow-up can lean on them.
+# The window moves in steps so the prompt prefix stays steady across turns for provider caching.
 HISTORY_MESSAGES = 20
+HISTORY_STEP = 10
 # How many rows of each kind the summary shows; a lookup reads every one.
 TOP_BOXES = 15
 LONGEST_LISTED = 15
 LATEST_SALES = 10
 SIZING_ROWS = 10
 PRICE_CHANGE_ROWS = 10
+AD_ROWS = 10
+EVENT_ROWS = 10
 TOP_GROUPS = 12
 OVER_TIME_BUCKETS = 24
 # Listings read per statement for a question: a few megabytes, well inside the
@@ -70,8 +76,9 @@ LISTING_BATCH = 200
 # What the whole prompt may cost on a large shop, in tokens (about 3.5 characters each). The tests hold a
 # shop of hundreds of listings to it, so a new section cannot quietly bring every row back.
 PROMPT_TOKEN_BUDGET = 20_000
-# Lookups one question may run, and what one may cost and return.
+# Lookups one question may run (rounds, and blocks per round), and what one may cost and return.
 MAX_LOOKUPS = 6
+LOOKUPS_PER_ROUND = 3
 LOOKUP_SECONDS = 5.0
 LOOKUP_ROWS = 200
 LOOKUP_CHARS = 24_000
@@ -130,10 +137,11 @@ INSTRUCTIONS = (
 
 LOOKUP_INSTRUCTIONS = (
     "Looking things up: the shop is also loaded into a SQLite database. When the summary does not already "
-    "answer the question, reply with nothing but one ```sql block holding a single SELECT. Make its first line "
-    "a comment saying in plain words what you are looking up, like `-- sales by size`. Anteroom runs it and "
-    "replies with up to {rows} rows, so filter, aggregate, or ORDER BY with a LIMIT. You may do this up to "
-    "{limit} times for one question, then answer. Never show SQL or mention the database to the seller.\n"
+    "answer the question, reply with nothing but one ```sql block holding a single SELECT, or up to {per_round} "
+    "```sql blocks, each one SELECT, when the figures are independent. Make each block's first line "
+    "a comment saying in plain words what you are looking up, like `-- sales by size`. Anteroom runs them and "
+    "replies with up to {rows} rows each, so filter, aggregate, or ORDER BY with a LIMIT. You may do this up to "
+    "{limit} rounds for one question, then answer. Never show SQL or mention the database to the seller.\n"
     "Lookup tables, all of them, with every column:\n{schema}\n"
     "Dates are YYYY-MM-DD text. Amounts are numbers; NULL means not recorded. `margin` is profit as a percent of "
     "revenue over the sales with a cost recorded (`profit_known`); `median_days` is days from listing to sale.\n"
@@ -141,9 +149,10 @@ LOOKUP_INSTRUCTIONS = (
     "one; `listed_on` is where it is cross-listed, `sold_on` where it sold, and `box` the id of the bought box it "
     "came from (`boxes.id`). `form_sizes` is the size each marketplace form holds, `photo_size` the size read "
     "from the photos and where it was read, and `size_issue` why the sizing needs a look (NULL when nothing "
-    "stands out). `details` is the listing's full JSON, including each marketplace's fields; read it with "
-    "json_extract(details, '$.ebay_specifics'). `category` is the Analytics category; a kind of piece is best "
-    "matched on the title too, like title LIKE '%jacket%'.\n"
+    "stands out, and for sold listings). `listing_details(listing_id, description, details)` holds each listing's "
+    "description and full JSON (including each marketplace's fields; read with json_extract(details, '$.ebay_specifics')), "
+    "one row per listing; join `listing_details.listing_id = listings.id` and select it only for the listings you need. "
+    "`category` is the Analytics category; a kind of piece is best matched on the title too, like title LIKE '%jacket%'.\n"
     "`boxes` is the wholesale boxes the seller bought and what each returned; `price_changes` each asking-price "
     "change made in Anteroom.\n"
     "`sourcing_boxes` is every box on the Sourcing tab from its last check: `contents` the kind of piece, `landed` "
@@ -154,12 +163,14 @@ LOOKUP_INSTRUCTIONS = (
     "`period` (30d, 90d, 12m, all). `sales_over_time` is each range's sales per `bucket`, as the Analytics chart "
     "draws them, `position` 1 the oldest; range all reaches back to the first sale and range 12m is one row per "
     "calendar month.\n"
-    "Every lookup answers: rows, \"0 rows matched\", or \"Lookup ... failed: <reason>\". Read that reply; when a "
-    "lookup failed or matched nothing, say so or try a corrected query, and never fill the gap with a guess.\n"
-    "Seeing a box's photos: reply with nothing but one ```view_box_media block listing the box ids from the "
-    "sourcing_boxes table (or the summary's box table), one per line. Anteroom fetches each box's product page now "
-    "and replies with its photos and frames from its video as images, saying which images belong to which box and "
-    "which boxes could not be viewed and why. It counts as one of the lookups.\n"
+    "`median(column)` is available alongside `avg`, `sum`, `min`, `max`, and `count`.\n"
+    "Every lookup answers: rows, \"0 rows matched\" (with the closest real values in that column when any exist), or "
+    "\"Lookup ... failed: <reason>\". Read that reply; when a lookup failed or matched nothing, say so or try a "
+    "corrected query using a listed value only if it names the same thing, and never fill the gap with a guess.\n"
+    "Seeing a box's photos: include a ```view_box_media block (alone or alongside ```sql blocks, within the "
+    "{per_round}-block limit) listing the box ids from the sourcing_boxes table (or the summary's box table), "
+    "one per line. Anteroom fetches each box's product page now and replies with its photos and frames from its "
+    "video as images, saying which images belong to which box and which boxes could not be viewed and why.\n"
 )
 
 CHANGES_INSTRUCTIONS = (
@@ -232,15 +243,19 @@ ACTIVE_GROUP_COLUMNS = ("category", "active", "asking_value", "median_days_liste
 LISTING_COLUMNS = (
     "id", "title", "status", "brand", "category", "size", "condition", "color", "labels", "sku", "listed_on",
     "asking", "cost", "sold_for", "fees", "profit", "sold_on", "listed", "sold", "days", "box",
-    "shipping_cost", "shipping_credit", "form_sizes", "photo_size", "size_issue", "description", "details",
+    "shipping_cost", "shipping_credit", "form_sizes", "photo_size", "size_issue",
 )
+LISTING_DETAIL_COLUMNS = ("listing_id", "description", "details")
 # A listing whose sizing needs a look, as the summary shows it.
 SIZING_COLUMNS = ("id", "title", "status", "category", "size", "form_sizes", "photo_size", "size_issue")
 CHANGE_COLUMNS = ("listing_id", "changed_on", "old_price", "new_price")
 BOX_COLUMNS = (
     "id", "store", "title", "price", "shipping", "pieces", "unsellable", "sellable", "unsellable_rate",
     "cost_per_piece", "bought_at", "spent", "listings", "listed", "sold", "returned", "profit", "roi",
-    "sell_through", "unsold_asking", "median_days", "asp", "sold_premium",
+    "sell_through", "sell_through_by_age", "unsold_asking", "median_days", "asp", "sold_premium",
+)
+BOXES_SHOWN_COLUMNS = (
+    "id", "store", "title", "bought_at", "spent", "pieces", "listed", "sold", "profit", "roi", "sell_through",
 )
 AD_COLUMNS = (
     "marketplace", "start_date", "end_date", "spend", "clicks", "orders", "revenue", "roas", "cost_per_click", "notes",
@@ -250,6 +265,7 @@ EVENT_COLUMNS = (
 )
 TABLES = {
     "listings": LISTING_COLUMNS,
+    "listing_details": LISTING_DETAIL_COLUMNS,
     "price_changes": CHANGE_COLUMNS,
     "boxes": BOX_COLUMNS,
     "ad_spend": AD_COLUMNS,
@@ -279,6 +295,20 @@ _SELECTISH = re.compile(r"^(?:--|select\b|with\b)", re.IGNORECASE)
 _FROM_TABLE = re.compile(r"\bfrom\s+([A-Za-z_]+)", re.IGNORECASE)
 _WHERE = re.compile(r"\bwhere\b(.*?)(?:\bgroup\s+by\b|\border\s+by\b|\blimit\b|\bhaving\b|;|\Z)",
                     re.IGNORECASE | re.DOTALL)
+_FILTER_LITERAL = re.compile(
+    r"(?:\b[A-Za-z_][A-Za-z0-9_]*\.)?\b([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|like)\s*'((?:[^']|'')*)'",
+    re.IGNORECASE,
+)
+# Only these (table, column) pairs are ever queried for 0-row hints; identifiers come from here, never from SQL text.
+_HINT_COLUMNS: dict[str, frozenset[str]] = {
+    "listings": frozenset({"brand", "category", "size", "condition", "color", "sold_on", "status"}),
+    "sales_by_category": frozenset({"category"}),
+    "sales_by_brand": frozenset({"brand"}),
+    "sales_by_marketplace": frozenset({"marketplace"}),
+    "sourcing_boxes": frozenset({"store", "contents"}),
+}
+_HINT_MATCHES = 5
+_HINT_CHARS = 600
 _READ_ACTIONS = {sqlite3.SQLITE_SELECT, sqlite3.SQLITE_READ, sqlite3.SQLITE_FUNCTION, sqlite3.SQLITE_RECURSIVE}
 
 
@@ -435,10 +465,37 @@ def message_view(row: AssistantMessage) -> dict[str, Any]:
 
 @dataclass
 class Shop:
-    """The business as of one moment: what the model is told, and what it can look up."""
+    """The business as of one moment: what the model is told, and what it can look up.
+
+    ``tables`` may be shared across questions via ``business_context``; never mutate it.
+    The in-memory SQLite copy is built on first access to ``lookups`` so answers that
+    need no lookup never pay to create it.
+    """
 
     brief: str
-    lookups: sqlite3.Connection
+    tables: dict[str, list[dict[str, Any]]]
+    _conn: sqlite3.Connection | None = field(default=None, init=False, repr=False)
+    _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
+
+    @property
+    def lookups(self) -> sqlite3.Connection:
+        if self._conn is None:
+            with self._lock:
+                if self._conn is None:
+                    self._conn = _lookup_database(self.tables)
+        return self._conn
+
+    def read_lookup[T](self, read: Callable[[sqlite3.Connection], T]) -> T:
+        # Cancellation of the async waiter does not stop this worker. Hold the
+        # lock for the whole read so close() cannot interrupt it.
+        with self._lock:
+            return read(self.lookups)
+
+    def close(self) -> None:
+        with self._lock:
+            conn, self._conn = self._conn, None
+        if conn is not None:
+            conn.close()
 
 
 def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
@@ -465,7 +522,7 @@ def read_shop(db: Session, *, now: datetime | None = None) -> Shop:
         f"--- What the seller says about their business ---\n{note}" if note else "",
         assistant_memory.section(db),
     ]
-    return Shop(brief="\n\n".join(section for section in sections if section), lookups=_lookup_database(tables))
+    return Shop(brief="\n\n".join(section for section in sections if section), tables=tables)
 
 
 def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[str, Any]]]]:
@@ -480,7 +537,7 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
     rows = rows_from_inputs(inputs)
     ranges = analytics_ranges(db, ANALYTICS_RANGES, now=clock, rows=rows)
     everything = ranges["all"]
-    records = _records(db, rows, clock)
+    records, detail_rows = _records(db, rows, clock)
     changes = _price_changes(db)
     box_results = boxes.results(db, rows=rows, release=True)
     ads = [ad_spend.entry_view(row) for row in ad_spend.list_entries(db)]
@@ -529,11 +586,11 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
         _listing_summary(records),
         _sizing_rows(records),
         _price_change_rows(changes),
-        _section("Wholesale boxes bought, and what each has returned", box_results),
+        _box_rows(box_results),
         _sourcing(sourcing_state, tab_boxes, clock),
         _sourcing_box_rows(tab_boxes),
-        _section("Ad spend the seller recorded", ads),
-        _section("Sale events", events),
+        _ad_rows(ads),
+        _event_rows(events),
         automation_lines,
         _section("Sourcing checks (is this worth buying?)", {
             "track_record": scout_record,
@@ -544,6 +601,7 @@ def _read_data(db: Session, clock: datetime) -> tuple[str, dict[str, list[dict[s
         "\n\n".join(section for section in sections if section),
         {
             "listings": records,
+            "listing_details": detail_rows,
             "price_changes": changes,
             "boxes": box_results["boxes"],
             "ad_spend": ads,
@@ -631,14 +689,21 @@ def build_messages(db: Session, question: str, shop: Shop, thread_id: str | None
     The seller's question must already be saved; it is the last turn read back.
     History is that conversation only, never another thread or a listing's chat.
     """
+    rows = list_messages(db, thread_id)
+    start = max(0, len(rows) - (HISTORY_MESSAGES + 1))
+    start -= start % HISTORY_STEP
+    while start + 1 < len(rows) and rows[start].role != "user":
+        start += 1
     earlier = [
         {"role": row.role, "content": row.text + assistant_changes.history_note(row.changes) + _automation_note(row.automation)}
-        for row in list_messages(db, thread_id)[-(HISTORY_MESSAGES + 1):]
+        for row in rows[start:]
     ]
     if not earlier or earlier[-1] != {"role": "user", "content": question}:
         earlier.append({"role": "user", "content": question})
     # The instructions lead so a provider's prefix cache still hits when the figures move.
-    lookups = LOOKUP_INSTRUCTIONS.format(limit=MAX_LOOKUPS, rows=LOOKUP_ROWS, schema=lookup_schema())
+    lookups = LOOKUP_INSTRUCTIONS.format(
+        limit=MAX_LOOKUPS, per_round=LOOKUPS_PER_ROUND, rows=LOOKUP_ROWS, schema=lookup_schema(),
+    )
     system = (
         f"{INSTRUCTIONS}\n{lookups}\n"
         f"{CHANGES_INSTRUCTIONS.format(limit=assistant_changes.MAX_CHANGES)}\n"
@@ -746,8 +811,8 @@ async def answer(
                         lead, written = "", True
         finally:
             timing.round_ms[-1] = elapsed_ms(round_started)
-        lookup = find_lookup(reply)
-        if lookup is None:
+        lookups = find_lookups(reply)
+        if not lookups:
             words, memory, changes, automation = assistant_memory.peel(reply)
             if memory is not None and not words.strip() and not written:
                 words = "I'll remember that."
@@ -761,7 +826,7 @@ async def answer(
             if automation is not None:
                 yield "automation", automation
             return
-        before = assistant_memory.visible_text(reply[:lookup.start]).rstrip()
+        before = assistant_memory.visible_text(reply[:lookups[0].start]).rstrip()
         if len(before) > released:
             piece = links.clean(before[released:])
             if piece.strip():
@@ -770,13 +835,22 @@ async def answer(
         if used == MAX_LOOKUPS:
             yield "error", "The assistant kept looking things up without answering. Ask again, or ask something narrower."
             return
-        yield "status", lookup_label(lookup)
-        lookup_started = time.monotonic()
-        timing.lookups += 1
-        try:
-            result = await run_any_lookup(lookup, shop, viewed)
-        finally:
-            timing.lookup_ms = min(TIMING_CAP_MS, timing.lookup_ms + elapsed_ms(lookup_started))
+        batch = lookups[:LOOKUPS_PER_ROUND]
+        skipped = len(lookups) - len(batch)
+        results: list[str | list[dict[str, Any]]] = []
+        image_offset = 0
+        for item in batch:
+            yield "status", lookup_label(item)
+            lookup_started = time.monotonic()
+            timing.lookups += 1
+            try:
+                lookup_result = await run_any_lookup(item, shop, viewed, image_offset=image_offset)
+            finally:
+                timing.lookup_ms = min(TIMING_CAP_MS, timing.lookup_ms + elapsed_ms(lookup_started))
+            results.append(lookup_result)
+            if isinstance(lookup_result, list):
+                image_offset += sum(part.get("type") == "image_url" for part in lookup_result)
+        result = _combined(batch, results, skipped)
         texts = [result] if isinstance(result, str) else [part["text"] for part in result if part.get("type") == "text"]
         links.allow(texts)
         if used == MAX_LOOKUPS - 1:
@@ -785,7 +859,39 @@ async def answer(
                 result += last
             else:
                 result[0] = {"type": "text", "text": result[0]["text"] + last}
-        messages += [{"role": "assistant", "content": reply[:lookup.end]}, {"role": "user", "content": result}]
+        messages += [{"role": "assistant", "content": reply[:lookups[-1].end]}, {"role": "user", "content": result}]
+
+
+def _lookup_heading(lookup: Lookup) -> str:
+    if lookup.kind == "media":
+        return "box photos"
+    first = lookup.body.lstrip().splitlines()[0].strip() if lookup.body.strip() else ""
+    words = first[2:].strip(" .") if first.startswith("--") else ""
+    return words[:80] if words else _lookup_name(lookup.body)
+
+
+def _combined(
+    batch: list[Lookup], results: list[str | list[dict[str, Any]]], skipped: int,
+) -> str | list[dict[str, Any]]:
+    if len(batch) == 1 and not skipped:
+        return results[0]
+    sections: list[str] = []
+    images: list[dict[str, Any]] = []
+    total = len(batch)
+    for index, (lookup, item_result) in enumerate(zip(batch, results, strict=True), 1):
+        header = f"Lookup {index} of {total} ({_lookup_heading(lookup)}):"
+        if isinstance(item_result, str):
+            body = item_result
+        else:
+            text_parts = [part["text"] for part in item_result if part.get("type") == "text"]
+            images.extend(part for part in item_result if part.get("type") != "text")
+            body = "\n".join(text_parts)
+        sections.append(f"{header}\n{body}")
+    if skipped:
+        noun = "lookup was" if skipped == 1 else "lookups were"
+        sections.append(f"{skipped} more {noun} not run: at most {LOOKUPS_PER_ROUND} run at once.")
+    combined_text = "\n\n".join(sections)
+    return [{"type": "text", "text": combined_text}, *images] if images else combined_text
 
 
 def _visible(reply: str) -> str:
@@ -815,9 +921,10 @@ def _visible(reply: str) -> str:
     return shown[:-hold] if hold else shown
 
 
-def find_lookup(reply: str) -> Lookup | None:
-    """The first lookup block in a reply, wherever it sits, or None when the reply is an answer."""
+def find_lookups(reply: str) -> list[Lookup]:
+    """Every lookup block in a reply, in order, or an empty list when the reply is an answer."""
     opening = len(reply) - len(reply.lstrip())
+    found: list[Lookup] = []
     for match in _FENCED.finditer(reply):
         language = match.group(1).lower()
         body = match.group(2).strip()
@@ -825,8 +932,14 @@ def find_lookup(reply: str) -> Lookup | None:
         if kind is None and not language and match.start() == opening and _SELECTISH.match(body):
             kind = "sql"
         if kind is not None:
-            return Lookup(kind=kind, body=body, start=match.start(), end=match.end())
-    return None
+            found.append(Lookup(kind=kind, body=body, start=match.start(), end=match.end()))
+    return found
+
+
+def find_lookup(reply: str) -> Lookup | None:
+    """The first lookup block in a reply, wherever it sits, or None when the reply is an answer."""
+    found = find_lookups(reply)
+    return found[0] if found else None
 
 
 def lookup_sql(reply: str) -> str | None:
@@ -845,13 +958,19 @@ def lookup_label(lookup: Lookup | str) -> str:
     return f"Looking up {words[:80]}…" if words else "Looking up more detail…"
 
 
-async def run_any_lookup(lookup: Lookup, shop: Shop, viewed: list[str]) -> str | list[dict[str, Any]]:
+def _run_sql(shop: Shop, body: str) -> str:
+    return shop.read_lookup(lambda conn: run_lookup(conn, body))
+
+
+async def run_any_lookup(
+    lookup: Lookup, shop: Shop, viewed: list[str], *, image_offset: int = 0,
+) -> str | list[dict[str, Any]]:
     """Run one lookup and return what goes back to the model; a failure comes back as its reason."""
     name = "view_box_media" if lookup.kind == "media" else _lookup_name(lookup.body)
     try:
         if lookup.kind == "media":
-            return await view_box_media(shop, lookup.body, viewed)
-        return await asyncio.to_thread(run_lookup, shop.lookups, lookup.body)
+            return await view_box_media(shop, lookup.body, viewed, image_offset=image_offset)
+        return await asyncio.to_thread(_run_sql, shop, lookup.body)
     except Exception as exc:  # noqa: BLE001 - the model is told, so it never answers from nothing
         log.exception("assistant lookup failed")
         return f"Lookup {name} failed: {type(exc).__name__}: {str(exc).strip() or 'no detail'}"
@@ -868,6 +987,87 @@ def _matched(sql: str) -> str:
     return f"WHERE {clause[:200]}" if clause else "the query"
 
 
+def _match_values(target: str, by_lower: dict[str, list[str]]) -> list[str]:
+    matches: list[str] = []
+
+    def add(value: str) -> None:
+        if value not in matches and len(matches) < _HINT_MATCHES:
+            matches.append(value)
+
+    for value in by_lower.get(target, ()):
+        add(value)
+    if len(target) >= 2:
+        for lower_val, values in by_lower.items():
+            if target in lower_val or (len(lower_val) >= 3 and lower_val in target):
+                for value in values:
+                    add(value)
+    for close in difflib.get_close_matches(target, list(by_lower), n=_HINT_MATCHES, cutoff=0.6):
+        for value in by_lower[close]:
+            add(value)
+    return matches
+
+
+def _closest_values(lookups: sqlite3.Connection, sql: str) -> str:
+    """When a SELECT matches 0 rows, suggest close real values for whitelisted filter columns."""
+    cleaned = re.sub(r"--[^\n]*", "", sql)
+    primary = _lookup_name(cleaned).lower()
+    seen: set[tuple[str, str, str]] = set()
+    lines: list[str] = []
+    used = 0
+    for match in _FILTER_LITERAL.finditer(cleaned):
+        col = match.group(1).lower()
+        needle = match.group(2).replace("''", "'").strip("%_").strip()
+        if not needle:
+            continue
+        table = primary if primary in _HINT_COLUMNS and col in _HINT_COLUMNS[primary] else (
+            "listings" if col in _HINT_COLUMNS["listings"] else None
+        )
+        if table is None:
+            continue
+        safe_table = next(name for name in _HINT_COLUMNS if name == table)
+        safe_col = next(name for name in _HINT_COLUMNS[safe_table] if name == col)
+        key = (safe_table, safe_col, needle.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            distinct = lookups.execute(
+                f"SELECT {safe_col}, count(*) FROM {safe_table} "
+                f"WHERE {safe_col} IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 500",
+            ).fetchall()
+        except sqlite3.Error:
+            continue
+        if not distinct:
+            continue
+        counts: dict[str, int] = {}
+        by_lower: dict[str, list[str]] = {}
+        for raw_val, count in distinct:
+            val = str(raw_val).replace("\n", " ")
+            counts[val] = int(count)
+            by_lower.setdefault(val.lower(), []).append(val)
+        if needle in counts:
+            continue
+        matches = _match_values(needle.lower(), by_lower)
+        if not matches:
+            continue
+        prefix = f"Values in {safe_table}.{safe_col} closest to '{needle}': "
+        suffix = ". Use one only if it names the same thing."
+        items: list[str] = []
+        for value in matches:
+            count = counts[value]
+            entry = f"{value} ({count} {'row' if count == 1 else 'rows'})"
+            candidate = prefix + ", ".join([*items, entry]) + suffix
+            if used + len(candidate) + (1 if lines else 0) > _HINT_CHARS:
+                break
+            items.append(entry)
+        if not items:
+            continue
+        line = prefix + ", ".join(items) + suffix
+        lines.append(line)
+        used += len(line) + (1 if len(lines) > 1 else 0)
+    return "\n".join(lines)
+
+
 def run_lookup(lookups: sqlite3.Connection, sql: str) -> str:
     """Run one SELECT over the in-memory copy and describe the result, or why there is none, as text."""
     sql = (sql or "").strip()
@@ -876,12 +1076,15 @@ def run_lookup(lookups: sqlite3.Connection, sql: str) -> str:
         return f"Lookup {name} failed: the sql block was empty. Put one SELECT in it."
     deadline = time.monotonic() + LOOKUP_SECONDS
     lookups.set_progress_handler(lambda: time.monotonic() > deadline, 10_000)
+    hints = ""
     try:
         cursor = lookups.execute(sql)
         if cursor.description is None:
             return f"Lookup {name} failed: only a single SELECT can be run."
         header = " | ".join(column[0] for column in cursor.description)
         rows = cursor.fetchmany(LOOKUP_ROWS + 1)
+        if not rows:
+            hints = _closest_values(lookups, sql)
     except sqlite3.Error as exc:
         reason = str(exc).strip() or type(exc).__name__
         if time.monotonic() > deadline:
@@ -896,7 +1099,8 @@ def run_lookup(lookups: sqlite3.Connection, sql: str) -> str:
     finally:
         lookups.set_progress_handler(None, 0)
     if not rows:
-        return f"Lookup result: 0 rows matched {_matched(sql)}.\n{header}"
+        base = f"Lookup result: 0 rows matched {_matched(sql)}.\n{header}"
+        return f"{base}\n{hints}" if hints else base
     lines: list[str] = []
     used = 0
     for row in rows[:LOOKUP_ROWS]:
@@ -931,7 +1135,9 @@ def _sourcing_rows(lookups: sqlite3.Connection) -> list[dict[str, Any]]:
     return [dict(zip(("id", "store", "title", "url"), row, strict=True)) for row in cursor.fetchall()]
 
 
-async def view_box_media(shop: Shop, body: str, viewed: list[str]) -> str | list[dict[str, Any]]:
+async def view_box_media(
+    shop: Shop, body: str, viewed: list[str], *, image_offset: int = 0,
+) -> str | list[dict[str, Any]]:
     """The photos and video frames of the boxes asked for, as image parts the model can see.
 
     Up to ``box_media.MAX_BOXES_PER_ANSWER`` boxes in one answer, however many
@@ -941,7 +1147,7 @@ async def view_box_media(shop: Shop, body: str, viewed: list[str]) -> str | list
     if not ids:
         return ("Lookup view_box_media failed: no box ids were given. Put the id of each box from the "
                 "sourcing_boxes table on its own line.")
-    rows = await asyncio.to_thread(_sourcing_rows, shop.lookups)
+    rows = await asyncio.to_thread(shop.read_lookup, _sourcing_rows)
     by_id = {row["id"]: row for row in rows}
     by_title: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
@@ -963,8 +1169,22 @@ async def view_box_media(shop: Shop, body: str, viewed: list[str]) -> str | list
             chosen.append(row)
     views = await box_media.view_boxes(chosen) if chosen else []
     viewed.extend(view.box_id for view in views if view.viewed)
-    text, parts = box_media.describe(views, skipped=skipped)
+    text, parts = box_media.describe(views, skipped=skipped, image_offset=image_offset)
     return [{"type": "text", "text": text}, *parts] if parts else text
+
+
+class _Median:
+    """SQLite aggregate returning the median of numeric values, ignoring NULLs and non-numbers."""
+
+    def __init__(self) -> None:
+        self._values: list[int | float] = []
+
+    def step(self, value: Any) -> None:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            self._values.append(value)
+
+    def finalize(self) -> Any:
+        return statistics.median(self._values) if self._values else None
 
 
 def _lookup_database(tables: dict[str, list[dict[str, Any]]]) -> sqlite3.Connection:
@@ -978,6 +1198,7 @@ def _lookup_database(tables: dict[str, list[dict[str, Any]]]) -> sqlite3.Connect
             [[_cell(row.get(column)) for column in columns] for row in tables[name]],
         )
     lookups.commit()
+    lookups.create_aggregate("median", 1, _Median)
     # Reads only from here on: no ATTACH to a real database, no PRAGMA, no writes.
     lookups.set_authorizer(
         lambda action, *_details: sqlite3.SQLITE_OK if action in _READ_ACTIONS else sqlite3.SQLITE_DENY,
@@ -997,8 +1218,10 @@ def _section(title: str, payload: Any) -> str:
     return f"--- {title} ---\n{json.dumps(payload, separators=(',', ':'), default=str)}"
 
 
-def _records(db: Session, rows: list[AnalyticsItem], now: datetime) -> list[dict[str, Any]]:
-    """Every listing as one record, newest sales first, then what is still for sale."""
+def _records(
+    db: Session, rows: list[AnalyticsItem], now: datetime,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Every listing as one slim record, plus one detail row per listing with description and full JSON."""
     from anteroom.models.conversation import Conversation
     from anteroom.models.listing import Listing, ListingRevision
     from anteroom.services import size_audit
@@ -1029,6 +1252,8 @@ def _records(db: Session, rows: list[AnalyticsItem], now: datetime) -> list[dict
     # calculating, so the following price-history read starts a fresh transaction.
     db.rollback()
     records = []
+    detail_rows = []
+    seen_details: set[str] = set()
     for item in _ordered(rows):
         listing = listings.get(item.conversation_id)
         listing = listing if isinstance(listing, dict) else {}
@@ -1064,11 +1289,17 @@ def _records(db: Session, rows: list[AnalyticsItem], now: datetime) -> list[dict
             "shipping_credit": item.shipping_credit if sold else None,
             "form_sizes": ", ".join(f"{name}: {size}" for name, size in size_audit.form_sizes(listing).items()) or None,
             "photo_size": photo_sizes.get(item.conversation_id),
-            "size_issue": size_audit.size_problems(listing, photo_sizes.get(item.conversation_id)),
-            "description": _text(listing.get("description")),
-            "details": json.dumps(listing, default=str) if listing else None,
+            "size_issue": None if sold else size_audit.size_problems(listing, photo_sizes.get(item.conversation_id)),
         })
-    return records
+        if item.conversation_id not in seen_details:
+            seen_details.add(item.conversation_id)
+            detail_rows.append({
+                "listing_id": item.conversation_id,
+                "description": _text(listing.get("description")),
+                # Kept as a dict here; _cell serializes it only when a lookup builds the SQLite copy.
+                "details": listing or None,
+            })
+    return records, detail_rows
 
 
 def _photo_sizes(db: Session) -> dict[str, str]:
@@ -1136,9 +1367,9 @@ def _listing_summary(records: list[dict[str, Any]]) -> str:
     longest = sorted(active, key=lambda record: (record["days"] is None, -(record["days"] or 0), record["id"]))
     latest = [record for record in records if record["status"] == "sold"][:LATEST_SALES]
     note = (
-        "Only these rows are here. The `listings` lookup table has every listing with every column: brand, size, "
-        "condition, labels, cost, fees, profit, description and each marketplace's fields. `days` is days listed "
-        "so far for an active listing and days to sell for a sold one. Empty means not recorded."
+        "Only these rows are here. The `listings` lookup table has every listing with every column (brand, size, "
+        "condition, labels, cost, fees, profit); `listing_details` has each listing's description and marketplace "
+        "fields. `days` is days listed so far for an active listing and days to sell for a sold one. Empty means not recorded."
     )
     parts = [title, note]
     if active:
@@ -1236,6 +1467,41 @@ def _price_change_rows(changes: list[dict[str, Any]]) -> str:
         title, note, " | ".join(CHANGE_COLUMNS),
         *(_line(change, CHANGE_COLUMNS) for change in changes[:PRICE_CHANGE_ROWS]),
     ])
+
+
+def _box_rows(box_results: dict[str, Any]) -> str:
+    """Bought wholesale boxes: per-store totals in full, and the latest boxes as a table."""
+    bought = list(box_results.get("boxes") or [])
+    stores = box_results.get("stores") or []
+    if not bought and not stores:
+        return "--- Wholesale boxes bought, and what each has returned ---\nNothing recorded."
+    ordered = sorted(bought, key=lambda box: (box.get("bought_at") or "", str(box.get("id") or "")), reverse=True)
+    shown = ordered[:TOP_BOXES]
+    note = "Newest first; the `boxes` lookup table has every box and every column."
+    if len(ordered) > TOP_BOXES:
+        note = (
+            f"Only the latest {TOP_BOXES} of {len(ordered)} boxes are shown; "
+            "the `boxes` lookup table has every box and every column."
+        )
+    parts = []
+    if stores:
+        parts.append(_section("Wholesale boxes by store", stores))
+    parts.append(_table("Wholesale boxes bought, and what each has returned", note, BOXES_SHOWN_COLUMNS, shown))
+    return "\n\n".join(parts)
+
+
+def _ad_rows(ads: list[dict[str, Any]]) -> str:
+    note = "Most recent ad spend entries recorded."
+    if len(ads) > AD_ROWS:
+        note = f"Only the latest {AD_ROWS} of {len(ads)} entries are shown; the `ad_spend` lookup table has every one."
+    return _table("Ad spend the seller recorded", note, AD_COLUMNS, ads[:AD_ROWS])
+
+
+def _event_rows(events: list[dict[str, Any]]) -> str:
+    note = "Most recent sale events recorded."
+    if len(events) > EVENT_ROWS:
+        note = f"Only the latest {EVENT_ROWS} of {len(events)} events are shown; the `sale_events` lookup table has every one."
+    return _table("Sale events", note, EVENT_COLUMNS, events[:EVENT_ROWS])
 
 
 def _sourcing(state: dict, tab_boxes: list[dict[str, Any]], now: datetime) -> str:

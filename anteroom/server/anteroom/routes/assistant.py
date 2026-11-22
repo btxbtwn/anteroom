@@ -292,42 +292,51 @@ async def _answer(
             error = f"{provider_label(getattr(provider, 'name', None))} could not finish the assistant answer. Try again."
         run.publish(sse_event("error", error))
     finally:
-        if shop is not None:
-            shop.lookups.close()
         # Also reached when the seller presses Stop: keep what was written so far.
         # Off the event loop: a save that waits on SQLite's write lock must not
         # freeze every other request, or hold this answer's stream open.
         try:
-            if answer.strip():
-                save_started = time.monotonic()
-                on_committed = None
-                if isinstance(run, _Journal):
-                    saved_outcome = outcome
+            try:
+                if shop is not None:
+                    # A cancelled lookup can still be using the copy in its worker.
+                    cleanup = asyncio.create_task(asyncio.to_thread(shop.close))
+                    try:
+                        await asyncio.shield(cleanup)
+                    except asyncio.CancelledError:
+                        outcome = "cancelled"
+                        await cleanup
+                        raise
+            finally:
+                if answer.strip():
+                    save_started = time.monotonic()
+                    on_committed = None
+                    if isinstance(run, _Journal):
+                        saved_outcome = outcome
 
-                    def confirm_committed() -> None:
-                        run.confirm_saved(saved_outcome)
+                        def confirm_committed() -> None:
+                            run.confirm_saved(saved_outcome)
 
-                    on_committed = confirm_committed
-                try:
-                    await asyncio.to_thread(
-                        _save_answer, provider, answer, changes, memory_block, automation_block, thread_id, settle,
-                        error,
-                        on_committed=on_committed,
-                    )
-                except asyncio.CancelledError:
-                    outcome = "cancelled"
-                    raise
-                except background_tasks.TaskStopped:
-                    outcome = "cancelled"
-                    raise
-                except background_tasks.TaskLeaseExpired:
-                    outcome = "lease_lost"
-                    raise
-                except Exception:
-                    outcome = "error"
-                    raise
-                finally:
-                    timing.save_ms = business_assistant.elapsed_ms(save_started)
+                        on_committed = confirm_committed
+                    try:
+                        await asyncio.to_thread(
+                            _save_answer, provider, answer, changes, memory_block, automation_block, thread_id, settle,
+                            error,
+                            on_committed=on_committed,
+                        )
+                    except asyncio.CancelledError:
+                        outcome = "cancelled"
+                        raise
+                    except background_tasks.TaskStopped:
+                        outcome = "cancelled"
+                        raise
+                    except background_tasks.TaskLeaseExpired:
+                        outcome = "lease_lost"
+                        raise
+                    except Exception:
+                        outcome = "error"
+                        raise
+                    finally:
+                        timing.save_ms = business_assistant.elapsed_ms(save_started)
         finally:
             total_ms = business_assistant.elapsed_ms(timing.started)
             if isinstance(run, _Journal) and settle is not None:
@@ -487,9 +496,12 @@ async def stop():
     if _queued():
         await in_worker_session(_stop_queued)
         return {"ok": True}
-    stop_generation(_answer_run())
+    key = _answer_run()
+    # A second Stop waits for the same run without interrupting its save.
+    if active_generation(key) is not None:
+        stop_generation(key)
     # What was written so far is saved as the run unwinds; answer once it is there to read.
-    await wait_generation(_answer_run())
+    await wait_generation(key)
     return {"ok": True}
 
 
