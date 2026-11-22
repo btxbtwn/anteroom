@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -354,6 +355,39 @@ def test_mcp_tools_list_and_read_write_lifecycle_respects_safety_invariant():
     deleted, err = _call_tool(client, "delete_draft_listing", {"conversation_id": draft_id, "confirm": True})
     assert not err, deleted
     assert deleted["deleted"] is True
+
+
+def test_desktop_mcp_draft_delete_removes_original_video(tmp_path, monkeypatch):
+    from anteroom.models.listing_video import ListingVideo
+    from anteroom.services import listing_videos
+
+    monkeypatch.setattr(listing_videos, "VIDEOS_DIR", tmp_path)
+    client = TestClient(app)
+    draft, error = _call_tool(client, "create_draft_listing", {"title": "Draft with a video"})
+    assert not error, draft
+    conv_id = draft["conversation_id"]
+    clip = Path(__file__).with_name("fixtures") / "listing-video.mp4"
+    upload = client.post(
+        f"/api/conversations/{conv_id}/videos", files={"file": ("clip.mp4", clip.read_bytes(), "video/mp4")},
+    )
+    assert upload.status_code == 200, upload.text
+    video_id = upload.json()["id"]
+    with SessionLocal() as db:
+        video = db.get(ListingVideo, video_id)
+        assert video is not None
+        original = listing_videos.video_path(video)
+    assert original.is_file()
+
+    _, error = _call_tool(client, "delete_draft_listing", {"conversation_id": conv_id, "confirm": False})
+    assert error
+    assert original.is_file()
+
+    result, error = _call_tool(client, "delete_draft_listing", {"conversation_id": conv_id, "confirm": True})
+    assert not error, result
+    assert result["deleted"] and result["deleted_photos"] == 0
+    with SessionLocal() as db:
+        assert db.get(ListingVideo, video_id) is None
+    assert not original.exists()
 
 
 def test_desktop_mcp_token_crud_and_optional_bearer_validation():

@@ -17,14 +17,13 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from anteroom.models.background_task import BackgroundTask
-from anteroom.models.conversation import Conversation, Message, Photo
+from anteroom.models.conversation import Conversation, Photo
 from anteroom.models.job import ACTIVE_JOB_STATUSES, Job
 from anteroom.models.listing import Listing, ListingRevision
-from anteroom.models.listing_evidence import ListingCorrection, SaleSnapshot
 from anteroom.models.marketplace_listing import LIVE_STATES, MarketplaceListing
 from anteroom.models.marketplace_sale import MarketplaceSale
 from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
@@ -1089,28 +1088,27 @@ def _tool_delete_draft_listing(
             "Refused: only unsent local drafts with no marketplace records, jobs, or sales can be deleted via MCP."
         )
 
-    photos = db.scalars(select(Photo).where(Photo.conversation_id == conv_id)).all()
     if hosted:
         from anteroom.services import hosted_listing_delete
 
+        deleted_photos = db.scalar(select(func.count()).select_from(Photo).where(Photo.conversation_id == conv_id))
         storage_keys = hosted_listing_delete.remove_unsent_draft(db, conv_id)
-        photo_keys = [(key, None) for key in storage_keys]
+        db.commit()
+        for key in storage_keys:
+            _best_effort_delete_photo_files(db, key, None, bearer_token=bearer_token)
     else:
-        photo_keys = [(p.stored_filename, p.source_filename) for p in photos]
-        db.execute(delete(BackgroundTask).where(BackgroundTask.conversation_id == conv_id))
-        for model in (Listing, ListingRevision, Photo, Message, ListingCorrection, SaleSnapshot):
-            db.execute(delete(model).where(model.conversation_id == conv_id))
-        db.execute(delete(Conversation).where(Conversation.id == conv_id))
-    db.commit()
+        from anteroom.services.listing_delete import ListingBusy, delete_listing
 
-    for stored_key, source_key in photo_keys:
-        _best_effort_delete_photo_files(db, stored_key, source_key, bearer_token=bearer_token)
+        try:
+            _, deleted_photos = delete_listing(db, conv_id)
+        except (ListingBusy, LookupError) as exc:
+            raise McpToolError(str(exc)) from exc
 
     return {
         "ok": True,
         "conversation_id": conv_id,
         "deleted": True,
-        "deleted_photos": len(photos),
+        "deleted_photos": deleted_photos,
         "delisted_from_marketplaces": False,
     }
 
