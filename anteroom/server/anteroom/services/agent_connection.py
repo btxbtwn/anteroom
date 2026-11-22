@@ -63,7 +63,10 @@ def describe() -> dict[str, Any]:
     command = _display_command(path)
     base_url = loopback_base_url()
     remote = remote_base_url()
+    mcp_base = remote or base_url
+    mcp_url = f"{mcp_base.rstrip('/')}/api/mcp"
     return {
+        "hosted": False,
         "installed": path is not None,
         "on_path": on_path,
         "path": path,
@@ -71,6 +74,7 @@ def describe() -> dict[str, Any]:
         "version_error": version_error,
         "base_url": base_url,
         "remote_base_url": remote,
+        "mcp_url": mcp_url,
         "login_command": f"{command} auth login --alias local --base-url {base_url}",
         "remote_login_command": (
             f"{command} auth login --alias studio --base-url {remote}" if remote else None
@@ -78,6 +82,30 @@ def describe() -> dict[str, Any]:
         "install_command": None if path else _INSTALL_COMMAND,
         "hint": _hint(installed=path is not None, on_path=on_path),
         "clients": _clients(path or "anteroom"),
+        "remote_clients": _remote_clients(mcp_url, require_token=bool(remote)),
+    }
+
+
+def describe_hosted(base_url: str) -> dict[str, Any]:
+    """Remote MCP connection details for hosted myanteroom.com sellers."""
+    origin = (base_url or "https://myanteroom.com").rstrip("/")
+    mcp_url = f"{origin}/api/mcp"
+    return {
+        "hosted": True,
+        "installed": False,
+        "on_path": False,
+        "path": None,
+        "version": _app_version() or None,
+        "version_error": None,
+        "base_url": origin,
+        "remote_base_url": origin,
+        "mcp_url": mcp_url,
+        "login_command": "",
+        "remote_login_command": None,
+        "install_command": None,
+        "hint": None,
+        "clients": [],
+        "remote_clients": _remote_clients(mcp_url, require_token=True),
     }
 
 
@@ -227,6 +255,76 @@ def _clients(command: str) -> list[dict[str, Any]]:
             "where": "Run the command in a terminal, or merge the JSON into the project's .mcp.json.",
             "snippet": snippet,
             "command": f"claude mcp add --transport stdio anteroom -- {quoted} mcp serve",
+        },
+    ]
+
+
+def _remote_clients(mcp_url: str, *, require_token: bool) -> list[dict[str, Any]]:
+    token_placeholder = "arm_your_access_token"
+    headers_block = {"Authorization": f"Bearer {token_placeholder}"} if require_token else {}
+
+    claude_entry: dict[str, Any] = {"type": "http", "url": mcp_url}
+    if headers_block:
+        claude_entry["headers"] = headers_block
+    claude_snippet = json.dumps({"mcpServers": {"anteroom": claude_entry}}, indent=2)
+    claude_cmd = (
+        f"claude mcp add --transport http anteroom {shlex.quote(mcp_url)} "
+        f'--header "Authorization: Bearer {token_placeholder}"'
+        if require_token
+        else f"claude mcp add --transport http anteroom {shlex.quote(mcp_url)}"
+    )
+
+    chatgpt_snippet = json.dumps(
+        {
+            "name": "Anteroom",
+            "mcp_server_url": mcp_url,
+            "authentication": "Bearer token" if require_token else "None (local loopback) or Bearer token",
+            "headers": {"Authorization": f"Bearer {token_placeholder}"},
+        },
+        indent=2,
+    )
+
+    gemini_entry: dict[str, Any] = {"httpUrl": mcp_url}
+    if headers_block:
+        gemini_entry["headers"] = headers_block
+    gemini_snippet = json.dumps({"mcpServers": {"anteroom": gemini_entry}}, indent=2)
+    gemini_cmd = (
+        f"gemini mcp add --transport http anteroom {shlex.quote(mcp_url)} "
+        f'--header "Authorization: Bearer {token_placeholder}"'
+        if require_token
+        else f"gemini mcp add --transport http anteroom {shlex.quote(mcp_url)}"
+    )
+
+    return [
+        {
+            "id": "claude",
+            "label": "Claude",
+            "where": (
+                "Claude.ai / Claude Desktop → Settings → Connectors → Add custom connector "
+                "using the Streamable HTTP URL and your access token, or add it via Claude Code."
+            ),
+            "snippet": claude_snippet,
+            "command": claude_cmd,
+        },
+        {
+            "id": "chatgpt",
+            "label": "ChatGPT",
+            "where": (
+                "ChatGPT → Settings → Connectors → Developer Mode → Create connector. "
+                "Paste the Streamable HTTP MCP URL and pass your access token as a Bearer header."
+            ),
+            "snippet": chatgpt_snippet,
+            "command": None,
+        },
+        {
+            "id": "gemini",
+            "label": "Gemini",
+            "where": (
+                "Gemini CLI (~/.gemini/settings.json) or Gemini MCP extensions: "
+                "merge this httpUrl entry into mcpServers or run the command below."
+            ),
+            "snippet": gemini_snippet,
+            "command": gemini_cmd,
         },
     ]
 

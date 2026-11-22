@@ -23,6 +23,7 @@ from anteroom.models.job import ACTIVE_JOB_STATUSES
 SKIPPED_TABLES = frozenset({
     'background_tasks', 'background_task_events', 'user_secret_references',
     'cloud_marketplace_sessions', 'cloud_session_audit', 'cloud_operation_journals',
+    'mcp_access_tokens',
     'listing_videos', 'photo_fingerprints',
 })
 MAX_ROWS = 500

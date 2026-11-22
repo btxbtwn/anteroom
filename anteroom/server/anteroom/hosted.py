@@ -230,13 +230,35 @@ class SellerSessionMiddleware:
             if scheme.lower() != "bearer" or not token or len(token) > 16384:
                 raise InvalidSession
             state = scope["app"].state
-            # JWKS retrieval is synchronous. Keep it off the event loop, the
-            # request thread limiter and the loop's shared pool: database steps
-            # waiting for a connection and photo copies to Storage fill that
-            # pool, and must not stop the Mac and Chrome authenticating their
-            # heartbeats and replies.
-            identity = await asyncio.get_running_loop().run_in_executor(
-                state.auth_threads, state.session_verifier.verify, token)
+            from anteroom.services import mcp_tokens
+            from anteroom.services.seller_sessions import SellerIdentity
+
+            is_mcp_token = token.startswith(mcp_tokens.TOKEN_PREFIX)
+            if is_mcp_token:
+                # Personal access tokens for MCP are strictly scoped to /api/mcp.
+                # Never allow them on general workspace, publishing, or delisting routes.
+                if scope["path"] != "/api/mcp":
+                    raise InvalidSession
+                from functools import partial
+                from anteroom import database
+
+                verified = await asyncio.get_running_loop().run_in_executor(
+                    state.auth_threads,
+                    partial(mcp_tokens.authenticate_token, database.engine, token, hosted=True),
+                )
+                if verified is None:
+                    raise InvalidSession
+                identity = SellerIdentity(user_id=verified.owner_id)
+                context_token: str | None = None
+            else:
+                # JWKS retrieval is synchronous. Keep it off the event loop, the
+                # request thread limiter and the loop's shared pool: database steps
+                # waiting for a connection and photo copies to Storage fill that
+                # pool, and must not stop the Mac and Chrome authenticating their
+                # heartbeats and replies.
+                identity = await asyncio.get_running_loop().run_in_executor(
+                    state.auth_threads, state.session_verifier.verify, token)
+                context_token = token
         except InvalidSession:
             response = JSONResponse(
                 {"detail": "A valid seller session is required"}, status_code=401,
@@ -254,7 +276,7 @@ class SellerSessionMiddleware:
             scope.setdefault("state", {})["seller"] = identity
             from anteroom.services.hosted_context import for_seller
             from anteroom.services.service_context import use
-            with use(for_seller(identity.user_id, token)):
+            with use(for_seller(identity.user_id, context_token)):
                 await self.app(scope, receive, send)
             return
         await response(scope, receive, send)
@@ -518,9 +540,9 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(mac_ai_router)
     from anteroom.routes.hosted_attachments import router as attachment_router
     app.include_router(attachment_router)
-    from anteroom.routes import analytics, boxes, sale_calendar, sales_ledger
+    from anteroom.routes import analytics, boxes, home, mcp, sale_calendar, sales_ledger
     from anteroom.routes import scout, sourcing
-    for shared_router in (analytics.router, boxes.router, sale_calendar.router, sales_ledger.router, sourcing.router, scout.router):
+    for shared_router in (analytics.router, boxes.router, home.router, mcp.router, sale_calendar.router, sales_ledger.router, sourcing.router, scout.router):
         app.include_router(shared_router)
     from anteroom.routes.photos import edit_router
     app.include_router(edit_router)

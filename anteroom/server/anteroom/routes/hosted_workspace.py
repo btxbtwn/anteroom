@@ -117,7 +117,7 @@ def runtime(request: Request, db=Depends(get_seller_db, scope="function")):
             + (['generation', 'chat_attachments', 'bulk_regenerate'] if generation else [])
             + (['catalog_categories'] if categories_ready(db) else [])
             + (['ebay_offers'] if scheduled else []),
-            'views': ['listings', 'analytics', 'settings', 'automations', 'assistant', 'marketplaces', 'sourcing'], 'marketplace_forms': ['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
+            'views': ['home', 'listings', 'analytics', 'settings', 'automations', 'assistant', 'marketplaces', 'sourcing'], 'marketplace_forms': ['poshmark', 'depop', 'mercari', 'ebay', 'etsy'],
             # eBay and Etsy list through their APIs, the rest through the seller's Chrome; a restart's held slot needs the job watchdog.
             'action_marketplaces': list(ACTION_MARKETPLACES) if scheduled else []}
 

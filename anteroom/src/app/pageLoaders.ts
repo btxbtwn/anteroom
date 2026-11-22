@@ -26,6 +26,7 @@ export function preloadablePage<P extends object>(load: () => Promise<PageModule
   return { Page, preload };
 }
 
+const home = preloadablePage(() => import("../components/HomePage").then(m => ({ default: m.HomePage })));
 const settings = preloadablePage(() => import("../components/SettingsPage").then(m => ({ default: m.SettingsPage })));
 const analytics = preloadablePage(() => import("../components/AnalyticsPage").then(m => ({ default: m.AnalyticsPage })));
 const assistant = preloadablePage(() => import("../components/AssistantPage").then(m => ({ default: m.AssistantPage })));
@@ -35,6 +36,7 @@ const sourcing = preloadablePage(() => import("../components/SourcingPage").then
 const inventory = preloadablePage(() => import("../components/InventoryTablePage").then(m => ({ default: m.InventoryTablePage })));
 
 export const pageLoaders = {
+  home: home.preload,
   settings: settings.preload,
   analytics: analytics.preload,
   assistant: assistant.preload,
@@ -44,6 +46,7 @@ export const pageLoaders = {
   inventory: inventory.preload,
 };
 
+export const HomePage = home.Page;
 export const SettingsPage = settings.Page;
 export const AnalyticsPage = analytics.Page;
 export const AssistantPage = assistant.Page;

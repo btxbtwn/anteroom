@@ -83,7 +83,8 @@ import { readSse } from "./sse";
 import { AssistantRefused, type AssistantMemory, type AssistantMessage, type AssistantStreamHandlers, type AssistantThread } from "./assistant";
 import type { Automation, AutomationApproval, AutomationBody, AutomationDraft, AutomationHistory, AutomationPreview, AutomationRun, RelistGap } from "./automations";
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
-import type { AgentConnectionStatus, AgentConnectionTest } from "./agentConnection";
+import type { AgentConnectionStatus, AgentConnectionTest, McpAccessToken, McpTokenCreateResponse } from "./agentConnection";
+import { browserTimeZone, type GoalMetric, type GoalPeriod, type HomeMutationResponse, type HomeSummaryResponse } from "./home";
 import type { DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus, StillListedResponse } from "./directConnections";
 import type { DelistMarketplace, MarketplaceListings, MarketplaceMark, SalesCheck, SellerSale, SellerSaleResult } from "./marketplaceListings";
 import type { ListingReadiness, NativeDraft, NativeDrafts, NativeMarketplace, NativePreflight } from "./nativeMarketplaces";
@@ -1524,6 +1525,18 @@ export const api = {
       }>("/settings/formulas", { method: "PUT", body: JSON.stringify(body) }),
     agent: () => request<AgentConnectionStatus>("/settings/agent"),
     testAgent: () => request<AgentConnectionTest>("/settings/agent/test", { method: "POST" }),
+    mcpTokens: {
+      list: () => request<{ tokens: McpAccessToken[] }>("/settings/mcp-tokens"),
+      create: (body: { name: string; expires_in_days?: number | null }) =>
+        request<McpTokenCreateResponse>("/settings/mcp-tokens", {
+          method: "POST",
+          body: JSON.stringify(body),
+        }),
+      revoke: (tokenId: string) =>
+        request<{ ok: boolean }>(`/settings/mcp-tokens/${encodeURIComponent(tokenId)}`, {
+          method: "DELETE",
+        }),
+    },
     tailscale: () =>
       request<{
         available: boolean;
@@ -1661,6 +1674,43 @@ export const api = {
         "/updates/versions/install",
         { method: "POST", body: JSON.stringify({ tag, snapshot: snapshot ?? null }) },
       ),
+  },
+
+  home: {
+    summary: (timezone = browserTimeZone()) =>
+      request<HomeSummaryResponse>(`/home?timezone=${encodeURIComponent(timezone)}`),
+    upsertGoal: (
+      body: { period: GoalPeriod; metric: GoalMetric; target: number; label?: string | null },
+      timezone = browserTimeZone(),
+    ) =>
+      request<HomeMutationResponse>(`/home/goals?timezone=${encodeURIComponent(timezone)}`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    updateGoal: (
+      goalId: string,
+      body: { period?: GoalPeriod; metric?: GoalMetric; target?: number; label?: string | null },
+      timezone = browserTimeZone(),
+    ) =>
+      request<HomeMutationResponse>(
+        `/home/goals/${encodeURIComponent(goalId)}?timezone=${encodeURIComponent(timezone)}`,
+        { method: "PATCH", body: JSON.stringify(body) },
+      ),
+    deleteGoal: (goalId: string, timezone = browserTimeZone()) =>
+      request<HomeMutationResponse>(
+        `/home/goals/${encodeURIComponent(goalId)}?timezone=${encodeURIComponent(timezone)}`,
+        { method: "DELETE" },
+      ),
+    dismissAttention: (itemKey: string, kind: string, timezone = browserTimeZone()) =>
+      request<HomeMutationResponse>(`/home/attention/dismiss?timezone=${encodeURIComponent(timezone)}`, {
+        method: "POST",
+        body: JSON.stringify({ item_key: itemKey, kind }),
+      }),
+    restoreAttention: (itemKey: string, timezone = browserTimeZone()) =>
+      request<HomeMutationResponse>(`/home/attention/restore?timezone=${encodeURIComponent(timezone)}`, {
+        method: "POST",
+        body: JSON.stringify({ item_key: itemKey }),
+      }),
   },
 
   changelog: () =>

@@ -80,23 +80,27 @@ def difference_hash(path: Path) -> str | None:
     return f"{bits:016x}"
 
 
-def _fingerprints(db: Session, photos: dict[str, str]) -> dict[str, int]:
-    """Cover hashes by checksum, computing and saving the ones not seen before."""
+def _fingerprints(db: Session, photos: dict[str, str], *, compute: bool = True) -> dict[str, int]:
+    """Cover hashes by checksum, optionally computing and saving ones not seen before."""
     from anteroom.models.similar_item import PhotoFingerprint
 
     known = {
         row.checksum: row.dhash
         for row in db.query(PhotoFingerprint).filter(PhotoFingerprint.checksum.in_(list(photos))).all()
     } if photos else {}
-    for checksum, stored in photos.items():
-        if checksum in known:
-            continue
-        try:
-            known[checksum] = difference_hash(photo_store().local_path(stored))
-        except (FileNotFoundError, ValueError):
-            continue
-        db.add(PhotoFingerprint(checksum=checksum, dhash=known[checksum]))
-    db.commit()
+    if compute:
+        added = False
+        for checksum, stored in photos.items():
+            if checksum in known:
+                continue
+            try:
+                known[checksum] = difference_hash(photo_store().local_path(stored))
+            except (FileNotFoundError, ValueError):
+                continue
+            db.add(PhotoFingerprint(checksum=checksum, dhash=known[checksum]))
+            added = True
+        if added:
+            db.commit()
     return {checksum: int(value, 16) for checksum, value in known.items() if value}
 
 
@@ -163,8 +167,8 @@ def _pair(a: str, b: str) -> tuple[str, str]:
     return (a, b) if a < b else (b, a)
 
 
-def find_similar(db: Session) -> dict[str, Any]:
-    """Pairs worth a look, most alike first. Reads and fingerprints photos; changes no item."""
+def find_similar(db: Session, *, compute_fingerprints: bool = True) -> dict[str, Any]:
+    """Pairs worth a look, most alike first. Reads and optionally fingerprints photos; changes no item."""
     from anteroom.models.conversation import Photo
     from anteroom.services.photos import cover_thumb_url
 
@@ -223,7 +227,7 @@ def find_similar(db: Session) -> dict[str, Any]:
     stored = dict(
         db.query(Photo.checksum, Photo.stored_filename).filter(Photo.checksum.in_(covers)).all()
     ) if covers else {}
-    hashes = _fingerprints(db, cast(dict[str, str], stored))
+    hashes = _fingerprints(db, cast(dict[str, str], stored), compute=compute_fingerprints)
     for (first, second), entry in found.items():
         first_checksum, second_checksum = items[first].cover_checksum, items[second].cover_checksum
         left = hashes.get(first_checksum) if first_checksum is not None else None

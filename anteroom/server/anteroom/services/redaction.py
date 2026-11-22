@@ -32,6 +32,7 @@ _POSTGRES_DSN = re.compile(
     re.IGNORECASE,
 )
 _JWT = re.compile(r"\beyJ[\w-]{6,}\.[\w-]+\.[\w-]+")
+_MCP_TOKEN = re.compile(r"\barm_[A-Za-z0-9_-]{16,}")
 _BEARER = re.compile(r"\b(Bearer\s+)(?!…\(masked\))[\w.~+/=-]+", re.IGNORECASE)
 _MASK = "…(masked)"
 
@@ -63,6 +64,7 @@ def redact(text: str) -> str:
     text = _POSTGRES_DSN.sub(_redact_dsn, text)
     text = _BEARER.sub(lambda m: f"{m.group(1)}{_MASK}", text)
     text = _JWT.sub(lambda m: _mask(m.group(0)), text)
+    text = _MCP_TOKEN.sub(lambda m: _mask(m.group(0)), text)
     text = _DQ_HEADER.sub(lambda m: f"{m.group(1)}{_MASK}{m.group(3)}", text)
     text = _SQ_HEADER.sub(lambda m: f"{m.group(1)}{_MASK}{m.group(3)}", text)
     text = _UNQUOTED_HEADER.sub(

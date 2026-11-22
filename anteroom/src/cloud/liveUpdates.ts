@@ -20,19 +20,19 @@ export const TOPIC_QUERY_KEYS: Record<string, readonly string[]> = {
   listings: [
     "status", "conversations", "conversation", "listing", "listing-fields", "messages", "revisions", "revision",
     "published-versions", "marketplace-listings", "marketplace-statuses", "native-marketplaces", "native-editor-form",
-    "native-preflight", "listing-videos", "similar-items", "suggestions", "activity", "analytics", "sales-ledger",
+    "native-preflight", "listing-videos", "similar-items", "suggestions", "activity", "analytics", "sales-ledger", "home",
   ],
   photos: ["photos", "conversations", "conversation", "listing", "marketplace-media"],
-  jobs: ["status", "jobs", "queue", "fill-log", "activity", "conversations", "marketplace-statuses"],
+  jobs: ["status", "jobs", "queue", "fill-log", "activity", "conversations", "marketplace-statuses", "home"],
   settings: [
     "settings-*", "ai-keys", "ai-key-models", "direct-connections", "marketplace-sessions", "listing-templates",
-    "ebay-listing-defaults", "ebay-listing-profiles", "etsy-listing-defaults", "etsy-listing-profiles", "status",
+    "ebay-listing-defaults", "ebay-listing-profiles", "etsy-listing-defaults", "etsy-listing-profiles", "status", "home",
   ],
   assistant: ["assistant"],
-  sales: ["marketplace-sales", "sales-ledger", "sale-calendar", "sale-detection", "analytics", "conversations"],
+  sales: ["marketplace-sales", "sales-ledger", "sale-calendar", "sale-detection", "analytics", "conversations", "home"],
   automations: [
     "automations", "automation-approvals", "automation-gaps", "promotion-automations", "promotions",
-    "promotion-floors", "ebay-offers", "price-drop-preview", "offer-analytics", "offer-log",
+    "promotion-floors", "ebay-offers", "price-drop-preview", "offer-analytics", "offer-log", "home",
   ],
   sourcing: ["sourcing", "boxes", "scout"],
 };

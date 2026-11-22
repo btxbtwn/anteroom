@@ -7,6 +7,7 @@ export interface AgentClientSnippet {
 }
 
 export interface AgentConnectionStatus {
+  hosted?: boolean;
   installed: boolean;
   on_path: boolean;
   path: string | null;
@@ -14,11 +15,13 @@ export interface AgentConnectionStatus {
   version_error: string | null;
   base_url: string;
   remote_base_url: string | null;
+  mcp_url?: string | null;
   login_command: string;
   remote_login_command: string | null;
   install_command: string | null;
   hint: string | null;
   clients: AgentClientSnippet[];
+  remote_clients?: AgentClientSnippet[];
 }
 
 export interface AgentConnectionTest {
@@ -26,4 +29,19 @@ export interface AgentConnectionTest {
   detail: string;
   version: string | null;
   base_url: string | null;
+}
+
+export interface McpAccessToken {
+  id: string;
+  name: string;
+  token_prefix: string;
+  created_at: string | null;
+  last_used_at: string | null;
+  expires_at: string | null;
+  revoked_at: string | null;
+  active: boolean;
+}
+
+export interface McpTokenCreateResponse extends McpAccessToken {
+  token: string;
 }

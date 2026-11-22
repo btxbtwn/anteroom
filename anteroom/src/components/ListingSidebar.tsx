@@ -73,6 +73,7 @@ interface Props {
   onDelete: (id: string, title: string) => void;
   onCreate: () => void;
   creating: boolean;
+  onOpenHome: () => void;
   onOpenSettings: () => void;
   onOpenAnalytics: () => void;
   onOpenMarketplaces: () => void;
@@ -104,6 +105,7 @@ export function ListingSidebar({
   onDelete,
   onCreate,
   creating,
+  onOpenHome,
   onOpenSettings,
   onOpenAnalytics,
   onOpenMarketplaces,
@@ -457,6 +459,7 @@ export function ListingSidebar({
         settingsMode={settingsMode}
         activeView={activeView}
         onCloseSettings={onCloseSettings}
+        onOpenHome={onOpenHome}
         onOpenSourcing={onOpenSourcing}
         onOpenAnalytics={onOpenAnalytics}
         onOpenMarketplaces={onOpenMarketplaces}
