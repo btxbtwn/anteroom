@@ -85,7 +85,13 @@ fi
 if component backend; then
   # The cloud marketplace runner tests start its Node script, which needs its
   # own packages (CI's "Install cloud runner dependencies" step).
-  run "Anteroom cloud runner dependencies" bash -c "cd anteroom/server/anteroom/cloud_runner && { npm ls --all >/dev/null 2>&1 || npm ci --no-audit --no-fund; }"
+  run "Anteroom cloud runner dependencies" bash -c "
+    cd anteroom/server/anteroom/cloud_runner || exit 1
+    # npm ls accepts a missing optional native binding.
+    if ! npm ls --all >/dev/null 2>&1 || ! node -e \"require('impit')\" >/dev/null 2>&1; then
+      npm ci --include=optional --no-audit --no-fund && node -e \"require('impit')\"
+    fi
+  "
   run "Anteroom backend" bash -c "cd anteroom && ANTEROOM_DATA_DIR=\$(mktemp -d) '$PY' -m pytest -q -n auto"
   if [[ "$FAST" == "1" ]]; then
     skip "Anteroom backend on Postgres" "--fast"
