@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import type { DelistMarketplace, MarketplaceListings } from "../api/marketplaceListings";
+import { useWorkspaceRuntime } from "../app/runtime";
 import { confirmDialog } from "../ui/confirmDialog";
 import { toastManager } from "./ui/toast";
 import {
@@ -11,6 +13,8 @@ import {
   useChatBusy,
 } from "./chat/liveChatStore";
 import { RefreshCwIcon } from "lucide-react";
+import { waitlist } from "./MarketplaceActivity";
+import { delistPrompt, delistTargets } from "./MarketplacesSection";
 import { RegeneratePriceDialog } from "./RegeneratePriceDialog";
 import { Button } from "./ui/button";
 
@@ -23,6 +27,22 @@ const REGENERATE_WARNING = [
   "Rewrite this listing from scratch?",
   "Chat and every generated field are discarded, then the listing is written again from your photos and item details. Measurements, flaws, COG, labels and notes are kept.",
 ].join("\n");
+
+const REGENERATE_DELIST_LEAD = "The listing will be rewritten in Anteroom. Live listings keep the old copy unless you delist or update them.";
+
+/** After the seller confirms Regenerate: the marketplaces they also chose to delist from.
+    Nothing live there means no question; "Keep them listed" means none. */
+export async function askDelistOnRegenerate(
+  title: string,
+  listings: MarketplaceListings,
+  canAct: (marketplace: string) => boolean,
+): Promise<DelistMarketplace[]> {
+  const targets = delistTargets(listings, canAct);
+  if (!targets.length) return [];
+  const { message, confirmLabel } = delistPrompt(title, targets, REGENERATE_DELIST_LEAD);
+  const approved = await confirmDialog(message, { variant: "destructive", confirmLabel, cancelLabel: "Keep them listed" });
+  return approved ? targets : [];
+}
 
 export async function refreshAfterReset(queryClient: QueryClient, convId: string) {
   queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -80,7 +100,8 @@ function listingHasPrice(listing: Record<string, unknown> | undefined): boolean 
 }
 
 /** When the listing has a price, opens the comps/percent drop chooser, which
- *  offers the rewrite itself. Otherwise a single confirm precedes the rewrite. */
+ *  offers the rewrite itself. Otherwise a single confirm precedes the rewrite.
+ *  Either way, an item still live somewhere is then asked whether to delist it too. */
 export function RegenerateListingButton({
   convId,
   className,
@@ -93,6 +114,7 @@ export function RegenerateListingButton({
   onRegenerated?: () => void;
 }) {
   const queryClient = useQueryClient();
+  const runtime = useWorkspaceRuntime();
   const busy = useChatBusy(convId);
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
   const { data: photos } = useQuery({
@@ -103,11 +125,15 @@ export function RegenerateListingButton({
     queryKey: ["listing", convId],
     queryFn: ({ signal }) => api.listings.get(convId, { signal }),
   });
+  const { data: liveListings } = useQuery({
+    queryKey: ["marketplace-listings", convId],
+    queryFn: ({ signal }) => api.marketplaceListings.get(convId, { signal }),
+  });
   const hasPhotos = Boolean(photos?.length);
   const hasPrice = listingHasPrice(listingData?.listing);
 
   const regenerate = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (_delist: { title: string; marketplaces: DelistMarketplace[] }) => {
       resetChatLive(convId);
       // The wipe can take a moment; show it as a phase in the chat instead
       // of leaving an empty panel.
@@ -127,7 +153,13 @@ export function RegenerateListingButton({
       queryClient.setQueryData(["messages", convId], messages);
       void refreshAfterReset(queryClient, convId);
     },
-    onSuccess: () => {
+    onSuccess: (_data, delist) => {
+      // Queued only after the wipe, which cancels this item's marketplace jobs.
+      // The seller approved exactly these marketplaces in the delist prompt.
+      for (const marketplace of delist.marketplaces) {
+        waitlist.add({ convId, title: delist.title, marketplace, kind: "delist", revisionId: "" });
+      }
+      if (delist.marketplaces.length) void queryClient.invalidateQueries({ queryKey: ["queue"] });
       // Stop during the wipe clears the phase; honour it instead of generating.
       if (!isChatResetting(convId)) return;
       // queueChatGenerate resets the live stream, which clears the wipe phase.
@@ -144,13 +176,22 @@ export function RegenerateListingButton({
     },
   });
 
+  /** Asks once, after the rewrite is confirmed, whether to delist the live listings too.
+      Keeping them listed still rewrites. */
+  async function rewriteAskingDelist() {
+    const title = String(listingData?.listing?.title || "this item");
+    const marketplaces = await askDelistOnRegenerate(title, liveListings ?? {},
+      (marketplace) => runtime.actionMarketplaces.has(marketplace));
+    regenerate.mutate({ title, marketplaces });
+  }
+
   async function confirmFullRegenerate() {
     const confirmed = await confirmDialog(REGENERATE_WARNING, {
       variant: "destructive",
       confirmLabel: "Rewrite",
     });
     if (!confirmed) return;
-    regenerate.mutate();
+    await rewriteAskingDelist();
   }
 
   return (
@@ -184,7 +225,7 @@ export function RegenerateListingButton({
         open={priceDialogOpen}
         onClose={() => setPriceDialogOpen(false)}
         onRewrite={() => {
-          regenerate.mutate();
+          void rewriteAskingDelist();
         }}
       />
     </>

@@ -7,6 +7,7 @@ type ConfirmState =
       message: string;
       variant: ConfirmVariant;
       confirmLabel: string;
+      cancelLabel: string;
       resolve: (value: boolean) => void;
     }
   /* Answered, still animating out: keeps the copy on screen until the host
@@ -16,6 +17,7 @@ type ConfirmState =
       message: string;
       variant: ConfirmVariant;
       confirmLabel: string;
+      cancelLabel: string;
     };
 
 let state: ConfirmState = { status: "idle" };
@@ -54,7 +56,7 @@ export function registerConfirmDialogHost() {
 
 export function confirmDialog(
   message: string,
-  options?: { variant?: ConfirmVariant; confirmLabel?: string },
+  options?: { variant?: ConfirmVariant; confirmLabel?: string; cancelLabel?: string },
 ): Promise<boolean> {
   if (!hostRegistered) return Promise.resolve(false);
   if (state.status === "confirming") return Promise.resolve(false);
@@ -65,6 +67,7 @@ export function confirmDialog(
       message,
       variant: options?.variant ?? "default",
       confirmLabel: options?.confirmLabel?.trim() || "Confirm",
+      cancelLabel: options?.cancelLabel?.trim() || "Cancel",
       resolve,
     };
     emit();
@@ -73,8 +76,8 @@ export function confirmDialog(
 
 export function respondToConfirmDialog(value: boolean) {
   if (state.status !== "confirming") return;
-  const { resolve, message, variant, confirmLabel } = state;
-  state = { status: "closing", message, variant, confirmLabel };
+  const { resolve, message, variant, confirmLabel, cancelLabel } = state;
+  state = { status: "closing", message, variant, confirmLabel, cancelLabel };
   resolve(value);
   emit();
 }
