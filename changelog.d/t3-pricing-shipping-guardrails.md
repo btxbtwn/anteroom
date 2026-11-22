@@ -1,7 +1,0 @@
-- Set pricing rules in Settings → Listings: pick a main price and let each marketplace's price follow it, with typical-fee offsets, your own percent and dollar adjustments, and .99 or whole-dollar endings (Poshmark always uses whole dollars). Prices you type on a marketplace stay yours.
-- See a Price inconsistency warning, and filter for it, when a marketplace price has drifted from your pricing rules; Apply pricing rules fixes it in Anteroom without sending anything.
-- Save shipping presets with a package size, weight, marketplace shipping choices and a plain-English rule for when to use each one. Generation picks the matching preset for you, and you can apply one with a click in the editor or in Bulk Edit.
-- Turn on a missing-SKU warning to flag items without a SKU in your listings, the inventory table and the listing's checks.
-- Filter labels both ways: include some labels and exclude others at the same time, in your listings and in the inventory table.
-- Listings that are still up on a marketplace but not for sale now show as Inactive instead of looking sold or deleted, with their own filter.
-- When you list, relist or update several items at once, choose how their marketplace text is handled: keep it as is, shorten only what runs over a marketplace's limit, or have AI write each marketplace its own title and description.
