@@ -126,9 +126,10 @@ def test_seller_deletes_only_their_own_account(cloud, signing_keys, monkeypatch)
     assert response.status_code == 200, response.text
     assert response.json() == {'deleted': True}
     assert owned_rows(engine, ALICE) == {}
-    # Only Alice's photo and chat images, sent with her own session.
-    assert removed == [([f'{ALICE}/item/{"a" * 32}.jpg', f'{ALICE}/thread/{"b" * 32}.jpg'],
-                        alice['Authorization'].removeprefix('Bearer '))]
+    # The cleanup receipt deduplicates keys without guaranteeing their order.
+    [(keys, token)] = removed
+    assert sorted(keys) == [f'{ALICE}/item/{"a" * 32}.jpg', f'{ALICE}/thread/{"b" * 32}.jpg']
+    assert token == alice['Authorization'].removeprefix('Bearer ')
     with engine.connect() as db:
         assert set(map(str, db.scalars(text('SELECT id FROM auth.users')))) == {BOB}
         assert set(map(str, db.scalars(text('SELECT user_id FROM anteroom_private.device_routes')))) == {BOB}
