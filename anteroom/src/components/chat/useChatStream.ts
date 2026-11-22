@@ -24,6 +24,7 @@ import type { SseParts } from "../sseCoalesce";
 
 /** How many times a dropped chat answer is followed again before the seller is asked to retry. */
 const SEND_RESUME_ATTEMPTS = 10;
+const RECONNECTING = /\s*·\s*reconnecting….*$/i;
 
 interface Options {
   convId: string;
@@ -273,7 +274,7 @@ export function useChatStream({
     const stillMine = () => getLive(convId).controller === controller;
     const errorContext = () => ({
       action: "send" as const,
-      lastStatus: getLive(convId).streamStatus || "",
+      lastStatus: (getLive(convId).streamStatus || "").replace(RECONNECTING, ""),
     });
     // Hosted answers run as a durable task that outlives this request. When the
     // connection drops, follow that task again from its first event: the reply
@@ -310,10 +311,13 @@ export function useChatStream({
       for (let attempt = 1; ; attempt += 1) {
         const resuming = Boolean(taskId);
         try {
-          ({ parts } = await consumeResponseSse(
+          const result = await consumeResponseSse(
             await open(),
             (event, nextParts) => applySseToLive(convId, event, nextParts),
-          ));
+          );
+          // A task's stream always ends with [DONE]; one closed before it was cut off.
+          if (taskId && !result.sawDone) throw new TypeError("network error");
+          parts = result.parts;
           break;
         } catch (err) {
           const status = Number((err as StreamRequestError | null)?.httpStatus);
@@ -325,7 +329,7 @@ export function useChatStream({
             && attempt < SEND_RESUME_ATTEMPTS
           ) {
             patchLive(convId, {
-              streamStatus: `${(getLive(convId).streamStatus || "Answering").replace(/\s*·\s*reconnecting….*$/i, "")} · reconnecting…`,
+              streamStatus: `${(getLive(convId).streamStatus || "Answering").replace(RECONNECTING, "")} · reconnecting…`,
               thinkingStarted: true,
               streamText: "",
             });

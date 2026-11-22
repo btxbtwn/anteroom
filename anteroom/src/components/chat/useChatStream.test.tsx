@@ -615,6 +615,41 @@ describe("useChatStream send", () => {
     expect(getLive(convId).streamText).not.toMatch(/Error/);
   });
 
+  it("follows a task stream that closed before it finished", async () => {
+    routes = (url) => (url.endsWith("/messages")
+      ? new Response("event: status\ndata: Reading the listing…\n\ndata: I upd\n\n", {
+        headers: { "X-Anteroom-Task": "task-9" },
+      })
+      : sse("data: I updated the Occasion field.", "", DONE));
+    const { chat } = mountChat();
+
+    await act(async () => { await chat().sendMessage("Fill occasion"); });
+
+    expect(requested("/messages/resume?task_id=task-9")).toHaveLength(1);
+    expect(getLive(convId)).toMatchObject({ failedAction: null, streaming: false });
+  });
+
+  it("names the step, not the reconnect, when a dropped answer cannot be followed", async () => {
+    routes = (url) => {
+      // The status arrives, then the connection breaks on the next read.
+      let pulls = 0;
+      const body = new ReadableStream<Uint8Array>({
+        pull(c) {
+          if (pulls++ === 0) c.enqueue(new TextEncoder().encode("event: status\ndata: Reading the listing…\n\n"));
+          else c.error(new TypeError("network error"));
+        },
+      });
+      return new Response(body, { headers: url.endsWith("/messages") ? { "X-Anteroom-Task": "task-10" } : {} });
+    };
+    const { chat } = mountChat();
+
+    await act(async () => { await chat().sendMessage("Fill occasion"); });
+
+    expect(requested("/messages/resume")).toHaveLength(9);
+    expect(getLive(convId).failedAction).toBe("send");
+    expect(getLive(convId).streamText).toMatch(/^Error: Chat request connection dropped during “Reading the listing…”\./);
+  });
+
   it("shows the answer's own failure when the followed task failed", async () => {
     routes = (url) => {
       if (url.endsWith("/messages")) {
