@@ -26,8 +26,14 @@ def test_upgrade_indexes_recent_history_without_changing_waiting_results(migrati
     now = datetime(2026, 11, 15, 23, 30)
     with Session(engine) as db:
         rule = PromotionAutomation(id="history-rule", name="Offers", marketplace="poshmark", action="offer", min_likes=2)
-        db.add(rule)
-        db.flush()
+        # Seed the historical schema without issuing inserts against newer ORM columns.
+        metadata = sa.MetaData()
+        rules = sa.Table("promotion_automations", metadata, autoload_with=db.connection())
+        history = sa.Table("listing_promotions", metadata, autoload_with=db.connection())
+        db.execute(rules.insert().values(id=rule.id, name=rule.name, marketplace=rule.marketplace,
+                                         action=rule.action, min_likes=rule.min_likes, enabled=False, scope="all",
+                                         conversation_ids=[], excluded_ids=[], min_days_listed=0,
+                                         created_at=now, updated_at=now))
         # Old rows dominate the same rule, as a seller's journal grows.
         rows = [dict(id=f"old-{i}", batch_id="batch", automation_id=rule.id, marketplace="poshmark", action="offer",
                      listing_id=f"item-{i % 100}", state="skipped", like_count=0,
@@ -51,7 +57,7 @@ def test_upgrade_indexes_recent_history_without_changing_waiting_results(migrati
         # Uniform keys for executemany.
         for row in rows:
             row.setdefault("sent_at", None)
-        db.execute(sa.insert(ListingPromotion), rows)
+        db.execute(history.insert(), rows)
         db.commit()
         assert _waiting_for_likes(db, rule, now) == {"few", "offered", "tie"}
 

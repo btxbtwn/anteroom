@@ -358,8 +358,16 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
                 "listing_url": f"https://poshmark.com/listing/{new_posh_1}",
             }
 
+        blocked = asyncio.run(auto_relist.run_auto_relist(now=now, delister=fake_delister, lister=fake_lister))
+        self.assertIn("skipped_offer_unverified", {item["status"] for item in blocked})
+        self.assertEqual(delist_calls, [])
+
+        async def confirmed_no_offer(_market: str, _listing_id: str) -> bool:
+            return False
+
         outcomes = asyncio.run(
-            auto_relist.run_auto_relist(now=now, delister=fake_delister, lister=fake_lister)
+            auto_relist.run_auto_relist(now=now, delister=fake_delister, lister=fake_lister,
+                                       offer_checker=confirmed_no_offer)
         )
         self.assertEqual(len(outcomes), 2)
         statuses = {o["conversation_id"]: o["status"] for o in outcomes}
@@ -379,7 +387,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
 
         # Audit logs recorded
         logs = self.db.query(MarketplaceRelistLog).all()
-        self.assertEqual(len(logs), 2)
+        self.assertEqual(len(logs), 4)
 
 
 if __name__ == "__main__":

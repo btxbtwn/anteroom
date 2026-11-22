@@ -6,6 +6,8 @@ Create Date: 2026-11-22 10:45:00.000000
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -48,9 +50,20 @@ def upgrade() -> None:
     _add_column_if_missing(inspector, 'listings', sa.Column('scheduled_status', sa.String(32), nullable=True))
     _add_column_if_missing(inspector, 'listings', sa.Column('scheduled_error', sa.Text(), nullable=True))
     if 'listings' in tables:
-        idx_names = {idx['name'] for idx in inspector.get_indexes('listings')}
-        if 'ix_listings_scheduled_publish_at' not in idx_names:
-            op.create_index('ix_listings_scheduled_publish_at', 'listings', ['scheduled_publish_at'])
+        postgres = bind.dialect.name == 'postgresql'
+        name = 'ix_listings_scheduled_publish_at'
+        with op.get_context().autocommit_block() if postgres else nullcontext():
+            if postgres:
+                valid = op.get_bind().scalar(sa.text(
+                    'SELECT indisvalid FROM pg_index WHERE indexrelid = to_regclass(:name)'
+                ), {'name': name})
+                if valid is False:
+                    op.drop_index(name, table_name='listings', postgresql_concurrently=True)
+                exists = valid is True
+            else:
+                exists = name in {index['name'] for index in inspector.get_indexes('listings')}
+            if not exists:
+                op.create_index(name, 'listings', ['scheduled_publish_at'], postgresql_concurrently=True)
 
     # 2. Promotion automation parity columns (waterfall, bundles, party/community shares, 24h schedule, follows).
     _add_column_if_missing(inspector, 'promotion_automations', sa.Column('share_modes', sa.JSON(), nullable=True))
@@ -61,6 +74,7 @@ def upgrade() -> None:
     _add_column_if_missing(inspector, 'promotion_automations', sa.Column('bundle_min_items', sa.Integer(), nullable=True))
     _add_column_if_missing(inspector, 'promotion_automations', sa.Column('follow_config', sa.JSON(), nullable=True))
 
+    _add_column_if_missing(inspector, 'listing_promotions', sa.Column('follow_budget', sa.JSON(), nullable=True))
     _add_column_if_missing(inspector, 'listing_promotions', sa.Column('waterfall_step', sa.Integer(), nullable=True))
     _add_column_if_missing(inspector, 'listing_promotions', sa.Column('buyer_handle', sa.String(), nullable=True))
 
@@ -207,6 +221,31 @@ def upgrade() -> None:
         )
 
 
+    _set_due_owners("""
+        UNION
+        SELECT listing.user_id::text FROM public.listings AS listing
+            WHERE listing.ready_to_list AND listing.scheduled_status = 'scheduled'
+                AND listing.scheduled_confirmed_at IS NOT NULL
+                AND listing.scheduled_publish_at <= (now() AT TIME ZONE 'utc')
+        UNION
+        SELECT rule.user_id::text FROM public.marketplace_relist_rules AS rule WHERE rule.enabled
+    """)
+
+
+def _set_due_owners(extra: str) -> None:
+    op.execute(f"""
+        CREATE OR REPLACE FUNCTION anteroom_private.due_automation_owners()
+        RETURNS TABLE(owner_id text) LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
+        SELECT automation.user_id::text FROM public.automations AS automation
+            WHERE automation.status = 'active' AND automation.next_run_at <= (now() AT TIME ZONE 'utc')
+        UNION
+        SELECT run.user_id::text FROM public.automation_runs AS run
+            WHERE run.status IN ('running', 'waiting')
+        {extra}
+        $$;
+    """)
+
+
 def downgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == 'postgresql':
@@ -216,6 +255,7 @@ def downgrade() -> None:
                 RAISE EXCEPTION 'Deletion fences cannot be removed while deleted or pending accounts exist';
             END IF;
         END $$''')
+        _set_due_owners('')
         for table in NEW_TABLES:
             op.execute(f'DROP TRIGGER IF EXISTS account_write_guard ON public."{table}"')
 
@@ -226,7 +266,7 @@ def downgrade() -> None:
         ('ebay_offer_attempts', ('waterfall_step',)),
         ('ebay_offer_rules', ('waterfall_steps',)),
         ('ebay_offer_policies', ('waterfall_steps',)),
-        ('listing_promotions', ('buyer_handle', 'waterfall_step')),
+        ('listing_promotions', ('buyer_handle', 'waterfall_step', 'follow_budget')),
         ('promotion_automations', (
             'follow_config', 'bundle_min_items', 'bundle_comment', 'bundle_pause_minutes',
             'waterfall_steps', 'hourly_schedule', 'share_modes',

@@ -39,3 +39,17 @@ test('cloud sends use the desktop journal and never resend an action', async () 
   assert.equal(result.finished, true);
   assert.equal(writes, 1);
 });
+
+test('hosted follow commands require confirmed account writes with a bounded rolling budget', () => {
+  const follow_config = { reciprocal_24h: true, unsubscribe_live_shows: false,
+    remaining_follow_cap: 15, new_active_sellers_cap: 10, unfollow_cap: 20 };
+  const follow = { marketplace: 'poshmark', action: 'follow', listing_id: '__account__',
+    action_id: 'action-124', confirm: true, follow_config };
+  assert.ok(protocol.command(command('marketplace.promote', follow)));
+  assert.equal(protocol.command(command('marketplace.promote', { ...follow, confirm: false })), null);
+  for (const patch of [{ remaining_follow_cap: undefined }, { new_active_sellers_cap: 16 }, { unfollow_cap: 1001 }]) {
+    assert.equal(protocol.command(command('marketplace.promote', {
+      ...follow, follow_config: { ...follow_config, ...patch },
+    })), null);
+  }
+});

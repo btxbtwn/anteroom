@@ -772,7 +772,7 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
                 "follow",
                 automation_id=automation_id,
                 batch_id=batch,
-                extra_payload={"follow_config": rule.get("follow_config") or {}},
+                extra_payload={},
             )
             if follow_result["state"] == "done":
                 counts["sent"] += max(int(follow_result.get("recipient_count") or 1), 1)
@@ -894,7 +894,8 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
             effective_gap = int(base_gap * INTENSITY_GAP_MULTIPLIER.get(intensity, 1.0)) if base_gap else None
             extra_payload: dict | None = None
             if action == "share":
-                extra_payload = {"share_modes": share_modes, "party_window": party_window}
+                if share_modes != ["self"]:
+                    extra_payload = {"share_modes": share_modes, "party_window": party_window}
             elif action == "bundle_offer":
                 extra_payload = {
                     "bundle_pause_minutes": rule.get("bundle_pause_minutes") or 15,

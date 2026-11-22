@@ -98,6 +98,28 @@ class SaleQuantitySyncAndTrackerTest(unittest.TestCase):
         self.db.commit()
         return sale
 
+    def test_mercari_adapter_uses_completed_job_listing_id(self):
+        from anteroom.services import automation_actions, native_marketplaces
+
+        conv = self._create_multi_qty_item()
+        record = self._add_live(conv.id, "mercari", "m1234567", "https://www.mercari.com/us/item/m1234567/")
+        job_id = "relist-job"
+
+        async def settle(expected_job_id):
+            self.assertEqual(expected_job_id, job_id)
+            record.job_id = job_id
+            record.listing_id = "m7654321"
+            record.listing_url = "https://www.mercari.com/us/item/m7654321/"
+            self.db.commit()
+            return True
+
+        with patch.object(native_marketplaces, "list_now", return_value={"job_id": job_id, "state": "saving"}), \
+             patch.object(automation_actions, "_wait_for_job", side_effect=settle), \
+             patch.object(automation_actions, "_job_outcome", return_value=("completed", None)):
+            actual = asyncio.run(sale_quantity_sync._default_mercari_relister(conv.id, "reviewed"))
+        self.assertTrue(actual["ok"])
+        self.assertEqual(actual["listing_id"], "m7654321")
+
     def test_auto_adjust_quantity_defaults_off_and_toggles_via_settings(self):
         self.assertFalse(user_settings.auto_adjust_quantity_enabled())
         res = self.client.get("/api/settings/sale-detection")

@@ -260,6 +260,27 @@ class WaterfallAndPoshmarkBotTest(unittest.TestCase):
         )
         self.assertIn(too_high.status_code, (400, 422))
 
+    def test_follow_budget_counts_other_rules_and_uncertain_sends_for_24_hours(self):
+        now = _now()
+        for name, age, budget, state in (
+            ("other-rule", 1, {"active": 45, "followed": 970, "unfollowed": 30}, "done"),
+            ("uncertain", 2, {"active": 15, "followed": 20, "unfollowed": 5}, "unknown"),
+            ("expired", 25, {"active": 100, "followed": 1000, "unfollowed": 100}, "done"),
+        ):
+            self.db.add(ListingPromotion(
+                id=name, batch_id=name, marketplace="poshmark", action="follow",
+                listing_id="__account__", sent_at=now - timedelta(hours=age),
+                expires_at=now, state=state, follow_budget=budget,
+            ))
+        self.db.commit()
+        payload, reservation = listing_promotions._follow_allowance(self.db, "poshmark", {
+            "reciprocal_24h": True, "new_active_sellers_cap": 100, "unfollow_cap": 40,
+        })
+        self.assertEqual(payload["remaining_follow_cap"], 10)
+        self.assertEqual(payload["new_active_sellers_cap"], 10)
+        self.assertEqual(payload["unfollow_cap"], 5)
+        self.assertEqual(reservation, {"active": 10, "followed": 10, "unfollowed": 5})
+
     def test_poshmark_automatic_follows_caps_and_live_show_opt_in(self):
         # Valid follow rule with reciprocal 24h, active seller cap <= 1000, unfollow cap <= 1000, live show opt-in OFF
         res = self.client.post(

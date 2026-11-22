@@ -210,6 +210,28 @@ async def _native_one(conv_id: str, name: str, revision_id: str, kind: str) -> d
     return {"marketplace": name, "ok": True, "detail": _brief(result)}
 
 
+async def wait_for_native_result(conv_id: str, marketplace: str, started: dict) -> dict:
+    """Resolve a dispatch to the record written by that exact native job."""
+    from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
+
+    job_id = started.get("job_id")
+    if not job_id or started.get("error"):
+        return started
+    if not await _wait_for_job(job_id):
+        return {"error": "The marketplace job was still running when Anteroom stopped waiting."}
+
+    def read(db: Session) -> dict:
+        job = _job_outcome(db, job_id)
+        if not job or job[0] != "completed":
+            return {"error": (job[1] if job else None) or "The marketplace job did not complete."}
+        record = MarketplaceListingRepo(db).get(conv_id, marketplace)
+        if record.get("job_id") != job_id:
+            return {"error": "The marketplace record changed after this job."}
+        return record
+
+    return await _db_work(read)
+
+
 async def update_revision(conv_id: str, marketplaces: list[str], revision_id: str | None) -> dict:
     """Write a saved revision onto listings already live, after explicit approval.
 
