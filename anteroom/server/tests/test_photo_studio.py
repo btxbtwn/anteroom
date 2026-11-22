@@ -233,6 +233,8 @@ def test_batch_ai_studio_keeps_each_original_and_reset_returns_to_it(env, monkey
 
     write_slot(photoroom.KEY_ACCOUNT, KEY)
     seen = _mock_photoroom(monkeypatch, lambda _request: httpx.Response(200, content=_png("#FFFFFF", (500, 500))))
+    # The test database is one shared in-memory connection; real sessions come from a pool.
+    monkeypatch.setattr(photoroom, "CONCURRENCY", 1)
     originals = [(env.dir / photo.stored_filename).read_bytes() for photo in env.photos]
     response = env.client.post(env.studio, json={"photo_ids": [photo.id for photo in env.photos],
                                                  "options": {"ghost_mannequin": True}})
