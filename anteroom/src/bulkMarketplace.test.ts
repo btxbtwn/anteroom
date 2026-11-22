@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { BulkMarketplaceResult, BulkMarketplaceRow } from "./api/bulkMarketplace";
-import { ITEMS_AT_ONCE, reviewedTasks, runMarketplaceTasks } from "./bulkMarketplace";
+import { ITEMS_AT_ONCE, prepareMarketplaceText, reviewedTasks, runMarketplaceTasks } from "./bulkMarketplace";
 
 const row = (id: string, patch: Partial<BulkMarketplaceRow> = {}): BulkMarketplaceRow => ({
   conversation_id: id, title: `Item ${id}`, action: "relist", revision_id: `rev-${id}`, marketplaces: ["ebay"],
@@ -56,5 +56,35 @@ describe("bulk marketplace review", () => {
     const result = await runMarketplaceTasks(reviewedTasks([row("a"), row("b")], new Set()), perform, () => false, () => {});
     expect(result.map((task) => task.state)).toEqual(["unconfirmed", "failed"]);
     expect(perform).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("bulk crosslist text modes", () => {
+  it("keeps text without calling the AI", async () => {
+    const prepare = vi.fn();
+    const results = await prepareMarketplaceText(["a", "b"], ["ebay"], "keep", prepare);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(results.every((result) => result.ok && result.changed === 0)).toBe(true);
+  });
+
+  it("prepares every item, a few at a time, and reports failures without stopping", async () => {
+    let running = 0;
+    let most = 0;
+    const prepare = vi.fn(async (id: string, body: { mode: string }) => {
+      running += 1;
+      most = Math.max(most, running);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      running -= 1;
+      if (id === "c") throw new Error("MiMo stopped responding");
+      expect(body.mode).toBe("shorten");
+      return { conversation_id: id, revision_id: `r-${id}`, changes: [{ marketplace: "ebay", field: "title", old: "x", new: "y" }], skipped: [] };
+    });
+    const seen: number[] = [];
+    const results = await prepareMarketplaceText(["a", "b", "c", "d", "e"], ["ebay"], "shorten", prepare, (done) => seen.push(done));
+    expect(most).toBeLessThanOrEqual(ITEMS_AT_ONCE);
+    expect(results.map((result) => result.id)).toEqual(["a", "b", "c", "d", "e"]);
+    expect(results.find((result) => result.id === "c")).toMatchObject({ ok: false, error: "MiMo stopped responding" });
+    expect(results.filter((result) => result.ok && result.changed === 1)).toHaveLength(4);
+    expect(seen[seen.length - 1]).toBe(5);
   });
 });

@@ -155,8 +155,11 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
         ):
             # Reconcile accepted General changes after native answers have been restored.
             sync_depop_measurements(listing_json, depop_notes, clear_empty=True)
+    from anteroom.services.pricing_rules import SNAPSHOT_RULES
     from anteroom.services.unsent_edits import normalized_listing_hash
 
+    if SNAPSHOT_RULES in listing_json:
+        listing_json = {key: value for key, value in listing_json.items() if key != SNAPSHOT_RULES}
     revision = repo.insert_revision(
         conv_id, listing_json, source, parent_revision_id,
         normalized_hash=normalized_listing_hash(listing_json),

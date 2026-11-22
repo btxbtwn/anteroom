@@ -2,7 +2,7 @@
 import { labelColor, labelDotClass, type LabelColor } from "../labelColors";
 
 import type { ReactNode } from "react";
-import { ChevronDownIcon, ListFilterIcon, XIcon } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, ListFilterIcon, XIcon } from "lucide-react";
 import { cn } from "../lib/utils";
 import { MarketplaceLogo } from "./MarketplaceLogo";
 import { marketplaceLabel } from "./fillLog/marketplaces";
@@ -26,6 +26,8 @@ import {
   LISTING_STATUS_TABS,
   activeFilterCount,
   compactCount,
+  cycleLabelFilter,
+  labelFilterState,
   statusForSort,
   toggleValue,
   type ListingFilters as Filters,
@@ -33,7 +35,7 @@ import {
 } from "./inventoryFilters";
 
 /** One narrowing, as a checkable menu row: check, glyph, name, count. */
-function FilterRow({
+export function FilterRow({
   checked,
   disabled,
   title,
@@ -67,7 +69,40 @@ function FilterRow({
   );
 }
 
-function Dot({ tone = "muted" }: { tone?: "muted" | "warning" | "info" }) {
+/**
+ * A label row with three states: off, included (✓) and excluded (✗). One
+ * click steps through them, so "Summer" and "not Consigned" can be on at once.
+ */
+export function LabelRow({ label, count, glyph, state, onSelect }: {
+  label: string;
+  count: number;
+  glyph: ReactNode;
+  state: "include" | "exclude" | "none";
+  onSelect: () => void;
+}) {
+  const stateText = state === "include" ? "included" : state === "exclude" ? "excluded" : "not filtered";
+  return (
+    <MenuItem
+      closeOnClick={false}
+      aria-label={`${label}, ${count}: ${stateText}`}
+      title={state === "none" ? "Click to include, again to exclude" : state === "include" ? "Included · click to exclude" : "Excluded · click to clear"}
+      data-label-state={state}
+      className="grid grid-cols-[1rem_minmax(0,1fr)] pe-4"
+      onClick={onSelect}
+    >
+      <span className="col-start-1 flex items-center justify-center" aria-hidden="true">
+        {state === "include" ? <CheckIcon className="size-4" /> : state === "exclude" ? <XIcon className="size-4 text-destructive-foreground" /> : null}
+      </span>
+      <span className="flex min-w-0 items-center gap-2">
+        {glyph}
+        <span className={cn("min-w-0 flex-1 truncate", state === "exclude" && "line-through decoration-muted-foreground")}>{label}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">{count}</span>
+      </span>
+    </MenuItem>
+  );
+}
+
+export function Dot({ tone = "muted" }: { tone?: "muted" | "warning" | "info" }) {
   return (
     <span
       aria-hidden="true"
@@ -90,6 +125,9 @@ export function ListingFilters({
   notListedCount,
   unsentCount,
   missingSaleCount,
+  inactiveCount = 0,
+  priceDriftCount,
+  missingSkuCount,
   staleCounts,
   onChange,
 }: {
@@ -109,6 +147,12 @@ export function ListingFilters({
   unsentCount: number;
   /** How many listings have a sale missing details. */
   missingSaleCount: number;
+  /** How many listings are still up somewhere but not for sale there. */
+  inactiveCount?: number;
+  /** How many listings drifted from the pricing rules; undefined while the rules are off. */
+  priceDriftCount?: number;
+  /** How many listings have no SKU; undefined while that warning is off. */
+  missingSkuCount?: number;
   /** How many listings each staleness cutoff would keep, keyed by its days. */
   staleCounts: Record<number, number>;
   onChange: (next: Filters) => void;
@@ -223,6 +267,36 @@ export function ListingFilters({
               label="Missing sale details"
               onSelect={() => onChange({ ...filters, missingSale: !filters.missingSale })}
             />
+            {inactiveCount || filters.inactive ? (
+              <FilterRow
+                checked={filters.inactive}
+                count={inactiveCount}
+                title="Still on a marketplace but not for sale there (deactivated, expired or Not For Sale)"
+                glyph={<Dot />}
+                label="Inactive"
+                onSelect={() => onChange({ ...filters, inactive: !filters.inactive })}
+              />
+            ) : null}
+            {priceDriftCount !== undefined || filters.priceDrift ? (
+              <FilterRow
+                checked={filters.priceDrift}
+                count={priceDriftCount || 0}
+                title="Marketplace prices that differ from your pricing rules"
+                glyph={<Dot tone="warning" />}
+                label="Price inconsistency"
+                onSelect={() => onChange({ ...filters, priceDrift: !filters.priceDrift })}
+              />
+            ) : null}
+            {missingSkuCount !== undefined || filters.missingSku ? (
+              <FilterRow
+                checked={filters.missingSku}
+                count={missingSkuCount || 0}
+                title="Listings without a SKU"
+                glyph={<Dot tone="warning" />}
+                label="Missing SKU"
+                onSelect={() => onChange({ ...filters, missingSku: !filters.missingSku })}
+              />
+            ) : null}
 
             <MenuSeparator />
             <MenuGroup>
@@ -244,15 +318,15 @@ export function ListingFilters({
               <>
                 <MenuSeparator />
                 <MenuGroup>
-                  <MenuGroupLabel>{"Labels"}</MenuGroupLabel>
+                  <MenuGroupLabel>Labels · include ✓ or exclude ✗</MenuGroupLabel>
                   {labels.map((label) => (
-                    <FilterRow
+                    <LabelRow
                       key={label}
-                      checked={filters.labels.includes(label)}
+                      state={labelFilterState(filters, label)}
                       count={labelCounts[label.toLowerCase()] || 0}
                       glyph={labelColor(labelColors, label) ? <span aria-hidden="true" className={cn("mx-[3px] size-2 shrink-0 rounded-full", labelDotClass(labelColor(labelColors, label)!))} /> : <Dot />}
                       label={label}
-                      onSelect={() => onChange({ ...filters, labels: toggleValue(filters.labels, label) })}
+                      onSelect={() => onChange(cycleLabelFilter(filters, label))}
                     />
                   ))}
                 </MenuGroup>

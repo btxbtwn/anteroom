@@ -901,4 +901,9 @@ def validate_listing(
         for item in native_form_gaps(payload, market):
             if not any(error["field"] == item["field"] for error in result.errors):
                 add_issue(result, item["field"], item["message"])
+    from anteroom.services.user_settings import get_listing_warnings
+
+    if not str(payload.get("sku") or "").strip() and get_listing_warnings()["missing_sku"]:
+        # The seller asked to be told; a SKU is never required to send.
+        add_issue(result, "sku", "This item has no SKU.", warning=True)
     return result

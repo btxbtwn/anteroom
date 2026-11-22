@@ -82,7 +82,7 @@ async def _in_thread(function, *args):
 
 # Fixed names only: never SQL text, parameters, seller IDs or row contents.
 INVENTORY_STEPS = ('analytics', 'reconcile', 'conversations', 'covers', 'listings',
-                   'direct', 'sales', 'unsent', 'assemble')
+                   'direct', 'sales', 'unsent', 'prices', 'assemble')
 SUGGESTION_STEPS = ('preferences', 'covers', 'photo_counts', 'listing_rows',
                     'direct', 'conversations', 'busy', 'ranking')
 

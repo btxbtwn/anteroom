@@ -62,7 +62,8 @@ def iso(value):
     return value.isoformat() if value else None
 
 
-def conversation_response(row, listing=None, direct=None, *, notes=None, include_notes=True, missing_sale_data=None, sold=None):
+def conversation_response(row, listing=None, direct=None, *, notes=None, include_notes=True, missing_sale_data=None, sold=None,
+                          price_drift=None):
     """One inventory row. ``notes`` are the parsed notes when the caller deferred loading them.
 
     ``sold`` is the item's status from its sales: the Sold tab sorts by its
@@ -83,7 +84,9 @@ def conversation_response(row, listing=None, direct=None, *, notes=None, include
             'sold_marketplaces': list(sold.sold_on) if sold else [],
             'units_sold': sold.units_sold if sold else 0,
             'sold_at': sold.sold_at.isoformat() if sold and sold.sold_at else None,
-            'missing_sale_data': missing_sale_data or [], **imported_fields(notes, direct or {})}
+            'missing_sale_data': missing_sale_data or [],
+            'inactive_marketplaces': [market for market, record in (direct or {}).items() if record.get('inactive')],
+            'price_drift': price_drift or [], **imported_fields(notes, direct or {})}
     if include_notes:
         result['notes'] = row.notes
     return result
@@ -205,6 +208,10 @@ def inventory_response(db):
 
     with snapshot_step(db, 'unsent'):
         unsent = unsent_edits(db, rows, revisions, commit_backfill=True)
+    from anteroom.services.price_consistency import DriftReader
+
+    with snapshot_step(db, 'prices'):
+        drift = DriftReader(db)
     # Ledger validation, cost allocation and hashing are CPU work over loaded
     # values. Keep scarce connections available while that work runs.
     db.close()
@@ -213,7 +220,8 @@ def inventory_response(db):
         summaries = []
         for row in rows:
             summary = conversation_response(row, current.get(row.id), direct.get(row.id), notes=notes.get(row.id, {}), include_notes=False,
-                                            missing_sale_data=missing.get(row.id, []), sold=analytics.statuses.get(row.id))
+                                            missing_sale_data=missing.get(row.id, []), sold=analytics.statuses.get(row.id),
+                                            price_drift=drift.drift(row.id, direct.get(row.id)))
             summary['unsent_edits'] = row.id in unsent
             if row.id in covers:
                 from anteroom.services.photos import cover_thumb_url
@@ -238,9 +246,15 @@ def get_conversation(identity: str, db=Depends(get_seller_db, scope="function"))
     from anteroom.services.sales_records import missing_by_conversation
     from anteroom.services.vendoo_import import parse_notes
 
+    from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
+    from anteroom.services.price_consistency import DriftReader
+
     row = conversation(db, identity)
-    return conversation_response(row, missing_sale_data=missing_by_conversation(db, identity).get(identity, []),
-                                 sold=status_for(db, identity, parse_notes(row.notes)))
+    drift = DriftReader(db, identity)
+    direct = MarketplaceListingRepo(db).summaries(identity).get(identity, {})
+    return conversation_response(row, direct=direct, missing_sale_data=missing_by_conversation(db, identity).get(identity, []),
+                                 sold=status_for(db, identity, parse_notes(row.notes)),
+                                 price_drift=drift.drift(identity, direct))
 
 
 @router.patch('/conversations/{identity}', response_model=contract.Conversation, responses={**REFUSED, **NOT_FOUND, **CONFLICT})

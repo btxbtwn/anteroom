@@ -34,3 +34,12 @@ describe("bulk edit review", () => {
     ]);
   });
 });
+
+describe("bulk shipping presets and pricing rules", () => {
+  it("sends a preset or the pricing rules on their own", () => {
+    expect(bulkEditsFromInputs({}, "keep", "", { tagsMode: "keep", tagsText: "", category: {}, shippingPreset: "p1" }))
+      .toEqual({ values: {}, labels_mode: "keep", labels: [], shipping_preset: "p1" });
+    expect(bulkEditsFromInputs({}, "keep", "", { tagsMode: "keep", tagsText: "", category: {}, pricingRules: true }).pricing_rules).toBe(true);
+    expect(() => bulkEditsFromInputs({}, "keep", "", { tagsMode: "keep", tagsText: "", category: {} })).toThrow(/shipping or pricing/);
+  });
+});

@@ -6,6 +6,21 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1142 — 2026-11-22
+
+- Set pricing rules in Settings → Listings: pick a main price and let each marketplace's price follow it, with typical-fee offsets, your own percent and dollar adjustments, and .99 or whole-dollar endings (Poshmark always uses whole dollars). Prices you type on a marketplace stay yours.
+- See a Price inconsistency warning, and filter for it, when a marketplace price has drifted from your pricing rules; Apply pricing rules fixes it in Anteroom without sending anything.
+- Save shipping presets with a package size, weight, marketplace shipping choices and a plain-English rule for when to use each one. Generation picks the matching preset for you, and you can apply one with a click in the editor or in Bulk Edit.
+- Turn on a missing-SKU warning to flag items without a SKU in your listings, the inventory table and the listing's checks.
+- Filter labels both ways: include some labels and exclude others at the same time, in your listings and in the inventory table.
+- Listings that are still up on a marketplace but not for sale now show as Inactive instead of looking sold or deleted, with their own filter.
+- When you list, relist or update several items at once, choose how their marketplace text is handled: keep it as is, shorten only what runs over a marketplace's limit, or have AI write each marketplace its own title and description.
+
+## 0.1.1141 — 2026-11-22
+
+- Add a remote and local Streamable HTTP MCP server (`/api/mcp`) with seller-scoped access tokens in Settings → Agents and copy-ready setup for Claude, ChatGPT, and Gemini.
+- Add a Today command center with today's sales and automation snapshot, configurable profit/sales/listing/sell-through goals with pacing, and a Needs Attention inbox with 7-day dismiss and restore.
+
 ## 0.1.1140 — 2026-11-22
 
 - Connect Mercari and Depop in Cloud so listing actions, inventory imports, sales checks, and offers can run with Chrome closed.

@@ -77,12 +77,19 @@ export type FilterableListing = {
   unsent_edits?: boolean;
   /** Sale details the sales records still lack, such as fees or the sale date. */
   missing_sale_data?: string[];
+  /** Marketplaces where the listing is still up but not for sale. */
+  inactive_marketplaces?: string[];
+  /** Marketplace prices that differ from the seller's pricing rules. */
+  price_drift?: { marketplace: string; expected?: number; price?: number; source?: string }[];
 };
 
 export interface ListingFilters {
   status: ListingStatusFilter;
   marketplaces: string[];
+  /** Labels a listing must wear one of (✓). */
   labels: string[];
+  /** Labels a listing must not wear (✗), alongside the included ones. */
+  excludeLabels: string[];
   /**
    * Turns the marketplace picks around: keep the listings missing from one of
    * them, or, with none picked, the listings no marketplace carries.
@@ -92,6 +99,12 @@ export interface ListingFilters {
   unsent: boolean;
   /** Keep only listings whose sale is missing details, such as fees or the sale date. */
   missingSale: boolean;
+  /** Keep only listings still up somewhere but not for sale there. */
+  inactive: boolean;
+  /** Keep only listings whose marketplace prices drifted from the pricing rules. */
+  priceDrift: boolean;
+  /** Keep only listings without a SKU. */
+  missingSku: boolean;
   /** Keep only listings that went live at least this many days ago; 0 is off. */
   staleDays: number;
   sort: ListingSortId;
@@ -101,9 +114,13 @@ export const DEFAULT_LISTING_FILTERS: ListingFilters = {
   status: "active",
   marketplaces: [],
   labels: [],
+  excludeLabels: [],
   notListed: false,
   unsent: false,
   missingSale: false,
+  inactive: false,
+  priceDrift: false,
+  missingSku: false,
   staleDays: 0,
   sort: "recent",
 };
@@ -212,12 +229,17 @@ export function matchesFilters(
       if (listed.length) return false;
     } else if (filters.marketplaces.every((id) => listed.includes(id))) return false;
   } else if (filters.marketplaces.length && !filters.marketplaces.some((id) => listed.includes(id))) return false;
-  if (filters.labels.length) {
+  if (filters.labels.length || filters.excludeLabels?.length) {
     const own = new Set((listing.vendoo_labels || []).map(lower));
-    if (!filters.labels.some((label) => own.has(lower(label)))) return false;
+    if (filters.labels.length && !filters.labels.some((label) => own.has(lower(label)))) return false;
+    // Include and exclude together: "Summer" but not "Consigned".
+    if ((filters.excludeLabels || []).some((label) => own.has(lower(label)))) return false;
   }
   if (filters.unsent && !listing.unsent_edits) return false;
   if (filters.missingSale && !listing.missing_sale_data?.length) return false;
+  if (filters.inactive && !listing.inactive_marketplaces?.length) return false;
+  if (filters.priceDrift && !listing.price_drift?.length) return false;
+  if (filters.missingSku && !missingSku(listing)) return false;
   if (!isStale(listing, filters.staleDays, now)) return false;
   return true;
 }
@@ -372,8 +394,12 @@ export function activeFilterCount(filters: ListingFilters): number {
     // "Not listed on eBay" is one narrowing, not two.
     Math.max(filters.marketplaces.length, filters.notListed ? 1 : 0) +
     filters.labels.length +
+    (filters.excludeLabels?.length || 0) +
     (filters.unsent ? 1 : 0) +
     (filters.missingSale ? 1 : 0) +
+    (filters.inactive ? 1 : 0) +
+    (filters.priceDrift ? 1 : 0) +
+    (filters.missingSku ? 1 : 0) +
     (filters.staleDays ? 1 : 0)
   );
 }
@@ -447,4 +473,45 @@ export function missingSaleCount(listings: FilterableListing[]): number {
 /** Listings no marketplace carries. */
 export function notListedCount(listings: FilterableListing[]): number {
   return listings.filter((listing) => listedOn(listing).length === 0).length;
+}
+
+/** A listing with no SKU to find it by on the shelf. */
+export function missingSku(listing: FilterableListing): boolean {
+  return !String(listing.sku || "").trim();
+}
+
+export type LabelFilterState = "include" | "exclude" | "none";
+
+/** Whether a label is included (✓), excluded (✗) or neither. */
+export function labelFilterState(filters: ListingFilters, label: string): LabelFilterState {
+  const key = label.toLowerCase();
+  if (filters.labels.some((value) => value.toLowerCase() === key)) return "include";
+  if (filters.excludeLabels?.some((value) => value.toLowerCase() === key)) return "exclude";
+  return "none";
+}
+
+/** One click moves a label from off, to included, to excluded, and back off. */
+export function cycleLabelFilter(filters: ListingFilters, label: string): ListingFilters {
+  const state = labelFilterState(filters, label);
+  const key = label.toLowerCase();
+  const labels = filters.labels.filter((value) => value.toLowerCase() !== key);
+  const excludeLabels = (filters.excludeLabels || []).filter((value) => value.toLowerCase() !== key);
+  if (state === "none") return { ...filters, labels: [...labels, label], excludeLabels };
+  if (state === "include") return { ...filters, labels, excludeLabels: [...excludeLabels, label] };
+  return { ...filters, labels, excludeLabels };
+}
+
+/** Listings still up somewhere but not for sale there. */
+export function inactiveCount(listings: FilterableListing[]): number {
+  return listings.filter((listing) => Boolean(listing.inactive_marketplaces?.length)).length;
+}
+
+/** Listings whose marketplace prices drifted from the pricing rules. */
+export function priceDriftCount(listings: FilterableListing[]): number {
+  return listings.filter((listing) => Boolean(listing.price_drift?.length)).length;
+}
+
+/** Listings without a SKU. */
+export function missingSkuCount(listings: FilterableListing[]): number {
+  return listings.filter(missingSku).length;
 }

@@ -30,3 +30,12 @@ it.each(["age", "source", "style"])("keeps Depop %s empty instead of restoring t
   expect(editorFieldValue(listing, { key, label: name, native: true, multi: true,
     selectionOnly: true, defaultValue: ["Old"], options: ["Old", "New"] }, "depop")).toEqual([]);
 });
+
+it("shows the rule-derived marketplace price without giving up explicit prices or the rules-off fallback", () => {
+  const field = { key: "ebay_specifics.price", label: "eBay price", type: "number" as const, native: true, defaultValue: 24 };
+  const listing = { price: 20, ebay_specifics: { price: 22 }, _price_followers: { "ebay_specifics.price": 22 } };
+  expect(editorFieldValue(listing, field, "ebay", true)).toBe(24);
+  expect(editorFieldValue(listing, field, "ebay", false)).toBe(20);
+  expect(editorFieldValue({ ...listing, seller_fields: [field.key] }, field, "ebay", true)).toBe(22);
+  expect(editorFieldValue(listing, { ...field, native: false, defaultValue: undefined }, "ebay", true)).toBe(22);
+});
