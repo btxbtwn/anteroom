@@ -72,12 +72,8 @@ struct InventoryView: View {
         .onChange(of: sideBySide) { _, wide in
             if wide {
                 open = path.first
-            } else if let open {
-                path = [open]
             } else {
-                path = []
-                // The path may already be empty after the wide editor closes.
-                preferredEditorTab = "general"
+                path = open.map { [$0] } ?? []
             }
         }
         // Back on the list, the next row opens on General. A tap gesture on the
