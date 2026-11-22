@@ -24,7 +24,7 @@ from anteroom.services.hosted_limits import (
     release_upload_slot,
     stream_upload_to_path,
 )
-from anteroom.services.listing_provider import get_photo_provider
+from anteroom.services.listing_provider import get_photo_provider, managed_task_provider
 from anteroom.services.photo_store import photo_store
 
 MAX_UPLOAD_FILES = 20
@@ -69,6 +69,9 @@ def _photo_provider(what: str):
 def _provider(garment: str):
     if garment not in GARMENTS:
         raise HTTPException(400, f"Garment must be one of {', '.join(GARMENTS)}")
+    managed = managed_task_provider("measurement")
+    if managed is not None:
+        return managed
     return _photo_provider("measurements")
 
 

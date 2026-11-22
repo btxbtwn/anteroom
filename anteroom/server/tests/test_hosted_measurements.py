@@ -119,3 +119,38 @@ def test_a_saved_listing_reads_its_size_tag_from_its_own_photos_in_order(cloud, 
     assert answer.status_code == 200, answer.text
     assert answer.json() == {'photos_read': 2, 'status': 'accepted', 'size': 'M', 'sizes': ['M']}
     assert read_bytes == list(stored.values())
+
+
+def test_managed_ai_routes_measurements_to_measurement_model_and_size_tags_to_default(cloud, signing_keys, monkeypatch):  # noqa: F811
+    from anteroom.services.hosted_provider import DEFAULT_MANAGED_MEASUREMENT_MODEL, DEFAULT_MANAGED_MODEL
+
+    client, _engine = cloud
+    alice = headers(signing_keys)
+    monkeypatch.setenv('ANTEROOM_MANAGED_OPENROUTER_KEY', 'sk-or-managed-secret')
+    monkeypatch.delenv('ANTEROOM_MANAGED_MODEL', raising=False)
+    monkeypatch.delenv('ANTEROOM_MANAGED_MEASUREMENT_MODEL', raising=False)
+
+    seen_models: dict[str, str] = {}
+
+    async def read_measure(provider, _paths, _garment):
+        seen_models['measurement'] = provider.vision_model
+        return {'photos_read': 1, 'measurements': {}}
+
+    async def read_tag(provider, _paths):
+        seen_models['size_tag'] = provider.vision_model
+        return {'photos_read': 1, 'status': 'accepted', 'size': 'L', 'sizes': ['L']}
+
+    monkeypatch.setattr('anteroom.routes.measurements.measure_read.read_measurements', read_measure)
+    monkeypatch.setattr('anteroom.routes.measurements.size_tag_read.read_size_tag', read_tag)
+
+    files = [('files', ('a.jpg', _photo(), 'image/jpeg'))]
+    res_m = client.post('/api/measurements/read', files=files, data={'garment': 'top'}, headers=alice)
+    assert res_m.status_code == 200, res_m.text
+
+    res_t = client.post('/api/size-tags/read', files=files, headers=alice)
+    assert res_t.status_code == 200, res_t.text
+
+    assert seen_models == {
+        'measurement': DEFAULT_MANAGED_MEASUREMENT_MODEL,
+        'size_tag': DEFAULT_MANAGED_MODEL,
+    }

@@ -175,6 +175,61 @@ def test_reasoning_only_plain_reply_retry_is_bounded(fake_http):
     assert len(calls) == 2
 
 
+def test_reasoning_only_plain_reply_falls_back_to_minimal_on_400(fake_http):
+    replies = iter([
+        httpx.Response(200, json={
+            "choices": [{"message": {"content": "", "reasoning": "Measuring"}, "finish_reason": "length"}],
+        }),
+        httpx.Response(400, json={"error": {"message": "Reasoning is mandatory for this model"}}),
+        httpx.Response(200, json={"choices": [{"message": {"content": '{"pitToPit": 21}'}, "finish_reason": "stop"}]}),
+    ])
+    calls = fake_http(lambda request: next(replies))
+    provider = OpenRouterProvider(KEY_PROVIDERS["openrouter"], "sk-or", "openai/gpt-6.2-sol", "openai/gpt-6.2-sol")
+    result = run(collect(provider.vision_chat([{"role": "user", "content": "Measure"}])))
+    assert result == ['{"pitToPit": 21}']
+    bodies = [json.loads(call.content) for call in calls]
+    assert len(bodies) == 3
+    assert "reasoning" not in bodies[0]
+    assert bodies[1]["reasoning"] == {"enabled": False}
+    assert bodies[2]["reasoning"] == {"effort": "minimal"}
+
+
+def test_reasoning_only_plain_reply_already_minimal_wraps_400_without_repeating(fake_http):
+    replies = iter([
+        httpx.Response(200, json={
+            "choices": [{"message": {"content": "", "reasoning": "Still thinking"}, "finish_reason": "length"}],
+        }),
+        httpx.Response(400, json={"error": {"message": "Reasoning cannot be disabled"}}),
+    ])
+    calls = fake_http(lambda request: next(replies))
+    provider = OpenRouterProvider(
+        KEY_PROVIDERS["openrouter"], "sk-or", "google/gemini-3.5-flash-lite", "google/gemini-3.5-flash-lite", "minimal",
+    )
+    with pytest.raises(RuntimeError, match="streamed 14 characters of reasoning.*Retrying with reasoning off failed.*HTTP 400"):
+        run(collect(provider.quick_chat([{"role": "user", "content": "Fill"}])))
+    bodies = [json.loads(call.content) for call in calls]
+    assert len(bodies) == 2
+    assert bodies[0]["reasoning"] == {"effort": "minimal"}
+    assert bodies[1]["reasoning"] == {"enabled": False}
+
+
+def test_reasoning_only_stream_falls_back_to_minimal_on_400(fake_http):
+    replies = iter([
+        httpx.Response(200, content=sse(
+            {"choices": [{"delta": {"reasoning_content": "weighing it"}}]},
+            {"choices": [{"delta": {}, "finish_reason": "length"}]},
+        )),
+        httpx.Response(400, json={"error": {"message": "Reasoning is mandatory"}}),
+        httpx.Response(200, content=sse({"choices": [{"delta": {"content": "Listing"}}]})),
+    ])
+    calls = fake_http(lambda request: next(replies))
+    provider = OpenRouterProvider(KEY_PROVIDERS["openrouter"], "sk-or", "vision-m", "listing-m", "high")
+    chunks = run(collect(provider.chat([{"role": "user", "content": "go"}])))
+    assert chunks == [StreamChunk("weighing it", "thinking"), StreamChunk("Listing", "content")]
+    bodies = [json.loads(call.content) for call in calls]
+    assert [body["reasoning"] for body in bodies] == [{"effort": "high"}, {"enabled": False}, {"effort": "minimal"}]
+
+
 @pytest.mark.parametrize("status", [401, 402])
 def test_plain_reply_does_not_retry_key_or_credit_rejection(fake_http, status):
     calls = fake_http(lambda request: httpx.Response(status, json={"error": {"message": "Rejected"}}))
