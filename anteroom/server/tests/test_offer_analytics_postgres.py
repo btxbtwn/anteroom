@@ -68,7 +68,8 @@ def seed(db, seller, counts):
 
 
 def test_postgres_aggregates_and_rls_exclude_other_seller_even_with_wrong_predicate(pg_engine):
-    command.upgrade(config(pg_engine), REVISION)
+    # SellerDatabaseSession checks RLS for all current models, not just this migration.
+    command.upgrade(config(pg_engine), 'head')
     alice, bob = str(uuid.uuid4()), str(uuid.uuid4())
     with Session(pg_engine) as db:
         seed(db, alice, [2, 5, 0, -100])

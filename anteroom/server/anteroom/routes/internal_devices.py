@@ -108,7 +108,8 @@ class CloudMarketplaceExecute(BaseModel):
     command: dict
     photos: list[dict] = Field(default_factory=list)
     approved_photos: list[dict] = Field(default_factory=list)
-    timeout: float = Field(default=180.0, ge=5.0, le=300.0)
+    # Sales history uses a 20-minute deadline to page through older orders.
+    timeout: float = Field(default=180.0, ge=5.0, le=1200.0)
 
 
 @router.post('/cloud-marketplace/execute')

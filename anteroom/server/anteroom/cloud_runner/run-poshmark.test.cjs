@@ -184,6 +184,16 @@ test('seller isolation and Set-Cookie persistence across operations', async () =
   assert.equal(resB.cookies.find(c => c.name === '_web_session').value, `refreshed_${sellerB}`);
 });
 
+test('live session verification reports a rejected unexpired session as expired', async () => {
+  const out = await executePoshmarkOperation({
+    command: { type: 'marketplace.verify_session', payload: { marketplace: 'poshmark' } },
+    cookies: makePoshmarkCookies('111111111111111111111111'),
+    httpFetch: async () => mockResponse({ status: 401, body: 'Unauthorized' }),
+  });
+  assert.equal(out.result.ok, true);
+  assert.equal(out.result.session.state, 'expired');
+});
+
 test('write-ahead journal failure blocks Poshmark mutation cleanly', async () => {
   let networkCalls = 0;
   const out = await executePoshmarkOperation({

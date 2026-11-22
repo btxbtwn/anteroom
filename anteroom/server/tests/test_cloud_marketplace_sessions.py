@@ -8,7 +8,9 @@ import json
 from types import SimpleNamespace
 import uuid
 
+import httpx
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
@@ -24,7 +26,8 @@ from anteroom.models.cloud_session import (
 )
 from anteroom.models.conversation import Conversation, utcnow
 from anteroom.models.marketplace_listing import MarketplaceListing
-from anteroom.services import cloud_marketplace, cloud_sessions, schema_migrations
+from anteroom.routes.internal_devices import CloudMarketplaceExecute
+from anteroom.services import cloud_marketplace, cloud_sessions, native_marketplaces, order_history, schema_migrations
 from anteroom.services.hosted_context import for_seller
 from anteroom.services.hosted_database import SellerDatabaseSession
 from anteroom.services.service_context import use
@@ -290,6 +293,75 @@ def test_web_process_role_forbids_decrypt_and_forwards_to_worker(cloud, monkeypa
         assert res == {"ok": True, "forwarded": True}
         assert len(forwarded) == 1
         assert vault.get_fresh_calls == []
+
+
+@pytest.mark.parametrize("failure", ["timeout", "http_error", "invalid_json", "invalid_body"])
+def test_lost_worker_reply_requires_listing_reconciliation(monkeypatch, failure):
+    monkeypatch.setenv("ANTEROOM_PROCESS_ROLE", "web")
+    monkeypatch.setenv("ANTEROOM_WORKER_BASE_URL", "http://localhost:8080")
+    monkeypatch.setenv("ANTEROOM_PROCESS_TOKEN", "test-token")
+    monkeypatch.setattr(cloud_sessions, "is_cloud_enabled", lambda market: True)
+    monkeypatch.setattr(cloud_marketplace, "_seller_id", lambda: USER_ID)
+
+    def respond(request):
+        if failure == "timeout":
+            raise httpx.ReadTimeout("lost response", request=request)
+        if failure == "http_error":
+            return httpx.Response(500)
+        if failure == "invalid_json":
+            return httpx.Response(200, text="invalid")
+        return httpx.Response(200, json=[])
+
+    client = httpx.AsyncClient
+    monkeypatch.setattr(cloud_marketplace.httpx, "AsyncClient", lambda **kwargs: client(transport=httpx.MockTransport(respond), **kwargs))
+    result = asyncio.run(cloud_marketplace.execute("poshmark", {"type": "marketplace.execute", "payload": {}}))
+    assert result["safe_to_retry"] is False
+    outcome = native_marketplaces._outcome("poshmark", "list", {}, result)
+    assert outcome["state"] == "unknown"
+    assert outcome["error_code"] == "uncertain"
+
+
+def test_missing_worker_configuration_is_safe_to_retry(monkeypatch):
+    monkeypatch.setenv("ANTEROOM_PROCESS_ROLE", "web")
+    monkeypatch.delenv("ANTEROOM_WORKER_BASE_URL", raising=False)
+    monkeypatch.delenv("FLY_APP_NAME", raising=False)
+    monkeypatch.delenv("ANTEROOM_PROCESS_TOKEN", raising=False)
+    monkeypatch.setattr(cloud_sessions, "is_cloud_enabled", lambda market: True)
+    monkeypatch.setattr(cloud_marketplace, "_seller_id", lambda: USER_ID)
+    result = asyncio.run(cloud_marketplace.execute("poshmark", {"type": "marketplace.execute"}))
+    assert result["safe_to_retry"] is True
+
+
+def test_worker_accepts_sales_history_deadline():
+    request = {"user_id": USER_ID, "marketplace": "poshmark", "command": {"type": "marketplace.sales_history"}}
+    assert CloudMarketplaceExecute(**request, timeout=order_history.READ_TIMEOUT_S).timeout == 1200
+    with pytest.raises(ValidationError):
+        CloudMarketplaceExecute(**request, timeout=1201)
+
+
+def test_verify_persists_live_sign_out(cloud, signing_keys, monkeypatch):  # noqa: F811
+    client, _engine = cloud
+    _patch_vault(monkeypatch)
+    monkeypatch.setenv("ANTEROOM_CLOUD_MARKETPLACES", "poshmark")
+    monkeypatch.setenv("ANTEROOM_PROCESS_ROLE", "worker")
+    alice = headers(signing_keys)
+    token = client.post("/api/cloud-sessions/poshmark/connect-token", headers=alice).json()["token"]
+    uploaded = client.post(
+        "/api/cloud-sessions/poshmark/upload",
+        headers={"X-Cloud-Upload-Token": token},
+        json={"cookies": _sample_cookies(), "user_agent": "UA/1.0"},
+    )
+    assert uploaded.json()["session"]["state"] == "signed_in"
+
+    async def rejected_session(marketplace, seller_id, job_id, run_payload, timeout):
+        assert run_payload["command"]["type"] == "marketplace.verify_session"
+        return {"result": {"ok": True, "session": {"state": "expired"}}, "cookies_changed": False}
+
+    monkeypatch.setattr(cloud_marketplace, "_run_subprocess", rejected_session)
+    verified = client.post("/api/cloud-sessions/poshmark/verify", headers=alice)
+    assert verified.status_code == 200
+    assert verified.json()["session"]["state"] == "expired"
+    assert client.get("/api/cloud-sessions", headers=alice).json()["sessions"]["poshmark"]["state"] == "expired"
 
 
 def test_execute_local_uses_fresh_vault_rotates_cookies_and_marks_expired_on_signed_out(cloud, monkeypatch):  # noqa: F811

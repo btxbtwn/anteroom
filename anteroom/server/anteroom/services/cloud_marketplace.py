@@ -56,6 +56,10 @@ class CloudExecutionUnavailable(RuntimeError):
     """Raised when the worker cannot be reached or Node runtime is missing."""
 
 
+class CloudExecutionUncertain(CloudExecutionUnavailable):
+    """The worker may have received and executed the command."""
+
+
 def _process_role() -> str:
     return (os.environ.get("ANTEROOM_PROCESS_ROLE") or "all").strip().lower()
 
@@ -151,12 +155,15 @@ async def _forward_to_worker(path: str, body: dict[str, Any], timeout: float) ->
             )
     except httpx.HTTPError as exc:
         log.warning("Cloud worker forward to %s failed: %s", path, type(exc).__name__)
-        raise CloudExecutionUnavailable("Cloud marketplace worker did not answer in time.") from None
+        raise CloudExecutionUncertain("Cloud marketplace worker did not answer in time.") from None
     if response.status_code != 200:
-        raise CloudExecutionUnavailable(f"Cloud marketplace worker returned HTTP {response.status_code}.")
-    data = response.json()
+        raise CloudExecutionUncertain(f"Cloud marketplace worker returned HTTP {response.status_code}.")
+    try:
+        data = response.json()
+    except ValueError:
+        raise CloudExecutionUncertain("Cloud marketplace worker returned an invalid response.") from None
     if not isinstance(data, dict):
-        raise CloudExecutionUnavailable("Cloud marketplace worker returned an invalid response.")
+        raise CloudExecutionUncertain("Cloud marketplace worker returned an invalid response.")
     return data
 
 
@@ -199,7 +206,7 @@ async def execute(
         except CloudExecutionUnavailable as exc:
             return {
                 "ok": False,
-                "safe_to_retry": True,
+                "safe_to_retry": not isinstance(exc, CloudExecutionUncertain),
                 "error_code": "network",
                 "error": str(exc),
             }
@@ -478,7 +485,13 @@ async def execute_local(
 
     # Transition to expired on signed_out; otherwise persist rotated cookies once (H4).
     err_code = result.get("error_code") or (result.get("error") if result.get("ok") is False else None)
-    if err_code == "signed_out":
+    verified_session = result.get("session")
+    verified_expired = (
+        command.get("type") == "marketplace.verify_session"
+        and isinstance(verified_session, dict)
+        and verified_session.get("state") in {"expired", "signed_out"}
+    )
+    if err_code == "signed_out" or verified_expired:
         try:
             await in_worker_session(cloud_sessions.mark_session_expired, market, str(result.get("error") or ""))
         except Exception:
