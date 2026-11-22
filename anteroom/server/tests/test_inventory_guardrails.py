@@ -87,7 +87,7 @@ def test_an_inactive_listing_stays_live_and_is_neither_sold_nor_removed(inventor
     coat = row(inventory)
     assert coat["inactive_marketplaces"] == ["etsy"]
     assert coat["direct_records"]["etsy"]["inactive"] is True
-    assert coat["direct_records"]["ebay"]["inactive"] is False
+    assert coat["direct_records"]["ebay"].get("inactive", False) is False
     assert set(coat["direct_marketplaces"]) == {"etsy", "ebay"}
     assert coat["sold_marketplaces"] == [] and coat["removed_marketplaces"] == []
     assert coat["status"] != "sold"

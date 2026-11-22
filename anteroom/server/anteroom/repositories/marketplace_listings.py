@@ -101,8 +101,7 @@ class MarketplaceListingRepo:
         grouped: dict[str, dict[str, dict]] = {}
         for (conversation_id, marketplace, state, url, error, fields, price, listed_at, listing_id,
              observation) in self.db.execute(query):
-            grouped.setdefault(conversation_id, {})[marketplace] = {
-                "inactive": state in LIVE_STATES and observed_inactive(observation, listing_id),
+            record = grouped.setdefault(conversation_id, {})[marketplace] = {
                 "state": _read_state(marketplace, state, url),
                 "listing_url": url,
                 "failed": bool(error) or _read_state(marketplace, state, url) != state,
@@ -111,6 +110,9 @@ class MarketplaceListingRepo:
                 "listed_at": (listed_at if listed_at.tzinfo else listed_at.replace(tzinfo=UTC)).isoformat()
                 if listed_at else None,
             }
+            if state in LIVE_STATES and observed_inactive(observation, listing_id):
+                # Only set when true: the contract's default is False.
+                record["inactive"] = True
         return grouped
 
     def live_revisions(self, conv_id: str | None = None) -> dict[str, set[str]]:

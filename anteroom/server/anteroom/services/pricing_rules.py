@@ -107,7 +107,8 @@ def normalize(raw: Any) -> dict:
     anchor = str(stored.get("anchor") or "general")
     if anchor not in ANCHORS:
         anchor = "general"
-    rules = stored.get("rules") if isinstance(stored.get("rules"), dict) else {}
+    raw_rules = stored.get("rules")
+    rules: dict = raw_rules if isinstance(raw_rules, dict) else {}
     filled = {}
     for market in MARKETPLACES:
         try:

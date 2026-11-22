@@ -40,8 +40,6 @@ export function BulkEditDialog({ conversationIds, onClose }: { conversationIds: 
   const [labels, setLabels] = useState("");
   const [tagsMode, setTagsMode] = useState<ListMode>("keep");
   const [tags, setTags] = useState("");
-  const [shippingPreset, setShippingPreset] = useState("");
-  const [pricingRules, setPricingRules] = useState(false);
   const { data: presetData } = useQuery({ queryKey: ["settings-shipping-presets"], queryFn: api.settings.shippingPresets });
   const { data: rulesData } = useQuery({ queryKey: ["settings-pricing-rules"], queryFn: api.settings.pricingRules });
   const presets = presetData?.presets || [];
@@ -54,6 +52,8 @@ export function BulkEditDialog({ conversationIds, onClose }: { conversationIds: 
   const [error, setError] = useState<string | null>(null);
   const [review, setReview] = useState<{ edits: BulkEdits; rows: BulkReviewRow[] } | null>(null);
   const [skips, setSkips] = useState<Set<string>>(new Set());
+  const [shippingPreset, setShippingPreset] = useState("");
+  const [pricingRules, setPricingRules] = useState(false);
   const preview = useMutation({ mutationFn: (edits: BulkEdits) => api.bulkEdit.preview(conversationIds, edits), retry: false,
     onSuccess: (result, edits) => { setReview({ edits, rows: result.rows }); setSkips(new Set()); } });
   const apply = useMutation({ mutationFn: () => api.bulkEdit.apply(review!.edits, bulkReviewTokens(review!.rows.filter((row) => !skips.has(row.conversation_id)))), retry: false,
