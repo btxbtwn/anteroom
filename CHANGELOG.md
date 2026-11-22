@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1132 — 2026-11-22
+
+- Improve automatic yardstick and wooden folding-ruler detection on single-stick, dark-wood, striped, and plaid measurement photos while rejecting non-ruler garments and fixing edge-clipping coordinates.
+
 ## 0.1.1131 — 2026-11-22
 
 - Upgrade hosted managed AI to Gemini 3.5 Flash Lite (minimal reasoning) by default, Claude Haiku 5.5 for chat edits and marketplace field fills, and GPT-6.2 Sol for yardstick measurements, and recover cleanly when reasoning-only retries hit models that require reasoning.
