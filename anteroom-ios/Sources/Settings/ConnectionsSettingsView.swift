@@ -24,6 +24,8 @@ struct ConnectionsSettingsView: View {
     @State private var confirmDisconnect: DirectConnectionMarketplace?
     @State private var showEbaySheet = false
     @State private var cloudSessions: MarketplaceCloudSessions?
+    @State private var cloudLoadGeneration = 0
+    @State private var cloudLoadError: String?
     @State private var cloudBusy: String?
     @State private var cloudMessages: [String: String] = [:]
     @State private var cloudDisconnect: String?
@@ -35,17 +37,25 @@ struct ConnectionsSettingsView: View {
                     ForEach(DirectConnectionMarketplace.allCases) { marketplace in
                         marketplaceSection(marketplace)
                     }
-                    if let cloudSessions {
-                        ForEach(["poshmark", "mercari", "depop"].filter { cloudSessions.enabled.contains($0) }, id: \.self) { marketplace in
-                            cloudSection(marketplace, status: cloudSessions.sessions[marketplace])
-                        }
-                    }
                 } else if loading {
                     Section {
                         HStack(spacing: 10) {
                             ProgressView()
                             Text("Loading connections…")
                         }
+                    }
+                }
+                if let cloudSessions {
+                    ForEach(["poshmark", "mercari", "depop"].filter { cloudSessions.enabled.contains($0) }, id: \.self) { marketplace in
+                        cloudSection(marketplace, status: cloudSessions.sessions[marketplace])
+                    }
+                }
+                if let cloudLoadError {
+                    Section {
+                        Label(cloudLoadError, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(WorkspaceStyle.destructive)
+                        Button("Retry cloud status") { Task { await loadCloud() } }
+                            .disabled(cloudBusy != nil)
                     }
                 }
                 if let loadError {
@@ -135,7 +145,7 @@ struct ConnectionsSettingsView: View {
                 let result = try await api.verifyMarketplaceCloudSession(marketplace)
                 cloudMessages[marketplace] = result.ok ? "Cloud sign-in verified." : result.error ?? "Could not verify the cloud sign-in."
             }
-            cloudSessions = try await api.marketplaceCloudSessions()
+            await loadCloud()
         } catch {
             cloudMessages[marketplace] = error.localizedDescription
         }
@@ -235,6 +245,20 @@ struct ConnectionsSettingsView: View {
         loading = false
     }
 
+    private func loadCloud() async {
+        cloudLoadGeneration += 1
+        let generation = cloudLoadGeneration
+        do {
+            let response = try await api.marketplaceCloudSessions()
+            guard generation == cloudLoadGeneration, !Task.isCancelled else { return }
+            cloudSessions = response
+            cloudLoadError = nil
+        } catch {
+            guard generation == cloudLoadGeneration, !Task.isCancelled else { return }
+            cloudLoadError = "Could not load cloud sign-ins. \(error.localizedDescription)"
+        }
+    }
+
     private func load() async {
         loadGeneration += 1
         let generation = loadGeneration
@@ -244,19 +268,20 @@ struct ConnectionsSettingsView: View {
                 loading = false
             }
         }
+        async let cloud: Void = loadCloud()
         do {
-            async let cloud = try? api.marketplaceCloudSessions()
             let response = try await api.marketplaceAccounts()
-            let cloudResponse = await cloud
-            guard generation == loadGeneration else { return }
-            accounts = response.accounts
-            cloudSessions = cloudResponse
-            loadError = nil
-            loaded = true
+            if generation == loadGeneration {
+                accounts = response.accounts
+                loadError = nil
+                loaded = true
+            }
         } catch {
-            guard generation == loadGeneration else { return }
-            loadError = error.localizedDescription
+            if generation == loadGeneration {
+                loadError = error.localizedDescription
+            }
         }
+        await cloud
     }
 
     private func connect(_ marketplace: DirectConnectionMarketplace) async {

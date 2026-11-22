@@ -448,6 +448,10 @@ def activate_verified_session(
     connected_at = _as_utc(row.connected_at) if row else None
     if row is None or connected_at is None or connected_at.isoformat() != generation or row.state not in {"pending", "connected"}:
         return None
+    expires_at = _as_utc(row.expires_at)
+    if expires_at is not None and expires_at <= utcnow():
+        mark_session_expired(db, marketplace, f"Your {marketplace.title()} cloud session expired.", row.connected_at)
+        return serialize_session_row(marketplace, row)
     row.state = "connected"
     if label:
         row.account_label = _sanitize_label({"name": label})
@@ -483,7 +487,7 @@ def revoke_session(db: Session, marketplace: str) -> dict[str, Any]:
         ctx.secrets.delete(vault_account(market))
     now = utcnow()
     if row is not None:
-        if row.state == "connected":
+        if row.state == "connected" or (row.state == "pending" and row.connected_at is not None):
             pause_for_cloud_disconnect(db, _seller_id(), market)
         row.state = "revoked"
         row.account_label = None
@@ -504,7 +508,8 @@ def mark_session_expired(db: Session, marketplace: str, error: str, generation: 
     row = _row(db, market, lock=True)
     if row is None or row.state not in {"connected", "pending"} or row.connected_at != generation:
         return
-    if row.state == "connected":
+    # Minting a first upload token also creates a pending row, without credentials.
+    if row.state == "connected" or row.connected_at is not None:
         pause_for_cloud_disconnect(db, _seller_id(), market)
     row.state = "expired"
     row.last_error = (error or f"{market.title()} asked to sign in again.")[:300]

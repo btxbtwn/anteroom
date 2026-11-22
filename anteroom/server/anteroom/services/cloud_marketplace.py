@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 from io import BytesIO
 import json
@@ -50,6 +51,8 @@ _MAX_PHOTO_BYTES = 20 * 1024 * 1024
 
 # Per-event-loop concurrency semaphores (M2)
 _semaphores: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = weakref.WeakKeyDictionary()
+_photo_pool: ThreadPoolExecutor | None = None
+_photo_pool_lock = threading.Lock()
 # Active subprocess registry for cancellation: (seller_id, job_id) -> Process
 _pending: dict[tuple[str, str], threading.Event] = {}
 _active_lock = threading.Lock()
@@ -75,6 +78,16 @@ def _max_concurrency() -> int:
     except ValueError:
         return _DEFAULT_MAX_CONCURRENCY
     return max(1, min(16, value))
+
+
+def _photo_executor() -> ThreadPoolExecutor:
+    # Share one pool across loops and keep the decode bound after task cancellation.
+    # Runner slots remain available while other sellers' photos are prepared.
+    global _photo_pool
+    with _photo_pool_lock:
+        if _photo_pool is None:
+            _photo_pool = ThreadPoolExecutor(max_workers=_max_concurrency(), thread_name_prefix="cloud-photos")
+        return _photo_pool
 
 
 def _loop_semaphore() -> asyncio.Semaphore:
@@ -157,7 +170,12 @@ def _prepare_photos(marketplace: str, photos: list[dict[str, str]]) -> list[dict
             with Image.open(BytesIO(raw)) as source:
                 image = ImageOps.exif_transpose(source).convert("RGBA")
                 if marketplace == "depop":
-                    image = ImageOps.contain(image, (1280, 1280), Image.Resampling.LANCZOS)
+                    width, height = image.size
+                    if width > height:
+                        size = (1280, max(1, round(height / width * 1280)))
+                    else:
+                        size = (max(1, round(width / height * 1280)), 1280)
+                    image = image.resize(size, Image.Resampling.LANCZOS)
                     canvas = Image.new("RGB", (1280, 1280), "white")
                     offset = ((1280 - image.width) // 2, (1280 - image.height) // 2)
                 else:
@@ -549,7 +567,10 @@ async def _execute_local(
             }
 
     try:
-        photo_payloads = await asyncio.to_thread(_prepare_photos, market, photo_payloads)
+        if photo_payloads and market != "poshmark":
+            photo_payloads = await asyncio.get_running_loop().run_in_executor(
+                _photo_executor(), _prepare_photos, market, photo_payloads,
+            )
     except ValueError as exc:
         return {"ok": False, "safe_to_retry": True, "error_code": "rejected", "error": str(exc)}
 

@@ -5,11 +5,13 @@ import asyncio
 import base64
 from datetime import datetime, timedelta, UTC
 import json
+from io import BytesIO
 from types import SimpleNamespace
 import uuid
 
 import httpx
 import pytest
+from PIL import Image
 from pydantic import ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.exc import DBAPIError
@@ -427,6 +429,59 @@ def test_marketplace_cloud_verification_and_resume(cloud, signing_keys, monkeypa
 
     assert client.delete(f"/api/cloud-sessions/{market}", headers=alice).json()["ok"]
     assert (USER_ID, f"cloud-session-{market}") not in vault.data
+
+
+@pytest.mark.parametrize("transition", ["activate_expired", "expire", "revoke", "revoke_before_upload"])
+def test_pending_session_stop_controls(cloud, monkeypatch, transition):  # noqa: F811
+    from anteroom.database import SessionLocal
+    from anteroom.models.promotion_automation import PromotionAutomation
+    from anteroom.services.promotion_automations import CLOUD_DISCONNECTED
+
+    _patch_vault(monkeypatch)
+    monkeypatch.setenv("ANTEROOM_CLOUD_MARKETPLACES", "poshmark")
+    with use(for_seller(USER_ID)), SessionLocal() as db:
+        if transition == "revoke_before_upload":
+            summary = cloud_sessions.mint_upload_token(db, "poshmark")
+        else:
+            summary = cloud_sessions.save_uploaded_session(db, "poshmark", _sample_cookies(), verify_first=True)
+        session = db.scalar(select(CloudMarketplaceSession))
+        assert session is not None and session.state == "pending"
+        session.expires_at = utcnow() - timedelta(seconds=1)
+        enabled = PromotionAutomation(user_id=USER_ID, name="Enabled", marketplace="poshmark", action="share", enabled=True)
+        paused = PromotionAutomation(user_id=USER_ID, name="Paused", marketplace="poshmark", action="share",
+                                     enabled=False, paused_reason=CLOUD_DISCONNECTED)
+        db.add_all([enabled, paused])
+        db.commit()
+
+        if transition == "activate_expired":
+            result = cloud_sessions.activate_verified_session(db, "poshmark", summary["connected_at"], "Seller")
+            assert result is not None and not result["cloud_connected"]
+        elif transition == "expire":
+            cloud_sessions.mark_session_expired(db, "poshmark", "", session.connected_at)
+        else:
+            cloud_sessions.revoke_session(db, "poshmark")
+
+        db.refresh(enabled)
+        db.refresh(paused)
+        assert session.state == ("revoked" if transition.startswith("revoke") else "expired")
+        if transition == "revoke_before_upload":
+            assert enabled.enabled and enabled.paused_reason is None
+        else:
+            assert not enabled.enabled and enabled.paused_reason == CLOUD_DISCONNECTED
+        assert not paused.enabled and paused.paused_reason == CLOUD_DISCONNECTED
+
+
+@pytest.mark.parametrize("dimensions", [(1, 4096), (4096, 1)])
+def test_depop_photo_keeps_source_pixels_for_extreme_aspect_ratios(dimensions):
+    source = BytesIO()
+    Image.new("RGB", dimensions, "black").save(source, format="PNG")
+    [prepared] = cloud_marketplace._prepare_photos(
+        "depop", [{"base64": base64.b64encode(source.getvalue()).decode("ascii")}],
+    )
+    with Image.open(BytesIO(base64.b64decode(prepared["base64"]))) as output:
+        assert output.size == (1280, 1280)
+        assert max(output.getpixel((639, 639))) < 128
+        assert min(output.getpixel((0, 0))) > 240
 
 
 def test_execute_local_uses_fresh_vault_rotates_cookies_and_marks_expired_on_signed_out(cloud, monkeypatch):  # noqa: F811
