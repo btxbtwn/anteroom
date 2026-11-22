@@ -7,7 +7,7 @@ video formats eBay, Etsy and Poshmark accept, up to eBay's 150 MB. The API
 still bounds photos at their own size and type.
 
 Revision ID: 3f6a9d2c7b14
-Revises: 9b37679ce820
+Revises: 1af734b029ed
 Create Date: 2026-11-22 12:00:00.000000
 """
 from __future__ import annotations
@@ -17,7 +17,7 @@ import sqlalchemy as sa
 
 
 revision = '3f6a9d2c7b14'
-down_revision = '9b37679ce820'
+down_revision = '1af734b029ed'
 branch_labels = None
 depends_on = None
 
