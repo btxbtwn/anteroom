@@ -415,6 +415,13 @@ def test_redaction_hides_a_region_only(env):
     assert after.getpixel((380, 20)) == pytest.approx(before.getpixel((380, 20)), abs=3)
 
 
+def test_thin_redaction_at_far_edge_renders(env):
+    response = env.client.put(env.base + "/edits", json={"redactions": [
+        {"x": 0.9999, "y": 0.0, "width": 0.0001, "height": 1.0, "style": "pixelate"},
+    ]})
+    assert response.status_code == 200, response.text
+
+
 def test_annotations_draw_arrows_shapes_and_labels(env):
     response = env.client.put(env.base + "/edits", json={"annotations": [
         {"kind": "arrow", "x1": 0.1, "y1": 0.9, "x2": 0.4, "y2": 0.6, "color": "#00FF00"},

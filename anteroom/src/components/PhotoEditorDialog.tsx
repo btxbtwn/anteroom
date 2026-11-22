@@ -89,8 +89,15 @@ function normalized(edits: PhotoEdits | null | undefined): PhotoEdits {
   };
 }
 
+/** The draft keeps marks on the whole frame while the API stores them relative to the crop. */
+function draftRecipe(edits: ListingPhoto["edits"]): PhotoEdits {
+  const recipe = normalized(edits);
+  return recipe.crop ? { ...withCrop(recipe, null), crop: recipe.crop } : recipe;
+}
+
 export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClose, initialTab = "crop" }: Props) {
-  const saved = useMemo(() => normalized(photo.edits), [photo.edits]);
+  const [studioSaved, setStudioSaved] = useState<PhotoEdits | null>(null);
+  const saved = useMemo(() => studioSaved ?? draftRecipe(photo.edits), [studioSaved, photo.edits]);
   const [edits, setEdits] = useState<PhotoEdits>(saved);
   const [tab, setTab] = useState<Tab>(initialTab);
   const [aspectId, setAspectId] = useState("free");
@@ -109,9 +116,10 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
 
   // The crop is drawn on the whole frame; marks are drawn live over the finished frame without them.
   const cropping = tab === "crop";
+  const renderedEdits = useMemo(() => edits.crop ? withCrop({ ...edits, crop: null }, edits.crop) : edits, [edits]);
   const previewEdits = useMemo<PhotoEdits>(
-    () => (tab === "markup" ? { ...edits, annotations: [], redactions: [], border: null } : edits),
-    [edits, tab],
+    () => (tab === "markup" ? { ...edits, annotations: [], redactions: [], border: null } : renderedEdits),
+    [edits, renderedEdits, tab],
   );
   const previewKey = JSON.stringify([previewEdits, !cropping]);
 
@@ -154,7 +162,7 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
   const chooseAspect = (id: string) => {
     setAspectId(id);
     const next = CROP_ASPECTS.find((option) => option.id === id)?.aspect;
-    if (next && frameAspect) setEdits((current) => withCrop(current, centeredCrop(next, frameAspect)));
+    if (next && frameAspect) setEdits((current) => ({ ...current, crop: centeredCrop(next, frameAspect) }));
   };
   const changed = JSON.stringify(edits) !== JSON.stringify(saved);
   const unreadable = previewUrl !== null && unreadablePreview === previewUrl;
@@ -163,7 +171,7 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
     setSaving(true);
     setSaveError(null);
     try {
-      onSaved(await api.conversations.editPhoto(convId, photo.id, edits));
+      onSaved(await api.conversations.editPhoto(convId, photo.id, renderedEdits));
       onClose();
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Save failed");
@@ -212,10 +220,10 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
                       box={edits.crop ?? FULL_FRAME}
                       aspect={aspect}
                       frameAspect={frameAspect ?? 1}
-                      onChange={(crop) => setEdits((current) => withCrop(current, crop))}
+                      onChange={(crop) => setEdits((current) => ({ ...current, crop }))}
                     />
                   ) : tab === "markup" ? (
-                    <MarkupOverlay edits={edits} pen={pen} onChange={setEdits} />
+                    <MarkupOverlay edits={edits} renderedEdits={renderedEdits} pen={pen} onChange={setEdits} />
                   ) : null}
                 </div>
               ) : null}
@@ -249,7 +257,7 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
                 hasCrop={Boolean(edits.crop)}
                 disabled={!frameAspect || loading}
                 onAspect={chooseAspect}
-                onClear={() => { setAspectId("free"); setEdits((current) => withCrop(current, null)); }}
+                onClear={() => { setAspectId("free"); setEdits((current) => ({ ...current, crop: null })); }}
               />
             ) : tab === "adjust" ? (
               <AdjustTools edits={edits} onChange={setEdits} />
@@ -263,7 +271,11 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
                 unsaved={changed}
                 onSaved={onSaved}
                 onRunning={setStudioRunning}
-                onRebase={(next) => setEdits(normalized(next))}
+                onRebase={(next) => {
+                  const recipe = draftRecipe(next);
+                  setStudioSaved(recipe);
+                  setEdits(recipe);
+                }}
                 onDone={onClose}
               />
             )}
@@ -514,8 +526,9 @@ function MarkRow({ label, onRemove }: { label: string; onRemove: () => void }) {
 }
 
 /** Marks drawn live over the finished frame; a drag (or a tap, for text) adds one. */
-function MarkupOverlay({ edits, pen, onChange }: {
+function MarkupOverlay({ edits, renderedEdits, pen, onChange }: {
   edits: PhotoEdits;
+  renderedEdits: PhotoEdits;
   pen: MarkPen;
   onChange: (update: (current: PhotoEdits) => PhotoEdits) => void;
 }) {
@@ -542,11 +555,17 @@ function MarkupOverlay({ edits, pen, onChange }: {
       return;
     }
     setHint(null);
-    if ("annotation" in mark) {
-      onChange((current) => ({ ...current, annotations: [...(current.annotations ?? []), mark.annotation] }));
-    } else {
-      onChange((current) => ({ ...current, redactions: [...(current.redactions ?? []), mark.redaction] }));
-    }
+    onChange((current) => {
+      const fullFrame = withCrop({
+        crop: current.crop,
+        annotations: "annotation" in mark ? [mark.annotation] : [],
+        redactions: "redaction" in mark ? [mark.redaction] : [],
+      }, null);
+      return { ...current,
+        annotations: [...(current.annotations ?? []), ...(fullFrame.annotations ?? [])],
+        redactions: [...(current.redactions ?? []), ...(fullFrame.redactions ?? [])],
+      };
+    });
   };
   const preview = draft ? markFromDrag(pen.tool, draft.x1, draft.y1, draft.x2, draft.y2, pen.color, pen.text || " ") : null;
   return (
@@ -567,13 +586,13 @@ function MarkupOverlay({ edits, pen, onChange }: {
       onPointerUp={finish}
       onPointerCancel={() => setDraft(null)}
     >
-      {(edits.redactions ?? []).map((box, position) => <RedactionBox key={`r${position}`} box={box} />)}
+      {(renderedEdits.redactions ?? []).map((box, position) => <RedactionBox key={`r${position}`} box={box} />)}
       {preview && "redaction" in preview ? <RedactionBox box={preview.redaction} /> : null}
       <svg className="pointer-events-none absolute inset-0 size-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
-        {[...(edits.annotations ?? []), ...(preview && "annotation" in preview ? [preview.annotation] : [])]
+        {[...(renderedEdits.annotations ?? []), ...(preview && "annotation" in preview ? [preview.annotation] : [])]
           .map((mark, position) => <AnnotationShape key={position} mark={mark} />)}
       </svg>
-      {(edits.annotations ?? []).filter((mark) => mark.kind === "text").map((mark, position) => (
+      {(renderedEdits.annotations ?? []).filter((mark) => mark.kind === "text").map((mark, position) => (
         <span key={`t${position}`} className="pointer-events-none absolute whitespace-nowrap font-medium text-sm leading-none"
           style={{ left: `${mark.x1 * 100}%`, top: `${mark.y1 * 100}%`, color: mark.color }}>
           {mark.text}

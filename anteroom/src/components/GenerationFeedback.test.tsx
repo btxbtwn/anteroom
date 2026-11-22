@@ -46,10 +46,15 @@ it("pins edited feedback to its original revision and provides Retry after a rea
         <GenerationFeedback id="item" revision="edited-revision" />
       </QueryClientProvider>);
     });
-    await act(async () => { await vi.waitFor(() => expect(client.getQueryState(["generation-feedback", "item", "edited-revision"])?.status).toBe("error")); });
-    expect(container.textContent).toContain("Could not read feedback");
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(container.textContent).toContain("Could not read feedback");
+    });
     await click("Retry");
-    await act(async () => { await vi.waitFor(() => expect(client.getQueryState(["generation-feedback", "item", "edited-revision"])?.status).toBe("success")); });
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(container.querySelector('[aria-label="Thumbs down"]')).not.toBeNull();
+    });
     await click("Thumbs down");
     await act(async () => {
       client.setQueryData(["generation-feedback", "item", "edited-revision"], { revision_id: "newer", feedback: null });

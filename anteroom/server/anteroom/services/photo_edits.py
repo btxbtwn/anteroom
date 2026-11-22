@@ -272,7 +272,8 @@ def _flip(img: Image.Image, edits: PhotoEdits) -> Image.Image:
 
 def _pixel_box(img: Image.Image, box: CropBox) -> tuple[int, int, int, int]:
     width, height = img.size
-    left, top = round(box.x * width), round(box.y * height)
+    # Even a thin region at the far edge must include a pixel.
+    left, top = min(width - 1, round(box.x * width)), min(height - 1, round(box.y * height))
     right = min(width, max(left + 1, round((box.x + box.width) * width)))
     bottom = min(height, max(top + 1, round((box.y + box.height) * height)))
     return left, top, right, bottom

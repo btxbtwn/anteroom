@@ -184,7 +184,7 @@ export function withCrop(edits: PhotoEdits, crop: CropBox | null): PhotoEdits {
     const top = Math.max(0, mapY(box.y));
     const right = Math.min(1, mapX(box.x + box.width));
     const bottom = Math.min(1, mapY(box.y + box.height));
-    return right - left > 0.001 && bottom - top > 0.001 ? [{ ...box, x: left, y: top, width: right - left, height: bottom - top }] : [];
+    return right > left && bottom > top ? [{ ...box, x: left, y: top, width: right - left, height: bottom - top }] : [];
   });
   const annotations = (edits.annotations ?? []).map((mark) => ({
     ...mark, x1: unit(mapX(mark.x1)), y1: unit(mapY(mark.y1)), x2: unit(mapX(mark.x2)), y2: unit(mapY(mark.y2)),

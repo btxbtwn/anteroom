@@ -1,5 +1,15 @@
-import { crc32, deflateSync } from "node:zlib";
+import { deflateSync } from "node:zlib";
 import { expect, openForm, openListing, test } from "./fixtures";
+
+/** PNG chunk checksum, including on Node versions before zlib exposed crc32. */
+function crc32(bytes: Buffer): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
 
 /** A 320×400 PNG: a coloured block on a grey backdrop, the shape of a product shot. */
 function png(red: number, green: number, blue: number): Buffer {

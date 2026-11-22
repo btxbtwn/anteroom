@@ -116,6 +116,11 @@ it("applies AI Studio to the chosen photos and reports each photo that failed", 
     expect(ids).toEqual(["p1", "p2"]);
     expect(options).toMatchObject({ flat_lay: true, ghost_mannequin: false, remove_background: true });
     expect(onSaved).toHaveBeenCalledTimes(1);
+    // MarketplaceMedia refreshes asynchronously: the open photo prop is still the old recipe.
+    expect(buttonNamed("Discard changes")).toBeUndefined();
+    expect(buttonNamed("Apply")?.disabled).toBe(false);
+    await act(async () => { buttonNamed("Apply")!.click(); });
+    expect(studio.mock.calls[1]?.[1]).toEqual(["p2"]);
     // A failed photo keeps the editor open and says why.
     expect(onClose).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain("Photo 2: Your Photoroom plan has no credits left for this edit.");
@@ -136,5 +141,35 @@ it("previews markup without the marks, which it draws over the photo itself", as
     expect(sent).toMatchObject({ annotations: [], redactions: [], border: null });
     expect(document.body.querySelector("[data-markup-frame] line")).not.toBeNull();
     expect(document.body.textContent).toContain("Arrow 1");
+  } finally { await act(async () => root.unmount()); }
+});
+
+it("restores hidden and partially clipped redactions when the crop is cleared", async () => {
+  const redactions = [
+    { x: 0.75, y: 0.25, width: 0.125, height: 0.25, style: "pixelate" as const },
+    { x: 0.55, y: 0.25, width: 0.125, height: 0.25, style: "blur" as const },
+  ];
+  const edited: ListingPhoto = { ...photo, edits: { redactions } };
+  const previews = vi.spyOn(api.conversations, "previewPhotoEdits").mockResolvedValue(new Blob(["jpeg"]));
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  await act(async () => root.render(<PhotoEditorDialog convId="item" photo={edited} index={0} onSaved={vi.fn()} onClose={vi.fn()} />));
+  try {
+    await settle();
+    const handle = host.querySelector('[aria-label="Resize from bottom right"]')!;
+    for (let i = 0; i < 8; i++) {
+      await act(async () => {
+        handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", shiftKey: true, bubbles: true }));
+      });
+    }
+    await settle();
+    const cropped = previews.mock.lastCall?.[2];
+    expect(cropped?.redactions).toHaveLength(1);
+    expect(cropped?.redactions?.[0]?.style).toBe("blur");
+    expect(cropped?.redactions?.[0]?.width).toBeCloseTo(1 / 12);
+    await act(async () => { buttonNamed("Clear crop")!.click(); });
+    await settle();
+    expect(previews.mock.lastCall?.[2].redactions).toEqual(redactions);
   } finally { await act(async () => root.unmount()); }
 });

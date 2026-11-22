@@ -380,7 +380,8 @@ function PhotoroomSection({ hosted }: { hosted: boolean }) {
         status={status}
         control={
           configured ? (
-            <Button size="xs" variant="ghost-destructive" onClick={() => deleteKeyMutation.mutate()}>
+            <Button size="xs" variant="ghost-destructive" disabled={setKeyMutation.isPending || deleteKeyMutation.isPending}
+              onClick={() => { setKeyMutation.reset(); deleteKeyMutation.mutate(); }}>
               <Trash2Icon />
               Remove
             </Button>
@@ -390,8 +391,8 @@ function PhotoroomSection({ hosted }: { hosted: boolean }) {
         <ApiKeyField
           label="Photoroom API key"
           placeholder="sk_pr_..."
-          saving={setKeyMutation.isPending}
-          onSave={(key) => setKeyMutation.mutate(key)}
+          saving={setKeyMutation.isPending || deleteKeyMutation.isPending}
+          onSave={(key) => { deleteKeyMutation.reset(); setKeyMutation.mutate(key); }}
         />
       </SettingsRow>
     </SettingsSection>
