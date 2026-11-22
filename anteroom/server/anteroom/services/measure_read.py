@@ -27,7 +27,7 @@ from anteroom.services import image_decode
 log = logging.getLogger(__name__)
 
 MAX_RULER_PHOTOS = 3  # pants take two; a third covers a sleeve shot
-WOOD_SHARE = 0.04  # a photo with less yardstick colour than this has no yardstick worth finding
+WOOD_SHARE = 0.008  # single narrow folding rulers cover ~1% of a full-garment shot
 TILES_PER_MEASURE = 2  # the locate step picks at most this many
 MAX_TILES_SHOWN = 4  # the read step also sees their neighbours, as a reader scanning along the stick would
 
@@ -74,7 +74,9 @@ def _has_wood(path: Path) -> bool:
         image = image.convert("RGB")
     except Exception:
         return False
-    return float(ruler().wood_mask(image).mean()) > WOOD_SHARE
+    module = ruler()
+    mask_fn = getattr(module, "any_wood_mask", module.wood_mask)
+    return float(mask_fn(image).mean()) > WOOD_SHARE
 
 
 def _search_photos(paths: list[Path], out: Path) -> list[dict]:
@@ -96,12 +98,10 @@ def reader_name(provider) -> str:
 
 
 def find_ruler_photos(paths: list[Path], out: Path) -> list[dict]:
-    """Crops for each photo with two yardsticks on it, in upload order."""
+    """Crops for each photo with one or more yardsticks on it, in upload order."""
     module = ruler()
-    found: list[dict] = []
-    for path in paths:
-        if len(found) == MAX_RULER_PHOTOS:
-            break
+    matches: list[tuple[int, float, Path, object, list]] = []
+    for index, path in enumerate(paths):
         if not _has_wood(path):
             continue
         try:
@@ -111,8 +111,17 @@ def find_ruler_photos(paths: list[Path], out: Path) -> list[dict]:
         except Exception:
             log.exception("could not search %s for yardsticks", path.name)
             continue
-        if len(sticks) < 2:
+        if not sticks:
             continue
+        confidence = sum(float(getattr(s, "score", 0.0)) for s in sticks)
+        matches.append((index, confidence, path, image, sticks))
+        if len(matches) > MAX_RULER_PHOTOS:
+            # Stable sort keeps the earlier upload when confidence ties.
+            matches.sort(key=lambda item: item[1], reverse=True)
+            matches.pop()
+    matches.sort(key=lambda item: item[0])
+    found: list[dict] = []
+    for _index, _confidence, path, image, sticks in matches:
         number = len(found) + 1
         lines = [",".join(str(round(v)) for v in (s.x1, s.y1, s.x2, s.y2, s.width)) for s in sticks]
         report = module.crop(path, out / str(number), lines, set(), image=image)

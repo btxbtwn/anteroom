@@ -1,0 +1,1 @@
+- Improve automatic yardstick and wooden folding-ruler detection on single-stick, dark-wood, striped, and plaid measurement photos while rejecting non-ruler garments and fixing edge-clipping coordinates.

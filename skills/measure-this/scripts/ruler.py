@@ -32,10 +32,11 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageOps
 
 AGREE_WITHIN = 0.25  # inches two reads may differ by and still be accepted
-DETECT_SIDE = 400  # the photo is searched for sticks at this size
+DETECT_SIDE = 320  # the photo is searched for sticks at this size
 MAX_PIXELS = 50_000_000  # refuse decompression bombs and >50 MP images
 MAX_SIDE = 4096  # caps decode + HSV/crop memory while keeping 1/8" ticks legible
-MIN_STICK_SHARE = 0.3  # a stick must run at least this share of the photo's side
+MIN_STICK_SHARE = 0.20  # a stick must span at least this share of the photo's short side
+REFINE_MAX_LEN = 1200  # cap temporary band width during line refinement and verification
 TILE_INCHES_ACROSS = 4.5  # tile width, in stick widths (a yardstick is about 1.1 in wide)
 TILE_OUT_WIDTH = 1560
 BACKDROP = (238, 238, 238)
@@ -51,13 +52,14 @@ MEASURES = {
 
 @dataclass
 class Stick:
-    """One yardstick: its centre line in photo pixels, and its width."""
+    """One yardstick: its centre line in photo pixels, its width, and detection confidence."""
 
     x1: float
     y1: float
     x2: float
     y2: float
     width: float
+    score: float = 0.0
 
     @property
     def length(self) -> float:
@@ -86,89 +88,479 @@ def load(path: Path, *, max_side: int | None = MAX_SIDE) -> Image.Image:
     return _load_with_scale(path, max_side=max_side)[0]
 
 
+def _hsv_bands(image: Image.Image) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    hue, sat, val = (np.asarray(band, dtype=np.float32) for band in image.convert("HSV").split())
+    return hue, sat, val
+
+
 def wood_mask(image: Image.Image) -> np.ndarray:
     """Pixels the colour of unfinished wood, from tan in shade to near white in full sun.
 
     Sunlit wood keeps only a trace of warmth, so the saturation floor is low. That lets
-    cream and white garments through as well; `find_sticks` tells them apart by shape.
+    cream and white garments through as well; `find_sticks` tells them apart by shape and
+    periodic ruler tick marks.
     """
-    hue, sat, val = (np.asarray(band, dtype=np.float32) for band in image.convert("HSV").split())
+    hue, sat, val = _hsv_bands(image)
     return (hue > 8) & (hue < 42) & (sat > 7) & (sat < 150) & (val > 150)
+
+
+def dark_wood_mask(image: Image.Image) -> np.ndarray:
+    """Pixels of darker or weathered wooden rulers (e.g. vintage folding rulers on light fabric)."""
+    hue, sat, val = _hsv_bands(image)
+    return (hue > 8) & (hue < 44) & (sat > 36) & (sat < 200) & (val > 50) & (val < 225)
+
+
+def any_wood_mask(image: Image.Image) -> np.ndarray:
+    """Union of bright and darker wooden ruler masks in a single HSV pass."""
+    hue, sat, val = _hsv_bands(image)
+    light = (hue > 8) & (hue < 42) & (sat > 7) & (sat < 150) & (val > 150)
+    dark = (hue > 8) & (hue < 44) & (sat > 36) & (sat < 200) & (val > 50) & (val < 225)
+    return light | dark
+
+
+def _local_extrema(arr: np.ndarray, radius: int = 2) -> tuple[np.ndarray, np.ndarray]:
+    """Separable (2*radius+1)x(2*radius+1) local max and min in pure numpy."""
+    h, w = arr.shape
+    span = 2 * radius + 1
+    pad_y = np.pad(arr, ((radius, radius), (0, 0)), mode="edge")
+    max_y = np.maximum.reduce([pad_y[i : i + h, :] for i in range(span)])
+    min_y = np.minimum.reduce([pad_y[i : i + h, :] for i in range(span)])
+    pad_max = np.pad(max_y, ((0, 0), (radius, radius)), mode="edge")
+    pad_min = np.pad(min_y, ((0, 0), (radius, radius)), mode="edge")
+    return (
+        np.maximum.reduce([pad_max[:, i : i + w] for i in range(span)]),
+        np.minimum.reduce([pad_min[:, i : i + w] for i in range(span)]),
+    )
+
+
+def tick_edge_wood_mask(image: Image.Image, *, wood: np.ndarray | None = None) -> np.ndarray:
+    """High-contrast printed ruler ticks adjacent to wood pixels.
+
+    Separates a wooden yardstick lying on a similarly coloured plaid or tan garment where
+    plain wood colour blends into the cloth.
+    """
+    grey = np.asarray(image.convert("L"), dtype=np.float32)
+    loc_max, loc_min = _local_extrema(grey, radius=2)
+    contrast = (loc_max - loc_min) > 42.0
+    base_wood = any_wood_mask(image) if wood is None else wood
+    wood_near = _local_extrema(base_wood.astype(np.uint8), radius=2)[0] > 0
+    return contrast & wood_near
 
 
 def box(profile: np.ndarray, width: int) -> np.ndarray:
     return np.convolve(profile, np.ones(width) / width, mode="same")
 
 
-def find_sticks(image: Image.Image, limit: int = 2) -> list[Stick]:
-    """Find up to `limit` sticks as long, narrow, straight bands of wood colour.
+def _verify_stick(
+    image: Image.Image,
+    stick: Stick,
+    mask_fn,
+    *,
+    is_tick_channel: bool = False,
+) -> float | None:
+    """Verify a candidate stick carries periodic ruler ticks concentrated along its edge.
 
-    For each angle the mask is rotated and summed along rows. A stick lying along that
-    angle shows as a tall narrow peak: many wood pixels on its own rows and few on the
-    rows either side. A cream or tan garment is wood coloured too, but it is a blob, so
-    its rows and their neighbours are equally full and it scores nothing.
+    Uses a short sliding-window STFT on the horizontal first difference so perspective
+    foreshortening on vertical sticks does not smear the tick frequency peak, and compares
+    the peak tick row against interior rows (`edge_ratio`) to reject uniform stripes, knit
+    ribbing, polka dots, woven tags, and plaid patterns. Returns a confidence score or None.
+    """
+    side_max = max(image.size)
+    side_min = min(image.size)
+    if stick.length < side_min * 0.25:
+        return None
+    min_w = side_max * (0.011 if is_tick_channel else 0.008)
+    if stick.width < min_w or stick.width > side_max * 0.145:
+        return None
+
+    ux, uy = (stick.x2 - stick.x1) / stick.length, (stick.y2 - stick.y1) / stick.length
+    if ux < 0:
+        ux, uy = -ux, -uy
+        stick = Stick(stick.x2, stick.y2, stick.x1, stick.y1, stick.width)
+    nx, ny = -uy, ux
+
+    # Cap verification strip length so 12 MP full-res photos stay fast while preserving ticks.
+    v_scale = min(1.0, REFINE_MAX_LEN / max(stick.length, 1.0))
+    w_img = stick.width
+    w = w_img * v_scale
+    half_img = w_img * 1.45
+    out_w = max(int(round(stick.length * v_scale)), 64)
+    out_h = max(int(round(2 * half_img * v_scale)), 24)
+    quad = (
+        stick.x1 - nx * half_img,
+        stick.y1 - ny * half_img,
+        stick.x1 + nx * half_img,
+        stick.y1 + ny * half_img,
+        stick.x2 + nx * half_img,
+        stick.y2 + ny * half_img,
+        stick.x2 - nx * half_img,
+        stick.y2 - ny * half_img,
+    )
+    strip = image.transform((out_w, out_h), Image.Transform.QUAD, quad, resample=Image.Resampling.BILINEAR)
+
+    # Check colour continuity and contrast on a 2x horizontally downsampled strip first.
+    strip_sm = strip.resize((max(out_w // 2, 32), out_h), Image.Resampling.BILINEAR)
+    hue, sat, val = _hsv_bands(strip_sm)
+    light_sm = (hue > 8) & (hue < 42) & (sat > 7) & (sat < 150) & (val > 150)
+    dark_sm = (hue > 8) & (hue < 44) & (sat > 36) & (sat < 200) & (val > 50) & (val < 225)
+    wood_sm = light_sm | dark_sm
+    if mask_fn is wood_mask:
+        strip_mask_sm = light_sm
+    elif mask_fn is dark_wood_mask:
+        strip_mask_sm = dark_sm
+    elif mask_fn is tick_edge_wood_mask:
+        strip_mask_sm = tick_edge_wood_mask(strip_sm, wood=wood_sm)
+    else:
+        strip_mask_sm = mask_fn(strip_sm)
+
+    mid = out_h // 2
+    r_lo = max(0, int(mid - w * 0.52))
+    r_hi = min(out_h, int(mid + w * 0.52) + 1)
+    core_col_sm = strip_mask_sm[r_lo:r_hi].mean(axis=0)
+    active_sm = np.nonzero(core_col_sm > 0.25)[0]
+    min_active = max(32, int(side_min * v_scale * 0.11))
+    if len(active_sm) < min_active:
+        return None
+    sx0, sx1 = int(active_sm[0]), int(active_sm[-1]) + 1
+
+    # Ignore out-of-bounds black quad fill so border-hugging lines cannot fake wood contrast or edge_ratio.
+    sm_w = strip_sm.width
+    t_sm = ((np.arange(sx0, sx1, dtype=np.float32) + 0.5) / sm_w) * stick.length
+    d_sm = (((np.arange(out_h, dtype=np.float32) + 0.5) / out_h) * 2.0 - 1.0) * half_img
+    px_sm = stick.x1 + ux * t_sm[None, :] + nx * d_sm[:, None]
+    py_sm = stick.y1 + uy * t_sm[None, :] + ny * d_sm[:, None]
+    in_bounds_sm = (
+        (px_sm >= 1.0) & (px_sm <= image.width - 2.0) & (py_sm >= 1.0) & (py_sm <= image.height - 2.0)
+    )
+    if float(in_bounds_sm[r_lo:r_hi].mean()) < 0.85:
+        return None
+
+    active_wood_density = float((wood_sm[r_lo:r_hi, sx0:sx1].mean(axis=0) > 0.22).mean())
+    width_ratio = w_img / side_max
+    min_wood_density = 0.90 if width_ratio > 0.055 else (0.80 if is_tick_channel else 0.45)
+    if active_wood_density < min_wood_density:
+        return None
+
+    core_wood = float(core_col_sm[sx0:sx1].mean())
+    ft_hi = max(1, int(mid - w * 0.78))
+    fb_lo = min(out_h - 1, int(mid + w * 0.78))
+    flanks: list[float] = []
+    wood_flanks: list[float] = []
+    for sl in (slice(0, ft_hi), slice(fb_lo, out_h)):
+        valid_flank = in_bounds_sm[sl]
+        if float(valid_flank.mean()) >= 0.25:
+            flanks.append(float(strip_mask_sm[sl, sx0:sx1][valid_flank].mean()))
+            if is_tick_channel:
+                wood_flanks.append(float(wood_sm[sl, sx0:sx1][valid_flank].mean()))
+    if not flanks:
+        return None
+    flank_wood = sum(flanks) / len(flanks)
+    wood_contrast = core_wood - flank_wood
+    if wood_contrast < 0.12:
+        return None
+    # In the tick channel the fitted band follows the print, not the whole stick.
+    # Continuous wood on both sides puts that printed band inside the stick.
+    if len(wood_flanks) == 2 and min(wood_flanks) >= 0.75:
+        return None
+
+    x0 = max(0, sx0 * 2)
+    x1 = min(out_w, sx1 * 2)
+    if x1 - x0 < 96:
+        return None
+
+    grey = np.asarray(strip.convert("L"), dtype=np.float32)[:, x0:x1]
+    dx = np.diff(grey, axis=1)
+    length_px = dx.shape[1]
+    k_rows = max(min(int(round(w * 0.12)), 5), 2)
+    in_lo = max(0, r_lo)
+    in_end = min(dx.shape[0], max(in_lo + k_rows, r_hi))
+    in_dx = dx[in_lo:in_end]
+    if in_dx.shape[0] < k_rows:
+        return None
+    cs_r = np.cumsum(np.pad(in_dx, ((1, 0), (0, 0))), axis=0)
+    bands = (cs_r[k_rows:] - cs_r[:-k_rows]) / k_rows
+    n_in = bands.shape[0]
+    if n_in < 1:
+        return None
+
+    min_period = max(3.2, w * 0.08)
+    max_period = max(min_period * 1.8, min(36.0, w * 0.48))
+    freq_lo, freq_hi = 1.0 / max_period, 1.0 / min_period
+    nominal = max(128, min(192, int(round(w * 4.5))))
+    # Wide rulers put their plausible periods in a narrow band of frequencies.
+    # Only grow the window when the nominal one cannot resolve five bins.
+    if math.floor(nominal * freq_hi) - math.ceil(nominal * freq_lo) + 1 < 5:
+        nominal = math.ceil(5 / (freq_hi - freq_lo))
+    win_len = min(length_px, nominal)
+    step = max(32, win_len // 2)
+    starts = list(range(0, max(1, length_px - win_len + 1), step))
+    if starts[-1] + win_len < length_px:
+        starts.append(length_px - win_len)
+    win_starts = [s for s in starts if core_col_sm[sx0 + s // 2 : sx0 + (s + win_len) // 2].mean() >= 0.25]
+    if len(win_starts) < 2:
+        win_starts = starts
+
+    hann = np.hanning(win_len).astype(np.float32)
+    freqs = np.fft.rfftfreq(win_len, d=1.0)
+    valid_bins = np.nonzero((freqs >= freq_lo) & (freqs <= freq_hi))[0]
+    if len(valid_bins) < 5:
+        return None
+    n_bins = len(freqs)
+
+    row_proms = np.zeros((n_in, len(win_starts)), dtype=np.float32)
+    row_dxs = np.zeros((n_in, len(win_starts)), dtype=np.float32)
+    row_pows = np.zeros((n_in, len(win_starts)), dtype=np.float32)
+
+    for wi, start in enumerate(win_starts):
+        segs = bands[:, start : start + win_len]
+        in_sp = np.abs(np.fft.rfft((segs - segs.mean(axis=1, keepdims=True)) * hann[None, :], axis=1)) ** 2
+        abs_segs = np.abs(segs)
+        ks = valid_bins[np.argmax(in_sp[:, valid_bins], axis=1)]
+        for ri in range(n_in):
+            k = int(ks[ri])
+            # Bin k describes k repeats, but can be a harmonic of the tick
+            # spacing. Allow for that and for marks clipped by window edges.
+            rank = max(3, k // 2)
+            row_dxs[ri, wi] = np.partition(abs_segs[ri], -rank)[-rank]
+            bg_lo = max(2, k - 12)
+            bg_hi = min(n_bins, k + 13)
+            bg = np.concatenate([in_sp[ri, bg_lo : max(bg_lo, k - 2)], in_sp[ri, min(bg_hi, k + 3) : bg_hi]])
+            med = float(np.median(bg)) + 1e-6 if len(bg) >= 4 else 1.0
+            pw = float(in_sp[ri, k])
+            row_pows[ri, wi] = pw
+            row_proms[ri, wi] = pw / med
+
+    med_proms = np.median(row_proms, axis=1)
+    best_ri = int(np.argmax(med_proms))
+    if not is_tick_channel:
+        band_rows = in_lo + np.arange(n_in) + (k_rows - 1) / 2.0
+        edge_rows = np.flatnonzero(np.abs(band_rows - mid) >= w * 0.25)
+        if not len(edge_rows):
+            return None
+        edge_ri = int(edge_rows[np.argmax(med_proms[edge_rows])])
+        # Adjacent rows of the same printed tick can differ slightly after resampling.
+        if med_proms[edge_ri] < med_proms[best_ri] * 0.90:
+            return None
+        best_ri = edge_ri
+    mp = float(med_proms[best_ri])
+    dx_med = float(np.median(row_dxs[best_ri]))
+    row_med_pow = np.median(row_pows, axis=1)
+    edge_ratio = (
+        float(row_med_pow[best_ri] / (float(np.percentile(row_med_pow, 25)) + 1e-6)) if n_in >= 4 else 2.0
+    )
+
+    min_edge_ratio = 4.5 if is_tick_channel else 3.0
+    # Close-up wide sticks have crisp dark tick marks; only distant narrow sticks may soften below dx=15.
+    if width_ratio > 0.055:
+        contrast_ok = dx_med >= 22.0
+    elif width_ratio <= 0.045:
+        contrast_ok = dx_med >= 15.0 or (dx_med >= 10.0 and wood_contrast >= 0.50)
+    else:
+        contrast_ok = dx_med >= 18.0
+    if mp < 18.0 or edge_ratio < min_edge_ratio or not contrast_ok:
+        return None
+    return mp * min(edge_ratio, 25.0)
+
+
+def _row_distance(row: int, other_row: int, angle_gap: float, side: int) -> int:
+    """Compare rotated rows after aligning their perpendicular directions."""
+    if angle_gap > 90.0:
+        other_row = side - 1 - other_row
+    return abs(row - other_row)
+
+
+def _bands_overlap(first: Stick, second: Stick) -> bool:
+    """Test the finite ruler rectangles on each of their separating axes."""
+    delta = (
+        (second.x1 + second.x2 - first.x1 - first.x2) / 2.0,
+        (second.y1 + second.y2 - first.y1 - first.y2) / 2.0,
+    )
+    u, v = [
+        ((s.x2 - s.x1) / s.length, (s.y2 - s.y1) / s.length) for s in (first, second)
+    ]
+    normals = (-u[1], u[0]), (-v[1], v[0])
+    for x, y in (u, v, *normals):
+        reaches = sum(
+            (s.length * abs(axis[0] * x + axis[1] * y) + s.width * abs(normal[0] * x + normal[1] * y)) / 2.0
+            for s, axis, normal in zip((first, second), (u, v), normals, strict=True)
+        )
+        if abs(delta[0] * x + delta[1] * y) >= reaches:
+            return False
+    return True
+
+
+def find_sticks(image: Image.Image, limit: int = 2) -> list[Stick]:
+    """Find up to `limit` wooden rulers as long, narrow straight bands with periodic ticks.
+
+    Searches three complementary channels in a single RGB rotation pass:
+      0. bright/unfinished wood (`wood_mask`)
+      1. darker/weathered folding rulers (`dark_wood_mask`)
+      2. high-contrast ruler tick edges near wood (`tick_edge_wood_mask`) for wood-on-plaid
+
+    Candidates are picked across diverse orientations, refined to full image geometry, and
+    verified for periodic tick marks concentrated along the ruler edge.
     """
     scale = DETECT_SIDE / max(image.size)
-    small = image.resize((round(image.width * scale), round(image.height * scale)), Image.BILINEAR)
-    mask = wood_mask(small)
-    side = int(math.hypot(*small.size)) + 2
-    canvas = Image.new("L", (side, side), 0)
-    offset = ((side - small.width) // 2, (side - small.height) // 2)
-    canvas.paste(Image.fromarray((mask * 255).astype(np.uint8)), offset)
+    small = image.resize(
+        (max(round(image.width * scale), 1), max(round(image.height * scale), 1)),
+        Image.Resampling.BILINEAR,
+    )
+    hue, sat, val = _hsv_bands(small)
+    w_mask = (hue > 8) & (hue < 42) & (sat > 7) & (sat < 150) & (val > 150)
+    d_mask = (hue > 8) & (hue < 44) & (sat > 36) & (sat < 200) & (val > 50) & (val < 225)
+    t_mask = tick_edge_wood_mask(small, wood=(w_mask | d_mask))
 
-    sticks: list[Stick] = []
-    for _ in range(limit):
-        best = None
-        for angle in np.arange(0, 180, 1.0):
-            rows = np.asarray(canvas.rotate(angle, resample=Image.BILINEAR), dtype=np.float32) / 255
-            profile = rows.sum(axis=1)
-            for width in (10, 14, 18, 24, 32, 44):
+    side = int(math.hypot(*small.size)) + 2
+    offset = ((side - small.width) // 2, (side - small.height) // 2)
+    arr = np.zeros((side, side, 3), dtype=np.uint8)
+    arr[offset[1] : offset[1] + small.height, offset[0] : offset[0] + small.width, 0] = (w_mask * 255).astype(np.uint8)
+    arr[offset[1] : offset[1] + small.height, offset[0] : offset[0] + small.width, 1] = (d_mask * 255).astype(np.uint8)
+    arr[offset[1] : offset[1] + small.height, offset[0] : offset[0] + small.width, 2] = (t_mask * 255).astype(np.uint8)
+    canvas = Image.fromarray(arr, mode="RGB")
+
+    thresh = MIN_STICK_SHARE * min(small.size)
+    widths = (5, 8, 12, 17, 24, 34)
+    peaks_by_ch: dict[int, list[tuple[float, int, float, int, int]]] = {0: [], 1: [], 2: []}
+    for angle in range(0, 180, 3):
+        rot = np.asarray(canvas.rotate(angle, resample=Image.Resampling.BILINEAR), dtype=np.float32) / 255.0
+        for ch in (0, 1, 2):
+            profile = rot[:, :, ch].sum(axis=1)
+            best_score_row = np.zeros(side, dtype=np.float32)
+            best_width_row = np.zeros(side, dtype=np.int32)
+            for width in widths:
                 core = box(profile, max(width // 2, 3))
                 flank = np.maximum(np.roll(core, width), np.roll(core, -width))
                 score = core - flank
-                row = int(score.argmax())
+                better = score > best_score_row
+                best_score_row[better] = score[better]
+                best_width_row[better] = width
+            sc_copy = best_score_row.copy()
+            for _ in range(5):
+                row = int(sc_copy.argmax())
+                s = float(sc_copy[row])
+                if s < thresh:
+                    break
+                w = int(best_width_row[row])
+                peaks_by_ch[ch].append((s, ch, float(angle), row, w))
+                sup = max(w, 10)
+                sc_copy[max(0, row - sup) : min(side, row + sup + 1)] = 0.0
+
+    # Keep orientation-diverse peaks per channel while leaving room when a striped garment
+    # shares the same angle as the ruler.
+    raw_chosen: list[tuple[float, int, float, int, int]] = []
+    for ch in (0, 1, 2):
+        ch_chosen: list[tuple[float, int, float, int, int]] = []
+        for s, ch_id, ang, row, w in sorted(peaks_by_ch[ch], reverse=True):
+            dup = False
+            same_ang_count = 0
+            for _, _, c_ang, c_row, c_w in ch_chosen:
+                gap = abs(ang - c_ang)
+                da = min(gap, 180.0 - gap)
+                if da < 10.0 and _row_distance(row, c_row, gap, side) < max(w, c_w, 12) * 1.4:
+                    dup = True
+                    break
+                if da < 18.0:
+                    same_ang_count += 1
+            if not dup and same_ang_count < 5:
+                ch_chosen.append((s, ch_id, ang, row, w))
+                if len(ch_chosen) >= 7:
+                    break
+        raw_chosen.extend(ch_chosen)
+
+    # Cross-channel deduplication by (angle, row) before fine search and verification.
+    # Keep tick-edge candidates separate from full-wood candidates so a narrow tick-edge
+    # peak never suppresses a full-wood peak on the same ruler (and vice versa).
+    raw_chosen.sort(reverse=True)
+    chosen: list[tuple[float, int, float, int, int]] = []
+    for item in raw_chosen:
+        _, ch, ang, row, w = item
+        dup = False
+        for _, c_ch, c_ang, c_row, c_w in chosen:
+            if (ch == 2) != (c_ch == 2):
+                continue
+            gap = abs(ang - c_ang)
+            da = min(gap, 180.0 - gap)
+            if da < 7.0 and _row_distance(row, c_row, gap, side) < max(min(w, c_w), 8):
+                dup = True
+                break
+        if not dup:
+            chosen.append(item)
+            if len(chosen) >= 14:
+                break
+
+    ch_canvas = [canvas.getchannel(0), canvas.getchannel(1), canvas.getchannel(2)]
+    mask_fns = (wood_mask, dark_wood_mask, tick_edge_wood_mask)
+    side_max = max(image.size)
+    verified: list[Stick] = []
+    for _, ch, base_ang, base_row, base_w in chosen:
+        best = None
+        r_lo = max(0, base_row - max(base_w, 12))
+        r_hi = min(side, base_row + max(base_w, 12) + 1)
+        for da in (-2.0, -1.0, 0.0, 1.0, 2.0):
+            # Keep the trial rotation in the same row frame as the coarse peak.
+            ang = base_ang + da
+            rot = np.asarray(ch_canvas[ch].rotate(ang, resample=Image.Resampling.BILINEAR), dtype=np.float32) / 255.0
+            profile = rot.sum(axis=1)
+            for width in widths:
+                core = box(profile, max(width // 2, 3))
+                flank = np.maximum(np.roll(core, width), np.roll(core, -width))
+                score = core - flank
+                row = r_lo + int(score[r_lo:r_hi].argmax())
                 if best is None or score[row] > best[0]:
-                    best = (float(score[row]), angle, row, width, rows)
-        score, angle, row, width, rows = best
-        if score < MIN_STICK_SHARE * DETECT_SIDE:
-            break
-        # Refine the width and the ends from the rotated mask around the winning row.
+                    best = (float(score[row]), ang, row, width, rot)
+        if best is None:
+            continue
+        _, ang, row, _, rows = best
         profile = rows.sum(axis=1)
         level = profile[row] * 0.5
-        top = row
+        top = bottom = row
         while top > 0 and profile[top - 1] > level:
             top -= 1
-        bottom = row
         while bottom < side - 1 and profile[bottom + 1] > level:
             bottom += 1
-        columns = np.nonzero(rows[top : bottom + 1].mean(axis=0) > 0.5)[0]
+        columns = np.nonzero(rows[top : bottom + 1].mean(axis=0) > 0.35)[0]
         if len(columns) < 2:
-            break
-        centre = (top + bottom) / 2
+            continue
+        centre = (top + bottom) / 2.0
         ends = []
         for column in (columns[0], columns[-1]):
-            # Undo the rotation (PIL rotates counter-clockwise about the canvas centre).
-            dx, dy = column - side / 2, centre - side / 2
-            rad = math.radians(angle)
-            x = dx * math.cos(rad) - dy * math.sin(rad) + side / 2 - offset[0]
-            y = dx * math.sin(rad) + dy * math.cos(rad) + side / 2 - offset[1]
+            dx, dy = column - side / 2.0, centre - side / 2.0
+            rad = math.radians(ang)
+            x = dx * math.cos(rad) - dy * math.sin(rad) + side / 2.0 - offset[0]
+            y = dx * math.sin(rad) + dy * math.cos(rad) + side / 2.0 - offset[1]
             ends.append((x / scale, y / scale))
-        sticks.append(refine(image, to_edges(image, Stick(*ends[0], *ends[1], width=(bottom - top + 1) / scale))))
-        # Erase this stick so the next pass finds the other one.
-        draw = ImageDraw.Draw(canvas)
-        (ax, ay), (bx, by) = [(x * scale + offset[0], y * scale + offset[1]) for x, y in ends]
-        ux, uy = (bx - ax) / max(math.hypot(bx - ax, by - ay), 1), (by - ay) / max(math.hypot(bx - ax, by - ay), 1)
-        draw.line(
-            (ax - ux * side, ay - uy * side, bx + ux * side, by + uy * side),
-            fill=0,
-            width=int((bottom - top + 1) * 1.6) + 2,
-        )
-    # Both are the same kind of stick, so a width far off the other's is a misread: a pale
-    # garment taken for wood reads too wide, a bleached stick too narrow. A yardstick
-    # spans 3-12% of a photo's side from a whole-garment shot to a close-up.
+        raw = to_edges(image, Stick(*ends[0], *ends[1], width=(bottom - top + 1) / scale))
+        mask_fn = mask_fns[ch]
+        refined = refine(image, raw, mask_fn=mask_fn)
+        confidence = _verify_stick(image, refined, mask_fn, is_tick_channel=(ch == 2))
+        if confidence is not None:
+            # The tick-edge mask measures only the narrow printed tick strip; widen crop
+            # width to a realistic ruler width so tiles carry full numerals and garment edge.
+            width_out = refined.width
+            if ch == 2 and width_out < side_max * 0.035:
+                width_out = min(max(width_out * 2.2, side_max * 0.035), side_max * 0.065)
+            verified.append(Stick(refined.x1, refined.y1, refined.x2, refined.y2, width=width_out, score=confidence))
+
+    # Deduplicate parallel/overlapping detections of the same physical stick.
+    verified.sort(key=lambda s: s.score, reverse=True)
+    sticks: list[Stick] = []
+    for st in verified:
+        ang = math.degrees(math.atan2(st.y2 - st.y1, st.x2 - st.x1)) % 180.0
+        dup = False
+        for kept in sticks:
+            k_ang = math.degrees(math.atan2(kept.y2 - kept.y1, kept.x2 - kept.x1)) % 180.0
+            da = min(abs(ang - k_ang), 180.0 - abs(ang - k_ang))
+            if da < 15.0 and _bands_overlap(st, kept):
+                dup = True
+                break
+        if not dup:
+            sticks.append(st)
+            if len(sticks) >= limit:
+                break
+
+    # Both sticks are the same kind of yardstick, so a width far off the other's is a misread.
     if len(sticks) == 2 and max(s.width for s in sticks) > 1.6 * min(s.width for s in sticks):
-        side = max(image.size)
-        plausible = [s.width for s in sticks if 0.03 * side <= s.width <= 0.12 * side]
+        plausible = [s.width for s in sticks if 0.03 * side_max <= s.width <= 0.12 * side_max]
         if len(plausible) == 1:
             for stick in sticks:
                 stick.width = plausible[0]
@@ -178,64 +570,108 @@ def find_sticks(image: Image.Image, limit: int = 2) -> list[Stick]:
 
 
 def to_edges(image: Image.Image, stick: Stick) -> Stick:
-    """Run the stick's line out to the photo's edges.
+    """Intersect the stick's infinite line cleanly with the photo bounds (Liang-Barsky).
 
-    Where the other stick crosses it, or the sun bleaches it, the wood colour stops and
-    the found stick ends early, short of the reading. Crops of bare garment cost nothing.
+    Where the other stick crosses it, or lighting bleaches it, the wood colour stops and
+    the found stick ends early, short of the reading. Exact rectangle clipping prevents
+    near-corner endpoints from shooting thousands of pixels outside the frame.
     """
-    ux, uy = (stick.x2 - stick.x1) / stick.length, (stick.y2 - stick.y1) / stick.length
-    reach = []
-    for sign in (-1, 1):
-        x, y = (stick.x1, stick.y1) if sign < 0 else (stick.x2, stick.y2)
-        steps = [
-            (limit - at) / (sign * part)
-            for at, part, limits in ((x, ux, (0, image.width - 1)), (y, uy, (0, image.height - 1)))
-            for limit in limits
-            if sign * part * (limit - at) > 0
-        ]
-        distance = max(min(steps, default=0), 0)
-        reach.append((x + sign * ux * distance, y + sign * uy * distance))
-    return Stick(*reach[0], *reach[1], width=stick.width)
+    length = stick.length
+    if length < 1e-6:
+        return stick
+    ux, uy = (stick.x2 - stick.x1) / length, (stick.y2 - stick.y1) / length
+    w, h = float(image.width - 1), float(image.height - 1)
+    t_lo, t_hi = -1e12, 1e12
+    for p, q in (
+        (-ux, stick.x1),
+        (ux, w - stick.x1),
+        (-uy, stick.y1),
+        (uy, h - stick.y1),
+    ):
+        if abs(p) < 1e-12:
+            if q < 0:
+                return stick
+        else:
+            t = q / p
+            if p < 0:
+                t_lo = max(t_lo, t)
+            else:
+                t_hi = min(t_hi, t)
+    if t_lo >= t_hi:
+        return stick
+    return Stick(
+        stick.x1 + ux * t_lo,
+        stick.y1 + uy * t_lo,
+        stick.x1 + ux * t_hi,
+        stick.y1 + uy * t_hi,
+        width=stick.width,
+        score=stick.score,
+    )
 
 
-def refine(image: Image.Image, stick: Stick) -> Stick:
+def refine(image: Image.Image, stick: Stick, *, mask_fn=wood_mask) -> Stick:
     """Tighten a coarse stick to the full-size photo: its true centre line and width.
 
-    The search works in whole degrees on a small copy, which over a yardstick's length
+    The search works in coarse degrees on a small copy, which over a yardstick's length
     drifts by more than a tick. Here the stick is cut into short sections, each section's
-    wood band is measured across, and a line is fitted through the section centres.
+    mask band is measured across near the coarse centre, and a robust median line is fitted.
     """
+    if stick.length < 1e-3:
+        return stick
     ux, uy = (stick.x2 - stick.x1) / stick.length, (stick.y2 - stick.y1) / stick.length
     nx, ny = -uy, ux
-    half = max(image.size) * 0.09
+    side_max = max(image.size)
+    half = max(min(stick.width * 2.0, side_max * 0.09), side_max * 0.025)
     quad = []
     for along, across in ((0, -half), (0, half), (stick.length, half), (stick.length, -half)):
         quad += [stick.x1 + ux * along + nx * across, stick.y1 + uy * along + ny * across]
-    band = image.transform((round(stick.length), round(2 * half)), Image.QUAD, quad, resample=Image.BILINEAR)
-    mask = wood_mask(band).astype(np.float32)
+    r_scale = min(1.0, REFINE_MAX_LEN / max(stick.length, 1.0))
+    band_w = max(round(stick.length * r_scale), 1)
+    band_h = max(round(2 * half * r_scale), 1)
+    band = image.transform((band_w, band_h), Image.Transform.QUAD, quad, resample=Image.Resampling.BILINEAR)
+    mask = mask_fn(band).astype(np.float32)
+
     centres, widths = [], []
+    w_band = stick.width * r_scale
+    half_band = half * r_scale
+    smooth_w = max(min(int(w_band * 0.22), 7), 3)
+    max_w = min(w_band * 1.75, half_band * 1.35)
+    search_r = max(int(half_band * 0.55), int(w_band * 0.9))
     for section in np.array_split(np.arange(mask.shape[1]), 40):
-        profile = box(mask[:, section].mean(axis=1), 9)
-        peak = int(profile.argmax())
-        if profile[peak] < 0.5:
+        if len(section) == 0:
+            continue
+        profile = box(mask[:, section].mean(axis=1), smooth_w)
+        mid = len(profile) // 2
+        lo = max(0, mid - search_r)
+        hi = min(len(profile), mid + search_r + 1)
+        peak = lo + int(profile[lo:hi].argmax())
+        if profile[peak] < 0.40:
             continue
         top = bottom = peak
         while top > 0 and profile[top - 1] > profile[peak] * 0.5:
             top -= 1
         while bottom < len(profile) - 1 and profile[bottom + 1] > profile[peak] * 0.5:
             bottom += 1
-        centres.append((section.mean(), (top + bottom) / 2 - half))
-        widths.append(bottom - top + 1)
+        w_sec = bottom - top + 1
+        if w_sec > max_w:
+            continue
+        centres.append((float(section.mean()) / r_scale, ((top + bottom) / 2.0 - half_band) / r_scale))
+        widths.append(w_sec / r_scale)
     if len(centres) < 4:
         return stick
-    # Sun bleaches stretches of the stick out of the mask, so most sections read narrow.
-    # The widest sections are the ones seen whole; fit the line through those.
-    width = float(np.percentile(widths, 85))
-    kept = [(x, y) for (x, y), w in zip(centres, widths, strict=True) if abs(w - width) < width * 0.2]
+    width = float(np.percentile(widths, 60))
+    kept = [(x, y) for (x, y), w in zip(centres, widths, strict=True) if abs(w - width) < max(width * 0.28, 4.0)]
     if len(kept) < 3:
         return stick
     xs, ys = np.array(kept).T
-    slopes = [(ys[j] - ys[i]) / (xs[j] - xs[i]) for i in range(len(xs)) for j in range(i + 1, len(xs))]
+    slopes = [
+        (ys[j] - ys[i]) / (xs[j] - xs[i])
+        for i in range(len(xs))
+        for j in range(i + 1, len(xs))
+        if abs(xs[j] - xs[i]) > 1.0
+    ]
+    if not slopes:
+        return stick
     slope = float(np.median(slopes))
     shift = float(np.median(ys - slope * xs))
 
@@ -243,7 +679,7 @@ def refine(image: Image.Image, stick: Stick) -> Stick:
         across = shift + slope * along
         return stick.x1 + ux * along + nx * across, stick.y1 + uy * along + ny * across
 
-    return Stick(*point(0), *point(stick.length), width=width)
+    return to_edges(image, Stick(*point(0), *point(stick.length), width=width, score=stick.score))
 
 
 def straighten(image: Image.Image, stick: Stick, flip: bool) -> tuple[Image.Image, float]:
@@ -261,7 +697,7 @@ def straighten(image: Image.Image, stick: Stick, flip: bool) -> tuple[Image.Imag
 
     quad = (*corner(-pad, -half), *corner(-pad, half), *corner(stick.length + pad, half), *corner(stick.length + pad, -half))
     size = (round(stick.length + 2 * pad), round(2 * half))
-    strip = image.transform(size, Image.QUAD, quad, resample=Image.BICUBIC, fillcolor=BACKDROP)
+    strip = image.transform(size, Image.Transform.QUAD, quad, resample=Image.Resampling.BICUBIC, fillcolor=BACKDROP)
     if ticks_on_bottom(strip, stick.width) != flip:
         strip = strip.rotate(180)
     return strip, stick.width
@@ -327,14 +763,17 @@ def crop(
         tiles = []
         for number, start in enumerate(starts, 1):
             tile = strip.crop((start, 0, min(start + tile_w, strip.width), strip.height))
-            tile = tile.resize((TILE_OUT_WIDTH, round(tile.height * TILE_OUT_WIDTH / tile.width)), Image.LANCZOS)
+            tile = tile.resize(
+                (TILE_OUT_WIDTH, round(tile.height * TILE_OUT_WIDTH / tile.width)),
+                Image.Resampling.LANCZOS,
+            )
             path = out / f"{name}-{number:02d}.jpg"
             tile.save(path, quality=92)
             tiles.append(str(path))
 
         # The whole strip, small, with tile numbers above it so the reader can pick one.
         shrink = min(2000 / strip.width, 1.0)
-        small = strip.resize((round(strip.width * shrink), round(strip.height * shrink)), Image.LANCZOS)
+        small = strip.resize((round(strip.width * shrink), round(strip.height * shrink)), Image.Resampling.LANCZOS)
         header = 26
         sheet = Image.new("RGB", (small.width, small.height + header), "white")
         sheet.paste(small, (0, header))
