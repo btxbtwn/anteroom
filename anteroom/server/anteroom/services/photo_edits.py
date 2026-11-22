@@ -205,8 +205,12 @@ class PhotoEdits(BaseModel):
                 crop = CropBox(**_turn_box(crop))
             redactions = [Redaction(**_turn_box(box), style=box.style) for box in redactions]
             annotations = [mark.turned() for mark in annotations]
+        # Rotation renders before the flip, so turning a mirrored frame a quarter swaps the mirror's axis.
+        horizontal, vertical = ((self.flip_vertical, self.flip_horizontal) if turns % 2
+                                else (self.flip_horizontal, self.flip_vertical))
         return self.model_copy(update={"rotate": (self.rotate + degrees) % 360, "crop": crop,
-                                       "redactions": redactions, "annotations": annotations})
+                                       "redactions": redactions, "annotations": annotations,
+                                       "flip_horizontal": horizontal, "flip_vertical": vertical})
 
 
 class BackgroundRemovalError(ValueError):

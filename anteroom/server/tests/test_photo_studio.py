@@ -358,6 +358,15 @@ def test_photoroom_key_settings_never_return_the_key(env):
     assert removed.json()["configured"] is False
 
 
+def test_a_key_removal_the_keychain_cannot_save_is_reported(env, monkeypatch):
+    from anteroom.services import keychain
+
+    env.client.put("/api/settings/photoroom", json={"api_key": KEY})
+    monkeypatch.setattr(keychain, "_save_store", lambda: False)
+    assert env.client.delete("/api/settings/photoroom").status_code == 503
+    assert photoroom.KEY_ACCOUNT in keychain._deleted
+
+
 # --- Free manual tools --------------------------------------------------------------------
 
 
@@ -434,6 +443,21 @@ def test_turning_carries_marks_with_the_frame():
     arrow = turned.annotations[0]
     assert (arrow.x1, arrow.y1, arrow.x2, arrow.y2) == (1, 0, 0.5, 1)
     assert edits.turned(90).turned(270).redactions == edits.redactions
+
+
+def test_turning_a_mirrored_photo_turns_the_picture_the_way_it_looks(env):
+    """Rotation renders before the flip, so a quarter turn swaps the flip's axis."""
+    env.client.put(env.base + "/edits", json={"flip_horizontal": True})
+    shown = _stored(env, env.photos[0])
+    turned = env.client.post(env.base + "/rotate", json={"degrees": 90}).json()
+    assert turned["edits"]["flip_horizontal"] is False and turned["edits"]["flip_vertical"] is True
+    import numpy as np
+
+    after = np.asarray(_stored(env, env.photos[0]), dtype=np.int16)
+    expected = np.asarray(shown.rotate(-90, expand=True), dtype=np.int16)
+    # Only JPEG rounding differs; the other direction would move the red edge to the far side.
+    assert after.shape == expected.shape and np.abs(after - expected).mean() < 2
+    assert PhotoEdits(flip_horizontal=True).turned(180).flip_horizontal is True
 
 
 def test_every_new_tool_resets_to_the_original(env):

@@ -315,8 +315,18 @@ def write_slot(account: str, value: str) -> bool:
     return _set(account, value)
 
 
-def delete_slot(account: str) -> None:
-    _delete(account)
+def delete_slot(account: str) -> bool:
+    """Remove a slot; False when the Keychain could not be saved (the removal stays pending for a retry)."""
+    from anteroom.services.service_context import current
+    context = current()
+    if context is not None:
+        context.secrets.delete(account)
+        return True
+    with _lock:
+        _secrets().pop(account, None)
+        _deleted.add(account)
+        _touched.discard(account)
+        return _save_store()
 
 
 def _delete(account: str) -> None:

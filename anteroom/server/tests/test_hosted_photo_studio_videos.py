@@ -197,10 +197,11 @@ def test_relayed_poshmark_command_carries_a_signed_video_link(monkeypatch):
 
     monkeypatch.setattr(hosted_videos, 'signed_url', lambda key: f'https://p.supabase.co/storage/v1/object/sign/anteroom-photos/{key}?token=t')
     command = {'type': 'marketplace.execute', 'job_id': 'j1',
-               'payload': {'marketplace': 'poshmark', 'video': {'id': 'v1', 'stored_filename': 'u/l/k.video'}}}
+               'payload': {'marketplace': 'poshmark', 'video': {'id': 'v1', 'stored_filename': 'u/l/k.video', 'url': '/api/videos/v1'}}}
     linked = asyncio.run(hosted_browser_relay.with_video_link(command))
-    assert linked['payload']['video']['url'].endswith('u/l/k.video?token=t')
-    assert 'url' not in command['payload']['video']
+    assert linked['payload']['video']['download_url'].endswith('u/l/k.video?token=t')
+    assert linked['payload']['video']['url'] == '/api/videos/v1'
+    assert 'download_url' not in command['payload']['video']
     other = {'type': 'marketplace.delete', 'payload': {'video': {'stored_filename': 'x'}}}
     assert asyncio.run(hosted_browser_relay.with_video_link(other)) is other
 

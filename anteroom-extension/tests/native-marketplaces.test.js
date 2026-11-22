@@ -394,13 +394,16 @@ test('a hosted listing video is read only through a signed link to the private p
     fetched.push([url, options.credentials]);
     return { ok: true, blob: async () => ({ size: 4, type: 'video/mp4' }) };
   };
-  const video = { id: 'abc-123', size_bytes: 4, url: signed };
+  const video = { id: 'abc-123', size_bytes: 4, url: '/api/videos/abc-123', download_url: signed };
   const load = value => {
     c.__args = ['job-1', value, Date.now() + 5000];
     return vm.runInContext('nativeVideo(...__args)', c);
   };
   assert.equal((await load(video)).size, 4);
   assert.deepEqual(fetched, [[signed, 'omit']]);
-  await assert.rejects(load({ ...video, url: 'https://evil.example/x.video' }), /Could not load the video/);
+  await assert.rejects(load({ ...video, download_url: 'https://evil.example/x.video' }), /Could not load the video/);
   assert.equal(fetched.length, 1);
+  // The Mac's own preview address never replaces its job-scoped loopback download.
+  await load({ id: 'abc-123', size_bytes: 4, url: '/api/videos/abc-123' });
+  assert.match(fetched[1][0], /\/api\/jobs\/job-1\/videos\/abc-123$/);
 });

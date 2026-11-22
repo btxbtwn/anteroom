@@ -948,7 +948,8 @@ def delete_photoroom():
     from anteroom.services.keychain import delete_slot
     from anteroom.services.photoroom import KEY_ACCOUNT
 
-    delete_slot(KEY_ACCOUNT)
+    if not delete_slot(KEY_ACCOUNT):
+        raise HTTPException(503, "The key could not be removed. Try again.")
     return {"ok": True, **_photoroom_payload()}
 
 

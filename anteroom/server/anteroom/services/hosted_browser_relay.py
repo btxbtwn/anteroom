@@ -298,7 +298,7 @@ class ChromeReadError(RuntimeError):
 
 
 async def with_video_link(command: dict) -> dict:
-    """The command with a short-lived link to its listing video, for a Poshmark listing.
+    """The command with a short-lived ``download_url`` for its listing video, for a Poshmark listing.
 
     The web app has no loopback server for the Bridge to read the video from, so it
     reads the seller's private Storage object through a signed link minted as the
@@ -310,7 +310,7 @@ async def with_video_link(command: dict) -> dict:
     if not isinstance(payload, dict):
         return command
     video = payload.get("video")
-    if command.get("type") != "marketplace.execute" or not isinstance(video, dict) or video.get("url"):
+    if command.get("type") != "marketplace.execute" or not isinstance(video, dict) or video.get("download_url"):
         return command
     key = video.get("stored_filename")
     if not isinstance(key, str) or not key:
@@ -321,7 +321,7 @@ async def with_video_link(command: dict) -> dict:
     except Exception:  # noqa: BLE001 - the Bridge reports the missing video
         logger.warning("Could not make a link to the listing video for a relayed command.", exc_info=True)
         return command
-    return {**command, "payload": {**payload, "video": {**video, "url": url}}}
+    return {**command, "payload": {**payload, "video": {**video, "download_url": url}}}
 
 
 async def approved_photo_hashes(job_id: str) -> list[dict]:

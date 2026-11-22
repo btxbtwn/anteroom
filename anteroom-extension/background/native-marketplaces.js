@@ -79,8 +79,9 @@ function nativeVideoLink(url) {
 // Binary video delivery is scoped to the job's selected immutable revision.
 async function nativeVideo(jobId, video, deadline) {
   if (!/^[a-f0-9-]+$/i.test(String(video.id))) throw marketplaceError('Invalid video ID.');
-  const link = video.url ? nativeVideoLink(video.url) : null;
-  if (video.url && !link) throw marketplaceError('Could not load the video selected for this revision.');
+  // ``url`` is Anteroom's own preview address; only ``download_url`` is a signed Storage link.
+  const link = video.download_url ? nativeVideoLink(video.download_url) : null;
+  if (video.download_url && !link) throw marketplaceError('Could not load the video selected for this revision.');
   let response;
   try {
     response = await fetch(link || `${STUDIO_URL}/api/jobs/${encodeURIComponent(jobId)}/videos/${encodeURIComponent(video.id)}`,

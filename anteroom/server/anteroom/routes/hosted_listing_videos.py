@@ -12,7 +12,9 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
-from anteroom.models.conversation import Conversation
+from sqlalchemy import select
+
+from anteroom.models.conversation import Conversation, new_id
 from anteroom.models.listing_video import ListingVideo
 from anteroom.services import hosted_videos, listing_videos as videos
 from anteroom.services.hosted_database import get_seller_db, in_seller_session
@@ -42,12 +44,16 @@ def library(conv_id: str, db=Depends(get_seller_db, scope='function')):
 
 def _insert(db, conv_id: str, key: str, checksum: str, filename: str, size: int, metadata: dict) -> dict:
     _conversation(db, conv_id)
-    row = ListingVideo(conversation_id=conv_id, stored_filename=key, checksum=checksum, original_filename=filename,
-                       size_bytes=size, **metadata)
+    row = ListingVideo(id=new_id(), conversation_id=conv_id, stored_filename=key, checksum=checksum,
+                       original_filename=filename, size_bytes=size, **metadata)
+    view = videos.video_view(row)
     db.add(row)
     db.commit()
-    db.refresh(row)
-    return videos.video_view(row)
+    return view
+
+
+def _saved(db, key: str) -> bool:
+    return db.scalar(select(ListingVideo.id).where(ListingVideo.stored_filename == key)) is not None
 
 
 def _measure(path: Path) -> tuple[str, dict]:
@@ -82,10 +88,11 @@ async def upload(conv_id: str, request: Request, file: UploadFile = File(...)):
     try:
         return await in_seller_session(request, _insert, conv_id, key, checksum, name, size, metadata)
     except BaseException:
-        # A refused save must not leave an unreachable object behind.
+        # A refused save must not leave an unreachable object behind; a saved one keeps its file.
         try:
-            await asyncio.to_thread(hosted_videos.delete, key)
-        except HTTPException:
+            if not await in_seller_session(request, _saved, key):
+                await asyncio.to_thread(hosted_videos.delete, key)
+        except Exception:  # noqa: BLE001 - the original error is the one to report
             pass
         raise
 
@@ -106,7 +113,9 @@ async def link(video_id: str, request: Request):
 
 
 def _remove(db, conv_id: str, video_id: str) -> str:
-    _conversation(db, conv_id)
+    # Lock the listing as a listing save does, so a save cannot select the video while it goes.
+    if db.scalar(select(Conversation).where(Conversation.id == conv_id).with_for_update()) is None:
+        raise HTTPException(404, 'Conversation not found')
     row = db.query(ListingVideo).filter_by(id=video_id, conversation_id=conv_id).first()
     if not row:
         raise HTTPException(404, 'Video not found')
