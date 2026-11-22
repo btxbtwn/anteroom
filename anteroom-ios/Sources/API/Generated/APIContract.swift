@@ -3,6 +3,32 @@
 
 import Foundation
 
+struct AccountSummary: Codable, Hashable, Sendable {
+    var name: String
+    var mask: String?
+    var type: String
+    var subtype: String?
+}
+
+struct ConnectionStatus: Identifiable, Codable, Hashable, Sendable {
+    var id: String
+    var institutionName: String
+    var accounts: [AccountSummary]
+    var lastSyncedAt: String?
+    var lastError: String?
+    var hasCursor: Bool
+    /// One of: waiting, current, error, disconnecting.
+    var status: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, accounts, status
+        case institutionName = "institution_name"
+        case lastSyncedAt = "last_synced_at"
+        case lastError = "last_error"
+        case hasCursor = "has_cursor"
+    }
+}
+
 /// One listing with the seller's notes.
 struct Conversation: Identifiable, Codable, Hashable, Sendable {
     var id: String
@@ -402,7 +428,7 @@ struct Expense: Identifiable, Codable, Hashable, Sendable {
     var revision: Int
     /// One of: operating_expense, inventory_purchase.
     var accountingType: String
-    /// One of: manual, csv, bank.
+    /// One of: manual, csv, plaid.
     var importSource: String
 
     enum CodingKeys: String, CodingKey {
@@ -888,6 +914,45 @@ extension PhotoEdits {
         brightness = try values.decodeIfPresent(Double.self, forKey: .brightness) ?? 0
         contrast = try values.decodeIfPresent(Double.self, forKey: .contrast) ?? 0
         background = try values.decodeIfPresent(String.self, forKey: .background)
+    }
+}
+
+struct PlaidExchange: Codable, Hashable, Sendable {
+    var publicToken: String
+    var institutionName: String = "Connected institution"
+
+    enum CodingKeys: String, CodingKey {
+        case publicToken = "public_token"
+        case institutionName = "institution_name"
+    }
+}
+
+extension PlaidExchange {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        publicToken = try values.decode(String.self, forKey: .publicToken)
+        institutionName = try values.decodeIfPresent(String.self, forKey: .institutionName) ?? "Connected institution"
+    }
+}
+
+struct PlaidLinkToken: Codable, Hashable, Sendable {
+    var linkToken: String
+    var redirectUri: String?
+
+    enum CodingKeys: String, CodingKey {
+        case linkToken = "link_token"
+        case redirectUri = "redirect_uri"
+    }
+}
+
+struct PlaidStatus: Codable, Hashable, Sendable {
+    var configured: Bool
+    var maxConnections: Int
+    var connections: [ConnectionStatus]
+
+    enum CodingKeys: String, CodingKey {
+        case configured, connections
+        case maxConnections = "max_connections"
     }
 }
 

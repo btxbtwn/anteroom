@@ -27,6 +27,7 @@ SKIPPED_TABLES = frozenset({
     'cloud_marketplace_sessions', 'cloud_session_audit', 'cloud_operation_journals',
     'mcp_access_tokens',
     'listing_videos', 'photo_fingerprints',
+    'plaid_connections', 'plaid_transactions',
 })
 MAX_ROWS = 500
 

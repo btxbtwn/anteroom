@@ -50,7 +50,7 @@ class Expense(ExpenseInput):
     id: str
     revision: int
     accounting_type: Literal["operating_expense", "inventory_purchase"]
-    import_source: Literal["manual", "csv", "bank"]
+    import_source: Literal["manual", "csv", "plaid"]
 
 
 class ExpenseUpdate(ExpenseInput):
@@ -68,10 +68,14 @@ def entries(start: date, end: date, category: Category | None = None):
     return query.order_by(BusinessExpense.incurred_date.desc(), BusinessExpense.id.desc())
 
 
-def save(db: Session, expense: BusinessExpense, body: ExpenseInput) -> Expense:
+def apply_input(expense: BusinessExpense, body: ExpenseInput) -> None:
     for field, value in body.model_dump().items():
         setattr(expense, field, value)
     expense.accounting_type = "inventory_purchase" if body.category == "inventory_purchases" else "operating_expense"
+
+
+def save(db: Session, expense: BusinessExpense, body: ExpenseInput) -> Expense:
+    apply_input(expense, body)
     db.add(expense)
     db.flush()
     return Expense.model_validate(expense, from_attributes=True)
