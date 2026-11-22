@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1129 — 2026-11-22
+
+- Improve automated checks for saving Mercari brand choices and retrying shipping options.
+
 ## 0.1.1128 — 2026-11-22
 
 - Keep assistant answers, draft chat, and photo uploads responsive while other sellers run large batches of listing generations.
