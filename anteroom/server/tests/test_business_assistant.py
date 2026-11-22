@@ -1443,6 +1443,57 @@ def test_the_lookup_copy_is_built_only_when_a_lookup_runs(workspace, monkeypatch
     shop.close()
 
 
+def test_stopping_during_lookup_build_keeps_the_event_loop_responsive(monkeypatch):
+    import sqlite3
+    import threading
+
+    tables = {name: [] for name in business_assistant.TABLES}
+    shop = business_assistant.Shop(brief="", tables=tables)
+    monkeypatch.setattr(assistant_route, "_prepare", lambda *_: ([], shop))
+    provider = Provider((f"{FENCE}sql\nSELECT 1\n{FENCE}",))
+    real_build = business_assistant._lookup_database
+    real_close = shop.close
+    release = threading.Event()
+    built = []
+
+    async def exercise():
+        loop = asyncio.get_running_loop()
+        building = asyncio.Event()
+        closing = asyncio.Event()
+
+        def build(tables):
+            loop.call_soon_threadsafe(building.set)
+            # Bound the wait so a regression cannot deadlock the test.
+            if not release.wait(3):
+                raise TimeoutError("The event loop did not release the lookup build")
+            conn = real_build(tables)
+            built.append(conn)
+            return conn
+
+        def close():
+            loop.call_soon_threadsafe(closing.set)
+            real_close()
+
+        monkeypatch.setattr(business_assistant, "_lookup_database", build)
+        monkeypatch.setattr(shop, "close", close)
+        work = asyncio.create_task(assistant_route._answer(assistant_route._Journal(), provider, "What sold?"))
+        try:
+            await asyncio.wait_for(building.wait(), 5)
+            work.cancel()
+            await asyncio.wait_for(closing.wait(), 5)
+            assert not work.done(), "Cleanup blocked the event loop until the build timed out"
+        finally:
+            release.set()
+            if not work.done():
+                await asyncio.gather(work, return_exceptions=True)
+        assert work.cancelled()
+
+    asyncio.run(exercise())
+    (conn,) = built
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        conn.execute("SELECT 1")
+
+
 def test_an_answer_without_a_lookup_never_builds_the_copy(workspace, monkeypatch):
     db, client = workspace
     seed(db)

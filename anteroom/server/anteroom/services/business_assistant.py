@@ -475,7 +475,7 @@ class Shop:
     brief: str
     tables: dict[str, list[dict[str, Any]]]
     _conn: sqlite3.Connection | None = field(default=None, init=False, repr=False)
-    _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
+    _lock: threading.RLock = field(default_factory=threading.RLock, init=False, repr=False)
 
     @property
     def lookups(self) -> sqlite3.Connection:
@@ -484,6 +484,12 @@ class Shop:
                 if self._conn is None:
                     self._conn = _lookup_database(self.tables)
         return self._conn
+
+    def read_lookup[T](self, read: Callable[[sqlite3.Connection], T]) -> T:
+        # Cancellation of the async waiter does not stop this worker. Hold the
+        # lock for the whole read so close() cannot interrupt it.
+        with self._lock:
+            return read(self.lookups)
 
     def close(self) -> None:
         with self._lock:
@@ -949,7 +955,7 @@ def lookup_label(lookup: Lookup | str) -> str:
 
 
 def _run_sql(shop: Shop, body: str) -> str:
-    return run_lookup(shop.lookups, body)
+    return shop.read_lookup(lambda conn: run_lookup(conn, body))
 
 
 async def run_any_lookup(lookup: Lookup, shop: Shop, viewed: list[str]) -> str | list[dict[str, Any]]:
@@ -1133,7 +1139,7 @@ async def view_box_media(shop: Shop, body: str, viewed: list[str]) -> str | list
     if not ids:
         return ("Lookup view_box_media failed: no box ids were given. Put the id of each box from the "
                 "sourcing_boxes table on its own line.")
-    rows = await asyncio.to_thread(lambda: _sourcing_rows(shop.lookups))
+    rows = await asyncio.to_thread(shop.read_lookup, _sourcing_rows)
     by_id = {row["id"]: row for row in rows}
     by_title: dict[str, list[dict[str, Any]]] = {}
     for row in rows:

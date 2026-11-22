@@ -292,12 +292,13 @@ async def _answer(
             error = f"{provider_label(getattr(provider, 'name', None))} could not finish the assistant answer. Try again."
         run.publish(sse_event("error", error))
     finally:
-        if shop is not None:
-            shop.close()
         # Also reached when the seller presses Stop: keep what was written so far.
         # Off the event loop: a save that waits on SQLite's write lock must not
         # freeze every other request, or hold this answer's stream open.
         try:
+            if shop is not None:
+                # A cancelled lookup can still be using the copy in its worker.
+                await asyncio.to_thread(shop.close)
             if answer.strip():
                 save_started = time.monotonic()
                 on_committed = None
