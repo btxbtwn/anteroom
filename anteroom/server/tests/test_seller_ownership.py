@@ -123,7 +123,7 @@ def test_previous_release_upgrade_preserves_records_and_constraints(migration_en
     after = read_rows(engine, names)
     for name, rows in before.items():
         assert after[name] == [dict(row, user_id=LOCAL_USER_ID,
-                                   **({"inventory_quantity": None, "normalized_hash": None, "inventory_fields": {
+                                   **({"inventory_quantity": None, "normalized_hash": None, "generation_feedback": None, "inventory_fields": {
                                        "sku": None, "price": 42, "quantity": None, "cost": None, "brand": None,
                                        "category_path": None, "title": "Vintage coat", "type": None,
                                        "season": None, "material": None,
@@ -179,7 +179,7 @@ def test_pre_alembic_database_gets_ownership_without_losing_rows(migration_engin
     assert schema_migrations.ensure_schema(engine) == CURRENT_REVISION
     for name, rows in before.items():
         assert read_rows(engine, [name])[name] == [dict(row, user_id=LOCAL_USER_ID,
-            **({"inventory_quantity": None, "normalized_hash": None, "inventory_fields": {
+            **({"inventory_quantity": None, "normalized_hash": None, "generation_feedback": None, "inventory_fields": {
                 "sku": None, "price": 42, "quantity": None, "cost": None, "brand": None,
                 "category_path": None, "title": "Vintage coat", "type": None,
                 "season": None, "material": None,
