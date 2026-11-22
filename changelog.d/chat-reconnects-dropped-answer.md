@@ -1,0 +1,1 @@
+- When your connection drops while the listing chat is answering on the web, the chat reconnects and shows the saved reply instead of a "connection dropped" error.

@@ -588,6 +588,53 @@ describe("useChatStream send", () => {
     expect(getLive(convId).failedAction).toBe("send");
   });
 
+  it("follows a dropped hosted answer to its saved reply instead of showing an error", async () => {
+    // The connection dropped while the answer ran on the server; it still saved.
+    routes = (url) => {
+      if (url.endsWith("/messages")) {
+        const encoder = new TextEncoder();
+        const body = new ReadableStream<Uint8Array>({
+          start(c) {
+            c.enqueue(encoder.encode("event: status\ndata: Reading the listing…\n\n"));
+            c.error(new TypeError("Load failed"));
+          },
+        });
+        return new Response(body, { headers: { "X-Anteroom-Task": "task-7" } });
+      }
+      return sse("event: status", "data: Reading the listing…", "", "data: Updated Occasion.", "", DONE);
+    };
+    const { chat } = mountChat();
+
+    await act(async () => { await chat().sendMessage("Fill occasion"); });
+
+    expect(calls.map((call) => call.url.replace(/^.*\/api\/conversations\/[^/]+/, ""))).toEqual([
+      "/messages",
+      "/messages/resume?task_id=task-7",
+    ]);
+    expect(getLive(convId)).toMatchObject({ failedAction: null, streaming: false, controller: null });
+    expect(getLive(convId).streamText).not.toMatch(/Error/);
+  });
+
+  it("shows the answer's own failure when the followed task failed", async () => {
+    routes = (url) => {
+      if (url.endsWith("/messages")) {
+        return new Response(
+          new ReadableStream({ start(c) { c.error(new TypeError("Load failed")); } }),
+          { headers: { "X-Anteroom-Task": "task-8" } },
+        );
+      }
+      return sse("data: Error: The provider timed out", "", DONE);
+    };
+    const { chat } = mountChat();
+
+    await act(async () => { await chat().sendMessage("Fill occasion"); });
+
+    expect(getLive(convId)).toMatchObject({
+      failedAction: "send",
+      streamText: "Error: The provider timed out",
+    });
+  });
+
   it("Stop puts the unanswered message back in the composer", async () => {
     routes = (url, init) => (url.endsWith("/messages") ? hangUntilAborted(init) : json({ ok: true }));
     const { chat, setInput } = mountChat();

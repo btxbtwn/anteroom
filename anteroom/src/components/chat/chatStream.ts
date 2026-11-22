@@ -1,4 +1,4 @@
-import { readWithin } from "../../api/sse";
+import { readWithin, StreamIdleError } from "../../api/sse";
 import { coalesceSseEvents, emptySseParts, type SseParts } from "../sseCoalesce";
 import { appendLiveTrace, applyAgentEvent, parseAgentEvent } from "../liveTrace";
 
@@ -25,6 +25,16 @@ export type StreamRequestError = Error & { httpStatus?: number; body?: unknown }
 export function isAbortError(error: unknown): boolean {
   return typeof error === "object" && error !== null && (error as { name?: unknown }).name === "AbortError";
 }
+
+/** A dropped or silent connection, as opposed to an answer the server refused or failed. */
+export function isNetworkFailure(error: unknown): boolean {
+  if (error instanceof StreamIdleError) return true;
+  const msg = error instanceof Error ? error.message : String(error || "");
+  return /failed to fetch|networkerror|load failed|network request failed|the internet connection appears to be offline/i.test(msg);
+}
+
+/** The hosted API names the durable task behind a chat stream, so a dropped stream can follow it again. */
+export const TASK_HEADER = "X-Anteroom-Task";
 
 /** Turn opaque browser/HTTP failures into actionable chat errors. */
 export function formatClientStreamError(

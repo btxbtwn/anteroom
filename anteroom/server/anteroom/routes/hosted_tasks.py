@@ -49,6 +49,8 @@ def require_worker(request: Request):
 
 router = APIRouter(prefix='/api/conversations/{conv_id}', tags=['draft tasks'])
 
+TASK_HEADER = 'X-Anteroom-Task'
+
 
 def owned_conversation(db, conv_id, *, lock=False):
     statement = select(Conversation).where(Conversation.id == conv_id)
@@ -115,7 +117,10 @@ def task_stream(task_id):
                     return
                 yield KEEPALIVE
                 await signal.wait()
-    return StreamingResponse(stream(), media_type='text/event-stream', headers=SSE_HEADERS)
+    # The client reattaches to this task by its id when the connection drops;
+    # the task keeps running, and its journal replays from the start.
+    return StreamingResponse(stream(), media_type='text/event-stream',
+                             headers={**SSE_HEADERS, TASK_HEADER: task_id})
 
 
 def submit(db, conv_id, kind, text='', uploads=None, request=None):
@@ -239,6 +244,23 @@ async def message(conv_id: str, request: Request):
 
         task_id = await run_in_threadpool(enqueue)
         return task_stream(task_id)
+
+
+@router.post('/messages/resume')
+def resume_message(conv_id: str, task_id: str):
+    """Follow a chat answer again after the connection dropped, from its first event.
+
+    The answer runs on a worker whether or not anyone is listening. Replaying
+    its journal shows the reply it saved, or why it failed, instead of an error
+    for a dropped connection.
+    """
+    with _seller_sessions()() as db:
+        owned_conversation(db, conv_id)
+        task = db.get(BackgroundTask, task_id)
+        if task is None or task.conversation_id != conv_id or task.kind != 'chat':
+            raise HTTPException(404, 'Task not found')
+        db.rollback()
+    return task_stream(task_id)
 
 
 @router.post('/generate/cancel')
