@@ -313,5 +313,113 @@ class LocateParsingTest(unittest.TestCase):
         self.assertEqual(provider.calls, 1)
 
 
+class RulerDetectorTest(unittest.TestCase):
+    """CV ruler detection handles single dark rulers, portrait geometry, clipping, and striped fabric."""
+
+    def test_to_edges_clips_near_corner_without_coordinate_explosion(self):
+        from anteroom.services import measure_read
+
+        m = measure_read.ruler()
+        image = Image.new("RGB", (1000, 1333), (240, 240, 240))
+        for raw in (
+            m.Stick(20, 4, 980, 12, 40),
+            m.Stick(-50, 200, 1050, 600, 40),
+            m.Stick(500, -30, 510, 1360, 40),
+        ):
+            clipped = m.to_edges(image, raw)
+            for x in (clipped.x1, clipped.x2):
+                self.assertGreaterEqual(x, -1e-6)
+                self.assertLessEqual(x, image.width - 1 + 1e-6)
+            for y in (clipped.y1, clipped.y2):
+                self.assertGreaterEqual(y, -1e-6)
+                self.assertLessEqual(y, image.height - 1 + 1e-6)
+
+    def test_detects_dark_folding_ruler_on_cream_sweater_and_accepts_single_stick(self):
+        from anteroom.services import measure_read
+
+        m = measure_read.ruler()
+        image = Image.new("RGB", (1000, 1000), (235, 228, 215))
+        draw = ImageDraw.Draw(image)
+        # Single vertical darker wooden folding ruler on cream knit sweater.
+        draw.rectangle((482, 60, 518, 940), fill=(148, 120, 78))
+        for y in range(70, 930, 10):
+            draw.line((482, y, 492, y), fill=(40, 32, 22), width=2)
+
+        sticks = m.find_sticks(image)
+        self.assertEqual(len(sticks), 1)
+        mid_x = (sticks[0].x1 + sticks[0].x2) / 2
+        self.assertAlmostEqual(mid_x, 500, delta=15)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            photo = Path(tmp) / "sweater.jpg"
+            image.save(photo, "JPEG", quality=92)
+            self.assertTrue(measure_read._has_wood(photo))
+            found = measure_read.find_ruler_photos([photo], Path(tmp) / "out")
+            self.assertEqual(len(found), 1)
+            self.assertEqual(len(found[0]["sticks"]), 1)
+
+    def test_rejects_striped_tan_fabric_without_ruler_ticks(self):
+        from anteroom.services import measure_read
+
+        m = measure_read.ruler()
+        image = Image.new("RGB", (1000, 1000), (32, 32, 38))
+        draw = ImageDraw.Draw(image)
+        # Uniform tan horizontal knit stripes across the garment (wood-coloured, no edge ticks).
+        for y in (200, 420, 640, 820):
+            draw.rectangle((60, y, 940, y + 34), fill=(212, 184, 140))
+            for x in range(60, 940, 8):
+                draw.line((x, y, x, y + 34), fill=(192, 164, 122), width=1)
+        self.assertEqual(m.find_sticks(image), [])
+
+    def test_detects_horizontal_stick_in_portrait_photo(self):
+        from anteroom.services import measure_read
+
+        m = measure_read.ruler()
+        image = Image.new("RGB", (1000, 1333), (38, 42, 50))
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((40, 520, 960, 568), fill=(228, 196, 146))
+        for x in range(48, 952, 11):
+            draw.line((x, 520, x, 532), fill=(52, 46, 36), width=2)
+        sticks = m.find_sticks(image)
+        self.assertEqual(len(sticks), 1)
+        mid_y = (sticks[0].y1 + sticks[0].y2) / 2
+        self.assertAlmostEqual(mid_y, 544, delta=15)
+
+    def test_find_ruler_photos_ranks_by_confidence_and_preserves_upload_order(self):
+        from anteroom.services import measure_read
+
+        m = measure_read.ruler()
+        scores = [10.0, 500.0, 50.0, 800.0, 300.0]
+        call_idx = 0
+
+        def fake_find(_image):
+            nonlocal call_idx
+            score = scores[call_idx]
+            call_idx += 1
+            return [m.Stick(0, 500, 999, 500, 40, score=score)]
+
+        cropped_names: list[str] = []
+
+        def fake_crop(path, _out, _lines, _flips, *, image=None):
+            cropped_names.append(path.name)
+            return {"photo": str(path), "sticks": [{"stick": "A"}]}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = []
+            for i in range(5):
+                p = Path(tmp) / f"p{i}.jpg"
+                p.write_bytes(_plain_photo())
+                paths.append(p)
+            with (
+                patch.object(measure_read, "_has_wood", return_value=True),
+                patch.object(m, "find_sticks", side_effect=fake_find),
+                patch.object(m, "crop", side_effect=fake_crop),
+            ):
+                found = measure_read.find_ruler_photos(paths, Path(tmp) / "out")
+
+        self.assertEqual(cropped_names, ["p1.jpg", "p3.jpg", "p4.jpg"])
+        self.assertEqual([item["number"] for item in found], [1, 2, 3])
+
+
 if __name__ == "__main__":
     unittest.main()
