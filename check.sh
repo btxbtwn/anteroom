@@ -92,6 +92,7 @@ if component backend; then
       npm ci --include=optional --no-audit --no-fund && node -e \"require('impit')\"
     fi
   "
+  run "Anteroom cloud runner" node --test anteroom/server/anteroom/cloud_runner/*.test.cjs
   run "Anteroom backend" bash -c "cd anteroom && ANTEROOM_DATA_DIR=\$(mktemp -d) '$PY' -m pytest -q -n auto"
   if [[ "$FAST" == "1" ]]; then
     skip "Anteroom backend on Postgres" "--fast"

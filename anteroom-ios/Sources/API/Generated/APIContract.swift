@@ -732,6 +732,39 @@ struct ListingValidation: Codable, Hashable, Sendable {
     }
 }
 
+struct MarketplaceCloudResult: Codable, Hashable, Sendable {
+    var ok: Bool
+    var session: MarketplaceCloudStatus?
+    var error: String?
+}
+
+struct MarketplaceCloudSessions: Codable, Hashable, Sendable {
+    var enabled: [String]
+    var sessions: [String: MarketplaceCloudStatus]
+}
+
+struct MarketplaceCloudStatus: Codable, Hashable, Sendable {
+    var marketplace: String
+    var state: String
+    var mode: String
+    var cloudConnected: Bool
+    var label: String?
+    var expiresAt: Int?
+    var expiring: Bool
+    var connectedAt: String?
+    var lastUsedAt: String?
+    var lastError: String?
+
+    enum CodingKeys: String, CodingKey {
+        case marketplace, state, mode, label, expiring
+        case cloudConnected = "cloud_connected"
+        case expiresAt = "expires_at"
+        case connectedAt = "connected_at"
+        case lastUsedAt = "last_used_at"
+        case lastError = "last_error"
+    }
+}
+
 struct MileageAmount: Codable, Hashable, Sendable {
     var currency: String
     /// Decimal value without a currency symbol.
