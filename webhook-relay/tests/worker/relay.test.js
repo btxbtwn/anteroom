@@ -526,6 +526,23 @@ describe("eBay", () => {
     expect(calls.filter((call) => call.url.includes("/destination") && call.method === "PUT")).toHaveLength(0);
   });
 
+  it("resolves and uses an allowlisted regional eBay taxonomy tree", async () => {
+    const device = await register();
+    await connectEbay(device.token, "seller-canadian-taxonomy");
+    route("GET", /taxonomy\/v1\/get_default_category_tree_id/, () => ({ categoryTreeId: "2" }));
+    route("GET", /taxonomy\/v1\/category_tree\/2\/get_item_aspects_for_category/, () => ({ aspects: [] }));
+    const request = (body) => relay("/studio/ebay/research", authed(device.token, { method: "POST", body: JSON.stringify(body) }));
+    const tree = await request({ operation: "category_tree", params: { marketplace_id: "EBAY_CA" } });
+    expect(await tree.json()).toEqual({ categoryTreeId: "2" });
+    const aspects = { operation: "regional_aspects", marketplace_id: "EBAY_CA", tree_id: "2", params: { category_id: "11483" } };
+    expect((await request(aspects)).status).toBe(200);
+    const taxonomy = calls.filter(call => call.url.includes("/commerce/taxonomy/"));
+    expect(taxonomy).toHaveLength(2);
+    expect(taxonomy.every(call => call.headers.get("accept-language") === "en-CA")).toBe(true);
+    expect((await request({ ...aspects, tree_id: "2/../0" })).status).toBe(400);
+    expect((await request({ ...aspects, marketplace_id: "EBAY_DE" })).status).toBe(400);
+  });
+
   it("rate-limits eBay research per device before calling upstream eBay APIs", async () => {
     const device = await register();
     await connectEbay(device.token, "seller-research-limit");

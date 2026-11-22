@@ -1,6 +1,8 @@
 """Read models for eBay's workspace. Private responses are never cached on disk."""
 from __future__ import annotations
 
+import asyncio
+
 from datetime import date, datetime, UTC
 from decimal import Decimal, InvalidOperation
 from html import unescape
@@ -370,7 +372,11 @@ async def read(client: EbayClient, section: str, offset: int = 0, target: str = 
         return page({"total": len(records)}, [row(str(offset + index), f"Report row {offset + index + 1}", fields=record)
                                               for index, record in enumerate(records[offset:offset + 25])], offset)
     if section == "categories":
-        body = await client.request("GET", "/commerce/taxonomy/v1/category_tree/0/get_category_suggestions", params={"q": query}, app=True)
+        from anteroom.services.marketplace_schemas import ebay_category_suggestions
+        from anteroom.services.seller_region import seller_region
+
+        site = (await asyncio.to_thread(seller_region)).ebay_marketplace
+        body = await ebay_category_suggestions(client, site, query or "")
         return {"rows": [row(c["category"]["categoryId"], c["category"]["categoryName"],
                               subtitle=" › ".join(a["categoryName"] for a in reversed(c.get("categoryTreeNodeAncestors", []))))
                          for c in body.get("categorySuggestions", [])]}

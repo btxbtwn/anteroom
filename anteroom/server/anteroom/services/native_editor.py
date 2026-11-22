@@ -48,6 +48,7 @@ def _preload_form_caches(
     if marketplace == "ebay":
         from anteroom.services.ebay_listings import ebay_category_id
         from anteroom.services.listing_result import ListingProblem
+        from anteroom.services.seller_region import seller_region
 
         try:
             category = ebay_category_id(snapshot)
@@ -55,12 +56,12 @@ def _preload_form_caches(
             category = ""
         schemas: dict[tuple[str, str], list[dict] | None] = {}
         if re.fullmatch(r"[1-9]\d{0,14}", category):
+            site = seller_region(db=db).ebay_marketplace
             schemas = category_fields.load_rows_many(
                 (
-                    (marketplace_schemas.EBAY_ASPECTS, category),
-                    (marketplace_schemas.EBAY_CONDITIONS, category),
-                    (marketplace_schemas.EBAY_LISTING_TYPES, category),
-                    (marketplace_schemas.EBAY_LISTING_STRUCTURE, category),
+                    (marketplace_schemas.ebay_schema_cache_key(kind, site), category)
+                    for kind in (marketplace_schemas.EBAY_ASPECTS, marketplace_schemas.EBAY_CONDITIONS,
+                                 marketplace_schemas.EBAY_LISTING_TYPES, marketplace_schemas.EBAY_LISTING_STRUCTURE)
                 ),
                 db=db,
             )

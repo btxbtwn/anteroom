@@ -721,6 +721,7 @@ function depopDraftView(draft) {
     brand,
     sku: source.sku ?? '',
     quantity: source.quantity,
+    national_shipping_cost: source.national_shipping_cost ?? source.nationalShippingCost,
     international_shipping_cost: source.international_shipping_cost ?? source.internationalShippingCost,
     description: source.description,
     price: source.price_amount ?? source.priceAmount ?? source.price,
@@ -869,6 +870,8 @@ function depopDraftMismatch(draft, listing, fields) {
   if (fields.brand != null && depopBrandToken(view.brand) !== depopBrandToken(fields.brand)) wrong.push('brand');
   // Depop takes a SKU once. A draft that carries none is still this revision's draft.
   if (fields.sku && String(view.sku || '').trim() && String(view.sku) !== String(fields.sku)) wrong.push('SKU');
+  if (depopRegion(listing) !== 'US' && fields.national_shipping_cost != null &&
+      depopQuotedCost(view.national_shipping_cost) !== depopQuotedCost(fields.national_shipping_cost)) wrong.push('domestic shipping');
   if (Object.hasOwn(fields, 'international_shipping_cost')) {
     const actual = view.international_shipping_cost;
     if (fields.international_shipping_cost == null ? actual != null && actual !== ''
@@ -1205,6 +1208,7 @@ async function depopApiAction(action, payload) {
         attributes: view.attributes, sku: view.sku, quantity: view.quantity,
         // The package size a draft cannot be published without, as the read saw it.
         shipping_methods: view.shipping_methods,
+        national_shipping_cost: view.national_shipping_cost,
         international_shipping_cost: view.international_shipping_cost,
         picture_ids: pictureIds, photo_count: pictureIds.length || depopPictureRows(draft).length,
         missing_fields: draft.missing_fields || draft.missingFields || [] };

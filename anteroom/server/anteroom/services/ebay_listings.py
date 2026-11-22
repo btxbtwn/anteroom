@@ -1171,13 +1171,13 @@ def _cached_aspect_gaps(snapshot: dict, form: dict) -> list[dict]:
     """Advisory eBay aspect issues from the cached schema."""
     from anteroom.services.category_fields import load_rows
     from anteroom.services.direct_categories import direct_category_id
-    from anteroom.services.marketplace_schemas import EBAY_ASPECTS
+    from anteroom.services.marketplace_schemas import EBAY_ASPECTS, ebay_schema_cache_key
 
     category = direct_category_id(snapshot, "ebay")
     if not re.fullmatch(r"[1-9]\d{0,14}", category):
         return []
     try:
-        rows = load_rows(EBAY_ASPECTS, category)
+        rows = load_rows(ebay_schema_cache_key(EBAY_ASPECTS), category)
     except Exception:  # noqa: BLE001 - a closed database only means the live check at List remains
         return []
     if not rows:

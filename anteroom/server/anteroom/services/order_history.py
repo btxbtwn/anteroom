@@ -295,7 +295,11 @@ async def sync(marketplace: str, *, session_factory=None) -> dict:
         from anteroom.services.hosted_browser_relay import relay_for
 
         context = current()
+        from anteroom.services.seller_region import seller_region
+
         payload = {"marketplace": marketplace, "settled": settled}
+        if marketplace == "poshmark" and (await asyncio.to_thread(seller_region)).country == "CA":
+            payload["seller_region"] = "CA"
         if use_cloud:
             raw = await cloud_marketplace.execute(
                 marketplace,

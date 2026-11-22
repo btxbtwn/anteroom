@@ -298,6 +298,8 @@ def serialize_session_row(marketplace: str, row: CloudMarketplaceSession | None)
 
 
 def mint_upload_token(db: Session, marketplace: str) -> dict[str, Any]:
+    from anteroom.services.seller_region import seller_region
+
     market = str(marketplace or "").lower()
     if not is_cloud_enabled(market):
         raise CloudSessionError("Cloud sessions are not enabled for this marketplace.")
@@ -323,12 +325,12 @@ def mint_upload_token(db: Session, marketplace: str) -> dict[str, Any]:
         row.upload_token_expires_at = expires_at
         row.updated_at = now
     _audit(db, market, "token_minted")
+    region = seller_region(db=db).country
     db.commit()
-    from anteroom.services.seller_region import seller_region
 
     return {
         "marketplace": market,
-        "seller_region": seller_region().country,
+        "seller_region": region,
         "token": f"{seller}.{secret_part}",
         "expires_at": expires_at.isoformat(),
         "expires_in": UPLOAD_TOKEN_TTL_S,

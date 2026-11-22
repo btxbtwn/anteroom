@@ -204,8 +204,9 @@ function poshmarkHistoryOrder(order, displayStatus) {
   });
 }
 
-async function poshmarkOrderHistory(settled, incremental = false) {
-  const { user_id: seller } = await poshmarkAccount();
+async function poshmarkOrderHistory(settled, incremental = false, region) {
+  const origin = poshmarkOrigin(region);
+  const { user_id: seller } = await poshmarkAccount(origin);
   const orders = [];
   const seen = new Set();
   let maxId = null;
@@ -216,7 +217,7 @@ async function poshmarkOrderHistory(settled, incremental = false) {
     if (page) await salePause(true);
     const request = { filters: {}, count: 100, ...(maxId ? { max_id: maxId } : {}) };
     const body = await historyJson('poshmark',
-      `https://poshmark.com/vm-rest/users/${seller}/orders/sales?request=${encodeURIComponent(JSON.stringify(request))}`,
+      `${origin}/vm-rest/users/${seller}/orders/sales?request=${encodeURIComponent(JSON.stringify(request))}`,
       { credentials: 'include' });
     if (body?.error || !Array.isArray(body?.data?.sales_summary)) throw new Error('Poshmark sales missing');
     const rows = body.data.sales_summary.filter(row => SALE_LISTING_ID.poshmark.test(String(row?.id ?? '')) && !seen.has(String(row.id)));
@@ -227,7 +228,7 @@ async function poshmarkOrderHistory(settled, incremental = false) {
       if (details >= HISTORY_MAX_DETAILS) { more = true; break; }
       await salePause(false);
       details += 1;
-      const html = await historyText('poshmark', `https://poshmark.com/order/sales/${row.id}`, { credentials: 'include' });
+      const html = await historyText('poshmark', `${origin}/order/sales/${row.id}`, { credentials: 'include' });
       let state = null;
       try { state = JSON.parse(/__INITIAL_STATE__\s*=\s*({[^<]*});/.exec(html)?.[1] || 'null'); } catch { state = null; }
       const detail = state?.$_order_details?.order;
@@ -354,15 +355,16 @@ async function mercariOrderHistory(settled, incremental = false) {
 
 const ORDER_HISTORY_READERS = { depop: depopOrderHistory, poshmark: poshmarkOrderHistory, mercari: mercariOrderHistory };
 
-async function readMarketplaceOrderHistory(marketplace, settledIds) {
+async function readMarketplaceOrderHistory(marketplace, settledIds, region) {
   if (nativeOperationsRunning()) return { ok: true, orders: [], skipped: true };
   const read = ORDER_HISTORY_READERS[marketplace];
   if (!read) return { ok: false, error: 'Could not read sales.' };
   const settled = new Set((Array.isArray(settledIds) ? settledIds : []).filter(id => typeof id === 'string' && id.length <= 64));
   try {
-    const full = await historyFullWalkDue(marketplace);
-    const { orders, more = false, unreadable = 0 } = await read(settled, !full);
-    await recordHistoryWalk(marketplace, full, more);
+    const walkKey = marketplace === 'poshmark' && region === 'CA' ? 'poshmark.ca' : marketplace;
+    const full = await historyFullWalkDue(walkKey);
+    const { orders, more = false, unreadable = 0 } = await read(settled, !full, region);
+    await recordHistoryWalk(walkKey, full, more);
     return { ok: true, orders, more, unreadable };
   } catch (error) {
     const code = ['signed_out', 'challenge', 'rate_limited', 'network', 'schema_drift', 'rejected'].includes(error?.code)
@@ -375,7 +377,7 @@ async function readMarketplaceOrderHistory(marketplace, settledIds) {
 async function handleMarketplaceOrderHistory(msg) {
   try {
     const payload = msg.payload || {};
-    sendBrowserResult(msg, await readMarketplaceOrderHistory(payload.marketplace, payload.settled));
+    sendBrowserResult(msg, await readMarketplaceOrderHistory(payload.marketplace, payload.settled, payload.seller_region));
   } catch {
     sendBrowserResult(msg, { ok: false, error: 'Could not read sales.' });
   }

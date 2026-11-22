@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from typing import Literal
 
+from sqlalchemy.orm import Session
+
 from anteroom.services.user_settings import read_settings, update_settings
 
 RegionCode = Literal["US", "CA", "GB", "AU"]
@@ -26,9 +28,20 @@ REGIONS: dict[str, SellerRegion] = {
 }
 
 
-def seller_region(settings: dict | None = None) -> SellerRegion:
-    payload = read_settings() if settings is None else settings
-    return REGIONS.get(str(payload.get("seller_region")), REGIONS["US"])
+def seller_region(settings: dict | None = None, *, db: Session | None = None) -> SellerRegion:
+    if settings is None:
+        from anteroom.services.hosted_context import HostedSettingsStore
+        from anteroom.services.service_context import current
+
+        context = current()
+        if context is None:
+            settings = read_settings()
+        else:
+            store = getattr(context, "settings", None)
+            if store is None:
+                store = HostedSettingsStore(context.session_factory, owner=context.seller_id)
+            settings = store.load(db) if db is not None else store.read()
+    return REGIONS.get(str((settings or {}).get("seller_region")), REGIONS["US"])
 
 
 def set_seller_region(country: RegionCode) -> SellerRegion:

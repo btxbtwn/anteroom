@@ -52,10 +52,12 @@ MARKETPLACE_REGIONS = "marketplace.regions"
 
 
 def needs_regional_bridge(command: str, payload: dict) -> bool:
+    marketplace = payload.get("marketplace")
+    if command in {"marketplace.delete", "marketplace.sales", "marketplace.sales_history"}:
+        return marketplace == "poshmark" and payload.get("seller_region") == "CA"
     if command not in {"marketplace.execute", "marketplace.result"}:
         return False
     region = (payload.get("listing") or {}).get("_seller_region")
-    marketplace = payload.get("marketplace")
     return (marketplace == "poshmark" and region == "CA"
             or marketplace == "depop" and region in {"CA", "GB", "AU"})
 

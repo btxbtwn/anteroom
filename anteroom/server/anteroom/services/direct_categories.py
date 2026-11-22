@@ -1,6 +1,7 @@
 """Each direct marketplace's taxonomy leaf and category-specific fields."""
 from __future__ import annotations
 
+import asyncio
 import copy
 import logging
 import re
@@ -170,14 +171,14 @@ async def overlay_live_fields(listing: dict, marketplace: str, fields: list[dict
 def live_fields_prompt(listing: dict) -> str:
     """Exact eBay and Etsy field names for generation. Empty when the live schema is not cached yet."""
     from anteroom.services.category_fields import load_rows
-    from anteroom.services.marketplace_schemas import EBAY_ASPECTS, ETSY_PROPERTIES
+    from anteroom.services.marketplace_schemas import EBAY_ASPECTS, ETSY_PROPERTIES, ebay_schema_cache_key
 
     ids = listing.get("direct_category_ids")
     if not isinstance(ids, dict):
         ids = {}
     blocks = []
     for marketplace, cache_key, bucket in (
-        ("ebay", EBAY_ASPECTS, "ebay_specifics"),
+        ("ebay", ebay_schema_cache_key(EBAY_ASPECTS), "ebay_specifics"),
         ("etsy", ETSY_PROPERTIES, "etsy_specifics.category_specifics"),
     ):
         category_id = direct_category_id(listing, marketplace)
@@ -216,15 +217,16 @@ async def _ebay_leaf(query: str) -> dict[str, str] | None:
     from anteroom.services import marketplace_schemas
     from anteroom.services.ebay_client import EbayClient
 
+    from anteroom.services.seller_region import seller_region
+
     client = await EbayClient.connect()
-    body = await client.request(
-        "GET", "/commerce/taxonomy/v1/category_tree/0/get_category_suggestions", params={"q": query}, app=True,
-    )
+    site = (await asyncio.to_thread(seller_region)).ebay_marketplace
+    body = await marketplace_schemas.ebay_category_suggestions(client, site, query)
     hit = pick_ebay_suggestion(body if isinstance(body, dict) else {})
     if not hit:
         return None
     try:
-        await marketplace_schemas.ebay_aspects(client, hit["id"])
+        await marketplace_schemas.ebay_aspects(client, hit["id"], marketplace=site)
     except Exception as exc:  # noqa: BLE001 - the category still stands; the editor can read the schema later
         log.info("No eBay aspects for %s: %s", hit["id"], exc)
     return hit
@@ -254,13 +256,21 @@ async def attach_direct_categories(listing: dict, evidence: str = "") -> dict[st
     if not isinstance(paths, dict):
         paths = {}
     etsy_query = str(paths.get("etsy") or listing.get("category_path") or query)
+    from anteroom.services.seller_region import seller_region
+
+    site = (await asyncio.to_thread(seller_region)).ebay_marketplace
     cache_query = "\n".join((query, etsy_query))
+    if site != "EBAY_US":
+        cache_query += "\n" + site
     chosen = dict(current)
     if chosen.get("query") != cache_query:
         for key in ("ebay", "ebay_path", "etsy", "etsy_path", "poshmark", "depop", "mercari"):
             chosen.pop(key, None)
     markets = {market for market in ("ebay", "poshmark", "depop", "mercari")
                if not direct_category_id({"direct_category_ids": chosen}, market)}
+    if site != "EBAY_US":
+        # The locally synchronized eBay tree belongs to the US marketplace.
+        markets.discard("ebay")
     if markets:
         from anteroom.database import in_worker_session
         from anteroom.services.agent_categories import apply_agent_categories, tree_leaves
@@ -269,7 +279,7 @@ async def attach_direct_categories(listing: dict, evidence: str = "") -> dict[st
         # Each form's own options, matched the same way as a category change in
         # the editor. A known eBay leaf needs no network search.
         # A copy, so filling a category here does not clear the sizes generation wrote.
-        ebay = await in_worker_session(tree_leaves, "ebay")
+        ebay = await in_worker_session(tree_leaves, "ebay") if "ebay" in markets else []
         apply_agent_categories({**copy.deepcopy(listing), "direct_category_ids": chosen},
                                {**native_rows(), "ebay": ebay}, markets=markets)
     if not direct_category_id({"direct_category_ids": chosen}, "ebay"):

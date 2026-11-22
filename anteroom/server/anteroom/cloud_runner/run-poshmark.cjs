@@ -530,7 +530,7 @@ async function executePoshmarkOperation({
   const cmdType = String(command?.type || '');
   let result;
   if (cmdType === 'marketplace.sales') {
-    result = await context.readMarketplaceSales('poshmark', command.payload?.listing_ids || []);
+    result = await context.readMarketplaceSales('poshmark', command.payload?.listing_ids || [], command.payload?.seller_region);
   } else if (cmdType === 'marketplace.sessions') {
     const summary = await context.readExtensionSession('poshmark', undefined, command.payload?.seller_region);
     result = { ok: true, sessions: { poshmark: summary } };

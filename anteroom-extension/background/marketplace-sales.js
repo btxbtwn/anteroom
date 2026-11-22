@@ -148,15 +148,16 @@ async function mercariSales(ids) {
     .map(item => ({ listing_id: item.id }));
 }
 
-async function poshmarkPost(id) {
+async function poshmarkPost(id, origin) {
   await ensureMarketplaceRequestContext();
-  return (await saleJson(`https://poshmark.com/vm-rest/posts/${id}?app_version=2.55`, { credentials: 'include' }))?.data;
+  return (await saleJson(`${origin}/vm-rest/posts/${id}?app_version=2.55`, { credentials: 'include' }))?.data;
 }
 
-async function poshmarkSales(ids) {
+async function poshmarkSales(ids, region) {
+  const origin = poshmarkOrigin(region);
   await ensureMarketplaceRequestContext();
   const seller = await sellerFrom(ids, async id => {
-    const creator = String((await poshmarkPost(id))?.creator_id ?? '');
+    const creator = String((await poshmarkPost(id, origin))?.creator_id ?? '');
     return SALE_LISTING_ID.poshmark.test(creator) ? creator : null;
   });
   const pending = new Set(ids);
@@ -166,7 +167,7 @@ async function poshmarkSales(ids) {
     if (page > 0) await salePause(true);
     const request = { filters: { department: 'All', inventory_status: ['available'] }, sort_by: 'added_desc',
       experience: 'all', count: 200, ...(maxId ? { max_id: maxId } : {}) };
-    const body = await saleJson(`https://poshmark.com/vm-rest/users/${seller}/posts/filtered?request=${encodeURIComponent(JSON.stringify(request))}&summarize=true&app_version=2.55`, { credentials: 'include' });
+    const body = await saleJson(`${origin}/vm-rest/users/${seller}/posts/filtered?request=${encodeURIComponent(JSON.stringify(request))}&summarize=true&app_version=2.55`, { credentials: 'include' });
     if (!Array.isArray(body?.data)) throw new Error('Poshmark closet missing');
     body.data.forEach(post => {
       const id = String(post?.id ?? '');
@@ -179,13 +180,13 @@ async function poshmarkSales(ids) {
   // A page still waiting means the closet was not finished, so a missing id
   // might be further down rather than sold.
   if (pending.size && maxId) throw new Error('Poshmark closet too large to read');
-  return soldAmongMissing(ids, live, async id => (await poshmarkPost(id))?.inventory?.status === 'sold_out');
+  return soldAmongMissing(ids, live, async id => (await poshmarkPost(id, origin))?.inventory?.status === 'sold_out');
 }
 
 
 const SALE_READERS = { depop: depopSales, mercari: mercariSales, poshmark: poshmarkSales };
 
-async function readMarketplaceSales(marketplace, listingIds) {
+async function readMarketplaceSales(marketplace, listingIds, region) {
   if (nativeOperationsRunning()) return { ok: true, sales: [], skipped: true };
   const read = SALE_READERS[marketplace];
   if (!read) return { ok: false, error: 'Could not check sales.' };
@@ -194,7 +195,7 @@ async function readMarketplaceSales(marketplace, listingIds) {
     .slice(0, SALE_MAX_LISTINGS);
   if (!ids.length) return { ok: true, sales: [] };
   try {
-    return { ok: true, sales: await read(ids) };
+    return { ok: true, sales: await read(ids, region) };
   } catch (error) {
     const code = SALE_ERROR_CODES.has(error?.code) ? error.code : null;
     return { ok: false, error: 'Could not check sales.', ...(code ? { error_code: code } : {}) };
@@ -204,7 +205,7 @@ async function readMarketplaceSales(marketplace, listingIds) {
 async function handleMarketplaceSales(msg) {
   try {
     const payload = msg.payload || {};
-    sendBrowserResult(msg, await readMarketplaceSales(payload.marketplace, payload.listing_ids));
+    sendBrowserResult(msg, await readMarketplaceSales(payload.marketplace, payload.listing_ids, payload.seller_region));
   } catch {
     sendBrowserResult(msg, { ok: false, error: 'Could not check sales.' });
   }

@@ -1,7 +1,7 @@
 // Named commands other than marketplace actions: read-only choices for the seller's
 // editor and Connections, from their own marketplace sessions, and opening a sign-in page.
 const CLOUD_READS = {
-  'marketplace.sales_history': ({ marketplace, settled }) => readMarketplaceOrderHistory(marketplace, settled),
+  'marketplace.sales_history': ({ marketplace, settled, seller_region }) => readMarketplaceOrderHistory(marketplace, settled, seller_region),
   // Settings → Connections: sign-in status only, never cookie or token values.
   'marketplace.sessions': async ({ seller_region }) => ({ sessions: await readExtensionSessions(undefined, seller_region) }),
   // The seller asked to sign in: open that marketplace's sign-in page in this Chrome, as the Mac does.
