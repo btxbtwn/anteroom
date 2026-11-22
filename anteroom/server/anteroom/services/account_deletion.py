@@ -106,7 +106,8 @@ def _delete_records(owner: str) -> list[str]:
         # Collect Storage cleanup targets under the lock before removing database records.
         # The function already scopes to this seller; never send another prefix to Storage.
         raw_keys = list(db.scalars(text('SELECT * FROM anteroom_private.stage_account_deletion()')))
-        keys = [key for key in raw_keys if key.startswith(owner + '/')]
+        # Merging staged receipts deduplicates keys without preserving their order.
+        keys = sorted(key for key in raw_keys if key.startswith(owner + '/'))
         for table in seller_tables():
             # Row security limits each delete to this seller; the filter says so too.
             db.execute(table.delete().where(table.c.user_id == owner))
