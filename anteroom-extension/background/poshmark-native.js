@@ -825,8 +825,10 @@ async function poshmarkSendPrivateBundleOffer(client, account, payload) {
   const likes = Array.isArray(likesResp) ? likesResp : Array.isArray(likesResp?.data) ? likesResp.data : [];
   const cutoff = Date.now() - pauseMinutes * 60 * 1000;
   const eligibleBuyers = likes.filter(item => {
-    const likedAt = Date.parse(item?.created_at || item?.liked_at || '');
-    return !Number.isFinite(likedAt) || likedAt <= cutoff;
+    const raw = item?.created_at || item?.liked_at;
+    if (typeof raw !== 'string' || !raw.trim()) return false;
+    const likedAt = Date.parse(raw);
+    return Number.isFinite(likedAt) && likedAt <= cutoff;
   });
   if (!eligibleBuyers.length) {
     throw marketplaceError('Waiting for buyer like activity to pause before sending a bundle offer.', { code: 'bundle_waiting' });
@@ -875,6 +877,19 @@ async function poshmarkSendPrivateBundleOffer(client, account, payload) {
   if (itemCount === 1) {
     if (String(posts[0]?.id || '') !== listingId) {
       throw marketplaceError('Anteroom could not verify a single-item bundle at the reviewed price.');
+    }
+    let currentPrice = poshmarkBundlePriceCents(posts[0]?.price_amount)
+      || poshmarkBundlePriceCents(bundle?.total_price_amount);
+    if (!currentPrice) {
+      const fetched = await client.call('GET', `/vm-rest/posts/${listingId}?app_type=web`,
+        undefined, { step: 'bundle-item-read', what: 'reading the bundle listing' });
+      if (String(fetched?.creator_id || '') !== account.user_id) {
+        throw marketplaceError('This Poshmark listing belongs to another account.');
+      }
+      currentPrice = poshmarkBundlePriceCents(fetched?.price_amount);
+    }
+    if (!currentPrice || currentPrice !== reviewedPriceCents) {
+      throw marketplaceError('The reviewed Poshmark listing price changed inside the bundle. Review the bundle offer again.');
     }
   } else {
     const discountPercent = Number(payload.discount_percent);

@@ -156,10 +156,14 @@ async function sharePoshmark(payload, deadline) {
       sharedParty = true;
     }
   }
-  if (modes.includes('self') || !sharedParty) {
+  const shouldSelfShare = modes.includes('self');
+  if (shouldSelfShare) {
     await client.call('PUT', `/vm-rest/users/self/shared_posts/${payload.listing_id}`, {}, { step: 'share', what: 'the share' });
   }
-  return { ok: true, state: 'done', ...(sharedParty && !modes.includes('self') ? { share_mode: 'party' } : {}) };
+  if (!shouldSelfShare && !sharedParty) {
+    throw marketplaceError('No active Posh Party is open right now.', { code: 'no_active_party' });
+  }
+  return { ok: true, state: 'done', ...(sharedParty && !shouldSelfShare ? { share_mode: 'party' } : {}) };
 }
 
 async function bundleOfferPoshmark(payload, deadline) {
@@ -615,10 +619,10 @@ async function readMarketplaceActiveOffers(payload) {
     }
     if (market === 'mercari') {
       return {
-        ok: true,
+        ok: false,
         verified: false,
-        has_active_offer: false,
-        reason: 'Mercari incoming buyer offers cannot be verified yet.',
+        error_code: 'unsupported',
+        error: 'Mercari unattended relisting is unavailable until incoming buyer offers can be verified.',
       };
     }
     return { ok: true, verified: false, has_active_offer: false, reason: 'Unsupported marketplace.' };

@@ -9,10 +9,14 @@ depends_on = None
 
 
 def upgrade() -> None:
-    table = "marketplace_relist_logs"
-    if "native_job_id" not in {col["name"] for col in sa.inspect(op.get_bind()).get_columns(table)}:
-        op.add_column(table, sa.Column("native_job_id", sa.String(), nullable=True))
+    inspector = sa.inspect(op.get_bind())
+    for table in ("marketplace_relist_logs", "sale_sync_events"):
+        if "native_job_id" not in {col["name"] for col in inspector.get_columns(table)}:
+            op.add_column(table, sa.Column("native_job_id", sa.String(), nullable=True))
 
 
 def downgrade() -> None:
-    op.drop_column("marketplace_relist_logs", "native_job_id")
+    inspector = sa.inspect(op.get_bind())
+    for table in ("sale_sync_events", "marketplace_relist_logs"):
+        if "native_job_id" in {col["name"] for col in inspector.get_columns(table)}:
+            op.drop_column(table, "native_job_id")

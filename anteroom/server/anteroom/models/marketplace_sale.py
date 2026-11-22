@@ -98,6 +98,7 @@ class SaleSyncEvent(SellerOwned, Base):
     new_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # pending, succeeded, failed, skipped, retrying
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    native_job_id: Mapped[str | None] = mapped_column(String, nullable=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

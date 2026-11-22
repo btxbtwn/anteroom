@@ -371,7 +371,96 @@ test('readMarketplaceActiveOffers detects active incoming Poshmark buyer offers 
   assert.equal((await partial.c.readMarketplaceActiveOffers({ marketplace: 'poshmark', listing_id: POST })).verified, false);
 
   const mercariRes = await clean.c.readMarketplaceActiveOffers({ marketplace: 'mercari', listing_id: 'm12345678' });
-  assert.equal(mercariRes.ok, true);
+  assert.equal(mercariRes.ok, false);
   assert.equal(mercariRes.verified, false);
+  assert.equal(mercariRes.error_code, 'unsupported');
+  assert.equal('has_active_offer' in mercariRes, false);
+});
+
+test('Poshmark party-only share without an open party does not fall back to follower share', async () => {
+  const { c, requests, results } = setupWorker({
+    'GET poshmark.com/vm-rest/parties': [200, { data: [] }],
+  });
+  await c.handleMarketplacePromotion({
+    type: 'marketplace.promote',
+    payload: {
+      marketplace: 'poshmark',
+      action: 'share',
+      listing_id: POST,
+      confirm: true,
+      action_id: 'party-only-closed',
+      share_modes: ['party'],
+      party_window: '12:00',
+    },
+  });
+  assert.equal(results[0].ok, false);
+  assert.equal(results[0].error_code, 'no_active_party');
+  assert.equal(requests.some(r => r.key.includes('shared_posts')), false);
+});
+
+test('Poshmark bundle offer rejects missing/invalid like timestamps and single-item price drift', async () => {
+  const missingTs = setupWorker({
+    [`GET poshmark.com/vm-rest/posts/${POST}/likes`]: [
+      200,
+      { data: [{ user_id: 'buyer-1', username: 'notimestamp' }, { user_id: 'buyer-2', created_at: 'not-a-date' }] },
+    ],
+  });
+  await missingTs.c.handleMarketplacePromotion({
+    type: 'marketplace.promote',
+    payload: {
+      marketplace: 'poshmark',
+      action: 'bundle_offer',
+      listing_id: POST,
+      confirm: true,
+      action_id: 'bundle-bad-ts',
+      price_cents: 5000,
+      offer_price_cents: 4000,
+      floor_cents: 3500,
+      shipping_discount_id: DISCOUNT,
+      bundle_pause_minutes: 15,
+      bundle_min_items: 1,
+    },
+  });
+  assert.equal(missingTs.results[0].ok, false);
+  assert.equal(missingTs.results[0].error_code, 'bundle_waiting');
+
+  const oldLike = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const drifted = setupWorker({
+    [`GET poshmark.com/vm-rest/posts/${POST}/likes`]: [
+      200,
+      { data: [{ user_id: 'buyer-1', username: 'happybuyer', created_at: oldLike }] },
+    ],
+    [`POST poshmark.com/vm-rest/users/${USER}/bundles`]: [
+      200,
+      {
+        data: {
+          bundle: {
+            id: 'bundle-drift',
+            item_count: 1,
+            posts: [{ id: POST, price_amount: { val: '60', currency_code: 'USD' } }],
+          },
+        },
+      },
+    ],
+    'POST poshmark.com/vm-rest/bundles/bundle-drift/offers': [200, { data: {} }],
+  });
+  await drifted.c.handleMarketplacePromotion({
+    type: 'marketplace.promote',
+    payload: {
+      marketplace: 'poshmark',
+      action: 'bundle_offer',
+      listing_id: POST,
+      confirm: true,
+      action_id: 'bundle-single-drift',
+      price_cents: 5000,
+      offer_price_cents: 4000,
+      floor_cents: 3500,
+      shipping_discount_id: DISCOUNT,
+      bundle_pause_minutes: 15,
+      bundle_min_items: 1,
+    },
+  });
+  assert.equal(drifted.results[0].ok, false);
+  assert.equal(drifted.bodies['POST poshmark.com/vm-rest/bundles/bundle-drift/offers'], undefined);
 });
 

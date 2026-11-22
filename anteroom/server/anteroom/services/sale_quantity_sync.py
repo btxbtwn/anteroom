@@ -106,6 +106,7 @@ def record_sync_event(
     new_listing_id: str | None = None,
     previous_quantity: int | None = None,
     new_quantity: int | None = None,
+    native_job_id: str | None = None,
     error: str | None = None,
     next_retry_at: datetime | None = None,
     increment_attempts: bool = True,
@@ -132,7 +133,8 @@ def record_sync_event(
             previous_quantity=previous_quantity,
             new_quantity=new_quantity,
             status=status,
-            attempts=1,
+            native_job_id=native_job_id,
+            attempts=1 if increment_attempts else 0,
             error=error,
             next_retry_at=next_retry_at,
             created_at=moment,
@@ -152,6 +154,8 @@ def record_sync_event(
             row.previous_quantity = previous_quantity
         if new_quantity is not None:
             row.new_quantity = new_quantity
+        if native_job_id is not None:
+            row.native_job_id = native_job_id
         row.status = status
         if increment_attempts:
             row.attempts = int(row.attempts or 0) + 1
@@ -160,6 +164,116 @@ def record_sync_event(
         row.updated_at = moment
     if commit:
         db.commit()
+    return row
+
+
+def _set_event_native_job_id(db: Session, event_id: str, native_job_id: str) -> None:
+    row = db.get(SaleSyncEvent, event_id)
+    if row is None:
+        return
+    row.native_job_id = native_job_id
+    row.updated_at = _now()
+    db.commit()
+
+
+def _reconcile_pending_sync_event(db: Session, row: SaleSyncEvent) -> SaleSyncEvent:
+    """Reconcile an in-flight or previously interrupted sync write before allowing another dispatch."""
+    if row.status != "pending" or row.action not in ("mercari_relist", "adjust_quantity"):
+        return row
+    from anteroom.models.job import Job
+
+    job = db.get(Job, row.native_job_id) if row.native_job_id else None
+    ml = (
+        db.query(MarketplaceListing)
+        .filter_by(conversation_id=row.conversation_id, marketplace=row.target_marketplace)
+        .first()
+        if row.conversation_id
+        else None
+    )
+    in_flight = job is not None and job.status in ("queued", "dispatched", "running", "in_progress")
+    if in_flight:
+        return row
+
+    if row.action == "mercari_relist":
+        if row.native_job_id:
+            if (
+                ml is not None
+                and ml.job_id == row.native_job_id
+                and ml.state in LIVE_STATES
+                and ml.listing_id
+                and ml.listing_id != row.target_listing_id
+            ):
+                if row.conversation_id:
+                    auto_relist.swap_tracked_listing_id(
+                        db,
+                        row.conversation_id,
+                        "mercari",
+                        old_listing_id=row.target_listing_id,
+                        new_listing_id=str(ml.listing_id),
+                        new_listing_url=ml.listing_url,
+                        now=_now(),
+                    )
+                row.status = "succeeded"
+                row.new_listing_id = str(ml.listing_id)
+                row.error = None
+                row.next_retry_at = None
+                row.updated_at = _now()
+                db.commit()
+                return row
+            if job is not None and job.status in ("failed", "cancelled", "canceled", "completed"):
+                row.status = "failed"
+                row.error = row.error or f"Previous Mercari relist job ended with status {job.status}."
+                row.next_retry_at = _now() + _retry_delay(int(row.attempts or 1))
+                row.updated_at = _now()
+                db.commit()
+                return row
+            return row
+
+        # No native_job_id recorded: only promote if a newer live listing ID appeared.
+        if (
+            ml is not None
+            and ml.state in LIVE_STATES
+            and ml.listing_id
+            and ml.listing_id != row.target_listing_id
+            and ml.updated_at is not None
+            and row.created_at is not None
+            and ml.updated_at >= row.created_at
+        ):
+            if row.conversation_id:
+                auto_relist.swap_tracked_listing_id(
+                    db,
+                    row.conversation_id,
+                    "mercari",
+                    old_listing_id=row.target_listing_id,
+                    new_listing_id=str(ml.listing_id),
+                    new_listing_url=ml.listing_url,
+                    now=_now(),
+                )
+            row.status = "succeeded"
+            row.new_listing_id = str(ml.listing_id)
+            row.error = None
+            row.next_retry_at = None
+            row.updated_at = _now()
+            db.commit()
+            return row
+        return row
+
+    # adjust_quantity
+    if row.native_job_id and job is not None:
+        if job.status == "completed" and (ml is None or (ml.job_id == row.native_job_id and ml.state in LIVE_STATES)):
+            row.status = "succeeded"
+            row.error = None
+            row.next_retry_at = None
+            row.updated_at = _now()
+            db.commit()
+            return row
+        if job.status in ("failed", "cancelled", "canceled"):
+            row.status = "failed"
+            row.error = row.error or f"Previous quantity sync job ended with status {job.status}."
+            row.next_retry_at = _now() + _retry_delay(int(row.attempts or 1))
+            row.updated_at = _now()
+            db.commit()
+            return row
     return row
 
 
@@ -183,6 +297,10 @@ def _save_quantity_revision(db: Session, conv_id: str, new_quantity: int) -> tup
 
 
 def _load_adjustment_plan(db: Session, sale_id: str, remaining: int) -> dict[str, Any] | None:
+    from anteroom.services.user_settings import auto_adjust_quantity_enabled
+
+    if not auto_adjust_quantity_enabled(fresh=True):
+        return None
     sale = db.get(MarketplaceSale, sale_id)
     if sale is None:
         return None
@@ -278,45 +396,65 @@ def _quantity_skipped() -> dict[str, Any]:
     return {"ok": False, "skipped": True, "error": "Auto-adjust quantity was turned off."}
 
 
-async def _default_updater(conv_id: str, marketplace: str, listing_id: str | None, new_qty: int,
-                           sale_id: str, *, session_factory=None) -> dict[str, Any]:
+async def _default_updater(
+    conv_id: str,
+    marketplace: str,
+    listing_id: str | None,
+    new_qty: int,
+    sale_id: str,
+    *,
+    session_factory=None,
+    require_setting: bool = True,
+) -> dict[str, Any]:
     """Send only stock, pinned to the live offer verified for this paid sale."""
     from anteroom.services.automation_actions import _turn
     from anteroom.services.ebay_client import EbayClient, segment
     from anteroom.services.sale_inventory import stock_after_sale
+    from anteroom.services.user_settings import auto_adjust_quantity_enabled
 
     if marketplace != "ebay":
-        return {"ok": False, "error": f"No quantity-only update is available for {NAMES.get(marketplace, marketplace)}. Adjust stock on the marketplace."}
+        return {
+            "ok": False,
+            "unsupported": True,
+            "error": f"No quantity-only update is available for {NAMES.get(marketplace, marketplace)}. Adjust stock on the marketplace.",
+        }
 
-    def binding():
+    def binding() -> tuple[str | None, str | None]:
+        if require_setting and not auto_adjust_quantity_enabled(fresh=True):
+            return None, "disabled"
         with _session_factory(session_factory)() as db:
             sale = db.get(MarketplaceSale, sale_id)
             if (not sale or sale.conversation_id != conv_id or sale.marketplace == marketplace
                     or sale.order_status not in PAID_STATUSES or not listing_id or new_qty <= 0):
-                return None
+                return None, "ineligible"
             stock = stock_after_sale(db, conv_id, sale.marketplace, sale.listing_id)
-            if stock["remaining"] != new_qty:
-                return None
+            if stock.get("remaining") != new_qty:
+                return None, "ineligible"
             row = db.query(MarketplaceListing).filter_by(conversation_id=conv_id, marketplace=marketplace).first()
             if (row and row.state in LIVE_STATES and not row.ebay_variant_offers and not row.ebay_group_key
                     and (row.ebay_listing_id or row.listing_id) == listing_id):
-                return row.ebay_offer_id
-            return None
+                return row.ebay_offer_id, None
+            return None, "ineligible"
 
     try:
         async with _turn(marketplace):
-            if await _quantity_opted_out():
+            if require_setting and await _quantity_opted_out():
                 return _quantity_skipped()
-            offer_id = await asyncio.to_thread(binding)
+            offer_id, reason = await asyncio.to_thread(binding)
+            if reason == "disabled":
+                return _quantity_skipped()
             if not offer_id:
                 return {"ok": False, "error": "The paid sale, remaining stock, or live eBay offer could not be verified."}
             client = await EbayClient.connect()
             offer = await client.request("GET", f"/sell/inventory/v1/offer/{segment(offer_id)}")
+            rechecked_offer_id, rechecked_reason = await asyncio.to_thread(binding)
+            if rechecked_reason == "disabled":
+                return _quantity_skipped()
             if (offer.get("status") != "PUBLISHED" or not offer.get("sku")
                     or str((offer.get("listing") or {}).get("listingId")) != listing_id
-                    or await asyncio.to_thread(binding) != offer_id):
+                    or rechecked_offer_id != offer_id):
                 return {"ok": False, "error": "The live offer or sale changed before the quantity update."}
-            if await _quantity_opted_out():
+            if require_setting and await _quantity_opted_out():
                 return _quantity_skipped()
             reply = await client.request("POST", "/sell/inventory/v1/bulk_update_price_quantity", body={"requests": [{
                 "sku": offer["sku"], "offers": [{"offerId": offer_id, "availableQuantity": new_qty}],
@@ -335,29 +473,48 @@ async def _default_mercari_relister(
     revision_id: str,
     *,
     sale_id: str,
+    event_id: str | None = None,
     session_factory=None,
+    require_setting: bool = True,
 ) -> dict[str, Any]:
     from anteroom.services.automation_actions import _turn, wait_for_native_result
     from anteroom.services.native_marketplaces import ListRequest, list_now
+    from anteroom.services.user_settings import auto_adjust_quantity_enabled
 
-    def eligible() -> bool:
+    factory = _session_factory(session_factory)
+
+    def check_eligibility() -> str | None:
         from anteroom.services.sale_inventory import stock_after_sale
 
-        with _session_factory(session_factory)() as db:
+        if require_setting and not auto_adjust_quantity_enabled(fresh=True):
+            return "disabled"
+        with factory() as db:
             sale = db.get(MarketplaceSale, sale_id)
             if (not sale or sale.marketplace != "mercari" or sale.conversation_id != conv_id
                     or sale.order_status not in PAID_STATUSES):
-                return False
+                return "ineligible"
             stock = stock_after_sale(db, conv_id, "mercari", sale.listing_id)
-            return stock["status"] == "remaining" and (stock["remaining"] or 0) > 0
+            if not (stock["status"] == "remaining" and (stock["remaining"] or 0) > 0):
+                return "ineligible"
+            return None
 
     try:
         async with _turn("mercari"):
-            if not await asyncio.to_thread(eligible):
+            blocked = await asyncio.to_thread(check_eligibility)
+            if blocked == "disabled":
+                return {"ok": False, "skipped": True, "error": "Skipped because auto-adjust quantity is turned off."}
+            if blocked is not None:
                 return {"ok": False, "error": "The Mercari sale or remaining stock could not be verified."}
             if await _quantity_opted_out():
                 return _quantity_skipped()
             res = await list_now(conv_id, "mercari", ListRequest(revision_id=revision_id, confirm=True))
+            dispatched_job_id = res.get("job_id")
+            if event_id and dispatched_job_id:
+                def _save_job(eid=event_id, jid=str(dispatched_job_id)):
+                    with factory() as db:
+                        _set_event_native_job_id(db, eid, jid)
+
+                await asyncio.to_thread(_save_job)
             res = await wait_for_native_result(conv_id, "mercari", res, session_factory=session_factory)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc)}
@@ -368,6 +525,8 @@ async def _default_mercari_relister(
         "listing_id": new_id_val,
         "listing_url": res.get("listing_url"),
         "error": res.get("error"),
+        "timed_out": bool(res.get("timed_out")),
+        "native_job_id": res.get("job_id"),
     }
 
 
@@ -383,6 +542,8 @@ async def adjust_quantities_for_sale(
 
     Never runs for sold-out items (``remaining <= 0``) or cancelled/refunded orders.
     """
+    from anteroom.services.user_settings import auto_adjust_quantity_enabled
+
     if remaining <= 0:
         return {"sale_id": sale_id, "remaining": remaining, "events": [], "note": ""}
     factory = _session_factory(session_factory)
@@ -406,42 +567,55 @@ async def adjust_quantities_for_sale(
     failed_markets: dict[str, str] = {}
     recorded: list[dict[str, Any]] = []
 
-    def still_paid() -> bool:
+    def _dispatch_block_reason() -> tuple[str | None, str]:
+        if not auto_adjust_quantity_enabled(fresh=True):
+            return "Skipped because auto-adjust quantity was turned off.", "paid"
         with factory() as db:
             sale = db.get(MarketplaceSale, sale_id)
-            return bool(sale and sale.conversation_id == conv_id and sale.order_status in PAID_STATUSES)
+            if not sale or sale.conversation_id != conv_id:
+                return "Skipped because the underlying sale is no longer linked to this listing.", "cancelled"
+            if sale.order_status not in PAID_STATUSES:
+                return "Skipped because the order was cancelled, refunded, or placed under cancellation review.", sale.order_status
+            return None, sale.order_status
 
-    for target in plan["targets"]:
-        if not await asyncio.to_thread(still_paid):
-            break
+    def _record_skip_batch(targets_to_skip: list[dict[str, Any]], reason: str, order_status: str) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        with factory() as db:
+            for item in targets_to_skip:
+                row = record_sync_event(
+                    db,
+                    sale_id=sale_id,
+                    conversation_id=conv_id,
+                    sku=sku,
+                    sold_marketplace=sold_market,
+                    target_marketplace=item["marketplace"],
+                    action=item["action"],
+                    target_listing_id=item.get("listing_id"),
+                    previous_quantity=prev_qty,
+                    new_quantity=item["target_quantity"],
+                    status="skipped",
+                    error=reason,
+                    next_retry_at=None,
+                    increment_attempts=False,
+                )
+                out.append(_event_out(row, order_status=order_status))
+        return out
+
+    targets = plan["targets"]
+    for idx, target in enumerate(targets):
         market = target["marketplace"]
         action = target["action"]
         listing_id = target.get("listing_id")
         target_qty = target["target_quantity"]
 
         if target.get("skip_reason"):
-            def _rec_skip(m=market, a=action, lid=listing_id, tq=target_qty, reason=target["skip_reason"]):
-                with factory() as db:
-                    row = record_sync_event(
-                        db,
-                        sale_id=sale_id,
-                        conversation_id=conv_id,
-                        sku=sku,
-                        sold_marketplace=sold_market,
-                        target_marketplace=m,
-                        action=a,
-                        target_listing_id=lid,
-                        previous_quantity=prev_qty,
-                        new_quantity=tq,
-                        status="skipped",
-                        error=reason,
-                        next_retry_at=None,
-                        increment_attempts=False,
-                    )
-                    return _event_out(row, order_status="paid")
-
-            recorded.append(await asyncio.to_thread(_rec_skip))
+            recorded.extend(await asyncio.to_thread(_record_skip_batch, [target], target["skip_reason"], "paid"))
             continue
+
+        block_reason, current_order_status = await asyncio.to_thread(_dispatch_block_reason)
+        if block_reason is not None:
+            recorded.extend(await asyncio.to_thread(_record_skip_batch, targets[idx:], block_reason, current_order_status))
+            break
 
         if not revision_id:
             err = "Listing has no saved revision to sync quantity."
@@ -469,16 +643,82 @@ async def adjust_quantities_for_sale(
             recorded.append(await asyncio.to_thread(_rec_no_rev))
             continue
 
+        # Persist pending event before external dispatch; reconcile any prior pending event
+        # so an interrupted or in-flight write cannot be duplicated.
+        def _prepare_dispatch(m=market, a=action, lid=listing_id, tq=target_qty):
+            with factory() as db:
+                existing = (
+                    db.query(SaleSyncEvent)
+                    .filter_by(sale_id=sale_id, target_marketplace=m, action=a)
+                    .first()
+                )
+                if existing is not None:
+                    existing = _reconcile_pending_sync_event(db, existing)
+                    if existing.status in ("succeeded", "pending"):
+                        return {"dispatch": False, "event": _event_out(existing, order_status="paid")}
+                pending_row = record_sync_event(
+                    db,
+                    sale_id=sale_id,
+                    conversation_id=conv_id,
+                    sku=sku,
+                    sold_marketplace=sold_market,
+                    target_marketplace=m,
+                    action=a,
+                    target_listing_id=lid,
+                    previous_quantity=prev_qty,
+                    new_quantity=MERCARI_MAX_QUANTITY if a == "mercari_relist" else tq,
+                    status="pending",
+                    error="Sync dispatched; awaiting marketplace confirmation.",
+                    next_retry_at=None,
+                    increment_attempts=True,
+                )
+                return {"dispatch": True, "event_id": pending_row.id}
+
+        prep = await asyncio.to_thread(_prepare_dispatch)
+        if not prep["dispatch"]:
+            recorded.append(prep["event"])
+            if prep["event"]["status"] == "succeeded":
+                if action == "mercari_relist":
+                    relisted_markets.append("mercari")
+                else:
+                    updated_markets.append(market)
+            continue
+
+        event_id = prep["event_id"]
+
         if action == "mercari_relist":
-            res = (await relister(conv_id, revision_id) if relister is not None else
-                   await _default_mercari_relister(conv_id, revision_id, sale_id=sale_id, session_factory=factory))
+            res = (
+                await relister(conv_id, revision_id)
+                if relister is not None
+                else await _default_mercari_relister(
+                    conv_id,
+                    revision_id,
+                    sale_id=sale_id,
+                    event_id=event_id,
+                    session_factory=factory,
+                    require_setting=True,
+                )
+            )
+            if res.get("skipped"):
+                skip_err = str(res.get("error") or "Auto-adjust quantity was turned off.")
+                recorded.extend(await asyncio.to_thread(_record_skip_batch, targets[idx:], skip_err, current_order_status))
+                break
             ok = bool(res.get("ok") and res.get("listing_id"))
-            skipped = bool(res.get("skipped"))
+            timed_out = bool(res.get("timed_out")) and not ok
             new_lid = str(res["listing_id"]) if ok and res.get("listing_id") else None
             new_url = res.get("listing_url")
             err = None if ok else str(res.get("error") or "Mercari did not confirm the fresh single-quantity relist.")
+            job_id = res.get("native_job_id")
 
-            def _rec_mercari(lid=listing_id, nlid=new_lid, nurl=new_url, is_ok=ok, is_skipped=skipped, e=err):
+            def _rec_mercari(
+                lid=listing_id,
+                nlid=new_lid,
+                nurl=new_url,
+                is_ok=ok,
+                is_timeout=timed_out,
+                jid=job_id,
+                e=err,
+            ):
                 with factory() as db:
                     if is_ok and nlid:
                         auto_relist.swap_tracked_listing_id(
@@ -490,6 +730,7 @@ async def adjust_quantities_for_sale(
                             new_listing_url=nurl,
                             now=_now(),
                         )
+                    status = "succeeded" if is_ok else ("pending" if is_timeout else "failed")
                     row = record_sync_event(
                         db,
                         sale_id=sale_id,
@@ -502,27 +743,55 @@ async def adjust_quantities_for_sale(
                         new_listing_id=nlid,
                         previous_quantity=prev_qty,
                         new_quantity=MERCARI_MAX_QUANTITY,
-                        status="succeeded" if is_ok else "skipped" if is_skipped else "failed",
+                        native_job_id=str(jid) if jid else None,
+                        status=status,
                         error=e,
-                        next_retry_at=None if is_ok or is_skipped else _now() + FIRST_RETRY,
-                        increment_attempts=not is_skipped,
+                        next_retry_at=None if (is_ok or is_timeout) else _now() + FIRST_RETRY,
+                        increment_attempts=False,
                     )
                     return _event_out(row, order_status="paid")
 
             recorded.append(await asyncio.to_thread(_rec_mercari))
             if ok:
                 relisted_markets.append("mercari")
-            elif not skipped:
+            elif not timed_out:
                 failed_markets["mercari"] = err or "Failed"
         else:
-            res = (await updater(conv_id, market, revision_id, target_qty) if updater is not None else
-                   await _default_updater(conv_id, market, listing_id, target_qty, sale_id, session_factory=factory))
+            res = (
+                await updater(conv_id, market, revision_id, target_qty)
+                if updater is not None
+                else await _default_updater(
+                    conv_id,
+                    market,
+                    listing_id,
+                    target_qty,
+                    sale_id,
+                    session_factory=factory,
+                    require_setting=True,
+                )
+            )
+            if res.get("skipped"):
+                skip_err = str(res.get("error") or "Auto-adjust quantity was turned off.")
+                recorded.extend(await asyncio.to_thread(_record_skip_batch, targets[idx:], skip_err, current_order_status))
+                break
             ok = bool(res.get("ok"))
-            skipped = bool(res.get("skipped"))
+            timed_out = bool(res.get("timed_out")) and not ok
+            unsupported = bool(res.get("unsupported")) and not ok
             err = None if ok else str(res.get("error") or f"{NAMES.get(market, market)} did not confirm the quantity update.")
+            job_id = res.get("native_job_id")
 
-            def _rec_update(m=market, lid=listing_id, tq=target_qty, is_ok=ok, is_skipped=skipped, e=err):
+            def _rec_update(
+                m=market,
+                lid=listing_id,
+                tq=target_qty,
+                is_ok=ok,
+                is_timeout=timed_out,
+                is_unsupported=unsupported,
+                jid=job_id,
+                e=err,
+            ):
                 with factory() as db:
+                    status = "succeeded" if is_ok else ("pending" if is_timeout else "failed")
                     row = record_sync_event(
                         db,
                         sale_id=sale_id,
@@ -534,17 +803,18 @@ async def adjust_quantities_for_sale(
                         target_listing_id=lid,
                         previous_quantity=prev_qty,
                         new_quantity=tq,
-                        status="succeeded" if is_ok else "skipped" if is_skipped else "failed",
+                        native_job_id=str(jid) if jid else None,
+                        status=status,
                         error=e,
-                        next_retry_at=None if is_ok or is_skipped else _now() + FIRST_RETRY,
-                        increment_attempts=not is_skipped,
+                        next_retry_at=None if (is_ok or is_timeout or is_unsupported) else _now() + FIRST_RETRY,
+                        increment_attempts=False,
                     )
                     return _event_out(row, order_status="paid")
 
             recorded.append(await asyncio.to_thread(_rec_update))
             if ok:
                 updated_markets.append(market)
-            elif not skipped:
+            elif not timed_out:
                 failed_markets[market] = err or "Failed"
 
     note = _format_adjust_sentence(updated_markets, relisted_markets, failed_markets)
@@ -790,7 +1060,7 @@ async def retry_sync_event(
 
     factory = _session_factory(session_factory)
 
-    def _load():
+    def _load() -> dict[str, Any]:
         with factory() as db:
             row = db.get(SaleSyncEvent, event_id)
             if row is None:
@@ -803,18 +1073,64 @@ async def retry_sync_event(
                     "Cannot retry because this order is cancelled, refunded, or awaiting cancellation review.",
                     status_code=409,
                 )
-            if not row.conversation_id:
+            row_conv_id = row.conversation_id
+            if not row_conv_id:
                 raise SaleSyncError("This sale is not linked to an Anteroom listing.", status_code=409)
-            stock = stock_after_sale(db, row.conversation_id, sale.marketplace, sale.listing_id)
-            if row.action == "delist" and stock["status"] != "sold_out":
+
+            was_pending = row.status == "pending"
+            row = _reconcile_pending_sync_event(db, row)
+            if was_pending and row.status == "succeeded":
+                return {"already_settled": _event_out(row, order_status=sale.order_status)}
+            if row.status == "pending" and row.action in ("mercari_relist", "adjust_quantity"):
                 raise SaleSyncError(
-                    "Stock remains or could not be verified. Cannot delist while inventory remains.",
+                    "A sync attempt is still pending verification on the marketplace; wait for it to settle before retrying.",
                     status_code=409,
                 )
-            remaining = stock.get("remaining")
-            if row.action in {"adjust_quantity", "mercari_relist"} and (remaining is None or remaining <= 0):
-                raise SaleSyncError("Cannot retry without verified remaining stock.", status_code=409)
-            rev_id, _qty, _payload = _current_revision_and_qty(db, row.conversation_id)
+
+            stock = stock_after_sale(db, row_conv_id, sale.marketplace, sale.listing_id)
+            if row.action == "delist":
+                if stock.get("status") != "sold_out":
+                    raise SaleSyncError(
+                        "Stock remains or could not be verified. Cannot delist while inventory remains.",
+                        status_code=409,
+                    )
+                if not row.target_listing_id:
+                    raise SaleSyncError(
+                        "Cannot retry delist without a pinned target listing ID.",
+                        status_code=409,
+                    )
+                verified_qty: int | None = None
+                rev_id, _qty, _payload = _current_revision_and_qty(db, row_conv_id)
+                attempts_now = int(row.attempts or 0)
+            elif row.action in ("adjust_quantity", "mercari_relist"):
+                rem = stock.get("remaining")
+                if stock.get("status") not in (None, "remaining") or type(rem) is not int or rem <= 0:
+                    raise SaleSyncError(
+                        "Stock is sold out or could not be verified. Cannot adjust quantity or relist without verified remaining stock.",
+                        status_code=409,
+                    )
+                if row.action == "adjust_quantity" and not row.target_listing_id:
+                    raise SaleSyncError(
+                        "Cannot retry quantity update without a pinned target listing ID.",
+                        status_code=409,
+                    )
+                verified_qty = MERCARI_MAX_QUANTITY if row.action == "mercari_relist" else rem
+                if row.action == "adjust_quantity":
+                    rev_id, _prev = _save_quantity_revision(db, row_conv_id, verified_qty)
+                else:
+                    rev_id, _qty, _payload = _current_revision_and_qty(db, row_conv_id)
+                # Persist pending state before dispatching any external marketplace write.
+                row.status = "pending"
+                row.native_job_id = None
+                row.new_quantity = verified_qty
+                row.error = "Sync dispatched; awaiting marketplace confirmation."
+                row.next_retry_at = None
+                row.updated_at = _now()
+                db.commit()
+                attempts_now = int(row.attempts or 0)
+            else:
+                raise SaleSyncError(f"Unsupported sync action: {row.action}")
+
             return {
                 "event_id": row.id,
                 "sale_id": row.sale_id,
@@ -825,20 +1141,26 @@ async def retry_sync_event(
                 "action": row.action,
                 "target_listing_id": row.target_listing_id,
                 "previous_quantity": row.previous_quantity,
-                "new_quantity": remaining if row.action == "adjust_quantity" else MERCARI_MAX_QUANTITY,
-                "attempts": int(row.attempts or 0),
+                "new_quantity": verified_qty,
+                "attempts": attempts_now,
                 "order_status": sale.order_status,
                 "revision_id": rev_id,
             }
 
     info = await asyncio.to_thread(_load)
+    if "already_settled" in info:
+        return info["already_settled"]
+
     action = info["action"]
     conv_id = info["conversation_id"]
     market = info["target_marketplace"]
     new_listing_id: str | None = None
     new_listing_url: str | None = None
+    native_job_id: str | None = None
     ok = False
     skipped = False
+    timed_out = False
+    unsupported = False
     error: str | None = None
 
     if action == "delist":
@@ -848,7 +1170,13 @@ async def retry_sync_event(
                 ok = bool(res.get("ok"))
                 error = None if ok else str(res.get("error") or "The marketplace did not confirm the delete.")
             else:
-                res = await delist(conv_id, [market], confirm=True, sale_id=info["sale_id"])
+                res = await delist(
+                    conv_id,
+                    [market],
+                    confirm=True,
+                    sale_id=info["sale_id"],
+                    expected={market: info["target_listing_id"]},
+                )
                 entry = res.get(market) or {}
                 ok = entry.get("state") == "deleted"
                 error = None if ok else str(entry.get("error") or "The marketplace did not confirm the delete.")
@@ -859,10 +1187,22 @@ async def retry_sync_event(
         if not info["revision_id"]:
             error = "Listing has no saved revision to relist."
         else:
-            res = (await relister(conv_id, info["revision_id"]) if relister is not None else
-                   await _default_mercari_relister(conv_id, info["revision_id"], sale_id=info["sale_id"], session_factory=factory))
+            res = (
+                await relister(conv_id, info["revision_id"])
+                if relister is not None
+                else await _default_mercari_relister(
+                    conv_id,
+                    info["revision_id"],
+                    sale_id=info["sale_id"],
+                    event_id=info["event_id"],
+                    session_factory=factory,
+                    require_setting=True,
+                )
+            )
             ok = bool(res.get("ok") and res.get("listing_id"))
-            skipped = bool(res.get("skipped"))
+            skipped = bool(res.get("skipped")) and not ok
+            timed_out = bool(res.get("timed_out")) and not ok and not skipped
+            native_job_id = str(res["native_job_id"]) if res.get("native_job_id") else None
             new_listing_id = str(res["listing_id"]) if ok and res.get("listing_id") else None
             new_listing_url = res.get("listing_url")
             error = None if ok else str(res.get("error") or "Mercari did not confirm the fresh single-quantity relist.")
@@ -871,17 +1211,31 @@ async def retry_sync_event(
             error = "Listing has no saved revision to update."
         else:
             qty = int(info["new_quantity"])
-            res = (await updater(conv_id, market, info["revision_id"], qty) if updater is not None else
-                   await _default_updater(conv_id, market, info["target_listing_id"], qty, info["sale_id"],
-                                          session_factory=factory))
+            res = (
+                await updater(conv_id, market, info["revision_id"], qty)
+                if updater is not None
+                else await _default_updater(
+                    conv_id,
+                    market,
+                    info["target_listing_id"],
+                    qty,
+                    info["sale_id"],
+                    session_factory=factory,
+                    require_setting=True,
+                )
+            )
             ok = bool(res.get("ok"))
-            skipped = bool(res.get("skipped"))
+            skipped = bool(res.get("skipped")) and not ok
+            timed_out = bool(res.get("timed_out")) and not ok and not skipped
+            unsupported = bool(res.get("unsupported")) and not ok and not skipped
+            native_job_id = str(res["native_job_id"]) if res.get("native_job_id") else None
             error = None if ok else str(res.get("error") or f"{NAMES.get(market, market)} did not confirm the quantity update.")
     else:
         raise SaleSyncError(f"Unsupported sync action: {action}")
 
-    next_attempts = info["attempts"] + 1
-    next_retry = None if ok or skipped else _now() + _retry_delay(next_attempts)
+    next_attempts = info["attempts"] + (0 if skipped else 1)
+    final_status = "succeeded" if ok else ("skipped" if skipped else ("pending" if timed_out else "failed"))
+    next_retry = None if (ok or skipped or timed_out or unsupported) else _now() + _retry_delay(next_attempts)
 
     def _save():
         with factory() as db:
@@ -907,7 +1261,8 @@ async def retry_sync_event(
                 new_listing_id=new_listing_id,
                 previous_quantity=info["previous_quantity"],
                 new_quantity=info["new_quantity"] if action != "delist" else None,
-                status="succeeded" if ok else "skipped" if skipped else "failed",
+                native_job_id=native_job_id,
+                status=final_status,
                 error=error,
                 next_retry_at=next_retry,
                 increment_attempts=not skipped,

@@ -11,8 +11,10 @@ Approved by the seller on 2026-11-22 (see AGENTS.md Invariant):
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import update
@@ -21,7 +23,9 @@ from sqlalchemy.orm import Session
 from anteroom.database import in_worker_session
 from anteroom.models.automation import ScheduledPublishLog
 from anteroom.models.conversation import Conversation, Photo, new_id
+from anteroom.models.job import ACTIVE_JOB_STATUSES, Job
 from anteroom.models.listing import Listing, ListingRevision
+from anteroom.models.marketplace_listing import MarketplaceListing
 from anteroom.services.marketplace_delist import MARKETPLACES
 from anteroom.services.validation import validate_listing
 
@@ -29,6 +33,8 @@ log = logging.getLogger("anteroom.draft_scheduling")
 
 SCHEDULABLE_MARKETPLACES = MARKETPLACES
 MAX_BULK_SCHEDULE = 100
+ABANDONED_PUBLISH_GRACE = timedelta(minutes=15)
+LIVE_PUBLISH_STATES = frozenset({"published", "pending_review"})
 
 
 class SchedulePublishError(ValueError):
@@ -72,7 +78,12 @@ def _normalize_marketplaces(marketplaces: list[str] | None) -> list[str]:
     return seen
 
 
-def _validate_ready(db: Session, conv_id: str) -> tuple[Listing, ListingRevision]:
+def _validate_ready(
+    db: Session,
+    conv_id: str,
+    *,
+    marketplaces: list[str] | None = None,
+) -> tuple[Listing, ListingRevision]:
     conv = db.get(Conversation, conv_id)
     if conv is None:
         raise SchedulePublishError("Listing not found.", 404)
@@ -85,7 +96,12 @@ def _validate_ready(db: Session, conv_id: str) -> tuple[Listing, ListingRevision
     if revision is None or not isinstance(revision.listing_json, dict):
         raise SchedulePublishError("Save a complete draft before marking it Ready to list.")
     photo_count = db.query(Photo).filter(Photo.conversation_id == conv_id, Photo.marketplace.is_(None)).count()
-    validation = validate_listing(revision.listing_json, photo_count, require_photos=True)
+    validation = validate_listing(
+        revision.listing_json,
+        photo_count,
+        require_photos=True,
+        selected_marketplaces=marketplaces,
+    )
     if not validation.valid:
         first = validation.errors[0].get("message") if validation.errors and isinstance(validation.errors[0], dict) else "Fix validation errors first."
         raise SchedulePublishError(f"Draft is not valid yet: {first}")
@@ -145,9 +161,11 @@ def set_ready_to_list(db: Session, conv_id: str, ready: bool) -> dict[str, Any]:
         listing, _revision = _validate_ready(db, conv_id)
         listing.ready_to_list = True
     else:
-        listing = db.query(Listing).filter(Listing.conversation_id == conv_id).first()
+        listing = db.query(Listing).filter(Listing.conversation_id == conv_id).with_for_update().first()
         if listing is None:
             return schedule_view(None, conv)
+        if listing.scheduled_status == "publishing":
+            raise SchedulePublishError("This draft is currently publishing and cannot be turned off yet.", 409)
         if listing.scheduled_status == "scheduled":
             _clear_schedule(db, listing, reason="Unscheduled because Ready to list was turned off.")
         listing.ready_to_list = False
@@ -196,7 +214,9 @@ def schedule_draft(
     when = _as_naive_utc(publish_at)
     if when <= moment:
         raise SchedulePublishError("Choose a future date and time to schedule publishing.")
-    listing, revision = _validate_ready(db, conv_id)
+    listing, revision = _validate_ready(db, conv_id, marketplaces=markets)
+    if listing.scheduled_status == "publishing":
+        raise SchedulePublishError("This draft is currently publishing and cannot be rescheduled yet.", 409)
     conv = db.get(Conversation, conv_id)
     listing.ready_to_list = True
     listing.scheduled_publish_at = when
@@ -223,7 +243,7 @@ def unschedule_draft(db: Session, conv_id: str, *, reason: str | None = None) ->
     conv = db.get(Conversation, conv_id)
     if conv is None:
         raise SchedulePublishError("Listing not found.", 404)
-    listing = db.query(Listing).filter(Listing.conversation_id == conv_id).first()
+    listing = db.query(Listing).filter(Listing.conversation_id == conv_id).with_for_update().first()
     if listing is None:
         return schedule_view(None, conv)
     if listing.scheduled_status == "publishing":
@@ -351,7 +371,7 @@ def _claim_due_drafts(db: Session, moment: datetime) -> list[dict[str, Any]]:
                 Listing.scheduled_publish_at == row.scheduled_publish_at,
                 Listing.ready_to_list.is_(True),
             )
-            .values(scheduled_status="publishing", scheduled_error=None)
+            .values(scheduled_status="publishing", scheduled_error=None, updated_at=moment)
         )
         if getattr(result, "rowcount", 0) != 1:
             continue
@@ -368,11 +388,13 @@ def _claim_due_drafts(db: Session, moment: datetime) -> list[dict[str, Any]]:
 
 def _settle_publish(db: Session, entry: dict[str, Any], outcome: dict[str, Any], moment: datetime) -> dict[str, Any]:
     ok = bool(outcome.get("ok"))
+    status_override = outcome.get("status_override")
     error = None if ok else str(outcome.get("error") or "Scheduled publish did not confirm.")
-    status = "published" if ok else "failed"
+    status = "published" if ok else (str(status_override) if status_override else "failed")
     values: dict[str, Any] = {
         "scheduled_status": status,
         "scheduled_error": error,
+        "updated_at": moment,
     }
     if ok:
         values["scheduled_publish_at"] = None
@@ -407,7 +429,8 @@ def _settle_publish(db: Session, entry: dict[str, Any], outcome: dict[str, Any],
     db.commit()
     if not ok:
         log.error(
-            "Scheduled publish failed for item %s on %s: %s",
+            "Scheduled publish %s for item %s on %s: %s",
+            status,
             entry["conversation_id"],
             ", ".join(entry["marketplaces"]),
             error,
@@ -421,12 +444,109 @@ def _settle_publish(db: Session, entry: dict[str, Any], outcome: dict[str, Any],
     }
 
 
+def _inspect_marketplace_outcome(db: Session, conv_id: str, markets: list[str]) -> dict[str, Any]:
+    """Check persisted MarketplaceListing states for an interrupted/abandoned publish claim."""
+    if not markets:
+        return {
+            "ok": False,
+            "status_override": "needs_review",
+            "error": "Scheduled publish stopped before confirming outcome. Review each marketplace before rescheduling.",
+        }
+    rows = {
+        row.marketplace: row
+        for row in db.query(MarketplaceListing)
+        .filter(MarketplaceListing.conversation_id == conv_id, MarketplaceListing.marketplace.in_(markets))
+        .all()
+    }
+    summary = {
+        market: {
+            "state": rows[market].state if market in rows else None,
+            "listing_id": rows[market].listing_id if market in rows else None,
+            "error": rows[market].error if market in rows else None,
+        }
+        for market in markets
+    }
+    if all(market in rows and rows[market].state in LIVE_PUBLISH_STATES for market in markets):
+        return {"ok": True, "recovered": True, "marketplaces": summary}
+    return {
+        "ok": False,
+        "status_override": "needs_review",
+        "recovered": True,
+        "marketplaces": summary,
+        "error": "Scheduled publish stopped before confirming every marketplace. Check each marketplace before rescheduling.",
+    }
+
+
+def _recover_entry(db: Session, entry: dict[str, Any], moment: datetime) -> dict[str, Any] | None:
+    """Reconcile an interrupted in-flight publish claim without retrying publication."""
+    active_job = (
+        db.query(Job.id)
+        .filter(Job.conversation_id == entry["conversation_id"], Job.status.in_(ACTIVE_JOB_STATUSES))
+        .first()
+    )
+    if active_job is not None:
+        return None
+    listing = (
+        db.query(Listing)
+        .filter(
+            Listing.conversation_id == entry["conversation_id"],
+            Listing.scheduled_status == "publishing",
+            Listing.scheduled_revision_id == entry["revision_id"],
+            Listing.scheduled_publish_at == entry["scheduled_for"],
+            Listing.scheduled_confirmed_at == entry.get("scheduled_confirmed_at"),
+        )
+        .with_for_update(skip_locked=True)
+        .first()
+    )
+    if listing is None:
+        return None
+    outcome = _inspect_marketplace_outcome(db, entry["conversation_id"], list(entry.get("marketplaces") or []))
+    return _settle_publish(db, entry, outcome, moment)
+
+
+def _recover_abandoned_publishes(db: Session, moment: datetime) -> list[dict[str, Any]]:
+    """Recover abandoned ``publishing`` claims older than the grace window with no active job."""
+    cutoff = moment - ABANDONED_PUBLISH_GRACE
+    stuck = (
+        db.query(Listing)
+        .filter(
+            Listing.scheduled_status == "publishing",
+            Listing.updated_at.isnot(None),
+            Listing.updated_at <= cutoff,
+        )
+        .with_for_update(skip_locked=True)
+        .all()
+    )
+    recovered: list[dict[str, Any]] = []
+    for row in stuck:
+        active_job = (
+            db.query(Job.id)
+            .filter(Job.conversation_id == row.conversation_id, Job.status.in_(ACTIVE_JOB_STATUSES))
+            .first()
+        )
+        if active_job is not None:
+            continue
+        markets = [m for m in (row.scheduled_marketplaces or []) if m in SCHEDULABLE_MARKETPLACES]
+        entry = {
+            "conversation_id": row.conversation_id,
+            "revision_id": row.scheduled_revision_id,
+            "marketplaces": markets,
+            "scheduled_for": row.scheduled_publish_at or moment,
+            "scheduled_confirmed_at": row.scheduled_confirmed_at,
+        }
+        outcome = _inspect_marketplace_outcome(db, row.conversation_id, markets)
+        recovered.append(_settle_publish(db, entry, outcome, moment))
+    return recovered
+
+
 async def run_due_scheduled_publishes(*, now: datetime | None = None, publisher=None) -> list[dict[str, Any]]:
     """Publish due drafts whose seller confirmation and revision are still valid.
 
-    Releases DB connections before any external marketplace await.
+    Recovers any abandoned ``publishing`` claims before permitting new attempts,
+    and releases DB connections before any external marketplace await.
     """
     moment = _as_naive_utc(now) if now is not None else _now()
+    await in_worker_session(_recover_abandoned_publishes, moment)
     if publisher is None:
         from anteroom.services.automation_actions import publish_revision
 
@@ -437,10 +557,18 @@ async def run_due_scheduled_publishes(*, now: datetime | None = None, publisher=
         if not due:
             break
         entry = due[0]
+        settled_done = False
         try:
-            result = await publisher(entry["conversation_id"], entry["marketplaces"], entry["revision_id"])
-        except Exception as exc:  # noqa: BLE001 - isolate one draft's publish failure
-            result = {"ok": False, "error": str(exc) or "Scheduled publish failed."}
-        settled = await in_worker_session(_settle_publish, entry, result, _now())
-        outcomes.append(settled)
+            try:
+                result = await publisher(entry["conversation_id"], entry["marketplaces"], entry["revision_id"])
+            except Exception as exc:  # noqa: BLE001 - isolate one draft's publish failure
+                result = {"ok": False, "error": str(exc) or "Scheduled publish failed."}
+            settled = await asyncio.shield(in_worker_session(_settle_publish, entry, result, _now()))
+            settled_done = True
+            outcomes.append(settled)
+        except BaseException:
+            if not settled_done:
+                with contextlib.suppress(BaseException):
+                    await asyncio.shield(in_worker_session(_recover_entry, entry, _now()))
+            raise
     return outcomes

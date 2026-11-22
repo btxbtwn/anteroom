@@ -507,6 +507,218 @@ class WaterfallAndPoshmarkBotTest(unittest.TestCase):
         self.assertEqual(floors_map[p1], 3500)
         self.assertEqual(floors_map[p2], 1500)
 
+    def test_regular_scan_enforces_waterfall_step_1_delay_before_sending(self):
+        # Finding #2: regular scan (like_events=None) persists first-seen eligible like timestamp and waits delay_minutes
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        from anteroom.models.marketplace_listing import MarketplaceListing
+
+        conv = Conversation(id="conv-wf-1", title="Waterfall Coat", status="listed")
+        posh_id = "5f0000000000000000000301"
+        self.db.add(conv)
+        self.db.add(MarketplaceListing(
+            conversation_id=conv.id,
+            marketplace="poshmark",
+            state="published",
+            listing_id=posh_id,
+            listing_url=f"https://poshmark.com/listing/{posh_id}",
+            listed_at=_now() - timedelta(days=5),
+        ))
+        rule = PromotionAutomation(
+            id="wf-regular-rule",
+            marketplace="poshmark",
+            action="offer",
+            name="Waterfall Offer",
+            enabled=True,
+            discount_percent=10,
+            min_likes=1,
+            minimum_price_cents=1000,
+            timezone="UTC",
+            next_run_at=_now() - timedelta(minutes=1),
+            waterfall_steps=[
+                {"step": 1, "discount_percent": 10, "delay_minutes": 30},
+                {"step": 2, "discount_percent": 15, "delay_minutes": 1440},
+            ],
+        )
+        self.db.add(rule)
+        self.db.commit()
+
+        async def fake_review(send, _conv_id, *, new_like_at=None):
+            send.listing_id = posh_id
+            send.like_count = 2
+            send.price_cents = 5000
+            send.offer_price_cents = 4500
+            send.floor_cents = 1000
+            send.shipping_options = []
+
+        perform_mock = AsyncMock(return_value={"state": "done"})
+
+        with (
+            patch("anteroom.services.listing_promotions.require_chrome", return_value=None),
+            patch("anteroom.services.listing_promotions.review", side_effect=fake_review),
+            patch("anteroom.services.listing_promotions.perform", perform_mock),
+        ):
+            # Scan 1 (regular scan): sees eligible likes, persists waiting marker, does NOT send yet
+            run1 = asyncio.run(promotion_automations.run_round(rule.id))
+            assert run1 is not None
+            self.assertEqual(run1.sent, 0)
+            self.assertEqual(run1.skipped, 1)
+            perform_mock.assert_not_awaited()
+
+            # Verify persisted first-seen timestamp
+            self.db.expire_all()
+            first_seen = listing_promotions.first_seen_waterfall_like_at(self.db, "poshmark", posh_id, "offer")
+            self.assertIsNotNone(first_seen)
+
+            # Scan 2 (still before 30m delay): still skipped, does NOT send
+            run2 = asyncio.run(promotion_automations.run_round(rule.id))
+            assert run2 is not None
+            self.assertEqual(run2.sent, 0)
+            self.assertEqual(run2.skipped, 1)
+            perform_mock.assert_not_awaited()
+
+            # Backdate the first-seen waiting row past the 30-minute delay -> Scan 3 sends step 1
+            waiting_row = self.db.query(ListingPromotion).filter_by(
+                marketplace="poshmark", listing_id=posh_id, state="skipped", waterfall_step=1,
+            ).one()
+            waiting_row.created_at = _now() - timedelta(minutes=35)
+            self.db.commit()
+
+            run3 = asyncio.run(promotion_automations.run_round(rule.id))
+            assert run3 is not None
+            self.assertEqual(run3.sent, 1)
+            perform_mock.assert_awaited_once()
+
+    def test_abandoned_account_send_releases_follow_budget_while_unknown_keeps_it(self):
+        # Finding #23: _abandon_account_send clears follow_budget to zero (not None!) so subsequent runs aren't blocked
+        import asyncio
+
+        now = _now()
+        row = ListingPromotion(
+            id="follow-abandon-1",
+            batch_id="b-ab",
+            marketplace="poshmark",
+            action="follow",
+            listing_id="__account__",
+            state="sending",
+            follow_budget={"active": 100, "followed": 1000, "unfollowed": 500},
+            sent_at=now,
+            expires_at=now + timedelta(minutes=15),
+        )
+        self.db.add(row)
+        self.db.commit()
+
+        asyncio.run(listing_promotions._abandon_account_send((row.id, {}, False)))
+        self.db.expire_all()
+        settled = self.db.get(ListingPromotion, row.id)
+        assert settled is not None
+        self.assertEqual(settled.state, "failed")
+        self.assertEqual(settled.follow_budget, {"active": 0, "followed": 0, "unfollowed": 0})
+
+        # Full follow allowance is restored after abandonment
+        payload, reservation = listing_promotions._follow_allowance(
+            self.db, "poshmark", {"reciprocal_24h": True, "new_active_sellers_cap": 100, "unfollow_cap": 40},
+        )
+        self.assertEqual(payload["remaining_follow_cap"], 1000)
+        self.assertEqual(reservation, {"active": 100, "followed": 1000, "unfollowed": 40})
+
+    def test_community_share_rechecks_approval_atomically_and_clamps_daily_cap_including_unknowns(self):
+        # Findings #24 and #25
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        now = _now()
+        rule = PromotionAutomation(
+            id="comm-cap-rule",
+            marketplace="poshmark",
+            action="share",
+            name="Community Share",
+            enabled=True,
+            daily_cap=20,
+            share_modes=["community"],
+            timezone="UTC",
+        )
+        self.db.add(rule)
+        # Existing unknown community share with reserved budget 12 + failed abandoned share with released budget 0
+        self.db.add_all([
+            ListingPromotion(
+                id="comm-unk-1", batch_id="b1", marketplace="poshmark", action="share",
+                listing_id="__account__", state="unknown", recipient_count=None,
+                follow_budget={"max_shares": 12}, sent_at=now - timedelta(minutes=5), expires_at=now,
+            ),
+            ListingPromotion(
+                id="comm-abandoned-1", batch_id="b2", marketplace="poshmark", action="share",
+                listing_id="__account__", state="failed", recipient_count=None,
+                follow_budget={"max_shares": 0}, sent_at=now - timedelta(minutes=3), expires_at=now,
+            ),
+        ])
+        self.db.commit()
+
+        # _shares_today charges 12 for unknown and 0 for abandoned failed row
+        self.assertEqual(promotion_automations._shares_today(self.db, "poshmark", now), 12)
+
+        # Next community share request for 50 is clamped to remaining 8 (20 - 12) and reserves {"max_shares": 8}
+        captured_payload: dict = {}
+
+        async def fake_cloud(_market, msg, **_kwargs):
+            captured_payload.update(msg["payload"])
+            return {"ok": True, "state": "done", "share_mode": "community", "recipient_count": 8}
+
+        with (
+            patch("anteroom.services.listing_promotions.require_chrome", return_value=None),
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch("anteroom.services.cloud_marketplace.execute", side_effect=fake_cloud),
+        ):
+            res = asyncio.run(listing_promotions.perform_account_action(
+                "poshmark",
+                "share",
+                automation_id=rule.id,
+                batch_id="b3",
+                extra_payload={"share_mode": "community", "max_shares": 50},
+            ))
+        self.assertEqual(captured_payload.get("max_shares"), 8)
+        self.assertEqual(res["state"], "done")
+        self.assertEqual(promotion_automations._shares_today(self.db, "poshmark", now), 20)
+
+        # Now cap is exhausted -> next community share raises daily_cap without calling cloud
+        cloud_mock = AsyncMock()
+        with (
+            patch("anteroom.services.listing_promotions.require_chrome", return_value=None),
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch("anteroom.services.cloud_marketplace.execute", cloud_mock),
+            self.assertRaises(listing_promotions.PromotionError) as cap_ctx,
+        ):
+            asyncio.run(listing_promotions.perform_account_action(
+                "poshmark",
+                "share",
+                automation_id=rule.id,
+                batch_id="b4",
+                extra_payload={"share_mode": "community", "max_shares": 10},
+            ))
+        self.assertEqual(cap_ctx.exception.code, "daily_cap")
+        cloud_mock.assert_not_awaited()
+
+        # Finding #24: removing "community" from share_modes or disabling rule aborts atomically with "paused"
+        rule.daily_cap = 100
+        rule.share_modes = ["self"]
+        self.db.commit()
+        with (
+            patch("anteroom.services.listing_promotions.require_chrome", return_value=None),
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch("anteroom.services.cloud_marketplace.execute", cloud_mock),
+            self.assertRaises(listing_promotions.PromotionError) as paused_ctx,
+        ):
+            asyncio.run(listing_promotions.perform_account_action(
+                "poshmark",
+                "share",
+                automation_id=rule.id,
+                batch_id="b5",
+                extra_payload={"share_mode": "community", "max_shares": 10},
+            ))
+        self.assertEqual(paused_ctx.exception.code, "paused")
+        cloud_mock.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

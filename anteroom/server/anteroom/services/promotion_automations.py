@@ -473,12 +473,33 @@ def activity(db: Session, automation_id: str, limit: int = 50) -> dict:
 
 
 def _shares_today(db: Session, marketplace: str, now: datetime) -> int:
-    total = db.query(func.coalesce(func.sum(func.coalesce(ListingPromotion.recipient_count, 1)), 0)).filter(
+    rows = db.query(
+        ListingPromotion.listing_id,
+        ListingPromotion.state,
+        ListingPromotion.recipient_count,
+        ListingPromotion.follow_budget,
+    ).filter(
         ListingPromotion.marketplace == marketplace,
         ListingPromotion.action == "share",
         ListingPromotion.sent_at > now - timedelta(hours=24),
-    ).scalar()
-    return int(total or 0)
+    ).all()
+    total = 0
+    for listing_id, state, recipient_count, follow_budget in rows:
+        if listing_id == "__account__":
+            if state == "failed":
+                if isinstance(follow_budget, dict) and type(follow_budget.get("max_shares")) is int:
+                    total += max(0, int(follow_budget["max_shares"]))
+                elif recipient_count is not None:
+                    total += max(0, int(recipient_count))
+            elif recipient_count is not None:
+                total += max(0, int(recipient_count))
+            elif isinstance(follow_budget, dict) and type(follow_budget.get("max_shares")) is int:
+                total += max(0, int(follow_budget["max_shares"]))
+            else:
+                total += 50
+        else:
+            total += max(0, int(recipient_count)) if recipient_count is not None else 1
+    return total
 
 
 def _order(db: Session, row: PromotionAutomation, targets: list) -> list:
@@ -664,21 +685,27 @@ def _check_offer_target(
     listing_id: str,
     new_like_at: datetime | None,
     action: str = "offer",
-) -> tuple[bool, str | None, dict | None]:
+) -> tuple[bool, str | None, dict | None, datetime | None]:
     row = db.get(PromotionAutomation, automation_id)
     if not row or not row.enabled:
-        return False, None, None
+        return False, None, None, None
     blocked = promotions.blocking(db, marketplace, listing_id, action, new_like_at=new_like_at)
     if blocked:
-        return True, blocked, None
+        return True, blocked, None, None
     if row.waterfall_steps:
+        first_seen = (
+            promotions.first_seen_waterfall_like_at(db, marketplace, listing_id, action)
+            if new_like_at is None
+            else None
+        )
+        effective_like_at = new_like_at if new_like_at is not None else first_seen
         step, skip_reason = promotions.next_waterfall_step(
-            db, marketplace, listing_id, action, row.waterfall_steps, new_like_at=new_like_at,
+            db, marketplace, listing_id, action, row.waterfall_steps, new_like_at=effective_like_at,
         )
         if skip_reason:
-            return True, skip_reason, None
-        return True, None, step
-    return True, None, None
+            return True, skip_reason, None, first_seen
+        return True, None, step, first_seen
+    return True, None, None, None
 
 
 def _record_review_failure(
@@ -806,6 +833,8 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
             new_like_at = like_events.get(listing_id) if like_events is not None else None
             chosen_discount = rule["discount_percent"]
             chosen_waterfall_step: int | None = None
+            chosen_step: dict | None = None
+            first_seen_like_at: datetime | None = None
             if action in ("offer", "bundle_offer"):
                 if listing_id in waiting:
                     if not await in_worker_session(_check_enabled, automation_id):
@@ -823,7 +852,7 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
                     counts["skipped"] += 1
                     reasons[HELD_AFTER_REFUSAL] += 1
                     continue
-                enabled, blocked, step = await in_worker_session(
+                enabled, blocked, step, first_seen_like_at = await in_worker_session(
                     _check_offer_target, automation_id, marketplace, listing_id, new_like_at, action,
                 )
                 if not enabled:
@@ -839,6 +868,7 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
                     reasons[reason] += 1
                     continue
                 if step is not None:
+                    chosen_step = step
                     chosen_discount = int(step["discount_percent"])
                     chosen_waterfall_step = int(step["step"])
                 if reads >= OFFER_READS:
@@ -874,6 +904,14 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
                         last = await in_worker_session(promotions.likes_at_last_offer, marketplace, listing_id)
                         if new_like_at is None and last is not None and cast(int, send.like_count) <= last:
                             raise PromotionError(409, "no new likers since the last offer")
+                    if (
+                        chosen_waterfall_step == 1
+                        and chosen_step is not None
+                        and new_like_at is None
+                        and first_seen_like_at is None
+                        and int(chosen_step.get("delay_minutes") or 0) > 0
+                    ):
+                        raise PromotionError(409, f"waiting {int(chosen_step['delay_minutes'])}m before waterfall step 1")
                     shipping = _shipping_choice_for(marketplace, rule["shipping_label"], send)
             except PromotionError as exc:
                 # Review only reads, but its refusal still belongs in the

@@ -247,6 +247,7 @@ def save_rule(db: Session, marketplace: str, body: dict[str, Any], *, confirm: b
         price_floor = round(float(price_floor), 2) if price_floor not in (None, "") else None
 
     filters = _clean_filters(body.get("filters"))
+    # Active buyer offers must always be checked and skipped before deleting a live listing.
 
     with listing_mode.guard(db):
         row = db.query(MarketplaceRelistRule).filter_by(marketplace=market).first()
@@ -290,7 +291,7 @@ def is_due_for_relist(marketplace: str, listed_at: datetime | None, rule: Market
     if marketplace == "ebay":
         before_mins = int(rule.ebay_recreate_before_gtc_minutes or DEFAULT_EBAY_GTC_MINUTES)
         threshold = EBAY_GTC_CYCLE - timedelta(minutes=before_mins)
-        return age >= threshold
+        return threshold <= age < EBAY_GTC_CYCLE
     return age >= timedelta(days=max(int(rule.min_age_days or MIN_AGE_DAYS_STANDARD), MIN_AGE_DAYS_STANDARD))
 
 
@@ -534,6 +535,11 @@ def _prepare_price_revision(db: Session, conv_id: str, new_price: float | None, 
     return saved.id
 
 
+PENDING_STAGE_DELETING = "stage:deleting"
+PENDING_STAGE_PUBLISHING = "stage:publishing"
+PENDING_NO_JOB_GRACE = timedelta(minutes=15)
+
+
 def _reconcile_pending_relists(
     db: Session,
     moment: datetime,
@@ -542,9 +548,9 @@ def _reconcile_pending_relists(
     """Reconcile any ``relist_pending`` logs against settled marketplace records.
 
     Returns the set of ``(conversation_id, marketplace)`` pairs still waiting on
-    an active publish job so subsequent sweeps never trigger a duplicate relist.
+    an active or unverified publish so subsequent sweeps never trigger a duplicate relist.
     """
-    from anteroom.models.job import ACTIVE_JOB_STATUSES
+    from anteroom.models.job import ACTIVE_JOB_STATUSES, Job
     from anteroom.repositories.queries import JobRepo
 
     query = db.query(MarketplaceRelistLog).filter(MarketplaceRelistLog.status == "relist_pending")
@@ -563,12 +569,53 @@ def _reconcile_pending_relists(
             .filter_by(conversation_id=row.conversation_id, marketplace=row.marketplace)
             .first()
         )
-        job = job_repo.get(row.native_job_id) if row.native_job_id else None
-        if (ml is None or job is None or job.conversation_id != row.conversation_id
-                or ml.job_id != row.native_job_id or job.status in ACTIVE_JOB_STATUSES):
+        if row.native_job_id:
+            job = job_repo.get(row.native_job_id)
+            if (ml is None or job is None or job.conversation_id != row.conversation_id
+                    or ml.job_id != row.native_job_id or job.status in ACTIVE_JOB_STATUSES):
+                still_pending.add((row.conversation_id, row.marketplace))
+                continue
+            if job.status == "completed" and ml.state in LIVE_STATES and ml.listing_id and ml.listing_id != row.old_listing_id:
+                swap_tracked_listing_id(
+                    db,
+                    row.conversation_id,
+                    row.marketplace,
+                    old_listing_id=row.old_listing_id,
+                    new_listing_id=str(ml.listing_id),
+                    new_listing_url=ml.listing_url,
+                    new_price=row.new_price,
+                    now=moment,
+                )
+                row.status = "completed"
+                row.new_listing_id = str(ml.listing_id)
+                row.reason = None
+                changed = True
+                continue
+            row.status = "down_needs_relist"
+            if ml is not None and ml.error:
+                row.reason = str(ml.error)[:500]
+            changed = True
+            continue
+
+        # No native_job_id recorded yet (e.g. crashed during delete or before list_now returned):
+        # verify marketplace state before clearing the hold or offering recovery; never retry publish.
+        active_conv_job = (
+            db.query(Job.id)
+            .filter(Job.conversation_id == row.conversation_id, Job.status.in_(ACTIVE_JOB_STATUSES))
+            .first()
+        )
+        if active_conv_job is not None:
             still_pending.add((row.conversation_id, row.marketplace))
             continue
-        if job.status == "completed" and ml.state in LIVE_STATES and ml.listing_id and ml.listing_id != row.old_listing_id:
+        ml_listed_at = _as_naive_utc(ml.listed_at) if (ml is not None and ml.listed_at is not None) else None
+        if (
+            ml is not None
+            and ml.state in LIVE_STATES
+            and ml.listing_id
+            and ml.listing_id != row.old_listing_id
+            and ml_listed_at is not None
+            and ml_listed_at >= row.created_at
+        ):
             swap_tracked_listing_id(
                 db,
                 row.conversation_id,
@@ -584,10 +631,16 @@ def _reconcile_pending_relists(
             row.reason = None
             changed = True
             continue
-        row.status = "down_needs_relist"
-        if ml is not None and ml.error:
-            row.reason = str(ml.error)[:500]
-        changed = True
+        reason_text = str(row.reason or "")
+        aged_out = row.created_at <= moment - PENDING_NO_JOB_GRACE
+        if aged_out and reason_text.startswith(PENDING_STAGE_PUBLISHING) and (
+            ml is None or ml.state not in LIVE_STATES or ml.listing_id != row.old_listing_id
+        ):
+            row.status = "down_needs_relist"
+            row.reason = "Old listing was delisted before a replacement job ID was recorded; verify marketplace before relisting."
+            changed = True
+            continue
+        still_pending.add((row.conversation_id, row.marketplace))
     if changed:
         db.commit()
     return still_pending
@@ -613,6 +666,7 @@ def _load_enabled_rules_and_candidates(
         for item in candidates:
             if (item["conversation_id"], rule.marketplace) in still_pending:
                 continue
+            # Always check local active buyer offers regardless of rule.skip_active_offers.
             local_offer = has_active_buyer_offer_local(db, item["conversation_id"], rule.marketplace, item["listing_id"])
             new_price = compute_relist_price(item["price"], rule)
             plan.append({
@@ -658,7 +712,8 @@ def _record_log(
                                   marketplace=marketplace, old_listing_id=old_listing_id,
                                   old_price=old_price, new_price=new_price, created_at=moment)
         db.add(row)
-    row.native_job_id = native_job_id
+    if native_job_id is not None:
+        row.native_job_id = native_job_id
     row.new_listing_id = new_listing_id
     row.status = status
     row.reason = reason
@@ -681,33 +736,121 @@ def _rule_enabled(db: Session, rule_id: str) -> bool:
     return bool(rule and rule.enabled)
 
 
-def _reserve_relist(db: Session, entry: dict[str, Any], attempt_id: str) -> bool:
-    """Serialize cap consumption and reject stale plans before the first write."""
-    with listing_mode.guard(db):
-        rule = db.query(MarketplaceRelistRule).filter_by(id=entry["rule_id"]).with_for_update().first()
-        moment = _now()
-        if not rule or not rule.enabled or _relisted_last_24h(db, rule.marketplace, moment) >= min(rule.daily_cap, MAX_DAILY_CAP):
-            return False
-        pending = db.query(MarketplaceRelistLog.id).filter_by(
-            conversation_id=entry["conversation_id"], marketplace=rule.marketplace, status="relist_pending",
-        ).first()
-        if pending:
-            return False
-        candidate = next((item for item in _eligible_candidates(db, rule, moment)
-                          if item["conversation_id"] == entry["conversation_id"]), None)
-        if (not candidate or candidate["listing_id"] != entry["listing_id"]
-                or candidate["revision_id"] != entry["revision_id"]
-                or compute_relist_price(candidate["price"], rule) != entry["new_price"]):
-            return False
-        _record_log(db, attempt_id=attempt_id, conv_id=entry["conversation_id"], marketplace=rule.marketplace,
-                    old_listing_id=entry["listing_id"], new_listing_id=None, old_price=entry["price"],
-                    new_price=entry["new_price"], status="relist_pending",
-                    reason="Relist started; verify the marketplace outcome before retrying.", moment=moment)
-        return True
-
-
 def _record_log_payload(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
     return _record_log(db, **payload)
+
+
+def _reserve_relist_attempt(
+    db: Session,
+    entry: dict[str, Any],
+    moment: datetime,
+) -> dict[str, Any]:
+    """Serialize rule-enabled check, daily-cap reservation, candidate freshness, and revision prep."""
+    rule_id = entry["rule_id"]
+    conv_id = entry["conversation_id"]
+    marketplace = entry["marketplace"]
+    old_listing_id = entry["listing_id"]
+    old_price = entry["price"]
+    new_price = entry["new_price"]
+    current_revision_id = entry["revision_id"]
+    with listing_mode.guard(db):
+        rule = (
+            db.query(MarketplaceRelistRule)
+            .filter(MarketplaceRelistRule.id == rule_id)
+            .with_for_update()
+            .first()
+        )
+        if rule is None or not rule.enabled:
+            outcome = _record_log(
+                db,
+                conv_id=conv_id,
+                marketplace=marketplace,
+                old_listing_id=old_listing_id,
+                new_listing_id=None,
+                old_price=old_price,
+                new_price=old_price,
+                status="skipped_rule_disabled",
+                reason="Skipped because auto-relist was turned off before delisting.",
+                moment=moment,
+            )
+            return {"reserved": False, "outcome": outcome}
+
+        existing_pending = (
+            db.query(MarketplaceRelistLog.id)
+            .filter(
+                MarketplaceRelistLog.conversation_id == conv_id,
+                MarketplaceRelistLog.marketplace == marketplace,
+                MarketplaceRelistLog.status == "relist_pending",
+            )
+            .first()
+        )
+        if existing_pending is not None:
+            return {"reserved": False, "outcome": None}
+
+        done_today = _relisted_last_24h(db, marketplace, moment)
+        cap = min(int(rule.daily_cap), MAX_DAILY_CAP)
+        if done_today >= cap:
+            return {"reserved": False, "outcome": None}
+
+        candidate = next(
+            (item for item in _eligible_candidates(db, rule, moment) if item["conversation_id"] == conv_id),
+            None,
+        )
+        if (
+            candidate is None
+            or candidate["listing_id"] != old_listing_id
+            or candidate["revision_id"] != current_revision_id
+            or compute_relist_price(candidate["price"], rule) != new_price
+        ):
+            return {"reserved": False, "outcome": None}
+
+        revision_id = _prepare_price_revision(db, conv_id, new_price, current_revision_id)
+        if not revision_id:
+            outcome = _record_log(
+                db,
+                conv_id=conv_id,
+                marketplace=marketplace,
+                old_listing_id=old_listing_id,
+                new_listing_id=None,
+                old_price=old_price,
+                new_price=new_price,
+                status="failed",
+                reason="Listing has no saved revision to relist.",
+                moment=moment,
+            )
+            return {"reserved": False, "outcome": outcome}
+
+        attempt_id = new_id()
+        _record_log(
+            db,
+            attempt_id=attempt_id,
+            conv_id=conv_id,
+            marketplace=marketplace,
+            old_listing_id=old_listing_id,
+            new_listing_id=None,
+            old_price=old_price,
+            new_price=new_price,
+            status="relist_pending",
+            reason=f"{PENDING_STAGE_DELETING} | Delisting old listing before relist.",
+            moment=moment,
+        )
+        return {"reserved": True, "attempt_id": attempt_id, "revision_id": revision_id}
+
+
+def _update_attempt_stage(
+    db: Session,
+    attempt_id: str,
+    reason: str | None = None,
+    native_job_id: str | None = None,
+) -> None:
+    row = db.get(MarketplaceRelistLog, attempt_id)
+    if row is None or row.status != "relist_pending":
+        return
+    if reason is not None:
+        row.reason = reason
+    if native_job_id is not None:
+        row.native_job_id = native_job_id
+    db.commit()
 
 
 async def check_active_buyer_offer(marketplace: str, listing_id: str) -> bool | None:
@@ -820,34 +963,70 @@ async def run_auto_relist(
             for entry in plan
         ]
 
-    async def _default_delister(conv_id: str, marketplace: str, listing_id: str, rule_id: str) -> dict[str, Any]:
+    async def _run_delist(
+        conv_id: str, marketplace: str, expected_listing_id: str, rule_id: str
+    ) -> dict[str, Any]:
+        if not await in_worker_session(_rule_enabled, rule_id):
+            return {
+                "ok": False,
+                "skipped": True,
+                "error": "The relist rule was turned off. Nothing was delisted.",
+            }
+        if delister is not None:
+            return await delister(conv_id, marketplace)
         from anteroom.services.marketplace_delist import DelistError, delist as default_delist
 
         try:
-            res = await default_delist(conv_id, [marketplace], confirm=True, expected={marketplace: listing_id},
-                                       relist_rule_id=rule_id)
+            res = await default_delist(
+                conv_id,
+                [marketplace],
+                confirm=True,
+                expected={marketplace: expected_listing_id},
+                relist_rule_id=rule_id,
+            )
         except DelistError as exc:
-            if exc.reason != "relist_rule_disabled":
-                raise
-            return {"ok": False, "skipped": True, "error": str(exc)}
-        entry = res.get(marketplace) or {}
-        return {"ok": entry.get("state") == "deleted", "error": entry.get("error"), "detail": entry}
+            if exc.reason == "relist_rule_disabled":
+                return {"ok": False, "skipped": True, "error": str(exc)}
+            return {"ok": False, "error": str(exc)}
+        entry_res = res.get(marketplace) or {}
+        return {"ok": entry_res.get("state") == "deleted", "error": entry_res.get("error"), "detail": entry_res}
 
-    async def _default_lister(conv_id: str, marketplace: str, revision_id: str, rule_id: str) -> dict[str, Any]:
+    async def _run_list(
+        conv_id: str, marketplace: str, revision_id: str, attempt_id: str, rule_id: str
+    ) -> dict[str, Any]:
+        if lister is not None:
+            if not await in_worker_session(_rule_enabled, rule_id):
+                return {"ok": False, "skipped": True, "error": RULE_DISABLED_AFTER_DELETE}
+            return await lister(conv_id, marketplace, revision_id)
         from anteroom.services.automation_actions import _turn, wait_for_native_result
         from anteroom.services.native_marketplaces import ListRequest, NativeMarketplaceError, list_now
 
-        async with _turn(marketplace):
-            if not await in_worker_session(_rule_enabled, rule_id):
-                return {"ok": False, "skipped": True, "error": RULE_DISABLED_AFTER_DELETE}
-            try:
-                res = await list_now(conv_id, cast(Any, marketplace), ListRequest(revision_id=revision_id, confirm=True),
-                                     relist_rule_id=rule_id)
-            except NativeMarketplaceError as exc:
-                if exc.reason != "relist_rule_disabled":
-                    raise
-                return {"ok": False, "skipped": True, "error": RULE_DISABLED_AFTER_DELETE}
-            res = await wait_for_native_result(conv_id, marketplace, res)
+        try:
+            async with _turn(marketplace):
+                if not await in_worker_session(_rule_enabled, rule_id):
+                    return {"ok": False, "skipped": True, "error": RULE_DISABLED_AFTER_DELETE}
+                try:
+                    res = await list_now(
+                        conv_id,
+                        cast(Any, marketplace),
+                        ListRequest(revision_id=revision_id, confirm=True),
+                        relist_rule_id=rule_id,
+                    )
+                except NativeMarketplaceError as exc:
+                    if exc.reason == "relist_rule_disabled":
+                        return {"ok": False, "skipped": True, "error": RULE_DISABLED_AFTER_DELETE}
+                    return {"ok": False, "error": str(exc)}
+                dispatched_job_id = res.get("job_id")
+                if dispatched_job_id:
+                    await in_worker_session(
+                        _update_attempt_stage,
+                        attempt_id,
+                        None,
+                        str(dispatched_job_id),
+                    )
+                res = await wait_for_native_result(conv_id, marketplace, res)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": str(exc)}
         ok = res.get("state") in LIVE_STATES and not res.get("error")
         new_id_val = res.get("listing_id") or extract_listing_id(marketplace, res.get("listing_url"))
         return {
@@ -866,6 +1045,10 @@ async def run_auto_relist(
         conv_id = entry["conversation_id"]
         market = entry["marketplace"]
         old_id = entry["listing_id"]
+        rule_id = entry["rule_id"]
+        step_now = moment if now is not None else _now()
+
+        # Always verify no active incoming buyer offer before deleting a live listing.
         offer_status = True if entry["local_active_offer"] else None
         if offer_status is None:
             try:
@@ -883,59 +1066,53 @@ async def run_auto_relist(
                 "status": "skipped_active_offer" if offer_status is True else "skipped_offer_unverified",
                 "reason": ("Skipped because this listing has an active incoming buyer offer." if offer_status is True
                            else "Skipped because Anteroom could not verify incoming buyer offers."),
-                "moment": _now(),
+                "moment": step_now,
             }))
             continue
 
-        attempt_id = new_id()
-        if not await in_worker_session(_reserve_relist, entry, attempt_id):
-            continue
-        revision_id = await in_worker_session(_prepare_price_revision, conv_id, entry["new_price"], entry["revision_id"])
-        if not revision_id:
-            outcomes.append(await in_worker_session(_record_log_payload, {
-                "attempt_id": attempt_id, "conv_id": conv_id,
-                "marketplace": market,
-                "old_listing_id": old_id,
-                "new_listing_id": None,
-                "old_price": entry["price"],
-                "new_price": entry["new_price"],
-                "status": "failed",
-                "reason": "Listing has no saved revision to relist.",
-                "moment": _now(),
-            }))
+        # Atomically lock the rule, re-check rule.enabled and daily cap, prepare revision,
+        # and commit a relist_pending row before dispatching either external write.
+        reservation = await in_worker_session(_reserve_relist_attempt, entry, step_now)
+        if not reservation["reserved"]:
+            if reservation.get("outcome") is not None:
+                outcomes.append(reservation["outcome"])
             continue
 
-        if not await in_worker_session(_rule_enabled, entry["rule_id"]):
-            delist_res = {"ok": False, "skipped": True, "error": "The relist rule was turned off. Nothing was delisted."}
-        elif delister is None:
-            delist_res = await _default_delister(conv_id, market, old_id, entry["rule_id"])
-        else:
-            delist_res = await delister(conv_id, market)
+        attempt_id = reservation["attempt_id"]
+        revision_id = reservation["revision_id"]
+
+        delist_res = await _run_delist(conv_id, market, old_id, rule_id)
         if not delist_res.get("ok"):
+            delist_status = "skipped_rule_disabled" if delist_res.get("skipped") else "failed"
             outcomes.append(await in_worker_session(_record_log_payload, {
                 "attempt_id": attempt_id, "conv_id": conv_id,
                 "marketplace": market,
                 "old_listing_id": old_id,
                 "new_listing_id": None,
                 "old_price": entry["price"],
-                "new_price": entry["new_price"],
-                "status": "skipped_rule_disabled" if delist_res.get("skipped") else "failed",
+                "new_price": entry["price"] if delist_status == "skipped_rule_disabled" else entry["new_price"],
+                "status": delist_status,
                 "reason": str(delist_res.get("error") or "Could not delist the old listing."),
-                "moment": _now(),
+                "moment": moment if now is not None else _now(),
             }))
             continue
 
-        if lister is None:
-            list_res = await _default_lister(conv_id, market, revision_id, entry["rule_id"])
-        elif await in_worker_session(_rule_enabled, entry["rule_id"]):
-            list_res = await lister(conv_id, market, revision_id)
-        else:
-            list_res = {"ok": False, "skipped": True, "error": RULE_DISABLED_AFTER_DELETE}
+        await in_worker_session(
+            _update_attempt_stage,
+            attempt_id,
+            f"{PENDING_STAGE_PUBLISHING} | Old listing delisted; publishing replacement listing.",
+        )
+
+        list_res = await _run_list(conv_id, market, revision_id, attempt_id, rule_id)
         new_id_val = list_res.get("listing_id") or extract_listing_id(market, list_res.get("listing_url"))
         if not list_res.get("ok") or not new_id_val:
             error_msg = str(list_res.get("error") or "Old listing was delisted, but relist did not confirm.")
-            status = ("skipped_rule_disabled" if list_res.get("skipped") else
-                      "relist_pending" if list_res.get("timed_out") else "down_needs_relist")
+            if list_res.get("skipped"):
+                status = "skipped_rule_disabled"
+            elif list_res.get("timed_out"):
+                status = "relist_pending"
+            else:
+                status = "down_needs_relist"
             outcomes.append(await in_worker_session(_record_log_payload, {
                 "attempt_id": attempt_id, "conv_id": conv_id,
                 "marketplace": market,
@@ -946,11 +1123,13 @@ async def run_auto_relist(
                 "status": status,
                 "native_job_id": list_res.get("native_job_id"),
                 "reason": error_msg,
-                "moment": _now(),
+                "moment": moment if now is not None else _now(),
             }))
             if status == "relist_pending":
                 log.warning("Auto-relist publish timed out on %s for %s; marked relist_pending for reconciliation: %s", market, conv_id, error_msg)
-            elif status == "down_needs_relist":
+            elif status == "skipped_rule_disabled":
+                log.info("Auto-relist stopped recreating %s on %s because rule was turned off: %s", conv_id, market, error_msg)
+            else:
                 log.error("Auto-relist left item %s down on %s: %s", conv_id, market, error_msg)
             continue
 
@@ -963,7 +1142,7 @@ async def run_auto_relist(
             "new_price": entry["new_price"],
             "status": "completed",
             "reason": None,
-            "moment": _now(),
+            "moment": moment if now is not None else _now(),
             "new_listing_url": list_res.get("listing_url"),
         }))
 

@@ -185,7 +185,9 @@ def _job_outcome(db: Session, job_id: str) -> tuple[str | None, str | None] | No
 
 async def _native_one(conv_id: str, name: str, revision_id: str, kind: str) -> dict:
     """One List or Update on one marketplace, waited on until the marketplace answers. Never retried."""
-    from anteroom.services.native_marketplaces import ListRequest, NativeMarketplaceError, list_now, update_live
+    from typing import cast
+
+    from anteroom.services.native_marketplaces import ListRequest, Marketplace, NativeMarketplaceError, list_now, update_live
 
     verb = "relist" if kind == "list" else "update"
     start = list_now if kind == "list" else update_live
@@ -196,7 +198,7 @@ async def _native_one(conv_id: str, name: str, revision_id: str, kind: str) -> d
             return stalled
         try:
             # This call follows the seller's consumed item-specific approval.
-            result = await start(conv_id, name, ListRequest(revision_id=revision_id, confirm=True))
+            result = await start(conv_id, cast(Marketplace, name), ListRequest(revision_id=revision_id, confirm=True))
         except NativeMarketplaceError as exc:
             return {"ok": False, "marketplace": name, "error": str(exc)}
         if result.get("job_id") and not await _wait_for_job(result["job_id"]):

@@ -41,6 +41,15 @@ def _valid_listing_json(**overrides) -> dict:
         "weight_lb": 1,
         "weight_oz": 4,
         "package_dimensions_in": "13x10x3",
+        "ebay_specifics": {
+            "brand": "Patagonia",
+            "department": "Women",
+            "size": "L",
+            "sizeType": "Regular",
+            "style": "Straight",
+            "color": "Gray",
+            "type": "Jeans",
+        },
     }
     base.update(overrides)
     return base
@@ -701,6 +710,214 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         reconciled = self.db.query(MarketplaceRelistLog).filter_by(conversation_id=conv.id).one()
         self.assertEqual(reconciled.status, "completed")
         self.assertEqual(reconciled.new_listing_id, new_posh)
+
+    def test_schedule_validates_target_marketplaces_and_blocks_mutations_while_publishing(self):
+        # Finding #4: missing eBay specifics is rejected when scheduling for ["ebay"] even if selected marketplaces is []
+        c_missing, _lm, _rm = self._create_draft("Missing Ebay Fields", ebay_specifics={})
+        future = _now() + timedelta(hours=2)
+        with self.assertRaises(draft_scheduling.SchedulePublishError) as ctx:
+            draft_scheduling.schedule_draft(
+                self.db, c_missing.id, publish_at=future, marketplaces=["ebay"], confirm=True,
+            )
+        self.assertEqual(ctx.exception.status_code, 400)
+
+        # Finding #6: unschedule, ready=False, and reschedule all return 409 while publishing
+        c_pub, l_pub, _rp = self._create_draft("Currently Publishing")
+        l_pub.ready_to_list = True
+        l_pub.scheduled_publish_at = _now() - timedelta(minutes=1)
+        l_pub.scheduled_marketplaces = ["poshmark"]
+        l_pub.scheduled_revision_id = l_pub.current_revision_id
+        l_pub.scheduled_confirmed_at = _now() - timedelta(minutes=5)
+        l_pub.scheduled_status = "publishing"
+        self.db.commit()
+
+        with self.assertRaises(draft_scheduling.SchedulePublishError) as u_ctx:
+            draft_scheduling.unschedule_draft(self.db, c_pub.id)
+        self.assertEqual(u_ctx.exception.status_code, 409)
+
+        with self.assertRaises(draft_scheduling.SchedulePublishError) as r_ctx:
+            draft_scheduling.set_ready_to_list(self.db, c_pub.id, False)
+        self.assertEqual(r_ctx.exception.status_code, 409)
+
+        with self.assertRaises(draft_scheduling.SchedulePublishError) as s_ctx:
+            draft_scheduling.schedule_draft(
+                self.db, c_pub.id, publish_at=future, marketplaces=["poshmark"], confirm=True,
+            )
+        self.assertEqual(s_ctx.exception.status_code, 409)
+
+    def test_abandoned_publishing_recovery_and_cancellation_settlement(self):
+        # Finding #5: stale publishing rows recover to published when live, or needs_review when unknown
+        c_live, l_live, r_live = self._create_draft("Abandoned Live Draft")
+        c_unk, l_unk, r_unk = self._create_draft("Abandoned Unknown Draft")
+        stale_ts = _now() - draft_scheduling.ABANDONED_PUBLISH_GRACE - timedelta(minutes=5)
+
+        for listing, rev in ((l_live, r_live), (l_unk, r_unk)):
+            listing.ready_to_list = True
+            listing.scheduled_publish_at = stale_ts - timedelta(minutes=1)
+            listing.scheduled_marketplaces = ["poshmark"]
+            listing.scheduled_revision_id = rev.id
+            listing.scheduled_confirmed_at = stale_ts - timedelta(minutes=5)
+            listing.scheduled_status = "publishing"
+            listing.updated_at = stale_ts
+        self.db.add(MarketplaceListing(
+            id=new_id(),
+            conversation_id=c_live.id,
+            marketplace="poshmark",
+            state="published",
+            listing_id="5f0000000000000000000999",
+            listing_url="https://poshmark.com/listing/5f0000000000000000000999",
+            listed_at=stale_ts + timedelta(seconds=10),
+        ))
+        self.db.commit()
+
+        asyncio.run(draft_scheduling.run_due_scheduled_publishes(now=_now()))
+        self.db.expire_all()
+        self.assertEqual(self.db.query(Listing).filter_by(conversation_id=c_live.id).one().scheduled_status, "published")
+        self.assertEqual(self.db.query(Listing).filter_by(conversation_id=c_unk.id).one().scheduled_status, "needs_review")
+
+    def test_auto_relist_enforces_offer_check_ebay_upper_bound_and_rechecks_disabled_rule(self):
+        from unittest.mock import AsyncMock
+
+        # Finding #7: save_rule forces skip_active_offers=True even if caller sends False
+        saved = auto_relist.save_rule(
+            self.db,
+            "poshmark",
+            {"enabled": True, "min_age_days": 30, "daily_cap": 5, "skip_active_offers": False},
+            confirm=True,
+        )
+        self.assertTrue(saved["skip_active_offers"])
+
+        # Finding #10: eBay GTC is NOT due once age >= 30 days
+        ebay_rule = MarketplaceRelistRule(
+            id=new_id(),
+            marketplace="ebay",
+            enabled=True,
+            min_age_days=30,
+            ebay_recreate_before_gtc_minutes=30,
+            daily_cap=5,
+            skip_active_offers=True,
+        )
+        now = _now()
+        self.assertTrue(auto_relist.is_due_for_relist("ebay", now - timedelta(days=30) + timedelta(minutes=15), ebay_rule, now))
+        self.assertFalse(auto_relist.is_due_for_relist("ebay", now - timedelta(days=30), ebay_rule, now))
+        self.assertFalse(auto_relist.is_due_for_relist("ebay", now - timedelta(days=35), ebay_rule, now))
+
+        # Finding #7 + #26: legacy skip_active_offers=False row still checks offers; disabling mid-run skips cleanly
+        conv, _l, _r = self._create_draft("Disable Mid Run Jacket")
+        conv.status = "listed"
+        posh_id = "5f0000000000000000000777"
+        self.db.add(MarketplaceListing(
+            id=new_id(),
+            conversation_id=conv.id,
+            marketplace="poshmark",
+            state="published",
+            listing_id=posh_id,
+            listing_url=f"https://poshmark.com/listing/{posh_id}",
+            listed_at=now - timedelta(days=45),
+            listed_price=58.0,
+        ))
+        rule = self.db.query(MarketplaceRelistRule).filter_by(marketplace="poshmark").one()
+        rule.skip_active_offers = False  # simulate legacy DB row
+        self.db.commit()
+
+        # Active offer blocks relist even when DB row has skip_active_offers=False
+        offer_checker = AsyncMock(return_value=True)
+        skipped_offer = asyncio.run(auto_relist.run_auto_relist(
+            marketplace="poshmark",
+            offer_checker=offer_checker,
+            delister=AsyncMock(return_value={"ok": True}),
+            lister=AsyncMock(return_value={"ok": True, "listing_id": "5f0000000000000000000778"}),
+        ))
+        offer_checker.assert_awaited_once_with("poshmark", posh_id)
+        self.assertEqual(skipped_offer[0]["status"], "skipped_active_offer")
+
+        # Disabling the rule immediately before delist stops cleanly with skipped_rule_disabled (no failure)
+        delister_called = False
+
+        async def should_not_delist(*_args):
+            nonlocal delister_called
+            delister_called = True
+            return {"ok": True}
+
+        async def disable_during_offer_check(_market: str, _lid: str) -> bool:
+            with self.Session() as s:
+                r = s.query(MarketplaceRelistRule).filter_by(marketplace="poshmark").one()
+                r.enabled = False
+                s.commit()
+            return False
+
+        disabled_res = asyncio.run(auto_relist.run_auto_relist(
+            marketplace="poshmark",
+            offer_checker=disable_during_offer_check,
+            delister=should_not_delist,
+            lister=AsyncMock(return_value={"ok": True}),
+        ))
+        self.assertFalse(delister_called)
+        self.assertEqual(disabled_res[0]["status"], "skipped_rule_disabled")
+
+    def test_auto_relist_default_delister_pins_expected_listing_id_and_persists_job_id_before_wait(self):
+        from unittest.mock import AsyncMock
+
+        from anteroom.services import automation_actions, native_marketplaces
+
+        conv, _l, _r = self._create_draft("Pinned Relist Jacket")
+        conv.status = "listed"
+        posh_id = "5f0000000000000000000881"
+        self.db.add(MarketplaceListing(
+            id=new_id(),
+            conversation_id=conv.id,
+            marketplace="poshmark",
+            state="published",
+            listing_id=posh_id,
+            listing_url=f"https://poshmark.com/listing/{posh_id}",
+            listed_at=_now() - timedelta(days=45),
+            listed_price=58.0,
+        ))
+        rule = MarketplaceRelistRule(
+            id=new_id(),
+            marketplace="poshmark",
+            enabled=True,
+            min_age_days=30,
+            daily_cap=5,
+            skip_active_offers=True,
+        )
+        self.db.add(rule)
+        self.db.commit()
+
+        # Finding #8: default delister passes expected={marketplace: expected_listing_id}
+        captured_expected: dict[str, str] = {}
+
+        async def fake_delist(_conv_id, _markets, **kwargs):
+            captured_expected.update(kwargs.get("expected") or {})
+            return {"poshmark": {"state": "deleted"}}
+
+        # Finding #9: native_job_id is persisted BEFORE wait_for_native_result starts
+        observed_job_id_before_wait: list[str | None] = []
+
+        async def fake_wait(_conv_id, _market, _started):
+            with self.Session() as s:
+                log_row = s.query(MarketplaceRelistLog).filter_by(conversation_id=conv.id).one()
+                observed_job_id_before_wait.append(log_row.native_job_id)
+            return {
+                "state": "published",
+                "listing_id": "5f0000000000000000000882",
+                "listing_url": "https://poshmark.com/listing/5f0000000000000000000882",
+            }
+
+        with (
+            patch("anteroom.services.marketplace_delist.delist", side_effect=fake_delist),
+            patch.object(native_marketplaces, "list_now", return_value={"job_id": "job-prewait-1", "state": "publishing"}),
+            patch.object(automation_actions, "wait_for_native_result", side_effect=fake_wait),
+        ):
+            res = asyncio.run(auto_relist.run_auto_relist(
+                marketplace="poshmark",
+                offer_checker=AsyncMock(return_value=False),
+            ))
+
+        self.assertEqual(captured_expected, {"poshmark": posh_id})
+        self.assertEqual(observed_job_id_before_wait, ["job-prewait-1"])
+        self.assertEqual(res[0]["status"], "completed")
+        self.assertEqual(res[0]["new_listing_id"], "5f0000000000000000000882")
 
 
 if __name__ == "__main__":

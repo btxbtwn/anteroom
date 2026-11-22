@@ -251,12 +251,6 @@ def _set_due_owners(bind, extra: str) -> None:
 def downgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == 'postgresql':
-        op.execute('LOCK TABLE anteroom_private.account_cleanup IN SHARE MODE')
-        op.execute('''DO $$ BEGIN
-            IF EXISTS (SELECT 1 FROM anteroom_private.account_cleanup) THEN
-                RAISE EXCEPTION 'Deletion fences cannot be removed while deleted or pending accounts exist';
-            END IF;
-        END $$''')
         _set_due_owners(bind, '')
         for table in NEW_TABLES:
             op.execute(f'DROP TRIGGER IF EXISTS account_write_guard ON public."{table}"')
