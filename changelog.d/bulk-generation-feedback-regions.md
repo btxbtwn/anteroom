@@ -1,4 +1,0 @@
-- See which items are generating in a bulk upload, retry a failed item, and open each draft for review.
-- Rate AI-generated listings and see recent feedback in Settings.
-- Carry slab grades and certification numbers into eBay coin listing payloads.
-- Choose your seller country for regional eBay offers, Canadian Poshmark, and local Depop prices and shipping.

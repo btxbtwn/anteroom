@@ -6,6 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1144 — 2026-11-22
+
+- See which items are generating in a bulk upload, retry a failed item, and open each draft for review.
+- Rate AI-generated listings and see recent feedback in Settings.
+- Carry slab grades and certification numbers into eBay coin listing payloads.
+- Choose your seller country for regional eBay offers, Canadian Poshmark, and local Depop prices and shipping.
+
 ## 0.1.1143 — 2026-11-22
 
 - In the assistant, and in a listing's chat in the Mac app, a message you send while an answer is still being written now goes straight in: it cuts that answer off, keeping what it already wrote, and is answered next. Press Ctrl/⌘+Enter, or the queue button on a phone, to queue it for afterwards instead.
