@@ -3,6 +3,44 @@
 
 import Foundation
 
+/// An arrow, box, ellipse or text label drawn on the finished frame, from (x1, y1) to (x2, y2).
+struct Annotation: Codable, Hashable, Sendable {
+    /// One of: arrow, rectangle, ellipse, text.
+    var kind: String
+    var x1: Double
+    var y1: Double
+    var x2: Double
+    var y2: Double
+    var color: String = "#E5484D"
+    var text: String?
+}
+
+extension Annotation {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try values.decode(String.self, forKey: .kind)
+        x1 = try values.decode(Double.self, forKey: .x1)
+        y1 = try values.decode(Double.self, forKey: .y1)
+        x2 = try values.decode(Double.self, forKey: .x2)
+        y2 = try values.decode(Double.self, forKey: .y2)
+        color = try values.decodeIfPresent(String.self, forKey: .color) ?? "#E5484D"
+        text = try values.decodeIfPresent(String.self, forKey: .text)
+    }
+}
+
+struct Border: Codable, Hashable, Sendable {
+    var width: Double
+    var color: String = "#FFFFFF"
+}
+
+extension Border {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        width = try values.decode(Double.self, forKey: .width)
+        color = try values.decodeIfPresent(String.self, forKey: .color) ?? "#FFFFFF"
+    }
+}
+
 /// One listing with the seller's notes.
 struct Conversation: Identifiable, Codable, Hashable, Sendable {
     var id: String
@@ -823,6 +861,20 @@ struct PhotoEdits: Codable, Hashable, Sendable {
     var brightness: Double = 0
     var contrast: Double = 0
     var background: String?
+    var flipHorizontal: Bool = false
+    var flipVertical: Bool = false
+    /// One of: vivid, crisp, warm, cool, bw, studio.
+    var filter: String?
+    var redactions: [Redaction]?
+    var annotations: [Annotation]?
+    var border: Border?
+    var studio: StudioEdit?
+
+    enum CodingKeys: String, CodingKey {
+        case rotate, straighten, crop, exposure, brightness, contrast, background, filter, redactions, annotations, border, studio
+        case flipHorizontal = "flip_horizontal"
+        case flipVertical = "flip_vertical"
+    }
 }
 
 extension PhotoEdits {
@@ -835,6 +887,62 @@ extension PhotoEdits {
         brightness = try values.decodeIfPresent(Double.self, forKey: .brightness) ?? 0
         contrast = try values.decodeIfPresent(Double.self, forKey: .contrast) ?? 0
         background = try values.decodeIfPresent(String.self, forKey: .background)
+        flipHorizontal = try values.decodeIfPresent(Bool.self, forKey: .flipHorizontal) ?? false
+        flipVertical = try values.decodeIfPresent(Bool.self, forKey: .flipVertical) ?? false
+        filter = try values.decodeIfPresent(String.self, forKey: .filter)
+        redactions = try values.decodeIfPresent([Redaction].self, forKey: .redactions)
+        annotations = try values.decodeIfPresent([Annotation].self, forKey: .annotations)
+        border = try values.decodeIfPresent(Border.self, forKey: .border)
+        studio = try values.decodeIfPresent(StudioEdit.self, forKey: .studio)
+    }
+}
+
+struct PhotoStudioFailure: Codable, Hashable, Sendable {
+    var photoID: String
+    /// Why this photo was not changed, for the seller; the others still saved.
+    var detail: String
+
+    enum CodingKeys: String, CodingKey {
+        case detail
+        case photoID = "photo_id"
+    }
+}
+
+/// AI Studio (Photoroom) on one or more of a listing's photos, all with the same options.
+struct PhotoStudioRequest: Codable, Hashable, Sendable {
+    var photoIDs: [String]
+    var options: StudioOptions
+
+    enum CodingKeys: String, CodingKey {
+        case options
+        case photoIDs = "photo_ids"
+    }
+}
+
+struct PhotoStudioResult: Codable, Hashable, Sendable {
+    /// The photos AI Studio changed, each with its new ``url`` and ``edits.studio``.
+    var photos: [ListingPhoto]
+    var errors: [PhotoStudioFailure]
+}
+
+/// A region hidden on the finished frame, such as a name, address or barcode.
+struct Redaction: Codable, Hashable, Sendable {
+    var x: Double
+    var y: Double
+    var width: Double
+    var height: Double
+    /// One of: pixelate, blur.
+    var style: String = "pixelate"
+}
+
+extension Redaction {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        x = try values.decode(Double.self, forKey: .x)
+        y = try values.decode(Double.self, forKey: .y)
+        width = try values.decode(Double.self, forKey: .width)
+        height = try values.decode(Double.self, forKey: .height)
+        style = try values.decodeIfPresent(String.self, forKey: .style) ?? "pixelate"
     }
 }
 
@@ -864,6 +972,42 @@ struct SizeTagReadResult: Codable, Hashable, Sendable {
     }
 }
 
+/// Photoroom's result for this photo, kept beside the upload; edits render from it.
+struct StudioEdit: Codable, Hashable, Sendable {
+    var key: String
+    var options: StudioOptions
+}
+
+/// One AI Studio edit. Photoroom does the work; these are the seller's choices.
+struct StudioOptions: Codable, Hashable, Sendable {
+    var removeBackground: Bool = false
+    var background: String = "#FFFFFF"
+    var ghostMannequin: Bool = false
+    var flatLay: Bool = false
+    var shadow: Bool = false
+    var virtualModel: VirtualModel?
+
+    enum CodingKeys: String, CodingKey {
+        case background, shadow
+        case removeBackground = "remove_background"
+        case ghostMannequin = "ghost_mannequin"
+        case flatLay = "flat_lay"
+        case virtualModel = "virtual_model"
+    }
+}
+
+extension StudioOptions {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        removeBackground = try values.decodeIfPresent(Bool.self, forKey: .removeBackground) ?? false
+        background = try values.decodeIfPresent(String.self, forKey: .background) ?? "#FFFFFF"
+        ghostMannequin = try values.decodeIfPresent(Bool.self, forKey: .ghostMannequin) ?? false
+        flatLay = try values.decodeIfPresent(Bool.self, forKey: .flatLay) ?? false
+        shadow = try values.decodeIfPresent(Bool.self, forKey: .shadow) ?? false
+        virtualModel = try values.decodeIfPresent(VirtualModel.self, forKey: .virtualModel)
+    }
+}
+
 struct ValidationError: Codable, Hashable, Sendable {
     var loc: [JSONValue]
     var msg: String
@@ -872,11 +1016,29 @@ struct ValidationError: Codable, Hashable, Sendable {
     var ctx: [String: JSONValue]?
 }
 
+struct VirtualModel: Codable, Hashable, Sendable {
+    /// One of: auto, avery, sam, taylor, kendall, jordan, casey, maya, reece, lena, julia, jackson, sophia, emma, ava, zoe, fiona.
+    var model: String = "auto"
+    /// One of: auto, street, bedroom, sunset, factory, studio, coloredstudio, concretestudio, beach, tropical, library, forest, businessdistrict, countryside, flowers, goldenlight, mountain, pool, latincity, cafe, asiancity, nightlights, desert.
+    var scene: String = "auto"
+    /// One of: auto, standing, 34turn, powerstance, walkingforward, handinpocket, crossedarms, back, overtheshoulder, seated, adjustingclothing, playfulspin.
+    var pose: String = "auto"
+}
+
+extension VirtualModel {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        model = try values.decodeIfPresent(String.self, forKey: .model) ?? "auto"
+        scene = try values.decodeIfPresent(String.self, forKey: .scene) ?? "auto"
+        pose = try values.decodeIfPresent(String.self, forKey: .pose) ?? "auto"
+    }
+}
+
 /// What this hosted server offers the signed-in seller.
 struct WorkspaceRuntime: Codable, Hashable, Sendable {
     /// One of: hosted.
     var mode: String
-    /// One of: inventory, listing_fields, photos, preferences, generation, assistant, suggestions, marketplace_actions, marketplace_sessions, photo_edits, photo_background, chat_attachments, bulk_actions, bulk_edit, bulk_copy, bulk_delete, bulk_regenerate, bulk_markdowns, catalog_categories, ebay_offers, account_deletion, managed_ai.
+    /// One of: inventory, listing_fields, photos, preferences, generation, assistant, suggestions, marketplace_actions, marketplace_sessions, photo_edits, photo_background, chat_attachments, bulk_actions, bulk_edit, bulk_copy, bulk_delete, bulk_regenerate, bulk_markdowns, catalog_categories, ebay_offers, account_deletion, managed_ai, photo_studio, listing_videos.
     var features: [String]
     var views: [String]
     /// Marketplaces whose native form the editor can show.

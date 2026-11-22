@@ -61,13 +61,30 @@ async function nativeWait(tabId, test, deadline) {
   throw new Error('Chrome did not confirm the marketplace navigation.');
 }
 
+// A hosted listing's video is read from the seller's private Storage through the
+// short-lived signed link in the approved command; nothing else is fetched that way.
+function nativeVideoLink(url) {
+  let parsed;
+  try {
+    parsed = new URL(String(url));
+  } catch {
+    return null;
+  }
+  const loopback = parsed.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(parsed.hostname);
+  const supabase = parsed.protocol === 'https:' && /^[a-z0-9-]+\.supabase\.co$/.test(parsed.hostname);
+  if (!(loopback || supabase) || !parsed.pathname.startsWith('/storage/v1/object/sign/anteroom-photos/')) return null;
+  return parsed.href;
+}
+
 // Binary video delivery is scoped to the job's selected immutable revision.
 async function nativeVideo(jobId, video, deadline) {
   if (!/^[a-f0-9-]+$/i.test(String(video.id))) throw marketplaceError('Invalid video ID.');
+  const link = video.url ? nativeVideoLink(video.url) : null;
+  if (video.url && !link) throw marketplaceError('Could not load the video selected for this revision.');
   let response;
   try {
-    response = await fetch(`${STUDIO_URL}/api/jobs/${encodeURIComponent(jobId)}/videos/${encodeURIComponent(video.id)}`,
-      { signal: AbortSignal.timeout(Math.max(1000, Math.min(60000, deadline - Date.now()))) });
+    response = await fetch(link || `${STUDIO_URL}/api/jobs/${encodeURIComponent(jobId)}/videos/${encodeURIComponent(video.id)}`,
+      { credentials: 'omit', signal: AbortSignal.timeout(Math.max(1000, Math.min(60000, deadline - Date.now()))) });
   } catch {
     throw marketplaceError('Anteroom could not load the selected video in time.', { code: 'network' });
   }

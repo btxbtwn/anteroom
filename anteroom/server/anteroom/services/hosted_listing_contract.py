@@ -121,8 +121,15 @@ def validate_media(db, conversation_id, listing):
         values = listing.get(f'{market}_specifics')
         if values is not None and not isinstance(values, dict):
             raise HTTPException(422, 'Marketplace fields must be an object')
-        if (values or {}).get('videoId'):
-            raise HTTPException(422, 'Listing videos are available in the desktop app')
+        video_id = (values or {}).get('videoId')
+        if video_id:
+            from anteroom.models.listing_video import ListingVideo
+            from anteroom.services.listing_videos import VIDEO_MARKETPLACES
+            if market not in VIDEO_MARKETPLACES:
+                raise HTTPException(422, 'This marketplace does not take listing videos')
+            if not isinstance(video_id, str) or db.scalar(select(ListingVideo.id).where(
+                    ListingVideo.id == video_id, ListingVideo.conversation_id == conversation_id)) is None:
+                raise HTTPException(422, 'Choose a video from this listing')
 
 
 def remove_photo_selections(db, conversation_id, photo_id):

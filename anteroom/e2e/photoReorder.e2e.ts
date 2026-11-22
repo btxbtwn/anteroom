@@ -95,8 +95,8 @@ test("photos on a marketplace form reorder by dragging, with a mouse or a finger
     await revert.click();
     await expect(revert).toHaveCount(0);
     await expect(viewer.getByRole("button", { name: "Rotate left" })).toBeEnabled();
-    await viewer.getByRole("button", { name: "Crop photo" }).click();
-    const crop = page.getByRole("dialog", { name: /^Crop photo/ });
+    await viewer.getByRole("button", { name: "Edit photo" }).click();
+    const crop = page.getByRole("dialog", { name: /^Edit photo/ });
     await crop.getByRole("button", { name: "Square" }).click();
     const frame = crop.locator("[data-crop-frame]");
     const [visibleFrame, frameBounds] = await Promise.all([

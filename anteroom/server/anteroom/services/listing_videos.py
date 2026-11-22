@@ -1,4 +1,10 @@
-"""Local original videos, selected explicitly on a marketplace's listing form."""
+"""Original listing videos, selected explicitly on a marketplace's listing form.
+
+On the Mac a video is a file in ``<data>/videos``. Hosted, it is an object in the
+seller's private Storage folder (``services/hosted_videos.py``); ``stored_filename``
+holds its key. Either way it reaches a marketplace only when the seller lists or
+updates with it selected.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -30,8 +36,19 @@ VIDEO_RULES: dict[str, dict] = {
 VIDEO_MARKETPLACES = frozenset(VIDEO_RULES)
 
 
+def _hosted() -> bool:
+    from anteroom.services.service_context import current
+    return current() is not None
+
+
 def video_path(row: ListingVideo) -> Path:
     return VIDEOS_DIR / Path(row.stored_filename).name
+
+
+def stored(row: ListingVideo) -> bool:
+    """Whether the video's file is still there. Hosted objects are checked when they are read."""
+    return True if _hosted() else video_path(row).is_file()
+
 
 
 def video_view(row: ListingVideo) -> dict:
@@ -86,12 +103,27 @@ def store_upload(db: Session, conv_id: str, upload: UploadFile) -> ListingVideo:
         raise
 
 
+def deletion_refusal(db: Session, conv_id: str, video_id: str) -> str | None:
+    """Why this video cannot be deleted now, or None."""
+    from anteroom.models.job import ACTIVE_JOB_STATUSES, Job
+    from anteroom.repositories.queries import ListingRepo
+
+    if db.query(Job).filter(Job.conversation_id == conv_id, Job.status.in_(ACTIVE_JOB_STATUSES)).first():
+        return "Wait for this item's marketplace action to finish before removing a video."
+    current = ListingRepo(db).get_current(conv_id)
+    revision = ListingRepo(db).get_revision(current.current_revision_id) if current else None
+    listing = revision.listing_json if revision else {}
+    if any(isinstance(value, dict) and value.get("videoId") == video_id for value in listing.values()):
+        return "Remove this video from every marketplace form before deleting it."
+    return None
+
+
 def selected_video(db: Session, conv_id: str, listing: dict, marketplace: str) -> dict | None:
     video_id = (listing.get(f"{marketplace}_specifics") or {}).get("videoId")
     if not video_id:
         return None
     row = db.query(ListingVideo).filter_by(id=str(video_id), conversation_id=conv_id).first()
-    if row is None or not video_path(row).is_file():
+    if row is None or not stored(row):
         raise ValueError("The selected listing video is missing. Choose another video or clear it.")
     problem = video_problem(row, marketplace)
     if problem:
@@ -118,10 +150,19 @@ def video_problem(row: ListingVideo, marketplace: str) -> str | None:
 
 def video_bytes(video: dict) -> bytes:
     """The selected file, refused when it is no longer the one the job selected."""
-    path = VIDEOS_DIR / Path(str(video.get("stored_filename") or "")).name
-    if not path.name or not path.is_file():
-        raise ValueError("The selected listing video is missing. Choose another video or clear it.")
-    data = path.read_bytes()
+    if _hosted():
+        from fastapi import HTTPException
+
+        from anteroom.services import hosted_videos
+        try:
+            data = hosted_videos.read(str(video.get("stored_filename") or ""))
+        except HTTPException:
+            raise ValueError("The selected listing video is missing. Choose another video or clear it.") from None
+    else:
+        path = VIDEOS_DIR / Path(str(video.get("stored_filename") or "")).name
+        if not path.name or not path.is_file():
+            raise ValueError("The selected listing video is missing. Choose another video or clear it.")
+        data = path.read_bytes()
     if len(data) != video.get("size_bytes") or hashlib.sha256(data).hexdigest() != video.get("checksum"):
         raise ValueError("The listing video changed. Choose it again before listing.")
     return data

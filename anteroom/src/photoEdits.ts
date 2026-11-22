@@ -1,4 +1,4 @@
-import type { CropBox } from "./api/types";
+import type { Annotation, CropBox, PhotoEdits, Redaction, StudioOptions } from "./api/types";
 
 /** Width over height; null leaves the crop free. */
 export type CropAspect = number | null;
@@ -66,4 +66,99 @@ export function dragCrop(
     width,
     height,
   };
+}
+
+/** One-tap looks, in the order the editor shows them. */
+export const PHOTO_FILTERS: { id: NonNullable<PhotoEdits["filter"]>; label: string }[] = [
+  { id: "vivid", label: "Vivid" },
+  { id: "crisp", label: "Crisp" },
+  { id: "warm", label: "Warm" },
+  { id: "cool", label: "Cool" },
+  { id: "bw", label: "B&W" },
+  { id: "studio", label: "Studio clean" },
+];
+
+/**
+ * The edits after mirroring the frame. The crop is taken after the flip and
+ * marks sit on the finished frame, so both mirror too and still cover the same
+ * part of the item.
+ */
+export function flipEdits(edits: PhotoEdits, axis: "horizontal" | "vertical"): PhotoEdits {
+  const horizontal = axis === "horizontal";
+  const box = <T extends CropBox>(value: T): T => (horizontal
+    ? { ...value, x: Math.max(0, 1 - value.x - value.width) }
+    : { ...value, y: Math.max(0, 1 - value.y - value.height) });
+  const point = (value: number) => 1 - value;
+  return {
+    ...edits,
+    ...(horizontal ? { flip_horizontal: !edits.flip_horizontal } : { flip_vertical: !edits.flip_vertical }),
+    crop: edits.crop ? box(edits.crop) : edits.crop,
+    redactions: (edits.redactions ?? []).map(box),
+    // A text label keeps reading left to right; only where it starts moves.
+    annotations: (edits.annotations ?? []).map((mark) => (horizontal
+      ? { ...mark, x1: point(mark.x1), x2: point(mark.x2) }
+      : { ...mark, y1: point(mark.y1), y2: point(mark.y2) })),
+  };
+}
+
+export type MarkTool = Annotation["kind"] | "pixelate" | "blur";
+
+export const MARK_TOOLS: { id: MarkTool; label: string }[] = [
+  { id: "arrow", label: "Arrow" },
+  { id: "rectangle", label: "Box" },
+  { id: "ellipse", label: "Circle" },
+  { id: "text", label: "Text" },
+  { id: "pixelate", label: "Pixelate" },
+  { id: "blur", label: "Blur" },
+];
+
+const unit = (value: number) => clamp(value, 0, 1);
+
+/**
+ * A mark from a drag on the finished frame, from (x1, y1) to (x2, y2) in
+ * fractions of it. Returns null for a drag too small to mean anything (a text
+ * label needs only a tap).
+ */
+export function markFromDrag(tool: MarkTool, x1: number, y1: number, x2: number, y2: number, color: string, text: string):
+  { annotation: Annotation } | { redaction: Redaction } | null {
+  const [ax, ay, bx, by] = [unit(x1), unit(y1), unit(x2), unit(y2)];
+  if (tool === "text") {
+    const label = text.trim();
+    return label ? { annotation: { kind: "text", x1: ax, y1: ay, x2: ax, y2: ay, color, text: label.slice(0, 60) } } : null;
+  }
+  if (Math.abs(bx - ax) < 0.02 && Math.abs(by - ay) < 0.02) return null;
+  if (tool === "pixelate" || tool === "blur") {
+    const x = Math.min(ax, bx);
+    const y = Math.min(ay, by);
+    return { redaction: { x, y, width: Math.max(0.01, Math.abs(bx - ax)), height: Math.max(0.01, Math.abs(by - ay)), style: tool } };
+  }
+  return { annotation: { kind: tool, x1: ax, y1: ay, x2: bx, y2: by, color } };
+}
+
+/** The AI Studio choices the server accepts, made consistent the way it makes them. */
+export function normalizeStudio(options: StudioOptions): StudioOptions {
+  if (options.virtual_model) {
+    return { virtual_model: options.virtual_model };
+  }
+  const flatLay = Boolean(options.flat_lay) && !options.ghost_mannequin;
+  const generative = Boolean(options.ghost_mannequin || flatLay || options.shadow);
+  return {
+    remove_background: Boolean(options.remove_background) || generative,
+    background: options.background,
+    ghost_mannequin: Boolean(options.ghost_mannequin),
+    flat_lay: flatLay,
+    shadow: Boolean(options.shadow),
+  };
+}
+
+/** Why these AI Studio options cannot run, or null; mirrors `StudioOptions` on the server. */
+export function studioProblem(options: StudioOptions): string | null {
+  if (options.ghost_mannequin && options.flat_lay) return "Choose Ghost mannequin or Flat lay, not both.";
+  if (options.virtual_model && (options.remove_background || options.ghost_mannequin || options.flat_lay || options.shadow)) {
+    return "A virtual model makes its own scene, so it cannot be combined with other AI Studio edits.";
+  }
+  if (!options.remove_background && !options.ghost_mannequin && !options.flat_lay && !options.shadow && !options.virtual_model) {
+    return "Choose an AI Studio edit.";
+  }
+  return null;
 }

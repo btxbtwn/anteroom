@@ -23,6 +23,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from anteroom.services.photo_edits import PhotoEdits
+from anteroom.services.photoroom import MAX_BATCH, StudioOptions
 
 # (method, path) of every operation in the shared contract, in the hosted
 # app's path spelling. The desktop app serves the same ones (except
@@ -49,6 +50,7 @@ CONTRACT_OPERATIONS: tuple[tuple[str, str], ...] = (
     ("put", "/api/conversations/{identity}/listing"),
     ("get", "/api/conversations/{identity}/photos"),
     ("get", "/api/listing-sheet"),
+    ("post", "/api/conversations/{conv_id}/photos/studio"),
 )
 HOSTED_ONLY_OPERATIONS = {("get", "/api/runtime")}
 
@@ -98,7 +100,7 @@ WorkspaceFeature = Literal[
     "inventory", "listing_fields", "photos", "preferences", "generation", "assistant", "suggestions",
     "marketplace_actions", "marketplace_sessions", "photo_edits", "photo_background", "chat_attachments",
     "bulk_actions", "bulk_edit", "bulk_copy", "bulk_delete", "bulk_regenerate", "bulk_markdowns",
-    "catalog_categories", "ebay_offers", "account_deletion", "managed_ai",
+    "catalog_categories", "ebay_offers", "account_deletion", "managed_ai", "photo_studio", "listing_videos",
 ]
 
 
@@ -236,6 +238,37 @@ class ListingPhoto(ContractModel):
     """The edits served in place of the kept original; null when unedited."""
     marketplace: str | None = None
     """Set for a photo added on one marketplace's form; only that marketplace can send it."""
+
+
+class PhotoStudioRequest(ContractModel):
+    """AI Studio (Photoroom) on one or more of a listing's photos, all with the same options."""
+
+    model_config = ConfigDict(use_attribute_docstrings=True, extra="forbid")
+
+    photo_ids: list[str] = Field(min_length=1, max_length=MAX_BATCH)
+    options: StudioOptions
+
+
+class PhotoStudioFailure(ContractModel):
+    photo_id: str
+    detail: str
+    """Why this photo was not changed, for the seller; the others still saved."""
+
+
+class PhotoStudioResult(ContractModel):
+    photos: list[ListingPhoto]
+    """The photos AI Studio changed, each with its new ``url`` and ``edits.studio``."""
+    errors: list[PhotoStudioFailure]
+
+
+PHOTO_STUDIO_ERRORS: Responses = {
+    status: {"model": ErrorDetail, "description": description}
+    for status, description in (
+        (404, "The listing does not exist for this seller."),
+        (502, "Photoroom failed or could not be reached."),
+        (504, "Photoroom did not answer in time."),
+    )
+}
 
 
 class ListingDocument(ContractModel):

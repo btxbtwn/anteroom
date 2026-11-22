@@ -7,7 +7,7 @@ import type { ListingPhoto } from "../api/types";
 import { toastManager } from "./ui/toast";
 import { BulkUploadDialog } from "./BulkUploadDialog";
 import { InspectorSection } from "./ListingFormControls";
-import { PhotoCropDialog } from "./PhotoCropDialog";
+import { PhotoEditorDialog } from "./PhotoEditorDialog";
 import { PhotoLightbox, PhotoStrip, PhotoThumb } from "./PhotoThumbs";
 import { SortablePhoto, SortablePhotos } from "./SortablePhotos";
 import { useListingSessionActive } from "./listingSession";
@@ -36,7 +36,8 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ id: string; tab: "crop" | "studio" } | null>(null);
+  const editingId = editing?.id ?? null;
   const [pendingBulkGroups, setPendingBulkGroups] = useState<PhotoFolderGroup[] | null>(null);
 
   const { data: photos } = useQuery({
@@ -109,7 +110,7 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
 
   useEffect(() => {
     setPreviewId(null);
-    setEditingId(null);
+    setEditing(null);
   }, [convId]);
 
   useEffect(() => {
@@ -272,8 +273,12 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
           error={uploadError}
           rotating={adjustPhotoMutation.isPending}
           onRotate={runtime.features.has("photo_edits") ? (degrees) => adjustPhoto(previewPhoto.id, degrees) : undefined}
-          onCrop={runtime.features.has("photo_edits") ? () => {
-            setEditingId(previewPhoto.id);
+          onEdit={runtime.features.has("photo_edits") ? () => {
+            setEditing({ id: previewPhoto.id, tab: "crop" });
+            setPreviewId(null);
+          } : undefined}
+          onStudio={runtime.features.has("photo_studio") ? () => {
+            setEditing({ id: previewPhoto.id, tab: "studio" });
             setPreviewId(null);
           } : undefined}
           onRevert={runtime.features.has("photo_edits") && previewPhoto.edits ? () => adjustPhoto(previewPhoto.id, null) : undefined}
@@ -288,16 +293,18 @@ export function PhotoTray({ convId, onBulkListingsCreated }: Props) {
         />
       ) : null}
       {editingPhoto ? (
-        <PhotoCropDialog
+        <PhotoEditorDialog
           key={editingPhoto.id}
           convId={convId}
           photo={editingPhoto}
           index={editingIndex}
+          photos={photos ?? undefined}
+          initialTab={editing?.tab}
           onSaved={replacePhoto}
           onClose={() => {
             // Back to the enlarged photo the editor was opened from.
             setPreviewId(editingPhoto.id);
-            setEditingId(null);
+            setEditing(null);
           }}
         />
       ) : null}

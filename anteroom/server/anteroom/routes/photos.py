@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -9,6 +9,7 @@ from anteroom.database import get_db
 from anteroom.repositories.queries import ConversationRepo
 from anteroom.routes.conversations import _photo_response
 from anteroom.services import marketplace_media, photo_edits
+from anteroom.routes import api_contract as contract
 from anteroom.services.photo_edits import BackgroundRemovalError, PhotoEdits
 from anteroom.services.photos import (
     THUMBNAIL_MIME,
@@ -134,10 +135,45 @@ def rotate_photo(conv_id: str, photo_id: str, body: RotateRequest, db: Session =
 
 @edit_router.put("/api/conversations/{conv_id}/photos/{photo_id}/edits")
 def edit_photo(conv_id: str, photo_id: str, body: PhotoEdits, db: Session = Depends(get_db, scope="function")):
-    """Replace the photo's edits; they render from the original upload, which is kept."""
+    """Replace the photo's edits; they render from the original upload (or its AI Studio result), which is kept."""
     repo = ConversationRepo(db)
-    target = None if body.is_original() else body
-    return _apply_edit(repo, conv_id, photo_id, lambda _cur: target)
+
+    def _replace(current: PhotoEdits) -> PhotoEdits | None:
+        target = photo_edits.keep_studio(current, body)
+        return None if target.is_original() else target
+
+    return _apply_edit(repo, conv_id, photo_id, _replace)
+
+
+async def _in_session(request: Request, work, /, *args):
+    """``work(db, *args)`` in a short session of its own: the seller's when hosted, the Mac's otherwise."""
+    from anteroom.services.service_context import current
+
+    if current() is not None:
+        from anteroom.services.hosted_database import in_seller_session
+        return await in_seller_session(request, work, *args)
+    from anteroom.database import in_worker_session
+    return await in_worker_session(work, *args)
+
+
+@edit_router.post("/api/conversations/{conv_id}/photos/studio", response_model=contract.PhotoStudioResult,
+                  responses={**contract.REFUSED, **contract.PHOTO_STUDIO_ERRORS})
+async def photo_studio(conv_id: str, body: contract.PhotoStudioRequest, request: Request):
+    """AI Studio (Photoroom) on the chosen photos. Each keeps its upload, so Reset returns to it.
+
+    Only this listing's photos change; nothing reaches a marketplace until the seller lists or updates.
+    """
+    from anteroom.services import photo_studio
+    from anteroom.services.photoroom import PhotoroomError
+
+    try:
+        outcome = await photo_studio.run(lambda work, *args: _in_session(request, work, *args),
+                                         conv_id, body.photo_ids, body.options)
+    except PhotoroomError as exc:
+        raise HTTPException(exc.status, str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+    return {"photos": [_photo_response(photo) for photo in outcome["photos"]], "errors": outcome["errors"]}
 
 
 @edit_router.delete("/api/conversations/{conv_id}/photos/{photo_id}/edits")
@@ -158,14 +194,14 @@ def preview_photo_edits(conv_id: str, photo_id: str, body: PhotoEdits, crop: boo
     from fastapi.responses import Response
 
     try:
-        source = photo_edits.read_preview_source(db, conv_id, photo_id)
+        source, current = photo_edits.read_preview_source(db, conv_id, photo_id)
     except photo_edits.PhotoNotFoundError:
         raise HTTPException(404, "Photo not found") from None
     try:
-        image = photo_edits.preview_jpeg(source, body, crop=crop)
+        image = photo_edits.preview_jpeg(source, photo_edits.keep_studio(current, body), crop=crop)
     except FileNotFoundError:
         raise HTTPException(404, "Photo file not found") from None
-    except BackgroundRemovalError as e:
+    except (BackgroundRemovalError, ValueError) as e:
         raise HTTPException(400, str(e)) from None
     return Response(image, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 

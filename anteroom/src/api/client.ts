@@ -52,6 +52,10 @@ import type {
   OkResponse,
   ListingPhoto,
   PhotoEdits,
+  PhotoStudioRequest,
+  PhotoStudioResult,
+  PhotoroomKeyStatus,
+  StudioOptions,
   PhotoUploadResult,
   PriceDropApplyResult,
   PriceDropCompsSource,
@@ -540,6 +544,9 @@ export const api = {
   listingVideos: {
     list: (convId: string) => request<ListingVideoLibrary>(`/conversations/${convId}/videos`),
     delete: (convId: string, videoId: string) => request<OkResponse>(`/conversations/${convId}/videos/${videoId}`, { method: "DELETE" }),
+    /** On the web: a short-lived address to play a video from the seller's private storage. */
+    link: (videoId: string, signal?: AbortSignal) =>
+      request<{ url: string; expires_in: number }>(`/videos/${encodeURIComponent(videoId)}/link`, { signal }),
     upload: async (convId: string, file: File): Promise<ListingVideo> => {
       const form = new FormData();
       form.append("file", file);
@@ -1076,6 +1083,13 @@ export const api = {
       }),
     resetPhoto: (convId: string, photoId: string) =>
       request<ListingPhoto>(`/conversations/${convId}/photos/${photoId}/edits`, { method: "DELETE" }),
+    /** AI Studio (Photoroom) on several photos at once; each keeps its upload so Reset returns to it. */
+    photoStudio: (convId: string, photoIds: string[], options: StudioOptions, signal?: AbortSignal) =>
+      request<PhotoStudioResult>(`/conversations/${convId}/photos/studio`, {
+        method: "POST",
+        body: JSON.stringify({ photo_ids: photoIds, options } satisfies PhotoStudioRequest),
+        signal,
+      }),
     /** A smaller JPEG of unsaved edits; `crop: false` keeps the whole frame to draw the crop on. */
     previewPhotoEdits: async (convId: string, photoId: string, edits: PhotoEdits, crop: boolean, signal?: AbortSignal) => {
       const res = await studioFetch(`${BASE}/conversations/${convId}/photos/${photoId}/edits/preview?crop=${crop}`, {
@@ -1288,6 +1302,10 @@ export const api = {
         method: "DELETE",
       }),
     testBrave: () => request<{ ok: boolean; error?: string | null }>("/settings/brave/test", { method: "POST" }),
+    photoroom: () => request<PhotoroomKeyStatus>("/settings/photoroom"),
+    setPhotoroom: (apiKey: string) =>
+      request<PhotoroomKeyStatus>("/settings/photoroom", { method: "PUT", body: JSON.stringify({ api_key: apiKey }) }),
+    deletePhotoroom: () => request<PhotoroomKeyStatus>("/settings/photoroom", { method: "DELETE" }),
     cursor: () => request<{ configured: boolean; masked_key: string | null }>("/settings/cursor"),
     setCursor: (apiKey: string) =>
       request<{ ok: boolean; configured: boolean; masked_key: string | null }>("/settings/cursor", {

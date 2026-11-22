@@ -525,6 +525,9 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         app.include_router(shared_router)
     from anteroom.routes.photos import edit_router
     app.include_router(edit_router)
+    from anteroom.routes.hosted_listing_videos import router as videos_router, upload_router as video_upload_router
+    app.include_router(videos_router)
+    app.include_router(video_upload_router)
     # Bulk listing reads photos not uploaded yet; a saved listing reads its photos from private storage.
     from anteroom.routes import measurements
     app.include_router(measurements.hosted_router)

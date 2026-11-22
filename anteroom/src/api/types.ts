@@ -20,13 +20,27 @@ export type {
   ListingSheetResponse,
   ListingSheetRow,
   ListingValidation,
+  Annotation,
   PhotoEdits,
+  PhotoStudioRequest,
+  PhotoStudioResult,
+  Redaction,
   SizeTagReadResult,
+  StudioOptions,
+  VirtualModel,
   WorkspaceRuntime,
 } from "./contract.gen";
 import type { ListingPhoto, ListingValidation } from "./contract.gen";
 
 export type ListingData = Record<string, unknown>;
+
+/** AI Studio's Photoroom key: whether it can run and whose key it uses, never the key. */
+export interface PhotoroomKeyStatus {
+  configured: boolean;
+  masked_key: string | null;
+  source: "seller" | "server" | "sandbox" | null;
+  available: boolean;
+}
 
 export interface Message {
   id: string;

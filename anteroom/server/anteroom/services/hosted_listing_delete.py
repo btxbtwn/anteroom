@@ -36,14 +36,23 @@ def blocker(db, identity, *, regenerate: bool = False) -> str | None:
 
 def _photo_keys(db, identity) -> set[str]:
     from anteroom.services.hosted_photos import check_key
+    from anteroom.services.photo_edits import studio_key
 
     keys = set()
     for photo in db.scalars(select(Photo).where(Photo.conversation_id == identity)):
-        for key in (photo.stored_filename, photo.source_filename):
+        for key in (photo.stored_filename, photo.source_filename, studio_key(photo.edits)):
             if key:
                 check_key(key, db.user_id, identity)
                 keys.add(key)
     return keys
+
+
+def _video_keys(db, identity) -> set[str]:
+    from anteroom.models.listing_video import ListingVideo
+    from anteroom.services.hosted_videos import check_key
+
+    return {check_key(key, db.user_id, identity) for key in db.scalars(
+        select(ListingVideo.stored_filename).where(ListingVideo.conversation_id == identity))}
 
 
 def _attachment_keys(db, identity) -> set[str]:
@@ -67,7 +76,7 @@ def remove_unsent_draft(db, identity) -> set[str]:
     reason = blocker(db, identity)
     if reason:
         raise ValueError(reason)
-    keys = _photo_keys(db, identity) | _attachment_keys(db, identity)
+    keys = _photo_keys(db, identity) | _attachment_keys(db, identity) | _video_keys(db, identity)
     delete_history(db, identity)
     # Evidence rows reference the item without a cascade, as on the Mac (listing_delete.py).
     for model in (Listing, ListingRevision, Photo, Message, ListingCorrection, SaleSnapshot):
