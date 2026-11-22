@@ -328,6 +328,7 @@ describe("MarketplaceSheetEditor", () => {
         }],
       });
       const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      client.setQueryData(["seller-region"], { country: "US", currency: "USD" });
       client.setQueryData(["catalog-categories", "ebay"], { complete: false, nodes: [] });
       const anchor = document.createElement("button");
       const container = document.createElement("div");
