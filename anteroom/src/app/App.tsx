@@ -107,7 +107,10 @@ export function App() {
   const [returnToSuggestions, setReturnToSuggestions] = useState(false);
   // The assistant is home, on the Mac and signed in alike; a listing link opens that listing.
   const home = listingFromUrl || !runtime.views.has("assistant") ? "listings" : "assistant";
-  const [activeView, setActiveView] = useState<WorkspaceView>(home);
+  const [activeView, setActiveView] = useState<WorkspaceView>(() =>
+    runtime.hosted && runtime.views.has("analytics") && new URLSearchParams(window.location.search).has("oauth_state_id")
+      ? "analytics" : home,
+  );
   const [marketplace, setMarketplace] = useState<Marketplace>("ebay");
   /** Where Analytics, Settings and the rest return: the assistant is home, inventory is the other place. */
   const shell = useRef<"listings" | "assistant">(home);

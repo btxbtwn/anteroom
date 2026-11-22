@@ -312,34 +312,27 @@ def read_slot(account: str) -> str | None:
 
 
 def write_slot(account: str, value: str) -> bool:
+    """Store a credential in the Keychain or the current seller's Vault."""
     return _set(account, value)
 
 
 def delete_slot(account: str) -> bool:
-    """Remove a slot; False when the Keychain could not be saved (the removal stays pending for a retry)."""
+    """Report whether the credential has been removed from secure storage."""
+    return _delete(account, verify=True)
+
+
+def _delete(account: str, *, verify: bool = False) -> bool:
     from anteroom.services.service_context import current
     context = current()
     if context is not None:
         context.secrets.delete(account)
         return True
     with _lock:
-        _secrets().pop(account, None)
-        _deleted.add(account)
-        _touched.discard(account)
-        return _save_store()
-
-
-def _delete(account: str) -> None:
-    from anteroom.services.service_context import current
-    context = current()
-    if context is not None:
-        context.secrets.delete(account)
-        return
-    with _lock:
-        if _secrets().pop(account, None) is not None:
+        existed = _secrets().pop(account, None) is not None
+        if existed or verify:
             _deleted.add(account)
             _touched.discard(account)
-            _save_store()
+        return account not in _deleted or _save_store()
 
 
 def get_api_key() -> str | None:

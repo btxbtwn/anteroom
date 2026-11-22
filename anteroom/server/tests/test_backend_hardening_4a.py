@@ -708,6 +708,11 @@ def test_account_deletion_unit_ordering_no_external_calls_when_delete_refuses(mo
     called: list[str] = []
 
     monkeypatch.setattr(account_deletion, "_read_relay_device", lambda: {"deviceId": "d", "token": "t"})
+    monkeypatch.setattr(
+        account_deletion,
+        "_stage_plaid_cleanup",
+        lambda _owner: called.append("stage_plaid_cleanup") or [],
+    )
 
     def refuse(_owner: str) -> list[str]:
         called.append("delete_records")
@@ -727,4 +732,4 @@ def test_account_deletion_unit_ordering_no_external_calls_when_delete_refuses(mo
     with pytest.raises(account_deletion.AccountDeletionRefused) as exc_info:
         asyncio.run(account_deletion.delete_account("owner-1", "jwt-token"))
     assert exc_info.value.status == 409
-    assert called == ["delete_records"]
+    assert called == ["stage_plaid_cleanup", "delete_records"]

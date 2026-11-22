@@ -3,6 +3,13 @@
 
 import Foundation
 
+struct AccountSummary: Codable, Hashable, Sendable {
+    var name: String
+    var mask: String?
+    var type: String
+    var subtype: String?
+}
+
 /// An arrow, box, ellipse or text label drawn on the finished frame, from (x1, y1) to (x2, y2).
 struct Annotation: Codable, Hashable, Sendable {
     /// One of: arrow, rectangle, ellipse, text.
@@ -38,6 +45,25 @@ extension Border {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         width = try values.decode(Double.self, forKey: .width)
         color = try values.decodeIfPresent(String.self, forKey: .color) ?? "#FFFFFF"
+    }
+}
+
+struct ConnectionStatus: Identifiable, Codable, Hashable, Sendable {
+    var id: String
+    var institutionName: String
+    var accounts: [AccountSummary]
+    var lastSyncedAt: String?
+    var lastError: String?
+    var hasCursor: Bool
+    /// One of: waiting, current, error, disconnecting.
+    var status: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, accounts, status
+        case institutionName = "institution_name"
+        case lastSyncedAt = "last_synced_at"
+        case lastError = "last_error"
+        case hasCursor = "has_cursor"
     }
 }
 
@@ -440,7 +466,7 @@ struct Expense: Identifiable, Codable, Hashable, Sendable {
     var revision: Int
     /// One of: operating_expense, inventory_purchase.
     var accountingType: String
-    /// One of: manual, csv, bank.
+    /// One of: manual, csv, plaid.
     var importSource: String
 
     enum CodingKeys: String, CodingKey {
@@ -976,6 +1002,45 @@ struct PhotoStudioResult: Codable, Hashable, Sendable {
     /// The photos AI Studio changed, each with its new ``url`` and ``edits.studio``.
     var photos: [ListingPhoto]
     var errors: [PhotoStudioFailure]
+}
+
+struct PlaidExchange: Codable, Hashable, Sendable {
+    var publicToken: String
+    var institutionName: String = "Connected institution"
+
+    enum CodingKeys: String, CodingKey {
+        case publicToken = "public_token"
+        case institutionName = "institution_name"
+    }
+}
+
+extension PlaidExchange {
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        publicToken = try values.decode(String.self, forKey: .publicToken)
+        institutionName = try values.decodeIfPresent(String.self, forKey: .institutionName) ?? "Connected institution"
+    }
+}
+
+struct PlaidLinkToken: Codable, Hashable, Sendable {
+    var linkToken: String
+    var redirectUri: String?
+
+    enum CodingKeys: String, CodingKey {
+        case linkToken = "link_token"
+        case redirectUri = "redirect_uri"
+    }
+}
+
+struct PlaidStatus: Codable, Hashable, Sendable {
+    var configured: Bool
+    var maxConnections: Int
+    var connections: [ConnectionStatus]
+
+    enum CodingKeys: String, CodingKey {
+        case configured, connections
+        case maxConnections = "max_connections"
+    }
 }
 
 /// A marketplace price that is not what the seller's pricing rules give.
