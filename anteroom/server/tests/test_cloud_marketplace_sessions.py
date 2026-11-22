@@ -453,13 +453,17 @@ def test_depop_photo_preparation_preserves_a_narrow_image(dimensions):
         assert min(photo.getpixel((0, 0))) > 240
 
 
-def test_consumed_token_cannot_restore_a_revoked_session(cloud, monkeypatch):  # noqa: F811
+@pytest.mark.parametrize("already_revoked", [False, True])
+def test_consumed_token_cannot_restore_a_revoked_session(cloud, monkeypatch, already_revoked):  # noqa: F811
     from anteroom.database import SessionLocal
 
     _, engine = cloud
     vault = _patch_vault(monkeypatch)
     monkeypatch.setenv("ANTEROOM_CLOUD_MARKETPLACES", "poshmark")
     with use(for_seller(USER_ID)), SessionLocal() as db:
+        if already_revoked:
+            cloud_sessions.save_uploaded_session(db, "poshmark", _sample_cookies())
+            cloud_sessions.revoke_session(db, "poshmark")
         token = cloud_sessions.mint_upload_token(db, "poshmark")["token"]
         upload = cloud_sessions.consume_upload_token(engine, "poshmark", token)
         assert upload is not None

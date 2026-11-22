@@ -90,7 +90,7 @@ async def upload_cloud_session(
             verify = market != "poshmark" or await in_worker_session(cloud_sessions.needs_automation_resume, market)
             label = None
             if verify:
-                outcome = await cloud_marketplace.verify_upload(market, cookies, user_agent, upload.proxy_session_id)
+                outcome = await cloud_marketplace.verify_upload(market, cookies, user_agent, upload.proxy_session_id or "")
                 result = outcome.get("result") or {}
                 session = result.get("session") or {}
                 if not result.get("ok") or session.get("state") != "signed_in":

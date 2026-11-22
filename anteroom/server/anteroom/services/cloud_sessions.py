@@ -56,7 +56,7 @@ class CloudUpload:
     seller_id: str
     state: str
     connected_at: datetime | None
-    proxy_session_id: str
+    proxy_session_id: str | None
 
 
 class CloudSessionError(ValueError):
@@ -330,12 +330,15 @@ def mint_upload_token(db: Session, marketplace: str) -> dict[str, Any]:
             user_id=seller,
             marketplace=market,
             state="pending",
+            proxy_session_id=secrets.token_hex(12),
             upload_token_hash=token_hash,
             upload_token_expires_at=expires_at,
             updated_at=now,
         )
         db.add(row)
     else:
+        if not row.proxy_session_id:
+            row.proxy_session_id = secrets.token_hex(12)
         row.upload_token_hash = token_hash
         row.upload_token_expires_at = expires_at
         row.updated_at = now
@@ -386,10 +389,14 @@ def consume_upload_token(engine, marketplace: str, raw_token: str) -> CloudUploa
             ok = (result.rowcount or 0) == 1
         if not ok:
             return None
+        if conn.dialect.name == "postgresql":
+            from anteroom.services.hosted_database import scope_seller_transaction
+
+            scope_seller_transaction(conn, owner)
         state, connected_at, proxy_session_id = conn.execute(select(
             CloudMarketplaceSession.state, CloudMarketplaceSession.connected_at, CloudMarketplaceSession.proxy_session_id,
         ).where(CloudMarketplaceSession.user_id == owner, CloudMarketplaceSession.marketplace == market)).one()
-        return CloudUpload(owner, state, connected_at, proxy_session_id or secrets.token_hex(12))
+        return CloudUpload(owner, state, connected_at, proxy_session_id)
 
 
 def save_uploaded_session(
@@ -420,7 +427,10 @@ def save_uploaded_session(
     ctx = current()
     assert ctx is not None
     row = _row(db, market, lock=True)
-    if upload and (row is None or row.state != upload.state or row.connected_at != upload.connected_at or row.upload_token_hash):
+    if upload and (
+        row is None or row.state != upload.state or row.connected_at != upload.connected_at
+        or row.proxy_session_id != upload.proxy_session_id or row.upload_token_hash
+    ):
         raise CloudSessionError("The cloud connection changed. Start connecting again.")
     if verified_label:
         label = _sanitize_label({"name": verified_label}) or label
@@ -450,7 +460,7 @@ def save_uploaded_session(
         row.connected_at = now
         row.last_error = None
         if not row.proxy_session_id:
-            row.proxy_session_id = upload.proxy_session_id if upload else secrets.token_hex(12)
+            row.proxy_session_id = secrets.token_hex(12)
         row.upload_token_hash = None
         row.upload_token_expires_at = None
         row.updated_at = now
@@ -491,6 +501,8 @@ def revoke_session(db: Session, marketplace: str) -> dict[str, Any]:
         if row.state == "connected":
             pause_for_cloud_disconnect(db, _seller_id(), market)
         row.state = "revoked"
+        # Fence a verification that started before disconnect, even on a revoked row.
+        row.proxy_session_id = secrets.token_hex(12)
         row.account_label = None
         row.expires_at = None
         row.last_error = None

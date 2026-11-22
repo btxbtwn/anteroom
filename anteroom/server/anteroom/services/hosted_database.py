@@ -208,6 +208,10 @@ async def in_seller_session(request: Request, work, /, *args):
 def _scope_transaction(session, transaction, connection):
     if transaction.nested:
         return
+    scope_seller_transaction(connection, session.user_id)
+
+
+def scope_seller_transaction(connection, seller_id: str) -> None:
     # Use the transaction's connection, not Session.execute (which would
     # recurse). Both settings disappear on commit/rollback before pool reuse.
     # One statement, as PostgREST scopes a request: Postgres is a network hop
@@ -221,7 +225,7 @@ def _scope_transaction(session, transaction, connection):
         text("SELECT set_config('role', 'anteroom_seller', true), set_config('request.jwt.claims', :claims, true),"
              " set_config('statement_timeout', :statement_timeout, true),"
              " set_config('idle_in_transaction_session_timeout', :idle_timeout, true)"),
-        {"claims": json.dumps({"sub": session.user_id}), "statement_timeout": STATEMENT_TIMEOUT,
+        {"claims": json.dumps({"sub": seller_id}), "statement_timeout": STATEMENT_TIMEOUT,
          "idle_timeout": IDLE_IN_TRANSACTION_TIMEOUT},
     )
     # The role and the row security it relies on are checked once per pooled
