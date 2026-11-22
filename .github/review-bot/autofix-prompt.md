@@ -26,10 +26,10 @@ For every finding:
    - `not_fixed`: the problem is real but you could not fix it safely here
      (it needs a product decision, a large change, or checks you cannot run).
 2. To fix: make the smallest change to the root cause. Add or update a test
-   when the finding is about behavior. Never edit `.github/`, `VERSION` or
+   when the finding is about behavior. Never edit `.github/`, `VERSION`, `anteroom/VERSION` or
    `CHANGELOG.md`, and never weaken a test to make it pass.
 3. Validate with the narrowest commands that cover the change, for example
-   `anteroom/.venv/bin/python -m pytest -q <test file>` from `anteroom/`,
+   `.venv/bin/python -m pytest -q <test file>` from `anteroom/`,
    `npx vitest run <file>` from `anteroom/`, or
    `node --test anteroom-extension/tests/<file>`. `./check.sh --fast` runs
    everything CI checks for the changed components.

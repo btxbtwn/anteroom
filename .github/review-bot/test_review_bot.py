@@ -4,6 +4,9 @@ python3 .github/review-bot/test_review_bot.py"""
 import sys
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
+import subprocess
 
 sys.path.insert(0, str(Path(__file__).parent))
 import review_bot as bot  # noqa: E402
@@ -143,10 +146,55 @@ class AutofixTests(unittest.TestCase):
         self.assertIn("Auto-merge was turned off", result)
         self.assertIn("Round 2 of 3", result)
 
+    def test_changed_paths_keeps_whitespace_and_both_rename_endpoints(self):
+        with TemporaryDirectory() as tmp:
+            def git(*args):
+                return subprocess.check_output(["git", "-C", tmp, *args])
+            git("init", "-q")
+            (Path(tmp) / "CHANGELOG.md").write_text("notes")
+            git("add", ".")
+            git("-c", "user.name=Test", "-c", "user.email=test@example.org", "commit", "-qm", "base")
+            git("mv", "CHANGELOG.md", "review notes.md")
+            with patch.dict("os.environ", GIT_DIR=str(Path(tmp) / ".git"), GIT_WORK_TREE=tmp):
+                git("-c", "user.name=Test", "-c", "user.email=test@example.org", "commit", "-qm", "move")
+                paths = bot.changed_paths("HEAD^", "HEAD")
+            self.assertEqual(paths, ["CHANGELOG.md", "review notes.md"])
+            self.assertEqual(bot.protected_changes(paths), ["CHANGELOG.md"])
+
+    def test_body_findings_lifecycle(self):
+        ctx = {"head": "abc", "merge_base": "base", "files": ["app.py"]}
+        body = bot.render_review_body([], [FINDING, FINDING | {"line": 42}], ctx)
+        review = {"user": {"login": "github-actions[bot]"}, "id": 12, "body": body, "html_url": "review"}
+        with patch.object(bot, "repo", return_value="o/r"), patch.object(bot, "api_list", return_value=[review]), \
+             patch.object(bot, "bot_issue_comments") as history:
+            history.return_value = []
+            found = bot.body_findings(1, "abc", for_autofix=True)
+            self.assertEqual([f["comment_id"] for f in found], ["review:12:0", "review:12:1"])
+            history.return_value = [({"body": "done"}, {"id": found[0]["comment_id"], "outcome": "fixed"}),
+                                    ({"body": "closed"}, {"id": found[1]["comment_id"], "addressed": True})]
+            self.assertEqual(bot.body_findings(1, "abc", for_autofix=True), [])
+            self.assertEqual(len(bot.body_findings(1, "abc", for_autofix=False)), 1)
+
+    def test_interrupted_round_resumes_without_reposting_answered_reply(self):
+        journal = {"ctx": {"pr": 1, "head": "base", "round": 3}, "target": "tip",
+                   "auto_merge_disabled": False, "findings": [{"comment_id": 7}],
+                   "results": [{"comment_id": 7, "outcome": "fixed", "explanation": "ok", "validation": "tested"}]}
+        reply = bot.marker(bot.AUTOFIX_REPLY, {"head": "tip", "outcome": "fixed"})
+        with patch.object(bot, "is_ancestor", return_value=True), patch.object(bot, "repo", return_value="o/r"), \
+             patch.object(bot, "review_threads", return_value=[thread(bot.CODEX_LOGIN, "x", [reply])]), \
+             patch.object(bot, "bot_issue_comments", return_value=[]), patch.object(bot, "api") as api:
+            bot.finish_journal({"id": 44}, journal, "newhead")
+            self.assertEqual(api.call_count, 1)
+            path, method, data = api.call_args.args
+            self.assertEqual((path, method), ("repos/o/r/issues/comments/44", "PATCH"))
+            state = bot.read_marker(bot.AUTOFIX_STATE, data["body"])
+            self.assertTrue(state["pushed"])
+            self.assertEqual(state["round"], 3)
+
     def test_protected_paths(self):
         self.assertEqual(
-            bot.protected_changes([".github/workflows/ci.yml", "VERSION", "VERSIONS.md", "CHANGELOG.md", "docs/x.md"]),
-            [".github/workflows/ci.yml", "VERSION", "CHANGELOG.md"],
+            bot.protected_changes([".github/workflows/ci.yml", "VERSION", "anteroom/VERSION", "VERSIONS.md", "CHANGELOG.md", "docs/x.md"]),
+            [".github/workflows/ci.yml", "VERSION", "anteroom/VERSION", "CHANGELOG.md"],
         )
 
 

@@ -118,7 +118,7 @@ jobs:
             --permission-mode acceptEdits
             --add-dir ${{ runner.temp }}/claude-autofix
             --allowedTools "Read,Glob,Grep,Edit,Write,Bash(cd:*),Bash(ls:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git add:*),Bash(git commit:*),Bash(./check.sh --fast:*),Bash(.venv/bin/python -m pytest:*),Bash(anteroom/.venv/bin/python -m pytest:*),Bash(.venv/bin/ruff:*),Bash(anteroom/.venv/bin/ruff:*),Bash(npx vitest:*),Bash(npm test:*),Bash(npm run lint:*),Bash(node --test:*),Bash(gh pr view:*)"
-            --disallowedTools "Bash(git push:*),Edit(.github/**),Write(.github/**),Edit(VERSION),Edit(CHANGELOG.md)"
+            --disallowedTools "Bash(git push:*),Edit(.github/**),Write(.github/**),Edit(VERSION),Edit(anteroom/VERSION),Write(anteroom/VERSION),Edit(CHANGELOG.md)"
             --json-schema '${{ steps.schema.outputs.json }}'
       - name: Push fix and reply to findings
         if: steps.prepare.outputs.skip == 'false' && !cancelled()

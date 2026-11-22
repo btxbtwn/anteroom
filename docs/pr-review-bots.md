@@ -21,17 +21,17 @@ workflow.
 
 1. Open or push: Codex and Claude review. Claude's review job runs
    `review_bot.py prepare-review`, then Claude reads the code and returns JSON
-   (`review-schema.json`), then `post-review` posts it. Claude never gets a
-   token that writes to GitHub in this job.
+   (`review-schema.json`), then `post-review` posts it. The workflow denies Claude's file-edit, commit and push tools. Its job token
+   can write pull requests and issues; those tool restrictions do not remove the credential.
 2. Auto-fix runs right after Claude's review, and again whenever Codex submits
    a review. Claude verifies each open finding, fixes the real ones, runs the
    narrowest tests, and commits. `post-autofix` then:
-   - refuses to push changes to `.github/`, `VERSION` or `CHANGELOG.md`;
+   - refuses to push changes to `.github/`, `anteroom/VERSION`, `VERSION` or `CHANGELOG.md`;
    - turns auto-merge off if it was on, as AGENTS.md requires before pushing
      to a queued PR;
    - pushes with the Claude GitHub App token, so CI and the review run on the
      new commit (a push with the workflow token would start no CI);
-   - replies in every finding's thread and posts the round's result.
+   - replies to inline findings in their threads and to review-body findings in linked PR comments.
 3. The fix commit starts the next review, which marks addressed findings and
    may lead to another auto-fix round, up to the limit.
 
