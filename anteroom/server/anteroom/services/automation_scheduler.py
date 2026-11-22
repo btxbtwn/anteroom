@@ -92,8 +92,10 @@ async def tick(db: Session, *, now: datetime | None = None, executor=None) -> in
             if run is None:
                 run = _claim_next(db, moment)
             if run is None:
+                due_drafts = _has_due_scheduled_drafts(db, moment)
+                has_relist = _has_enabled_auto_relist(db)
                 end_read(db)
-                return handled
+                break
             automation = db.get(Automation, run.automation_id)
             if automation is None or automation.status not in {"active", "paused"}:
                 run.status = "failed"
@@ -131,6 +133,12 @@ async def tick(db: Session, *, now: datetime | None = None, executor=None) -> in
         db.expire_all()
         handled += 1
         moment = as_utc(now or datetime.now(UTC))
+
+    if due_drafts:
+        handled += await _run_scheduled_drafts(moment)
+    if has_relist:
+        handled += await _run_auto_relist(moment)
+    return handled
 
 
 def start_automation_scheduler() -> asyncio.Task:
@@ -471,3 +479,55 @@ def _parse_time(value: str | None) -> datetime | None:
 
 def _naive(value: datetime) -> datetime:
     return as_utc(value).replace(tzinfo=None)
+
+
+def _has_due_scheduled_drafts(db: Session, moment: datetime) -> bool:
+    from anteroom.models.listing import Listing
+
+    cutoff = _naive(moment)
+    return (
+        db.query(Listing.conversation_id)
+        .filter(
+            Listing.ready_to_list.is_(True),
+            Listing.scheduled_status == "scheduled",
+            Listing.scheduled_publish_at.isnot(None),
+            Listing.scheduled_publish_at <= cutoff,
+            Listing.scheduled_confirmed_at.isnot(None),
+        )
+        .first()
+        is not None
+    )
+
+
+def _has_enabled_auto_relist(db: Session) -> bool:
+    from anteroom.models.automation import MarketplaceRelistRule
+
+    return (
+        db.query(MarketplaceRelistRule.id)
+        .filter(MarketplaceRelistRule.enabled.is_(True))
+        .first()
+        is not None
+    )
+
+
+async def _run_scheduled_drafts(moment: datetime) -> int:
+    from anteroom.services.draft_scheduling import run_due_scheduled_publishes
+
+    try:
+        results = await run_due_scheduled_publishes(now=moment)
+        return len(results)
+    except Exception:  # noqa: BLE001
+        log.exception("scheduled draft publish sweep failed")
+        return 0
+
+
+async def _run_auto_relist(moment: datetime) -> int:
+    from anteroom.services.auto_relist import run_auto_relist
+
+    try:
+        results = await run_auto_relist(now=moment)
+        return sum(1 for item in results if item.get("status") in {"completed", "failed"})
+    except Exception:  # noqa: BLE001
+        log.exception("auto-relist sweep failed")
+        return 0
+

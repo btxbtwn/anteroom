@@ -85,13 +85,53 @@ def _local_check(db: Session, rule: EbayOfferRule) -> None:
         raise OfferConflict("An offer was sent in the last 24 hours. Wait before sending another.")
 
 
+def normalize_waterfall(steps: list[dict] | None) -> list[dict] | None:
+    if not steps:
+        return None
+    from anteroom.services.listing_promotions import PromotionError, normalize_waterfall_steps
+
+    try:
+        return normalize_waterfall_steps(steps, min_discount=5)
+    except PromotionError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def next_waterfall_step(db: Session, rule: EbayOfferRule, steps: list[dict] | None, *, moment: datetime | None = None) -> dict | None:
+    """Return the next due waterfall step for an eBay offer rule, or None if still waiting / complete."""
+    if not steps:
+        return None
+    current_time = moment or now()
+    last = (
+        db.query(EbayOfferAttempt)
+        .filter(
+            EbayOfferAttempt.rule_id == rule.id,
+            EbayOfferAttempt.state == "sent",
+            EbayOfferAttempt.sent_at.isnot(None),
+        )
+        .order_by(EbayOfferAttempt.sent_at.desc())
+        .first()
+    )
+    if last is None:
+        return steps[0]
+    last_step = int(last.waterfall_step or 1)
+    assert last.sent_at is not None
+    if last_step >= len(steps):
+        return None
+    upcoming = steps[last_step]
+    wait = max(SEND_COOLDOWN, timedelta(minutes=int(upcoming["delay_minutes"])))
+    if current_time < last.sent_at + wait:
+        return None
+    return upcoming
+
+
 def attempt_out(attempt: EbayOfferAttempt, rule: EbayOfferRule, title: str | None = None) -> dict:
     return {
         "id": attempt.id, "ruleId": rule.id, "listingId": rule.listing_id, "title": title,
         "currentPrice": ebay_api.dollars(attempt.current_price_cents),
         "offerPrice": ebay_api.dollars(attempt.offer_price_cents),
         "minimumPrice": ebay_api.dollars(attempt.minimum_price_cents),
-        "discountPercent": attempt.discount_percent, "state": attempt.state,
+        "discountPercent": attempt.discount_percent, "waterfallStep": attempt.waterfall_step,
+        "state": attempt.state,
         "note": attempt.note, "recipientCount": attempt.recipient_count,
         "createdAt": attempt.created_at.isoformat() + "Z",
         "expiresAt": attempt.expires_at.isoformat() + "Z",
@@ -131,6 +171,7 @@ def status(db: Session) -> dict:
             "ruleId": rule.id if rule else None, "enabled": bool(rule and rule.enabled),
             "discountPercent": rule.discount_percent if rule else 10,
             "minimumPrice": ebay_api.dollars(rule.minimum_price_cents) if rule else "",
+            "waterfallSteps": list(rule.waterfall_steps or []) if rule else [],
         })
     history = []
     for attempt, rule, title in db.query(EbayOfferAttempt, EbayOfferRule, Conversation.title).join(
@@ -143,30 +184,42 @@ def status(db: Session) -> dict:
     return {"connected": bool(account.get("accessToken")), "listings": listings, "history": history,
             "allListings": {"enabled": bool(policy and policy.enabled),
                             "discountPercent": policy.discount_percent if policy else 10,
-                            "minimumPrice": ebay_api.dollars(policy.minimum_price_cents) if policy and policy.minimum_price_cents > 1 else ""},
+                            "minimumPrice": ebay_api.dollars(policy.minimum_price_cents) if policy and policy.minimum_price_cents > 1 else "",
+                            "waterfallSteps": list(policy.waterfall_steps or []) if policy else []},
             "checkIntervalMinutes": CHECK_INTERVAL_S // 60, "lastCheck": last_check, "lastError": last_error}
 
 
-async def preview(selections: list[dict], discount_percent: int) -> dict:
+async def preview(
+    selections: list[dict],
+    discount_percent: int,
+    *,
+    waterfall_steps: list[dict] | None = None,
+    waterfall_step: int | None = None,
+) -> dict:
     """Price each selection on eBay. Every database step uses its own short session, released before eBay answers."""
     seller = account_id()
+    normalized_steps = normalize_waterfall(waterfall_steps)
+    effective_discount = normalized_steps[0]["discount_percent"] if normalized_steps and waterfall_step is None else discount_percent
+    effective_step = waterfall_step if waterfall_step is not None else (1 if normalized_steps else None)
     eligible = await ebay_api.eligible_items()
     rows = []
     seen: set[str] = set()
     for selection in selections:
-        row, minimum, skipped = await in_worker_session(_preview_target, seller, selection, discount_percent, seen)
+        row, minimum, skipped = await in_worker_session(_preview_target, seller, selection, effective_discount, seen)
         if skipped is not None:
             rows.append({**row, "state": "skipped", "note": skipped})
             continue
         try:
             price = await ebay_api.listing_price(row["listingId"])
             # Round up to the cent, so rounding never increases the requested discount.
-            offer = (price * (100 - discount_percent) + 99) // 100
+            offer = (price * (100 - effective_discount) + 99) // 100
             if offer < minimum:
                 raise OfferConflict("This discount would go below your minimum price. Lower the discount or skip this item.")
             if offer * 100 > price * 95:
                 raise OfferConflict("This price is too low to offer at least 5% off after rounding.")
-            saved = await in_worker_session(_save_preview, seller, row, discount_percent, minimum, price, offer)
+            saved = await in_worker_session(
+                _save_preview, seller, row, effective_discount, minimum, price, offer, normalized_steps, effective_step,
+            )
             rows.append({**row, **saved, "eligible": row["listingId"] in eligible})
         except (ValueError, ebay_api.EbayError) as exc:
             rows.append({**row, "state": "skipped", "note": str(exc)})
@@ -205,16 +258,29 @@ def _preview_target(db: Session, seller: str, selection: dict, discount_percent:
     return row, minimum, None
 
 
-def _save_preview(db: Session, seller: str, row: dict, discount_percent: int, minimum: int, price: int, offer: int) -> dict:
+def _save_preview(
+    db: Session,
+    seller: str,
+    row: dict,
+    discount_percent: int,
+    minimum: int,
+    price: int,
+    offer: int,
+    waterfall_steps: list[dict] | None = None,
+    waterfall_step: int | None = None,
+) -> dict:
     conv = db.get(Conversation, row["conversationId"])
     if conv is None:
         raise OfferConflict("This item sold or its eBay listing changed. Sync from Vendoo before making offers.")
     rule = _offer_rule(db, seller, conv, row["listingId"], discount_percent, minimum)
+    if waterfall_steps is not None:
+        rule.waterfall_steps = waterfall_steps
     if rule not in db:
         db.add(rule)
     db.flush()
     attempt = EbayOfferAttempt(rule_id=rule.id, current_price_cents=price, offer_price_cents=offer,
-                               discount_percent=discount_percent, minimum_price_cents=minimum,
+                               discount_percent=discount_percent, waterfall_step=waterfall_step,
+                               minimum_price_cents=minimum,
                                state="preview", expires_at=now() + PREVIEW_TTL)
     db.add(attempt)
     db.commit()
@@ -247,15 +313,24 @@ def enable(db: Session, attempt_ids: list[str]) -> dict:
     return {"ok": True}
 
 
-def enable_all(db: Session, discount_percent: int, minimum_price: str | None) -> dict:
+def enable_all(
+    db: Session,
+    discount_percent: int,
+    minimum_price: str | None,
+    *,
+    waterfall_steps: list[dict] | None = None,
+) -> dict:
     seller = account_id()
+    normalized_steps = normalize_waterfall(waterfall_steps)
+    base_discount = normalized_steps[0]["discount_percent"] if normalized_steps else discount_percent
     minimum = ebay_api.money_cents(minimum_price) if minimum_price else 1
     policy = db.query(EbayOfferPolicy).filter_by(account_id=seller).first()
     if not policy:
         policy = EbayOfferPolicy(account_id=seller)
         db.add(policy)
     policy.approval_id = new_id()
-    policy.discount_percent, policy.minimum_price_cents, policy.enabled = discount_percent, minimum, True
+    policy.discount_percent, policy.minimum_price_cents, policy.enabled = base_discount, minimum, True
+    policy.waterfall_steps = normalized_steps
     # Switching scope replaces individual automatic approvals, preserving their journals.
     db.query(EbayOfferRule).filter_by(account_id=seller).update({"enabled": False})
     db.commit()
@@ -327,6 +402,14 @@ def _preview_listing(db: Session, attempt_id: str) -> str:
     return rule.listing_id
 
 
+def _allowed_discounts(base: int, steps: list[dict] | None) -> set[int]:
+    allowed = {base}
+    for step in steps or []:
+        if isinstance(step, dict) and isinstance(step.get("discount_percent"), int):
+            allowed.add(step["discount_percent"])
+    return allowed
+
+
 def _reserve(db: Session, attempt_id: str, token: str, live_price: int, automatic: bool,
              policy_approval: str | None) -> tuple[datetime | None, int]:
     """Check the preview again and reserve the send, committed before eBay is called."""
@@ -337,8 +420,11 @@ def _reserve(db: Session, attempt_id: str, token: str, live_price: int, automati
         raise OfferConflict("The live eBay price changed. Preview again before sending.")
     if attempt.offer_price_cents < attempt.minimum_price_cents:
         raise OfferConflict("The offer is below the approved minimum price.")
-    if automatic and not policy_approval and (not rule.enabled or rule.discount_percent != attempt.discount_percent
-                      or rule.minimum_price_cents != attempt.minimum_price_cents):
+    if automatic and not policy_approval and (
+        not rule.enabled
+        or attempt.discount_percent not in _allowed_discounts(rule.discount_percent, rule.waterfall_steps)
+        or rule.minimum_price_cents != attempt.minimum_price_cents
+    ):
         raise OfferConflict("The automatic offer rule changed or was paused.")
     previous_attempt_at = rule.last_attempt_at
     reservation = update(EbayOfferRule).where(
@@ -346,12 +432,15 @@ def _reserve(db: Session, attempt_id: str, token: str, live_price: int, automati
         or_(EbayOfferRule.last_attempt_at.is_(None), EbayOfferRule.last_attempt_at <= now() - SEND_COOLDOWN),
     )
     if policy_approval:
+        policy_row = db.query(EbayOfferPolicy).filter_by(account_id=rule.account_id, approval_id=policy_approval).first()
+        if not policy_row or attempt.discount_percent not in _allowed_discounts(policy_row.discount_percent, policy_row.waterfall_steps):
+            db.rollback()
+            raise OfferConflict("The all-listings offer rule changed or was paused.")
         # Serialize pause/edit against the reservation; never approve from a stale sweep.
         approved = db.execute(update(EbayOfferPolicy).where(
             EbayOfferPolicy.account_id == rule.account_id,
             EbayOfferPolicy.approval_id == policy_approval,
             EbayOfferPolicy.enabled.is_(True),
-            EbayOfferPolicy.discount_percent == attempt.discount_percent,
             EbayOfferPolicy.minimum_price_cents == attempt.minimum_price_cents,
         ).values(enabled=True))
         if type_cast(CursorResult, approved).rowcount != 1:
@@ -362,7 +451,6 @@ def _reserve(db: Session, attempt_id: str, token: str, live_price: int, automati
         # this write. Approval and reservation must be checked atomically.
         reservation = reservation.where(
             EbayOfferRule.enabled.is_(True),
-            EbayOfferRule.discount_percent == attempt.discount_percent,
             EbayOfferRule.minimum_price_cents == attempt.minimum_price_cents,
         )
     reserved = db.execute(reservation.values(last_attempt_at=now()))
@@ -409,23 +497,45 @@ async def send_previews(attempt_ids: list[str]) -> dict:
     return {"offers": rows}
 
 
-def _policy(db: Session, seller: str) -> tuple[str | None, int, str] | None:
+def _policy(db: Session, seller: str) -> tuple[str | None, int, str, list[dict] | None] | None:
     policy = db.query(EbayOfferPolicy).filter_by(account_id=seller).first()
     if not policy or not policy.enabled:
         return None
-    return policy.approval_id, policy.discount_percent, ebay_api.dollars(policy.minimum_price_cents)
+    return (
+        policy.approval_id,
+        policy.discount_percent,
+        ebay_api.dollars(policy.minimum_price_cents),
+        list(policy.waterfall_steps) if policy.waterfall_steps else None,
+    )
+
+
+def _policy_step_for_listing(db: Session, seller: str, listing_id: str, steps: list[dict] | None) -> tuple[int | None, int | None]:
+    if not steps:
+        return None, None
+    rule = db.query(EbayOfferRule).filter_by(account_id=seller, listing_id=listing_id).first()
+    if rule is None:
+        return int(steps[0]["discount_percent"]), int(steps[0]["step"])
+    nxt = next_waterfall_step(db, rule, steps)
+    if nxt is None:
+        return None, -1
+    return int(nxt["discount_percent"]), int(nxt["step"])
 
 
 def _enabled_rules(db: Session, seller: str) -> list[str]:
     return [rule.id for rule in db.query(EbayOfferRule).filter_by(account_id=seller, enabled=True).all()]
 
 
-def _rule_target(db: Session, rule_id: str, eligible: set[str]) -> tuple[str | None, str, int] | None:
+def _rule_target(db: Session, rule_id: str, eligible: set[str]) -> tuple[str | None, str, int, int | None] | None:
     rule = db.get(EbayOfferRule, rule_id)
     if rule is None or not rule.enabled or rule.listing_id not in eligible:
         return None
     _local_check(db, rule)
-    return rule.conversation_id, ebay_api.dollars(rule.minimum_price_cents), rule.discount_percent
+    if rule.waterfall_steps:
+        step = next_waterfall_step(db, rule, rule.waterfall_steps)
+        if step is None:
+            return None
+        return rule.conversation_id, ebay_api.dollars(rule.minimum_price_cents), int(step["discount_percent"]), int(step["step"])
+    return rule.conversation_id, ebay_api.dollars(rule.minimum_price_cents), rule.discount_percent, None
 
 
 async def run_automation() -> None:
@@ -436,7 +546,7 @@ async def run_automation() -> None:
         seller = account_id()
         policy = await in_worker_session(_policy, seller)
         if policy is not None:
-            approval, discount, minimum = policy
+            approval, discount, minimum, policy_steps = policy
             eligible = await ebay_api.eligible_items()
             # Discover anew each round so future imports/listings need no manual selection.
             listings = (await in_worker_session(status))["listings"]
@@ -446,7 +556,19 @@ async def run_automation() -> None:
                 current = await in_worker_session(_policy, seller)
                 if current is None or current[0] != approval:
                     break
-                result = await preview([{"conversation_id": item["conversationId"], "minimum_price": minimum}], discount)
+                step_discount, step_num = discount, None
+                if policy_steps:
+                    step_discount_opt, step_num_opt = await in_worker_session(
+                        _policy_step_for_listing, seller, item["listingId"], policy_steps,
+                    )
+                    if step_num_opt == -1 or step_discount_opt is None:
+                        continue
+                    step_discount, step_num = step_discount_opt, step_num_opt
+                result = await preview(
+                    [{"conversation_id": item["conversationId"], "minimum_price": minimum}],
+                    step_discount,
+                    waterfall_step=step_num,
+                )
                 offer = result["offers"][0]
                 if offer["state"] == "preview":
                     try:
@@ -464,8 +586,12 @@ async def run_automation() -> None:
                 target = await in_worker_session(_rule_target, rule_id, eligible)
                 if target is None:
                     continue
-                conversation_id, rule_minimum, rule_discount = target
-                result = await preview([{"conversation_id": conversation_id, "minimum_price": rule_minimum}], rule_discount)
+                conversation_id, rule_minimum, rule_discount, step_num = target
+                result = await preview(
+                    [{"conversation_id": conversation_id, "minimum_price": rule_minimum}],
+                    rule_discount,
+                    waterfall_step=step_num,
+                )
                 offer = result["offers"][0]
                 if offer["state"] == "preview":
                     await send(offer["id"], automatic=True)

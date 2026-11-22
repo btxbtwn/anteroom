@@ -164,3 +164,91 @@ export interface RelistGap {
   conversation_id: string;
   error: string | null;
 }
+
+export interface DraftScheduleState {
+  conversation_id: string;
+  title: string | null;
+  ready_to_list: boolean;
+  scheduled_publish_at: string | null;
+  scheduled_marketplaces: string[];
+  scheduled_revision_id: string | null;
+  scheduled_confirmed_at: string | null;
+  scheduled_status: string | null;
+  scheduled_error: string | null;
+}
+
+export interface ScheduledPublishLog {
+  id: string;
+  conversation_id: string;
+  title: string | null;
+  revision_id: string | null;
+  marketplaces: string[];
+  scheduled_for: string | null;
+  status: string;
+  results: Record<string, unknown> | null;
+  error: string | null;
+  created_at: string | null;
+  finished_at: string | null;
+}
+
+export interface BulkScheduleResult {
+  scheduled?: DraftScheduleState[];
+  unscheduled?: DraftScheduleState[];
+  failed: { conversation_id: string; error: string }[];
+}
+
+export type AutoRelistMarketplace = "poshmark" | "ebay" | "mercari" | "depop";
+
+export interface AutoRelistFilters {
+  min_likes?: number;
+  max_likes?: number;
+  min_price?: number;
+  max_price?: number;
+  conditions?: string[];
+  keywords?: string[];
+  labels?: string[];
+}
+
+export interface AutoRelistRule {
+  id?: string;
+  marketplace: AutoRelistMarketplace;
+  enabled: boolean;
+  min_age_days: number;
+  ebay_recreate_before_gtc_minutes: number | null;
+  daily_cap: number;
+  price_adjust_mode: "percent" | "amount" | null;
+  price_adjust_value: number | null;
+  price_floor: number | null;
+  filters: AutoRelistFilters;
+  skip_active_offers: boolean;
+  relisted_today: number;
+  remaining_today: number;
+  last_run_at: string | null;
+}
+
+export interface AutoRelistRuleBody {
+  enabled: boolean;
+  confirm?: boolean;
+  min_age_days: number;
+  ebay_recreate_before_gtc_minutes?: number | null;
+  daily_cap: number;
+  price_adjust_mode?: "percent" | "amount" | null;
+  price_adjust_value?: number | null;
+  price_floor?: number | null;
+  filters?: AutoRelistFilters;
+  skip_active_offers?: boolean;
+}
+
+export interface AutoRelistLog {
+  id: string;
+  conversation_id: string;
+  title: string | null;
+  marketplace: AutoRelistMarketplace;
+  old_listing_id: string | null;
+  new_listing_id: string | null;
+  old_price: number | null;
+  new_price: number | null;
+  status: string;
+  reason: string | null;
+  created_at: string | null;
+}

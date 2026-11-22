@@ -1,20 +1,24 @@
 /**
- * Forms for scheduled Poshmark sharing and automatic offers to likers, shown in
- * the Automations side panel. Each one is saved off and runs only after the
- * seller turns it on; any edit turns it off again.
+ * Forms for scheduled Poshmark sharing (self/party/community + 24h schedule + 8,000/day cap),
+ * automatic offers to likers & waterfall offers, Poshmark private bundle offers, and Poshmark
+ * automatic follows. Each one is saved off and runs only after the seller turns it on; any
+ * edit turns it off again.
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { PlusIcon, Trash2Icon } from "lucide-react";
 
 import { promotionOutcomeLabel } from "../promotions";
 import { api } from "../api/client";
 import { promotionAutomationsQuery } from "../api/pageQueries";
 import { pollMs } from "../api/polling";
-import type { PromotionAction, PromotionAutomation, PromotionMarketplace } from "../api/promotions";
+import type { HourlyIntensity, PromotionAction, PromotionAutomation, PromotionMarketplace, ShareMode } from "../api/promotions";
 import { confirmDialog } from "../ui/confirmDialog";
 import { marketplaceName } from "./marketplaceNames";
 import {
-  ORDER_LABELS, SPEED_LABELS, bodyFromPromotionForm, describeOfferChecks, describePromotionMinimum, describePromotionAutomation, formFromAutomation, withListing,
+  HOURLY_INTENSITY_LABELS, ORDER_LABELS, SHARE_MODE_LABELS, SPEED_LABELS,
+  bodyFromPromotionForm, describeOfferChecks, describePromotionAutomation, describePromotionMinimum,
+  describeWaterfall, formFromAutomation, withListing,
   type PromotionAutomationForm,
 } from "./promotionAutomationsFormat";
 import { Button } from "./ui/button";
@@ -23,9 +27,12 @@ import { Input } from "./ui/input";
 import { Radio, RadioGroup } from "./ui/radio-group";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
 import { Spinner } from "./ui/spinner";
+import { Switch } from "./ui/switch";
+import { Textarea } from "./ui/textarea";
 
 const KEY = promotionAutomationsQuery.queryKey;
 const FIELD = "h-8 rounded-md border border-border bg-background px-2 text-sm";
+const INTENSITIES: HourlyIntensity[] = ["none", "low", "medium", "high"];
 
 function when(value: string | null | undefined): string {
   return value ? new Date(value).toLocaleString() : "";
@@ -46,11 +53,27 @@ function Choice<T extends string>({ label, value, options, onChange }: {
   );
 }
 
-/** Who turns a sharing schedule or offer rule on: only the seller, after reading what it will do. */
+/** Who turns a sharing schedule, offer rule, bundle offer, or follow bot on: only the seller, after reading what it will do. */
 export async function confirmPromotionOn(row: PromotionAutomation): Promise<boolean> {
-  const what = row.action === "share"
-    ? `Anteroom will share these ${marketplaceName(row.marketplace)} listings to your followers on its own at ${row.times.join(", ")} (${row.timezone}), up to ${(row.daily_cap ?? 0).toLocaleString()} a day.`
-    : `Anteroom will send ${row.discount_percent}% off offers to new likers on its own; ${describeOfferChecks(row.marketplace)}; ${describePromotionMinimum(row)}.`;
+  let what: string;
+  if (row.action === "share") {
+    const primaryMode = row.share_modes?.[0] || "self";
+    const mode = SHARE_MODE_LABELS[primaryMode];
+    what = `Anteroom will run ${mode.toLowerCase()} on ${marketplaceName(row.marketplace)} up to ${(row.daily_cap ?? 0).toLocaleString()} shares a day.`;
+  } else if (row.action === "follow") {
+    const cfg = row.follow_config || {};
+    what = `Anteroom will run Poshmark follows at ${row.times.join(", ")} (${row.timezone})`
+      + `${cfg.reciprocal_24h ? ", reciprocal within 24h" : ""}`
+      + `${cfg.new_active_sellers_cap ? `, up to ${cfg.new_active_sellers_cap} active sellers/day` : ""}`
+      + `${cfg.unfollow_cap ? `, unfollow up to ${cfg.unfollow_cap}/day` : ""}`
+      + `${cfg.unsubscribe_live_shows ? ", and unsubscribe from Live Show notifications" : ""}.`;
+  } else if (row.action === "bundle_offer") {
+    const wf = describeWaterfall(row.waterfall_steps);
+    what = `Anteroom will send private Poshmark bundle offers (${wf || `${row.discount_percent}% off`}) after a ${row.bundle_pause_minutes ?? 5}-minute pause in buyer like activity; ${describePromotionMinimum(row)}.`;
+  } else {
+    const wf = describeWaterfall(row.waterfall_steps);
+    what = `Anteroom will send ${wf ? `waterfall offers (${wf})` : `${row.discount_percent}% off offers`} to new likers on its own; ${describeOfferChecks(row.marketplace)}; ${describePromotionMinimum(row)}.`;
+  }
   return confirmDialog(`Turn on “${row.name}”? ${what} It stops and turns itself off at the first limit or unconfirmed result. Nothing runs until the next round.`, { confirmLabel: "Turn on" });
 }
 
@@ -63,7 +86,7 @@ function useSavePromotion(onSaved: () => void) {
   const list = usePromotionAutomations();
   return useMutation({
     mutationFn: async (next: PromotionAutomationForm) => {
-      const built = bodyFromPromotionForm(next, list.data?.max_daily_cap ?? 6000);
+      const built = bodyFromPromotionForm(next, list.data?.max_daily_cap ?? 8000);
       if ("error" in built) throw new Error(built.error);
       return next.id ? api.promotionAutomations.update(next.id, built.body) : api.promotionAutomations.create(built.body);
     },
@@ -73,7 +96,99 @@ function useSavePromotion(onSaved: () => void) {
   });
 }
 
-/** New or edit a sharing schedule or offer rule. Saving always leaves it off. */
+function WaterfallStepsEditor({
+  form,
+  set,
+  labels,
+}: {
+  form: PromotionAutomationForm;
+  set: (patch: Partial<PromotionAutomationForm>) => void;
+  labels: string[];
+}) {
+  const steps = form.waterfallSteps;
+  const addStep = () => {
+    const prev = steps[steps.length - 1];
+    const nextDiscount = prev ? Math.min(95, (Number(prev.discount) || 10) + 5) : Number(form.discount) || 10;
+    const nextDelay = prev ? (Number(prev.delayMinutes) || 15) + 1440 : 15;
+    set({
+      waterfallSteps: [
+        ...steps,
+        { discount: String(nextDiscount), delayMinutes: String(nextDelay), shippingLabel: form.shippingLabel },
+      ],
+    });
+  };
+  const updateStep = (idx: number, patch: Partial<PromotionAutomationForm["waterfallSteps"][number]>) => {
+    set({
+      waterfallSteps: steps.map((step, i) => (i === idx ? { ...step, ...patch } : step)),
+    });
+  };
+  const removeStep = (idx: number) => {
+    set({ waterfallSteps: steps.filter((_, i) => i !== idx) });
+  };
+
+  return (
+    <div className="space-y-2 rounded-lg border border-border/60 p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <p className="text-xs font-medium text-foreground">Waterfall offer sequence (optional)</p>
+          <p className="text-xs text-muted-foreground">
+            Step up discounts over time if a buyer has not accepted. Always respects floor prices and cooldowns.
+          </p>
+        </div>
+        {steps.length < 5 ? (
+          <Button size="xs" variant="outline" onClick={addStep}>
+            <PlusIcon className="size-3.5" />
+            Add step
+          </Button>
+        ) : null}
+      </div>
+      {steps.map((step, idx) => (
+        <div key={idx} className="flex flex-wrap items-end gap-2 border-t border-border/50 pt-2 text-xs">
+          <span className="pb-1.5 font-medium text-muted-foreground">Step {idx + 1}</span>
+          <label className="flex flex-col gap-1">
+            Discount (%)
+            <input
+              className={`${FIELD} w-16`}
+              inputMode="numeric"
+              aria-label={`Waterfall step ${idx + 1} discount`}
+              value={step.discount}
+              onChange={(e) => updateStep(idx, { discount: e.target.value })}
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            Delay (minutes)
+            <input
+              className={`${FIELD} w-24`}
+              inputMode="numeric"
+              aria-label={`Waterfall step ${idx + 1} delay minutes`}
+              value={step.delayMinutes}
+              onChange={(e) => updateStep(idx, { delayMinutes: e.target.value })}
+            />
+          </label>
+          {form.marketplace === "poshmark" ? (
+            <label className="flex flex-col gap-1">
+              Shipping
+              <Choice
+                label={`Step ${idx + 1} shipping`}
+                value={step.shippingLabel || null}
+                onChange={(val) => updateStep(idx, { shippingLabel: val ?? "" })}
+                options={[
+                  { value: null, label: "None" },
+                  ...[...new Set([...labels, ...(step.shippingLabel ? [step.shippingLabel] : [])])].map((label) => ({ value: label, label })),
+                ]}
+              />
+            </label>
+          ) : null}
+          <Button size="xs" variant="ghost" aria-label={`Remove step ${idx + 1}`} onClick={() => removeStep(idx)}>
+            <Trash2Icon className="size-3.5" />
+          </Button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** New or edit a sharing schedule, offer / waterfall rule, private bundle offer, or follow bot. */
 export function PromotionEditor({ initial, onSaved, onCancel }: {
   initial: PromotionAutomationForm; onSaved: () => void; onCancel: () => void;
 }) {
@@ -82,78 +197,219 @@ export function PromotionEditor({ initial, onSaved, onCancel }: {
   const save = useSavePromotion(onSaved);
   const data = list.data;
   const labels = data?.shipping_labels || [];
-  const maxCap = data?.max_daily_cap ?? 6000;
+  const maxCap = data?.max_daily_cap ?? 8000;
   const waiting = (marketplace: PromotionMarketplace, action: PromotionAction) => Boolean(data?.awaiting_capture?.[marketplace]?.includes(action));
   const busy = save.isPending;
   const set = (patch: Partial<PromotionAutomationForm>) => setForm({ ...form, ...patch });
   const offerMarketplaces: PromotionMarketplace[] = ["poshmark", "mercari", "depop"];
+
+  const cycleHour = (hour: number) => {
+    const key = String(hour);
+    const current = form.hourlySchedule[key] ?? "none";
+    const next = INTENSITIES[(INTENSITIES.indexOf(current) + 1) % INTENSITIES.length]!;
+    set({ hourlySchedule: { ...form.hourlySchedule, [key]: next } });
+  };
+
+  const defaultNamePlaceholder = form.action === "share"
+    ? "Poshmark sharing"
+    : form.action === "bundle_offer"
+      ? "Poshmark private bundle offers"
+      : form.action === "follow"
+        ? "Poshmark automatic follows"
+        : "Offers to likers";
+
   return (
     <div className="flex flex-col gap-3 text-sm">
       <p className="text-muted-foreground">Saving leaves this automation off. Turn it on from the list when you’re ready. Editing turns it off again.</p>
       {save.error ? <p role="alert" className="text-destructive-foreground">{save.error.message}</p> : null}
       <label className="flex flex-col gap-1">Name
-        <Input value={form.name} maxLength={80} placeholder={form.action === "share" ? "Poshmark sharing" : "Offers to likers"} onChange={(event) => set({ name: event.target.value })} />
+        <Input value={form.name} maxLength={80} placeholder={defaultNamePlaceholder} onChange={(event) => set({ name: event.target.value })} />
       </label>
+
       {form.action === "offer" && !form.id ? (
         <label className="flex flex-col gap-1">Marketplace
           <Choice label="Marketplace" value={form.marketplace} onChange={(marketplace) => { if (marketplace) set({ marketplace }); }}
             options={offerMarketplaces.map((name) => ({ value: name, label: `${marketplaceName(name)}${waiting(name, "offer") ? " (not available yet)" : ""}` }))} />
         </label>
       ) : null}
-      <fieldset><legend className="mb-1">Listings</legend>
-        <RadioGroup className="flex-row flex-wrap gap-4" value={form.scope} onValueChange={(scope) => set({ scope: scope as PromotionAutomationForm["scope"] })}>
-          <label className="flex items-center gap-2"><Radio value="all" />{form.action === "offer" ? "All current and future listings" : "All live listings"}</label>
-          <label className="flex items-center gap-2"><Radio value="items" />Only listings I choose</label>
-        </RadioGroup>
-      </fieldset>
-      <p className="text-xs text-muted-foreground">Choose listings and exclusions under Listings after saving.</p>
-      <label className="flex items-center gap-2">Only listings live at least
-        <input className={`${FIELD} w-16`} inputMode="numeric" value={form.minDays} onChange={(event) => set({ minDays: event.target.value })} /> days
-      </label>
-      {form.action === "share" ? <>
-        <label className="flex flex-col gap-1">Round times (up to 6)
-          <Input value={form.times} placeholder="09:00, 13:00, 20:00" onChange={(event) => set({ times: event.target.value })} />
-        </label>
-        <label className="flex flex-col gap-1">Time zone
-          <Input value={form.timezone} onChange={(event) => set({ timezone: event.target.value })} />
-        </label>
-        <div className="flex flex-wrap gap-3">
-          <label className="flex flex-col gap-1">Order
-            <Choice label="Order" value={form.order} onChange={(order) => { if (order) set({ order }); }}
-              options={Object.entries(ORDER_LABELS).map(([value, label]) => ({ value: value as PromotionAutomationForm["order"], label }))} />
+
+      {form.action !== "follow" ? (
+        <>
+          <fieldset><legend className="mb-1">Listings</legend>
+            <RadioGroup className="flex-row flex-wrap gap-4" value={form.scope} onValueChange={(scope) => set({ scope: scope as PromotionAutomationForm["scope"] })}>
+              <label className="flex items-center gap-2"><Radio value="all" />{form.action === "share" ? "All live listings" : "All current and future listings"}</label>
+              <label className="flex items-center gap-2"><Radio value="items" />Only listings I choose</label>
+            </RadioGroup>
+          </fieldset>
+          <p className="text-xs text-muted-foreground">Choose listings and exclusions under Listings after saving.</p>
+          <label className="flex items-center gap-2">Only listings live at least
+            <input className={`${FIELD} w-16`} inputMode="numeric" value={form.minDays} onChange={(event) => set({ minDays: event.target.value })} /> days
           </label>
-          <label className="flex flex-col gap-1">Speed
-            <Choice label="Speed" value={form.speed} onChange={(speed) => { if (speed) set({ speed }); }}
-              options={Object.entries(SPEED_LABELS).map(([value, label]) => ({ value: value as PromotionAutomationForm["speed"], label }))} />
+        </>
+      ) : null}
+
+      {form.action === "share" ? (
+        <>
+          <label className="flex flex-col gap-1">Share mode
+            <Choice<ShareMode>
+              label="Share mode"
+              value={form.shareMode}
+              onChange={(shareMode) => { if (shareMode) set({ shareMode }); }}
+              options={Object.entries(SHARE_MODE_LABELS).map(([value, label]) => ({ value: value as ShareMode, label }))}
+            />
           </label>
-          <label className="flex flex-col gap-1">Daily cap
-            <input className={`${FIELD} w-24`} inputMode="numeric" value={form.dailyCap} onChange={(event) => set({ dailyCap: event.target.value })} />
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-border/60 px-3 py-2 text-xs">
+            <span>Use 24-hour intensity schedule</span>
+            <Switch
+              size="sm"
+              checked={form.useHourlySchedule}
+              aria-label="Use 24-hour intensity schedule"
+              onCheckedChange={(checked) => set({ useHourlySchedule: checked })}
+            />
+          </div>
+          {form.useHourlySchedule ? (
+            <div className="space-y-2 rounded-lg border border-border/60 p-3 text-xs">
+              <p className="text-muted-foreground">Click any hour to cycle Off → Low → Medium → High sharing intensity.</p>
+              <div className="grid grid-cols-6 gap-1.5">
+                {Array.from({ length: 24 }, (_, hour) => {
+                  const intensity = form.hourlySchedule[String(hour)] ?? "none";
+                  return (
+                    <Button
+                      key={hour}
+                      type="button"
+                      size="xs"
+                      variant={intensity === "none" ? "ghost" : intensity === "high" ? "default" : "outline"}
+                      onClick={() => cycleHour(hour)}
+                    >
+                      {String(hour).padStart(2, "0")}h · {HOURLY_INTENSITY_LABELS[intensity]}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <label className="flex flex-col gap-1">Round times (up to 6)
+              <Input value={form.times} placeholder="09:00, 13:00, 20:00" onChange={(event) => set({ times: event.target.value })} />
+            </label>
+          )}
+          <label className="flex flex-col gap-1">Time zone
+            <Input value={form.timezone} onChange={(event) => set({ timezone: event.target.value })} />
           </label>
-        </div>
-        <p className="text-xs text-muted-foreground">The cap counts every share in the last 24 hours, including ones you start yourself (at most {maxCap.toLocaleString()}).</p>
-      </> : <>
-        <div className="flex flex-wrap gap-3">
-          <label className="flex items-center gap-2">Discount
-            <input className={`${FIELD} w-16`} inputMode="numeric" value={form.discount} onChange={(event) => set({ discount: event.target.value })} />% off
+          <div className="flex flex-wrap gap-3">
+            <label className="flex flex-col gap-1">Order
+              <Choice label="Order" value={form.order} onChange={(order) => { if (order) set({ order }); }}
+                options={Object.entries(ORDER_LABELS).map(([value, label]) => ({ value: value as PromotionAutomationForm["order"], label }))} />
+            </label>
+            <label className="flex flex-col gap-1">Speed
+              <Choice label="Speed" value={form.speed} onChange={(speed) => { if (speed) set({ speed }); }}
+                options={Object.entries(SPEED_LABELS).map(([value, label]) => ({ value: value as PromotionAutomationForm["speed"], label }))} />
+            </label>
+            <label className="flex flex-col gap-1">Daily cap
+              <input className={`${FIELD} w-24`} inputMode="numeric" value={form.dailyCap} onChange={(event) => set({ dailyCap: event.target.value })} />
+            </label>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            The cap counts every share in the last 24 hours across self, party, and community shares (at most {maxCap.toLocaleString()}).
+          </p>
+        </>
+      ) : form.action === "follow" ? (
+        <>
+          <label className="flex flex-col gap-1">Run times (up to 6)
+            <Input value={form.times} placeholder="09:00, 18:00" onChange={(event) => set({ times: event.target.value })} />
           </label>
-          <label className="flex items-center gap-2">At least
-            <input className={`${FIELD} w-16`} inputMode="numeric" value={form.minLikes} onChange={(event) => set({ minLikes: event.target.value })} /> likes
+          <label className="flex flex-col gap-1">Time zone
+            <Input value={form.timezone} onChange={(event) => set({ timezone: event.target.value })} />
           </label>
-          <label className="flex items-center gap-2">Minimum ($, optional)
-            <Input className="w-28" type="number" min="0.01" step="0.01" placeholder="No minimum" value={form.minimumPrice}
-              onChange={(event) => set({ minimumPrice: event.target.value })} />
-          </label>
-        </div>
-        {form.marketplace === "poshmark" ? (
-          <label className="flex flex-col gap-1">Shipping discount
-            <Choice label="Shipping discount" value={form.shippingLabel || null} onChange={(shippingLabel) => set({ shippingLabel: shippingLabel ?? "" })}
-              options={[{ value: null, label: "No shipping discount" },
-                ...[...new Set([...labels, ...(form.shippingLabel ? [form.shippingLabel] : [])])].map((label) => ({ value: label, label }))]} />
-            <span className="text-xs text-muted-foreground">Labels come from offers you reviewed. A listing where Poshmark does not offer this one is skipped.</span>
-          </label>
-        ) : null}
-        <p className="text-xs text-muted-foreground">At most one offer action per listing each day. Marketplace eligibility rules apply, so not every like will receive an offer. Your saved minimum prices still apply.</p>
-      </>}
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2 text-xs">
+            <div>
+              <p className="font-medium text-foreground">Reciprocal follows (last 24h)</p>
+              <p className="text-muted-foreground">Automatically follow back users who followed your closet in the last 24 hours.</p>
+            </div>
+            <Switch
+              size="sm"
+              checked={form.followReciprocal24h}
+              aria-label="Enable reciprocal follows for last 24 hours"
+              onCheckedChange={(checked) => set({ followReciprocal24h: checked })}
+            />
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 text-xs">
+            <label className="flex flex-col gap-1">
+              Active sellers cap (≤ 1,000/day)
+              <input className={FIELD} inputMode="numeric" value={form.followActiveSellersCap}
+                onChange={(e) => set({ followActiveSellersCap: e.target.value })} />
+            </label>
+            <label className="flex flex-col gap-1">
+              Unfollow cap (≤ 1,000/day)
+              <input className={FIELD} inputMode="numeric" value={form.unfollowCap}
+                onChange={(e) => set({ unfollowCap: e.target.value })} />
+            </label>
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2 text-xs">
+            <div>
+              <p className="font-medium text-foreground">Unsubscribe from Live Shows (opt-in)</p>
+              <p className="text-muted-foreground">Off by default. When enabled, silences Poshmark Live Show notifications for followed closets.</p>
+            </div>
+            <Switch
+              size="sm"
+              checked={form.unsubscribeLiveShows}
+              aria-label="Unsubscribe from Poshmark Live Shows"
+              onCheckedChange={(checked) => set({ unsubscribeLiveShows: checked })}
+            />
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="flex flex-wrap gap-3">
+            <label className="flex items-center gap-2">Discount
+              <input className={`${FIELD} w-16`} inputMode="numeric" value={form.discount} onChange={(event) => set({ discount: event.target.value })} />% off
+            </label>
+            <label className="flex items-center gap-2">At least
+              <input className={`${FIELD} w-16`} inputMode="numeric" value={form.minLikes} onChange={(event) => set({ minLikes: event.target.value })} /> likes
+            </label>
+            <label className="flex items-center gap-2">Minimum ($, optional)
+              <Input className="w-28" type="number" min="0.01" step="0.01" placeholder="No minimum" value={form.minimumPrice}
+                onChange={(event) => set({ minimumPrice: event.target.value })} />
+            </label>
+          </div>
+          {form.action === "bundle_offer" ? (
+            <div className="space-y-3 rounded-lg border border-border/60 p-3 text-xs">
+              <p className="font-medium text-foreground">Private bundle settings</p>
+              <div className="flex flex-wrap gap-3">
+                <label className="flex items-center gap-2">Pause after last like
+                  <input className={`${FIELD} w-16`} inputMode="numeric" value={form.bundlePauseMinutes}
+                    onChange={(e) => set({ bundlePauseMinutes: e.target.value })} /> min
+                </label>
+                <label className="flex items-center gap-2">Minimum items
+                  <input className={`${FIELD} w-16`} inputMode="numeric" value={form.bundleMinItems}
+                    onChange={(e) => set({ bundleMinItems: e.target.value })} /> (1 = single &amp; multi)
+                </label>
+              </div>
+              <label className="flex flex-col gap-1">Optional first bundle comment
+                <Textarea
+                  rows={2}
+                  maxLength={500}
+                  placeholder="Thanks for liking! Here is a private bundle offer."
+                  value={form.bundleComment}
+                  onChange={(e) => set({ bundleComment: e.target.value })}
+                />
+              </label>
+            </div>
+          ) : null}
+          {form.marketplace === "poshmark" ? (
+            <label className="flex flex-col gap-1">Shipping discount
+              <Choice label="Shipping discount" value={form.shippingLabel || null} onChange={(shippingLabel) => set({ shippingLabel: shippingLabel ?? "" })}
+                options={[{ value: null, label: "No shipping discount" },
+                  ...[...new Set([...labels, ...(form.shippingLabel ? [form.shippingLabel] : [])])].map((label) => ({ value: label, label }))]} />
+              <span className="text-xs text-muted-foreground">Labels come from offers you reviewed. A listing where Poshmark does not offer this one is skipped.</span>
+            </label>
+          ) : null}
+          <WaterfallStepsEditor form={form} set={set} labels={labels} />
+          <p className="text-xs text-muted-foreground">
+            At most one offer action per listing each day. Marketplace eligibility rules and your saved minimum prices always apply.
+          </p>
+        </>
+      )}
+
       <div className="flex gap-2">
         <Button size="sm" disabled={busy} onClick={() => save.mutate(form)}>{busy ? <Spinner /> : null}Save</Button>
         <Button size="sm" variant="ghost" disabled={busy} onClick={onCancel}>Cancel</Button>
@@ -162,12 +418,16 @@ export function PromotionEditor({ initial, onSaved, onCancel }: {
   );
 }
 
-/** One sharing schedule or offer rule: which listings it covers, and what its rounds did. */
+/** One sharing schedule, offer/bundle rule, or follow bot: which listings it covers, and what its rounds did. */
 export function PromotionDetails({ automation }: { automation: PromotionAutomation }) {
   const client = useQueryClient();
   const saveListings = useSavePromotion(() => undefined);
   const busy = saveListings.isPending;
-  const coverage = useQuery({ queryKey: [...KEY, automation.id, "coverage"], queryFn: () => api.promotionAutomations.coverage(automation.id) });
+  const coverage = useQuery({
+    queryKey: [...KEY, automation.id, "coverage"],
+    queryFn: () => api.promotionAutomations.coverage(automation.id),
+    enabled: automation.action !== "follow",
+  });
   const activity = useQuery({ queryKey: [...KEY, automation.id, "activity"], queryFn: () => api.promotionAutomations.activity(automation.id), refetchInterval: () => pollMs(30000) });
   const [form, setForm] = useState(() => formFromAutomation(automation));
   const [floors, setFloors] = useState<Record<string, string>>({});
@@ -179,38 +439,41 @@ export function PromotionDetails({ automation }: { automation: PromotionAutomati
   const included = (id: string) => (form.scope === "items" ? form.conversationIds.includes(id) : !form.excludedIds.includes(id));
   const changed = form.excludedIds.join() !== automation.excluded_ids.join() || form.conversationIds.join() !== automation.conversation_ids.join();
   const error = coverage.error || activity.error || saveFloors.error || settle.error || saveListings.error;
+  const isOfferLike = automation.action === "offer" || automation.action === "bundle_offer";
   return (
     <div className="flex flex-col gap-3 text-sm">
       <p className="text-muted-foreground">{describePromotionAutomation(automation)}</p>
       {error ? <p role="alert" className="text-xs text-destructive-foreground">{error.message}</p> : null}
-      <div className="rounded-lg border border-border/60 p-3">
-        <p className="font-medium">Listings {coverage.data ? `· ${coverage.data.included} covered` : ""}</p>
-        {automation.action === "offer" ? <p className="text-xs text-muted-foreground">Individual minimums are optional and can raise the rule's minimum. Clear one to use the rule's minimum.</p> : null}
-        {coverage.isPending ? <Spinner /> : null}
-        <ul className="mt-2 max-h-72 space-y-1 overflow-y-auto">
-          {(coverage.data?.items || []).map((item) => (
-            <li key={item.conversation_id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
-              <label className="flex min-w-0 items-center gap-2">
-                <Checkbox checked={included(item.conversation_id)} disabled={busy}
-                  onCheckedChange={(next) => setForm(withListing(form, item.conversation_id, next === true))} />
-                <span className="truncate">{item.title || item.listing_id}</span>
-                <span className="text-muted-foreground">{item.listed_days != null ? `${item.listed_days} d` : ""}{item.too_new ? " · too new" : ""}</span>
-              </label>
-              {automation.action === "offer" ? <span className="flex items-center gap-1">Minimum $
-                <input className={`${FIELD} w-20`} inputMode="decimal" aria-label={`Floor for ${item.title || "listing"}`} placeholder={automation.minimum_price || "None"}
-                  value={floors[item.conversation_id] ?? item.floor ?? ""}
-                  onChange={(event) => setFloors({ ...floors, [item.conversation_id]: event.target.value.replace(/[^0-9.]/g, "").slice(0, 10) })} />
-              </span> : null}
-            </li>
-          ))}
-          {coverage.data && !coverage.data.items.length ? <li className="text-xs text-muted-foreground">No live {marketplaceName(automation.marketplace)} listings with links in Anteroom.</li> : null}
-        </ul>
-        <div className="mt-2 flex flex-wrap gap-2">
-          <Button size="xs" variant="outline" disabled={busy || !changed} onClick={() => saveListings.mutate(form)}>Save listings (turns it off)</Button>
-          {automation.action === "offer" ? <Button size="xs" variant="outline" disabled={saveFloors.isPending || !Object.keys(floors).length}
-            onClick={() => saveFloors.mutate()}>Save floors</Button> : null}
+      {automation.action !== "follow" ? (
+        <div className="rounded-lg border border-border/60 p-3">
+          <p className="font-medium">Listings {coverage.data ? `· ${coverage.data.included} covered` : ""}</p>
+          {isOfferLike ? <p className="text-xs text-muted-foreground">Individual minimums are optional and can raise the rule's minimum. Clear one to use the rule's minimum.</p> : null}
+          {coverage.isPending ? <Spinner /> : null}
+          <ul className="mt-2 max-h-72 space-y-1 overflow-y-auto">
+            {(coverage.data?.items || []).map((item) => (
+              <li key={item.conversation_id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <label className="flex min-w-0 items-center gap-2">
+                  <Checkbox checked={included(item.conversation_id)} disabled={busy}
+                    onCheckedChange={(next) => setForm(withListing(form, item.conversation_id, next === true))} />
+                  <span className="truncate">{item.title || item.listing_id}</span>
+                  <span className="text-muted-foreground">{item.listed_days != null ? `${item.listed_days} d` : ""}{item.too_new ? " · too new" : ""}</span>
+                </label>
+                {isOfferLike ? <span className="flex items-center gap-1">Minimum $
+                  <input className={`${FIELD} w-20`} inputMode="decimal" aria-label={`Floor for ${item.title || "listing"}`} placeholder={automation.minimum_price || "None"}
+                    value={floors[item.conversation_id] ?? item.floor ?? ""}
+                    onChange={(event) => setFloors({ ...floors, [item.conversation_id]: event.target.value.replace(/[^0-9.]/g, "").slice(0, 10) })} />
+                </span> : null}
+              </li>
+            ))}
+            {coverage.data && !coverage.data.items.length ? <li className="text-xs text-muted-foreground">No live {marketplaceName(automation.marketplace)} listings with links in Anteroom.</li> : null}
+          </ul>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button size="xs" variant="outline" disabled={busy || !changed} onClick={() => saveListings.mutate(form)}>Save listings (turns it off)</Button>
+            {isOfferLike ? <Button size="xs" variant="outline" disabled={saveFloors.isPending || !Object.keys(floors).length}
+              onClick={() => saveFloors.mutate()}>Save floors</Button> : null}
+          </div>
         </div>
-      </div>
+      ) : null}
       <div className="rounded-lg border border-border/60 p-3">
         <p className="font-medium">Activity</p>
         <p className="mt-1 text-xs text-muted-foreground">Counts are listing actions, not buyers. Each result shows what the marketplace confirmed.</p>
@@ -218,7 +481,7 @@ export function PromotionDetails({ automation }: { automation: PromotionAutomati
         <ul className="mt-2 max-h-72 space-y-2 overflow-y-auto text-xs">
           {(activity.data?.sends || []).filter((send) => send.state === "unknown").map((send) => (
             <li key={send.id} className="rounded border border-destructive/40 p-2">
-              <p><span className="font-medium">{send.title || send.listing_id}</span> · {send.action === "share" ? "share" : `offer $${send.offer_price}`} · not confirmed</p>
+              <p><span className="font-medium">{send.title || send.listing_id}</span> · {send.action === "share" ? "share" : send.action === "follow" ? "follow" : `offer $${send.offer_price}`} · not confirmed</p>
               <p className="text-muted-foreground">{send.note}</p>
               <div className="mt-1 flex gap-1.5">
                 <Button size="xs" variant="outline" disabled={settle.isPending} onClick={() => settle.mutate({ id: send.id, how: "check" })}>Check result</Button>
@@ -229,7 +492,11 @@ export function PromotionDetails({ automation }: { automation: PromotionAutomati
           {(activity.data?.sends || []).filter((send) => send.state !== "unknown").map((send) => (
             <li key={send.id} className="min-w-0 space-y-1 break-words">
               <p className="font-medium">{send.title || send.listing_id}</p>
-              <p className="tabular-nums">{promotionOutcomeLabel(send)}{send.offer_price ? ` · $${send.offer_price}` : ""}</p>
+              <p className="tabular-nums">
+                {promotionOutcomeLabel(send)}
+                {send.offer_price ? ` · $${send.offer_price}` : ""}
+                {send.waterfall_step ? ` · Step ${send.waterfall_step}` : ""}
+              </p>
               {!send.title ? null : <p className="text-2xs text-muted-foreground">Listing <span className="font-mono">{send.listing_id}</span></p>}
               {send.note ? <p className="text-muted-foreground">{send.note}</p> : null}
             </li>
@@ -246,4 +513,3 @@ export function PromotionDetails({ automation }: { automation: PromotionAutomati
     </div>
   );
 }
-

@@ -467,16 +467,22 @@ def _delist_sentence(done: list[str], failed: dict[str, str]) -> str:
 
 
 async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> dict[str, str]:
-    """Delist the other live marketplaces after a sale, once, when the seller turned that on.
+    """Delist sold-out items or adjust multi-quantity stock after a sale when the seller opted in.
 
-    The marketplace that sold is never included. ``confirm`` is the seller's saved choice,
-    and the names are the other listings Anteroom still has up. Nothing is retried.
+    The marketplace that sold is never delisted. Cancelled/refunded orders are never
+    acted on, and multi-quantity items with remaining stock are never delisted: when
+    ``sale_auto_adjust_quantity`` is enabled, remaining stock is decremented across
+    live marketplaces (and relisted as a fresh single-quantity listing on Mercari
+    when a Mercari sale leaves stock remaining).
     """
+    from anteroom.services import sale_quantity_sync
     from anteroom.services.mac_workspace import account_shown
-    from anteroom.services.user_settings import autodelist_enabled
+    from anteroom.services.user_settings import auto_adjust_quantity_enabled, autodelist_enabled
 
-    # While the Mac's window shows the account, the account delists after its own copy of the sale.
-    if not sale_ids or not autodelist_enabled() or account_shown():
+    do_delist = autodelist_enabled()
+    do_adjust = auto_adjust_quantity_enabled()
+    # While the Mac's window shows the account, the account acts on its own copy of the sale.
+    if not sale_ids or (not do_delist and not do_adjust) or account_shown():
         return {}
     if session_factory is None:
         from anteroom.database import SessionLocal
@@ -488,6 +494,7 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
     notes: dict[str, str] = {}
     groups: dict[str, list[str]] = {}
     order: list[str] = []
+    adjust_targets: list[tuple[str, int]] = []
     with session_factory() as db:
         sales = db.query(MarketplaceSale).filter(MarketplaceSale.id.in_(sale_ids)).all()
         for sale in sales:
@@ -500,14 +507,36 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
             from anteroom.services.sale_inventory import stock_after_sale
 
             stock = stock_after_sale(db, sale.conversation_id, sale.marketplace, sale.listing_id)
+            if stock["status"] == "remaining" and type(stock.get("remaining")) is int and stock["remaining"] > 0:
+                if do_adjust:
+                    adjust_targets.append((sale.id, int(stock["remaining"])))
+                else:
+                    notes[sale.id] = "Stock remains or could not be verified. Review quantities before delisting elsewhere."
+                continue
             if stock["status"] != "sold_out":
                 notes[sale.id] = "Stock remains or could not be verified. Review quantities before delisting elsewhere."
+                continue
+            if not do_delist:
                 continue
             if sale.conversation_id not in groups:
                 groups[sale.conversation_id] = []
                 order.append(sale.conversation_id)
             groups[sale.conversation_id].append(sale.id)
+
+    for sale_id, remaining in adjust_targets:
+        try:
+            adj = await sale_quantity_sync.adjust_quantities_for_sale(
+                sale_id,
+                remaining,
+                session_factory=session_factory,
+            )
+            notes[sale_id] = str(adj.get("note") or "Updated remaining stock across marketplaces.")
+        except Exception:  # noqa: BLE001 - sale is already recorded
+            log.exception("could not adjust quantity after sale %s", sale_id)
+            notes[sale_id] = "Couldn't adjust quantity on other marketplaces. Retry from the 60-day sale tracker."
+
     for conv_id in order:
+        live_targets: dict[str, str | None] = {}
         try:
             with session_factory() as db:
                 known = listings(db, conv_id)
@@ -521,6 +550,7 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
                 and entry.get("listing_id")
                 and not entry.get("sold_here")
             ]
+            live_targets = {name: (known.get(name) or {}).get("listing_id") for name in live}
             if not live:
                 text = "It isn't listed anywhere else."
             else:
@@ -528,7 +558,24 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
                     result = await delist(conv_id, live, confirm=True)
                 except DelistError as exc:
                     text = f"Couldn't delist it elsewhere: {exc}. You can delist it from the item."
+                    failed_map = {name: {"state": "failed", "error": str(exc)} for name in live}
+                    with session_factory() as db:
+                        sale_quantity_sync.record_delist_outcomes(
+                            db,
+                            sale_ids=groups[conv_id],
+                            conv_id=conv_id,
+                            live_targets=live_targets,
+                            result=failed_map,
+                        )
                 else:
+                    with session_factory() as db:
+                        sale_quantity_sync.record_delist_outcomes(
+                            db,
+                            sale_ids=groups[conv_id],
+                            conv_id=conv_id,
+                            live_targets=live_targets,
+                            result=result,
+                        )
                     failed = {
                         name: str((result.get(name) or {}).get("error") or "The marketplace did not confirm the delete.")
                         for name in live
@@ -542,24 +589,24 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
 
 
 async def announce_sales(sale_ids: list[str], *, session_factory=None) -> None:
-    """Tell the seller about new sales. Delist the other marketplaces only when they opted in."""
-    from anteroom.services.user_settings import autodelist_enabled
+    """Tell the seller about new sales. Delist or adjust quantities only when they opted in."""
+    from anteroom.services.user_settings import auto_adjust_quantity_enabled, autodelist_enabled
 
     from anteroom.database import SessionLocal
     from anteroom.services.marketplace_inventory import read_after_sales
 
     notes: dict[str, str] = {}
     try:
-        # What is left of a multi-unit item decides whether it is delisted elsewhere.
+        # What is left of a multi-unit item decides whether it is delisted or quantity-adjusted elsewhere.
         await read_after_sales(sale_ids, session_factory=session_factory or SessionLocal)
     except Exception:  # noqa: BLE001 - the sale is already recorded
         log.exception("could not read stock after a sale")
     try:
         notes = await autodelist_for_sales(sale_ids, session_factory=session_factory)
     except Exception:  # noqa: BLE001 - the sale is already recorded
-        log.exception("could not delist after a sale")
-        if autodelist_enabled():
-            notes = {sale_id: "Couldn't delist it elsewhere. You can delist it from the item." for sale_id in sale_ids}
+        log.exception("could not delist or sync quantities after a sale")
+        if autodelist_enabled() or auto_adjust_quantity_enabled():
+            notes = {sale_id: "Couldn't sync other marketplaces. Check the 60-day sale tracker." for sale_id in sale_ids}
     try:
         notify = partial(_notify_sales, sale_ids, notes)
         await asyncio.to_thread(notify)
