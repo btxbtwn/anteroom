@@ -352,6 +352,73 @@ def test_pending_deletion_fences_late_import_and_preserves_other_seller(cloud): 
     assert owned_rows(engine, ALICE) == {}
 
 
+def test_every_seller_table_carries_the_deletion_fence(cloud):  # noqa: F811
+    # A table added after the fence migration must be fenced too, or a
+    # still-valid session can write a deleted seller's rows back.
+    _client, engine = cloud
+    with engine.connect() as db:
+        unfenced = db.execute(text("""
+            SELECT DISTINCT c.table_name FROM information_schema.columns AS c
+            JOIN information_schema.tables AS t
+              ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+            WHERE c.table_schema = 'public' AND c.column_name = 'user_id' AND t.table_type = 'BASE TABLE'
+              AND NOT EXISTS (
+                SELECT 1 FROM pg_trigger AS tr JOIN pg_class AS cl ON cl.oid = tr.tgrelid
+                JOIN pg_namespace AS ns ON ns.oid = cl.relnamespace
+                WHERE ns.nspname = 'public' AND cl.relname = c.table_name
+                  AND tr.tgname = 'account_write_guard')
+            ORDER BY 1""")).scalars().all()
+    assert unfenced == []
+
+
+@pytest.mark.parametrize('table', ['sessions', 'audit', 'journals'])
+def test_pending_deletion_fences_cloud_session_tables(cloud, table):  # noqa: F811
+    from anteroom.models.cloud_session import CloudMarketplaceSession, CloudOperationJournal, CloudSessionAudit
+    from anteroom.services.hosted_database import SellerDatabaseSession
+    row = {
+        'sessions': lambda: CloudMarketplaceSession(marketplace='poshmark'),
+        'audit': lambda: CloudSessionAudit(marketplace='poshmark', event='connected'),
+        'journals': lambda: CloudOperationJournal(marketplace='poshmark', journal_key='late', payload={}),
+    }[table]
+    _client, engine = cloud
+    supabase_schemas(engine)
+    seed(engine, ALICE)
+    account_deletion._delete_records(ALICE)
+    with SellerDatabaseSession(user_id=ALICE, bind=engine) as db:
+        db.add(row())
+        with pytest.raises(DBAPIError, match='Account deletion is pending'):
+            db.commit()
+
+
+@pytest.mark.parametrize('receipt_state', ['absent', 'pending', 'completed'])
+def test_cloud_session_fence_downgrade(migration_engine, receipt_state):  # noqa: F811
+    from alembic import command
+    from anteroom.models.cloud_session import CloudSessionAudit
+    from anteroom.services import schema_migrations
+    from anteroom.services.hosted_database import SellerDatabaseSession
+
+    engine = migration_engine
+    if receipt_state != 'absent' and engine.dialect.name != 'postgresql':
+        pytest.skip('Deletion receipts require Postgres')
+    config = schema_migrations.alembic_config(engine.url.render_as_string(hide_password=False))
+    command.upgrade(config, '8580524be7de')
+    if receipt_state == 'absent':
+        command.downgrade(config, 'ae814be47ba5')
+        assert schema_migrations.recorded_revision(engine) == 'ae814be47ba5'
+        return
+
+    with engine.begin() as db:
+        db.execute(text('INSERT INTO anteroom_private.account_cleanup (user_id, object_keys) VALUES (:owner, :keys)'),
+                   {'owner': ALICE, 'keys': [f'{ALICE}/photo.jpg'] if receipt_state == 'pending' else []})
+    with pytest.raises(DBAPIError, match='Deletion fences cannot be removed'):
+        command.downgrade(config, 'ae814be47ba5')
+    assert schema_migrations.recorded_revision(engine) == '8580524be7de'
+    with SellerDatabaseSession(user_id=ALICE, bind=engine) as db:
+        db.add(CloudSessionAudit(marketplace='poshmark', event='connected'))
+        with pytest.raises(DBAPIError, match='Account deletion is pending'):
+            db.commit()
+
+
 def test_storage_trigger_serializes_with_deletion(migration_engine):  # noqa: F811
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event
