@@ -103,6 +103,9 @@ class SaleQuantitySyncAndTrackerTest(unittest.TestCase):
 
         conv = self._create_multi_qty_item()
         record = self._add_live(conv.id, "mercari", "m1234567", "https://www.mercari.com/us/item/m1234567/")
+        sale = self._add_sale(conv.id, "mercari", order_id="mercari-relist", listing_id="m1234567")
+        record.inventory_observation = {"listing_id": "m1234567", "checked_at": _now().isoformat(), "state": "active", "quantity": 2}
+        self.db.commit()
         job_id = "relist-job"
 
         async def settle(expected_job_id):
@@ -116,9 +119,41 @@ class SaleQuantitySyncAndTrackerTest(unittest.TestCase):
         with patch.object(native_marketplaces, "list_now", return_value={"job_id": job_id, "state": "saving"}), \
              patch.object(automation_actions, "_wait_for_job", side_effect=settle), \
              patch.object(automation_actions, "_job_outcome", return_value=("completed", None)):
-            actual = asyncio.run(sale_quantity_sync._default_mercari_relister(conv.id, "reviewed"))
+            actual = asyncio.run(sale_quantity_sync._default_mercari_relister(conv.id, "reviewed", sale_id=sale.id))
         self.assertTrue(actual["ok"])
         self.assertEqual(actual["listing_id"], "m7654321")
+
+    def test_quantity_write_is_pinned_and_contains_no_draft_fields(self):
+        from unittest.mock import AsyncMock
+
+        conv = self._create_multi_qty_item(title="Unsent title")
+        sale = self._add_sale(conv.id, "poshmark", order_id="quantity-only")
+        listing_id = "123456789100"
+        binding = self._add_live(conv.id, "ebay", listing_id, f"https://www.ebay.com/itm/{listing_id}")
+        binding.ebay_offer_id = "1234"
+        self.db.commit()
+        client = AsyncMock()
+        client.request.side_effect = [
+            {"status": "PUBLISHED", "sku": "live-sku", "listing": {"listingId": listing_id}},
+            {"responses": [{"offerId": "1234", "statusCode": 200}]},
+        ]
+        with (patch("anteroom.services.ebay_client.EbayClient.connect", return_value=client),
+              patch("anteroom.services.sale_inventory.stock_after_sale", return_value={"remaining": 2})):
+            def adjust(market):
+                return asyncio.run(sale_quantity_sync._default_updater(conv.id, market, listing_id, 2, sale.id,
+                                                                       session_factory=self.Session))
+
+            self.assertTrue(adjust("ebay")["ok"])
+            client.request.assert_awaited_with("POST", "/sell/inventory/v1/bulk_update_price_quantity",
+                                               body={"requests": [{"sku": "live-sku", "offers": [
+                                                   {"offerId": "1234", "availableQuantity": 2}]}]})
+            sale.order_status = "refunded"
+            self.db.commit()
+            self.assertFalse(adjust("ebay")["ok"])
+            self.assertEqual(client.request.await_count, 2)
+            with patch("anteroom.services.native_marketplaces.update_live") as full_update:
+                self.assertFalse(adjust("etsy")["ok"])
+                full_update.assert_not_called()
 
     def test_auto_adjust_quantity_defaults_off_and_toggles_via_settings(self):
         self.assertFalse(user_settings.auto_adjust_quantity_enabled())

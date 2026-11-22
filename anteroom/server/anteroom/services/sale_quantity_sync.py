@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 
 from anteroom.models.conversation import Conversation, new_id
 from anteroom.models.listing import Listing, ListingRevision
-from anteroom.models.marketplace_listing import LIVE_STATES
+from anteroom.models.marketplace_listing import LIVE_STATES, MarketplaceListing
 from anteroom.models.marketplace_sale import PAID_STATUSES, MarketplaceSale, SaleSyncEvent
 from anteroom.services import auto_relist, listing_persistence
 from anteroom.services.marketplace_delist import MARKETPLACES, DelistError, delist, listings
@@ -268,38 +268,79 @@ def _format_adjust_sentence(updated: list[str], relisted: list[str], failed: dic
     return " ".join(parts)
 
 
-async def _default_updater(
-    conv_id: str,
-    marketplace: str,
-    revision_id: str,
-    _new_qty: int,
-    *,
-    session_factory=None,
-) -> dict[str, Any]:
-    from anteroom.services.automation_actions import _turn, wait_for_native_result
-    from anteroom.services.native_marketplaces import ListRequest, update_live
+async def _default_updater(conv_id: str, marketplace: str, listing_id: str | None, new_qty: int,
+                           sale_id: str, *, session_factory=None) -> dict[str, Any]:
+    """Send only stock, pinned to the live offer verified for this paid sale."""
+    from anteroom.services.automation_actions import _turn
+    from anteroom.services.ebay_client import EbayClient, segment
+    from anteroom.services.sale_inventory import stock_after_sale
+
+    if marketplace != "ebay":
+        return {"ok": False, "error": f"No quantity-only update is available for {NAMES.get(marketplace, marketplace)}. Adjust stock on the marketplace."}
+
+    def binding():
+        with _session_factory(session_factory)() as db:
+            sale = db.get(MarketplaceSale, sale_id)
+            if (not sale or sale.conversation_id != conv_id or sale.marketplace == marketplace
+                    or sale.order_status not in PAID_STATUSES or not listing_id or new_qty <= 0):
+                return None
+            stock = stock_after_sale(db, conv_id, sale.marketplace, sale.listing_id)
+            if stock["remaining"] != new_qty:
+                return None
+            row = db.query(MarketplaceListing).filter_by(conversation_id=conv_id, marketplace=marketplace).first()
+            if (row and row.state in LIVE_STATES and not row.ebay_variant_offers and not row.ebay_group_key
+                    and (row.ebay_listing_id or row.listing_id) == listing_id):
+                return row.ebay_offer_id
+            return None
 
     try:
         async with _turn(marketplace):
-            res = await update_live(conv_id, marketplace, ListRequest(revision_id=revision_id, confirm=True))  # type: ignore[arg-type]
-            res = await wait_for_native_result(conv_id, marketplace, res, session_factory=session_factory)
-    except Exception as exc:  # noqa: BLE001 - capture marketplace failure cleanly
+            offer_id = await asyncio.to_thread(binding)
+            if not offer_id:
+                return {"ok": False, "error": "The paid sale, remaining stock, or live eBay offer could not be verified."}
+            client = await EbayClient.connect()
+            offer = await client.request("GET", f"/sell/inventory/v1/offer/{segment(offer_id)}")
+            if (offer.get("status") != "PUBLISHED" or not offer.get("sku")
+                    or str((offer.get("listing") or {}).get("listingId")) != listing_id
+                    or await asyncio.to_thread(binding) != offer_id):
+                return {"ok": False, "error": "The live offer or sale changed before the quantity update."}
+            reply = await client.request("POST", "/sell/inventory/v1/bulk_update_price_quantity", body={"requests": [{
+                "sku": offer["sku"], "offers": [{"offerId": offer_id, "availableQuantity": new_qty}],
+            }]})
+            rows = reply.get("responses") or []
+            if (len(rows) == 1 and str(rows[0].get("offerId")) == offer_id
+                    and rows[0].get("statusCode") == 200 and not rows[0].get("errors")):
+                return {"ok": True}
+            return {"ok": False, "error": "eBay did not confirm the quantity update for this offer."}
+    except Exception as exc:  # noqa: BLE001 - report provider failures in the sale tracker
         return {"ok": False, "error": str(exc)}
-    ok = res.get("state") in LIVE_STATES and not res.get("error")
-    return {"ok": ok, "error": res.get("error")}
 
 
 async def _default_mercari_relister(
     conv_id: str,
     revision_id: str,
     *,
+    sale_id: str,
     session_factory=None,
 ) -> dict[str, Any]:
     from anteroom.services.automation_actions import _turn, wait_for_native_result
     from anteroom.services.native_marketplaces import ListRequest, list_now
 
+    def eligible() -> bool:
+        from anteroom.services.sale_inventory import stock_after_sale
+
+        with _session_factory(session_factory)() as db:
+            sale = db.get(MarketplaceSale, sale_id)
+            if (not sale or sale.marketplace != "mercari" or sale.conversation_id != conv_id
+                    or sale.order_status not in PAID_STATUSES):
+                return False
+            stock = stock_after_sale(db, conv_id, "mercari", sale.listing_id)
+            return stock["status"] == "remaining" and (stock["remaining"] or 0) > 0
+
     try:
         async with _turn("mercari"):
+            if not await asyncio.to_thread(eligible):
+                return {"ok": False, "error": "The Mercari sale or remaining stock could not be verified."}
             res = await list_now(conv_id, "mercari", ListRequest(revision_id=revision_id, confirm=True))
             res = await wait_for_native_result(conv_id, "mercari", res, session_factory=session_factory)
     except Exception as exc:  # noqa: BLE001
@@ -329,16 +370,6 @@ async def adjust_quantities_for_sale(
     if remaining <= 0:
         return {"sale_id": sale_id, "remaining": remaining, "events": [], "note": ""}
     factory = _session_factory(session_factory)
-    if updater is None:
-        async def _bound_updater(cid: str, market: str, rev_id: str, qty: int) -> dict[str, Any]:
-            return await _default_updater(cid, market, rev_id, qty, session_factory=session_factory)
-
-        updater = _bound_updater
-    if relister is None:
-        async def _bound_relister(cid: str, rev_id: str) -> dict[str, Any]:
-            return await _default_mercari_relister(cid, rev_id, session_factory=session_factory)
-
-        relister = _bound_relister
 
     def _load():
         with factory() as db:
@@ -359,7 +390,14 @@ async def adjust_quantities_for_sale(
     failed_markets: dict[str, str] = {}
     recorded: list[dict[str, Any]] = []
 
+    def still_paid() -> bool:
+        with factory() as db:
+            sale = db.get(MarketplaceSale, sale_id)
+            return bool(sale and sale.conversation_id == conv_id and sale.order_status in PAID_STATUSES)
+
     for target in plan["targets"]:
+        if not await asyncio.to_thread(still_paid):
+            break
         market = target["marketplace"]
         action = target["action"]
         listing_id = target.get("listing_id")
@@ -416,7 +454,8 @@ async def adjust_quantities_for_sale(
             continue
 
         if action == "mercari_relist":
-            res = await relister(conv_id, revision_id)
+            res = (await relister(conv_id, revision_id) if relister is not None else
+                   await _default_mercari_relister(conv_id, revision_id, sale_id=sale_id, session_factory=factory))
             ok = bool(res.get("ok") and res.get("listing_id"))
             new_lid = str(res["listing_id"]) if ok and res.get("listing_id") else None
             new_url = res.get("listing_url")
@@ -458,7 +497,8 @@ async def adjust_quantities_for_sale(
             else:
                 failed_markets["mercari"] = err or "Failed"
         else:
-            res = await updater(conv_id, market, revision_id, target_qty)
+            res = (await updater(conv_id, market, revision_id, target_qty) if updater is not None else
+                   await _default_updater(conv_id, market, listing_id, target_qty, sale_id, session_factory=factory))
             ok = bool(res.get("ok"))
             err = None if ok else str(res.get("error") or f"{NAMES.get(market, market)} did not confirm the quantity update.")
 
@@ -729,16 +769,6 @@ async def retry_sync_event(
     from anteroom.services.sale_inventory import stock_after_sale
 
     factory = _session_factory(session_factory)
-    if updater is None:
-        async def _bound_updater(cid: str, market: str, rev_id: str, qty: int) -> dict[str, Any]:
-            return await _default_updater(cid, market, rev_id, qty, session_factory=session_factory)
-
-        updater = _bound_updater
-    if relister is None:
-        async def _bound_relister(cid: str, rev_id: str) -> dict[str, Any]:
-            return await _default_mercari_relister(cid, rev_id, session_factory=session_factory)
-
-        relister = _bound_relister
 
     def _load():
         with factory() as db:
@@ -805,7 +835,8 @@ async def retry_sync_event(
         if not info["revision_id"]:
             error = "Listing has no saved revision to relist."
         else:
-            res = await relister(conv_id, info["revision_id"])
+            res = (await relister(conv_id, info["revision_id"]) if relister is not None else
+                   await _default_mercari_relister(conv_id, info["revision_id"], sale_id=info["sale_id"], session_factory=factory))
             ok = bool(res.get("ok") and res.get("listing_id"))
             new_listing_id = str(res["listing_id"]) if ok and res.get("listing_id") else None
             new_listing_url = res.get("listing_url")
@@ -814,7 +845,10 @@ async def retry_sync_event(
         if not info["revision_id"]:
             error = "Listing has no saved revision to update."
         else:
-            res = await updater(conv_id, market, info["revision_id"], int(info["new_quantity"]))
+            qty = int(info["new_quantity"])
+            res = (await updater(conv_id, market, info["revision_id"], qty) if updater is not None else
+                   await _default_updater(conv_id, market, info["target_listing_id"], qty, info["sale_id"],
+                                          session_factory=factory))
             ok = bool(res.get("ok"))
             error = None if ok else str(res.get("error") or f"{NAMES.get(market, market)} did not confirm the quantity update.")
     else:

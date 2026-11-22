@@ -419,6 +419,19 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         ):
             self.assertEqual(asyncio.run(_run_auto_relist(_now())), 0)
             delete.assert_not_awaited()
+            # A seller turning the rule off during the external check revokes the planned deletion.
+            def pause(*args, **kwargs):
+                with self.Session() as db:
+                    db.query(MarketplaceRelistRule).update({"enabled": False})
+                    db.commit()
+                return {"ok": True, "verified": True, "has_active_offer": False}
+
+            check.side_effect = pause
+            self.assertEqual(asyncio.run(_run_auto_relist(_now())), 0)
+            delete.assert_not_awaited()
+            self.db.query(MarketplaceRelistRule).update({"enabled": True})
+            self.db.commit()
+            check.side_effect = None
             check.return_value = {"ok": True, "verified": True, "has_active_offer": False}
             self.assertEqual(asyncio.run(_run_auto_relist(_now())), 1)
             delete.assert_awaited_once()
@@ -596,6 +609,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
             marketplace="poshmark",
             delister=fake_delister,
             lister=fake_timeout_lister,
+            offer_checker=AsyncMock(return_value=False),
         ))
         self.assertEqual(len(res), 1)
         self.assertEqual(res[0]["status"], "relist_pending")

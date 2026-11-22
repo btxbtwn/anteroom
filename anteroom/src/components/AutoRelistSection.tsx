@@ -16,7 +16,6 @@ import type { AutoRelistMarketplace, AutoRelistRule, AutoRelistRuleBody } from "
 import { confirmDialog } from "../ui/confirmDialog";
 import { marketplaceName } from "./marketplaceNames";
 import { Button } from "./ui/button";
-import { Checkbox } from "./ui/checkbox";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "./ui/collapsible";
 import { Input } from "./ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
@@ -41,7 +40,6 @@ interface RuleFormState {
   conditions: string;
   keywords: string;
   labels: string;
-  skipActiveOffers: boolean;
 }
 
 function formFromRule(rule: AutoRelistRule): RuleFormState {
@@ -59,7 +57,6 @@ function formFromRule(rule: AutoRelistRule): RuleFormState {
     conditions: (rule.filters.conditions ?? []).join(", "),
     keywords: (rule.filters.keywords ?? []).join(", "),
     labels: (rule.filters.labels ?? []).join(", "),
-    skipActiveOffers: rule.skip_active_offers !== false,
   };
 }
 
@@ -96,7 +93,7 @@ function bodyFromRuleForm(
     price_adjust_value: form.priceMode === "none" ? null : Number(form.priceValue) || null,
     price_floor: form.priceFloor.trim() ? Number(form.priceFloor) : null,
     filters,
-    skip_active_offers: form.skipActiveOffers,
+    skip_active_offers: true,
   };
 }
 
@@ -355,13 +352,7 @@ export function AutoRelistSection() {
                     </label>
                   </div>
 
-                  <label className="inline-flex cursor-pointer items-center gap-2 text-foreground">
-                    <Checkbox
-                      checked={form.skipActiveOffers}
-                      onCheckedChange={(checked) => setForm({ ...form, skipActiveOffers: checked === true })}
-                    />
-                    Skip listings with active incoming buyer offers
-                  </label>
+                  <p>Listings with active or unverified buyer offers are skipped.</p>
 
                   <div className="flex gap-2">
                     <Button size="xs" disabled={busy} onClick={() => void saveEdited(rule)}>
