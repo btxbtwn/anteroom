@@ -86,3 +86,49 @@ def test_hosted_startup_failure_does_not_leak_shared_http():
         with TestClient(create_app('')):
             pass
     assert set(shared_http._clients) == before
+
+
+def test_shared_http_initialization_failure_stops_hosted_background_loops(monkeypatch):
+    import threading
+
+    import pytest
+    from fastapi.testclient import TestClient
+    from anteroom import hosted
+    from anteroom.services import background_worker, process_handoff
+    from anteroom.services.background_loop import BackgroundLoop
+
+    loops: dict[str, BackgroundLoop] = {}
+    released = threading.Event()
+
+    class TrackedLoop(BackgroundLoop):
+        def __init__(self, name: str):
+            super().__init__(name)
+            loops[name] = self
+
+    async def serve(_engine, stopping):
+        while not stopping.is_set():
+            await asyncio.sleep(0.01)
+
+    def fail_initialization():
+        raise OSError('Cannot load the HTTP client certificate')
+
+    monkeypatch.setenv('ANTEROOM_BACKGROUND_WORKER', '1')
+    monkeypatch.setenv('ANTEROOM_PROCESS_ROLE', 'worker')
+    monkeypatch.setattr(hosted, 'BackgroundLoop', TrackedLoop)
+    monkeypatch.setattr(background_worker, 'serve', serve)
+    monkeypatch.setattr(process_handoff, 'hold', lambda *_: False)
+    monkeypatch.setattr(process_handoff, 'release', lambda _: released.set())
+    monkeypatch.setattr(shared_http, 'keep_connection_on_this_loop', fail_initialization)
+
+    try:
+        with pytest.raises(OSError, match='Cannot load the HTTP client certificate'):
+            with TestClient(hosted.create_app('https://shared-http-test.supabase.co')):
+                pytest.fail('The app started despite the shared HTTP client failure')
+        assert set(loops) == {'anteroom-drafts', 'anteroom-handoff'}
+        assert released.is_set()
+        assert all(not loop.thread.is_alive() for loop in loops.values())
+    finally:
+        process_handoff.begin_draining()
+        for loop in loops.values():
+            if loop.thread.is_alive():
+                loop.stop()

@@ -417,8 +417,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         )
         app.state.background_worker = worker
         app.state.handoff = handoff
-        shared_http.keep_connection_on_this_loop()
         try:
+            shared_http.keep_connection_on_this_loop()
             yield
         finally:
             loop_checkouts.close()
