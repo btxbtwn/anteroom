@@ -6,6 +6,12 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1128 — 2026-11-22
+
+- Keep assistant answers, draft chat, and photo uploads responsive while other sellers run large batches of listing generations.
+- Pace scheduled Chrome sale checks, limit promotion database work without holding up other sellers during Chrome waits, and reuse upstream connections so hosted pages stay snappy with multiple sellers online.
+- Prevent one seller's direct marketplace job or heavy Etsy traffic from delaying other sellers.
+
 ## 0.1.1127 — 2026-11-22
 
 - Add opt-in Poshmark Cloud sessions for hosted accounts so Poshmark listing, updates, delisting, sales checks, inventory imports, and promotions can run in the cloud while Chrome is closed (enabled via `ANTEROOM_CLOUD_MARKETPLACES=poshmark`).
