@@ -149,7 +149,8 @@ class ListingFacetsTest(unittest.TestCase):
                          {"state": "published", "listing_url": "https://www.ebay.com/itm/1", "failed": False, "fields": 0,
                           "price": 42.5, "listed_at": None, "inactive": False})
         self.assertEqual(response.direct_records["poshmark"].model_dump(),
-                         {"state": "not_saved", "listing_url": None, "failed": True, "fields": 2, "price": None, "listed_at": None})
+                         {"state": "not_saved", "listing_url": None, "failed": True, "fields": 2,
+                          "price": None, "listed_at": None, "inactive": False})
         self.assertEqual(response.direct_records["depop"].state, "draft")
         self.assertEqual(response.direct_marketplaces, ["ebay"])
 
