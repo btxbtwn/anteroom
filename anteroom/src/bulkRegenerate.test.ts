@@ -368,6 +368,24 @@ describe("runBulkRegenerate", () => {
 });
 
 describe("followListingGeneration", () => {
+  it("cancels a rate-limited submission without posting again", async () => {
+    const submission = new AbortController();
+    const started = vi.fn();
+    const fetchImpl = vi.fn(async () => new Response(null, {
+      status: 429, headers: { "Retry-After": "120" },
+    }));
+    const onWaiting = vi.fn((waiting: boolean) => {
+      if (waiting) submission.abort();
+    });
+
+    await expect(followListingGeneration("conv-1", {
+      fetchImpl, onStarted: started, onWaiting, submissionSignal: submission.signal,
+    })).resolves.toBe(false);
+    expect(onWaiting.mock.calls).toEqual([[true], [false]]);
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(started).not.toHaveBeenCalled();
+  });
+
   it("signs the web app's generate stream with the seller's session", async () => {
     const fetchMock = vi.fn(async () => sseResponse("data: {\"title\":\"Coat\"}\n\ndata: [DONE]\n\n"));
     vi.stubGlobal("fetch", fetchMock);

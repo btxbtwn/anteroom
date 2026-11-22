@@ -9,7 +9,7 @@ from anteroom.services.seller_region import seller_region
 
 @pytest.mark.parametrize(("code", "currency", "site", "available"), [
     ("US", "USD", "EBAY_US", {"ebay", "etsy", "depop", "poshmark", "mercari"}),
-    ("CA", "CAD", "EBAY_CA", {"ebay", "etsy", "depop", "poshmark", "mercari"}),
+    ("CA", "CAD", "EBAY_CA", {"ebay", "etsy", "depop", "poshmark"}),
     ("GB", "GBP", "EBAY_GB", {"ebay", "etsy", "depop"}),
     ("AU", "AUD", "EBAY_AU", {"ebay", "etsy", "depop"}),
 ])

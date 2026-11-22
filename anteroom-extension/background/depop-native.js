@@ -232,8 +232,9 @@ function depopQuotedCost(cost) {
   const value = cost == null || typeof cost !== 'object'
     ? cost
     : (cost.amount ?? cost.price?.amount ?? cost.price ?? cost.value);
-  if (value == null || value === '') return null;
-  const amount = Number(typeof value === 'object' ? value.amount ?? value.value : value);
+  const scalar = value != null && typeof value === 'object' ? value.amount ?? value.value : value;
+  if (typeof scalar !== 'number' && (typeof scalar !== 'string' || !scalar.trim())) return null;
+  const amount = Number(scalar);
   if (!Number.isFinite(amount) || amount < 0) return null;
   // Two decimals, as Depop stores a money amount, so "1.9" is not a different price.
   return amount.toFixed(2);

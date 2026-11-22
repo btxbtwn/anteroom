@@ -15,6 +15,11 @@ test('regional Depop drafts use local currency and Canadian seller shipping', as
   assert.ok(c.depopDraftMatches({ ...draft, national_shipping_cost: 7.5 }, canadian, resolved.fields));
   assert.ok(!c.depopDraftMatches({ ...draft, national_shipping_cost: 6 }, canadian, resolved.fields));
   assert.ok(!c.depopDraftMatches({ ...draft, national_shipping_cost: undefined }, canadian, resolved.fields));
+  const free = { ...resolved.fields, national_shipping_cost: '0.00' };
+  assert.ok(c.depopDraftMatches({ ...draft, national_shipping_cost: 0 }, canadian, free));
+  for (const invalid of [false, ' ', { amount: false }]) {
+    assert.ok(!c.depopDraftMatches({ ...draft, national_shipping_cost: invalid }, canadian, free));
+  }
   assert.ok(c.depopDraftMatches({ ...draft, price_currency: 'USD', national_shipping_cost: undefined }, listing, resolved.fields));
   const missing = await c.depopShippingFields({ ...canadian, depop_specifics: {} }, null, Date.now() + 1000);
   assert.equal(missing.problem.field, 'depop_specifics.domesticShippingPrice');

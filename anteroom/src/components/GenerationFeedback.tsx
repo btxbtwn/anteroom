@@ -18,27 +18,38 @@ export function GenerationFeedback({ id, revision }: { id: string; revision: str
   const client = useQueryClient();
   const queryKey = ["generation-feedback", id, revision];
   const current = useQuery({ queryKey, queryFn: () => api.generationFeedback.get(id) });
-  const [editing, setEditing] = useState(false);
+  const [targetRevision, setTargetRevision] = useState<string | null>(null);
+  const editing = targetRevision !== null;
   const [tags, setTags] = useState<string[]>([]);
   const [note, setNote] = useState("");
   const save = useMutation({
-    mutationFn: (rating: GenerationRating) => api.generationFeedback.save(id, current.data!.revision_id, rating),
+    mutationFn: ({ revisionId, rating }: { revisionId: string; rating: GenerationRating }) =>
+      api.generationFeedback.save(id, revisionId, rating),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: ["generation-feedback"] });
-      setEditing(false);
+      setTargetRevision(null);
     },
   });
-  if (!current.data) return null;
-  const saved = current.data.feedback;
+  if (!current.data && !editing && !current.isError) return null;
+  const revisionId = current.data?.revision_id;
+  const saved = current.data?.feedback;
   return (
     <div className="flex flex-wrap items-center gap-2">
+      {current.isError && (
+        <div className="flex items-center gap-2">
+          <p role="alert">{current.error.message}</p>
+          <Button variant="outline" disabled={current.isFetching} onClick={() => void current.refetch()}>Retry</Button>
+        </div>
+      )}
+      {revisionId && <>
       <span className="text-sm text-muted-foreground">Rate AI generation</span>
       <Button variant="ghost" aria-label="Thumbs up" aria-pressed={saved?.rating === "up"} disabled={save.isPending}
-        onClick={() => save.mutate({ rating: "up", issues: [], note: "" })}><ThumbsUpIcon /></Button>
+        onClick={() => save.mutate({ revisionId, rating: { rating: "up", issues: [], note: "" } })}><ThumbsUpIcon /></Button>
       <Button variant="ghost" aria-label="Thumbs down" aria-pressed={saved?.rating === "down"} disabled={save.isPending}
-        onClick={() => { save.reset(); setTags(saved?.issues ?? []); setNote(saved?.note ?? ""); setEditing(true); }}><ThumbsDownIcon /></Button>
+        onClick={() => { save.reset(); setTags(saved?.issues ?? []); setNote(saved?.note ?? ""); setTargetRevision(revisionId); }}><ThumbsDownIcon /></Button>
+      </>}
       {save.error && !editing && <p role="alert">{save.error.message}</p>}
-      <Dialog open={editing} onOpenChange={setEditing}>
+      <Dialog open={editing} onOpenChange={(open) => { if (!open) setTargetRevision(null); }}>
         <DialogPopup>
           <DialogHeader><DialogTitle>What needs improvement?</DialogTitle></DialogHeader>
           <DialogPanel>
@@ -55,7 +66,9 @@ export function GenerationFeedback({ id, revision }: { id: string; revision: str
             {save.error && <p role="alert">{save.error.message}</p>}
           </DialogPanel>
           <DialogFooter>
-            <Button disabled={save.isPending} onClick={() => save.mutate({ rating: "down", issues: tags, note })}>Save feedback</Button>
+            <Button disabled={save.isPending || !targetRevision} onClick={() => {
+              if (targetRevision) save.mutate({ revisionId: targetRevision, rating: { rating: "down", issues: tags, note } });
+            }}>Save feedback</Button>
           </DialogFooter>
         </DialogPopup>
       </Dialog>

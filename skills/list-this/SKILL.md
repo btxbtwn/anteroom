@@ -183,11 +183,15 @@ Apply the PRICING Formula below.
 - **Occasion**
 - **Size grouping** only when the item is petite, tall, maternity, or plus — use exactly `Maternity`, `Petite`, `Plus size`, or `Tall`. Omit this field entirely for regular sizing; never use values like `US` or `Regular`
 
-**eBay Fields — ALWAYS include ALL of these in `ebay_specifics`. Do not skip any.**
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:969224b5c95d754b15590892c27ce824f8a8e5e16bb2447cdec09fd936f977d4 -->
+
+**eBay item specifics by category**
 
 For an eBay trading card or coin, use the category's own specifics. For a professionally graded item, read the slab label and save `Professional Grader` (for example PSA, BGS, CGC, SGC, PCGS or NGC), `Grade` (for example `9.5` for cards or `MS-65` for coins), and `Certification Number` as text, preserving leading zeros. Use `Card Condition` or `Coin Condition` for ungraded items when the supported condition is evident. Leave unreadable slab details blank for seller review.
 
-Every applicable eBay apparel listing MUST populate these fields. Leaving them blank causes downgraded search visibility and incomplete eBay drafts.
+For eBay apparel, populate every listed field that applies to the garment and is supported by its category. Leaving them blank causes downgraded search visibility and incomplete eBay drafts.
 
 | Field | Value guidance |
 |-------|---------------|
@@ -219,7 +223,7 @@ Every applicable eBay apparel listing MUST populate these fields. Leaving them b
 | **Inseam** | If provided in measurements |
 | **Waist** | If provided in measurements |
 
-**Pitfall: Skipping any of these fields causes the eBay form to show them blank. After "Show Optional Fields", fill every applicable row — non-negotiable unless the attribute literally does not apply (then leave the row out — allowed only for MPN, UPC, Character, Theme, Strap Type, Accents, Country of Origin, Sleeve Type). Fabric Weight: leave blank unless a numeric oz/gsm value is evidenced on the tag or seller notes — never the word Lightweight (eBay rejects non-numeric values; do not invent a number). Never leave Features, Neckline, Season, Fit, Pattern, Occasion, Closure, Unit Quantity, or Unit Type blank. Season must be Spring/Summer/Fall/Winter. Verify they are present in `ebay_specifics` before outputting.**
+**For eBay apparel: Skipping any of these fields causes the eBay form to show them blank. After "Show Optional Fields", fill every applicable row — non-negotiable unless the attribute literally does not apply (then leave the row out — allowed only for MPN, UPC, Character, Theme, Strap Type, Accents, Country of Origin, Sleeve Type). Fabric Weight: leave blank unless a numeric oz/gsm value is evidenced on the tag or seller notes — never the word Lightweight (eBay rejects non-numeric values; do not invent a number). Fill Features, Neckline, Season, Fit, Pattern, Occasion, Closure, Unit Quantity, and Unit Type when the apparel category offers them and they apply. Season must be Spring/Summer/Fall/Winter. Verify they are present in `ebay_specifics` before outputting.**
 
 **Pitfall: Etsy Show Optional Fields are also non-negotiable.** Fill Clothing style, Sleeve length, Neckline, Closure, and Fabric pattern with exact Etsy dropdown values. Leave out Graphic, Collar style, Holiday, Occasion, and Sustainability only when they literally do not apply.
 
@@ -227,7 +231,9 @@ Every applicable eBay apparel listing MUST populate these fields. Leaving them b
 
 **Never write "Does Not Apply".** A field that does not apply to the item stays empty — leave it out of the JSON. Anteroom records it as reviewed so it is not chased again, and blanks any "Does Not Apply" a model still writes. eBay renders the phrase verbatim as an item specific.
 
-**Pitfall: eBay Season has no "All Seasons" option.** Choose exactly one of Spring, Summer, Fall, or Winter from the garment (fabric, sleeve, type, title cues). For year-round items, put `"All Seasons"` under **Features** and still set Season to the primary wear season.
+**For eBay apparel, Season has no "All Seasons" option.** Choose exactly one of Spring, Summer, Fall, or Winter from the garment (fabric, sleeve, type, title cues). For year-round items, put `"All Seasons"` under **Features** and still set Season to the primary wear season.
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 **Pitfall: JSON key names must exactly match the listing contract's keys** (e.g., `unitQuantity` not `unit_quantity` or `qty`). See the JSON Field Reference in `references/anteroom_listing_template.md`.
 

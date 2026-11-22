@@ -13,6 +13,7 @@ export type BulkRegenerateProgress = {
   id: string;
   phase: "dropping" | "resetting" | "generating" | "finishing";
   started?: boolean;
+  waiting?: boolean;
 };
 
 export type BulkRegenerateFailure = {
@@ -23,7 +24,7 @@ export type BulkRegenerateFailure = {
 export type BulkRegenerateResult = {
   completed: string[];
   failed: BulkRegenerateFailure[];
-  /** Wipe was stopped before the rewrite, so generate never started. */
+  /** Generation stopped before submission. */
   skipped: string[];
   cancelled: boolean;
 };
@@ -106,7 +107,7 @@ export type BulkRegenerateDeps = {
   /** False when Stop dropped the wipe and this listing should stay cleared. */
   accepted(id: string): boolean;
   /** Resolve when the generate stream finishes. Reject when the rewrite fails. */
-  generate(id: string): Promise<void>;
+  generate(id: string): Promise<void | false>;
   /** True while post-generate work is still writing this listing. */
   pending(id: string): Promise<boolean>;
   sleep(ms: number): Promise<void>;
@@ -258,7 +259,10 @@ export async function runBulkRegenerate(
     // leave the chat and generated fields discarded with nothing written back.
     control.onProgress?.({ ...progress, phase: "generating" });
     try {
-      await deps.generate(id);
+      if (await deps.generate(id) === false) {
+        result.skipped.push(id);
+        return;
+      }
     } catch (err) {
       result.failed.push({ id, message: errorText(err) });
       return;
@@ -304,8 +308,10 @@ export async function followListingGeneration(
     sleep?: (ms: number) => Promise<void>;
     maxAttempts?: number;
     onStarted?: () => void;
+    onWaiting?: (waiting: boolean) => void;
+    submissionSignal?: AbortSignal;
   } = {},
-): Promise<void> {
+): Promise<void | false> {
   const fetchImpl = options.fetchImpl ?? studioFetch;
   const sleep = options.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
   const maxAttempts = options.maxAttempts ?? 20;
@@ -314,7 +320,31 @@ export async function followListingGeneration(
   let attempt = 0;
   let lastError = "Listing generation did not finish.";
 
+  async function waitToRetry(ms: number) {
+    const signal = options.submissionSignal;
+    if (started || !signal) {
+      await sleep(ms);
+      return;
+    }
+    if (signal.aborted) return;
+    try {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(finish, ms);
+        function finish() {
+          clearTimeout(timer);
+          signal?.removeEventListener("abort", finish);
+          resolve();
+        }
+        signal.addEventListener("abort", finish, { once: true });
+        options.onWaiting?.(true);
+      });
+    } finally {
+      options.onWaiting?.(false);
+    }
+  }
+
   while (attempt < maxAttempts) {
+    if (!started && options.submissionSignal?.aborted) return false;
     attempt += 1;
     const resume = started;
     const url = `/api/conversations/${encodeURIComponent(convId)}/generate${resume ? "?resume=1" : ""}`;
@@ -334,7 +364,7 @@ export async function followListingGeneration(
       if (res.status === 429 && attempt < maxAttempts) {
         const retryAfter = Number(res.headers.get("Retry-After"));
         if (Number.isFinite(retryAfter) && retryAfter > 0 && retryAfter <= 120) {
-          await sleep(retryAfter * 1000);
+          await waitToRetry(retryAfter * 1000);
           continue;
         }
       }

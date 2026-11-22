@@ -1128,9 +1128,13 @@ export function App() {
                     <Button variant="ghost" onClick={() => { setBulkProgressOpen(false); openListing(id); }}>
                       {row.title}
                     </Button>
-                    <p role="status">{phase === "finishing" ? "Finishing draft" : running ? "Generating" : row.status}</p>
-                    {phase === "generating" && progress?.started && (
+                    <p role="status">{phase === "finishing" ? "Finishing draft" : progress?.waiting ? "Waiting" : running ? "Generating" : row.status}</p>
+                    {phase === "generating" && (progress?.waiting || progress?.started) && (
                       <Button variant="outline" onClick={() => {
+                        if (progress.waiting) {
+                          bulk.cancelSubmission(id);
+                          return;
+                        }
                         void api.conversations.cancelGeneration(id).catch((error: unknown) => {
                           toastManager.add({ type: "error", title: "Could not stop generation", description: String(error) });
                         });

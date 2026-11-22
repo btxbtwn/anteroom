@@ -25,14 +25,17 @@ def direct_mode(monkeypatch):
     return check
 
 
-def test_old_bridge_can_poll_past_regional_command_without_consuming_it():
+@pytest.mark.parametrize(("command", "extra"), [
+    ("marketplace.delete", {"listing_id": "a" * 24, "seller_region": "CA", "confirm": True}),
+    ("marketplace.result", {"context": {"listing": {"_seller_region": "CA"}}}),
+])
+def test_old_bridge_can_poll_past_regional_command_without_consuming_it(command, extra):
     async def scenario():
         relay = hosted_browser_relay.BrowserRelay(USER_ID)
         current_caps = {MARKETPLACE_ACTIONS, MARKETPLACE_REGIONS}
         relay.note_seen(current_caps)
-        regional = {"type": "marketplace.delete", "job_id": "job1", "message_id": "one",
-                    "payload": {"marketplace": "poshmark", "listing_id": "a" * 24,
-                                "seller_region": "CA", "confirm": True}}
+        regional = {"type": command, "job_id": "job1", "message_id": "one",
+                    "payload": {"marketplace": "poshmark", **extra}}
         local = {**regional, "message_id": "two", "payload": {"marketplace": "poshmark"}}
         assert await relay.deliver_local(regional)
         assert await relay.deliver_local(local)

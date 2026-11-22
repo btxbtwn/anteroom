@@ -22,7 +22,7 @@ class SellerRegion:
 _COMMON = frozenset({"ebay", "etsy", "depop"})
 REGIONS: dict[str, SellerRegion] = {
     "US": SellerRegion("US", "USD", "EBAY_US", "poshmark.com", _COMMON | {"poshmark", "mercari"}),
-    "CA": SellerRegion("CA", "CAD", "EBAY_CA", "poshmark.ca", _COMMON | {"poshmark", "mercari"}),
+    "CA": SellerRegion("CA", "CAD", "EBAY_CA", "poshmark.ca", _COMMON | {"poshmark"}),
     "GB": SellerRegion("GB", "GBP", "EBAY_GB", None, _COMMON),
     "AU": SellerRegion("AU", "AUD", "EBAY_AU", None, _COMMON),
 }

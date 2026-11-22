@@ -57,7 +57,8 @@ def needs_regional_bridge(command: str, payload: dict) -> bool:
         return marketplace == "poshmark" and payload.get("seller_region") == "CA"
     if command not in {"marketplace.execute", "marketplace.result"}:
         return False
-    region = (payload.get("listing") or {}).get("_seller_region")
+    source = (payload.get("context") or {}) if command == "marketplace.result" else payload
+    region = (source.get("listing") or {}).get("_seller_region")
     return (marketplace == "poshmark" and region == "CA"
             or marketplace == "depop" and region in {"CA", "GB", "AU"})
 
