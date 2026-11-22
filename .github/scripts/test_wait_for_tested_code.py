@@ -221,16 +221,28 @@ class WaitForTestedCodeRecoveryTests(unittest.TestCase):
         raise AssertionError(f"Unexpected API path: {path}")
 
     def test_committed_pin_matches_exact_documented_receipt(self):
-        # Spent 0.1.1011 pin removed; a new d19adbff receipt must be pinned before
-        # Deploy hosted can supersede that historical failure.
-        self.assertIsNone(self.gate.HISTORICAL_RECOVERY_CHECKPOINT)
+        pin = self.gate.HISTORICAL_RECOVERY_CHECKPOINT
+        self.assertIsNotNone(pin)
+        assert pin is not None
+        self.assertEqual(pin.repository, "btxbtwn/anteroom")
+        self.assertEqual(pin.repository_id, 1183824317)
+        self.assertEqual(pin.workflow_id, 422931456)
+        self.assertEqual(pin.target, "bbb4c8fc560da5f81bedfd349714ff30a4c28a1d")
+        self.assertEqual(pin.production_base, "a1a55df0789371ad271e443897b72c2fd6ff0c3e")
+        self.assertEqual(pin.historical_failure, verification.HISTORICAL)
+        self.assertEqual(pin.correcting_merge, verification.CORRECTED)
+        self.assertEqual(pin.run_id, 44992383513)
+        self.assertEqual(pin.attempt, 1)
+        self.assertEqual(pin.receipt_artifact_id, 14743680528)
+        self.assertEqual(
+            pin.receipt_digest,
+            "sha256:b6f32050e79a324cdc27c0d0adad164cb573a8eb229c22b0bf6d0c6cf980ce31",
+        )
         self.assertEqual(
             self.gate.HISTORICAL_BASE_IMAGE_DIGEST,
             "sha256:cdc7323a7eb2f8ac00f2a9f3e96bd737abec9ce16c0aa2de7cdb3a77e14ebd7e",
         )
         self.assertEqual(self.gate.HISTORICAL_BASE_DB_REVISION, "85dab8d3327c")
-        self.assertEqual(verification.HISTORICAL, "d19adbff5a34609dd5c2b7ada19966ae4aeafce8")
-        self.assertEqual(verification.CORRECTED, "6d72c5e3d9d1ee4256f7c754c749a2e19a01818c")
 
     def test_valid_checkpoint_passes_when_base_live_version_and_receipt_match(self):
         report = self.gate.verify_historical_checkpoint(

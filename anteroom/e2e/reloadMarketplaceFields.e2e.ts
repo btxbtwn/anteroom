@@ -184,25 +184,26 @@ test("a partial Mercari form offers a retry until shipping choices recover", asy
       mercari_specifics: { title, shippingMethod: "SOYO" },
     } } });
     expect(saved.ok(), await saved.text()).toBe(true);
-    let quoteFailure = true;
     await page.route(`**/api/conversations/${id}/native-marketplaces/mercari/form?*`, async route => {
       const response = await route.fetch();
       const body = await response.json();
-      await route.fulfill({ response, json: quoteFailure ? {
+      await route.fulfill({ response, json: {
         ...body, reload_recommended: true,
         notes: [...body.notes, "Mercari shipping labels could not be loaded. Reload choices to try again."],
-      } : body });
+      } });
     });
     await openListing(page, phone, title);
     await openForm(page, phone, "Mercari");
     const retry = page.getByRole("button", { name: "Reload fields", exact: true });
     await expect(retry).toBeEnabled();
+    // Drain the mock before retry so subsequent form reads go to the sandbox.
+    await page.unrouteAll({ behavior: "wait" });
     const response = page.waitForResponse(res => res.url().endsWith("/mercari/form/refresh"));
-    quoteFailure = false;
     await retry.click();
     expect((await response).ok()).toBe(true);
     await expect(retry).toHaveCount(0);
   } finally {
+    await page.unrouteAll({ behavior: "wait" });
     await request.delete(`/api/conversations/${id}`);
   }
 });

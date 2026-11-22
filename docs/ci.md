@@ -119,7 +119,7 @@ publish successful inventories. These fixtures do not access app or seller data.
 `.github/scripts/recovery_evidence.py` itself remains a read-only receipt
 validator (`deployment_authorized: false`, `require_runtime_authority` still
 disabled). For how `Deploy hosted` consumes a pinned Descendant verification
-receipt (currently awaiting a new pin for `d19adbff` / `a1a55df0`), see
+receipt (pinned `bbb4c8fc` / `a1a55df0` for `d19adbff`), see
 [Hosted deploy gate recovery checkpoint](#hosted-deploy-gate-recovery-checkpoint)
 below. When invoked standalone, `recovery_evidence.py` fetches GitHub metadata
 and artifact archives through bounded GET-only `gh api` calls and reads local
@@ -192,32 +192,43 @@ repository.
 
 ## Hosted deploy gate recovery checkpoint
 
-The spent `fa824f9a` / `0.1.1011` (`b73c5347`) checkpoint was removed after
-production reached `a1a55df0` (`0.1.1091`). Deploy hosted is again blocked by a
-historical push-CI failure that cannot pass on re-run:
+For single-owner recovery on `btxbtwn/anteroom`,
+`.github/scripts/wait-for-tested-code.py` live-verifies the pinned
+`Descendant verification` receipt (`bbb4c8fc560da5f81bedfd349714ff30a4c28a1d`,
+run `44992383513`, attempt `1`, artifact `14743680528`) via
+`recovery_evidence.verify` only when all of the following hold inside
+`Deploy hosted`'s serialized `deploy-hosted` concurrency group:
 
-- `d19adbff` (`#1717`, Support bulk eBay Promoted Listings) left two Alembic
-  heads (`85dab8d3327c` and `b0d24fa61ce8`). Backend and browser jobs failed
-  with `alembic.util.exc.CommandError: The script directory has multiple heads`.
-- Correcting merge `6d72c5e3` (`#1728`) joins those heads with
-  `e1a5d3b9c472_join_error_email_and_ebay_ad_membership.py`.
+- Recorded `production_commit` equals `a1a55df0789371ad271e443897b72c2fd6ff0c3e`,
+  corroborated by HTTPS `HEALTH_URL` reporting `status: ok`,
+  `service: anteroom-hosted`, and version `0.1.1091`.
+- The only non-green historical commit is `d19adbff` (`conclusion == failure`),
+  preceding correcting merge `#1728` (`6d72c5e3`) and exact checkpoint `bbb4c8fc`
+  on `origin/main` first-parent history at or before the target `HEAD`.
+- Every other non-release commit in `production..HEAD` — including every commit
+  merged after `bbb4c8fc` — passes its own push `CI` first; the receipt is never
+  applied to any other SHA.
+- Before any build push, migration, category-tree write, or Fly rollout,
+  `Reconcile live production base for recovery` (`--reconcile-live-base`)
+  re-verifies that recorded `production_commit` is still `a1a55df0`, live
+  `HEALTH_URL` still reports `0.1.1091`, **both** Fly `app` (web) and `worker`
+  Machines are `started` on exact image tag `v0.1.1091-a1a55df0` and digest
+  `sha256:cdc7323a7eb2f8ac00f2a9f3e96bd737abec9ce16c0aa2de7cdb3a77e14ebd7e`, and
+  the live Postgres Alembic revision (`python -m alembic current` over
+  `verify-full` TLS) is still `85dab8d3327c`.
+- Workflow permissions remain unchanged (`contents: read`, `actions: read`,
+  `checks: read`); no new environments, rulesets, or tokens are added.
 
-`verification_evidence.HISTORICAL` / `CORRECTED` name that pair.
-`HISTORICAL_RECOVERY_CHECKPOINT` is `None` until a Descendant verification
-receipt is pinned for `production_base=a1a55df0`. Live recovery base facts
-already match production:
-
-- Fly app `peaceful-meadowstone-6944`, image tag `v0.1.1091-a1a55df0`, digest
-  `sha256:cdc7323a7eb2f8ac00f2a9f3e96bd737abec9ce16c0aa2de7cdb3a77e14ebd7e`
-- Postgres Alembic revision `85dab8d3327c` (sole head at `a1a55df0`)
-
-To finish recovery: merge this retarget, dispatch **Descendant verification**
-at a main tip that contains `6d72c5e3` with
-`production_base=a1a55df0789371ad271e443897b72c2fd6ff0c3e`, then pin the
-receipt in `HISTORICAL_RECOVERY_CHECKPOINT` (same single-owner gate as before:
-every other commit in `production..HEAD` must pass push CI first; reconcile
-live web+worker Machines and DB before any deploy effect; one-use after
-`Deployed commit` moves). Offline gate-recovery tests live in
+Once a single deploy mutates the database past `85dab8d3327c`, moves either
+Fly `app` or `worker` Machine off `v0.1.1091-a1a55df0`, or records a newer
+`Deployed commit` notice, the pinned checkpoint fails closed on any subsequent
+run and cannot be reused against partially mutated state. Post-rollout,
+`Confirm every Machine runs the new image` passes `--require-group app
+--require-group worker` to `check-fly-machines.py`, so both web and worker
+Machines must be `started` on the new image before `Deployed commit` is
+recorded. Remove `HISTORICAL_RECOVERY_CHECKPOINT` in a cleanup PR once
+production is verified past `a1a55df0` (artifact `14743680528` expires about
+30 days after 2026-11-22). The offline gate-recovery tests live in
 `.github/scripts/test_wait_for_tested_code.py` and run in `Repo checks`.
 
 ## Sandbox browser timing evidence

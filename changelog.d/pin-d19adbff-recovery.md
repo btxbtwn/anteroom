@@ -1,0 +1,1 @@
+- Improve automated checks for saving Mercari brand choices and retrying shipping options.
