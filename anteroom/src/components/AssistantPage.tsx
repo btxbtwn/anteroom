@@ -708,7 +708,8 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
   };
   const startEditQueued = (id: string) => {
     const message = chatQueue<AssistantQueuePayload>(ASSISTANT_QUEUE).find((item) => item.id === id);
-    if (!message || input.trim() || message.payload !== undefined || message.steer) return false;
+    // A question waiting for its conversation to be created moves with the box; leave it be.
+    if (!message || input.trim() || message.payload !== undefined || message.steer || message.threadId == null) return false;
     setEditingQueuedId(id);
     setInput(message.text);
     composerRef.current?.focus();

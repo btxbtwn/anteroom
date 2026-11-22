@@ -10,7 +10,7 @@ import { listingQueueKey, useChatQueue } from "./useChatQueue";
 
 const mounted: Root[] = [];
 beforeEach(() => {
-  localStorage.clear();
+  sessionStorage.clear();
   resetChatQueuesForTest();
 });
 afterEach(() => act(() => mounted.splice(0).forEach((root) => root.unmount())));

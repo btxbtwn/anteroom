@@ -13,7 +13,7 @@ import {
 } from "./chatQueueStore";
 
 beforeEach(() => {
-  localStorage.clear();
+  sessionStorage.clear();
   resetChatQueuesForTest();
 });
 
@@ -39,7 +39,7 @@ describe("chat queue store", () => {
   it("saves text across a reload but never images", () => {
     enqueueChatMessage("k", newQueuedChatMessage("text only", { threadId: "t" }));
     enqueueChatMessage("k", newQueuedChatMessage("with image", { payload: { attachments: [{ data: "…" }] } }));
-    expect(localStorage.getItem("anteroom.chatQueue.v1")).not.toContain("with image");
+    expect(sessionStorage.getItem("anteroom.chatQueue.v1")).not.toContain("with image");
     resetChatQueuesForTest();
     expect(chatQueue("k").map((m) => [m.text, m.threadId])).toEqual([["text only", "t"]]);
   });
@@ -59,40 +59,19 @@ describe("chat queue store", () => {
     expect(resolveFollowUp({ busy: true, canSteer: false, alternate: true })).toBe("queue");
   });
 
-  it("does not send a message another tab already sent", () => {
-    enqueueChatMessage("k", newQueuedChatMessage("once"));
-    // The other tab took it: storage no longer holds it.
-    localStorage.removeItem("anteroom.chatQueue.v1");
-    expect(takeNextChatMessage("k")).toBeNull();
-  });
-
   it("drops a saved message older than a day instead of sending it out of the blue", () => {
     const old = { id: "old", text: "stale", createdAt: new Date(Date.now() - 2 * 24 * 3600_000).toISOString() };
     const fresh = { id: "new", text: "fresh", createdAt: new Date().toISOString() };
-    localStorage.setItem("anteroom.chatQueue.v1", JSON.stringify({ k: [old, fresh] }));
+    sessionStorage.setItem("anteroom.chatQueue.v1", JSON.stringify({ k: [old, fresh] }));
     expect(chatQueue("k").map((m) => m.text)).toEqual(["fresh"]);
   });
 
   it("keeps a question asked before its conversation existed in memory, then files it there", () => {
     enqueueChatMessage("assistant", newQueuedChatMessage("before the thread", { threadId: null }));
-    expect(localStorage.getItem("anteroom.chatQueue.v1")).toBeNull();
+    expect(sessionStorage.getItem("anteroom.chatQueue.v1")).toBeNull();
     assignChatThread("assistant", "t1");
     expect(chatQueue("assistant").map((m) => m.threadId)).toEqual(["t1"]);
     resetChatQueuesForTest();
     expect(chatQueue("assistant").map((m) => [m.text, m.threadId])).toEqual([["before the thread", "t1"]]);
-  });
-
-  it("leaves another open tab's message for that tab to send", () => {
-    const mine = newQueuedChatMessage("mine");
-    enqueueChatMessage("k", mine);
-    const saved = JSON.parse(localStorage.getItem("anteroom.chatQueue.v1")!);
-    saved.k.push({ id: "theirs", text: "theirs", createdAt: new Date().toISOString(), owner: "other-tab" });
-    localStorage.setItem("anteroom.chatQueue.v1", JSON.stringify(saved));
-    expect(takeNextChatMessage("k")?.text).toBe("mine");
-    expect(takeNextChatMessage("k")).toBeNull();
-    expect(chatQueue("k").map((m) => m.text)).toEqual(["theirs"]);
-    // Once that tab has closed and reopened elsewhere, the page that loads takes it over.
-    resetChatQueuesForTest();
-    expect(takeNextChatMessage("k")?.text).toBe("theirs");
   });
 });

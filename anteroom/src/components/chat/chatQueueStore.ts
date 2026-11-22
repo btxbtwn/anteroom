@@ -3,13 +3,15 @@
  * T3 Code keeps queued runs on the thread rather than in the composer: they
  * survive switching listings, closing the chat popup and reloading the page.
  *
- * Text is saved in this browser and shared with its other tabs. Images live
- * in memory only, because their prepared uploads are too big for browser
- * storage, so a reload drops a queued message that carries images rather
- * than sending it without them. So does a message asked before its
- * assistant conversation existed, which has nowhere to go after a reload.
- * A saved message older than a day is dropped rather than sent out of the
- * blue the next time its listing opens.
+ * Each tab keeps its own queue (sessionStorage), because only the tab that
+ * queued a message knows whether the reply it waits for is still being
+ * written; another tab, seeing the listing idle, would send it at once.
+ * Closing the tab ends its queue. Images live in memory only, because their
+ * prepared uploads are too big for browser storage, so a reload drops a
+ * queued message that carries images rather than sending it without them.
+ * So does a message asked before its assistant conversation existed, which
+ * has nowhere to go after a reload. A saved message older than a day is
+ * dropped rather than sent out of the blue.
  */
 import { useSyncExternalStore } from "react";
 
@@ -21,20 +23,12 @@ export type QueuedChatMessage<P = unknown> = {
   threadId?: string | null;
   /** Sent ahead of the rest as soon as the interrupted answer has stopped. */
   steer?: boolean;
-  /**
-   * The tab that sends it. Only that tab knows whether its own reply is still
-   * being written; another tab, seeing the listing idle, would send it at once.
-   * A closing tab hands its messages back for an open one to take.
-   */
-  owner?: string;
   /** Images and other in-memory extras; never written to browser storage. */
   payload?: P;
 };
 
 const STORAGE_KEY = "anteroom.chatQueue.v1";
 const SAVED_FOR_MS = 24 * 60 * 60 * 1000;
-/** This tab, for `owner`. */
-const TAB = globalThis.crypto?.randomUUID?.() ?? `tab-${Math.random()}`;
 
 type Queues = Record<string, QueuedChatMessage[]>;
 
@@ -42,131 +36,61 @@ let queues: Queues | null = null;
 const listeners = new Map<string, Set<() => void>>();
 const EMPTY: readonly QueuedChatMessage[] = [];
 
-/** Kept only in this tab's memory: never written, and kept when storage is read again. */
+/** Kept only in memory: never written to storage. */
 function memoryOnly(item: QueuedChatMessage): boolean {
   return item.payload !== undefined || item.threadId === null;
 }
 
-function readStorage(): Queues {
-  const read: Queues = {};
+function storage(): Storage | undefined {
   try {
-    const raw = globalThis.localStorage?.getItem(STORAGE_KEY);
-    const parsed: unknown = raw ? JSON.parse(raw) : null;
-    if (!parsed || typeof parsed !== "object") return read;
-    const oldest = Date.now() - SAVED_FOR_MS;
-    for (const [key, items] of Object.entries(parsed as Record<string, unknown>)) {
-      if (!Array.isArray(items)) continue;
-      const kept = items
-        .filter(
-          (item): item is QueuedChatMessage =>
-            Boolean(item) && typeof item.id === "string" && typeof item.text === "string"
-            && typeof item.createdAt === "string" && Date.parse(item.createdAt) >= oldest,
-        )
-        .map(({ id, text, createdAt, threadId, owner }) => ({
-          id,
-          text,
-          createdAt,
-          ...(typeof threadId === "string" ? { threadId } : {}),
-          ...(typeof owner === "string" ? { owner } : {}),
-        }));
-      if (kept.length) read[key] = kept;
-    }
+    return globalThis.sessionStorage;
   } catch {
-    // Storage blocked or unreadable: the queue still works for this session.
+    return undefined;
   }
-  return read;
-}
-
-/** Make messages nobody sends this tab's own; true when any changed hands. */
-function claim(all: Queues, every: boolean): boolean {
-  let claimed = false;
-  for (const [key, items] of Object.entries(all)) {
-    all[key] = items.map((item) => {
-      if (item.owner === TAB || (!every && item.owner !== undefined)) return item;
-      claimed = true;
-      return { ...item, owner: TAB };
-    });
-  }
-  return claimed;
 }
 
 function load(): Queues {
-  if (!queues) {
-    queues = readStorage();
-    // A page that just loaded takes over what was saved: whoever queued it is gone or reloaded.
-    if (claim(queues, true)) persist();
+  if (queues) return queues;
+  queues = {};
+  try {
+    const raw = storage()?.getItem(STORAGE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    if (parsed && typeof parsed === "object") {
+      const oldest = Date.now() - SAVED_FOR_MS;
+      for (const [key, items] of Object.entries(parsed as Record<string, unknown>)) {
+        if (!Array.isArray(items)) continue;
+        const kept = items
+          .filter(
+            (item): item is QueuedChatMessage =>
+              Boolean(item) && typeof item.id === "string" && typeof item.text === "string"
+              && typeof item.createdAt === "string" && Date.parse(item.createdAt) >= oldest,
+          )
+          .map(({ id, text, createdAt, threadId }) => ({
+            id,
+            text,
+            createdAt,
+            ...(typeof threadId === "string" ? { threadId } : {}),
+          }));
+        if (kept.length) queues[key] = kept;
+      }
+    }
+  } catch {
+    // Storage blocked or unreadable: the queue still works until the page reloads.
   }
   return queues;
 }
 
-/**
- * Take what another tab saved, keeping this tab's memory-only messages in
- * place, so a message one tab sent or removed is not sent again from here.
- */
-function syncFromStorage(): string[] {
-  const before = load();
-  const saved = readStorage();
-  const next: Queues = {};
-  for (const key of new Set([...Object.keys(before), ...Object.keys(saved)])) {
-    const durable = saved[key] ?? [];
-    const mine = before[key] ?? [];
-    // Keep this tab's order and its memory-only items; follow storage for the rest.
-    const durableIds = new Set(durable.map((item) => item.id));
-    const merged = mine.filter((item) => memoryOnly(item) || durableIds.has(item.id))
-      .map((item) => (memoryOnly(item) ? item : { ...item, ...durable.find((d) => d.id === item.id)! }));
-    const known = new Set(merged.map((item) => item.id));
-    merged.push(...durable.filter((item) => !known.has(item.id)));
-    if (merged.length) next[key] = merged;
-  }
-  queues = next;
-  if (claim(next, false)) persist();
-  return [...new Set([...Object.keys(before), ...Object.keys(next)])];
-}
-
-function syncAndNotify() {
-  for (const key of syncFromStorage()) listeners.get(key)?.forEach((listener) => listener());
-}
-
-if (typeof window !== "undefined") {
-  window.addEventListener("storage", (event) => {
-    if (event.key !== STORAGE_KEY && event.key !== null) return;
-    syncAndNotify();
-  });
-  // Hand this tab's saved messages back as it closes; take them again if it comes back.
-  window.addEventListener("pagehide", () => {
-    if (!queues) return;
-    for (const [key, items] of Object.entries(queues)) {
-      queues[key] = items.map((item) => {
-        if (item.owner !== TAB || memoryOnly(item)) return item;
-        const { owner: _owner, ...rest } = item;
-        return rest;
-      });
-    }
-    persist();
-  });
-  window.addEventListener("pageshow", (event) => {
-    if (event.persisted) syncAndNotify();
-  });
-}
-
 function persist() {
-  const all = load();
   const saved: Queues = {};
-  for (const [key, items] of Object.entries(all)) {
+  for (const [key, items] of Object.entries(load())) {
     const durable = items
       .filter((item) => !memoryOnly(item))
-      .map(({ id, text, createdAt, threadId, owner }) => ({
-        id,
-        text,
-        createdAt,
-        ...(threadId !== undefined ? { threadId } : {}),
-        ...(owner !== undefined ? { owner } : {}),
-      }));
+      .map(({ id, text, createdAt, threadId }) => ({ id, text, createdAt, ...(threadId !== undefined ? { threadId } : {}) }));
     if (durable.length) saved[key] = durable;
   }
   try {
-    if (Object.keys(saved).length) globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(saved));
-    else globalThis.localStorage?.removeItem(STORAGE_KEY);
+    if (Object.keys(saved).length) storage()?.setItem(STORAGE_KEY, JSON.stringify(saved));
+    else storage()?.removeItem(STORAGE_KEY);
   } catch {
     // Quota or private mode: keep the in-memory queue.
   }
@@ -184,7 +108,7 @@ export function newQueuedChatMessage<P = unknown>(
   text: string,
   extra: Partial<Pick<QueuedChatMessage<P>, "threadId" | "payload" | "steer">> = {},
 ): QueuedChatMessage<P> {
-  return { id: crypto.randomUUID(), text, createdAt: new Date().toISOString(), owner: TAB, ...extra };
+  return { id: crypto.randomUUID(), text, createdAt: new Date().toISOString(), ...extra };
 }
 
 export function chatQueue<P = unknown>(key: string): readonly QueuedChatMessage<P>[] {
@@ -235,15 +159,13 @@ export function steerChatMessage(key: string, message: QueuedChatMessage) {
   write(key, [{ ...message, steer: true }, ...chatQueue(key)]);
 }
 
-/** The oldest message of this tab's that `matches` leaves the queue; the rest stay in order. */
+/** The oldest message that `matches` leaves the queue; the rest stay in order. */
 export function takeNextChatMessage<P = unknown>(
   key: string,
   matches: (message: QueuedChatMessage<P>) => boolean = () => true,
 ): QueuedChatMessage<P> | null {
-  // Another tab may have sent it a moment ago.
-  syncFromStorage();
   const queue = chatQueue<P>(key);
-  const next = queue.find((message) => message.owner === TAB && matches(message)) ?? null;
+  const next = queue.find(matches) ?? null;
   if (next) write(key, queue.filter((message) => message !== next) as QueuedChatMessage[]);
   return next;
 }
