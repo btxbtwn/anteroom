@@ -2,7 +2,7 @@ import { listingScreenRead } from "./listingScreen";
 import { reportError } from "./errorReports";
 import type { VendooDraft } from "./vendooDraft";
 import type { OfferLogResponse } from "./contract.gen";
-import { ApiRequestError, retryAfterMs, studioFetch, studioUpload, hasHostedApiSession } from "./transport";
+import { ApiRequestError, currentHostedSession, retryAfterMs, studioFetch, studioUpload, hasHostedApiSession } from "./transport";
 import { trackPhotoUpload } from "../photoUploads";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
 import type { CopyPreview, CopyListingRequest, BatchCopyPreviewRow } from "./listingCopy";
@@ -379,16 +379,24 @@ function isUploadSlotBusy(status: number, detail: string, retryAfter: number | n
  * errors the server explains (a model that failed, or a rate limit) fail fast.
  */
 async function readPhotos<T>(path: string, form: FormData, button: string, signal?: AbortSignal): Promise<T> {
+  const session = currentHostedSession();
+  const assertSameSession = () => {
+    if (currentHostedSession() !== session) {
+      throw new Error("Your account changed. Open the request again.");
+    }
+  };
   let restartAttempts = 0;
   let busyAttempts = 0;
   for (;;) {
     if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
+    assertSameSession();
     let response: Response;
     try {
-      if (hasHostedApiSession()) {
+      if (session) {
         const releaseUpload = await acquireHostedUploadGate(signal);
         try {
-          response = await studioUpload(`${BASE}${path}`, form, { signal, onUploadComplete: releaseUpload });
+          assertSameSession();
+          response = await studioUpload(`${BASE}${path}`, form, { signal, session, onUploadComplete: releaseUpload });
         } finally {
           releaseUpload();
         }
@@ -397,6 +405,7 @@ async function readPhotos<T>(path: string, form: FormData, button: string, signa
       }
     } catch (error) {
       if (signal?.aborted) throw error;
+      if (currentHostedSession() !== session) throw error;
       if (error instanceof TypeError && restartAttempts === 0) {
         restartAttempts += 1;
         continue;

@@ -294,7 +294,8 @@ class LocateParsingTest(unittest.TestCase):
                 yield json.dumps({
                     "pit_to_pit": {"photo": False, "stick": "A", "tiles": [1]},
                     "length": {"photo": "1", "stick": 2, "tiles": ["1"]},
-                    "sleeve": {"photo": "1", "stick": "A", "tiles": [True, "²", "abc", 0]},
+                    "waist": {"photo": "9" * 5000, "stick": "A", "tiles": ["1"]},
+                    "sleeve": {"photo": "1", "stick": "A", "tiles": [True, "²", "abc", 0, "9" * 5000]},
                 })
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -307,7 +308,7 @@ class LocateParsingTest(unittest.TestCase):
                 "sticks": [{"stick": "A", "strip": img_path, "tiles": [img_path, img_path]}],
             }]
             provider = BadLocateProvider()
-            result = asyncio.run(measure_read._read_once(provider, photos, "top", ["pit_to_pit", "length", "sleeve"]))
+            result = asyncio.run(measure_read._read_once(provider, photos, "top", ["pit_to_pit", "length", "waist", "sleeve"]))
 
         self.assertEqual(result, {})
         self.assertEqual(provider.calls, 1)

@@ -142,13 +142,34 @@ export function BulkUploadDialog({ groups: initialGroups, onCancel, onConfirm }:
   };
 
   // Photos only move within their own listing; the first one becomes the cover.
+  // Order affects which yardstick shots the server inspects, so reordering cancels
+  // any queued or in-flight reading captured against the previous order.
   const dropPhoto = (target: DragSpot) => {
     const source = dragFrom;
     resetDrag();
-    if (!source || source.group !== target.group) return;
+    if (!source || source.group !== target.group || source.photo === target.photo) return;
+    photoSetRef.current[target.group] = (photoSetRef.current[target.group] ?? 0) + 1;
+    measureAbortsRef.current.get(target.group)?.abort();
+    measureAbortsRef.current.delete(target.group);
+    sizeAbortsRef.current.get(target.group)?.abort();
+    sizeAbortsRef.current.delete(target.group);
     setGroups((current) => current.map((group, index) => (
       index === target.group ? { ...group, files: moveItem(group.files, source.photo, target.photo) } : group
     )));
+    setRows((current) => current.map((row, index) => {
+      if (index !== target.group) return row;
+      const clearedMeasure = row.readNote === READING_MEASUREMENTS_NOTE
+        ? { readNote: "Photos were reordered while reading. Read measurements again or measure by hand." }
+        : {};
+      const sizeCancellation = "Photos were reordered while reading. Read size tags again or type the size.";
+      const clearedSize = row.sizeNote === READING_SIZE_NOTE
+        ? {
+            sizeReview: row.size.trim() === "" || Boolean(row.sizeWarning),
+            sizeNote: row.sizeWarning ? `${sizeCancellation} ${row.sizeWarning}` : sizeCancellation,
+          }
+        : {};
+      return { ...row, ...clearedMeasure, ...clearedSize, photoSet: row.photoSet + 1 };
+    }));
   };
 
   const setRow = (index: number, patch: Partial<Row>) => setRows((current) => current.map((row, i) => (

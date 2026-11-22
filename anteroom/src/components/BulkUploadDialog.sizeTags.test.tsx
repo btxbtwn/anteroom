@@ -220,6 +220,45 @@ it("keeps a size mismatch warning when a re-read finds no tag", async () => {
   }
 });
 
+it.each(["34 x 30", ""])("keeps size review for %j when reordering cancels a tag read", async (typedSize) => {
+  const report = tagReads.Jeans!;
+  const read = vi.spyOn(api.sizeTags, "read");
+  const { root, size, button } = await openDialog(vi.fn(), [{
+    ...groups[1]!, files: [groups[1]!.files[0]!, new File(["x"], "tag.jpg", { type: "image/jpeg" })],
+  }]);
+  try {
+    const warning = "The tag reads 32 x 30. Check the size you typed.";
+    const note = () => document.getElementById(size("Jeans").getAttribute("aria-describedby")!)?.textContent;
+    if (typedSize) {
+      read.mockResolvedValueOnce(report);
+      await act(async () => setInput(size("Jeans"), typedSize));
+      await act(async () => button("Read size tags").click());
+      await settle(() => expect(note()).toBe(warning));
+    }
+
+    let resolveRead!: (result: SizeTagReadResult) => void;
+    read.mockImplementationOnce(() => new Promise((resolve) => { resolveRead = resolve; }));
+    await act(async () => button("Read size tags").click());
+    await settle(() => expect(resolveRead).toBeTypeOf("function"));
+    const signal = read.mock.lastCall?.[1];
+    const thumbs = document.querySelectorAll(".photo-thumb");
+    const dataTransfer = { effectAllowed: "", dropEffect: "", setData: vi.fn(), types: ["text/plain"], items: [], files: [] };
+    for (const [eventType, photo] of [["dragstart", thumbs[1]!], ["drop", thumbs[0]!]] as const) {
+      const event = new Event(eventType, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "dataTransfer", { value: dataTransfer });
+      await act(async () => { photo.dispatchEvent(event); });
+    }
+    expect(signal?.aborted).toBe(true);
+    await act(async () => resolveRead(report));
+    const cancellation = "Photos were reordered while reading. Read size tags again or type the size.";
+    expect(size("Jeans").value).toBe(typedSize);
+    expect(size("Jeans").className).toContain("needs-review");
+    expect(note()).toBe(typedSize ? `${cancellation} ${warning}` : cancellation);
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
 it("drops a typed size's tag warning when a photo is removed, so an empty re-read can't restore it", async () => {
   const read = vi.spyOn(api.sizeTags, "read").mockImplementation(async (files) => tagReads[files[0]!.name.replace(".jpg", "")]!);
   const twoPhotos = groups.map((group) => ({ ...group, files: [...group.files, new File(["y"], `${group.folder}-2.jpg`, { type: "image/jpeg" })] }));
@@ -391,6 +430,121 @@ it("paces hosted uploads without limiting concurrent model reads, cancels queued
     await act(async () => root.unmount());
     expect(requests[0]!.aborted).toBe(true);
     expect(requests[1]!.aborted).toBe(true);
+  } finally {
+    uninstall();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("cancels a queued measurement read when photos are reordered so the old order is not uploaded", async () => {
+  const { installHostedApiSession } = await import("../api/transport");
+  const requests: Array<{
+    sentFiles: string[];
+    finishUpload: () => void;
+    respond: (status: number, body: unknown) => void;
+  }> = [];
+  class FakeReorderXhr {
+    status = 0;
+    statusText = "";
+    responseText = "";
+    readyState = 0;
+    sentFiles: string[] = [];
+    private uploadLoadend: (() => void) | null = null;
+    upload = {
+      addEventListener: (event: string, cb: () => void) => {
+        if (event === "loadend") this.uploadLoadend = cb;
+      },
+    };
+    onreadystatechange: (() => void) | null = null;
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    ontimeout: (() => void) | null = null;
+    onabort: (() => void) | null = null;
+    constructor() { requests.push(this); }
+    open() {}
+    setRequestHeader() {}
+    getAllResponseHeaders() { return "Content-Type: application/json\r\n"; }
+    send(body: FormData) {
+      this.sentFiles = body.getAll("files").map((entry) => (entry as File).name);
+    }
+    finishUpload() { this.uploadLoadend?.(); }
+    respond(status: number, body: unknown) {
+      this.status = status;
+      this.responseText = JSON.stringify(body);
+      this.readyState = 4;
+      this.onreadystatechange?.();
+      this.onload?.();
+    }
+    abort() { this.onabort?.(); }
+  }
+
+  vi.stubGlobal("XMLHttpRequest", FakeReorderXhr);
+  const uninstall = installHostedApiSession({
+    seller: "seller-1",
+    origin: "https://anteroom.example",
+    accessToken: async () => "token",
+    unauthorized: vi.fn(),
+  });
+  const twoGroups = ["Item 1", "Item 2"].map((folder) => ({
+    folder,
+    files: [
+      new File(["a"], `${folder}-1.jpg`, { type: "image/jpeg" }),
+      new File(["b"], `${folder}-2.jpg`, { type: "image/jpeg" }),
+    ],
+  }));
+  const hostedRuntime = { ...desktopRuntime, hosted: true };
+  vi.spyOn(api.boxes, "list").mockResolvedValue({ boxes: [] } as never);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () => root.render(
+      <WorkspaceRuntimeProvider value={hostedRuntime}>
+        <QueryClientProvider client={client}>
+          <BulkUploadDialog groups={twoGroups} onCancel={vi.fn()} onConfirm={vi.fn()} />
+        </QueryClientProvider>
+      </WorkspaceRuntimeProvider>,
+    ));
+    const button = (name: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === name)!;
+
+    await act(async () => button("Read measurements").click());
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]!.sentFiles).toEqual(["Item 1-1.jpg", "Item 1-2.jpg"]);
+
+    // Drag Item 2's second photo onto its first photo while Item 2 is queued on the upload gate.
+    const thumbs = document.querySelectorAll<HTMLElement>(".photo-thumb");
+    expect(thumbs).toHaveLength(4);
+    const dataTransfer = { effectAllowed: "", dropEffect: "", setData: vi.fn(), types: ["text/plain"], items: [], files: [] };
+    await act(async () => {
+      const startEvent = new Event("dragstart", { bubbles: true, cancelable: true });
+      Object.defineProperty(startEvent, "dataTransfer", { value: dataTransfer });
+      thumbs[3]!.dispatchEvent(startEvent);
+    });
+    await act(async () => {
+      const dropEvent = new Event("drop", { bubbles: true, cancelable: true });
+      Object.defineProperty(dropEvent, "dataTransfer", { value: dataTransfer });
+      thumbs[2]!.dispatchEvent(dropEvent);
+    });
+    expect(document.body.textContent).toContain("Photos were reordered while reading. Read measurements again or measure by hand.");
+
+    // Completing Item 1 must finish the batch without ever uploading Item 2's stale order.
+    await act(async () => {
+      requests[0]!.finishUpload();
+      requests[0]!.respond(200, { photos_read: 1, measurements: { length: { status: "accepted", value: 28, reads: [28, 28] } } });
+    });
+    await settle(() => expect(button("Read measurements").disabled).toBe(false));
+    expect(requests).toHaveLength(1);
+    expect(document.body.textContent).not.toContain("Reading measurements…");
+    expect(document.body.textContent).toContain("Photos were reordered while reading. Read measurements again or measure by hand.");
+
+    // A subsequent read uses Item 2's reordered photo sequence.
+    await act(async () => button("Read measurements").click());
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    await act(async () => { requests[1]!.finishUpload(); });
+    await vi.waitFor(() => expect(requests).toHaveLength(3));
+    expect(requests[2]!.sentFiles).toEqual(["Item 2-2.jpg", "Item 2-1.jpg"]);
+    await act(async () => root.unmount());
   } finally {
     uninstall();
     vi.unstubAllGlobals();

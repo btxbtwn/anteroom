@@ -131,6 +131,129 @@ describe("shared desktop and cloud API transport", () => {
     expect(instances[1]!.aborted).toBe(true);
     expect(onAbortedUpload).toHaveBeenCalledOnce();
   });
+
+  it("aborts studioUpload during accessToken lookup and releases onUploadComplete", async () => {
+    const xhrCtor = vi.fn();
+    vi.stubGlobal("XMLHttpRequest", xhrCtor);
+    const controller = new AbortController();
+    const onUploadComplete = vi.fn();
+    let resolveToken!: (token: string | null) => void;
+    dispose = installHostedApiSession({
+      seller: "seller",
+      origin: ORIGIN,
+      accessToken: () => new Promise<string | null>((resolve) => { resolveToken = resolve; }),
+      unauthorized: vi.fn(),
+    });
+    const pending = studioUpload("/api/measurements/read", new FormData(), {
+      signal: controller.signal,
+      onUploadComplete,
+    });
+    await vi.waitFor(() => expect(resolveToken).toBeDefined());
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(onUploadComplete).toHaveBeenCalledOnce();
+    expect(xhrCtor).not.toHaveBeenCalled();
+    resolveToken("late-token");
+  });
+
+  it("aborts stalled uploads and response bodies without cutting off post-upload inference", async () => {
+    vi.useFakeTimers();
+    try {
+      const instances: FakeTimedXhr[] = [];
+      class FakeTimedXhr {
+        status = 0;
+        statusText = "";
+        responseText = "";
+        readyState = 0;
+        aborted = false;
+        private uploadLoadend: (() => void) | null = null;
+        upload = {
+          addEventListener: (event: string, cb: () => void) => {
+            if (event === "loadend") this.uploadLoadend = cb;
+          },
+        };
+        onreadystatechange: (() => void) | null = null;
+        onload: (() => void) | null = null;
+        onprogress: ((event: { loaded: number }) => void) | null = null;
+        onerror: (() => void) | null = null;
+        ontimeout: (() => void) | null = null;
+        onabort: (() => void) | null = null;
+        constructor() { instances.push(this); }
+        open() {}
+        setRequestHeader() {}
+        getAllResponseHeaders() { return "Content-Type: application/json\r\n"; }
+        send() {}
+        finishUpload() { this.uploadLoadend?.(); }
+        receiveHeaders() {
+          this.readyState = 2;
+          this.onreadystatechange?.();
+        }
+        respond(status: number, body: string) {
+          this.status = status;
+          this.responseText = body;
+          this.readyState = 4;
+          this.onreadystatechange?.();
+          this.onload?.();
+        }
+        abort() { this.aborted = true; this.onabort?.(); }
+      }
+      vi.stubGlobal("XMLHttpRequest", FakeTimedXhr);
+      dispose = installHostedApiSession({ seller: "seller", origin: ORIGIN, accessToken: async () => "tok", unauthorized: vi.fn() });
+
+      // Stalled upload before loadend times out and releases onUploadComplete.
+      const onStalledComplete = vi.fn();
+      const stalled = studioUpload("/api/measurements/read", new FormData(), {
+        uploadTimeoutMs: 500,
+        onUploadComplete: onStalledComplete,
+      });
+      const stalledRejection = expect(stalled).rejects.toThrow("Failed to fetch");
+      await vi.waitFor(() => expect(instances).toHaveLength(1));
+      await vi.advanceTimersByTimeAsync(500);
+      await stalledRejection;
+      expect(instances[0]!.aborted).toBe(true);
+      expect(onStalledComplete).toHaveBeenCalledOnce();
+
+      // Upload that finishes before uploadTimeoutMs is NOT timed out during slow model inference.
+      const onSlowComplete = vi.fn();
+      const slow = studioUpload("/api/measurements/read", new FormData(), {
+        uploadTimeoutMs: 500,
+        onUploadComplete: onSlowComplete,
+      });
+      await vi.waitFor(() => expect(instances).toHaveLength(2));
+      instances[1]!.finishUpload();
+      expect(onSlowComplete).toHaveBeenCalledOnce();
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(instances[1]!.aborted).toBe(false);
+      instances[1]!.receiveHeaders();
+      await vi.advanceTimersByTimeAsync(40_000);
+      instances[1]!.onprogress?.({ loaded: 10 });
+      await vi.advanceTimersByTimeAsync(40_000);
+      expect(instances[1]!.aborted).toBe(false);
+      instances[1]!.respond(200, JSON.stringify({ ok: true }));
+      await expect(slow).resolves.toMatchObject({ status: 200 });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(instances[1]!.aborted).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+
+      // Even an early response without upload loadend gets an idle deadline.
+      const stalledResponse = studioUpload("/api/measurements/read", new FormData());
+      const outcome = stalledResponse.catch((error: unknown) => error);
+      await vi.waitFor(() => expect(instances).toHaveLength(3));
+      const response = instances[2]!;
+      response.receiveHeaders();
+      await vi.advanceTimersByTimeAsync(40_000);
+      response.onprogress?.({ loaded: 10 });
+      await vi.advanceTimersByTimeAsync(40_000);
+      expect(response.aborted).toBe(false);
+      response.onprogress?.({ loaded: 10 });
+      await vi.advanceTimersByTimeAsync(20_000);
+      if (!response.aborted) response.respond(200, "{}");
+      expect(response.aborted).toBe(true);
+      await expect(outcome).resolves.toMatchObject({ name: "TypeError", message: "Failed to fetch" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 it.each([true, false])("binds queued requests to their submission session (signed in: %s)", async signedIn => {
