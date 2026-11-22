@@ -141,6 +141,15 @@ def test_autopay_bills_import_but_credit_card_payments_are_excluded():
     )) is None
 
 
+def test_credit_card_payment_processing_fee_imports():
+    fee = plaid_expenses._expense(transaction(
+        "fee", name="CREDIT CARD PAYMENT PROCESSING FEE",
+        personal_finance_category={"primary": "BANK_FEES"},
+    ))
+    assert fee is not None and fee.category == "platform_fees"
+    assert plaid_expenses._expense(transaction("payment", name="CREDIT CARD PAYMENT")) is None
+
+
 def test_unconfigured_is_safe(local, monkeypatch):
     client, _ = local
     monkeypatch.delenv("PLAID_CLIENT_ID", raising=False)

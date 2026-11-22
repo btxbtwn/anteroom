@@ -264,7 +264,7 @@ def _category(detail: str, vendor: str) -> Category:
         return "advertising"
     if detail.startswith("TRANSPORTATION_"):
         return "sourcing_transportation"
-    if detail.endswith("_BANK_FEES") or detail.startswith("BANK_FEES_"):
+    if detail == "BANK_FEES" or detail.endswith("_BANK_FEES") or detail.startswith("BANK_FEES_"):
         return "platform_fees"
     if detail.endswith("_OFFICE_SUPPLIES"):
         return "home_office"
@@ -277,7 +277,8 @@ def _expense(row: dict) -> ExpenseInput | None:
     if row.get("pending") or primary in {"INCOME", "TRANSFER_IN", "TRANSFER_OUT", "LOAN_PAYMENTS"}:
         return None
     detailed = finance.get("detailed") or ""
-    if detailed == "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT" or "credit card payment" in str(row.get("name", "")).casefold():
+    name = str(row.get("name", ""))
+    if detailed == "LOAN_PAYMENTS_CREDIT_CARD_PAYMENT" or (not primary and "credit card payment" in name.casefold()):
         return None
     currency = row.get("iso_currency_code")
     if not currency:
@@ -288,7 +289,7 @@ def _expense(row: dict) -> ExpenseInput | None:
     vendor = str(row.get("merchant_name") or row["name"])
     return ExpenseInput(incurred_date=row["date"], amount_cents=amount, currency=currency,
                         vendor=vendor[:256], description=str(row["name"])[:512],
-                        category=_category(detailed, vendor))
+                        category=_category(detailed or primary or "", vendor))
 
 
 def _import_key(environment: str, transaction_id: str) -> str:
