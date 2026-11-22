@@ -79,13 +79,20 @@ def test_observed_inactive_needs_a_read_of_this_same_listing():
     assert not observed_inactive(None, "9")
 
 
-def test_an_inactive_listing_stays_live_and_is_neither_sold_nor_removed(inventory):
+@pytest.mark.parametrize("rules_enabled", [False, True])
+def test_an_inactive_listing_stays_live_and_is_neither_sold_nor_removed(inventory, rules_enabled):
+    from anteroom.routes.hosted_workspace import get_conversation
+
+    pricing_rules.set_pricing_rules(enabled=rules_enabled)
     repo = MarketplaceListingRepo(inventory.db)
     repo.save("coat", "etsy", {"state": "published", "listing_id": "9", "listing_url": "https://www.etsy.com/listing/9",
                                "inventory_observation": {"state": "inactive", "listing_id": "9", "checked_at": "2026-11-20T00:00:00+00:00"}})
     repo.save("coat", "ebay", {"state": "published", "listing_id": "5", "listing_url": "https://www.ebay.com/itm/5"})
     coat = row(inventory)
     assert coat["inactive_marketplaces"] == ["etsy"]
+    hosted = get_conversation("coat", inventory.db)
+    assert hosted["inactive_marketplaces"] == ["etsy"]
+    assert hosted["direct_records"]["etsy"]["inactive"] is True
     assert coat["direct_records"]["etsy"]["inactive"] is True
     assert coat["direct_records"]["ebay"].get("inactive", False) is False
     assert set(coat["direct_marketplaces"]) == {"etsy", "ebay"}
@@ -171,6 +178,8 @@ def test_parse_reply_takes_per_marketplace_or_flat_answers():
     wanted = [("ebay", "title", "x", 80), ("mercari", "description", "y", 1000)]
     per_market = marketplace_text.parse_reply('{"ebay": {"title": "Wool  coat"}, "mercari": {"description": "Warm"}}', wanted)
     assert per_market == {("ebay", "title"): "Wool coat", ("mercari", "description"): "Warm"}
+    fenced = ' ```json\n{"ebay": {"title": "Wool  coat"}, "mercari": {"description": "Warm"}}\n```'
+    assert marketplace_text.parse_reply(fenced, wanted) == per_market
     flat = marketplace_text.parse_reply('```json\n{"title": "Coat", "description": "Warm"}\n```', wanted)
     assert flat == {("ebay", "title"): "Coat", ("mercari", "description"): "Warm"}
     assert marketplace_text.parse_reply("no json", wanted) == {}

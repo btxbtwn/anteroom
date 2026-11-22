@@ -270,8 +270,10 @@ def _read(db: Session, conv_id: str):
 
 
 def _changes(before: dict, after: dict) -> list[dict]:
+    from anteroom.services.seller_overrides import PRICE_FOLLOWERS
+
     return [{"field": field, "old": before.get(field), "new": after.get(field)}
-            for field in sorted(before.keys() | after.keys()) if before.get(field) != after.get(field)]
+            for field in sorted(before.keys() | after.keys()) if field != PRICE_FOLLOWERS and before.get(field) != after.get(field)]
 
 
 def preview(db: Session, body: PreviewRequest) -> dict:

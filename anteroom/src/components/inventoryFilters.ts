@@ -484,16 +484,18 @@ export type LabelFilterState = "include" | "exclude" | "none";
 
 /** Whether a label is included (✓), excluded (✗) or neither. */
 export function labelFilterState(filters: ListingFilters, label: string): LabelFilterState {
-  if (filters.labels.includes(label)) return "include";
-  if ((filters.excludeLabels || []).includes(label)) return "exclude";
+  const key = label.toLowerCase();
+  if (filters.labels.some((value) => value.toLowerCase() === key)) return "include";
+  if (filters.excludeLabels?.some((value) => value.toLowerCase() === key)) return "exclude";
   return "none";
 }
 
 /** One click moves a label from off, to included, to excluded, and back off. */
 export function cycleLabelFilter(filters: ListingFilters, label: string): ListingFilters {
   const state = labelFilterState(filters, label);
-  const labels = filters.labels.filter((value) => value !== label);
-  const excludeLabels = (filters.excludeLabels || []).filter((value) => value !== label);
+  const key = label.toLowerCase();
+  const labels = filters.labels.filter((value) => value.toLowerCase() !== key);
+  const excludeLabels = (filters.excludeLabels || []).filter((value) => value.toLowerCase() !== key);
   if (state === "none") return { ...filters, labels: [...labels, label], excludeLabels };
   if (state === "include") return { ...filters, labels, excludeLabels: [...excludeLabels, label] };
   return { ...filters, labels, excludeLabels };

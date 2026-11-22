@@ -310,7 +310,7 @@ export function ListingEditor({
           </div>}
           {!vendoo && (reviewTab !== "forms" || editTab === "general") && data ? (
             <ListingGuardrails listing={listing} drift={conversation?.price_drift} inactive={conversation?.inactive_marketplaces}
-              disabled={writing || unsaved} onChange={edits.save} />
+              disabled={writing || unsaved} onChange={edits.applyTransform} />
           ) : null}
           {(reviewTab !== "forms" || editTab === "general") && (
             <>

@@ -6,10 +6,21 @@ import type { ConversationSummary, ListingData, ListingDocument } from "./types"
 import { listingCategorySignature } from "../components/nativeFormStability";
 import { notifyUnsavedWork, registerUnsavedWork } from "../lib/unsavedWork";
 
+function sellerLocks(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((path): path is string => typeof path === "string") : [];
+}
+
 /** Keep newer field edits while accepting the server's normalized unchanged fields. */
 function rebase(saved: unknown, before: unknown, after: unknown, checkConflicts = false, path = ""): unknown {
   if (JSON.stringify(before) === JSON.stringify(after)) return saved;
   if (JSON.stringify(saved) === JSON.stringify(after)) return saved;
+  if (path === "seller_fields") {
+    const prior = new Set(sellerLocks(before));
+    const next = new Set(sellerLocks(after));
+    const merged = new Set(sellerLocks(saved).filter(key => !prior.has(key) || next.has(key)));
+    for (const key of next) if (!prior.has(key)) merged.add(key);
+    return merged.size ? [...merged].sort() : undefined;
+  }
   if (!saved || !before || !after || typeof saved !== "object" || typeof before !== "object" || typeof after !== "object" || Array.isArray(saved) || Array.isArray(before) || Array.isArray(after)) {
     if (checkConflicts && JSON.stringify(saved) !== JSON.stringify(before)) {
       throw new Error(`The field ${path || "listing"} also changed in the saved listing. Your edits are kept. Copy them before using Discard and reload.`);
@@ -74,6 +85,13 @@ class ListingEdits {
     void this.client.cancelQueries({ queryKey: ["listing", this.id], exact: true });
     this.update({ ...this.state, draft: listing });
     if (!this.state.saving && !this.state.error) void this.flush();
+  };
+
+  applyTransform = (before: ListingData, after: ListingData) => {
+    const current = this.state.draft ?? this.client.getQueryData<ListingDocument>(["listing", this.id])?.listing;
+    if (!current) return;
+    const merged = rebase(current, before, after) as ListingData;
+    if (JSON.stringify(current) !== JSON.stringify(merged)) this.save(merged);
   };
 
   retry = () => {

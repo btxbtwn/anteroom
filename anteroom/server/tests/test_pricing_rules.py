@@ -193,3 +193,47 @@ def test_apply_route_needs_rules_on_and_saves_nothing():
     assert result.status_code == 200, result.text
     assert result.json()["listing"]["ebay_specifics"]["price"] == 22
     assert result.json()["changed"] == ["ebay"]
+
+
+def test_rule_changes_and_disabling_keep_derived_prices_following():
+    turn_on(ebay={"percent": 10, "fixed": 0, "rounding": "none"})
+    previous = {"price": 20, "ebay_specifics": {"price": 20}, "etsy_specifics": {"price": 33},
+                "seller_fields": ["etsy_specifics.price"]}
+    assert sync_unlocked_prices(previous)
+    assert previous["ebay_specifics"]["price"] == 22
+    turn_on(ebay={"percent": 0, "fixed": -50, "rounding": "none"})
+    previous = prepare_user_listing(previous, {**previous, "title": "No valid rule price"})
+    assert previous["ebay_specifics"]["price"] == 22
+    assert "ebay_specifics.price" not in previous["seller_fields"]
+    turn_on(ebay={"percent": 20, "fixed": 0, "rounding": "none"})
+    current = prepare_user_listing(previous, {**previous, "title": "Edited"})
+    assert current["ebay_specifics"]["price"] == 24
+    assert current["etsy_specifics"]["price"] == 33
+    pricing_rules.set_pricing_rules(enabled=False)
+    current = prepare_user_listing(current, {**current, "price": 25})
+    assert current["ebay_specifics"]["price"] == 25
+    assert "ebay_specifics.price" not in current["seller_fields"]
+    assert "etsy_specifics.price" in current["seller_fields"]
+
+
+def test_editing_the_anchor_keeps_its_lock_until_it_matches_general():
+    turn_on("ebay", mercari={"percent": 10, "fixed": 0, "rounding": "none"})
+    previous = {"price": 20, "ebay_specifics": {"price": 30}, "mercari_specifics": {"price": 30},
+                "seller_fields": ["ebay_specifics.price"]}
+    sync_unlocked_prices(previous)
+    edited = prepare_user_listing(previous, {**previous, "ebay_specifics": {"price": 40}})
+    assert edited["seller_fields"] == ["ebay_specifics.price"]
+    assert price_for(edited, "ebay") == 40
+    assert edited["mercari_specifics"]["price"] == 44
+    reset = prepare_user_listing(edited, {**edited, "ebay_specifics": {"price": 20}})
+    assert "ebay_specifics.price" not in reset.get("seller_fields", [])
+    assert reset["mercari_specifics"]["price"] == 22
+
+
+def test_unlocked_poshmark_anchor_uses_whole_dollars():
+    turn_on("poshmark", ebay={"percent": 0, "fixed": 0, "rounding": "none"})
+    listing = {"price": 25.50, "poshmark_specifics": {"poshmarkPrice": 25.50}}
+    assert price_for(listing, "poshmark") == 26
+    assert price_for(listing, "ebay") == 26
+    assert sync_unlocked_prices(listing)
+    assert listing["poshmark_specifics"]["poshmarkPrice"] == 26

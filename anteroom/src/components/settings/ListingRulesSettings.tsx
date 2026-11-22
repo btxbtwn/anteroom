@@ -254,7 +254,7 @@ export function ShippingPresetsSection() {
             </div>
             <Button size="icon-sm" variant="ghost-muted" aria-label={`Edit ${preset.name}`} disabled={busy || editing !== null}
               onClick={() => { save.reset(); setEditing(preset); }}><PencilIcon /></Button>
-            <Button size="icon-sm" variant="ghost-muted" aria-label={`Delete ${preset.name}`} disabled={busy}
+            <Button size="icon-sm" variant="ghost-muted" aria-label={`Delete ${preset.name}`} disabled={busy || editing !== null}
               onClick={() => remove.mutate(preset.id)}><Trash2Icon /></Button>
           </div>
         )))}

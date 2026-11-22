@@ -89,12 +89,7 @@ def parse_reply(text: str, wanted: list[tuple[str, str, str, int]]) -> dict[tupl
     """The model's text for each wanted field. A flat ``{title, description}`` applies to every marketplace."""
     from anteroom.services.listing_generate import extract_listing_json
 
-    data: Any = extract_listing_json(text)
-    if not isinstance(data, dict):
-        try:
-            data = json.loads(text)
-        except (TypeError, ValueError):
-            data = None
+    data = extract_listing_json(text, require_listing_fields=False)
     if not isinstance(data, dict):
         return {}
     found = {}

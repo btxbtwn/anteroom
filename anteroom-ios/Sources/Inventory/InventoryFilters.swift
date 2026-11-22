@@ -125,14 +125,17 @@ struct InventoryFilters: Equatable, Sendable {
     enum LabelState: Equatable, Sendable { case none, include, exclude }
 
     func labelState(_ label: String) -> LabelState {
-        labels.contains(label) ? .include : excludeLabels.contains(label) ? .exclude : .none
+        let key = label.lowercased()
+        if labels.contains(where: { $0.lowercased() == key }) { return .include }
+        return excludeLabels.contains(where: { $0.lowercased() == key }) ? .exclude : .none
     }
 
     /// One tap moves a label from off, to included, to excluded, and back off.
     mutating func cycleLabel(_ label: String) {
         let state = labelState(label)
-        labels.removeAll { $0 == label }
-        excludeLabels.removeAll { $0 == label }
+        let key = label.lowercased()
+        labels.removeAll { $0.lowercased() == key }
+        excludeLabels.removeAll { $0.lowercased() == key }
         switch state {
         case .none: labels.append(label)
         case .include: excludeLabels.append(label)
@@ -259,7 +262,7 @@ extension ConversationSummary {
     func rowLogos(selling: [String] = []) -> [(marketplace: String, sold: Bool)] {
         marketplaceBadges().compactMap { badge in
             if !selling.isEmpty, !selling.contains(badge.marketplace) { return nil }
-            if badge.tone == .good { return (badge.marketplace, false) }
+            if badge.tone == .good || badge.label == "Inactive" { return (badge.marketplace, false) }
             return badge.label == "Sold" ? (badge.marketplace, true) : nil
         }
     }

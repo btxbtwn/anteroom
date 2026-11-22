@@ -251,8 +251,8 @@ def get_conversation(identity: str, db=Depends(get_seller_db, scope="function"))
 
     row = conversation(db, identity)
     drift = DriftReader(db, identity)
-    direct = MarketplaceListingRepo(db).summaries(identity).get(identity, {}) if drift.rules else {}
-    return conversation_response(row, missing_sale_data=missing_by_conversation(db, identity).get(identity, []),
+    direct = MarketplaceListingRepo(db).summaries(identity).get(identity, {})
+    return conversation_response(row, direct=direct, missing_sale_data=missing_by_conversation(db, identity).get(identity, []),
                                  sold=status_for(db, identity, parse_notes(row.notes)),
                                  price_drift=drift.drift(identity, direct))
 

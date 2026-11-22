@@ -29,9 +29,9 @@ describe("include and exclude labels", () => {
     let filters = DEFAULT_LISTING_FILTERS;
     expect(labelFilterState(filters, "Summer")).toBe("none");
     filters = cycleLabelFilter(filters, "Summer");
-    expect(labelFilterState(filters, "Summer")).toBe("include");
-    filters = cycleLabelFilter(filters, "Summer");
-    expect(labelFilterState(filters, "Summer")).toBe("exclude");
+    expect(labelFilterState(filters, "summer")).toBe("include");
+    filters = cycleLabelFilter(filters, "summer");
+    expect(labelFilterState(filters, "SUMMER")).toBe("exclude");
     expect(filters.labels).toEqual([]);
     filters = cycleLabelFilter(filters, "Summer");
     expect(filters).toEqual(DEFAULT_LISTING_FILTERS);

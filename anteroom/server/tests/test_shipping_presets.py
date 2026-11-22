@@ -91,7 +91,7 @@ def test_the_model_names_a_preset_by_name_in_any_case():
     assert shipping_presets.find_preset("Pants") is None
 
 
-def test_generation_applies_the_picked_preset(monkeypatch):
+def test_generation_applies_the_picked_preset():
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
@@ -120,6 +120,19 @@ def test_generation_applies_the_picked_preset(monkeypatch):
                                                                     "shipping_preset": "Nothing"}, announce=False)
         assert unknown is not None and "shipping_preset" not in unknown
         assert unknown["package_dimensions_in"] != "10x8x2"
+
+        from anteroom.services import listing_persistence
+
+        seed = {**listing, "weight_lb": 3, "weight_oz": 0, "seller_fields": ["weight_lb", "weight_oz"],
+                "_native_forms": {"depop": {"fields": [{"path": "depop_specifics.parcelSize", "label": "Parcel size"}]}}}
+        listing_persistence.save_revision(db, "tee", seed, "test")
+        for block, expected in [({}, "Extra large"), ({"parcelSize": "Large"}, "Large")]:
+            refreshed = persist_generated_listing(
+                db, "tee", "", parsed={"title": "Blue tee", "price": 20, "shipping_preset": "Light tops",
+                                       "depop_specifics": block}, announce=False)
+            assert refreshed is not None
+            assert (refreshed["weight_lb"], refreshed["weight_oz"]) == (3, 0)
+            assert refreshed["depop_specifics"]["parcelSize"] == expected
     finally:
         db.close()
         engine.dispose()

@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
+import type { ConversationSummary } from "../api/types";
 import type { BulkMarketplaceAction, BulkMarketplacePreview } from "../api/bulkMarketplace";
 import type { DelistMarketplace } from "../api/marketplaceListings";
 import { prepareMarketplaceText, reviewedTasks, runMarketplaceTasks, type MarketplaceTask, type TextPrepResult } from "../bulkMarketplace";
@@ -117,6 +118,10 @@ export function BulkMarketplaceDialog({
     className="max-w-3xl" busy={busy} onClose={onClose} footer={footer}
     description="Nothing is sent until you review each item and confirm. List and Update can run together; other actions run one item at a time. Stop lets running items finish and leaves the rest untouched; failures require a new review.">
     {preview.error || run.error ? <PageError message={preview.error?.message || run.error?.message || "Could not review these items"} /> : null}
+    {textResults ? <TextSummary results={textResults} titles={new Map([
+      ...(client.getQueryData<ConversationSummary[]>(["conversations"]) ?? []).map((row) => [row.id, row.title || "Untitled item"] as const),
+      ...(review?.rows ?? []).map((row) => [row.conversation_id, row.title || "Untitled item"] as const),
+    ])} /> : null}
     {tasks ? <div className="space-y-3" aria-live="polite">
       <PageNote>{tasks.filter((task) => task.state === "done").length} done · {tasks.filter((task) => task.state === "failed" || task.state === "unconfirmed").length} need attention · {tasks.filter((task) => task.state === "pending").length} not started</PageNote>
       {tasks.map((task) => <div key={task.id} className="min-w-0 break-words rounded-lg border p-3">
@@ -128,7 +133,6 @@ export function BulkMarketplaceDialog({
       {remaining.length && !run.isPending ? <PageNote>Review remaining checks what each marketplace has now. Nothing is sent again until you confirm a new review.</PageNote> : null}
     </div> : review ? <div className="space-y-3">
       <PageNote>{verb.note}</PageNote>
-      {textResults ? <TextSummary results={textResults} titles={new Map(review.rows.map((row) => [row.conversation_id, row.title || "Untitled item"]))} /> : null}
       <ul className="space-y-2">{review.rows.map((row) => <li key={row.conversation_id} className="min-w-0 space-y-1 rounded-lg border p-3">
         <label className="flex items-center gap-2 font-medium">
           <Checkbox aria-label={`Include ${row.title || "item"}`} disabled={Boolean(row.skip_reason) || busy}
@@ -186,6 +190,10 @@ function TextSummary({ results, titles }: { results: TextPrepResult[]; titles: M
   return <div className="space-y-1 rounded-lg border p-3 text-xs">
     <p className="font-medium">Marketplace text: {changed} {changed === 1 ? "item" : "items"} updated in Anteroom
       {failed.length ? ` · ${failed.length} kept as they were` : ""}</p>
-    {failed.map((result) => <p key={result.id} className="text-muted-foreground">{titles.get(result.id) || "An item"}: {result.error}</p>)}
+    {results.map((result, index) => !result.ok || result.skipped ? (
+      <p key={result.id} className="text-muted-foreground">{titles.get(result.id) || `Item ${index + 1}`}: {result.ok
+        ? `${result.skipped} ${result.skipped === 1 ? "field" : "fields"} skipped`
+        : result.error}</p>
+    ) : null)}
   </div>;
 }

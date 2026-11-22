@@ -11,10 +11,15 @@ and an item already live shows unsent edits until the seller chooses Update.
 from __future__ import annotations
 
 import copy
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from decimal import ROUND_CEILING, ROUND_HALF_UP, Decimal
-from typing import Any
+from typing import Any, Literal
 
 PRICING_RULES_KEY = "pricing_rules"
+SNAPSHOT_RULES = "_approved_pricing_rules"
+_reviewed_rules: ContextVar[dict | None | Literal[True]] = ContextVar("reviewed_pricing_rules", default=True)
 MARKETPLACES = ("ebay", "poshmark", "mercari", "depop", "etsy")
 ANCHORS = ("general", *MARKETPLACES)
 ROUNDINGS = ("none", "99", "whole")
@@ -172,8 +177,23 @@ def apply_rule(anchor_price: Decimal, rule: dict, market: str) -> Decimal | None
 
 def active_rules(config: dict | None = None) -> dict | None:
     """The rules when the seller turned them on, else None."""
+    if config is None:
+        reviewed = _reviewed_rules.get()
+        if reviewed is not True:
+            return reviewed
     rules = config if config is not None else get_pricing_rules()
     return rules if rules.get("enabled") else None
+
+
+@contextmanager
+def freeze_active_rules(rules: dict | None | Literal[True] = True) -> Iterator[dict | None]:
+    """Use one seller settings read for review validation and subsequent dispatch."""
+    rules = active_rules() if rules is True else rules
+    token = _reviewed_rules.set(rules)
+    try:
+        yield rules
+    finally:
+        _reviewed_rules.reset(token)
 
 
 def anchor_amount(listing: dict, rules: dict) -> Decimal | None:
@@ -188,7 +208,8 @@ def anchor_amount(listing: dict, rules: dict) -> Decimal | None:
             amount = money(get_path(listing, held))
             if amount is not None:
                 return amount
-    return money(listing.get("price"))
+    fallback = money(listing.get("price"))
+    return round_price(fallback, "none", anchor) if fallback is not None and anchor in WHOLE_DOLLAR_ONLY else fallback
 
 
 def rule_price(listing: dict, market: str, rules: dict) -> Decimal | None:

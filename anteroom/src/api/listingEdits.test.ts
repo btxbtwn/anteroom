@@ -290,3 +290,22 @@ it("keeps a queue that is re-subscribed in the same task, as a remount does", as
   unsubscribe();
   await vi.waitFor(() => expect(listingEditQueueCount(client)).toBe(0));
 });
+
+
+it("merges a delayed preset into the current draft and retains locks added during save", async () => {
+  const { client, edits } = setup();
+  const original = { title: "Original", price: 10, weight_lb: 1 };
+  let finish!: (value: ListingSaveResult) => void;
+  const update = vi.spyOn(api.listings, "update")
+    .mockReturnValueOnce(new Promise(resolve => { finish = resolve; }))
+    .mockImplementationOnce(async (_id, listing) => result("r2", listing));
+  try {
+    edits.save({ ...original, title: "My newer title" });
+    edits.applyTransform(original, { ...original, weight_lb: 3, seller_fields: ["weight_lb"] });
+    finish(result("r1", { ...original, title: "My newer title", seller_fields: ["title"] }));
+    await vi.waitFor(() => expect(edits.pending).toBe(false));
+    expect(update).toHaveBeenLastCalledWith("item", {
+      ...original, title: "My newer title", weight_lb: 3, seller_fields: ["title", "weight_lb"],
+    }, "r1");
+  } finally { client.clear(); }
+});

@@ -48,7 +48,10 @@ def normalized_listing_hash(listing: dict | None) -> str | None:
     from anteroom.services.listing_generate import align_size_fields
     from anteroom.services.validation import normalize_listing_dropdowns
 
+    from anteroom.services.seller_overrides import PRICE_FOLLOWERS
+
     shaped = copy.deepcopy(listing)
+    shaped.pop(PRICE_FOLLOWERS, None)
     align_size_fields(shaped)
     normalize_listing_dropdowns(shaped)
     canonical = _canonicalize_numbers(shaped)

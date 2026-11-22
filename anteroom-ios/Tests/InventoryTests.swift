@@ -320,7 +320,7 @@ struct InventoryTests {
         var labelled = InventoryFilters()
         labelled.cycleLabel("Summer")
         labelled.cycleLabel("Consigned")
-        labelled.cycleLabel("Consigned")
+        labelled.cycleLabel("consigned")
         precondition(labelled.labelState("Consigned") == .exclude && labelled.activeCount == 2)
         precondition(ids(guarded.filter { InventoryQuery.matchesFilters($0, labelled) }) == ["s"])
         labelled.cycleLabel("Consigned")
@@ -334,6 +334,8 @@ struct InventoryTests {
         precondition(InventoryQuery.labelOptions(guarded) == ["Consigned", "Summer", "Winter"])
         let inactiveBadge = guarded[2].marketplaceBadges().first { $0.marketplace == "etsy" }
         precondition(inactiveBadge?.label == "Inactive" && inactiveBadge?.tone == .neutral)
+        precondition(guarded[2].rowLogos().map(\.marketplace) == ["etsy"])
+        precondition(guarded[2].rowLogos().map(\.sold) == [false])
 
         print("Inventory tests passed")
     }

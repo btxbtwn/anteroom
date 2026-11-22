@@ -311,7 +311,7 @@ def analysis_with_photo_count(photo_count: int, analysis_text: str | None = None
     return header + "\n" + text
 
 
-def extract_listing_json(text: str) -> dict | None:
+def extract_listing_json(text: str, *, require_listing_fields: bool = True) -> dict | None:
     if not text or text.lstrip().lower().startswith("error:"):
         return None
 
@@ -339,7 +339,7 @@ def extract_listing_json(text: str) -> dict | None:
             except json.JSONDecodeError:
                 continue
             if isinstance(parsed, dict) and (
-                parsed.get("title") or parsed.get("description") or parsed.get("price") is not None
+                not require_listing_fields or parsed.get("title") or parsed.get("description") or parsed.get("price") is not None
             ):
                 return parsed
     return None
@@ -1710,6 +1710,12 @@ def persist_generated_listing(
         listing["size"] = locked_size
         align_size_fields(listing, previous_size=generated_size or None)
         _drop_unformed_size_ids(listing, seed)
+    # Depop's derived parcel tier must see the same weight that will be saved.
+    from anteroom.services.seller_overrides import is_locked
+
+    for key in ("weight_lb", "weight_oz"):
+        if is_locked(seed, key):
+            listing[key] = seed.get(key)
     apply_send_readiness_fixes(listing)
     if revisions:
         selected = revisions[0].listing_json
@@ -1756,7 +1762,7 @@ def persist_generated_listing(
         package = str(seller.get("packageDimensions") or "").strip()
         if package:
             listing["package_dimensions_in"] = package
-        from anteroom.services.seller_overrides import is_locked, materialize_prices
+        from anteroom.services.seller_overrides import materialize_prices
 
         previous_listing = revisions[0].listing_json if revisions and isinstance(revisions[0].listing_json, dict) else {}
         if previous_listing.get("seller_fields"):

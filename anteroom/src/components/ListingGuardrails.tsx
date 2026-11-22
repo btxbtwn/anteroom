@@ -42,18 +42,18 @@ export function ListingGuardrails({ listing, drift = [], inactive = [], disabled
   inactive?: readonly string[];
   disabled: boolean;
   /** The editor's save: the same path as any field edit, with stale-edit protection. */
-  onChange: (listing: ListingData) => void;
+  onChange: (before: ListingData, after: ListingData) => void;
 }) {
   const { data: rules } = useQuery({ queryKey: ["settings-pricing-rules"], queryFn: api.settings.pricingRules });
   const { data: presets } = useQuery({ queryKey: ["settings-shipping-presets"], queryFn: api.settings.shippingPresets });
   const { data: warningSettings } = useQuery({ queryKey: ["settings-listing-warnings"], queryFn: api.settings.listingWarnings });
   const applyRules = useMutation({
-    mutationFn: () => api.settings.applyPricingRules(listing),
-    onSuccess: (result) => onChange(result.listing),
+    mutationFn: (before: ListingData) => api.settings.applyPricingRules(before),
+    onSuccess: (result, before) => onChange(before, result.listing),
   });
   const applyPreset = useMutation({
-    mutationFn: (id: string) => api.settings.applyShippingPreset(id, listing),
-    onSuccess: (result) => onChange(result.listing),
+    mutationFn: ({ id, before }: { id: string; before: ListingData }) => api.settings.applyShippingPreset(id, before),
+    onSuccess: (result, { before }) => onChange(before, result.listing),
   });
   const warnings = guardrailWarnings({ listing, drift, warnMissingSku: Boolean(warningSettings?.missing_sku), inactive });
   const presetList = presets?.presets || [];
@@ -72,7 +72,7 @@ export function ListingGuardrails({ listing, drift = [], inactive = [], disabled
         {rules?.enabled ? (
           <Button size="xs" variant={drift.length ? "outline" : "ghost-muted"} disabled={busy}
             title="Put every marketplace price back on your pricing rules. Saves locally; sends nothing."
-            onClick={() => applyRules.mutate()}>
+            onClick={() => applyRules.mutate(listing)}>
             <ScaleIcon />
             {applyRules.isPending ? "Applying…" : "Apply pricing rules"}
           </Button>
@@ -85,7 +85,7 @@ export function ListingGuardrails({ listing, drift = [], inactive = [], disabled
             </MenuTrigger>
             <MenuPopup align="start" className="min-w-56">
               {presetList.map((preset) => (
-                <MenuItem key={preset.id} onClick={() => applyPreset.mutate(preset.id)}>
+                <MenuItem key={preset.id} onClick={() => applyPreset.mutate({ id: preset.id, before: listing })}>
                   <span className="flex min-w-0 flex-col">
                     <span className="truncate">{preset.name}</span>
                     <span className="truncate text-2xs text-muted-foreground">{preset.usage_condition || presetSummary(preset)}</span>
