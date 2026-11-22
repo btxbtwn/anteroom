@@ -32,5 +32,13 @@ def upgrade() -> None:
 def downgrade() -> None:
     if op.get_bind().dialect.name != 'postgresql':
         return
+    # Preserve the original fence-removal rule. Block receipt changes until
+    # the trigger drops commit so a deletion cannot race the emptiness check.
+    op.execute('LOCK TABLE anteroom_private.account_cleanup IN SHARE MODE')
+    op.execute('''DO $$ BEGIN
+        IF EXISTS (SELECT 1 FROM anteroom_private.account_cleanup) THEN
+            RAISE EXCEPTION 'Deletion fences cannot be removed while deleted or pending accounts exist';
+        END IF;
+    END $$''')
     for table in TABLES:
         op.execute(f'DROP TRIGGER IF EXISTS account_write_guard ON public."{table}"')
