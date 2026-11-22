@@ -15,6 +15,7 @@ describe("queryKeyMatchesTopic", () => {
   it("maps each server topic to the screens it covers", () => {
     expect(queryKeyMatchesTopic("listings", ["conversations"])).toBe(true);
     expect(queryKeyMatchesTopic("listings", ["listing", "c1"])).toBe(true);
+    expect(queryKeyMatchesTopic("listings", ["profit-and-loss", "accrual"])).toBe(true);
     expect(queryKeyMatchesTopic("photos", ["photos", "c1"])).toBe(true);
     expect(queryKeyMatchesTopic("jobs", ["jobs", "c1"])).toBe(true);
     expect(queryKeyMatchesTopic("jobs", ["queue"])).toBe(true);

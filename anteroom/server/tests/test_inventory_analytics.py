@@ -201,6 +201,23 @@ class SummarizeAnalyticsTest(unittest.TestCase):
         self.assertEqual(payload["previous"]["sales"]["count"], 2)
         self.assertEqual(payload["previous"]["sales"]["revenue"], 30)
 
+    def test_unit_counts_and_sell_through_compare_the_same_windows(self):
+        start = NOW - timedelta(days=30)
+        rows = [
+            _item(conversation_id="current", sold_at=start, listed_at=start, listing_quantity=4, sale_quantity=2),
+            _item(conversation_id="prior", sold_at=start - timedelta(days=1), listed_at=start - timedelta(days=1),
+                  listing_quantity=3, sale_quantity=3),
+            _item(conversation_id="stock", status="active", listed_at=start, listing_quantity=5),
+            _item(conversation_id="current", sold_at=start + timedelta(days=1), listed_at=start, listing_quantity=4),
+        ]
+        result = summarize(rows, range_id="30d", now=NOW)
+        self.assertEqual(result["units_listed"], 9)
+        self.assertEqual(result["units_sold"], 3)
+        self.assertEqual(result["previous"]["units_listed"], 3)
+        self.assertEqual(result["previous"]["units_sold"], 3)
+        self.assertEqual(result["sell_through_rate"], 66.7)
+        self.assertEqual(result["previous"]["sell_through_rate"], 50)
+
     def test_comparison_respects_every_selected_range(self):
         for range_id, start in [
             ("90d", NOW - timedelta(days=90)),
@@ -565,6 +582,13 @@ class LoadAnalyticsTest(unittest.TestCase):
         self.assertIn("incomplete_sales", body)
         self.assertIsNone(body["previous"])
         month = client.get("/api/analytics?range=30d").json()
+        self.assertEqual(month["window_start"], month["previous"]["end"])
+        self.assertEqual(datetime.fromisoformat(month["window_end_exclusive"]),
+                         datetime.fromisoformat(month["window_end"]) + timedelta(microseconds=1))
+        for window in (month, month["previous"]):
+            self.assertIn("units_listed", window)
+            self.assertIn("units_sold", window)
+            self.assertIn("sell_through_rate", window)
         self.assertIn("fees_known", month["previous"]["sales"])
         week = client.get("/api/analytics?range=7d")
         self.assertEqual(week.status_code, 200, week.text)
@@ -574,6 +598,19 @@ class LoadAnalyticsTest(unittest.TestCase):
         bad = client.get("/api/analytics?range=nope")
         self.assertEqual(bad.status_code, 400)
 
+    def test_loader_sets_fallback_sold_quantity_from_listing_quantity(self):
+        bare_sold = ConversationRepo(self.db).create(title="Multi Tee")
+        bare_sold.notes = json.dumps({
+            "marketplaceMarks": {
+                "ebay": {"state": "sold", "at": NOW.isoformat()},
+                "depop": {"state": "sold", "at": NOW.isoformat()},
+            },
+        })
+        listing_persistence.save_revision(self.db, bare_sold.id, {"title": "Multi Tee", "quantity": 2}, source="import")
+        self.db.commit()
+        row = next(item for item in load_rows(self.db) if item.conversation_id == bare_sold.id)
+        self.assertEqual(row.status, "sold")
+        self.assertEqual(row.sale_quantity, 2)
 
 
 class StaleListingsTest(unittest.TestCase):

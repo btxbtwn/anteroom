@@ -62,6 +62,44 @@ function render(payload: InventoryAnalytics) {
 }
 
 describe("InventoryAnalyticsView", () => {
+  it.each(["current", "previous"])("hides cached %s profit figures after a refresh error", (failed) => {
+    const reports = [{ currency: "USD", incomplete_sales: 0, lines: [{ label: "Net Profit", amount_cents: 12345 }] }];
+    const previousReports = [{ ...reports[0], lines: [{ label: "Net Profit", amount_cents: 10000 }] }];
+    useMutation.mockReturnValue({ mutate: vi.fn(), isPending: false });
+    useQuery.mockImplementation(({ queryKey }) => {
+      if (queryKey[0] !== "profit-and-loss") return {
+        data: { ...data, window_start: "2026-09-01T00:00:00Z", window_end: "2026-09-30T00:00:00Z" },
+      };
+      const previous = queryKey[1].includes("start=2026-08-01");
+      return { data: previous ? previousReports : reports, isError: failed === (previous ? "previous" : "current") };
+    });
+    const html = renderToStaticMarkup(<InventoryAnalyticsView onOpenListing={vi.fn()} mode="accrual" setMode={vi.fn()} />);
+    expect(html).not.toContain("Up USD 23.45");
+    if (failed === "current") {
+      expect(html).toContain("Could not load profit and loss.");
+      expect(html).not.toContain("USD 123.45");
+    } else {
+      expect(html).toContain("USD 123.45");
+    }
+  });
+
+  it("includes the last date of a previous window ending just after midnight", () => {
+    const html = render({ ...data, previous: data.previous && {
+      ...data.previous, end: "2026-08-31T00:00:00.000001+00:00",
+    } });
+    expect(html).toContain("Compared with Aug 1 – Aug 31, 2026.");
+  });
+
+  it("compares units listed and sell-through with the preceding period", () => {
+    const html = render({
+      ...data, units_listed: 4,
+      previous: data.previous && { ...data.previous, units_listed: 2, sell_through_rate: 50 },
+    });
+    expect(html).toContain("Units listed");
+    expect(html).toContain("Up 2 (100%)");
+    expect(html).toContain("Up 16.7 pp");
+  });
+
   it("shows current inventory without an obsolete sync timestamp", () => {
     const html = render(data);
     expect(html).toContain("Current inventory:");
