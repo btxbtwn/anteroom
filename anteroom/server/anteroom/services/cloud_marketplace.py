@@ -654,18 +654,24 @@ async def verify_upload_local(
 ) -> dict[str, Any]:
     if _process_role() == "web" or not cloud_sessions.is_cloud_enabled(marketplace):
         raise CloudExecutionUnavailable("Cloud marketplace verification is unavailable.")
+    from anteroom.services.seller_region import seller_region
+
+    region = (await asyncio.to_thread(seller_region)).country
     async with _loop_semaphore():
         return await _run_subprocess(marketplace, _seller_id(), "", {
             "type": "run",
-            "command": {"type": "marketplace.verify_session", "payload": {"marketplace": marketplace}},
+            "command": {"type": "marketplace.verify_session", "payload": {"marketplace": marketplace, "seller_region": region}},
             "cookies": cookies, "user_agent": user_agent, "proxy_url": cloud_sessions.proxy_url_for(proxy_session_id),
         }, 25.0)
 
 
 async def verify_session(marketplace: str = "poshmark", timeout: float = 25.0) -> dict[str, Any]:
     """Run a live read-only verification against the marketplace for the current seller."""
+    from anteroom.services.seller_region import seller_region
+
+    region = (await asyncio.to_thread(seller_region)).country
     return await execute(
         marketplace,
-        {"type": "marketplace.verify_session", "payload": {"marketplace": marketplace}},
+        {"type": "marketplace.verify_session", "payload": {"marketplace": marketplace, "seller_region": region}},
         timeout=timeout,
     )

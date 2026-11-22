@@ -34,7 +34,7 @@ const DEPOP_PAGE_RULES = [
 function ensureMarketplaceRequestContext() {
   if (!marketplaceNetworkReady) {
     marketplaceNetworkReady = chrome.declarativeNetRequest.updateSessionRules({
-      removeRuleIds: [17001, 17002, 17004, 17005, 17006, 17011, 17012, 17013, 17014, 17015, 17016, 17017, 17018, 17019, 17020, 17021, 17022, 17023, 17030],
+      removeRuleIds: [17001, 17002, 17004, 17005, 17006, 17011, 17012, 17013, 17014, 17015, 17016, 17017, 17018, 17019, 17020, 17021, 17024, 17022, 17023, 17030],
       addRules: [
         ...DEPOP_PAGE_RULES.map(([id, regexFilter]) => marketplaceHeaderRule(id, DEPOP_PAGE_HEADERS, regexFilter, DEPOP_PAGE_METHODS)),
         marketplaceHeaderRule(17002, { Origin: 'https://www.mercari.com', Referer: 'https://www.mercari.com/sell/' },
@@ -43,6 +43,8 @@ function ensureMarketplaceRequestContext() {
           '^https://webapi\\.depop\\.com/(presentation/)?api/v1/receipts/', ['get']),
         marketplaceHeaderRule(17005, { Origin: 'https://poshmark.com', Referer: 'https://poshmark.com/create-listing' },
           '^https://poshmark\\.com/(vm-rest/|api/|create-listing$)', ['get', 'post', 'put', 'delete']),
+        marketplaceHeaderRule(17024, { Origin: 'https://poshmark.ca', Referer: 'https://poshmark.ca/create-listing' },
+          '^https://poshmark\\.ca/(vm-rest/|api/|create-listing$)', ['get', 'post', 'put', 'delete']),
         // Depop's accelerated photo bucket expects its web app as the referrer.
         marketplaceHeaderRule(17006, { Referer: 'https://web.depop.com/' },
           '^https://[a-z0-9.-]+\\.s3-accelerate\\.amazonaws\\.com/', ['put']),

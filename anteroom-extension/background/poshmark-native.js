@@ -1,14 +1,17 @@
 // Poshmark's own editor flow. Saving a user_draft never calls published.
 // Publishing is seller-confirmed only, sent once, never retried.
 const POSHMARK = 'https://poshmark.com';
+function poshmarkOrigin(region) {
+  return region === 'CA' ? 'https://poshmark.ca' : POSHMARK;
+}
 const POSHMARK_QUERY = 'app_version=2.55&pm_version=2026.43.00';
 const POSHMARK_CONDITIONS = new Set(['nwt', 'uln', 'ug', 'uf']);
 const POSHMARK_STYLE_TAG = /^[A-Za-z0-9\-, ']{1,25}$/;
 
 // Poshmark's public catalog: departments, categories, size sets and colours.
-async function poshmarkCatalogData(deadline) {
-  return await marketplaceCatalog('poshmark:catalog', () => marketplaceCatalogRead('poshmark', 'category list', async () => {
-    const { data } = await marketplaceFetch(`${POSHMARK}/vm-rest/meta/catalog_v2`, { marketplace: 'poshmark', step: 'catalog',
+async function poshmarkCatalogData(deadline, origin = POSHMARK) {
+  return await marketplaceCatalog(`poshmark:catalog:${origin}`, () => marketplaceCatalogRead('poshmark', 'category list', async () => {
+    const { data } = await marketplaceFetch(`${origin}/vm-rest/meta/catalog_v2`, { marketplace: 'poshmark', step: 'catalog',
       credentials: 'omit', headers: { Accept: 'application/json' }, deadline, timeoutMs: 30000 });
     const catalog = data.data || data;
     if (!Array.isArray(catalog?.catalog?.departments)) {
@@ -20,11 +23,11 @@ async function poshmarkCatalogData(deadline) {
 
 // The order and grouping Poshmark's listing page shows its categories in
 // (departments, categories, and groups such as Global & Traditional Wear).
-async function poshmarkCatalogDisplay(deadline) {
-  return await marketplaceCatalog('poshmark:catalog_display', () => marketplaceCatalogRead('poshmark', 'category order', async () => {
-    const { data } = await marketplaceFetch(`${POSHMARK}/vm-rest/meta/catalog_display`, { marketplace: 'poshmark', step: 'catalog',
+async function poshmarkCatalogDisplay(deadline, origin = POSHMARK) {
+  return await marketplaceCatalog(`poshmark:catalog_display:${origin}`, () => marketplaceCatalogRead('poshmark', 'category order', async () => {
+    const { data } = await marketplaceFetch(`${origin}/vm-rest/meta/catalog_display`, { marketplace: 'poshmark', step: 'catalog',
       credentials: 'omit', headers: { Accept: 'application/json' }, deadline, timeoutMs: 30000 });
-    const display = data?.data?.us?.catalog_display;
+    const display = data?.data?.[origin === POSHMARK ? 'us' : 'ca']?.catalog_display;
     if (!Array.isArray(display?.children)) throw marketplaceError('Poshmark\'s category list changed.', { code: 'schema_drift' });
     return display;
   }));
@@ -32,10 +35,10 @@ async function poshmarkCatalogDisplay(deadline) {
 
 // Poshmark's own style tags. Free text is accepted too, so a failed read
 // only means the listing's tags go as the seller wrote them.
-async function poshmarkStyleTags(deadline) {
+async function poshmarkStyleTags(deadline, origin = POSHMARK) {
   try {
-    return await marketplaceCatalog('poshmark:style_tags', async () => {
-      const { data } = await marketplaceFetch(`${POSHMARK}/vm-rest/meta/style_tags/top?${POSHMARK_QUERY}`, { marketplace: 'poshmark',
+    return await marketplaceCatalog(`poshmark:style_tags:${origin}`, async () => {
+      const { data } = await marketplaceFetch(`${origin}/vm-rest/meta/style_tags/top?${POSHMARK_QUERY}`, { marketplace: 'poshmark',
         step: 'style-tags', credentials: 'omit', headers: { Accept: 'application/json' }, deadline, timeoutMs: 10000 });
       return Array.isArray(data.data) ? data.data.map(String) : [];
     });
@@ -45,9 +48,9 @@ async function poshmarkStyleTags(deadline) {
   }
 }
 
-async function poshmarkShippingDiscounts(deadline) {
-  const account = await poshmarkAccount();
-  const rows = await poshmarkClient(deadline, '').call('GET', `/vm-rest/users/${account.user_id}/seller_shipping_discounts/post`, undefined,
+async function poshmarkShippingDiscounts(deadline, origin = POSHMARK) {
+  const account = await poshmarkAccount(origin);
+  const rows = await poshmarkClient(deadline, '', origin).call('GET', `/vm-rest/users/${account.user_id}/seller_shipping_discounts/post`, undefined,
     { step: 'shipping-discounts', what: 'shipping discounts' });
   if (!Array.isArray(rows) || rows.some(row => !/^[a-f0-9]{24}$/.test(String(row.id)) || typeof row.label !== 'string')) {
     throw marketplaceError('Poshmark’s shipping discounts changed. Reopen the listing to try again.', { code: 'schema_drift' });
@@ -58,15 +61,15 @@ async function poshmarkShippingDiscounts(deadline) {
 // Poshmark's own spelling of the brand (brand search, read 2026-10-25). Brand
 // is a free string on a post, so a brand Poshmark does not know, or a failed
 // search, keeps the seller's spelling.
-async function poshmarkBrand(listing, deadline) {
+async function poshmarkBrand(listing, deadline, origin = POSHMARK) {
   const specifics = listing?.poshmark_specifics || {};
   const wanted = String(Object.hasOwn(specifics, 'brand') ? specifics.brand ?? ''
     : Object.hasOwn(listing, 'brand') ? listing.brand ?? ''
     : specifics.poshmarkBrand ?? listing.form?.overrides?.brand ?? '').trim();
   if (!wanted || /^(?:unbranded|no brand|none|other|n\/a)$/i.test(wanted)) return '';
   try {
-    const brands = await marketplaceCatalog(`poshmark:brand:${marketplaceNameKey(wanted)}`, async () => {
-      const { data } = await marketplaceFetch(`${POSHMARK}/vm-rest/searches/brands/suggested?query=${encodeURIComponent(wanted)}&count=10&${POSHMARK_QUERY}`,
+    const brands = await marketplaceCatalog(`poshmark:brand:${origin}:${marketplaceNameKey(wanted)}`, async () => {
+      const { data } = await marketplaceFetch(`${origin}/vm-rest/searches/brands/suggested?query=${encodeURIComponent(wanted)}&count=10&${POSHMARK_QUERY}`,
         { marketplace: 'poshmark', step: 'brand', credentials: 'omit', headers: { Accept: 'application/json' }, deadline, timeoutMs: 10000 });
       return Array.isArray(data.data) ? data.data : [];
     });
@@ -93,8 +96,8 @@ function poshmarkPostStyleTags(listing, known) {
 }
 
 // The signed-in account from Poshmark's jwt cookie, checked before any request.
-async function poshmarkAccount() {
-  const claims = jwtClaims(cookieToken(await chrome.cookies.get({ url: `${POSHMARK}/`, name: 'jwt' })));
+async function poshmarkAccount(origin = POSHMARK) {
+  const claims = jwtClaims(cookieToken(await chrome.cookies.get({ url: `${origin}/`, name: 'jwt' })));
   if (!/^[a-f0-9]{24}$/.test(String(claims?.user_id))) {
     throw marketplaceError('Reconnect Poshmark in Anteroom first. No tab will be opened automatically.', { code: 'signed_out' });
   }
@@ -106,8 +109,8 @@ async function poshmarkAccount() {
 
 // Poshmark's listing page carries the session's request token in its initial
 // state; its own editor sends it as X-XSRF-TOKEN on every write.
-async function poshmarkCsrf(deadline) {
-  const { data: page } = await marketplaceFetch(`${POSHMARK}/create-listing`, { marketplace: 'poshmark', step: 'session',
+async function poshmarkCsrf(deadline, origin = POSHMARK) {
+  const { data: page } = await marketplaceFetch(`${origin}/create-listing`, { marketplace: 'poshmark', step: 'session',
     headers: { Accept: 'text/html' }, expect: 'text', deadline, timeoutMs: 15000 });
   let state = null;
   try { state = JSON.parse(/__INITIAL_STATE__\s*=\s*({[^<]*});/.exec(page)?.[1] || 'null'); } catch {}
@@ -143,11 +146,11 @@ function poshmarkRefusal(error, what) {
   return Object.assign(refusal, { marketplace_type: type });
 }
 
-function poshmarkClient(deadline, csrf) {
+function poshmarkClient(deadline, csrf, origin = POSHMARK) {
   const client = { csrf };
   client.call = async (method, path, body, { step = 'request', what = 'the request', retry = method === 'GET', guard = true, timeoutMs = 25000 } = {}) => {
     const multipart = body instanceof FormData;
-    const { data } = await marketplaceFetch(`${POSHMARK}${path}${path.includes('?') ? '&' : '?'}${POSHMARK_QUERY}`, {
+    const { data } = await marketplaceFetch(`${origin}${path}${path.includes('?') ? '&' : '?'}${POSHMARK_QUERY}`, {
       marketplace: 'poshmark', step, method, retry, guard, timeoutMs, deadline: guard ? deadline : Date.now() + timeoutMs,
       headers: { Accept: 'application/json', ...(method !== 'GET' && client.csrf ? { 'X-XSRF-TOKEN': client.csrf } : {}),
         ...(!multipart && method !== 'GET' ? { 'Content-Type': 'application/json' } : {}) },
@@ -170,7 +173,7 @@ function poshmarkClient(deadline, csrf) {
         return String(uploaded.id);
       } catch (error) {
         if (error.status !== 400 || attempt) throw error;
-        client.csrf = await poshmarkCsrf(deadline);
+        client.csrf = await poshmarkCsrf(deadline, origin);
       }
     }
   };
@@ -498,9 +501,10 @@ function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {
   const smartEnabled = minimum > 0 || listing.poshmark_specifics?.smartSell?.enabled === true;
   const categoryIds = String(listing.direct_category_ids?.poshmark || '').split('/');
   // The item's cost (Anteroom's share of the box price), in dollars and cents as Poshmark's editor keeps it.
+  const currency = listing._seller_region === 'CA' ? 'CAD' : 'USD';
   const privateFields = {
     ...(sku || Object.hasOwn(listing.poshmark_specifics || {}, 'poshmarkSku') ? { sku } : {}),
-    ...(hasCost ? { cost_price_amount: blankCost ? null : { val: cost.toFixed(2), currency_code: 'USD', currency_symbol: '$' } } : {}),
+    ...(hasCost ? { cost_price_amount: blankCost ? null : { val: cost.toFixed(2), currency_code: currency, currency_symbol: '$' } } : {}),
     ...(Object.hasOwn(listing.poshmark_specifics || {}, 'sellerNotes')
       ? { other_info: String(listing.poshmark_specifics.sellerNotes ?? '') } : {}),
   };
@@ -509,29 +513,29 @@ function poshmarkPostFields(catalog, listing, { brand = '', styleTags = [] } = {
     catalog: category?.catalog || { department: categoryIds[0] || null, category: categoryIds[1] || null,
       category_features: categoryIds[2] ? [categoryIds[2]] : [] },
     inventory: { status: availability, multi_item: poshmarkMultiItem(listing, sizes), size_quantity_revision: 0, size_quantities: sizes },
-    price_amount: { val: String(price), currency_code: 'USD', currency_symbol: '$' },
-    original_price_amount: { val: String(originalPrice), currency_code: 'USD', currency_symbol: '$' },
+    price_amount: { val: String(price), currency_code: currency, currency_symbol: '$' },
+    original_price_amount: { val: String(originalPrice), currency_code: currency, currency_symbol: '$' },
     condition,
     brand,
     colors: [...new Set(colors)].slice(0, 2),
     style_tags: styleTags,
     offer_auto_actions_v2_enabled: smartEnabled,
     offer_auto_actions_min_price_amount: smartEnabled
-      ? { val: String(minimum || listing.poshmark_specifics?.smartSell?.minimumPrice || 0), currency_code: 'USD' } : null,
+      ? { val: String(minimum || listing.poshmark_specifics?.smartSell?.minimumPrice || 0), currency_code: currency } : null,
     ...(makeAvailableAt ? { make_available_at: makeAvailableAt } : {}),
     ...(Object.keys(privateFields).length ? { seller_private_info: privateFields } : {}),
   };
 }
 
 // Every catalog read the post needs, before anything is written.
-async function poshmarkPreparedPost(listing, deadline) {
-  const catalog = await poshmarkCatalogData(deadline);
-  const brand = await poshmarkBrand(listing, deadline);
-  const styleTags = poshmarkPostStyleTags(listing, await poshmarkStyleTags(deadline));
+async function poshmarkPreparedPost(listing, deadline, origin = POSHMARK) {
+  const catalog = await poshmarkCatalogData(deadline, origin);
+  const brand = await poshmarkBrand(listing, deadline, origin);
+  const styleTags = poshmarkPostStyleTags(listing, await poshmarkStyleTags(deadline, origin));
   const post = poshmarkPostFields(catalog, listing, { brand, styleTags });
   const discountId = listing.poshmark_specifics?.shippingDiscountId;
   if (Object.hasOwn(listing.poshmark_specifics || {}, 'shippingDiscountId')) {
-    const discounts = await poshmarkShippingDiscounts(deadline);
+    const discounts = await poshmarkShippingDiscounts(deadline, origin);
     const selected = discountId ? discounts.find(row => row.id === discountId)
       : discounts.find(row => Number(row.discount_amount?.val) === 0);
     post.seller_shipping_discount = { id: selected?.id ?? discountId };
@@ -539,12 +543,12 @@ async function poshmarkPreparedPost(listing, deadline) {
   return post;
 }
 
-function poshmarkListingUrl(id) {
-  return `https://poshmark.com/listing/${id}`;
+function poshmarkListingUrl(id, origin = POSHMARK) {
+  return `${origin}/listing/${id}`;
 }
 
-function poshmarkDraftUrl(id) {
-  return `https://poshmark.com/edit-listing/${id}`;
+function poshmarkDraftUrl(id, origin = POSHMARK) {
+  return `${origin}/edit-listing/${id}`;
 }
 
 function poshmarkPostDifferences(actual, expected, photoCount) {
@@ -592,6 +596,7 @@ function poshmarkPostDifferences(actual, expected, photoCount) {
 // without creating a post and without calling publish again.
 async function updatePoshmarkPost(msg, recovery = false) {
   const p = msg.payload;
+  const origin = poshmarkOrigin(p.listing?._seller_region);
   const deadline = Date.now() + 150000;
   const id = String(p.listing_id || '');
   const key = `native_operation_${p.operation_id}`;
@@ -600,13 +605,13 @@ async function updatePoshmarkPost(msg, recovery = false) {
     if (!/^[a-f0-9]{24}$/.test(id) || (p.confirm !== true && !recovery)) {
       return marketplaceFailure(marketplaceError('Confirm updating the live Poshmark listing.'), true);
     }
-    const account = await poshmarkAccount();
-    const client = poshmarkClient(deadline, '');
+    const account = await poshmarkAccount(origin);
+    const client = poshmarkClient(deadline, '', origin);
     const existing = await client.call('GET', `/vm-rest/posts/${id}`, undefined, { step: 'read' });
     if (String(existing.creator_id) !== account.user_id) throw marketplaceError('This Poshmark listing belongs to another account.');
     const sold = (existing.inventory?.size_quantities || []).some(entry => Number(entry.quantity_sold) > 0);
     if (sold || existing.status !== 'published') throw marketplaceError('This Poshmark listing is not live. It was not changed.');
-    const post = await poshmarkPreparedPost(p.listing || {}, deadline);
+    const post = await poshmarkPreparedPost(p.listing || {}, deadline, origin);
     poshmarkVideoData(p);
     if (recovery) poshmarkExpectedVideo(post, p, (await chrome.storage.local.get(key))[key]);
     const matches = saved => saved.status === 'published'
@@ -614,10 +619,10 @@ async function updatePoshmarkPost(msg, recovery = false) {
     if (recovery) {
       if (!matches(existing)) return marketplaceFailure(new Error('Poshmark has not confirmed the update. Check the live listing before trying again.'), false);
       const warning = [poshmarkSmartWarning(post, existing), poshmarkVideoPending(existing, post) ? 'Poshmark is still processing the video.' : ''].filter(Boolean).join(' ');
-      return { ok: true, state: 'published', listing_url: poshmarkListingUrl(id), ...(warning ? { warning } : {}) };
+      return { ok: true, state: 'published', listing_url: poshmarkListingUrl(id, origin), ...(warning ? { warning } : {}) };
     }
     post.inventory.size_quantity_revision = Number(existing.inventory?.size_quantity_revision) || 0;
-    client.csrf = await poshmarkCsrf(deadline);
+    client.csrf = await poshmarkCsrf(deadline, origin);
     await poshmarkSendVideo(client, id, p, msg.job_id, post, key);
     const ids = [];
     for (const photo of p.photos) ids.push(await client.photo(id, await nativePhoto(msg.job_id, photo, deadline)));
@@ -630,7 +635,7 @@ async function updatePoshmarkPost(msg, recovery = false) {
     const saved = await client.call('GET', `/vm-rest/posts/${id}`, undefined, { step: 'read-back' });
     if (!matches(saved)) throw new Error('Poshmark did not keep this listing revision. Check the live listing before trying again.');
     const warning = [poshmarkSmartWarning(post, saved), poshmarkVideoPending(saved, post) ? 'Poshmark is still processing the video.' : ''].filter(Boolean).join(' ');
-    return { ok: true, state: 'published', listing_url: poshmarkListingUrl(id), ...(warning ? { warning } : {}) };
+    return { ok: true, state: 'published', listing_url: poshmarkListingUrl(id, origin), ...(warning ? { warning } : {}) };
   } catch (error) {
     const safe = stage === 'prepare' || (stage === 'saving' && error.rejected === true);
     return marketplaceFailure(error, safe && !recovery);
@@ -640,6 +645,7 @@ async function updatePoshmarkPost(msg, recovery = false) {
 async function runPoshmarkApi(msg, recovery = false) {
   if (msg.payload?.action === 'update') return await updatePoshmarkPost(msg, recovery);
   const p = msg.payload;
+  const origin = poshmarkOrigin(p.listing?._seller_region);
   const deadline = Date.now() + 150000;
   const key = `native_operation_${p.operation_id}`;
   let created = null;
@@ -647,7 +653,7 @@ async function runPoshmarkApi(msg, recovery = false) {
   const draftOnly = p.action === 'save_draft';
   // prepare -> creating -> created -> publishing -> published
   let stage = 'prepare';
-  let client = poshmarkClient(deadline, '');
+  let client = poshmarkClient(deadline, '', origin);
   try {
     if (!['list', 'save_draft'].includes(p.action)) return marketplaceFailure(marketplaceError('Unsupported Poshmark action.'), true);
     if (recovery) {
@@ -655,28 +661,28 @@ async function runPoshmarkApi(msg, recovery = false) {
       if (!journal.poshmark_post_id) return marketplaceFailure(new Error('Poshmark did not confirm a listing. Check your Poshmark closet before trying again.'), false);
       const post = await client.call('GET', `/vm-rest/posts/${journal.poshmark_post_id}`, undefined, { step: 'recover' });
       if (draftOnly) {
-        const account = await poshmarkAccount();
-        const expected = await poshmarkPreparedPost(p.listing || {}, deadline);
+        const account = await poshmarkAccount(origin);
+        const expected = await poshmarkPreparedPost(p.listing || {}, deadline, origin);
         poshmarkExpectedVideo(expected, p, journal);
         if (String(post.creator_id) !== account.user_id || post.status !== 'user_draft'
             || poshmarkPostDifferences(post, expected, p.photos?.length ?? p.expected_photo_count).length) {
           return marketplaceFailure(marketplaceError('Poshmark has not confirmed this draft revision. Check your Poshmark drafts before trying again.'), false);
         }
         const pendingVideo = poshmarkVideoPending(post, expected);
-        return { ok: true, state: 'draft', draft_url: poshmarkDraftUrl(journal.poshmark_post_id),
+        return { ok: true, state: 'draft', draft_url: poshmarkDraftUrl(journal.poshmark_post_id, origin),
           ...(pendingVideo ? { warning: 'Poshmark is still processing the video. List will wait for it to finish.' } : {}) };
       }
-      if (post.status === 'published') return { ok: true, state: 'published', listing_url: poshmarkListingUrl(journal.poshmark_post_id) };
+      if (post.status === 'published') return { ok: true, state: 'published', listing_url: poshmarkListingUrl(journal.poshmark_post_id, origin) };
       return marketplaceFailure(new Error(`Poshmark has post ${journal.poshmark_post_id} but it is not listed. Check your Poshmark closet before trying again.`), false);
     }
     if (!draftOnly && p.confirm !== true) return marketplaceFailure(marketplaceError('Confirm listing on Poshmark.'), true);
-    const account = await poshmarkAccount();
-    const post = await poshmarkPreparedPost(p.listing || {}, deadline);
+    const account = await poshmarkAccount(origin);
+    const post = await poshmarkPreparedPost(p.listing || {}, deadline, origin);
     poshmarkVideoData(p);
-    client = poshmarkClient(deadline, await poshmarkCsrf(deadline));
+    client = poshmarkClient(deadline, await poshmarkCsrf(deadline, origin), origin);
 
     if (p.draft_url) {
-      const match = /^https:\/\/poshmark\.com\/edit-listing\/([a-f0-9]{24})$/.exec(p.draft_url);
+      const match = String(p.draft_url).startsWith(origin + '/') && /^\/edit-listing\/([a-f0-9]{24})$/.exec(String(p.draft_url).slice(origin.length));
       if (!match) throw marketplaceError('Invalid native draft link.');
       const held = await client.call('GET', `/vm-rest/posts/${match[1]}`, undefined, { step: 'read-draft' });
       if (String(held.creator_id) !== account.user_id || held.status !== 'user_draft'
@@ -712,7 +718,7 @@ async function runPoshmarkApi(msg, recovery = false) {
         throw marketplaceError(`Poshmark did not keep this draft revision${differences.length ? ` (${differences.join(', ')})` : ''}. Check your Poshmark drafts.`, { code: 'uncertain', rejected: false });
       }
       const pendingVideo = poshmarkVideoPending(saved, post);
-      return { ok: true, state: 'draft', draft_url: poshmarkDraftUrl(created),
+      return { ok: true, state: 'draft', draft_url: poshmarkDraftUrl(created, origin),
         ...(pendingVideo ? { warning: 'Poshmark is still processing the video. List will wait for it to finish.' } : {}) };
     }
     const checked = await client.call('GET', `/vm-rest/posts/${created}`, undefined, { step: 'verify-before-publish' });
@@ -732,7 +738,7 @@ async function runPoshmarkApi(msg, recovery = false) {
       throw new Error('Poshmark did not keep the selected video. Check the live listing before trying again.');
     }
     const warning = poshmarkSmartWarning(post, published);
-    return { ok: true, state: 'published', listing_url: poshmarkListingUrl(created), ...(warning ? { warning } : {}) };
+    return { ok: true, state: 'published', listing_url: poshmarkListingUrl(created, origin), ...(warning ? { warning } : {}) };
   } catch (error) {
     if (recovery) return marketplaceFailure(error, false);
     // Until the publish request, nothing is public; a clear refusal of it is safe too.

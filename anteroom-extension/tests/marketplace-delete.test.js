@@ -46,6 +46,21 @@ test('Poshmark delete reads, deletes once, and confirms it is gone', async () =>
   assert.deepEqual(requests, ['GET poshmark.com/create-listing', `GET ${posh}`, `DELETE ${posh}`, `GET ${posh}`]);
 });
 
+test('Canadian Poshmark delists and checks the same Canadian listing', async () => {
+  const path = `poshmark.ca/vm-rest/posts/${POST}`;
+  const { c, requests } = worker({
+    'GET poshmark.ca/create-listing': [200, `<script>window.__INITIAL_STATE__={"csrftoken":"csrf","userCookies":{"userInfo":{"uid":"${USER}"}}};</script>`, { 'content-type': 'text/html' }],
+    [`GET ${path}`]: n => [200, n === 1 ? livePost : { error: { errorType: 'NotFoundError' } }],
+    [`DELETE ${path}`]: [200, {}],
+  });
+  const cookies = [];
+  c.chrome.cookies.get = async ({ url }) => { cookies.push(url); return { value: jwt }; };
+  const result = await c.runMarketplaceDelete({ marketplace: 'poshmark', listing_id: POST, confirm: true, seller_region: 'CA' });
+  assert.deepEqual({ ...result }, { ok: true, state: 'deleted' });
+  assert.deepEqual(cookies, ['https://poshmark.ca/']);
+  assert.deepEqual(requests, ['GET poshmark.ca/create-listing', `GET ${path}`, `DELETE ${path}`, `GET ${path}`]);
+});
+
 test('Poshmark never deletes a sold or foreign listing, and a gone one is already deleted', async () => {
   const sold = { data: { ...livePost.data, inventory: { status: 'available', size_quantities: [{ quantity_sold: 1 }] } } };
   for (const body of [sold, { data: { ...livePost.data, creator_id: 'c'.repeat(24) } }]) {

@@ -16,6 +16,9 @@ PHOTO_ANALYSIS_SYSTEM = (
     '- department: {value, confidence} — who the item is cut for: Women, Men, Girls, Boys, Baby, or Unisex. Category trees split on this first, so infer it from cut, styling and sizing when no label says it.\n'
     '- uncertainties: [{field, issue}]\n'
     '- tag_text: {brand_label, size_tag, care_tag, rn_number} copied verbatim from any visible labels, empty strings when not visible\n'
+    '- slab_label: optional {grader, grade, certification_number} copied from a readable professional card or coin slab. '
+    'Preserve leading zeros in certification numbers and include the visible coin letter grade (for example MS-65). '
+    'Leave fields blank when unreadable.\n'
     '\n'
     'Keep every required field, using empty values and uncertainties for unknowns. Never rename keys.\n'
     'Transcribe tag_text verbatim, including apparent spelling mistakes; do not correct or expand it.\n'
@@ -55,5 +58,7 @@ PHOTO_EVIDENCE_SCHEMA = {
         "tag_text": {"type": "object", "required": ["brand_label", "size_tag", "care_tag", "rn_number"],
                      "properties": {name: {"type": "string"} for name in
                                     ("brand_label", "size_tag", "care_tag", "rn_number")}},
+        "slab_label": {"type": "object", "additionalProperties": False,
+                       "properties": {name: {"type": "string"} for name in ("grader", "grade", "certification_number")}},
     },
 }

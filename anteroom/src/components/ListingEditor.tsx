@@ -40,6 +40,7 @@ import { useChatBusy } from "./chat/liveChatStore";
 import { ListingActionsMenu } from "./ListingReviewActions";
 import { type ListingReviewTab } from "./ListingReviewTabs";
 import type { BulkListingUploadResult } from "../bulkPhotoUpload";
+import { GenerationFeedback } from "./GenerationFeedback";
 import { BookmarkCheckIcon, BookmarkPlusIcon, CircleAlertIcon, HistoryIcon, MessageCircleIcon } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { cn } from "../lib/utils";
@@ -263,6 +264,7 @@ export function ListingEditor({
         >
           {listingTitle}
         </h2>
+        {data?.current_revision_id && <GenerationFeedback key={data.current_revision_id} id={convId} revision={data.current_revision_id} />}
       </div>
 
       <SoldElsewhereNotice convId={convId} />

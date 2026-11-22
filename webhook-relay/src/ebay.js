@@ -95,9 +95,17 @@ export async function ebayAppToken(env) {
 export async function ebayResearch(env, input) {
   const params = input?.params ?? {};
   if (!params || typeof params !== "object" || Array.isArray(params)) return new Response(null, { status: 400 });
+  const site = input?.operation === "category_tree" ? params.marketplace_id : input?.marketplace_id;
+  const regionalSite = ["EBAY_CA", "EBAY_GB", "EBAY_AU"].includes(site);
+  const regionalTree = regionalSite && typeof input?.tree_id === "string" && /^[0-9]{1,10}$/.test(input.tree_id);
   const routes = {
     categories: ["GET", "/commerce/taxonomy/v1/category_tree/0/get_category_suggestions", ["q"]],
     aspects: ["GET", "/commerce/taxonomy/v1/category_tree/0/get_item_aspects_for_category", ["category_id"]],
+    ...(regionalSite ? { category_tree: ["GET", "/commerce/taxonomy/v1/get_default_category_tree_id", ["marketplace_id"]] } : {}),
+    ...(regionalTree ? {
+      regional_categories: ["GET", `/commerce/taxonomy/v1/category_tree/${input.tree_id}/get_category_suggestions`, ["q"]],
+      regional_aspects: ["GET", `/commerce/taxonomy/v1/category_tree/${input.tree_id}/get_item_aspects_for_category`, ["category_id"]],
+    } : {}),
     search: ["GET", "/buy/browse/v1/item_summary/search", ["q", "limit", "offset", "filter"]],
     image: ["POST", "/buy/browse/v1/item_summary/search_by_image", ["limit", "offset", "filter"]],
     ad_metadata: ["GET", "/sell/marketing/v1/ad_report_metadata/CAMPAIGN_PERFORMANCE_SUMMARY_REPORT", []],
@@ -105,6 +113,9 @@ export async function ebayResearch(env, input) {
   const selected = Object.hasOwn(routes, input?.operation) ? routes[input.operation] : null;
   if (!selected || Object.keys(params).some((key) => !selected[2].includes(key))) return new Response(null, { status: 400 });
   const [method, path] = selected;
+  const regional = ["category_tree", "regional_categories", "regional_aspects"].includes(input.operation);
+  const headers = { "content-type": "application/json", "X-EBAY-C-MARKETPLACE-ID": regional ? site : "EBAY_US" };
+  if (regional) headers["Accept-Language"] = `en-${site.slice(-2)}`;
   const url = new URL(hosts(env).api + path);
   for (const [key, value] of Object.entries(params)) {
     if (!["string", "number"].includes(typeof value) || String(value).length > 500) return new Response(null, { status: 400 });
@@ -116,7 +127,7 @@ export async function ebayResearch(env, input) {
   try {
     response = await fetchWithDeadline("eBay research", url, {
       method, redirect: "manual",
-      headers: { authorization: `Bearer ${await ebayAppToken(env)}`, "content-type": "application/json", "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" },
+      headers: { authorization: `Bearer ${await ebayAppToken(env)}`, ...headers },
       ...(method === "POST" ? { body: JSON.stringify({ image: input.image }) } : {}),
     }, RESEARCH_TIMEOUT_MS);
     // Do not forward provider headers, credentials, or private error echoes.

@@ -6,6 +6,7 @@ import { ChevronRightIcon, Trash2Icon } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { SettingsNote, SettingsRow, SettingsSection } from "./SettingsLayout";
+import { GenerationFeedbackSummary } from "../GenerationFeedback";
 
 // Phones get one scroll for the page and each log row as a card: time, level and
 // source on a line, the message (the tap target) under them.
@@ -132,5 +133,10 @@ function ErrorLogSection() {
 }
 
 export function LogsSettings() {
-  return <ErrorLogSection />;
+  return <>
+    <ErrorLogSection />
+    <SettingsSection id="generation-feedback" title="Generation feedback">
+      <GenerationFeedbackSummary />
+    </SettingsSection>
+  </>;
 }

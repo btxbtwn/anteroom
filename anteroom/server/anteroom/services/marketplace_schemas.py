@@ -28,12 +28,14 @@ from contextlib import contextmanager
 from typing import Any, Literal, TypedDict
 
 from anteroom.services.category_fields import load_rows, save_rows
+from anteroom.services.seller_region import seller_region
 
 # v3 keeps aspectEnabledForVariations, so older cached rows are read again.
 EBAY_ASPECTS = "ebay_aspects_v3"
 EBAY_CONDITIONS = "ebay_conditions"
 EBAY_LISTING_TYPES = "ebay_listing_types"
 EBAY_LISTING_STRUCTURE = "ebay_listing_structure"
+EBAY_DEFAULT_TREE = "ebay_default_tree"
 ETSY_PROPERTIES = "etsy_properties"
 _TAXONOMY_MAX_AGE_S = 24 * 3600
 
@@ -212,35 +214,77 @@ def aspect_options(field: dict, answers: dict[str, list[str]]) -> list[dict]:
     return selected
 
 
-async def ebay_aspects(client, category_id: str) -> list[dict]:
+def ebay_schema_cache_key(kind: str, marketplace: str | None = None) -> str:
+    site = marketplace or seller_region().ebay_marketplace
+    # Existing unqualified caches only contain US responses.
+    return kind if site == "EBAY_US" else f"{kind}:{site}"
+
+
+async def ebay_category_tree(client, marketplace: str) -> str:
+    # Tree 0 is eBay's documented default for the US. Keep existing US
+    # taxonomy requests available while the research relay picks up region support.
+    if marketplace == "EBAY_US":
+        return "0"
+    cached = await _cached_rows(EBAY_DEFAULT_TREE, marketplace)
+    tree = str(cached[0].get("tree") or "") if cached else ""
+    if re.fullmatch(r"[0-9]{1,10}", tree):
+        return tree
+    from anteroom.services.ebay_client import EbayFailure
+
+    body = await client.request("GET", "/commerce/taxonomy/v1/get_default_category_tree_id",
+                                params={"marketplace_id": marketplace}, app=True)
+    tree = str(body.get("categoryTreeId") or "")
+    if not re.fullmatch(r"[0-9]{1,10}", tree):
+        raise EbayFailure("eBay did not return a category tree for this marketplace.", 502)
+    await asyncio.to_thread(save_rows, EBAY_DEFAULT_TREE, marketplace, [{"tree": tree}])
+    return tree
+
+
+async def ebay_category_suggestions(client, marketplace: str, query: str) -> dict:
+    tree = await ebay_category_tree(client, marketplace)
+    params = {"q": query}
+    if marketplace != "EBAY_US":
+        params["marketplace_id"] = marketplace
+    return await client.request("GET", f"/commerce/taxonomy/v1/category_tree/{tree}/get_category_suggestions",
+                                params=params, app=True)
+
+
+async def ebay_aspects(client, category_id: str, *, marketplace: str | None = None) -> list[dict]:
     """The leaf's item aspects, under eBay's exact names."""
     category_id = _category(category_id)
-    # The cache is in the database: read and write it off the event loop.
-    cached = await _cached_rows(EBAY_ASPECTS, category_id)
+    site = marketplace or (await asyncio.to_thread(seller_region)).ebay_marketplace
+    cache = ebay_schema_cache_key(EBAY_ASPECTS, site)
+    cached = await _cached_rows(cache, category_id)
     if cached is not None:
         return cached
     ebay = await _ebay_client(client)
-    body = await ebay.request("GET", "/commerce/taxonomy/v1/category_tree/0/get_item_aspects_for_category",
-                              params={"category_id": category_id}, app=True)
+    tree = await ebay_category_tree(ebay, site)
+    params = {"category_id": category_id}
+    if site != "EBAY_US":
+        params["marketplace_id"] = site
+    body = await ebay.request("GET", f"/commerce/taxonomy/v1/category_tree/{tree}/get_item_aspects_for_category",
+                              params=params, app=True)
     fields = [_ebay_field(aspect) for aspect in body.get("aspects") or [] if aspect.get("localizedAspectName")]
-    await asyncio.to_thread(save_rows, EBAY_ASPECTS, category_id, fields)
+    await asyncio.to_thread(save_rows, cache, category_id, fields)
     return fields
 
 
 async def ebay_conditions(client, category_id: str) -> dict:
     """``{"required", "conditions": [{"id", "label"}]}`` for the leaf. No conditions means eBay did not say."""
     category_id = _category(category_id)
-    cached = await _cached_rows(EBAY_CONDITIONS, category_id)
+    site = (await asyncio.to_thread(seller_region)).ebay_marketplace
+    cache = ebay_schema_cache_key(EBAY_CONDITIONS, site)
+    cached = await _cached_rows(cache, category_id)
     if cached:
         return cached[0]
     ebay = await _ebay_client(client)
-    body = await ebay.request("GET", "/sell/metadata/v1/marketplace/EBAY_US/get_item_condition_policies",
+    body = await ebay.request("GET", f"/sell/metadata/v1/marketplace/{site}/get_item_condition_policies",
                               params={"filter": f"categoryIds:{{{category_id}}}"})
     policy = next((row for row in body.get("itemConditionPolicies") or [] if str(row.get("categoryId")) == category_id), {})
     answer = {"required": bool(policy.get("itemConditionRequired")),
               "conditions": [{"id": str(item["conditionId"]), "label": str(item.get("conditionDescription") or "")}
                              for item in policy.get("itemConditions") or [] if item.get("conditionId")]}
-    await asyncio.to_thread(save_rows, EBAY_CONDITIONS, category_id, [answer])
+    await asyncio.to_thread(save_rows, cache, category_id, [answer])
     return answer
 
 
@@ -270,11 +314,13 @@ async def ebay_listing_types(client, category_id: str) -> dict[str, list[str]]:
     empty answer means eBay did not say.
     """
     category_id = _category(category_id)
-    cached = await _cached_rows(EBAY_LISTING_TYPES, category_id)
+    site = (await asyncio.to_thread(seller_region)).ebay_marketplace
+    cache = ebay_schema_cache_key(EBAY_LISTING_TYPES, site)
+    cached = await _cached_rows(cache, category_id)
     if cached:
         return cached[0]
     ebay = await _ebay_client(client)
-    body = await ebay.request("GET", "/sell/metadata/v1/marketplace/EBAY_US/get_listing_type_policies",
+    body = await ebay.request("GET", f"/sell/metadata/v1/marketplace/{site}/get_listing_type_policies",
                               params={"filter": f"categoryIds:{{{category_id}}}"})
     policy = next((row for row in body.get("listingTypePolicies") or [] if str(row.get("categoryId")) == category_id), {})
     answer: dict[str, list[str]] = {}
@@ -288,24 +334,26 @@ async def ebay_listing_types(client, category_id: str) -> dict[str, list[str]]:
                 answer[kind].append(duration)
     answer = {kind: values for kind, values in answer.items() if values}
     if answer:
-        await asyncio.to_thread(save_rows, EBAY_LISTING_TYPES, category_id, [answer])
+        await asyncio.to_thread(save_rows, cache, category_id, [answer])
     return answer
 
 
 async def ebay_variations_supported(client, category_id: str) -> bool | None:
     """Whether eBay takes multi-variation listings in the leaf (``getListingStructurePolicies``). None: eBay did not say."""
     category_id = _category(category_id)
-    cached = await _cached_rows(EBAY_LISTING_STRUCTURE, category_id)
+    site = (await asyncio.to_thread(seller_region)).ebay_marketplace
+    cache = ebay_schema_cache_key(EBAY_LISTING_STRUCTURE, site)
+    cached = await _cached_rows(cache, category_id)
     if cached:
         return bool(cached[0].get("variations"))
     ebay = await _ebay_client(client)
-    body = await ebay.request("GET", "/sell/metadata/v1/marketplace/EBAY_US/get_listing_structure_policies",
+    body = await ebay.request("GET", f"/sell/metadata/v1/marketplace/{site}/get_listing_structure_policies",
                               params={"filter": f"categoryIds:{{{category_id}}}"})
     policy = next((row for row in body.get("listingStructurePolicies") or [] if str(row.get("categoryId")) == category_id), None)
     if policy is None or "variationsSupported" not in policy:
         return None
     supported = bool(policy["variationsSupported"])
-    await asyncio.to_thread(save_rows, EBAY_LISTING_STRUCTURE, category_id, [{"variations": supported}])
+    await asyncio.to_thread(save_rows, cache, category_id, [{"variations": supported}])
     return supported
 
 

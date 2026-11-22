@@ -193,7 +193,7 @@ def draft_url(marketplace: str, value: str) -> str:
     pattern, host = (
         (r"/your/shops/me/listing-editor/edit/\d+/?", "www.etsy.com") if marketplace == "etsy"
         else (r"/sellinghub/drafts/edit/[A-Za-z0-9_-]{1,80}/?", "www.depop.com") if marketplace == "depop"
-        else (r"/edit-listing/[a-f0-9]{24}", "poshmark.com") if marketplace == "poshmark"
+        else (r"/edit-listing/[a-f0-9]{24}", "poshmark.ca" if parsed.netloc == "poshmark.ca" else "poshmark.com") if marketplace == "poshmark"
         else (r"/sell/draft/[A-Za-z0-9_-]+/", "www.mercari.com")
     )
     if (parsed.scheme != "https" or parsed.netloc != host or not re.fullmatch(pattern, parsed.path)
@@ -645,11 +645,15 @@ def _for_chrome(snapshot: dict, marketplace: str) -> dict:
     """The listing as Chrome receives it. The marketplaces' saved form contracts stay on the
     server: Chrome never reads them, and they can be megabytes, past what the Bridge accepts."""
     from anteroom.services.native_contract import KEY
-
     from anteroom.services.pricing_rules import SNAPSHOT_RULES
     from anteroom.services.seller_overrides import CANONICAL_PRICE, PRICE_FOLLOWERS
+    from anteroom.services.seller_region import seller_region
 
-    listing = {key: value for key, value in snapshot.items() if key not in {KEY, SNAPSHOT_RULES, PRICE_FOLLOWERS}}
+    listing = {
+        key: value
+        for key, value in snapshot.items()
+        if key not in {KEY, SNAPSHOT_RULES, PRICE_FOLLOWERS, "_seller_region"}
+    }
     if SNAPSHOT_RULES in snapshot and (price := price_for(snapshot, marketplace)) is not None:
         # The Bridge reads the legacy payload fields. Use the same frozen
         # price as the server, even when the saved native block was restored.
@@ -657,6 +661,9 @@ def _for_chrome(snapshot: dict, marketplace: str) -> dict:
         listing[block] = {**(listing[block] if isinstance(listing.get(block), dict) else {}), key: price}
         if marketplace == "depop":
             listing["price"] = price
+    region = seller_region().country
+    if region != "US":
+        listing["_seller_region"] = region
     return listing
 
 
@@ -827,7 +834,7 @@ async def _execute_step(job_id: str, conv_id: str, marketplace: str, step: str, 
             if checked is not None:
                 stored = await _joined_worker_session(_apply_result, conv_id, marketplace, job_id, step, checked)
         return stored
-    payload = _execute_payload(marketplace, step, binding, snapshot, photos, warning)
+    payload = await asyncio.to_thread(_execute_payload, marketplace, step, binding, snapshot, photos, warning)
     if binding.get("executor") == "cloud":
         from anteroom.services import cloud_marketplace
 

@@ -1,6 +1,7 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { categoryPathOptions, CategoryTreeSelect, DependentSelectPair, groupedChoices, SearchableMultiSelect, SearchableSelect } from "./ListingFormControls";
+import { categoryPathOptions, CategoryTreeSelect, DependentSelectPair, EbayCategorySelect, groupedChoices, SearchableMultiSelect, SearchableSelect } from "./ListingFormControls";
 
 describe("marketplace choice controls", () => {
   it("identifies an unsupported saved choice without silently clearing it", () => {
@@ -168,4 +169,18 @@ describe("groupedChoices", () => {
       ["Standard", ["XS (0-2)", "S (4-6)"]], ["Petite", ["XS Petite"]], ["Inch", ["30"]], ["", ["One size"]],
     ]);
   });
+});
+
+it("uses live category search for Canada even when the US tree is cached", () => {
+  const client = new QueryClient();
+  client.setQueryData(["seller-region"], { country: "CA", currency: "CAD" });
+  client.setQueryData(["catalog-categories", "ebay"], { coverage: "tree", complete: true, nodes: [
+    { id: "123", path: "US category", label: "US category", is_leaf: true, has_children: false },
+  ] });
+  const html = renderToStaticMarkup(<QueryClientProvider client={client}>
+    <EbayCategorySelect id="category" value="" onChange={() => {}} />
+  </QueryClientProvider>);
+  expect(html).toContain("Type at least 3 characters to search eBay categories.");
+  expect(html).not.toContain("US category");
+  expect(html).not.toContain('aria-label="Choose a category"');
 });
