@@ -1,13 +1,23 @@
 name: Bug
-description: Something is broken in Anteroom, the extension, skills, or CI
+description: Something is broken in Anteroom, the iPhone app, the extension, the relay, skills, or CI
+type: Bug
 labels: ["bug"]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Title the issue with the symptom as the seller sees it, not the suspected cause.
+        Search [open issues](https://github.com/btxbtwn/anteroom/issues) first and add to a matching one instead.
+        Remove listing text, buyer details and tokens from anything you paste.
   - type: dropdown
     id: component
     attributes:
       label: Component
+      multiple: true
       options:
-        - Anteroom
+        - Anteroom web / Mac app
+        - Hosted API (Fly.io / Supabase)
+        - iPhone app
         - Chrome extension
         - Webhook relay
         - list-this skills
@@ -17,8 +27,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: Anteroom version
-      description: Settings → General → About, or the status bar.
+      label: Version
+      description: Settings → General → About, the status bar, or the commit SHA.
   - type: textarea
     id: what-happened
     attributes:
@@ -31,7 +41,21 @@ body:
     attributes:
       label: How to reproduce
       description: Steps from a fresh `./sandbox.sh` if it happens there too; otherwise say what the sandbox lacks (a live marketplace page, a real model, your data).
-      placeholder: 1. ...
+      placeholder: |
+        1. ...
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: root-cause
+    attributes:
+      label: Root cause
+      description: One sentence with `file:line`, or your best guess and how confident you are. Leave empty if unknown.
+  - type: textarea
+    id: done-when
+    attributes:
+      label: Done when
+      description: What the seller sees once it's fixed, written so it can become the failing test.
     validations:
       required: true
   - type: textarea
@@ -39,6 +63,6 @@ body:
     attributes:
       label: Diagnostics
       description: |
-        Whatever applies, with listing text, buyer details and tokens removed:
-        the job ID and its fill log (`GET /api/jobs/<id>/fill-log`), recent errors (`anteroom logs --level error`), a screenshot.
+        Whatever applies: the job ID and its fill log (`GET /api/jobs/<id>/fill-log`),
+        recent errors (`anteroom logs --level error`), a screenshot.
       render: text

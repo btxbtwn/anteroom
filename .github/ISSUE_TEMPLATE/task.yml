@@ -1,0 +1,45 @@
+name: Task
+description: A refactor, docs, dependency, CI or other change with no new seller-facing behavior
+type: Task
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - Refactor (no behavior change)
+        - Docs
+        - CI / repo hygiene
+        - Dependencies
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      multiple: true
+      options:
+        - Anteroom web / Mac app
+        - Hosted API (Fly.io / Supabase)
+        - iPhone app
+        - Chrome extension
+        - Webhook relay
+        - list-this skills
+        - CI / repo hygiene
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: What this makes easier, safer or faster.
+    validations:
+      required: true
+  - type: textarea
+    id: done-when
+    attributes:
+      label: Done when
+      placeholder: "- [ ] ..."
+    validations:
+      required: true
