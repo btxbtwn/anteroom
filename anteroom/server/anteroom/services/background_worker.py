@@ -210,6 +210,9 @@ async def run_claimed(task_id, owner, token, *, heartbeat_loop: BackgroundLoop):
 
 
 async def serve(engine, stopping, *, max_concurrency: int | None = None):
+    from anteroom.services import shared_http
+
+    shared_http.keep_connection_on_this_loop()
     limit = _worker_concurrency(max_concurrency)
     slots = asyncio.Semaphore(limit)
     active: set[asyncio.Task] = set()
@@ -268,3 +271,4 @@ async def serve(engine, stopping, *, max_concurrency: int | None = None):
             task.cancel()
         await asyncio.gather(*remaining, return_exceptions=True)
         await asyncio.to_thread(heartbeats.stop)
+        await shared_http.close_connection()

@@ -14,13 +14,15 @@
     { "tag": "v1", "new_sqlite_classes": ["Inbox"] },
     { "tag": "v2", "new_sqlite_classes": ["Directory"] }
   ],
-  // Device registration: 5 per minute per IP.
+  // Device registration: 5 per minute per IP (bypassed by hosted server via HOSTED_REGISTER_SECRET).
   // eBay signing-key lookups that miss the cache: 10 per minute per IP.
   // eBay Browse/research lookups proxied through the shared app key: 60 per minute per device.
+  // Etsy API calls proxied through the shared app key: 120 per minute per device.
   "ratelimits": [
     { "name": "REGISTRATION_LIMITER", "namespace_id": "1001", "simple": { "limit": 5, "period": 60 } },
     { "name": "EBAY_KEY_LIMITER", "namespace_id": "1002", "simple": { "limit": 10, "period": 60 } },
-    { "name": "EBAY_RESEARCH_LIMITER", "namespace_id": "1003", "simple": { "limit": 60, "period": 60 } }
+    { "name": "EBAY_RESEARCH_LIMITER", "namespace_id": "1003", "simple": { "limit": 60, "period": 60 } },
+    { "name": "ETSY_PROXY_LIMITER", "namespace_id": "1004", "simple": { "limit": 120, "period": 60 } }
   ],
   "vars": {
     // "production" or "sandbox".
@@ -38,4 +40,5 @@
   //   ETSY_KEYSTRING          Etsy app keystring (public, but kept out of the repo)
   //   ETSY_SHARED_SECRET      Etsy app shared secret
   //   ETSY_WEBHOOK_SECRET     whsec_... from Etsy's webhook portal
+  //   HOSTED_REGISTER_SECRET  optional shared secret letting the hosted server bypass per-IP registration limits
 }

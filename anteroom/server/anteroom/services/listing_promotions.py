@@ -27,7 +27,7 @@ from types import SimpleNamespace
 from sqlalchemy import and_, or_, update
 from sqlalchemy.orm import Session
 
-from anteroom.database import claim_in_worker_session, in_worker_session
+from anteroom.database import claim_in_worker_session, in_worker_session, run_worker_db_step
 from anteroom.models.conversation import Conversation, new_id
 from anteroom.models.listing_promotion import ListingPromotion, MarketplaceOfferFloor
 from anteroom.models.promotion_automation import PromotionAutomation
@@ -287,7 +287,7 @@ async def _review_remote(row: ListingPromotion, listing_id: str) -> None:
     }
     diagnostic_inputs = {**payload, "floor_cents": row.floor_cents}
     started = time.monotonic()
-    use_cloud = await asyncio.to_thread(cloud_sessions.has_active_session, row.marketplace)
+    use_cloud = await run_worker_db_step(cloud_sessions.has_active_session, row.marketplace)
     try:
         if use_cloud:
             facts = await cloud_marketplace.execute(
@@ -367,7 +367,7 @@ async def preview(conversation_ids: list[str], marketplace: str, action: str,
         raise PromotionError(400, f"Select between 1 and {MAX_ITEMS} items.")
     if action == "offer" and not (isinstance(discount_percent, int) and 1 <= discount_percent <= 99):
         raise PromotionError(400, "Enter the discount for the offer.")
-    await asyncio.to_thread(require_chrome, marketplace)
+    await run_worker_db_step(require_chrome, marketplace)
     batch = new_id()
     rows = []
     for conv_id in ids:

@@ -196,3 +196,110 @@ def test_progress_events_check_the_lease_once_per_write(storage, leased_session)
             queue.append_events(task_id, token, ['data: late\n\n'])
     with sessions(owner)() as db:
         assert queue.journal(db, task_id)[-1] == 'data: three\n\n'
+
+
+def test_claim_prioritizes_interactive_work_and_balances_across_sellers(storage):  # noqa: F811
+    from anteroom.models.assistant import AssistantThread
+
+    engine, sessions = storage
+    alice, bob = str(uuid.uuid4()), str(uuid.uuid4())
+
+    def add_draft_tasks(seller: str, kinds: list[str]) -> list[str]:
+        ids = []
+        with sessions(seller)() as db:
+            for idx, kind in enumerate(kinds):
+                conv = Conversation(title=f'{seller[:4]}-{kind}-{idx}')
+                db.add(conv)
+                db.flush()
+                ids.append(queue.enqueue(db, conv.id, kind, {}).id)
+        return ids
+
+    # Alice queues 3 bulk generations first, then Bob queues 2 generations, 1 chat and 1 assistant answer.
+    a1, a2, a3 = add_draft_tasks(alice, ['generate', 'generate', 'generate'])
+    b1, b2, b_chat = add_draft_tasks(bob, ['generate', 'generate', 'chat'])
+    with sessions(bob)() as db:
+        thread = AssistantThread()
+        db.add(thread)
+        db.flush()
+        b_assist_task = queue.add_answer(db, thread.id, {'question': 'What sold today?'})
+        db.commit()
+        b_assist = b_assist_task.id
+
+    # Interactive work (chat + assistant) is claimed before Alice's earlier bulk generations.
+    first_two = [queue.claim(engine), queue.claim(engine)]
+    assert [row[:2] for row in first_two] == [(b_chat, bob), (b_assist, bob)]
+
+    # Finish Bob's interactive tasks so both sellers start the generation pass at 0 running.
+    for task_id, _owner, token in first_two:
+        with service_context.use(replace(runtime(bob), session_factory=sessions(bob))):
+            queue.finish(task_id, token)
+
+    # Generation tasks balance across sellers instead of draining all of Alice's backlog first:
+    # a1 (0 vs 0, oldest), then b1 (Bob 0 running < Alice 1 running), then a2 (1 vs 1), then b2 (1 < 2), then a3.
+    claimed_gen = [queue.claim(engine)[:2] for _ in range(5)]
+    assert claimed_gen == [(a1, alice), (b1, bob), (a2, alice), (b2, bob), (a3, alice)]
+    assert queue.claim(engine) is None
+
+
+def test_solo_seller_still_claims_all_tasks_without_artificial_cap(storage):  # noqa: F811
+    engine, sessions = storage
+    alice = str(uuid.uuid4())
+    expected = []
+    with sessions(alice)() as db:
+        for idx in range(4):
+            conv = Conversation(title=f'Solo-{idx}')
+            db.add(conv)
+            db.flush()
+            expected.append(queue.enqueue(db, conv.id, 'generate', {}).id)
+    claimed = [queue.claim(engine)[0] for _ in range(4)]
+    assert claimed == expected
+    assert queue.claim(engine) is None
+
+
+
+def test_claim_does_not_let_fresh_chat_overtake_aged_generation(storage):  # noqa: F811
+    engine, sessions, owner, other, _identity, task_id = prepare(storage)
+    with sessions(owner)() as db:
+        db.execute(update(BackgroundTask).where(BackgroundTask.id == task_id).values(
+            created_at=datetime.now(UTC) - timedelta(seconds=90),
+        ))
+        db.commit()
+    with sessions(other)() as db:
+        conversation = Conversation(title='Fresh chat')
+        db.add(conversation)
+        db.flush()
+        chat_id = queue.enqueue(db, conversation.id, 'chat', {}).id
+
+    assert queue.claim(engine)[:2] == (task_id, owner)
+    assert queue.claim(engine)[:2] == (chat_id, other)
+
+
+def test_claim_balances_across_sellers_when_both_have_aged_tasks(storage):  # noqa: F811
+    engine, sessions = storage
+    alice, bob = str(uuid.uuid4()), str(uuid.uuid4())
+    now = datetime.now(UTC)
+
+    def add_aged_generations(seller: str, ages_seconds: list[int]) -> list[str]:
+        ids = []
+        with sessions(seller)() as db:
+            for idx, age in enumerate(ages_seconds):
+                conv = Conversation(title=f'{seller[:4]}-aged-{idx}')
+                db.add(conv)
+                db.flush()
+                task_id = queue.enqueue(db, conv.id, 'generate', {}).id
+                db.execute(update(BackgroundTask).where(BackgroundTask.id == task_id).values(
+                    created_at=now - timedelta(seconds=age),
+                ))
+                db.commit()
+                ids.append(task_id)
+        return ids
+
+    # Alice has 3 tasks aged 120s-118s; Bob has 1 task aged 90s (both > 1 minute).
+    a1, a2, a3 = add_aged_generations(alice, [120, 119, 118])
+    (b1,) = add_aged_generations(bob, [90])
+
+    # First claim takes Alice's oldest (0 vs 0 running). Second claim balances to Bob (0 < 1)
+    # rather than draining all of Alice's older aged backlog first.
+    claimed = [queue.claim(engine)[:2] for _ in range(4)]
+    assert claimed == [(a1, alice), (b1, bob), (a2, alice), (a3, alice)]
+    assert queue.claim(engine) is None

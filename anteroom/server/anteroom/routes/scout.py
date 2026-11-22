@@ -11,7 +11,7 @@ from anteroom.config import MAX_PHOTO_SIZE_MB
 from anteroom.database import get_db, in_worker_session
 from anteroom.models.scout import ScoutCheck
 from anteroom.services import scout
-from anteroom.services.hosted_limits import bounded_route_class, read_bounded_upload
+from anteroom.services.hosted_limits import bounded_route_class, limit_seller_submissions, read_bounded_upload
 from anteroom.services.photo_store import photo_store
 from anteroom.services.photos import process_bytes
 
@@ -99,6 +99,7 @@ async def create_check(
     files: list[UploadFile] = File(...),
     asking_price: float | None = Form(None, ge=0),
 ):
+    limit_seller_submissions(request)
     if len(files) > scout.MAX_PHOTOS:
         raise HTTPException(400, f"Up to {scout.MAX_PHOTOS} photos per check")
     from anteroom.models.conversation import new_id

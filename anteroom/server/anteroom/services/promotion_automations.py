@@ -26,7 +26,7 @@ from typing import cast
 from sqlalchemy import CursorResult, func, or_, update
 from sqlalchemy.orm import Session
 
-from anteroom.database import SessionLocal, claim_in_worker_session, in_worker_session
+from anteroom.database import SessionLocal, claim_in_worker_session, in_worker_session, run_worker_db_step
 from anteroom.models.conversation import Conversation, new_id
 from anteroom.models.listing_promotion import (
     ListingPromotion,
@@ -566,7 +566,7 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
     counts: Counter = Counter()
     stop_note = None
     try:
-        await asyncio.to_thread(promotions.require_chrome, marketplace)
+        await run_worker_db_step(promotions.require_chrome, marketplace)
         targets, remaining, waiting, held = await in_worker_session(_prepare_round, automation_id, now, like_events)
         reads = 0
         batch = new_id()
@@ -761,7 +761,7 @@ async def tick(
     for automation_id, next_run_at, marketplace in due:
         if await in_worker_session(_has_active_job):
             break
-        if await asyncio.to_thread(_awaiting_chrome_at, next_run_at, moment, marketplace):
+        if await run_worker_db_step(_awaiting_chrome_at, next_run_at, moment, marketplace):
             continue
         if await run_round(automation_id, expected_next_run_at=next_run_at, sleep=sleep) is not None:
             ran += 1
@@ -873,9 +873,9 @@ async def check_new_likes(
             continue
         if marketplace not in feeds:
             try:
-                use_cloud = await asyncio.to_thread(cloud_sessions.has_active_session, marketplace)
+                use_cloud = await run_worker_db_step(cloud_sessions.has_active_session, marketplace)
                 if not use_cloud:
-                    await asyncio.to_thread(promotions.require_chrome, marketplace)
+                    await run_worker_db_step(promotions.require_chrome, marketplace)
                 started = _now()
                 if use_cloud:
                     answer = await cloud_marketplace.execute(

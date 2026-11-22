@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import random
 import time
 from dataclasses import dataclass
@@ -62,8 +63,10 @@ async def ensure_device() -> dict:
     device = await asyncio.to_thread(get_relay_device)
     if device:
         return device
+    register_secret = os.environ.get("ANTEROOM_RELAY_REGISTER_SECRET", "").strip()
+    headers = {"X-Anteroom-Register-Secret": register_secret} if register_secret else None
     async with http_client() as client:
-        resp = await client.post(f"{RELAY_URL}/devices", timeout=20)
+        resp = await client.post(f"{RELAY_URL}/devices", headers=headers, timeout=20)
     if resp.status_code == 429:
         raise RelayError("Anteroom's relay is busy. Try again in a minute.", 429)
     if resp.status_code != 201:

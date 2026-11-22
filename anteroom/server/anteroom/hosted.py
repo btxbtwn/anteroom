@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -292,6 +292,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         give_threads(asyncio.get_running_loop())
+        from anteroom.services import shared_http
         from anteroom.services.error_alerts import install_alerts, uninstall_alerts
         install_alerts()
         from anteroom.services.error_log import install_assistant_timings
@@ -417,6 +418,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         app.state.background_worker = worker
         app.state.handoff = handoff
         try:
+            shared_http.keep_connection_on_this_loop()
             yield
         finally:
             loop_checkouts.close()
@@ -441,6 +443,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
                 await asyncio.gather(*(asyncio.to_thread(background.stop) for background in backgrounds))
                 await asyncio.to_thread(task_signals.stop)
                 await asyncio.to_thread(uninstall_alerts)
+                await shared_http.close_connection()
 
     app = FastAPI(
         title="Anteroom hosted API", version=app_version(), lifespan=lifespan,
@@ -566,8 +569,14 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     from anteroom.routes.hosted_account import router as account_router
     app.include_router(account_router)
     from anteroom.routes.listings import apply_price_drop, preview_price_drop, stream_price_drop_comps
+    from anteroom.services.hosted_limits import limit_seller_submissions
     app.add_api_route('/api/conversations/{conv_id}/price-drop/preview', preview_price_drop, methods=['POST'])
-    app.add_api_route('/api/conversations/{conv_id}/price-drop/comps', stream_price_drop_comps, methods=['POST'])
+    app.add_api_route(
+        '/api/conversations/{conv_id}/price-drop/comps',
+        stream_price_drop_comps,
+        methods=['POST'],
+        dependencies=[Depends(limit_seller_submissions)],
+    )
     app.add_api_route('/api/conversations/{conv_id}/price-drop', apply_price_drop, methods=['POST'])
     from anteroom.routes.catalog import categories as catalog_categories, choice_list, dropdown_options, search as catalog_search
     app.add_api_route('/api/catalog/choice-lists/{name}', choice_list, methods=['GET'])

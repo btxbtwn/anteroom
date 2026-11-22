@@ -158,3 +158,36 @@ def test_heartbeat_before_first_poll_wakes_the_background_reader(cloud, signing_
     thread.join(10)
     assert not thread.is_alive()
     assert result['response']['ok'] is True
+
+
+def test_sale_checks_bound_concurrent_sellers_per_tick(monkeypatch):
+    import time
+    import uuid
+    from anteroom.services import hosted_sale_checks
+
+    hosted_browser_relay._relays.clear()
+    sellers = [str(uuid.uuid4()) for _ in range(6)]
+    for seller in sellers:
+        relay = hosted_browser_relay.relay_for(seller)
+        relay._capabilities = frozenset({'marketplace.actions', order_history.CAPABILITY})
+        relay._seen_at = time.monotonic()
+
+    active = 0
+    peak = 0
+    checked = []
+
+    async def slow_check(seller: str) -> None:
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.02)
+        checked.append(seller)
+        active -= 1
+
+    monkeypatch.setattr(hosted_sale_checks, 'check_seller', slow_check)
+    try:
+        asyncio.run(hosted_sale_checks.check_ready_sellers())
+    finally:
+        hosted_browser_relay._relays.clear()
+    assert set(checked) == set(sellers)
+    assert peak <= hosted_sale_checks.MAX_CONCURRENT_SELLERS

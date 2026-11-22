@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from anteroom.database import SessionLocal, in_worker_session
+from anteroom.database import SessionLocal, in_worker_session, limit_worker_db_steps, run_worker_db_step
 from anteroom.services import promotion_automations
 from anteroom.services.hosted_browser_relay import MARKETPLACE_PROMOTIONS, ready_sellers
 from anteroom.services.hosted_context import for_seller
@@ -35,6 +35,11 @@ async def check_seller(owner: str, recovered: set[str]) -> None:
         await promotion_automations.tick(skip_cloud=True)
 
 
+# Leave connections for interactive requests while sellers wait independently
+# for marketplace replies and pacing delays.
+MAX_CONCURRENT_DB_STEPS = 2
+
+
 async def check_ready_sellers(recovered: set[str]) -> None:
     ready = set(ready_sellers(MARKETPLACE_PROMOTIONS))
 
@@ -47,12 +52,13 @@ async def check_ready_sellers(recovered: set[str]) -> None:
             if owner in ready:
                 await check_seller(owner, recovered)
             else:
-                await asyncio.to_thread(check_disconnected, owner)
+                await run_worker_db_step(check_disconnected, owner)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - a seller's failed round must not stop others
             log.exception('Promotion check failed for one seller; unknown sends are never retried')
-    await asyncio.gather(*(check(owner) for owner in ready | recovered))
+    with limit_worker_db_steps(asyncio.Semaphore(MAX_CONCURRENT_DB_STEPS)):
+        await asyncio.gather(*(check(owner) for owner in ready | recovered))
 
 
 async def serve() -> None:

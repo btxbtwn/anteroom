@@ -2,17 +2,30 @@
 from __future__ import annotations
 
 import io
+import os
 import threading
-import warnings
 
 from PIL import Image, ImageOps
 
 # Camera photos reach about 48 megapixels (6000×8000); larger is refused.
 MAX_PIXELS = 50_000_000
 FORMATS = frozenset({'JPEG', 'MPO', 'PNG', 'WEBP', 'HEIF', 'HEIC'})
-# One full decode at a time bounds decoder memory while uploads, imports and
-# thumbnails arrive concurrently.
-_decode_slot = threading.Semaphore(1)
+DEFAULT_DECODE_CONCURRENCY = 2
+
+
+def _decode_concurrency() -> int:
+    raw = os.environ.get('ANTEROOM_DECODE_CONCURRENCY')
+    if raw is None or not raw.strip():
+        return DEFAULT_DECODE_CONCURRENCY
+    try:
+        return max(1, int(raw.strip()))
+    except ValueError:
+        return DEFAULT_DECODE_CONCURRENCY
+
+
+# Bounded concurrent decodes cap decoder memory while letting multiple sellers
+# upload or import photos without serializing behind one global lock.
+_decode_slot = threading.Semaphore(_decode_concurrency())
 
 
 class ImageTooLargeError(ValueError):
@@ -29,21 +42,22 @@ def decode(data: bytes, *, max_side: int | None = None) -> tuple[Image.Image, tu
     """
     with _decode_slot:
         try:
-            with warnings.catch_warnings():
-                warnings.simplefilter('error', Image.DecompressionBombWarning)
-                with Image.open(io.BytesIO(data)) as image:
-                    if image.format not in FORMATS:
-                        raise ValueError('unsupported image format')
-                    if image.width * image.height > MAX_PIXELS:
-                        raise ImageTooLargeError('image exceeds maximum pixel limit')
-                    size = image.size
-                    if max_side:
-                        image.draft('RGB', (max_side, max_side))
-                    upright = ImageOps.exif_transpose(image)
-                    if max_side:
-                        upright.thumbnail((max_side, max_side))
-                    upright.load()
-                    return upright, size
+            with Image.open(io.BytesIO(data)) as image:
+                if image.format not in FORMATS:
+                    raise ValueError('unsupported image format')
+                # Respect Pillow's warning threshold without changing global filters.
+                pillow_limit = Image.MAX_IMAGE_PIXELS
+                limit = MAX_PIXELS if pillow_limit is None else min(MAX_PIXELS, pillow_limit)
+                if image.width * image.height > limit:
+                    raise ImageTooLargeError('image exceeds maximum pixel limit')
+                size = image.size
+                if max_side:
+                    image.draft('RGB', (max_side, max_side))
+                upright = ImageOps.exif_transpose(image)
+                if max_side:
+                    upright.thumbnail((max_side, max_side))
+                upright.load()
+                return upright, size
         except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
             raise ImageTooLargeError('image exceeds maximum pixel limit') from exc
         except (OSError, SyntaxError) as exc:

@@ -201,7 +201,7 @@ def test_browser_error_reports_are_rate_limited_per_seller(jwks, signing_keys, c
             # Another seller keeps an independent allowance.
             assert client.post('/api/error-reports', headers=bob, json=payload).status_code == 202
         # Only the 3 accepted reports were logged.
-        assert len(caplog.records) == 3
+        assert len([r for r in caplog.records if r.name == 'anteroom.browser']) == 3
 
 
 def test_hosted_vision_and_automation_routes_are_rate_limited_per_seller(jwks, signing_keys, monkeypatch):  # noqa: F811
@@ -240,4 +240,171 @@ def test_hosted_vision_and_automation_routes_are_rate_limited_per_seller(jwks, s
         limited_run = client.post('/api/automations/auto-1/run', headers=alice)
         assert limited_run.status_code == 429
         assert limited_run.headers['Retry-After']
+
+
+def test_start_gate_isolates_independent_sellers_and_serializes_same_seller():
+    from anteroom.services import api_job_lock, service_context
+    from test_service_context import runtime
+
+    alice_inside = threading.Event()
+    release_alice = threading.Event()
+    bob_entered = threading.Event()
+    alice_second_entered = threading.Event()
+
+    def hold_alice():
+        with service_context.use(runtime('alice')), api_job_lock.start_gate():
+            alice_inside.set()
+            assert release_alice.wait(5)
+
+    def try_bob():
+        with service_context.use(runtime('bob')), api_job_lock.start_gate():
+            bob_entered.set()
+
+    def try_alice_again():
+        with service_context.use(runtime('alice')), api_job_lock.start_gate():
+            alice_second_entered.set()
+
+    t1 = threading.Thread(target=hold_alice)
+    t1.start()
+    try:
+        assert alice_inside.wait(5)
+        t_bob = threading.Thread(target=try_bob)
+        t_bob.start()
+        assert bob_entered.wait(2), 'Another seller must not wait behind Alice in start_gate'
+        t_bob.join(5)
+
+        t_alice2 = threading.Thread(target=try_alice_again)
+        t_alice2.start()
+        assert not alice_second_entered.wait(0.08), 'Same seller must still serialize in start_gate'
+    finally:
+        release_alice.set()
+        t1.join(5)
+    assert alice_second_entered.wait(2)
+    t_alice2.join(5)
+    assert not api_job_lock._start_gates
+
+
+def test_upload_slots_reads_env_override(monkeypatch):
+    monkeypatch.setenv('ANTEROOM_UPLOAD_SLOTS', '6')
+    slots = UploadSlots()
+    assert slots._total._value == 6
+
+
+def test_draft_photo_upload_uses_per_seller_upload_slots(migration_engine, jwks, signing_keys, monkeypatch):  # noqa: F811
+    if migration_engine.dialect.name != 'postgresql':
+        pytest.skip('Hosted draft photo upload requires Postgres')
+    schema_migrations.ensure_schema(migration_engine)
+    monkeypatch.setattr('anteroom.database.engine', migration_engine)
+
+    objects = {}
+
+    def storage(method, key, token=None, data=None):
+        if method == 'POST':
+            objects[key] = data
+        elif method == 'DELETE':
+            objects.pop(key, None)
+        else:
+            return objects[key]
+        return b''
+
+    monkeypatch.setattr('anteroom.services.hosted_photos.storage_call', storage)
+    from anteroom.services import hosted_photos as hp
+    real_normalize = hp.normalize
+    entered, release = threading.Event(), threading.Event()
+    calls = {'n': 0}
+
+    def slow_normalize(data: bytes):
+        calls['n'] += 1
+        if calls['n'] == 1:
+            entered.set()
+            assert release.wait(10)
+        return real_normalize(data)
+
+    monkeypatch.setattr(hp, 'normalize', slow_normalize)
+    buf = io.BytesIO()
+    Image.new('RGB', (16, 16), 'green').save(buf, 'JPEG')
+    raw = buf.getvalue()
+
+    with TestClient(create_app(PROJECT_URL)) as client:
+        client.app.state.upload_slots = UploadSlots(total=4, wait=0.15)
+        alice, bob = headers(signing_keys), headers(signing_keys, BOB)
+        alice_draft = client.post('/api/conversations', headers=alice, json={'title': 'A'}).json()['id']
+        bob_draft = client.post('/api/conversations', headers=bob, json={'title': 'B'}).json()['id']
+
+        result = {}
+        t = threading.Thread(target=lambda: result.setdefault(
+            'first', client.post(f'/api/drafts/{alice_draft}/photos', headers=alice, content=raw),
+        ))
+        t.start()
+        try:
+            assert entered.wait(5)
+            # Bob uploads freely while Alice is normalizing.
+            bob_res = client.post(f'/api/drafts/{bob_draft}/photos', headers=bob, content=raw)
+            assert bob_res.status_code == 201, bob_res.text
+            # Alice's concurrent upload on the same account is refused with 429 instead of stacking RAM.
+            busy = client.post(f'/api/drafts/{alice_draft}/photos', headers=alice, content=raw)
+            assert busy.status_code == 429
+            assert busy.headers['Retry-After']
+        finally:
+            release.set()
+            t.join(10)
+        assert result['first'].status_code == 201, result['first'].text
+
+
+def test_scout_sourcing_and_comps_routes_are_rate_limited_per_seller(jwks, signing_keys):  # noqa: F811
+    image = io.BytesIO()
+    Image.new('RGB', (8, 8), 'red').save(image, 'JPEG')
+    raw = image.getvalue()
+
+    with TestClient(create_app(PROJECT_URL)) as client:
+        alice = headers(signing_keys)
+        client.app.state.submission_limit = SellerRateLimit(burst=0, per_second=0.001)
+
+        scout_res = client.post('/api/scout', headers=alice, files=[('files', ('a.jpg', raw, 'image/jpeg'))])
+        assert scout_res.status_code == 429
+        assert scout_res.headers['Retry-After']
+
+        comps_res = client.post('/api/conversations/draft-1/price-drop/comps', headers=alice)
+        assert comps_res.status_code == 429
+        assert comps_res.headers['Retry-After']
+
+        sourcing_res = client.post('/api/sourcing/refresh', headers=alice)
+        assert sourcing_res.status_code == 429
+        assert sourcing_res.headers['Retry-After']
+
+
+def test_relay_ensure_device_sends_hosted_register_secret_when_configured(monkeypatch):
+    from contextlib import asynccontextmanager
+    from anteroom.services import relay_client
+
+    seen_headers = []
+    saved = {}
+
+    class FakeResponse:
+        status_code = 201
+
+        def json(self):
+            return {'deviceId': 'dev-1', 'token': 'tok-1'}
+
+    class FakeClient:
+        async def post(self, _url, *, headers=None, timeout=None):
+            seen_headers.append(headers)
+            return FakeResponse()
+
+    @asynccontextmanager
+    async def fake_http():
+        yield FakeClient()
+
+    monkeypatch.setattr(relay_client, 'get_relay_device', lambda: None)
+    monkeypatch.setattr(relay_client, 'set_relay_device', lambda d: saved.update(d))
+    monkeypatch.setattr(relay_client, 'http_client', fake_http)
+
+    monkeypatch.setenv('ANTEROOM_RELAY_REGISTER_SECRET', 'super-secret-value')
+    asyncio.run(relay_client.ensure_device())
+    assert seen_headers == [{'X-Anteroom-Register-Secret': 'super-secret-value'}]
+
+    seen_headers.clear()
+    monkeypatch.delenv('ANTEROOM_RELAY_REGISTER_SECRET', raising=False)
+    asyncio.run(relay_client.ensure_device())
+    assert seen_headers == [None]
 

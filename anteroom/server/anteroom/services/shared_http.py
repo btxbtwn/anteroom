@@ -15,26 +15,27 @@ from contextlib import asynccontextmanager
 
 import httpx
 
-_shared: tuple[asyncio.AbstractEventLoop, httpx.AsyncClient] | None = None
+_clients: dict[asyncio.AbstractEventLoop, httpx.AsyncClient] = {}
 
 
 def keep_connection_on_this_loop() -> None:
-    global _shared
-    _shared = (asyncio.get_running_loop(), httpx.AsyncClient())
+    loop = asyncio.get_running_loop()
+    existing = _clients.get(loop)
+    if existing is None or existing.is_closed:
+        _clients[loop] = httpx.AsyncClient()
 
 
 async def close_connection() -> None:
-    global _shared
-    shared, _shared = _shared, None
-    if shared is not None:
-        await shared[1].aclose()
+    client = _clients.pop(asyncio.get_running_loop(), None)
+    if client is not None:
+        await client.aclose()
 
 
 def current_client() -> httpx.AsyncClient | None:
-    """The shared client when running on the server's loop, else None."""
-    shared = _shared
-    if shared is not None and shared[0] is asyncio.get_running_loop():
-        return shared[1]
+    """The shared client when running on a registered loop, else None."""
+    client = _clients.get(asyncio.get_running_loop())
+    if client is not None and not client.is_closed:
+        return client
     return None
 
 

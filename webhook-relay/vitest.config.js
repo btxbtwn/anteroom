@@ -18,6 +18,7 @@ export default defineConfig({
           ETSY_KEYSTRING: fake("keystring"),
           ETSY_SHARED_SECRET: fake("shared-secret"),
           ETSY_WEBHOOK_SECRET: webhookSecret,
+          HOSTED_REGISTER_SECRET: fake("hosted-register-secret"),
         },
       },
     }),

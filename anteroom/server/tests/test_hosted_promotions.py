@@ -191,3 +191,60 @@ def test_mercari_preview_cooldown_is_seller_scoped(cloud, signing_keys, monkeypa
     assert command['type'] == 'marketplace.promotion_check'
     assert not thread.is_alive() and second['response'].status_code == 200
     assert second['response'].json()['rows'][0]['state'] == 'preview'
+
+
+def test_promotion_scheduler_bounds_database_steps_without_blocking_sellers(monkeypatch):
+    import asyncio
+    import threading
+    from contextlib import nullcontext
+
+    from anteroom import database
+    from anteroom.services import hosted_promotion_scheduler as scheduler
+
+    sellers = {'alice', 'bob', 'charlie'}
+    monkeypatch.setattr(scheduler, 'ready_sellers', lambda _: sellers)
+    monkeypatch.setattr(database, 'SessionLocal', lambda: nullcontext())
+
+    async def run():
+        loop = asyncio.get_running_loop()
+        db_busy = asyncio.Event()
+        release_db = threading.Event()
+        browser = asyncio.Event()
+        release_browser = asyncio.Event()
+        lock = threading.Lock()
+        active = peak = 0
+        entered_browser = set()
+
+        def db_step(_db):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+                if active == 2:
+                    loop.call_soon_threadsafe(db_busy.set)
+            try:
+                assert release_db.wait(5)
+            finally:
+                with lock:
+                    active -= 1
+
+        async def check(owner, _recovered):
+            await database.in_worker_session(db_step)
+            entered_browser.add(owner)
+            if entered_browser == sellers:
+                browser.set()
+            await release_browser.wait()
+
+        monkeypatch.setattr(scheduler, 'check_seller', check)
+        wave = asyncio.create_task(scheduler.check_ready_sellers(set()))
+        try:
+            await asyncio.wait_for(db_busy.wait(), 3)
+            release_db.set()
+            await asyncio.wait_for(browser.wait(), 3)
+            assert peak == 2
+        finally:
+            release_db.set()
+            release_browser.set()
+            await asyncio.wait_for(wave, 5)
+
+    asyncio.run(run())

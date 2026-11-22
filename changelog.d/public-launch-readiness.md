@@ -1,0 +1,3 @@
+- Keep assistant answers, draft chat, and photo uploads responsive while other sellers run large batches of listing generations.
+- Pace scheduled Chrome sale checks, limit promotion database work without holding up other sellers during Chrome waits, and reuse upstream connections so hosted pages stay snappy with multiple sellers online.
+- Prevent one seller's direct marketplace job or heavy Etsy traffic from delaying other sellers.

@@ -23,7 +23,8 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from contextlib import nullcontext
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
@@ -38,12 +39,33 @@ LEASE = timedelta(seconds=30)
 RENEW_EVERY_SEC = 5.0
 
 # Check-and-claim for a new job. Held only across the busy check and the
-# insert, never across the Chrome or marketplace work.
-_start_gate = threading.Lock()
+# insert, never across the Chrome or marketplace work. Scoped per seller so
+# independent sellers starting jobs never serialize behind each other.
+_start_gates_lock = threading.Lock()
+_start_gates: dict[str, list] = {}
 
 
-def start_gate() -> threading.Lock:
-    return _start_gate
+@contextmanager
+def start_gate() -> Iterator[None]:
+    from anteroom.services.service_context import current
+
+    context = current()
+    key = context.seller_id if context is not None else 'local'
+    with _start_gates_lock:
+        entry = _start_gates.get(key)
+        if entry is None:
+            entry = [threading.Lock(), 0]
+            _start_gates[key] = entry
+        entry[1] += 1
+        lock: threading.Lock = entry[0]
+    try:
+        with lock:
+            yield
+    finally:
+        with _start_gates_lock:
+            entry[1] -= 1
+            if entry[1] <= 0 and _start_gates.get(key) is entry:
+                _start_gates.pop(key, None)
 
 
 # Lease columns are compared in the database; the session's copies are refreshed after commit.

@@ -6,6 +6,7 @@ import io
 import socket
 import threading
 import time
+import warnings
 
 import pytest
 from fastapi.testclient import TestClient
@@ -222,5 +223,39 @@ def test_ruler_load_and_measure_read_enforce_pixel_cap_and_max_side(tmp_path):
     stick_line = report["sticks"][0]["line"]
     assert 0 < stick_line[1] < 3072
     assert abs(stick_line[1] - round(4000 * (3072 / 4500))) <= 1
+
+
+def test_image_decode_allows_two_concurrent_decodes(monkeypatch):
+    from anteroom.services import image_decode
+
+    assert image_decode.DEFAULT_DECODE_CONCURRENCY == 2
+    monkeypatch.setattr(image_decode, "_decode_slot", threading.Semaphore(2))
+    sample = _png(64, 64, "RGB")
+    real_open = image_decode.Image.open
+    both_inside = threading.Barrier(2, timeout=3)
+    errors: list[Exception] = []
+
+    original_filters = warnings.filters[:]
+
+    def synchronized_open(fp):
+        both_inside.wait()
+        assert warnings.filters == original_filters
+        return real_open(fp)
+
+    monkeypatch.setattr(image_decode.Image, "open", synchronized_open)
+
+    def run():
+        try:
+            image_decode.decode(sample, max_side=64)
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=run) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(5)
+    assert not any(t.is_alive() for t in threads)
+    assert not errors
 
 
