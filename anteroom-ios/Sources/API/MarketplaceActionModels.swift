@@ -4,7 +4,7 @@ import Foundation
 /// the web's Marketplaces pane uses (MarketplacesSection.tsx,
 /// routes/hosted_direct_listing.py), over the records in MarketplaceReadiness.swift.
 /// eBay and Etsy act through their APIs; Poshmark, Mercari and Depop through
-/// the seller's signed-in Anteroom tab in Chrome on their computer. Every
+/// the seller's cloud session or signed-in Anteroom tab in desktop Chrome. Every
 /// action names its marketplace and carries `confirm`; nothing runs on its own.
 
 /// What a marketplace row says, and what it lets the seller do.
@@ -37,8 +37,8 @@ struct MarketplaceRow: Equatable, Sendable {
 enum MarketplaceActions {
     /// The marketplaces the phone can list on, in the web's order.
     static let order = ["ebay", "poshmark", "mercari", "depop", "etsy"]
-    /// Through the seller's Chrome rather than an API.
-    static let throughChrome: Set<String> = ["poshmark", "mercari", "depop"]
+    /// Uses a cloud session or the seller's Chrome.
+    static let sessionMarketplaces: Set<String> = ["poshmark", "mercari", "depop"]
     /// What Delist does on each marketplace: eBay has no delete.
     static let removed = ["ebay": "Ended", "etsy": "Deleted", "poshmark": "Deleted", "mercari": "Deleted", "depop": "Deleted"]
 
@@ -176,7 +176,7 @@ enum MarketplaceActions {
         let price = priceLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let heading = price.isEmpty ? "List “\(title)” on \(name)?" : "List “\(title)” on \(name) for \(price)?"
         return (heading,
-                "This creates a live \(name) listing from the listing saved in Anteroom.\(chromeNote([marketplace]))",
+                "This creates a live \(name) listing from the listing saved in Anteroom.\(sessionNote([marketplace]))",
                 "List on \(name)")
     }
 
@@ -186,7 +186,7 @@ enum MarketplaceActions {
         let names = marketplaces.map(Marketplaces.name)
         let list = names.dropLast().joined(separator: ", ") + " and " + (names.last ?? "")
         return ("List “\(title)” on \(names.count) marketplaces?",
-                "This creates a live listing on \(list) from the listing saved in Anteroom.\(chromeNote(marketplaces))",
+                "This creates a live listing on \(list) from the listing saved in Anteroom.\(sessionNote(marketplaces))",
                 "List on \(names.count) marketplaces")
     }
 
@@ -194,7 +194,7 @@ enum MarketplaceActions {
     static func updateQuestion(title: String, marketplace: String) -> (title: String, message: String, button: String) {
         let name = Marketplaces.name(marketplace)
         return ("Update the live \(name) listing for “\(title)” with what's saved in Anteroom?",
-                "This changes the listing that is already up.\(chromeNote([marketplace]))",
+                "This changes the listing that is already up.\(sessionNote([marketplace]))",
                 "Update on \(name)")
     }
 
@@ -203,15 +203,13 @@ enum MarketplaceActions {
         let names = marketplaces.map(Marketplaces.name)
         let lines = marketplaces.map { "• \(Marketplaces.name($0)): \((removed[$0] ?? "Deleted").lowercased())" }.joined(separator: "\n")
         let question = "Delist “\(title)” from \(names.count == 1 ? names[0] : "\(names.count) marketplaces")?"
-        return (question, lines + "\nA deleted listing can't be restored; listing again creates a new one.\(chromeNote(marketplaces))",
+        return (question, lines + "\nA deleted listing can't be restored; listing again creates a new one.\(sessionNote(marketplaces))",
                 names.count == 1 ? "Delist from \(names[0])" : "Delist from \(names.count)")
     }
 
-    private static func chromeNote(_ marketplaces: [String]) -> String {
-        let chrome = marketplaces.filter(throughChrome.contains).map(Marketplaces.name)
-        guard !chrome.isEmpty else { return "" }
-        let list = chrome.count == 1 ? chrome[0] : chrome.dropLast().joined(separator: ", ") + " and " + chrome.last!
-        return "\n\(list) \(chrome.count == 1 ? "goes" : "go") through Chrome on your computer: keep Anteroom open there."
+    private static func sessionNote(_ marketplaces: [String]) -> String {
+        guard marketplaces.contains(where: sessionMarketplaces.contains) else { return "" }
+        return "\nAnteroom uses a connected cloud session when available. For Chrome-only connections, keep Anteroom open in desktop Chrome."
     }
 
     private static func parseDate(_ iso: String) -> Date? {

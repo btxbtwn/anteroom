@@ -364,6 +364,209 @@ def test_verify_persists_live_sign_out(cloud, signing_keys, monkeypatch):  # noq
     assert client.get("/api/cloud-sessions", headers=alice).json()["sessions"]["poshmark"]["state"] == "expired"
 
 
+@pytest.mark.parametrize(("market", "cookie_name"), [("mercari", "session"), ("depop", "access_token")])
+def test_marketplace_cloud_verification_and_resume(cloud, signing_keys, monkeypatch, market, cookie_name):  # noqa: F811
+    from anteroom.models.promotion_automation import PromotionAutomation
+    from anteroom.services import promotion_automations
+
+    client, engine = cloud
+    vault = _patch_vault(monkeypatch)
+    monkeypatch.setenv("ANTEROOM_CLOUD_MARKETPLACES", "mercari,depop")
+    monkeypatch.setenv("ANTEROOM_PROCESS_ROLE", "worker")
+    alice = headers(signing_keys)
+    cookies = [
+        {"name": cookie_name, "value": "session-secret", "domain": f"www.{market}.com"},
+        {"name": cookie_name, "value": "foreign-secret", "domain": f"evil-{market}.com"},
+    ]
+    verified_state = "signed_in"
+    expected_cookie = "session-secret"
+
+    async def verify_market(marketplace, seller_id, job_id, run_payload, timeout):
+        assert marketplace == market
+        assert seller_id == USER_ID
+        assert run_payload["command"]["type"] == "marketplace.verify_session"
+        assert [cookie["value"] for cookie in run_payload["cookies"]] == [expected_cookie]
+        return {"result": {"ok": True, "session": {"state": verified_state, "label": "Seller"}}}
+
+    monkeypatch.setattr(cloud_marketplace, "_run_subprocess", verify_market)
+
+    def connect(value="session-secret"):
+        token = client.post(f"/api/cloud-sessions/{market}/connect-token", headers=alice).json()["token"]
+        submitted = [{**cookies[0], "value": value}, cookies[1]]
+        return client.post(f"/api/cloud-sessions/{market}/upload", headers={"X-Cloud-Upload-Token": token},
+                           json={"cookies": submitted})
+
+    first = connect()
+    assert first.status_code == 200, first.text
+    assert first.json()["session"]["label"] == "Seller"
+    assert "session-secret" not in first.text
+    assert "foreign-secret" not in vault.data[(USER_ID, f"cloud-session-{market}")]
+    saved = vault.data[(USER_ID, f"cloud-session-{market}")]
+    verified_state = "expired"
+    expected_cookie = "expired-candidate"
+    assert connect(expected_cookie).status_code == 409
+    assert vault.data[(USER_ID, f"cloud-session-{market}")] == saved
+    assert client.get("/api/cloud-sessions", headers=alice).json()["sessions"][market]["state"] == "signed_in"
+    expected_cookie = "session-secret"
+    with Session(engine) as db:
+        for name, enabled, reason in (("enabled", True, None), ("manual", False, None), ("unknown", False, "Unconfirmed send")):
+            db.add(PromotionAutomation(user_id=USER_ID, name=name, marketplace=market, action="offer",
+                                       enabled=enabled, paused_reason=reason))
+        db.commit()
+
+    verified_state = "expired"
+    failed = client.post(f"/api/cloud-sessions/{market}/verify", headers=alice)
+    assert failed.json()["ok"] is False
+    assert failed.json()["session"]["state"] == "expired"
+    with Session(engine) as db:
+        paused = db.scalar(select(PromotionAutomation).where(PromotionAutomation.name == "enabled"))
+        assert paused is not None and not paused.enabled
+        assert paused.paused_reason == promotion_automations.CLOUD_DISCONNECTED
+
+    verified_state = "signed_in"
+    assert connect().status_code == 200
+    with Session(engine) as db:
+        rows = {row.name: row for row in db.scalars(select(PromotionAutomation))}
+        assert rows["enabled"].enabled and rows["enabled"].paused_reason is None
+        assert rows["enabled"].next_run_at is not None
+        assert not rows["manual"].enabled and not rows["unknown"].enabled
+        assert rows["unknown"].paused_reason == "Unconfirmed send"
+        assert db.scalar(select(CloudSessionAudit).where(CloudSessionAudit.event == "automations_resumed"))
+
+    assert client.delete(f"/api/cloud-sessions/{market}", headers=alice).json()["ok"]
+    assert (USER_ID, f"cloud-session-{market}") not in vault.data
+
+
+@pytest.mark.parametrize("pause_all", [False, True])
+def test_manual_pause_survives_cloud_reconnect(cloud, pause_all):  # noqa: F811
+    from anteroom.models.promotion_automation import PromotionAutomation
+    from anteroom.services import promotion_automations as rules
+
+    _, engine = cloud
+    with SellerDatabaseSession(bind=engine, user_id=USER_ID) as manual:
+        rule = PromotionAutomation(name="offers", marketplace="depop", action="offer",
+                                   enabled=False, paused_reason=rules.CLOUD_DISCONNECTED)
+        manual.add(rule)
+        manual.commit()
+        # The manual request has seen a paused rule when reconnect commits.
+        manual.refresh(rule)
+        assert not rule.enabled
+        with SellerDatabaseSession(bind=engine, user_id=USER_ID) as reconnect:
+            assert rules.resume_after_cloud_reconnect(reconnect, USER_ID, "depop") == 1
+            reconnect.commit()
+
+        assert rules.pause(manual, None if pause_all else rule.id) == 1
+        manual.refresh(rule)
+        assert not rule.enabled
+        assert rule.paused_reason is None
+        assert rules.resume_after_cloud_reconnect(manual, USER_ID, "depop") == 0
+
+
+@pytest.mark.parametrize("operation", ["marketplace.like_events", "marketplace.promotion_check", "marketplace.promote"])
+@pytest.mark.parametrize("reconnect", [False, True])
+def test_cloud_promotion_sign_out_preserves_reconnect_state(cloud, monkeypatch, operation, reconnect):  # noqa: F811
+    from anteroom.database import SessionLocal, in_worker_session
+    from anteroom.models.promotion_automation import PromotionAutomation
+    from anteroom.services import promotion_automations as rules
+
+    _patch_vault(monkeypatch)
+    monkeypatch.setenv("ANTEROOM_CLOUD_MARKETPLACES", "poshmark")
+    monkeypatch.setenv("ANTEROOM_PROCESS_ROLE", "worker")
+    market = "poshmark"
+    listing_id = "1" * 24
+
+    def connect(db):
+        cloud_sessions.save_uploaded_session(db, market, _sample_cookies(), verified=True)
+
+    def expire_and_reconnect(db, generation):
+        cloud_sessions.mark_session_expired(db, market, "Old session signed out.", generation)
+        connect(db)
+
+    calls = []
+
+    async def runner(marketplace, seller_id, job_id, payload, timeout):
+        command = payload["command"]["type"]
+        calls.append(command)
+        if command == operation:
+            if reconnect:
+                await in_worker_session(expire_and_reconnect, generation)
+            return {"result": {"ok": False, "safe_to_retry": True,
+                               "error_code": "signed_out", "error": "Old session signed out."}}
+        assert operation == "marketplace.promote" and command == "marketplace.promotion_check"
+        return {"result": {"ok": True, "price_cents": 5000, "like_count": 3, "offer_price_cents": 4000,
+                           "minimum_discount_percent": 10, "maximum_discount_percent": 79,
+                           "shipping_discounts": [{"id": "none", "label": "No discount"}]}}
+
+    monkeypatch.setattr(cloud_marketplace, "_run_subprocess", runner)
+    with use(for_seller(USER_ID)):
+        with SessionLocal() as db:
+            connect(db)
+            session = db.scalar(select(CloudMarketplaceSession))
+            assert session is not None
+            generation = session.connected_at
+            conv = Conversation(title="Cloud item")
+            db.add(conv)
+            db.flush()
+            db.add(MarketplaceListing(conversation_id=conv.id, marketplace=market, state="listed",
+                                      listing_id=listing_id, listing_url=f"https://poshmark.com/listing/Item-{listing_id}"))
+            rule = PromotionAutomation(name="offers", marketplace=market, action="offer",
+                                       scope="all", min_likes=1, discount_percent=20)
+            db.add(rule)
+            db.flush()
+            rule_id = rule.id
+            rules.enable(db, rule_id)
+
+        if operation == "marketplace.like_events":
+            asyncio.run(rules.check_new_likes())
+        else:
+            run = asyncio.run(rules.run_round(rule_id))
+            assert run is not None and "Old session signed out." in (run.note or "")
+        assert calls == (["marketplace.promotion_check", operation] if operation == "marketplace.promote" else [operation])
+
+        with SessionLocal() as db:
+            rule = db.get(PromotionAutomation, rule_id)
+            assert rule is not None
+            assert rule.enabled is reconnect
+            assert rule.paused_reason == (None if reconnect else rules.CLOUD_DISCONNECTED)
+            assert cloud_sessions.has_active_session(market, db) is reconnect
+
+
+@pytest.mark.parametrize("dimensions", [(1, 4096), (4096, 1)])
+def test_depop_photo_preparation_preserves_a_narrow_image(dimensions):
+    from io import BytesIO
+    from PIL import Image
+
+    source = BytesIO()
+    Image.new("RGB", dimensions, "black").save(source, "PNG")
+    result = cloud_marketplace._prepare_photos("depop", [
+        {"id": "photo", "base64": base64.b64encode(source.getvalue()).decode("ascii")},
+    ])
+    with Image.open(BytesIO(base64.b64decode(result[0]["base64"]))) as photo:
+        assert photo.size == (1280, 1280)
+        assert max(photo.getpixel((639, 639))) < 128
+        assert min(photo.getpixel((0, 0))) > 240
+
+
+@pytest.mark.parametrize("already_revoked", [False, True])
+def test_consumed_token_cannot_restore_a_revoked_session(cloud, monkeypatch, already_revoked):  # noqa: F811
+    from anteroom.database import SessionLocal
+
+    _, engine = cloud
+    vault = _patch_vault(monkeypatch)
+    monkeypatch.setenv("ANTEROOM_CLOUD_MARKETPLACES", "poshmark")
+    with use(for_seller(USER_ID)), SessionLocal() as db:
+        if already_revoked:
+            cloud_sessions.save_uploaded_session(db, "poshmark", _sample_cookies())
+            cloud_sessions.revoke_session(db, "poshmark")
+        token = cloud_sessions.mint_upload_token(db, "poshmark")["token"]
+        upload = cloud_sessions.consume_upload_token(engine, "poshmark", token)
+        assert upload is not None
+        cloud_sessions.revoke_session(db, "poshmark")
+        with pytest.raises(cloud_sessions.CloudSessionError, match="connection changed"):
+            cloud_sessions.save_uploaded_session(db, "poshmark", _sample_cookies(), upload=upload)
+        assert not vault.data
+
+
 def test_execute_local_uses_fresh_vault_rotates_cookies_and_marks_expired_on_signed_out(cloud, monkeypatch):  # noqa: F811
     _, _engine = cloud
     vault = _patch_vault(monkeypatch)

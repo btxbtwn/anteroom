@@ -1862,6 +1862,152 @@
         "title": "ListingValidation",
         "type": "object"
       },
+      "MarketplaceCloudResult": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MarketplaceCloudStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "MarketplaceCloudResult",
+        "type": "object"
+      },
+      "MarketplaceCloudSessions": {
+        "properties": {
+          "enabled": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Enabled",
+            "type": "array"
+          },
+          "sessions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/MarketplaceCloudStatus"
+            },
+            "title": "Sessions",
+            "type": "object"
+          }
+        },
+        "required": [
+          "enabled",
+          "sessions"
+        ],
+        "title": "MarketplaceCloudSessions",
+        "type": "object"
+      },
+      "MarketplaceCloudStatus": {
+        "properties": {
+          "cloud_connected": {
+            "title": "Cloud Connected",
+            "type": "boolean"
+          },
+          "connected_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connected At"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "expiring": {
+            "title": "Expiring",
+            "type": "boolean"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "marketplace": {
+            "title": "Marketplace",
+            "type": "string"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "state": {
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "marketplace",
+          "state",
+          "mode",
+          "cloud_connected",
+          "expiring"
+        ],
+        "title": "MarketplaceCloudStatus",
+        "type": "object"
+      },
       "MileageAmount": {
         "properties": {
           "amount_cents": {
@@ -3209,6 +3355,99 @@
           }
         },
         "summary": "Update Expense"
+      }
+    },
+    "/api/cloud-sessions": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketplaceCloudSessions"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Cloud Sessions"
+      }
+    },
+    "/api/cloud-sessions/{marketplace}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "marketplace",
+            "required": true,
+            "schema": {
+              "title": "Marketplace",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketplaceCloudResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Disconnect Cloud Session"
+      }
+    },
+    "/api/cloud-sessions/{marketplace}/verify": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "marketplace",
+            "required": true,
+            "schema": {
+              "title": "Marketplace",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketplaceCloudResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify Cloud Session"
       }
     },
     "/api/conversations": {

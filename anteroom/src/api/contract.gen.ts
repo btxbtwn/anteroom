@@ -367,6 +367,30 @@ export interface ListingValidation {
   can_send: boolean;
 }
 
+export interface MarketplaceCloudResult {
+  ok: boolean;
+  session?: MarketplaceCloudStatus | null;
+  error?: string | null;
+}
+
+export interface MarketplaceCloudSessions {
+  enabled: string[];
+  sessions: Record<string, MarketplaceCloudStatus>;
+}
+
+export interface MarketplaceCloudStatus {
+  marketplace: string;
+  state: string;
+  mode: string;
+  cloud_connected: boolean;
+  label?: string | null;
+  expires_at?: number | null;
+  expiring: boolean;
+  connected_at?: string | null;
+  last_used_at?: string | null;
+  last_error?: string | null;
+}
+
 export interface MileageAmount {
   currency: string;
   /** Decimal value without a currency symbol. */
