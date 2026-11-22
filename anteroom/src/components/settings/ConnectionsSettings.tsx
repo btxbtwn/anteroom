@@ -312,13 +312,16 @@ function ChromeSessionRow({
   const { account } = useWorkspaceRuntime();
   const name = EXTENSION_SESSION_NAMES[marketplace];
   const [hint, setHint] = useState<string | null>(null);
-  const [cloudPending, setCloudPending] = useState(false);
+  const [cloudPendingUntil, setCloudPendingUntil] = useState(0);
   const sessions = useQuery({
     queryKey: ["marketplace-sessions"],
     queryFn: api.marketplaceSessions.status,
     enabled: chromeReady || hosted,
     retry: false,
-    refetchInterval: cloudPending ? () => pollMs(2_000) : (chromeReady || hosted) ? () => pollMs(60_000) : false,
+    refetchInterval: (query) => {
+      if (Date.now() < cloudPendingUntil && !query.state.data?.sessions[marketplace]?.cloud_connected) return pollMs(2_000);
+      return chromeReady || hosted ? pollMs(60_000) : false;
+    },
   });
   const session = sessions.data?.sessions[marketplace];
   const cloudAvailable = hosted && Boolean(session?.cloud_available);
@@ -349,19 +352,19 @@ function ChromeSessionRow({
       return response;
     },
     onSuccess: () => {
-      setCloudPending(true);
+      setCloudPendingUntil(Date.now() + 180_000);
       setHint(`Confirm the ${name} connection in the Anteroom Bridge popup.`);
       void queryClient.invalidateQueries({ queryKey: ["marketplace-sessions"] });
     },
     onError: () => {
-      setCloudPending(false);
+      setCloudPendingUntil(0);
       setHint(null);
     },
   });
   const cloudDisconnect = useMutation({
     mutationFn: () => api.cloudSessions.disconnect(marketplace),
     onSuccess: () => {
-      setCloudPending(false);
+      setCloudPendingUntil(0);
       setHint(null);
       void queryClient.invalidateQueries({ queryKey: ["marketplace-sessions"] });
     },

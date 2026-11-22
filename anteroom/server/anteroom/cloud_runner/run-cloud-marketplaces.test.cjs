@@ -33,10 +33,14 @@ for (const marketplace of ['mercari', 'depop']) {
 test('Mercari verifies through initialize and imports a page with its own session', async () => {
   const calls = [];
   const httpFetch = async (url, options) => {
-    assert.equal(options.headers.Cookie, 'session=test-session');
+    assert.equal(options.headers.Cookie, url.endsWith('/initialize') ? 'session=test-session' : 'session=rotated');
     assert.equal(options.headers.Origin, 'https://www.mercari.com');
     calls.push(url);
-    if (url.endsWith('/initialize')) return json({ csrf: 'csrf', user: { userId: 42, name: 'Seller' } });
+    if (url.endsWith('/initialize')) {
+      return new Response(JSON.stringify({ csrf: 'csrf', user: { userId: 42, name: 'Seller' } }), {
+        headers: { 'content-type': 'application/json', 'set-cookie': 'session=rotated; Path=/; Secure' },
+      });
+    }
     const body = JSON.parse(options.body);
     assert.equal(body.operationName, 'publicProfileSearchQuery');
     assert.equal(body.variables.criteria.offset, 24);
@@ -49,6 +53,8 @@ test('Mercari verifies through initialize and imports a page with its own sessio
   const verified = await execute('marketplace.verify_session');
   assert.equal(verified.result.session.state, 'signed_in');
   assert.equal(verified.result.session.label, 'Seller');
+  assert.equal(verified.cookies_changed, true);
+  assert.deepEqual(verified.cookies.map(({ name, value }) => [name, value]), [['session', 'rotated']]);
   const imported = await execute('marketplace.import.page', { cursor: '24' });
   assert.equal(imported.result.ok, true);
   assert.equal(imported.result.account, '42');
@@ -76,4 +82,24 @@ test('Depop verifies the account and polls likes with its bearer', async () => {
   });
   assert.equal(likes.result.ok, true);
   assert.equal(likes.result.events[0].listing_id, 'seller-coat');
+});
+
+test('Depop delists only after confirmation and verifies removal', async () => {
+  const requests = [];
+  const httpFetch = async (url, options) => {
+    requests.push([options.method, new URL(url).pathname]);
+    assert.equal(options.headers.Authorization, 'Bearer test-token');
+    if (options.method === 'DELETE') return json({});
+    return requests.length === 1 ? json({ id: 12, status: 'STATUS_ON_SALE' }) : json({}, 404);
+  };
+  const { result } = await executeMarketplaceOperation({
+    marketplace: 'depop', cookies: [depopCookie], httpFetch,
+    command: { type: 'marketplace.delete', payload: { marketplace: 'depop', listing_id: 'seller-coat', confirm: true } },
+  });
+  assert.equal(result.state, 'deleted');
+  assert.deepEqual(requests, [
+    ['GET', '/presentation/api/v1/products/by-slug/seller-coat/'],
+    ['DELETE', '/presentation/api/v1/products/12/'],
+    ['GET', '/presentation/api/v1/products/by-slug/seller-coat/'],
+  ]);
 });

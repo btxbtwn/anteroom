@@ -256,6 +256,9 @@ Poshmark sale checks and promotions on the worker while Chrome is closed.
 Bridge 0.2.84 introduced `marketplace.cloud_connect` for Poshmark. Bridge 0.2.85
 adds Mercari and Depop. On `https://myanteroom.com`, open Settings → Connections
 in desktop Chrome and choose **Connect in Cloud** for the marketplace.
+Bridge has permission for the marketplace's root domain because Chrome checks
+`cookies.getAll` access against the cookie's domain, including cookies shared
+with the `www` host.
 
 1. The web app calls `POST /api/cloud-sessions/{marketplace}/connect-token`, which mints
    a 180-second single-use upload token (`<accountId>.<random>`), stores only its

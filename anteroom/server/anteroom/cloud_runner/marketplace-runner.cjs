@@ -117,12 +117,12 @@ function buildCookieJar(cookies, marketplace = 'poshmark') {
   return jar;
 }
 
-function exportCookies(jar) {
+function exportCookies(jar, marketplace = 'poshmark') {
   const serialized = jar.serializeSync();
   const out = [];
   for (const entry of serialized.cookies || []) {
     const cleanDomain = String(entry.domain || '').toLowerCase().replace(/^\./, '');
-    if (!isPoshmarkCookieHost(cleanDomain)) continue;
+    if (!cookieHost(marketplace, cleanDomain)) continue;
     const domain = entry.hostOnly ? cleanDomain : `.${cleanDomain}`;
     const hasExpiry = entry.expires && entry.expires !== 'Infinity';
     const expMs = hasExpiry ? Date.parse(entry.expires) : NaN;
@@ -472,7 +472,7 @@ async function executeMarketplaceOperation({
   }
 
   const jar = buildCookieJar(cookies, marketplace);
-  const initialSnapshot = cookieFingerprint(exportCookies(jar));
+  const initialSnapshot = cookieFingerprint(exportCookies(jar, marketplace));
 
   const transport = httpFetch || createDefaultHttpFetch(proxyUrl);
   const fetchFn = createMarketplaceFetch({ jar, userAgent, httpFetch: transport, marketplace });
@@ -580,7 +580,7 @@ async function executeMarketplaceOperation({
     result = await context.runCloudMarketplaceCommand(command, Array.isArray(photos) ? photos : []);
   }
 
-  const exported = exportCookies(jar);
+  const exported = exportCookies(jar, marketplace);
   const cookiesChanged = cookieFingerprint(exported) !== initialSnapshot;
   return { result, cookies_changed: cookiesChanged, cookies: exported };
 }
