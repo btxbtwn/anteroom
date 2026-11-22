@@ -23,12 +23,12 @@ not finish in time.
 When recorded and live production are still on the pinned pre-recovery base
 (a1a55df0, 0.1.1091), the single historical failure on d19adbff (#1717: two
 Alembic heads, fixed in #1728 / 6d72c5e3) may be superseded only after all other
-commits in the span pass push CI and an exact Descendant verification receipt
-is live-verified against GitHub and local Git. The spent fa824f9a / 0.1.1011
-checkpoint was removed once production moved past b73c5347. Until a new receipt
-is pinned in HISTORICAL_RECOVERY_CHECKPOINT, that failure blocks every deploy.
-Once Deploy hosted succeeds and records a newer Deployed commit, the checkpoint
-never matches again and ordinary gating applies unchanged.
+commits in the span pass push CI and the exact Descendant verification receipt
+for bbb4c8fc (run 44992383513, attempt 1, artifact 14743680528) is
+live-verified against GitHub and local Git. The spent fa824f9a / 0.1.1011
+checkpoint was removed once production moved past b73c5347. Once Deploy hosted
+succeeds and records a newer Deployed commit, this checkpoint never matches
+again and ordinary gating applies unchanged.
 """
 
 from __future__ import annotations
@@ -81,10 +81,26 @@ PRE_RENAME_PREFIXES = (
     ("vendoo-ios/", "anteroom-ios/"),
 )
 
-# Spent fa824f9a / 0.1.1011 pin removed after production reached a1a55df0.
-# Pin a Descendant verification receipt here (production_base=a1a55df0) before
-# Deploy hosted can supersede d19adbff; None fails closed.
-HISTORICAL_RECOVERY_CHECKPOINT: recovery_evidence.EvidencePin | None = None
+# Single-base recovery checkpoint for historical d19adbff (fixed in #1728).
+# Inert once Deploy hosted records a commit after a1a55df0 (or after artifact
+# 14743680528 expires ~30 days from 2026-11-22); remove this pin in a cleanup
+# PR once production is verified past a1a55df0.
+HISTORICAL_RECOVERY_CHECKPOINT: recovery_evidence.EvidencePin | None = recovery_evidence.EvidencePin(
+    repository="btxbtwn/anteroom",
+    repository_id=1183824317,
+    workflow_id=422931456,
+    target="bbb4c8fc560da5f81bedfd349714ff30a4c28a1d",
+    tree="81b5e145302b5124b16176ab2f97875801d67cd3",
+    production_base="a1a55df0789371ad271e443897b72c2fd6ff0c3e",
+    historical_failure="d19adbff5a34609dd5c2b7ada19966ae4aeafce8",
+    correcting_merge="6d72c5e3d9d1ee4256f7c754c749a2e19a01818c",
+    workflow_blob="a0a097906554252a26f35c957169ec6d0e3c93db",
+    ci_blob="eb20aa66b1eb2ab1c0b7e310e62ea0c1aacc8abe",
+    run_id=44992383513,
+    attempt=1,
+    receipt_artifact_id=14743680528,
+    receipt_digest="sha256:b6f32050e79a324cdc27c0d0adad164cb573a8eb229c22b0bf6d0c6cf980ce31",
+)
 HISTORICAL_BASE_FLY_APP = "peaceful-meadowstone-6944"
 HISTORICAL_BASE_IMAGE_DIGEST = "sha256:cdc7323a7eb2f8ac00f2a9f3e96bd737abec9ce16c0aa2de7cdb3a77e14ebd7e"
 HISTORICAL_BASE_DB_REVISION = "85dab8d3327c"
