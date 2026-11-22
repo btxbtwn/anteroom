@@ -437,6 +437,31 @@ def test_marketplace_cloud_verification_and_resume(cloud, signing_keys, monkeypa
     assert (USER_ID, f"cloud-session-{market}") not in vault.data
 
 
+@pytest.mark.parametrize("pause_all", [False, True])
+def test_manual_pause_survives_cloud_reconnect(cloud, pause_all):  # noqa: F811
+    from anteroom.models.promotion_automation import PromotionAutomation
+    from anteroom.services import promotion_automations as rules
+
+    _, engine = cloud
+    with SellerDatabaseSession(bind=engine, user_id=USER_ID) as manual:
+        rule = PromotionAutomation(name="offers", marketplace="depop", action="offer",
+                                   enabled=False, paused_reason=rules.CLOUD_DISCONNECTED)
+        manual.add(rule)
+        manual.commit()
+        # The manual request has seen a paused rule when reconnect commits.
+        manual.refresh(rule)
+        assert not rule.enabled
+        with SellerDatabaseSession(bind=engine, user_id=USER_ID) as reconnect:
+            assert rules.resume_after_cloud_reconnect(reconnect, USER_ID, "depop") == 1
+            reconnect.commit()
+
+        assert rules.pause(manual, None if pause_all else rule.id) == 1
+        manual.refresh(rule)
+        assert not rule.enabled
+        assert rule.paused_reason is None
+        assert rules.resume_after_cloud_reconnect(manual, USER_ID, "depop") == 0
+
+
 @pytest.mark.parametrize("dimensions", [(1, 4096), (4096, 1)])
 def test_depop_photo_preparation_preserves_a_narrow_image(dimensions):
     from io import BytesIO

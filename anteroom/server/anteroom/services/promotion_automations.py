@@ -245,11 +245,10 @@ def pause(db: Session, automation_id: str | None = None, reason: str | None = No
     ))
     if automation_id:
         query = query.filter(PromotionAutomation.id == automation_id)
-    rows = query.all()
-    for row in rows:
-        row.enabled, row.paused_reason = False, reason
+    # Write both fields even if this session saw the rule disabled before reconnect.
+    paused = query.update({"enabled": False, "paused_reason": reason}, synchronize_session="fetch")
     db.commit()
-    return len(rows)
+    return paused
 
 
 def listing(db: Session) -> dict:
