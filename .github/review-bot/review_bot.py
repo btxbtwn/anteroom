@@ -13,8 +13,7 @@ the model a write token:
   prepare-autofix  collect open Claude and Codex findings, enforce the
                    repair-round limit
   post-autofix     check that Claude's fix commit reached the branch, reply to
-                   every finding, restore auto-merge only when nothing was
-                   pushed and nothing blocks, and post the round's result
+                   every finding and post the round's result
 
 See docs/pr-review-bots.md.
 """
@@ -418,7 +417,7 @@ def render_autofix_result(state: dict, *, blocking: str | None, auto_merge_disab
     if auto_merge_disabled:
         lines.append(
             "Auto-merge was turned off for this round and stays off. Queue the PR again once "
-            "its current commit has passed CI and review and nothing blocks it."
+            "its current commit has passed CI and every review finding is answered."
         )
     lines.append(
         f"Round {state.get('round', 0)} of {MAX_ROUNDS}. This is the auto-fix result for commit "
@@ -459,21 +458,6 @@ def classify_push(head_before: str, local: str, remote: str, local_on_remote: bo
     if remote != head_before:
         return False, "The branch changed while auto-fix ran."
     return False, None
-
-
-def should_restore_auto_merge(was_queued: bool, pushed: bool, blocking: str | None, remote: str, head: str) -> bool:
-    return was_queued and not pushed and not blocking and remote == head
-
-
-def restore_auto_merge(pr: int, head: str) -> None:
-    """Queue auto-merge again, only while the branch is still at `head`."""
-    node_id = api(f"repos/{repo()}/pulls/{pr}")["node_id"]
-    graphql(
-        "mutation($id: ID!, $oid: GitObjectID!) { enablePullRequestAutoMerge(input: "
-        "{pullRequestId: $id, expectedHeadOid: $oid, mergeMethod: MERGE}) { clientMutationId } }",
-        id=node_id,
-        oid=head,
-    )
 
 
 # --- Commands ------------------------------------------------------------------
@@ -637,17 +621,10 @@ def post_autofix(args) -> None:
     unresolved = [cid for cid, r in results.items() if r["outcome"] == "not_fixed"]
     if not blocking and unresolved:
         blocking = data.get("blocking") or f"{len(unresolved)} finding(s) could not be fixed automatically."
-    # Auto-merge was paused before Claude ran. It comes back only for the
-    # exact commit this round checked, with nothing pushed and nothing left
-    # blocking; a new commit needs its own CI and review first.
-    was_queued = os.environ.get("WAS_QUEUED") == "true"
-    auto_merge_off = was_queued
-    if should_restore_auto_merge(was_queued, pushed, blocking, remote, head_before):
-        try:
-            restore_auto_merge(ctx["pr"], head_before)
-            auto_merge_off = False
-        except (subprocess.CalledProcessError, RuntimeError) as error:
-            print(f"Could not turn auto-merge back on: {error}", file=sys.stderr)
+    # Auto-merge was paused before Claude ran and stays off: another review
+    # can land on this commit at any moment, so only a person (or agent)
+    # who has checked every finding queues the PR again (AGENTS.md).
+    auto_merge_off = os.environ.get("WAS_QUEUED") == "true"
     state = {"head": head_after, "pushed": pushed, "open": unresolved,
              "round": ctx["round"], "reason": "blocked" if blocking else "ready"}
     api(f"repos/{repo()}/issues/{ctx['pr']}/comments", "POST",

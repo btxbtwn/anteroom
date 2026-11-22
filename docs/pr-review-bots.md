@@ -27,16 +27,15 @@ workflow.
    restriction, not a missing credential.
 2. Auto-fix runs right after Claude's review, and again whenever Codex submits
    a review. It first pauses auto-merge, as AGENTS.md requires before pushing
-   to a queued PR. Claude verifies each open finding, fixes the real ones, runs
+   to a queued PR, and never turns it back on: another review can arrive on
+   the same commit at any time, so whoever has checked every finding queues
+   the PR again. Claude verifies each open finding, fixes the real ones, runs
    the narrowest tests, commits and pushes. Its push uses the Claude GitHub App
    token, so CI and the review run on the new commit (a push with the workflow
    token would start no CI), and the action's wrapper only pushes to the PR's
    branch. Claude cannot edit `.github/`, `anteroom/VERSION` or `CHANGELOG.md`.
    `post-autofix` then:
    - counts a finding as fixed only when Claude's own commit is on the branch;
-   - turns auto-merge back on only if it was on, nothing was pushed, nothing
-     blocks, and the branch is still at the commit it checked (the request
-     names that commit, so it cannot apply to a newer one);
    - flags a pushed change to a protected path as blocking;
    - replies in every finding's thread and posts the round's result.
 3. The fix commit starts the next review, which marks addressed findings and

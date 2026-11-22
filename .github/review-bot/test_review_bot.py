@@ -156,13 +156,6 @@ class AutofixTests(unittest.TestCase):
         self.assertEqual(bot.classify_push("a", "a", "other", False), (False, "The branch changed while auto-fix ran."))
         self.assertEqual(bot.classify_push("a", "a", "a", True), (False, None))
 
-    def test_auto_merge_returns_only_for_the_unchanged_unblocked_head(self):
-        self.assertTrue(bot.should_restore_auto_merge(True, False, None, "a", "a"))
-        self.assertFalse(bot.should_restore_auto_merge(False, False, None, "a", "a"))
-        self.assertFalse(bot.should_restore_auto_merge(True, True, None, "b", "a"))
-        self.assertFalse(bot.should_restore_auto_merge(True, False, "1 finding left", "a", "a"))
-        self.assertFalse(bot.should_restore_auto_merge(True, False, None, "b", "a"))
-
     def test_protected_paths(self):
         self.assertEqual(
             bot.protected_changes([".github/workflows/ci.yml", "anteroom/VERSION", "anteroom/VERSIONS.md", "CHANGELOG.md", "docs/x.md"]),

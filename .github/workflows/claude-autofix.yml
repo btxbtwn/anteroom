@@ -4,8 +4,9 @@ name: Claude auto-fix
 # verifies it against the current code, fixes the real ones, replies in each
 # thread and posts the round's result. Auto-merge is paused first (AGENTS.md:
 # never push to a queued PR). Claude pushes its fix with the Claude GitHub
-# App token, which starts CI and is revoked when the action ends; auto-merge
-# comes back on only if nothing was pushed. At most three pushed rounds.
+# App token, which starts CI and is revoked when the action ends. Auto-merge
+# stays off afterwards; whoever checks every finding queues the PR again.
+# At most three pushed rounds.
 # Auto-fix never publishes listings or touches .github/, anteroom/VERSION
 # or CHANGELOG.md. See docs/pr-review-bots.md.
 
