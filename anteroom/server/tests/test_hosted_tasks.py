@@ -338,3 +338,45 @@ def test_overlapping_seller_key_submissions_release_settings_before_vault(migrat
             assert all(executor.map(submit, (USER_ID, BOB)))
     finally:
         engine.dispose()
+
+
+def test_a_dropped_chat_answer_is_followed_again_by_its_task(
+        migration_engine, jwks, signing_keys, monkeypatch):  # noqa: F811
+    if migration_engine.dialect.name != 'postgresql':
+        pytest.skip('Hosted work requires Postgres')
+    schema_migrations.ensure_schema(migration_engine)
+    monkeypatch.setattr('anteroom.database.engine', migration_engine)
+    monkeypatch.setenv('ANTEROOM_BACKGROUND_WORKER', '1')
+    monkeypatch.setattr('anteroom.routes.hosted_tasks.get_listing_provider', lambda: object())
+
+    async def fake_answer(conv_id, body, *, stored_attachments=None):
+        async def stream():
+            yield 'event: status\ndata: Reading the listing…\n\n'
+            yield 'data: I updated the Occasion field.\n\n'
+            yield 'data: [DONE]\n\n'
+        return StreamingResponse(stream(), media_type='text/event-stream')
+
+    monkeypatch.setattr('anteroom.routes.chat.run_message', fake_answer)
+    with TestClient(create_app(PROJECT_URL)) as client:
+        alice, bob = headers(signing_keys), headers(signing_keys, BOB)
+        identity = client.post('/api/conversations', headers=alice, json={'title': 'Crop top'}).json()['id']
+        path = f'/api/conversations/{identity}'
+        response = client.post(path + '/messages', headers=alice, json={'text': 'Fill occasion'})
+        assert response.status_code == 200, response.text
+        task_id = response.headers['X-Anteroom-Task']
+        # The answer finished while nobody listened; following it again replays
+        # what it said and ends, instead of leaving a dropped-connection error.
+        resumed = client.post(path + f'/messages/resume?task_id={task_id}', headers=alice)
+        assert resumed.status_code == 200
+        assert 'I updated the Occasion field.' in resumed.text
+        assert resumed.text.endswith('data: [DONE]\n\n')
+        assert client.post(path + f'/messages/resume?task_id={task_id}', headers=bob).status_code == 404
+        assert client.post(path + '/messages/resume?task_id=missing', headers=alice).status_code == 404
+        with Session(migration_engine) as db:
+            generate = BackgroundTask(user_id=USER_ID, conversation_id=identity, kind='generate',
+                                      status='completed', payload={})
+            db.add(generate)
+            db.commit()
+            generate_id = generate.id
+        # Only a chat answer is followed this way.
+        assert client.post(path + f'/messages/resume?task_id={generate_id}', headers=alice).status_code == 404

@@ -1,4 +1,3 @@
-import { StreamIdleError } from "../../api/sse";
 import { studioFetch } from "../../api/transport";
 import { photosUploading } from "../../photoUploads";
 import React, { useCallback, useEffect, useState } from "react";
@@ -12,13 +11,20 @@ import {
   detailFromResponseBody,
   formatClientStreamError,
   isAbortError,
+  isNetworkFailure,
   isResumableGenerateFailure,
   sleep,
   SSE_FETCH,
   type StreamRequestError,
+  TASK_HEADER,
 } from "./chatStream";
 import { applySseToLive, foldLiveTurn, getLive, patchLive, refreshListingQueries } from "./liveChatStore";
 import type { ChatAttachmentUpload, Message } from "../../api/types";
+import type { SseParts } from "../sseCoalesce";
+
+/** How many times a dropped chat answer is followed again before the seller is asked to retry. */
+const SEND_RESUME_ATTEMPTS = 10;
+const RECONNECTING = /\s*·\s*reconnecting….*$/i;
 
 interface Options {
   convId: string;
@@ -79,12 +85,6 @@ export function useChatStream({
         probeActive: Boolean(probe),
         probeStep: String(probe?.current_step || ""),
       };
-    };
-    const isNetworkFailure = (err: unknown) => {
-      if (err instanceof StreamIdleError) return true;
-      const msg = err instanceof Error ? err.message : String(err || "");
-      return /^(load failed|failed to fetch|networkerror when attempting to fetch resource|network request failed|the internet connection appears to be offline\.?)$/i.test(msg.trim())
-        || /failed to fetch|networkerror|load failed/i.test(msg);
     };
     // A resumed generate can encounter a transient 5xx during a deploy.
     // Reattach to the durable task within the existing retry budget.
@@ -274,34 +274,72 @@ export function useChatStream({
     const stillMine = () => getLive(convId).controller === controller;
     const errorContext = () => ({
       action: "send" as const,
-      lastStatus: getLive(convId).streamStatus || "",
+      lastStatus: (getLive(convId).streamStatus || "").replace(RECONNECTING, ""),
     });
-    try {
-      const res = await studioFetch(`/api/conversations/${convId}/messages`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-        body: JSON.stringify({
-          text,
-          ...(attachments.length ? { attachments } : {}),
-        }),
-        cache: "no-store",
-        signal: controller.signal,
-      });
+    // Hosted answers run as a durable task that outlives this request. When the
+    // connection drops, follow that task again from its first event: the reply
+    // it saved replaces an error for a request that actually finished.
+    let taskId = "";
+    const open = async (): Promise<Response> => {
+      const res = taskId
+        ? await studioFetch(
+          `/api/conversations/${convId}/messages/resume?task_id=${encodeURIComponent(taskId)}`,
+          { ...SSE_FETCH, signal: controller.signal },
+        )
+        : await studioFetch(`/api/conversations/${convId}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+          body: JSON.stringify({
+            text,
+            ...(attachments.length ? { attachments } : {}),
+          }),
+          cache: "no-store",
+          signal: controller.signal,
+        });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: "Request failed" }));
-        if (stillMine()) {
-          patchLive(convId, {
-            streamText: formatClientStreamError(err, { ...errorContext(), httpStatus: res.status }),
-            streamTrace: [],
-            streamStatus: "",
-            failedAction: "send",
-            streaming: false,
-            controller: null,
-          });
-        }
-        return true;
+        throw Object.assign(new Error(detailFromResponseBody(err) || "Request failed"), {
+          httpStatus: res.status,
+          body: err,
+        });
       }
-      const { parts } = await consumeResponseSse(res, (event, nextParts) => applySseToLive(convId, event, nextParts));
+      taskId = res.headers.get(TASK_HEADER) || taskId;
+      return res;
+    };
+    try {
+      let parts: SseParts;
+      for (let attempt = 1; ; attempt += 1) {
+        const resuming = Boolean(taskId);
+        try {
+          const result = await consumeResponseSse(
+            await open(),
+            (event, nextParts) => applySseToLive(convId, event, nextParts),
+          );
+          // A task's stream always ends with [DONE]; one closed before it was cut off.
+          if (taskId && !result.sawDone) throw new TypeError("network error");
+          parts = result.parts;
+          break;
+        } catch (err) {
+          const status = Number((err as StreamRequestError | null)?.httpStatus);
+          if (
+            taskId
+            && stillMine()
+            && !isAbortError(err)
+            && (isNetworkFailure(err) || (resuming && status >= 500))
+            && attempt < SEND_RESUME_ATTEMPTS
+          ) {
+            patchLive(convId, {
+              streamStatus: `${(getLive(convId).streamStatus || "Answering").replace(RECONNECTING, "")} · reconnecting…`,
+              thinkingStarted: true,
+              streamText: "",
+            });
+            await sleep(Math.min(1500 * attempt, 5000));
+            if (!stillMine()) return true;
+            continue;
+          }
+          throw err;
+        }
+      }
       const assembled = parts.content;
       if (stillMine() && isStreamError(assembled)) patchLive(convId, { failedAction: "send" });
       const finished = stillMine();
@@ -347,8 +385,9 @@ export function useChatStream({
         return true;
       }
       if (stillMine()) {
+        const failure = e as StreamRequestError | null;
         patchLive(convId, {
-          streamText: formatClientStreamError(e, errorContext()),
+          streamText: formatClientStreamError(failure?.body || e, { ...errorContext(), httpStatus: failure?.httpStatus }),
           streamTrace: [],
           streamStatus: "",
           failedAction: "send",

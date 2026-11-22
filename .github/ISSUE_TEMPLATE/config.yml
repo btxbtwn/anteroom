@@ -1,1 +1,8 @@
-blank_issues_enabled: true
+# Every change starts from an issue filed with one of these forms; the PR that
+# fixes it says `Closes #<n>` so merging closes it. Blank issues are off so
+# every issue carries a component, a type and a "done when".
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/btxbtwn/anteroom/security/advisories/new
+    about: Report it privately. Do not open a public issue for a vulnerability.

@@ -1,0 +1,50 @@
+name: Feature
+description: A new capability or a change in how the product behaves
+type: Feature
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: Search [open issues](https://github.com/btxbtwn/anteroom/issues) first and add to a matching one instead.
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      multiple: true
+      options:
+        - Anteroom web / Mac app
+        - Hosted API (Fly.io / Supabase)
+        - iPhone app
+        - Chrome extension
+        - Webhook relay
+        - list-this skills
+        - CI / repo hygiene
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is hard or missing today, and for whom?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: The smallest change that would fix it, and how established products handle the same thing.
+    validations:
+      required: true
+  - type: textarea
+    id: done-when
+    attributes:
+      label: Done when
+      description: What a seller can do afterwards, written so it can become a test.
+      placeholder: "- [ ] ..."
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+      description: What this deliberately does not do, so the PR stays small.

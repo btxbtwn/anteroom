@@ -749,6 +749,103 @@
         "title": "CropBox",
         "type": "object"
       },
+      "CsvInput": {
+        "properties": {
+          "content": {
+            "maxLength": 1000000,
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "CsvInput",
+        "type": "object"
+      },
+      "CsvIssue": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "row": {
+            "title": "Row",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "row",
+          "detail"
+        ],
+        "title": "CsvIssue",
+        "type": "object"
+      },
+      "CsvResult": {
+        "properties": {
+          "duplicates": {
+            "title": "Duplicates",
+            "type": "integer"
+          },
+          "imported": {
+            "title": "Imported",
+            "type": "integer"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/CsvIssue"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "preview": {
+            "items": {
+              "$ref": "#/components/schemas/ExpenseInput"
+            },
+            "title": "Preview",
+            "type": "array"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "valid",
+          "duplicates",
+          "imported",
+          "issues",
+          "preview"
+        ],
+        "title": "CsvResult",
+        "type": "object"
+      },
+      "CurrencyReport": {
+        "properties": {
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "incomplete_sales": {
+            "title": "Incomplete Sales",
+            "type": "integer"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/ReportLine"
+            },
+            "title": "Lines",
+            "type": "array"
+          }
+        },
+        "required": [
+          "currency",
+          "incomplete_sales",
+          "lines"
+        ],
+        "title": "CurrencyReport",
+        "type": "object"
+      },
       "DeleteConversationResult": {
         "properties": {
           "deleted_jobs": {
@@ -846,6 +943,383 @@
           "detail"
         ],
         "title": "ErrorDetail",
+        "type": "object"
+      },
+      "Expense": {
+        "properties": {
+          "accounting_type": {
+            "enum": [
+              "operating_expense",
+              "inventory_purchase"
+            ],
+            "title": "Accounting Type",
+            "type": "string"
+          },
+          "amount_cents": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 999999999999.0,
+            "title": "Amount Cents",
+            "type": "integer"
+          },
+          "category": {
+            "enum": [
+              "inventory_purchases",
+              "sourcing_transportation",
+              "shipping_supplies",
+              "shipping_labels",
+              "platform_fees",
+              "software_subscriptions",
+              "equipment",
+              "home_office",
+              "advertising",
+              "mileage",
+              "other"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "currency": {
+            "default": "USD",
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "maxLength": 512,
+            "title": "Description",
+            "type": "string"
+          },
+          "distance": {
+            "anyOf": [
+              {
+                "description": "Decimal value without a currency symbol.",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance"
+          },
+          "distance_unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "mi",
+                  "km"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Unit"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "import_source": {
+            "enum": [
+              "manual",
+              "csv",
+              "bank"
+            ],
+            "title": "Import Source",
+            "type": "string"
+          },
+          "incurred_date": {
+            "format": "date",
+            "title": "Incurred Date",
+            "type": "string"
+          },
+          "mileage_rate_cents": {
+            "anyOf": [
+              {
+                "description": "Decimal value without a currency symbol.",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mileage Rate Cents"
+          },
+          "notes": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Notes",
+            "type": "string"
+          },
+          "origin_destination": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Destination"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "vendor": {
+            "default": "",
+            "maxLength": 256,
+            "title": "Vendor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "incurred_date",
+          "amount_cents",
+          "category",
+          "id",
+          "revision",
+          "accounting_type",
+          "import_source"
+        ],
+        "title": "Expense",
+        "type": "object"
+      },
+      "ExpenseInput": {
+        "properties": {
+          "amount_cents": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 999999999999.0,
+            "title": "Amount Cents",
+            "type": "integer"
+          },
+          "category": {
+            "enum": [
+              "inventory_purchases",
+              "sourcing_transportation",
+              "shipping_supplies",
+              "shipping_labels",
+              "platform_fees",
+              "software_subscriptions",
+              "equipment",
+              "home_office",
+              "advertising",
+              "mileage",
+              "other"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "currency": {
+            "default": "USD",
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "maxLength": 512,
+            "title": "Description",
+            "type": "string"
+          },
+          "distance": {
+            "anyOf": [
+              {
+                "description": "Decimal value without a currency symbol.",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance"
+          },
+          "distance_unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "mi",
+                  "km"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Unit"
+          },
+          "incurred_date": {
+            "format": "date",
+            "title": "Incurred Date",
+            "type": "string"
+          },
+          "mileage_rate_cents": {
+            "anyOf": [
+              {
+                "description": "Decimal value without a currency symbol.",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mileage Rate Cents"
+          },
+          "notes": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Notes",
+            "type": "string"
+          },
+          "origin_destination": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Destination"
+          },
+          "vendor": {
+            "default": "",
+            "maxLength": 256,
+            "title": "Vendor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "incurred_date",
+          "amount_cents",
+          "category"
+        ],
+        "title": "ExpenseInput",
+        "type": "object"
+      },
+      "ExpenseUpdate": {
+        "properties": {
+          "amount_cents": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 999999999999.0,
+            "title": "Amount Cents",
+            "type": "integer"
+          },
+          "category": {
+            "enum": [
+              "inventory_purchases",
+              "sourcing_transportation",
+              "shipping_supplies",
+              "shipping_labels",
+              "platform_fees",
+              "software_subscriptions",
+              "equipment",
+              "home_office",
+              "advertising",
+              "mileage",
+              "other"
+            ],
+            "title": "Category",
+            "type": "string"
+          },
+          "currency": {
+            "default": "USD",
+            "pattern": "^[A-Z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          },
+          "description": {
+            "default": "",
+            "maxLength": 512,
+            "title": "Description",
+            "type": "string"
+          },
+          "distance": {
+            "anyOf": [
+              {
+                "description": "Decimal value without a currency symbol.",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance"
+          },
+          "distance_unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "mi",
+                  "km"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance Unit"
+          },
+          "expected_revision": {
+            "minimum": 1.0,
+            "title": "Expected Revision",
+            "type": "integer"
+          },
+          "incurred_date": {
+            "format": "date",
+            "title": "Incurred Date",
+            "type": "string"
+          },
+          "mileage_rate_cents": {
+            "anyOf": [
+              {
+                "description": "Decimal value without a currency symbol.",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mileage Rate Cents"
+          },
+          "notes": {
+            "default": "",
+            "maxLength": 4096,
+            "title": "Notes",
+            "type": "string"
+          },
+          "origin_destination": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Destination"
+          },
+          "vendor": {
+            "default": "",
+            "maxLength": 256,
+            "title": "Vendor",
+            "type": "string"
+          }
+        },
+        "required": [
+          "incurred_date",
+          "amount_cents",
+          "category",
+          "expected_revision"
+        ],
+        "title": "ExpenseUpdate",
         "type": "object"
       },
       "HTTPValidationError": {
@@ -1427,6 +1901,91 @@
         "title": "MarketplaceCloudStatus",
         "type": "object"
       },
+      "MileageAmount": {
+        "properties": {
+          "amount_cents": {
+            "title": "Amount Cents",
+            "type": "integer"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "mileage_rate_cents": {
+            "description": "Decimal value without a currency symbol.",
+            "title": "Mileage Rate Cents",
+            "type": "string"
+          }
+        },
+        "required": [
+          "currency",
+          "mileage_rate_cents",
+          "amount_cents"
+        ],
+        "title": "MileageAmount",
+        "type": "object"
+      },
+      "MileageInput": {
+        "properties": {
+          "country": {
+            "enum": [
+              "US",
+              "CA"
+            ],
+            "title": "Country",
+            "type": "string"
+          },
+          "distance": {
+            "description": "Decimal value without a currency symbol.",
+            "title": "Distance",
+            "type": "string"
+          },
+          "distance_unit": {
+            "enum": [
+              "mi",
+              "km"
+            ],
+            "title": "Distance Unit",
+            "type": "string"
+          },
+          "incurred_date": {
+            "format": "date",
+            "title": "Incurred Date",
+            "type": "string"
+          },
+          "northern_territory": {
+            "default": false,
+            "title": "Northern Territory",
+            "type": "boolean"
+          },
+          "prior_business_km": {
+            "default": "0",
+            "description": "Decimal value without a currency symbol.",
+            "title": "Prior Business Km",
+            "type": "string"
+          },
+          "us_rate_override_cents": {
+            "anyOf": [
+              {
+                "description": "Decimal value without a currency symbol.",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Us Rate Override Cents"
+          }
+        },
+        "required": [
+          "incurred_date",
+          "country",
+          "distance",
+          "distance_unit"
+        ],
+        "title": "MileageInput",
+        "type": "object"
+      },
       "OfferAnalyticsMarketplace": {
         "properties": {
           "accepted_requests": {
@@ -1747,6 +2306,24 @@
         "title": "PhotoEdits",
         "type": "object"
       },
+      "ReportLine": {
+        "properties": {
+          "amount_cents": {
+            "title": "Amount Cents",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label",
+          "amount_cents"
+        ],
+        "title": "ReportLine",
+        "type": "object"
+      },
       "SizeTagReadResult": {
         "description": "Clothing size from unsaved tag photos, never the shipping package size.",
         "properties": {
@@ -2033,6 +2610,432 @@
           }
         },
         "summary": "Get Offer Log"
+      }
+    },
+    "/api/business-expenses": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Start",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "End",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "inventory_purchases",
+                    "sourcing_transportation",
+                    "shipping_supplies",
+                    "shipping_labels",
+                    "platform_fees",
+                    "software_subscriptions",
+                    "equipment",
+                    "home_office",
+                    "advertising",
+                    "mileage",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 1000000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Expense"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Expenses"
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExpenseInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Expense"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Expense"
+      }
+    },
+    "/api/business-expenses/import": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CsvInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CsvResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Expenses"
+      }
+    },
+    "/api/business-expenses/import/preview": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CsvInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CsvResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Preview Import"
+      }
+    },
+    "/api/business-expenses/mileage": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MileageInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MileageAmount"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Calculate Mileage"
+      }
+    },
+    "/api/business-expenses/profit-and-loss": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Start",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "End",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mode",
+            "required": false,
+            "schema": {
+              "default": "accrual",
+              "enum": [
+                "accrual",
+                "cash"
+              ],
+              "title": "Mode",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CurrencyReport"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Profit Report"
+      }
+    },
+    "/api/business-expenses/{expense_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "expense_id",
+            "required": true,
+            "schema": {
+              "title": "Expense Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "expected_revision",
+            "required": true,
+            "schema": {
+              "minimum": 1,
+              "title": "Expected Revision",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Expense"
+      },
+      "put": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "expense_id",
+            "required": true,
+            "schema": {
+              "title": "Expense Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExpenseUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Expense"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Expense"
       }
     },
     "/api/cloud-sessions": {
