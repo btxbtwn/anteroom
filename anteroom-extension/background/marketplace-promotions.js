@@ -537,6 +537,91 @@ function promotionRefusal(error) {
   return marketplaceFailure(error, error?.code !== 'uncertain' && error?.rejected !== false);
 }
 
+const INACTIVE_OFFER_STATUSES = new Set(['declined', 'expired', 'cancelled', 'canceled', 'accepted', 'completed', 'rejected']);
+
+function poshmarkOfferMatchesPost(offer, listingId) {
+  if (!offer || typeof offer !== 'object') return false;
+  if (String(offer.post_id || offer.post?.id || '') === listingId) return true;
+  const bundlePosts = Array.isArray(offer.bundle?.posts) ? offer.bundle.posts
+    : Array.isArray(offer.posts) ? offer.posts : [];
+  return bundlePosts.some(post => String(post?.id || post?.post_id || '') === listingId);
+}
+
+async function readMarketplaceActiveOffers(payload) {
+  const market = String(payload?.marketplace || '');
+  const listingId = String(payload?.listing_id || '');
+  const entry = MARKETPLACE_PROMOTIONS[market];
+  if (!entry || !entry.id.test(listingId)) {
+    return marketplaceFailure(marketplaceError('Name a marketplace listing to check active offers.'), true);
+  }
+  const deadline = Date.now() + 20000;
+  try {
+    if (market === 'poshmark') {
+      const account = await poshmarkAccount();
+      const client = poshmarkClient(deadline, '');
+      const post = await poshmarkOwnPost(client, account, listingId);
+      if (post.has_active_offer === true || Number(post.active_offer_count || 0) > 0) {
+        return { ok: true, verified: true, has_active_offer: true };
+      }
+      const resp = await client.call(
+        'GET',
+        `/vm-rest/users/${account.user_id}/offers?app_type=web&status=active&count=100`,
+        undefined,
+        { step: 'active-offers', what: 'active offers' },
+      );
+      const list = Array.isArray(resp) ? resp
+        : Array.isArray(resp?.data) ? resp.data
+        : Array.isArray(resp?.offers) ? resp.offers
+        : null;
+      if (!list) {
+        return { ok: true, verified: false, has_active_offer: false, reason: 'Unrecognized Poshmark active offers response.' };
+      }
+      const hasActiveOffer = list.some(offer => {
+        if (!poshmarkOfferMatchesPost(offer, listingId)) return false;
+        const status = String(offer.status || offer.state || '').trim().toLowerCase();
+        if (status && INACTIVE_OFFER_STATUSES.has(status)) return false;
+        const sender = String(offer.creator_id || offer.sender_id || offer.initiator_id || '');
+        if (sender && sender === account.user_id) return false;
+        return true;
+      });
+      return { ok: true, verified: true, has_active_offer: hasActiveOffer };
+    }
+    if (market === 'depop') {
+      const { data: me } = await depopOfferCall('GET', '/presentation/api/v1/users/me/', deadline, 'account');
+      const { data: product } = await depopOfferCall('GET', `/presentation/api/v1/products/by-slug/${encodeURIComponent(listingId)}/`, deadline, 'read');
+      if (String(product?.slug ?? '') !== listingId || !/^\d{1,15}$/.test(String(product?.id ?? ''))) {
+        return { ok: true, verified: false, has_active_offer: false, reason: 'Depop did not return this listing.' };
+      }
+      const owner = product.user_id ?? product.seller?.id ?? product.user?.id;
+      if (owner == null || String(owner) !== String(me?.id)) {
+        throw marketplaceError('This Depop listing belongs to another account.');
+      }
+      const { data } = await depopOfferCall('GET', '/presentation/api/v1/offers/me/products/', deadline, 'active-offers');
+      const list = Array.isArray(data) ? data
+        : Array.isArray(data?.products) ? data.products
+        : Array.isArray(data?.objects) ? data.objects
+        : null;
+      if (!list) {
+        return { ok: true, verified: false, has_active_offer: false, reason: 'Unrecognized Depop active offers response.' };
+      }
+      const match = list.find(item => String(item?.product_id ?? item?.id ?? '') === String(product.id) || String(item?.slug ?? '') === listingId);
+      const count = match ? Number(match.active_offers_count ?? match.offers_count ?? match.count ?? 1) : 0;
+      return { ok: true, verified: true, has_active_offer: Boolean(match && count > 0) };
+    }
+    if (market === 'mercari') {
+      return {
+        ok: true,
+        verified: false,
+        has_active_offer: false,
+        reason: 'Mercari incoming buyer offers cannot be verified yet.',
+      };
+    }
+    return { ok: true, verified: false, has_active_offer: false, reason: 'Unsupported marketplace.' };
+  } catch (error) {
+    return marketplaceFailure(error, true);
+  }
+}
+
 async function checkMarketplacePromotion(payload) {
   const entry = MARKETPLACE_PROMOTIONS[payload?.marketplace];
   if (!entry || !(entry.actions || ['share', 'offer']).includes(payload.action) || !entry.id.test(String(payload.listing_id || ''))) {

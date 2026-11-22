@@ -268,26 +268,40 @@ def _format_adjust_sentence(updated: list[str], relisted: list[str], failed: dic
     return " ".join(parts)
 
 
-async def _default_updater(conv_id: str, marketplace: str, revision_id: str, _new_qty: int) -> dict[str, Any]:
-    from anteroom.services.automation_actions import wait_for_native_result
+async def _default_updater(
+    conv_id: str,
+    marketplace: str,
+    revision_id: str,
+    _new_qty: int,
+    *,
+    session_factory=None,
+) -> dict[str, Any]:
+    from anteroom.services.automation_actions import _turn, wait_for_native_result
     from anteroom.services.native_marketplaces import ListRequest, update_live
 
     try:
-        res = await update_live(conv_id, marketplace, ListRequest(revision_id=revision_id, confirm=True))  # type: ignore[arg-type]
-        res = await wait_for_native_result(conv_id, marketplace, res)
+        async with _turn(marketplace):
+            res = await update_live(conv_id, marketplace, ListRequest(revision_id=revision_id, confirm=True))  # type: ignore[arg-type]
+            res = await wait_for_native_result(conv_id, marketplace, res, session_factory=session_factory)
     except Exception as exc:  # noqa: BLE001 - capture marketplace failure cleanly
         return {"ok": False, "error": str(exc)}
     ok = res.get("state") in LIVE_STATES and not res.get("error")
     return {"ok": ok, "error": res.get("error")}
 
 
-async def _default_mercari_relister(conv_id: str, revision_id: str) -> dict[str, Any]:
-    from anteroom.services.automation_actions import wait_for_native_result
+async def _default_mercari_relister(
+    conv_id: str,
+    revision_id: str,
+    *,
+    session_factory=None,
+) -> dict[str, Any]:
+    from anteroom.services.automation_actions import _turn, wait_for_native_result
     from anteroom.services.native_marketplaces import ListRequest, list_now
 
     try:
-        res = await list_now(conv_id, "mercari", ListRequest(revision_id=revision_id, confirm=True))
-        res = await wait_for_native_result(conv_id, "mercari", res)
+        async with _turn("mercari"):
+            res = await list_now(conv_id, "mercari", ListRequest(revision_id=revision_id, confirm=True))
+            res = await wait_for_native_result(conv_id, "mercari", res, session_factory=session_factory)
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc)}
     ok = res.get("state") in LIVE_STATES and not res.get("error")
@@ -315,8 +329,16 @@ async def adjust_quantities_for_sale(
     if remaining <= 0:
         return {"sale_id": sale_id, "remaining": remaining, "events": [], "note": ""}
     factory = _session_factory(session_factory)
-    updater = updater or _default_updater
-    relister = relister or _default_mercari_relister
+    if updater is None:
+        async def _bound_updater(cid: str, market: str, rev_id: str, qty: int) -> dict[str, Any]:
+            return await _default_updater(cid, market, rev_id, qty, session_factory=session_factory)
+
+        updater = _bound_updater
+    if relister is None:
+        async def _bound_relister(cid: str, rev_id: str) -> dict[str, Any]:
+            return await _default_mercari_relister(cid, rev_id, session_factory=session_factory)
+
+        relister = _bound_relister
 
     def _load():
         with factory() as db:
@@ -707,8 +729,16 @@ async def retry_sync_event(
     from anteroom.services.sale_inventory import stock_after_sale
 
     factory = _session_factory(session_factory)
-    updater = updater or _default_updater
-    relister = relister or _default_mercari_relister
+    if updater is None:
+        async def _bound_updater(cid: str, market: str, rev_id: str, qty: int) -> dict[str, Any]:
+            return await _default_updater(cid, market, rev_id, qty, session_factory=session_factory)
+
+        updater = _bound_updater
+    if relister is None:
+        async def _bound_relister(cid: str, rev_id: str) -> dict[str, Any]:
+            return await _default_mercari_relister(cid, rev_id, session_factory=session_factory)
+
+        relister = _bound_relister
 
     def _load():
         with factory() as db:

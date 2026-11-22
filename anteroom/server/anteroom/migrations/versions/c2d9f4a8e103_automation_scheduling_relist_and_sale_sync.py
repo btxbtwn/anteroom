@@ -1,7 +1,7 @@
 """Scheduled draft publishing, per-marketplace auto-relist, waterfall/bundle/follow promotions, and 60-day sale sync log.
 
 Revision ID: c2d9f4a8e103
-Revises: 8580524be7de
+Revises: 049b76a1ce20
 Create Date: 2026-11-22 10:45:00.000000
 """
 from __future__ import annotations
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 
 revision = 'c2d9f4a8e103'
-down_revision = '8580524be7de'
+down_revision = '049b76a1ce20'
 branch_labels = None
 depends_on = None
 
@@ -200,28 +200,27 @@ def upgrade() -> None:
         return
 
     for table in NEW_TABLES:
-        op.execute(f'ALTER TABLE "{table}" ENABLE ROW LEVEL SECURITY')
+        op.execute(f'ALTER TABLE public."{table}" ENABLE ROW LEVEL SECURITY')
+        op.execute(f'REVOKE ALL ON public."{table}" FROM PUBLIC')
+        for role in ('anon', 'authenticated'):
+            if bind.scalar(sa.text('SELECT 1 FROM pg_roles WHERE rolname=:role'), {'role': role}):
+                op.execute(f'REVOKE ALL ON public."{table}" FROM {role}')
+        op.execute(f'GRANT SELECT, INSERT, UPDATE, DELETE ON public."{table}" TO anteroom_seller')
         op.execute(
-            f'CREATE POLICY seller_owner ON "{table}" AS RESTRICTIVE FOR ALL TO PUBLIC '
+            f'CREATE POLICY seller_owner ON public."{table}" AS RESTRICTIVE FOR ALL TO PUBLIC '
             f'USING ({OWNER}) WITH CHECK ({OWNER})'
         )
         op.execute(
-            f'CREATE POLICY seller_access ON "{table}" FOR ALL TO anteroom_seller '
+            f'CREATE POLICY seller_access ON public."{table}" FOR ALL TO anteroom_seller '
             'USING (true) WITH CHECK (true)'
         )
-        op.execute(f'REVOKE ALL ON "{table}" FROM PUBLIC')
-        op.execute(f'GRANT SELECT, INSERT, UPDATE, DELETE ON "{table}" TO anteroom_seller')
-        for role in ('anon', 'authenticated'):
-            if bind.scalar(sa.text('SELECT 1 FROM pg_roles WHERE rolname=:role'), {'role': role}):
-                op.execute(f'REVOKE ALL ON "{table}" FROM {role}')
         op.execute(f'DROP TRIGGER IF EXISTS account_write_guard ON public."{table}"')
         op.execute(
             f'CREATE TRIGGER account_write_guard BEFORE INSERT OR UPDATE ON public."{table}" '
             'FOR EACH ROW EXECUTE FUNCTION anteroom_private.guard_account_write()'
         )
 
-
-    _set_due_owners("""
+    _set_due_owners(bind, """
         UNION
         SELECT listing.user_id::text FROM public.listings AS listing
             WHERE listing.ready_to_list AND listing.scheduled_status = 'scheduled'
@@ -232,7 +231,7 @@ def upgrade() -> None:
     """)
 
 
-def _set_due_owners(extra: str) -> None:
+def _set_due_owners(bind, extra: str) -> None:
     op.execute(f"""
         CREATE OR REPLACE FUNCTION anteroom_private.due_automation_owners()
         RETURNS TABLE(owner_id text) LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
@@ -243,7 +242,10 @@ def _set_due_owners(extra: str) -> None:
             WHERE run.status IN ('running', 'waiting')
         {extra}
         $$;
+        REVOKE ALL ON FUNCTION anteroom_private.due_automation_owners() FROM PUBLIC, anteroom_seller;
     """)
+    if bind.scalar(sa.text("SELECT 1 FROM pg_roles WHERE rolname='anteroom_api'")):
+        op.execute('GRANT EXECUTE ON FUNCTION anteroom_private.due_automation_owners() TO anteroom_api')
 
 
 def downgrade() -> None:
@@ -255,7 +257,7 @@ def downgrade() -> None:
                 RAISE EXCEPTION 'Deletion fences cannot be removed while deleted or pending accounts exist';
             END IF;
         END $$''')
-        _set_due_owners('')
+        _set_due_owners(bind, '')
         for table in NEW_TABLES:
             op.execute(f'DROP TRIGGER IF EXISTS account_write_guard ON public."{table}"')
 

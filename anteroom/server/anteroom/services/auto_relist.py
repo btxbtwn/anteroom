@@ -16,11 +16,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any, cast
 
 from sqlalchemy.orm import Session
 
-from anteroom.database import in_worker_session
+from anteroom.database import in_worker_session, run_worker_db_step
 from anteroom.models.automation import MarketplaceRelistLog, MarketplaceRelistRule
 from anteroom.models.conversation import Conversation, new_id
 from anteroom.models.ebay_offer import EbayOfferAttempt, EbayOfferRule
@@ -73,7 +74,7 @@ def _relisted_last_24h(db: Session, marketplace: str, moment: datetime) -> int:
         db.query(MarketplaceRelistLog)
         .filter(
             MarketplaceRelistLog.marketplace == marketplace,
-            MarketplaceRelistLog.status == "completed",
+            MarketplaceRelistLog.status.in_(("completed", "relist_pending")),
             MarketplaceRelistLog.created_at >= since,
         )
         .count()
@@ -532,22 +533,84 @@ def _prepare_price_revision(db: Session, conv_id: str, new_price: float | None, 
     return saved.id
 
 
+def _reconcile_pending_relists(
+    db: Session,
+    moment: datetime,
+    marketplace: str | None = None,
+) -> set[tuple[str, str]]:
+    """Reconcile any ``relist_pending`` logs against settled marketplace records.
+
+    Returns the set of ``(conversation_id, marketplace)`` pairs still waiting on
+    an active publish job so subsequent sweeps never trigger a duplicate relist.
+    """
+    from anteroom.models.job import ACTIVE_JOB_STATUSES
+    from anteroom.repositories.queries import JobRepo
+
+    query = db.query(MarketplaceRelistLog).filter(MarketplaceRelistLog.status == "relist_pending")
+    if marketplace:
+        query = query.filter(MarketplaceRelistLog.marketplace == marketplace)
+    pending_rows = query.all()
+    if not pending_rows:
+        return set()
+
+    still_pending: set[tuple[str, str]] = set()
+    changed = False
+    job_repo = JobRepo(db)
+    for row in pending_rows:
+        ml = (
+            db.query(MarketplaceListing)
+            .filter_by(conversation_id=row.conversation_id, marketplace=row.marketplace)
+            .first()
+        )
+        if ml is not None and ml.state in LIVE_STATES and ml.listing_id and ml.listing_id != row.old_listing_id:
+            swap_tracked_listing_id(
+                db,
+                row.conversation_id,
+                row.marketplace,
+                old_listing_id=row.old_listing_id,
+                new_listing_id=str(ml.listing_id),
+                new_listing_url=ml.listing_url,
+                new_price=row.new_price,
+                now=moment,
+            )
+            row.status = "completed"
+            row.new_listing_id = str(ml.listing_id)
+            row.reason = None
+            changed = True
+            continue
+        job = job_repo.get(ml.job_id) if (ml is not None and ml.job_id) else None
+        if job is not None and job.status in ACTIVE_JOB_STATUSES:
+            still_pending.add((row.conversation_id, row.marketplace))
+            continue
+        row.status = "down_needs_relist"
+        if ml is not None and ml.error:
+            row.reason = str(ml.error)[:500]
+        changed = True
+    if changed:
+        db.commit()
+    return still_pending
+
+
 def _load_enabled_rules_and_candidates(
     db: Session,
     moment: datetime,
     marketplace: str | None = None,
 ) -> list[dict[str, Any]]:
     query = db.query(MarketplaceRelistRule).filter(MarketplaceRelistRule.enabled.is_(True))
+    market: str | None = None
     if marketplace:
         market = str(marketplace).strip().lower()
         if market not in RELIST_MARKETPLACES:
             raise AutoRelistError("Auto-relist supports Poshmark, eBay, Mercari, and Depop.")
         query = query.filter(MarketplaceRelistRule.marketplace == market)
+    still_pending = _reconcile_pending_relists(db, moment, market)
     rules = query.all()
     plan: list[dict[str, Any]] = []
     for rule in rules:
         candidates = _eligible_candidates(db, rule, moment)
         for item in candidates:
+            if (item["conversation_id"], rule.marketplace) in still_pending:
+                continue
             local_offer = (
                 has_active_buyer_offer_local(db, item["conversation_id"], rule.marketplace, item["listing_id"])
                 if rule.skip_active_offers
@@ -621,6 +684,93 @@ def _record_log_payload(db: Session, payload: dict[str, Any]) -> dict[str, Any]:
     return _record_log(db, **payload)
 
 
+_EBAY_ACTIVE_OFFER_STATUSES = frozenset({
+    "active",
+    "pending",
+    "countered",
+    "pendingbuyerpayment",
+    "pendingbuyerconfirmation",
+})
+
+
+async def check_active_buyer_offer(marketplace: str, listing_id: str) -> bool | None:
+    """Verify whether ``listing_id`` has an active incoming buyer offer.
+
+    Returns:
+      - ``True``: verified active incoming buyer offer exists (must skip delist/relist)
+      - ``False``: verified NO active incoming buyer offer exists (safe to delist/relist)
+      - ``None``: could not verify (must fail closed with ``skipped_offer_unverified``)
+    """
+    market = str(marketplace or "").strip().lower()
+    lid = str(listing_id or "").strip()
+    if not lid:
+        return None
+
+    if market == "ebay":
+        from anteroom.services.ebay_client import NS, EbayClient, EbayFailure
+        from anteroom.services.marketplace_accounts import SignInRequired
+
+        try:
+            client = await EbayClient.connect()
+            result = await client.trading("GetBestOffers", {"ItemID": lid, "BestOfferStatus": "Active"})
+        except EbayFailure as exc:
+            combined = f"{exc} {exc.marketplace_message or ''}".lower()
+            if "21916260" in combined or "best offer is not enabled" in combined or "not enabled for best offer" in combined:
+                return False
+            log.warning("eBay GetBestOffers check failed for %s: %s", lid, exc)
+            return None
+        except (SignInRequired, Exception) as exc:  # noqa: BLE001 - fail closed when offer status cannot be verified
+            log.warning("eBay active offer check unavailable for %s: %s", lid, exc)
+            return None
+        root = result.get("xml")
+        if root is None:
+            return None
+        offers = root.findall(".//e:BestOfferArray/e:BestOffer", NS) or root.findall(".//e:BestOffer", NS)
+        for offer in offers:
+            status = (offer.findtext("e:Status", namespaces=NS) or "").strip().lower()
+            if not status or status in _EBAY_ACTIVE_OFFER_STATUSES:
+                return True
+        return False
+
+    if market in ("poshmark", "depop", "mercari"):
+        from anteroom.services import browser_bridge, cloud_marketplace, cloud_sessions
+        from anteroom.services.extension_connection import current_extension
+        from anteroom.services.hosted_browser_relay import MARKETPLACE_PROMOTIONS, relay_for
+        from anteroom.services.service_context import current
+
+        payload = {"marketplace": market, "listing_id": lid}
+        job_id = f"offer-check-{new_id()}"
+        try:
+            use_cloud = await run_worker_db_step(cloud_sessions.has_active_session, market)
+            if use_cloud:
+                reply = await cloud_marketplace.execute(
+                    market,
+                    {"type": "marketplace.active_offers", "job_id": job_id, "payload": payload},
+                    timeout=20,
+                )
+            else:
+                ctx = current()
+                if ctx is not None:
+                    if relay_for(ctx.seller_id).refusal(MARKETPLACE_PROMOTIONS):
+                        return None
+                elif not current_extension().connected:
+                    return None
+                reply = await browser_bridge.request(
+                    SimpleNamespace(id=job_id),
+                    "marketplace.active_offers",
+                    payload,
+                    timeout=20,
+                )
+        except Exception as exc:  # noqa: BLE001 - fail closed when marketplace cannot be queried
+            log.warning("%s active offer check failed for %s: %s", market, lid, exc)
+            return None
+        if not isinstance(reply, dict) or reply.get("ok") is not True or reply.get("verified") is not True:
+            return None
+        return bool(reply.get("has_active_offer"))
+
+    return None
+
+
 async def run_auto_relist(
     *,
     now: datetime | None = None,
@@ -665,12 +815,13 @@ async def run_auto_relist(
         delister = _default_delister
 
     if lister is None:
-        from anteroom.services.automation_actions import wait_for_native_result
+        from anteroom.services.automation_actions import _turn, wait_for_native_result
         from anteroom.services.native_marketplaces import ListRequest, list_now
 
         async def _default_lister(conv_id: str, marketplace: str, revision_id: str) -> dict[str, Any]:
-            res = await list_now(conv_id, cast(Any, marketplace), ListRequest(revision_id=revision_id, confirm=True))
-            res = await wait_for_native_result(conv_id, marketplace, res)
+            async with _turn(marketplace):
+                res = await list_now(conv_id, cast(Any, marketplace), ListRequest(revision_id=revision_id, confirm=True))
+                res = await wait_for_native_result(conv_id, marketplace, res)
             ok = res.get("state") in LIVE_STATES and not res.get("error")
             new_id_val = res.get("listing_id") or extract_listing_id(marketplace, res.get("listing_url"))
             return {
@@ -678,9 +829,12 @@ async def run_auto_relist(
                 "listing_id": new_id_val,
                 "listing_url": res.get("listing_url"),
                 "error": res.get("error"),
+                "timed_out": bool(res.get("timed_out")),
             }
 
         lister = _default_lister
+
+    active_offer_checker = offer_checker if offer_checker is not None else check_active_buyer_offer
 
     outcomes: list[dict[str, Any]] = []
     for entry in plan:
@@ -688,9 +842,9 @@ async def run_auto_relist(
         market = entry["marketplace"]
         old_id = entry["listing_id"]
         offer_status = True if entry["local_active_offer"] else None
-        if offer_status is None and entry["skip_active_offers"] and offer_checker is not None:
+        if offer_status is None and entry["skip_active_offers"]:
             try:
-                offer_status = await asyncio.wait_for(offer_checker(market, old_id), timeout=20)
+                offer_status = await asyncio.wait_for(active_offer_checker(market, old_id), timeout=20)
             except Exception:  # noqa: BLE001 - no positive clearance to delist
                 pass
         if entry["skip_active_offers"] and offer_status is not False:
@@ -742,6 +896,7 @@ async def run_auto_relist(
         new_id_val = list_res.get("listing_id") or extract_listing_id(market, list_res.get("listing_url"))
         if not list_res.get("ok") or not new_id_val:
             error_msg = str(list_res.get("error") or "Old listing was delisted, but relist did not confirm.")
+            status = "relist_pending" if list_res.get("timed_out") else "down_needs_relist"
             outcomes.append(await in_worker_session(_record_log_payload, {
                 "conv_id": conv_id,
                 "marketplace": market,
@@ -749,11 +904,14 @@ async def run_auto_relist(
                 "new_listing_id": None,
                 "old_price": entry["price"],
                 "new_price": entry["new_price"],
-                "status": "down_needs_relist",
+                "status": status,
                 "reason": error_msg,
                 "moment": _now(),
             }))
-            log.error("Auto-relist left item %s down on %s: %s", conv_id, market, error_msg)
+            if status == "relist_pending":
+                log.warning("Auto-relist publish timed out on %s for %s; marked relist_pending for reconciliation: %s", market, conv_id, error_msg)
+            else:
+                log.error("Auto-relist left item %s down on %s: %s", conv_id, market, error_msg)
             continue
 
         outcomes.append(await in_worker_session(_record_log_payload, {

@@ -27,10 +27,14 @@ export function EbayOffersSettings() {
   const [allMinimum, setAllMinimum] = useState<string | null>(null);
   const [waterfallDraft, setWaterfallDraft] = useState<{ discount: string; delayMinutes: string }[] | null>(null);
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["ebay-offers"] });
+  const data = status.data;
+  const activeWaterfall = waterfallDraft ?? (data?.allListings.waterfallSteps ?? []).map((step) => ({
+    discount: String(step.discount_percent),
+    delayMinutes: String(step.delay_minutes),
+  }));
   const parseWaterfallSteps = () => {
-    const steps = waterfallDraft ?? [];
-    if (!steps.length) return undefined;
-    return steps
+    if (!activeWaterfall.length) return undefined;
+    return activeWaterfall
       .map((s) => ({ discount_percent: Number(s.discount), delay_minutes: Number(s.delayMinutes) }))
       .filter((s) => Number.isInteger(s.discount_percent) && s.discount_percent >= 5 && s.discount_percent <= 99 && Number.isInteger(s.delay_minutes) && s.delay_minutes >= 0);
   };
@@ -80,11 +84,6 @@ export function EbayOffersSettings() {
     onSuccess: () => setNotice("Automatic offers enabled for all current and future eBay listings in Anteroom. The next check is within 15 minutes."),
     onSettled: refresh,
   });
-  const data = status.data;
-  const activeWaterfall = waterfallDraft ?? (data?.allListings.waterfallSteps ?? []).map((step) => ({
-    discount: String(step.discount_percent),
-    delayMinutes: String(step.delay_minutes),
-  }));
   const addWaterfallStep = () => {
     const prev = activeWaterfall[activeWaterfall.length - 1];
     const nextDiscount = prev ? Math.min(95, (Number(prev.discount) || 10) + 5) : Number(globalDiscount) || 10;

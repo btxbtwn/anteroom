@@ -625,7 +625,9 @@ def _open_delist(db: Session, conv_id: str, marketplaces: list[str], confirm: bo
             if any(_went_up_after(name, known[name]["listing_id"], native, marks, sold_at) for name in names):
                 raise DelistError(409, "A marketplace listing was listed again after the sale. Nothing was delisted.",
                                   reason="listing_changed")
-        if repo.get_active():
+        from anteroom.services.listing_promotions import has_active_account_send
+
+        if repo.get_active() or has_active_account_send(db):
             raise DelistError(409, "Another automation job is queued or running. Wait for it to finish.")
         job = repo.create(conv_id, listing.current_revision_id if listing else "", {"delist": names},
                           status="dispatched", current_step="native_delist")

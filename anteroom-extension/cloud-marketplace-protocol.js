@@ -50,11 +50,20 @@
     'marketplace.import.page': { marketplace: MARKETPLACES, cursor: 300 },
     'marketplace.import.listing': { marketplace: MARKETPLACES, listing_id: /^[a-z0-9][a-z0-9-]{0,200}$/ },
   };
-  const PROMOTION_COMMANDS = new Set(['marketplace.promotion_check', 'marketplace.promote', 'marketplace.promotion_result', 'marketplace.like_events']);
+  const PROMOTION_COMMANDS = new Set([
+    'marketplace.promotion_check',
+    'marketplace.promote',
+    'marketplace.promotion_result',
+    'marketplace.like_events',
+    'marketplace.active_offers',
+  ]);
   function promotion(value) {
     const p = value.payload;
     const id = /^[A-Za-z0-9-]{1,64}$/;
-    if (typeof value.job_id !== 'string' || !id.test(value.job_id) || p.job_id !== value.job_id || size(value) > 10000) return false;
+    const maxBytes = value.type === 'marketplace.promote' && p?.action === 'bundle_offer' ? 200000 : 10000;
+    if (typeof value.job_id !== 'string' || !id.test(value.job_id) || p.job_id !== value.job_id || size(value) > maxBytes) return false;
+    const ids = { poshmark: /^[a-f0-9]{24}$/, mercari: /^m\d{6,}$/, depop: /^[a-z0-9][a-z0-9-]{0,200}$/ };
+    const cents = n => Number.isInteger(n) && n > 0 && n <= 2147483647;
     let keys = ['job_id', 'request_id', 'approval'];
     if (value.type === 'marketplace.promotion_result') {
       keys.push('action_id');
@@ -62,6 +71,9 @@
     } else if (value.type === 'marketplace.like_events') {
       keys.push('marketplace');
       if (!['poshmark', 'depop'].includes(p.marketplace)) return false;
+    } else if (value.type === 'marketplace.active_offers') {
+      keys.push('marketplace', 'listing_id');
+      if (!Object.hasOwn(ids, p.marketplace) || typeof p.listing_id !== 'string' || !ids[p.marketplace].test(p.listing_id)) return false;
     } else if (value.type === 'marketplace.promote' && p.action === 'follow') {
       keys.push('marketplace', 'action', 'listing_id', 'action_id', 'confirm', 'follow_config');
       const cfg = p.follow_config;
@@ -72,9 +84,32 @@
           || !cap(cfg.remaining_follow_cap) || !cap(cfg.new_active_sellers_cap) || !cap(cfg.unfollow_cap)
           || cfg.new_active_sellers_cap > cfg.remaining_follow_cap
           || Object.keys(cfg).length !== 5) return false;
+    } else if (value.type === 'marketplace.promote' && p.action === 'share' && p.listing_id === '__account__') {
+      keys.push('marketplace', 'action', 'listing_id', 'action_id', 'confirm', 'share_mode', 'max_shares');
+      if (p.marketplace !== 'poshmark' || p.confirm !== true || p.share_mode !== 'community'
+          || !/^[A-Za-z0-9-]{6,64}$/.test(p.action_id || '')) return false;
+      if (Object.hasOwn(p, 'max_shares') && (!Number.isInteger(p.max_shares) || p.max_shares < 1 || p.max_shares > 500)) return false;
+    } else if (value.type === 'marketplace.promote' && p.action === 'bundle_offer') {
+      keys.push('marketplace', 'action', 'listing_id', 'action_id', 'confirm', 'price_cents', 'offer_price_cents',
+        'floor_cents', 'shipping_discount_id', 'discount_percent', 'waterfall_step',
+        'bundle_pause_minutes', 'bundle_min_items', 'bundle_comment', 'bundle_item_floors');
+      if (p.marketplace !== 'poshmark' || typeof p.listing_id !== 'string' || !ids.poshmark.test(p.listing_id)
+          || p.confirm !== true || !/^[A-Za-z0-9-]{6,64}$/.test(p.action_id || '')
+          || !cents(p.price_cents) || !cents(p.offer_price_cents) || !cents(p.floor_cents)
+          || p.offer_price_cents < p.floor_cents) return false;
+      if (p.shipping_discount_id !== null && (typeof p.shipping_discount_id !== 'string' || !/^[A-Za-z0-9-]{1,40}$/.test(p.shipping_discount_id))) return false;
+      if (Object.hasOwn(p, 'discount_percent') && (!Number.isInteger(p.discount_percent) || p.discount_percent < 1 || p.discount_percent > 99)) return false;
+      if (Object.hasOwn(p, 'waterfall_step') && (!Number.isInteger(p.waterfall_step) || p.waterfall_step < 1 || p.waterfall_step > 5)) return false;
+      if (Object.hasOwn(p, 'bundle_pause_minutes') && (!Number.isInteger(p.bundle_pause_minutes) || p.bundle_pause_minutes < 1 || p.bundle_pause_minutes > 1440)) return false;
+      if (Object.hasOwn(p, 'bundle_min_items') && (!Number.isInteger(p.bundle_min_items) || p.bundle_min_items < 1 || p.bundle_min_items > 50)) return false;
+      if (Object.hasOwn(p, 'bundle_comment') && (typeof p.bundle_comment !== 'string' || p.bundle_comment.length > 500)) return false;
+      if (Object.hasOwn(p, 'bundle_item_floors')) {
+        if (!plain(p.bundle_item_floors)) return false;
+        const entries = Object.entries(p.bundle_item_floors);
+        if (entries.length > 5000 || entries.some(([k, v]) => !ids.poshmark.test(k) || !cents(v))) return false;
+      }
     } else {
       keys.push('marketplace', 'action', 'listing_id');
-      const ids = { poshmark: /^[a-f0-9]{24}$/, mercari: /^m\d{6,}$/, depop: /^[a-z0-9][a-z0-9-]{0,200}$/ };
       if (!Object.hasOwn(ids, p.marketplace) || typeof p.listing_id !== 'string' || !ids[p.marketplace].test(p.listing_id)
           || !['share', 'offer'].includes(p.action) || (p.action === 'share' && p.marketplace !== 'poshmark')) return false;
       if (value.type === 'marketplace.promotion_check') {
@@ -84,12 +119,19 @@
         }
       } else {
         keys.push('action_id', 'confirm', 'price_cents', 'offer_price_cents', 'floor_cents', 'shipping_discount_id', 'gap_ms');
-        const cents = n => Number.isInteger(n) && n > 0 && n <= 2147483647;
+        if (p.action === 'share') keys.push('share_modes', 'party_window');
+        if (p.action === 'offer') keys.push('discount_percent', 'waterfall_step');
         if (p.confirm !== true || !/^[A-Za-z0-9-]{6,64}$/.test(p.action_id || '') || !cents(p.price_cents)) return false;
         if (p.action === 'offer' ? (!cents(p.offer_price_cents) || !cents(p.floor_cents) || p.offer_price_cents < p.floor_cents)
             : (p.offer_price_cents !== null || p.floor_cents !== null)) return false;
         if (p.shipping_discount_id !== null && (typeof p.shipping_discount_id !== 'string' || !/^[A-Za-z0-9-]{1,40}$/.test(p.shipping_discount_id))) return false;
         if (Object.hasOwn(p, 'gap_ms') && (p.action !== 'share' || !Number.isInteger(p.gap_ms) || p.gap_ms < 4000 || p.gap_ms > 30000)) return false;
+        if (Object.hasOwn(p, 'share_modes') && (!Array.isArray(p.share_modes) || !p.share_modes.length || p.share_modes.length > 3
+            || !p.share_modes.every(m => ['self', 'party', 'community'].includes(m)))) return false;
+        if (Object.hasOwn(p, 'party_window') && p.party_window !== null
+            && (typeof p.party_window !== 'string' || !/^\d{2}:\d{2}$/.test(p.party_window))) return false;
+        if (Object.hasOwn(p, 'discount_percent') && (!Number.isInteger(p.discount_percent) || p.discount_percent < 1 || p.discount_percent > 99)) return false;
+        if (Object.hasOwn(p, 'waterfall_step') && (!Number.isInteger(p.waterfall_step) || p.waterfall_step < 1 || p.waterfall_step > 5)) return false;
       }
     }
     return Object.keys(p).every(key => keys.includes(key));

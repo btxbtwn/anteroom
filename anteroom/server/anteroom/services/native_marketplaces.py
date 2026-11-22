@@ -148,11 +148,17 @@ def blocking_job(repo: JobRepo, marketplace: str | None):
     themselves. With no marketplace, only those exclusive jobs
     count.
     """
+    from types import SimpleNamespace
+
+    from anteroom.services.listing_promotions import has_active_account_send
+
     for job in repo.get_active():
         step = str(job.current_step or "")
         other = next((name for name in NAMES if step.startswith(f"native_{name}_")), None)
         if other is None or other == marketplace or step.removeprefix(f"native_{other}_") not in SIDE_BY_SIDE_STEPS:
             return job
+    if has_active_account_send(repo.db):
+        return SimpleNamespace(current_step="listing_promotion")
     return None
 
 

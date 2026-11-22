@@ -442,6 +442,7 @@ function enforcePoshmarkConfirmation(command) {
       'marketplace.import.listing',
       'marketplace.promotion_check',
       'marketplace.like_events',
+      'marketplace.active_offers',
     ].includes(type)
   ) {
     if (p.marketplace !== 'poshmark') {

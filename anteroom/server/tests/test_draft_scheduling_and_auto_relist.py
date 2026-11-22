@@ -389,6 +389,205 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         logs = self.db.query(MarketplaceRelistLog).all()
         self.assertEqual(len(logs), 4)
 
+    def test_check_active_buyer_offer_ebay_poshmark_and_mercari(self):
+        import xml.etree.ElementTree as ET
+        from unittest.mock import AsyncMock, patch
+        from anteroom.services.ebay_client import EbayFailure
+
+        ns = "urn:ebay:apis:eBLBaseComponents"
+
+        class FakeEbayClient:
+            def __init__(self, xml_text=None, exc=None):
+                self._xml_text = xml_text
+                self._exc = exc
+
+            async def trading(self, call, fields):
+                assert call == "GetBestOffers"
+                assert fields["BestOfferStatus"] == "Active"
+                if self._exc is not None:
+                    raise self._exc
+                return {"xml": ET.fromstring(self._xml_text)}
+
+        # 1. eBay active buyer offer -> True
+        active_xml = f'<GetBestOffersResponse xmlns="{ns}"><BestOfferArray><BestOffer><Status>Pending</Status></BestOffer></BestOfferArray></GetBestOffersResponse>'
+        with patch("anteroom.services.ebay_client.EbayClient.connect", AsyncMock(return_value=FakeEbayClient(active_xml))):
+            self.assertIs(asyncio.run(auto_relist.check_active_buyer_offer("ebay", "123456789012")), True)
+
+        # 2. eBay no active offers -> False
+        empty_xml = f'<GetBestOffersResponse xmlns="{ns}"><BestOfferArray/></GetBestOffersResponse>'
+        with patch("anteroom.services.ebay_client.EbayClient.connect", AsyncMock(return_value=FakeEbayClient(empty_xml))):
+            self.assertIs(asyncio.run(auto_relist.check_active_buyer_offer("ebay", "123456789012")), False)
+
+        # 3. eBay Best Offer not enabled (21916260) -> False
+        not_enabled = EbayFailure("Best Offer is not enabled.", code="rejected", marketplace_message="21916260: Best Offer is not enabled")
+        with patch("anteroom.services.ebay_client.EbayClient.connect", AsyncMock(return_value=FakeEbayClient(exc=not_enabled))):
+            self.assertIs(asyncio.run(auto_relist.check_active_buyer_offer("ebay", "123456789012")), False)
+
+        # 4. eBay transient error -> None (fail closed)
+        transient = EbayFailure("Timeout", code="network")
+        with patch("anteroom.services.ebay_client.EbayClient.connect", AsyncMock(return_value=FakeEbayClient(exc=transient))):
+            self.assertIsNone(asyncio.run(auto_relist.check_active_buyer_offer("ebay", "123456789012")))
+
+        # 5. Poshmark Cloud Runner verified active offer vs verified clean
+        with (
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch(
+                "anteroom.services.cloud_marketplace.execute",
+                AsyncMock(return_value={"ok": True, "verified": True, "has_active_offer": True}),
+            ),
+        ):
+            self.assertIs(asyncio.run(auto_relist.check_active_buyer_offer("poshmark", "5f0000000000000000000001")), True)
+
+        with (
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch(
+                "anteroom.services.cloud_marketplace.execute",
+                AsyncMock(return_value={"ok": True, "verified": True, "has_active_offer": False}),
+            ),
+        ):
+            self.assertIs(asyncio.run(auto_relist.check_active_buyer_offer("poshmark", "5f0000000000000000000001")), False)
+
+        # 6. Mercari unverified -> None (fail closed)
+        with (
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+            patch(
+                "anteroom.services.cloud_marketplace.execute",
+                AsyncMock(return_value={"ok": True, "verified": False, "has_active_offer": False}),
+            ),
+        ):
+            self.assertIsNone(asyncio.run(auto_relist.check_active_buyer_offer("mercari", "m123456789")))
+
+    def test_settle_publish_does_not_overwrite_replacement_schedule(self):
+        c1, l1, r1 = self._create_draft("Rescheduled Draft")
+        l1.ready_to_list = True
+        due_time = _now() - timedelta(minutes=1)
+        l1.scheduled_publish_at = due_time
+        l1.scheduled_marketplaces = ["poshmark"]
+        l1.scheduled_revision_id = r1.id
+        l1.scheduled_confirmed_at = due_time - timedelta(minutes=5)
+        l1.scheduled_status = "scheduled"
+        self.db.commit()
+
+        claimed = draft_scheduling._claim_due_drafts(self.db, _now())
+        self.assertEqual(len(claimed), 1)
+
+        # Simulate seller replacing the schedule while the earlier publish is still in flight
+        new_time = _now() + timedelta(hours=3)
+        l1.scheduled_publish_at = new_time
+        l1.scheduled_confirmed_at = _now()
+        l1.scheduled_status = "scheduled"
+        self.db.commit()
+
+        draft_scheduling._settle_publish(self.db, claimed[0], {"ok": False, "error": "stale failure"}, _now())
+        self.db.expire_all()
+        fresh = self.db.query(Listing).filter_by(conversation_id=c1.id).one()
+        self.assertEqual(fresh.scheduled_status, "scheduled")
+        self.assertEqual(fresh.scheduled_publish_at, new_time)
+
+    def test_wait_timeout_cancels_and_reconciles_pending_relist(self):
+        from unittest.mock import AsyncMock
+
+        from anteroom.models.job import Job
+        from anteroom.services import automation_actions
+
+        conv, _l, rev = self._create_draft("Pending Relist Jacket")
+        conv.status = "listed"
+        old_posh = "5f0000000000000000000081"
+        new_posh = "5f0000000000000000000089"
+        self.db.add(MarketplaceListing(
+            id=new_id(),
+            conversation_id=conv.id,
+            marketplace="poshmark",
+            state="published",
+            listing_id=old_posh,
+            listing_url=f"https://poshmark.com/listing/{old_posh}",
+            listed_at=_now() - timedelta(days=45),
+            listed_price=58.0,
+        ))
+        self.db.add(MarketplaceRelistRule(
+            id=new_id(),
+            marketplace="poshmark",
+            enabled=True,
+            min_age_days=30,
+            daily_cap=5,
+            skip_active_offers=False,
+        ))
+        job = Job(
+            id="job-timeout-1",
+            conversation_id=conv.id,
+            approved_revision_id=rev.id,
+            status="dispatched",
+            listing_snapshot={},
+        )
+        self.db.add(job)
+        self.db.commit()
+
+        # 1. wait_for_native_result requests cancellation on timeout and returns timed_out=True
+        ml_row = self.db.query(MarketplaceListing).filter_by(conversation_id=conv.id, marketplace="poshmark").one()
+        ml_row.state = "publishing"
+        ml_row.job_id = job.id
+        ml_row.operation_id = "op-timeout-1"
+        ml_row.executor = "cloud"
+        self.db.commit()
+
+        with (
+            patch.object(automation_actions, "IDLE_TIMEOUT_S", 0.0),
+            patch("anteroom.services.native_marketplaces._record_cancel", return_value=True) as mock_rec_cancel,
+            patch("anteroom.services.cloud_marketplace.cancel", AsyncMock(return_value=True)) as mock_cloud_cancel,
+        ):
+            timed_res = asyncio.run(automation_actions.wait_for_native_result(
+                conv.id,
+                "poshmark",
+                {"job_id": job.id, "state": "publishing"},
+                session_factory=self.Session,
+            ))
+        self.assertTrue(timed_res.get("timed_out"))
+        mock_rec_cancel.assert_called_once()
+        mock_cloud_cancel.assert_awaited_once_with("op-timeout-1")
+
+        # 2. run_auto_relist records relist_pending (not down_needs_relist) on timeout
+        ml_row.state = "published"
+        ml_row.listing_id = old_posh
+        ml_row.listed_at = _now() - timedelta(days=45)
+        self.db.commit()
+
+        async def fake_delister(_conv_id, _market):
+            return {"ok": True}
+
+        async def fake_timeout_lister(_conv_id, _market, _rev_id):
+            return {"ok": False, "timed_out": True, "error": "Timed out waiting for poshmark."}
+
+        res = asyncio.run(auto_relist.run_auto_relist(
+            marketplace="poshmark",
+            delister=fake_delister,
+            lister=fake_timeout_lister,
+        ))
+        self.assertEqual(len(res), 1)
+        self.assertEqual(res[0]["status"], "relist_pending")
+        pending_log = self.db.query(MarketplaceRelistLog).filter_by(conversation_id=conv.id).one()
+        self.assertEqual(pending_log.status, "relist_pending")
+
+        # 3. While job is still running, next sweep does NOT trigger a duplicate relist
+        plan_while_active = auto_relist._load_enabled_rules_and_candidates(self.db, _now(), "poshmark")
+        self.assertEqual(plan_while_active, [])
+        self.db.refresh(pending_log)
+        self.assertEqual(pending_log.status, "relist_pending")
+
+        # 4. Once the late-completing publish writes a new listing_id, reconcile promotes to completed & swaps ID
+        ml_row = self.db.query(MarketplaceListing).filter_by(conversation_id=conv.id, marketplace="poshmark").one()
+        ml_row.state = "published"
+        ml_row.listing_id = new_posh
+        ml_row.listing_url = f"https://poshmark.com/listing/{new_posh}"
+        job.status = "completed"
+        self.db.commit()
+
+        auto_relist._reconcile_pending_relists(self.db, _now(), "poshmark")
+        self.db.expire_all()
+        reconciled = self.db.query(MarketplaceRelistLog).filter_by(conversation_id=conv.id).one()
+        self.assertEqual(reconciled.status, "completed")
+        self.assertEqual(reconciled.new_listing_id, new_posh)
+
 
 if __name__ == "__main__":
     unittest.main()
+

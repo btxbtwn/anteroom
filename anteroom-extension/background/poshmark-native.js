@@ -803,9 +803,20 @@ async function poshmarkCommunityShares(client, account, maxShares) {
   return { ok: true, state: 'done', share_mode: 'community', recipient_count: shared };
 }
 
+function poshmarkBundlePriceCents(amount) {
+  const value = Number(amount?.val ?? amount);
+  return Number.isFinite(value) && value > 0 ? Math.round(value * 100) : 0;
+}
+
+function poshmarkBundleDiscountCents(priceCents, percent) {
+  return Math.floor((priceCents / 100) * (100 - percent) / 100) * 100;
+}
+
 async function poshmarkSendPrivateBundleOffer(client, account, payload) {
   const listingId = String(payload.listing_id || '');
-  const offerCents = Number(payload.offer_price_cents);
+  const reviewedPriceCents = Number(payload.price_cents);
+  const reviewedOfferCents = Number(payload.offer_price_cents);
+  const reviewedFloorCents = Number(payload.floor_cents);
   const pauseMinutes = Math.max(1, Number(payload.bundle_pause_minutes) || 15);
   const minItems = Math.max(1, Number(payload.bundle_min_items) || 1);
   const bundleComment = typeof payload.bundle_comment === 'string' ? payload.bundle_comment.trim().slice(0, 500) : '';
@@ -828,19 +839,101 @@ async function poshmarkSendPrivateBundleOffer(client, account, payload) {
     buyer_id: buyerId,
     post_ids: [listingId],
   }, { step: 'bundle-create', what: 'creating the private bundle' });
-  const bundle = bundleResp?.bundle || bundleResp;
+  let bundle = bundleResp?.bundle || bundleResp;
   const bundleId = String(bundle?.id || '');
   if (!bundleId) throw marketplaceError('Poshmark did not return a bundle ID.');
-  const posts = bundle?.posts;
-  const itemCount = Number(bundle?.item_count ?? (Array.isArray(posts) ? posts.length : NaN));
-  if (itemCount !== 1 || !Array.isArray(posts) || posts.length !== 1 || String(posts[0]?.id || '') !== listingId) {
-    throw marketplaceError('Anteroom could not verify a single-item bundle at the reviewed price.');
+  let posts = Array.isArray(bundle?.posts) ? bundle.posts : null;
+  let itemCount = Number(bundle?.item_count ?? (posts ? posts.length : NaN));
+  if (!Number.isInteger(itemCount) || itemCount < 1) {
+    throw marketplaceError('Poshmark did not return the bundle item count.');
+  }
+  if (!posts || posts.length !== itemCount) {
+    try {
+      const detailResp = await client.call('GET', `/vm-rest/bundles/${bundleId}?app_type=web`,
+        undefined, { step: 'bundle-read', what: 'reading the private bundle' });
+      const detail = detailResp?.bundle || detailResp;
+      if (Array.isArray(detail?.posts)) {
+        bundle = { ...bundle, ...detail };
+        posts = detail.posts;
+        itemCount = Number(detail.item_count ?? posts.length);
+      }
+    } catch {
+      // Fall through to strict refusal below when bundle membership cannot be verified.
+    }
+  }
+  if (!Array.isArray(posts) || posts.length !== itemCount) {
+    throw marketplaceError('Anteroom could not verify every item in this Poshmark bundle.');
   }
   if (itemCount < minItems) {
     throw marketplaceError(`Bundle has ${itemCount} item(s), below the ${minItems}-item minimum.`);
   }
+
+  let finalOfferCents = reviewedOfferCents;
+  let combinedPriceCents = reviewedPriceCents;
+  let combinedFloorCents = reviewedFloorCents;
+
+  if (itemCount === 1) {
+    if (String(posts[0]?.id || '') !== listingId) {
+      throw marketplaceError('Anteroom could not verify a single-item bundle at the reviewed price.');
+    }
+  } else {
+    const discountPercent = Number(payload.discount_percent);
+    if (!Number.isInteger(discountPercent) || discountPercent < 1 || discountPercent > 99) {
+      throw marketplaceError('Anteroom requires a verified discount percentage for multi-item bundles.');
+    }
+    const floorsMap = payload.bundle_item_floors && typeof payload.bundle_item_floors === 'object' && !Array.isArray(payload.bundle_item_floors)
+      ? payload.bundle_item_floors
+      : null;
+    if (!floorsMap) {
+      throw marketplaceError('Anteroom could not verify per-item floors for this multi-item bundle.');
+    }
+    const seenIds = new Set();
+    let totalPrice = 0;
+    let totalFloor = 0;
+    for (const item of posts) {
+      const postId = String(item?.id || '');
+      if (!/^[a-f0-9]{24}$/.test(postId) || seenIds.has(postId)) {
+        throw marketplaceError('Anteroom could not verify every listing ID in this multi-item bundle.');
+      }
+      seenIds.add(postId);
+      let itemPrice = poshmarkBundlePriceCents(item?.price_amount);
+      if (!itemPrice) {
+        const fetched = await client.call('GET', `/vm-rest/posts/${postId}?app_type=web`,
+          undefined, { step: 'bundle-item-read', what: 'reading a bundle listing' });
+        if (String(fetched?.creator_id || '') !== account.user_id) {
+          throw marketplaceError('A listing in this bundle belongs to another account.');
+        }
+        itemPrice = poshmarkBundlePriceCents(fetched?.price_amount);
+      }
+      if (!itemPrice) {
+        throw marketplaceError('Anteroom could not verify the price of every item in this multi-item bundle.');
+      }
+      if (postId === listingId && itemPrice !== reviewedPriceCents) {
+        throw marketplaceError('The reviewed Poshmark listing price changed inside the bundle.');
+      }
+      const rawFloor = Object.hasOwn(floorsMap, postId)
+        ? floorsMap[postId]
+        : (postId === listingId ? reviewedFloorCents : null);
+      const itemFloor = Number(rawFloor);
+      if (!Number.isInteger(itemFloor) || itemFloor <= 0) {
+        throw marketplaceError('Anteroom could not verify a seller floor for every item in this multi-item bundle.');
+      }
+      totalPrice += itemPrice;
+      totalFloor += itemFloor;
+    }
+    if (!seenIds.has(listingId)) {
+      throw marketplaceError('The reviewed listing was not found in this Poshmark bundle.');
+    }
+    combinedPriceCents = totalPrice;
+    combinedFloorCents = totalFloor;
+    finalOfferCents = poshmarkBundleDiscountCents(combinedPriceCents, discountPercent);
+    if (!Number.isInteger(finalOfferCents) || finalOfferCents <= 0 || finalOfferCents % 100 !== 0 || finalOfferCents < combinedFloorCents) {
+      throw marketplaceError('This multi-item bundle offer is below your combined seller floor.');
+    }
+  }
+
   const offerBody = {
-    offer_amount: { val: String(offerCents / 100), currency_code: 'USD' },
+    offer_amount: { val: String(finalOfferCents / 100), currency_code: 'USD' },
     offer_api_version: 3,
   };
   if (payload.shipping_discount_id) {
@@ -860,6 +953,10 @@ async function poshmarkSendPrivateBundleOffer(client, account, payload) {
     recipient_count: 1,
     buyer_handle: buyerHandle || buyerId,
     bundle_id: bundleId,
+    bundle_item_count: itemCount,
+    bundle_total_price_cents: combinedPriceCents,
+    bundle_floor_cents: combinedFloorCents,
+    bundle_offer_price_cents: finalOfferCents,
   };
 }
 

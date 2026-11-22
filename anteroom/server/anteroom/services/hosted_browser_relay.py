@@ -57,7 +57,8 @@ COMMANDS = {"job.vendoo_api": "vendoo.drafts", "marketplace.execute": MARKETPLAC
             "marketplace.import.page": MARKETPLACE_IMPORT, "marketplace.import.listing": MARKETPLACE_IMPORT,
             "marketplace.sales_history": SALES_HISTORY,
             "marketplace.promotion_check": MARKETPLACE_PROMOTIONS, "marketplace.promote": MARKETPLACE_PROMOTIONS,
-            "marketplace.promotion_result": MARKETPLACE_PROMOTIONS, "marketplace.like_events": MARKETPLACE_PROMOTIONS}
+            "marketplace.promotion_result": MARKETPLACE_PROMOTIONS, "marketplace.like_events": MARKETPLACE_PROMOTIONS,
+            "marketplace.active_offers": MARKETPLACE_PROMOTIONS}
 # A relayed command's fields (``CloudMarketplaceProtocol.command`` in the Bridge).
 CONTRACT = ("type", "job_id", "message_id", "payload")
 # How long a tab stays connected after it last asked or beat. A background tab's

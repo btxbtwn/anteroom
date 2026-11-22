@@ -345,6 +345,8 @@ def _claim_due_drafts(db: Session, moment: datetime) -> list[dict[str, Any]]:
                 Listing.conversation_id == row.conversation_id,
                 Listing.scheduled_status == "scheduled",
                 Listing.scheduled_revision_id == row.scheduled_revision_id,
+                Listing.scheduled_publish_at == row.scheduled_publish_at,
+                Listing.scheduled_confirmed_at == row.scheduled_confirmed_at,
             )
             .values(scheduled_status="publishing", scheduled_error=None)
         )
@@ -355,22 +357,37 @@ def _claim_due_drafts(db: Session, moment: datetime) -> list[dict[str, Any]]:
             "revision_id": row.scheduled_revision_id,
             "marketplaces": markets,
             "scheduled_for": row.scheduled_publish_at,
+            "scheduled_confirmed_at": row.scheduled_confirmed_at,
         })
     db.commit()
     return claimed
 
 
 def _settle_publish(db: Session, entry: dict[str, Any], outcome: dict[str, Any], moment: datetime) -> dict[str, Any]:
-    listing = db.query(Listing).filter(Listing.conversation_id == entry["conversation_id"]).first()
     ok = bool(outcome.get("ok"))
     error = None if ok else str(outcome.get("error") or "Scheduled publish did not confirm.")
     status = "published" if ok else "failed"
-    if listing is not None:
-        listing.scheduled_status = status
-        listing.scheduled_error = error
-        if ok:
-            listing.scheduled_publish_at = None
-            listing.scheduled_confirmed_at = None
+    values: dict[str, Any] = {
+        "scheduled_status": status,
+        "scheduled_error": error,
+    }
+    if ok:
+        values["scheduled_publish_at"] = None
+        values["scheduled_confirmed_at"] = None
+    # Guard by the exact claimed schedule identity so a replacement schedule saved
+    # while this publish was in flight is never overwritten.
+    db.execute(
+        update(Listing)
+        .execution_options(synchronize_session=False)
+        .where(
+            Listing.conversation_id == entry["conversation_id"],
+            Listing.scheduled_status == "publishing",
+            Listing.scheduled_revision_id == entry["revision_id"],
+            Listing.scheduled_publish_at == entry["scheduled_for"],
+            Listing.scheduled_confirmed_at == entry.get("scheduled_confirmed_at"),
+        )
+        .values(**values)
+    )
     audit = ScheduledPublishLog(
         id=new_id(),
         conversation_id=entry["conversation_id"],

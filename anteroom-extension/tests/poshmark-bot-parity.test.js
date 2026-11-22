@@ -204,3 +204,169 @@ test('Poshmark automatic follows runs reciprocal 24h, active sellers, unfollows,
   assert.equal(bodies['PUT poshmark.com/vm-rest/users/self/notification_settings'].live_show_notifications, false);
   assert.ok(requests.some(r => r.key === 'DELETE poshmark.com/vm-rest/users/self/followed_users/old-follow-3'));
 });
+
+test('Poshmark multi-item bundle uses combined price and enforces combined seller floors', async () => {
+  const oldLike = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const secondPost = {
+    data: {
+      creator_id: USER,
+      status: 'published',
+      price_amount: { val: '30', currency_code: 'USD' },
+      like_count: 1,
+      inventory: { status: 'available', size_quantities: [{ quantity_sold: 0 }] },
+    },
+  };
+  const { c, bodies, results } = setupWorker({
+    [`GET poshmark.com/vm-rest/posts/${OTHER_POST}`]: [200, secondPost],
+    [`GET poshmark.com/vm-rest/posts/${POST}/likes`]: [
+      200,
+      { data: [{ user_id: 'buyer-1', username: 'happybuyer', created_at: oldLike }] },
+    ],
+    [`POST poshmark.com/vm-rest/users/${USER}/bundles`]: [
+      200,
+      {
+        data: {
+          bundle: {
+            id: 'bundle-88',
+            item_count: 2,
+            posts: [
+              { id: POST, price_amount: { val: '50', currency_code: 'USD' } },
+              { id: OTHER_POST, price_amount: { val: '30', currency_code: 'USD' } },
+            ],
+            is_first_bundle: true,
+            comment_count: 0,
+          },
+        },
+      },
+    ],
+    'POST poshmark.com/vm-rest/bundles/bundle-88/offers': [200, { data: {} }],
+  });
+  await c.handleMarketplacePromotion({
+    type: 'marketplace.promote',
+    payload: {
+      marketplace: 'poshmark',
+      action: 'bundle_offer',
+      listing_id: POST,
+      confirm: true,
+      action_id: 'bundle-multi-ok',
+      price_cents: 5000,
+      offer_price_cents: 4000,
+      floor_cents: 3500,
+      discount_percent: 20,
+      bundle_item_floors: { [POST]: 3500, [OTHER_POST]: 2000 },
+      shipping_discount_id: DISCOUNT,
+      bundle_pause_minutes: 15,
+      bundle_min_items: 2,
+    },
+  });
+  assert.equal(results[0].ok, true);
+  assert.equal(results[0].bundle_item_count, 2);
+  assert.equal(results[0].bundle_total_price_cents, 8000);
+  assert.equal(results[0].bundle_floor_cents, 5500);
+  assert.equal(results[0].bundle_offer_price_cents, 6400);
+  assert.equal(bodies['POST poshmark.com/vm-rest/bundles/bundle-88/offers'].offer_amount.val, '64');
+});
+
+test('Poshmark multi-item bundle refuses when combined offer is below combined floor or a floor is missing', async () => {
+  const oldLike = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  const routes = {
+    [`GET poshmark.com/vm-rest/posts/${POST}/likes`]: [
+      200,
+      { data: [{ user_id: 'buyer-1', username: 'happybuyer', created_at: oldLike }] },
+    ],
+    [`POST poshmark.com/vm-rest/users/${USER}/bundles`]: [
+      200,
+      {
+        data: {
+          bundle: {
+            id: 'bundle-89',
+            item_count: 2,
+            posts: [
+              { id: POST, price_amount: { val: '50', currency_code: 'USD' } },
+              { id: OTHER_POST, price_amount: { val: '30', currency_code: 'USD' } },
+            ],
+            is_first_bundle: true,
+            comment_count: 0,
+          },
+        },
+      },
+    ],
+    'POST poshmark.com/vm-rest/bundles/bundle-89/offers': [200, { data: {} }],
+  };
+
+  // Case 1: combined 20% off ($64) < combined floor ($35 + $35 = $70)
+  const below = setupWorker(routes);
+  await below.c.handleMarketplacePromotion({
+    type: 'marketplace.promote',
+    payload: {
+      marketplace: 'poshmark',
+      action: 'bundle_offer',
+      listing_id: POST,
+      confirm: true,
+      action_id: 'bundle-multi-below',
+      price_cents: 5000,
+      offer_price_cents: 4000,
+      floor_cents: 3500,
+      discount_percent: 20,
+      bundle_item_floors: { [POST]: 3500, [OTHER_POST]: 3500 },
+      shipping_discount_id: DISCOUNT,
+      bundle_pause_minutes: 15,
+      bundle_min_items: 2,
+    },
+  });
+  assert.equal(below.results[0].ok, false);
+  assert.equal(below.bodies['POST poshmark.com/vm-rest/bundles/bundle-89/offers'], undefined);
+
+  // Case 2: missing floor for OTHER_POST
+  const missing = setupWorker(routes);
+  await missing.c.handleMarketplacePromotion({
+    type: 'marketplace.promote',
+    payload: {
+      marketplace: 'poshmark',
+      action: 'bundle_offer',
+      listing_id: POST,
+      confirm: true,
+      action_id: 'bundle-multi-missing',
+      price_cents: 5000,
+      offer_price_cents: 4000,
+      floor_cents: 3500,
+      discount_percent: 20,
+      bundle_item_floors: { [POST]: 3500 },
+      shipping_discount_id: DISCOUNT,
+      bundle_pause_minutes: 15,
+      bundle_min_items: 2,
+    },
+  });
+  assert.equal(missing.results[0].ok, false);
+  assert.equal(missing.bodies['POST poshmark.com/vm-rest/bundles/bundle-89/offers'], undefined);
+});
+
+test('readMarketplaceActiveOffers detects active incoming Poshmark buyer offers and fails closed on Mercari', async () => {
+  const withOffer = setupWorker({
+    [`GET poshmark.com/vm-rest/users/${USER}/offers`]: [
+      200,
+      { data: [{ post_id: POST, status: 'pending', creator_id: 'buyer-99' }] },
+    ],
+  });
+  const activeRes = await withOffer.c.readMarketplaceActiveOffers({ marketplace: 'poshmark', listing_id: POST });
+  assert.deepEqual(JSON.parse(JSON.stringify(activeRes)), { ok: true, verified: true, has_active_offer: true });
+
+  const clean = setupWorker({
+    [`GET poshmark.com/vm-rest/users/${USER}/offers`]: [
+      200,
+      {
+        data: [
+          { post_id: POST, status: 'pending', creator_id: USER },
+          { post_id: POST, status: 'declined', creator_id: 'buyer-99' },
+        ],
+      },
+    ],
+  });
+  const cleanRes = await clean.c.readMarketplaceActiveOffers({ marketplace: 'poshmark', listing_id: POST });
+  assert.deepEqual(JSON.parse(JSON.stringify(cleanRes)), { ok: true, verified: true, has_active_offer: false });
+
+  const mercariRes = await clean.c.readMarketplaceActiveOffers({ marketplace: 'mercari', listing_id: 'm12345678' });
+  assert.equal(mercariRes.ok, true);
+  assert.equal(mercariRes.verified, false);
+});
+

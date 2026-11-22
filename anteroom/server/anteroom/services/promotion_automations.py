@@ -273,13 +273,18 @@ def _validate(body: dict) -> dict:
     elif action == "follow":
         follow_cfg = _normalize_follow_config(body.get("follow_config"))
         try:
+            raw_times = body.get("times") or []
+            times = sorted({normalize_schedule({"kind": "daily", "time": str(value)})["time"] for value in raw_times})
             timezone = str(body.get("timezone") or "UTC")
             require_timezone(timezone)
         except ScheduleError as exc:
             raise PromotionError(400, str(exc)) from exc
+        if len(times) > MAX_TIMES:
+            raise PromotionError(400, f"Choose at most {MAX_TIMES} follow round times.")
         fields.update(
             scope="all",
             conversation_ids=[],
+            times=times or None,
             timezone=timezone,
             follow_config=follow_cfg,
             daily_cap=max(follow_cfg["new_active_sellers_cap"], follow_cfg["unfollow_cap"], 1),
@@ -373,7 +378,7 @@ def enable(db: Session, automation_id: str) -> dict:
     if row.action == "share":
         row.next_run_at = next_share_slot(row, now)
     elif row.action == "follow":
-        row.next_run_at = now + FOLLOW_INTERVAL
+        row.next_run_at = next_share_slot(row, now) if row.times else now + FOLLOW_INTERVAL
     else:
         row.next_run_at = now + OFFER_INTERVAL
     row.enabled, row.paused_reason = True, None
@@ -468,21 +473,23 @@ def activity(db: Session, automation_id: str, limit: int = 50) -> dict:
 
 
 def _shares_today(db: Session, marketplace: str, now: datetime) -> int:
-    return db.query(ListingPromotion).filter(
-        ListingPromotion.marketplace == marketplace, ListingPromotion.action == "share",
+    total = db.query(func.coalesce(func.sum(func.coalesce(ListingPromotion.recipient_count, 1)), 0)).filter(
+        ListingPromotion.marketplace == marketplace,
+        ListingPromotion.action == "share",
         ListingPromotion.sent_at > now - timedelta(hours=24),
-    ).count()
+    ).scalar()
+    return int(total or 0)
 
 
 def _order(db: Session, row: PromotionAutomation, targets: list) -> list:
-    if row.action == "offer":
+    if row.action in ("offer", "bundle_offer"):
         # Skipped reviews are journaled too: low-like listings must not keep
         # consuming the bounded scan while other listings never get checked.
         # Persisted checks survive restarts; a new rule starts with unseen items.
         checked = dict(db.query(ListingPromotion.listing_id, func.max(ListingPromotion.created_at)).filter(
             ListingPromotion.automation_id == row.id,
             ListingPromotion.marketplace == row.marketplace,
-            ListingPromotion.action == "offer",
+            ListingPromotion.action == row.action,
         ).group_by(ListingPromotion.listing_id).all())
         return sorted(targets, key=lambda target: (checked.get(target[1], datetime.min), target[1]))
     if row.share_order == "random":
@@ -584,7 +591,7 @@ def _begin_round(
         if row.action == "share":
             claimed_slot = next_share_slot(row, now)
         elif row.action == "follow":
-            claimed_slot = now + FOLLOW_INTERVAL
+            claimed_slot = next_share_slot(row, now) if row.times else now + FOLLOW_INTERVAL
         else:
             claimed_slot = now + OFFER_INTERVAL
         claimed = db.execute(update(PromotionAutomation).execution_options(synchronize_session=False).where(

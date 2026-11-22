@@ -378,6 +378,11 @@ async function handleStudioMessage(msg) {
       break;
     }
 
+    case 'marketplace.active_offers': {
+      sendBrowserResult(msg, await readMarketplaceActiveOffers(msg.payload || {}));
+      break;
+    }
+
     case 'marketplace.promotion_check':
     case 'marketplace.promote':
     case 'marketplace.promotion_result': {

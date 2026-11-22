@@ -14,6 +14,7 @@ from anteroom.main import app
 from anteroom.models.conversation import Conversation, new_id
 from anteroom.models.ebay_offer import EbayOfferAttempt, EbayOfferRule
 from anteroom.models.listing_promotion import ListingPromotion
+from anteroom.models.promotion_automation import PromotionAutomation
 from anteroom.services import ebay_offers, listing_promotions, promotion_automations
 
 
@@ -346,6 +347,167 @@ class WaterfallAndPoshmarkBotTest(unittest.TestCase):
         )
         self.assertEqual(empty_cfg.status_code, 400)
 
+    def test_follow_rule_preserves_times_and_schedules_by_times(self):
+        res = self.client.post(
+            "/api/promotion-automations",
+            json={
+                "marketplace": "poshmark",
+                "action": "follow",
+                "times": ["09:00", "17:00"],
+                "timezone": "UTC",
+                "follow_config": {"reciprocal_24h": True, "new_active_sellers_cap": 10, "unfollow_cap": 0},
+            },
+        )
+        self.assertEqual(res.status_code, 200)
+        rule_id = res.json()["id"]
+        self.assertEqual(res.json()["times"], ["09:00", "17:00"])
+
+        enabled = promotion_automations.enable(self.db, rule_id)
+        self.assertTrue(enabled["enabled"])
+        row = self.db.get(PromotionAutomation, rule_id)
+        self.assertIsNotNone(row)
+        assert row is not None
+        self.assertEqual(row.times, ["09:00", "17:00"])
+        self.assertIsNotNone(row.next_run_at)
+        assert row.next_run_at is not None
+        self.assertIn(row.next_run_at.hour, (9, 17))
+        self.assertEqual(row.next_run_at.minute, 0)
+
+    def test_shares_today_counts_community_recipient_units_and_bundle_offer_rotates_targets(self):
+        now = _now()
+        self.db.add_all([
+            ListingPromotion(
+                id="self-share-1", batch_id="b1", marketplace="poshmark", action="share",
+                listing_id="5f0000000000000000000001", sent_at=now - timedelta(minutes=10),
+                expires_at=now, state="done", recipient_count=None,
+            ),
+            ListingPromotion(
+                id="comm-share-1", batch_id="b2", marketplace="poshmark", action="share",
+                listing_id="__account__", sent_at=now - timedelta(minutes=5),
+                expires_at=now, state="done", recipient_count=15,
+            ),
+        ])
+        self.db.commit()
+        self.assertEqual(promotion_automations._shares_today(self.db, "poshmark", now), 16)
+
+        rule = PromotionAutomation(
+            id="bundle-rot", marketplace="poshmark", action="bundle_offer", name="Bundle",
+            discount_percent=15, timezone="UTC",
+        )
+        self.db.add(rule)
+        self.db.add(ListingPromotion(
+            id="bundle-checked-a", batch_id="b3", automation_id="bundle-rot",
+            marketplace="poshmark", action="bundle_offer", listing_id="aaa",
+            created_at=now - timedelta(minutes=1), expires_at=now, state="skipped",
+        ))
+        self.db.commit()
+        ordered = promotion_automations._order(self.db, rule, [("c1", "aaa", now), ("c2", "bbb", now)])
+        self.assertEqual([t[1] for t in ordered], ["bbb", "aaa"])
+
+    def test_perform_account_action_cancellation_settles_unknown_and_blocks_overlap(self):
+        import asyncio
+        from unittest.mock import patch
+
+        rule = PromotionAutomation(
+            id="follow-cancel", marketplace="poshmark", action="follow", name="Follow",
+            enabled=True, timezone="UTC",
+            follow_config={"reciprocal_24h": True, "new_active_sellers_cap": 10, "unfollow_cap": 0, "unsubscribe_live_shows": False},
+        )
+        self.db.add(rule)
+        self.db.commit()
+
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def slow_cloud(*_args, **_kwargs):
+            started.set()
+            await release.wait()
+            return {"ok": True, "state": "done", "followed_count": 1, "active_followed_count": 0, "unfollowed_count": 0}
+
+        async def run_scenario():
+            with (
+                patch("anteroom.services.listing_promotions.require_chrome", return_value=None),
+                patch("anteroom.services.cloud_sessions.has_active_session", return_value=True),
+                patch("anteroom.services.cloud_marketplace.execute", side_effect=slow_cloud),
+            ):
+                task = asyncio.create_task(listing_promotions.perform_account_action(
+                    "poshmark", "follow", automation_id="follow-cancel", batch_id="batch-c1", extra_payload={},
+                ))
+                await asyncio.wait_for(started.wait(), timeout=5)
+
+                # Overlapping account action and native/delist guards must see this as busy
+                from anteroom.repositories.queries import JobRepo
+                from anteroom.services import native_marketplaces
+
+                with self.Session() as probe_db:
+                    self.assertIsNotNone(native_marketplaces.blocking_job(JobRepo(probe_db), "poshmark"))
+                with self.assertRaises(listing_promotions.PromotionError) as ctx:
+                    await listing_promotions.perform_account_action(
+                        "poshmark", "follow", automation_id="follow-cancel", batch_id="batch-c2", extra_payload={},
+                    )
+                self.assertEqual(ctx.exception.code, "busy")
+
+                # Cancelling the in-flight task must settle it to unknown (never stuck in sending)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+
+        asyncio.run(run_scenario())
+        self.db.expire_all()
+        rows = self.db.query(ListingPromotion).filter_by(automation_id="follow-cancel").all()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].state, "unknown")
+        self.assertTrue(str(rows[0].job_id or "").startswith("cloud-account:"))
+        # Cloud journal recovery still finds Cloud executor even if active session later disconnects
+        with (
+            patch("anteroom.services.cloud_sessions.has_active_session", return_value=False),
+            patch("anteroom.services.cloud_sessions.load_journals", return_value={
+                f"promotion_{rows[0].id}": {"finished": True, "result": {"ok": True, "state": "done", "followed_count": 2, "unfollowed_count": 0}},
+            }),
+        ):
+            settled, _job_key, cloud_answer = listing_promotions._check_target(self.db, rows[0].id)
+            self.assertIsNone(settled)
+            self.assertIsNotNone(cloud_answer)
+            assert cloud_answer is not None
+            self.assertTrue(cloud_answer["finished"])
+
+    def test_poshmark_bundle_floors_combines_saved_floors_and_shared_minimum(self):
+        from anteroom.models.conversation import Conversation
+        from anteroom.models.listing_promotion import MarketplaceOfferFloor
+        from anteroom.models.marketplace_listing import MarketplaceListing
+
+        c1 = Conversation(id="conv-b1", title="Item 1", status="listed")
+        c2 = Conversation(id="conv-b2", title="Item 2", status="listed")
+        self.db.add_all([c1, c2])
+        self.db.flush()
+        p1 = "5f0000000000000000000011"
+        p2 = "5f0000000000000000000022"
+        self.db.add_all([
+            MarketplaceListing(
+                conversation_id="conv-b1", marketplace="poshmark", state="published",
+                listing_id=p1, listing_url=f"https://poshmark.com/listing/item-1-{p1}",
+            ),
+            MarketplaceListing(
+                conversation_id="conv-b2", marketplace="poshmark", state="published",
+                listing_id=p2, listing_url=f"https://poshmark.com/listing/item-2-{p2}",
+            ),
+            MarketplaceOfferFloor(marketplace="poshmark", listing_id=p1, conversation_id="conv-b1", floor_cents=3500),
+            PromotionAutomation(
+                id="bundle-rule-fl", marketplace="poshmark", action="bundle_offer", name="Bundle",
+                discount_percent=20, minimum_price_cents=1500, timezone="UTC",
+            ),
+        ])
+        self.db.commit()
+        promo = ListingPromotion(
+            id="promo-b1", batch_id="b", conversation_id="conv-b1", marketplace="poshmark",
+            action="bundle_offer", listing_id=p1, automation_id="bundle-rule-fl",
+            floor_cents=3500, expires_at=_now() + timedelta(minutes=10),
+        )
+        floors_map = listing_promotions._poshmark_bundle_floors(self.db, promo)
+        self.assertEqual(floors_map[p1], 3500)
+        self.assertEqual(floors_map[p2], 1500)
+
 
 if __name__ == "__main__":
     unittest.main()
+

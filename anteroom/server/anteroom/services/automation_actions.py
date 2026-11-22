@@ -210,18 +210,70 @@ async def _native_one(conv_id: str, name: str, revision_id: str, kind: str) -> d
     return {"marketplace": name, "ok": True, "detail": _brief(result)}
 
 
-async def wait_for_native_result(conv_id: str, marketplace: str, started: dict) -> dict:
-    """Resolve a dispatch to the record written by that exact native job."""
+async def wait_for_native_result(conv_id: str, marketplace: str, started: dict, *, session_factory=None) -> dict:
+    """Resolve a dispatch to the record written by that exact native job.
+
+    If waiting times out while the job is still running, requests cancellation
+    of the in-flight job and re-reads once so a late completion is reconciled
+    instead of leaving a stale failure or triggering a duplicate relist.
+    """
     from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
+    from anteroom.services import native_marketplaces
 
     job_id = started.get("job_id")
     if not job_id or started.get("error"):
         return started
-    if not await _wait_for_job(job_id):
-        return {"error": "The marketplace job was still running when Anteroom stopped waiting."}
+
+    async def _run_db(fn, *args):
+        sf = session_factory
+        if sf is None:
+            return await _db_work(fn, *args)
+
+        def _call():
+            with sf() as db:
+                return fn(db, *args)
+
+        return await asyncio.to_thread(_call)
+
+    timed_out = False
+    if session_factory is None:
+        if not await _wait_for_job(job_id):
+            timed_out = True
+    else:
+        deadline = asyncio.get_running_loop().time() + IDLE_TIMEOUT_S
+        while await _run_db(_job_running, job_id):
+            if asyncio.get_running_loop().time() > deadline:
+                timed_out = True
+                break
+            await asyncio.sleep(0.5)
+
+    def read_record(db: Session) -> dict:
+        return MarketplaceListingRepo(db).get(conv_id, marketplace)
+
+    if timed_out:
+        record = await _run_db(read_record)
+        try:
+            if session_factory is None:
+                await native_marketplaces.request_cancel(job_id, {**record, "marketplace": marketplace})
+            else:
+                if await _run_db(native_marketplaces._record_cancel, job_id, marketplace) and record.get("operation_id"):
+                    if record.get("executor") == "cloud":
+                        from anteroom.services import cloud_marketplace
+
+                        await cloud_marketplace.cancel(record["operation_id"])
+                    else:
+                        await native_marketplaces._send_cancel(record["operation_id"])
+        except Exception:  # noqa: BLE001 - best-effort cancel before reporting timeout
+            pass
 
     def read(db: Session) -> dict:
         job = _job_outcome(db, job_id)
+        if timed_out and (not job or job[0] != "completed"):
+            return {
+                "error": "The marketplace job was still running when Anteroom stopped waiting; cancellation was requested.",
+                "timed_out": True,
+                "job_id": job_id,
+            }
         if not job or job[0] != "completed":
             return {"error": (job[1] if job else None) or "The marketplace job did not complete."}
         record = MarketplaceListingRepo(db).get(conv_id, marketplace)
@@ -229,7 +281,7 @@ async def wait_for_native_result(conv_id: str, marketplace: str, started: dict) 
             return {"error": "The marketplace record changed after this job."}
         return record
 
-    return await _db_work(read)
+    return await _run_db(read)
 
 
 async def update_revision(conv_id: str, marketplaces: list[str], revision_id: str | None) -> dict:
