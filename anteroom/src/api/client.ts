@@ -1034,6 +1034,9 @@ export const api = {
       request<Conversation>(`/conversations/${id}/unsettle`, { method: "POST" }),
     stop: (id: string) =>
       request<{ ok: boolean }>(`/conversations/${id}/stop`, { method: "POST" }),
+    /** End only the reply being written, leaving fills and jobs running. */
+    cancelMessage: (id: string) =>
+      request<{ ok: boolean }>(`/conversations/${id}/messages/cancel`, { method: "POST" }),
     activity: (id: string, options?: ReadOptions) => read<ConversationActivity>(`/conversations/${id}/activity`, options),
     messages: (id: string, options?: ReadOptions) => read<Message[]>(`/conversations/${id}/messages`, options),
     /** The item's photos, or with `marketplace` the photos added on that marketplace's form only. */

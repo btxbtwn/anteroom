@@ -80,8 +80,8 @@ vi.mock("./ChatMarkdown", () => ({
 }));
 
 vi.mock("./chat/ChatComposer", () => ({
-  ChatComposer: ({ onSend }: { onSend: () => void }) => (
-    <button type="button" data-testid="send-button" onClick={onSend}>
+  ChatComposer: ({ onSend }: { onSend: (alternate: boolean) => void }) => (
+    <button type="button" data-testid="send-button" onClick={() => onSend(false)}>
       Send
     </button>
   ),

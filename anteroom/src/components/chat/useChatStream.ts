@@ -323,8 +323,8 @@ export function useChatStream({
       if (isAbortError(e)) {
         if (!stillMine()) return true;
         if (getLive(convId).userCancelled) {
-          const restore = getLive(convId).restoreInputOnAbort;
-          foldLiveTurn(convId, { cancelled: true });
+          const { restoreInputOnAbort: restore, steered } = getLive(convId);
+          foldLiveTurn(convId, { cancelled: true, steered });
           patchLive(convId, {
             streamText: "",
             streamTrace: [],
@@ -336,7 +336,10 @@ export function useChatStream({
             controller: null,
             userCancelled: false,
             restoreInputOnAbort: false,
+            steered: false,
           });
+          // The steered answer's partial reply is saved server-side; show it.
+          if (steered) void refreshListingQueries(queryClient, convId);
           if (restore) {
             if (opts?.preserveInput) setInput((current) => current || text);
             else setInput(text);
@@ -382,6 +385,23 @@ export function useChatStream({
     setStopping(false);
   }, [convId, queryClient]);
 
+  /**
+   * Cut off the reply being written so a steered follow-up can go next, as
+   * T3 Code's steer does for a provider that cannot take input mid-turn. Only
+   * the reply stops: the field fills and jobs Stop would end keep going, and
+   * the reply's words so far are saved. False when nothing steerable runs.
+   */
+  const interruptAnswer = useCallback(async () => {
+    const liveState = getLive(convId);
+    if (!canSteerLive(convId)) return false;
+    patchLive(convId, { userCancelled: true, restoreInputOnAbort: false, steered: true });
+    liveState.controller?.abort();
+    // Hosted replies run as a durable task that outlives the stream; end it too.
+    await api.conversations.cancelMessage(convId).catch(() => undefined);
+    await queryClient.invalidateQueries({ queryKey: ["activity", convId] });
+    return true;
+  }, [convId, queryClient]);
+
   const handleCancelDiscovery = useCallback(async () => {
     const probeId = activeProbe?.id;
     // Take the open request before clearing it, so it can still be aborted.
@@ -423,7 +443,31 @@ export function useChatStream({
     void handleGenerate();
   }, [failedAction, lastSendText, sendMessage, handleGenerate, activeProbe?.id, handleCancelDiscovery, convId, streamText]);
 
-  return { stopping, streamFromFetch, handleGenerate, sendMessage, handleCancel, handleCancelDiscovery, handleRetry };
+  return {
+    stopping,
+    streamFromFetch,
+    handleGenerate,
+    sendMessage,
+    handleCancel,
+    handleCancelDiscovery,
+    handleRetry,
+    interruptAnswer,
+  };
+}
+
+/**
+ * A reply can take a steer while it is still being written. Generation is a
+ * pipeline that cannot change course, and a reply that is already saving its
+ * edits would lose them if cut off, so a follow-up queues behind both.
+ */
+export function canSteerLive(convId: string): boolean {
+  const live = getLive(convId);
+  return Boolean(live.controller)
+    && live.streaming
+    && !live.generating
+    && !live.resetting
+    && !live.userCancelled
+    && !/^saving/i.test(live.streamStatus.trim());
 }
 
 /** Reattach to a generate the server is still running, and settle one that already finished. */

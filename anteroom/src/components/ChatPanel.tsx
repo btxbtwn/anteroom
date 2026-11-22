@@ -1,8 +1,7 @@
-import { Fragment, useRef, useEffect, useLayoutEffect, useCallback } from "react";
+import { Fragment, useRef, useEffect, useLayoutEffect, useCallback, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import { photosUploading, usePhotosUploading } from "../photoUploads";
-import { newQueuedChatMessage } from "./chatMessageQueue";
 import { CiteSelectionToolbar } from "./CiteSelectionToolbar";
 import { type ChatCitation } from "./chatCitations";
 import { ChatCitationRevealContext } from "./chatCitationContext";
@@ -10,7 +9,9 @@ import { type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { currentPhaseIndex } from "./liveTrace";
 import { assistantDisplayText, extractJson, isListingJson, isStreamError } from "./chat/assistantDisplay";
 import { useComposerImages } from "./chat/ComposerAttachments";
-import { getComposerDraft, setComposerListingPhotoBatch, useComposerDraftText } from "./chat/composerDrafts";
+import { getComposerDraft, setComposerDraftText, setComposerListingPhotoBatch, useComposerDraftText } from "./chat/composerDrafts";
+import { chatQueue, editChatMessage, newQueuedChatMessage, resolveFollowUp } from "./chat/chatQueueStore";
+import { modifierKeyLabel } from "./chat/ComposerPrimaryActions";
 import { ChatComposer } from "./chat/ChatComposer";
 import { decideComposerImageRoute, uploadComposerDraftPhotos } from "./chat/composerDraftPhotos";
 import { StreamErrorPanel, UnfinishedGenerationPanel } from "./chat/ChatErrors";
@@ -24,14 +25,14 @@ import { getLive } from "./chat/liveChatStore";
 import { useChatQueue } from "./chat/useChatQueue";
 import { useChatScroll } from "./chat/useChatScroll";
 import { useChatServerState } from "./chat/useChatServerState";
-import { useChatStream, useGenerateRecovery } from "./chat/useChatStream";
+import { canSteerLive, useChatStream, useGenerateRecovery } from "./chat/useChatStream";
 import { useLiveChat } from "./chat/useLiveChat";
 import { placeTurnFolds } from "./chat/workLogModel";
 import { RegenerateListingButton } from "./ClearListingButton";
 import { Button } from "./ui/button";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
 import { Spinner } from "./ui/spinner";
-import type { ConversationActivity, ListingDocument, Message } from "../api/types";
+import type { ChatAttachmentUpload, ConversationActivity, ListingDocument, Message } from "../api/types";
 import type { ListingChatStatus } from "./ListingChatPopup";
 
 interface Props {
@@ -84,6 +85,7 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     handleCancel,
     handleCancelDiscovery,
     handleRetry,
+    interruptAnswer,
   } = useChatStream({
     convId,
     setInput,
@@ -95,18 +97,59 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
   });
   const serverBusy = Boolean(activity?.busy);
   const sendQueuedMessage = useCallback(
-    (text: string) => sendMessage(text, { preserveInput: true }),
+    (text: string, attachments: ChatAttachmentUpload[] = []) =>
+      sendMessage(text, { preserveInput: true, ...(attachments.length ? { attachments } : {}) }),
     [sendMessage],
   );
-  const { pendingQueue, enqueue, handleRemoveQueued } = useChatQueue({
+  // A queued message being edited in the box, as T3 Code edits a queued run in its composer.
+  // Keyed by listing, so another listing never inherits it.
+  const [editing, setEditing] = useState<{ convId: string; id: string } | null>(null);
+  const editingQueuedId = editing?.convId === convId ? editing.id : null;
+  const setEditingQueuedId = useCallback(
+    (id: string | null) => setEditing(id ? { convId, id } : null),
+    [convId],
+  );
+  const { key: queueKey, pendingQueue, enqueue, steer, sendNow, handleRemoveQueued } = useChatQueue({
     convId,
     busy,
     serverBusy,
+    paused: editingQueuedId !== null,
     sendMessage: sendQueuedMessage,
+    interruptAnswer,
     queuedMessage,
     onQueuedMessageConsumed,
     pinChatToBottom,
   });
+  // Leaving an edit (another listing, a closed chat) gives the queued message
+  // back unchanged and leaves no half-edited copy in this listing's box.
+  useEffect(() => {
+    if (!editingQueuedId) return;
+    return () => setComposerDraftText(draftKey, "");
+  }, [editingQueuedId, draftKey]);
+  const canSteer = streaming && !generating && !resetting && !/^saving/i.test(streamStatus.trim());
+
+  const startEditQueued = useCallback((id: string) => {
+    const message = chatQueue(queueKey).find((item) => item.id === id);
+    if (!message || input.trim() || message.payload !== undefined || message.steer) return false;
+    setEditingQueuedId(id);
+    setInput(message.text);
+    composerRef.current?.focus();
+    return true;
+  }, [queueKey, input, setInput, setEditingQueuedId]);
+  const cancelEditQueued = useCallback(() => {
+    setEditingQueuedId(null);
+    setInput("");
+  }, [setInput, setEditingQueuedId]);
+  const editLastQueued = useCallback(() => {
+    const last = pendingQueue[pendingQueue.length - 1];
+    return Boolean(last && !editingQueuedId && startEditQueued(last.id));
+  }, [pendingQueue, editingQueuedId, startEditQueued]);
+  const sendFirstQueuedNow = useCallback(() => {
+    const first = pendingQueue[0];
+    if (!first || first.steer || !canSteerLive(convId) || editingQueuedId) return false;
+    void sendNow(first.id);
+    return true;
+  }, [pendingQueue, convId, editingQueuedId, sendNow]);
 
   const handleCite = useCallback((citation: ChatCitation) => {
     composerRef.current?.insertCitation(citation);
@@ -212,22 +255,46 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     if (!busy && !serverBusy && !uploadingPhotos) void finishPhotoSend();
   }, [busy, serverBusy, uploadingPhotos, finishPhotoSend]);
 
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback((alternate = false) => {
     const text = input.trim();
     const attached = images.images;
+    if (editingQueuedId) {
+      if (!text) return;
+      editChatMessage(queueKey, editingQueuedId, text);
+      setEditingQueuedId(null);
+      setInput("");
+      return;
+    }
     if (!text && !attached.length) return;
     const listingPhotoBatch = getComposerDraft(draftKey).listingPhotoBatch;
     if (listingPhotoBatch === "uploading") return;
-    // sendMessage refuses while background work runs, so hold the message instead of dropping it.
+    // sendMessage refuses while background work runs, so hold the message
+    // instead of dropping it, or steer it into the reply being written.
     if (busy || serverBusy) {
-      if (attached.length) {
+      const action = resolveFollowUp({ busy: true, canSteer: canSteerLive(convId), alternate });
+      const hold = (message: ReturnType<typeof newQueuedChatMessage>) => {
+        if (action === "steer") void steer(message);
+        else enqueue(message);
+        pinChatToBottom();
+      };
+      if (!attached.length) {
+        setComposerListingPhotoBatch(draftKey, undefined);
+        hold(newQueuedChatMessage(text));
+        setInput("");
+        return;
+      }
+      // Images on a draft with no photos become its listing photos; that waits for the run.
+      if (decideComposerImageRoute(photos?.length, listingPhotoBatch) !== "chat_attachments") {
         images.setError("Images go with the next message once the current run finishes.");
         return;
       }
-      setComposerListingPhotoBatch(draftKey, undefined);
-      enqueue(newQueuedChatMessage(text));
-      setInput("");
-      pinChatToBottom();
+      void (async () => {
+        const uploads = await images.prepare(attached);
+        if (uploads === null) return;
+        images.clear(attached.map((image) => image.id));
+        setInput((current) => (current.trim() === text ? "" : current));
+        hold(newQueuedChatMessage(text, { payload: { attachments: uploads } }));
+      })();
       return;
     }
     // When a draft has no listing photos yet, images attached in chat become
@@ -288,6 +355,10 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
     finishPhotoSend,
     pinChatToBottom,
     enqueue,
+    steer,
+    editingQueuedId,
+    setEditingQueuedId,
+    queueKey,
     images,
     photos,
     draftKey,
@@ -342,7 +413,11 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
   const tailLabel = busy && !resetting && livePhase < 0 && !showStreamBubble
     ? localLive ? localLabel || activityDetail : activityDetail
     : "";
-  const composerPlaceholder = busy
+  const composerPlaceholder = editingQueuedId
+    ? "Edit the queued message…"
+    : busy && canSteer
+    ? `Redirect this reply, or ${modifierKeyLabel()}+Enter to queue…`
+    : busy
     ? "Queue a follow-up…"
     : !hasPhotos
     ? "Upload photos to begin"
@@ -449,7 +524,20 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
           </div>
         ) : null}
 
-        <QueuedMessages queue={pendingQueue} onRemove={handleRemoveQueued} />
+        <QueuedMessages
+          queue={pendingQueue}
+          canSendNow={canSteer && !editingQueuedId}
+          onSendNow={(id) => { void sendNow(id); }}
+          onEdit={startEditQueued}
+          onRemove={handleRemoveQueued}
+          editingId={editingQueuedId}
+          onCancelEdit={cancelEditQueued}
+          editBlockedReason={
+            editingQueuedId ? "Finish editing the other message first"
+              : input.trim() ? "Send or clear the message box first" : null
+          }
+          imageCount={(message) => (message.payload as { attachments?: unknown[] } | undefined)?.attachments?.length ?? 0}
+        />
 
         {streamFailed ? (
           <StreamErrorPanel
@@ -484,6 +572,11 @@ export function ChatPanel({ convId, queuedMessage, onQueuedMessageConsumed, onSt
         onSend={handleSend}
         onStop={() => { void handleCancel(); }}
         stopLabel="Stop everything running for this listing"
+        canSteer={canSteer}
+        editingQueued={editingQueuedId !== null}
+        onCancelEdit={cancelEditQueued}
+        onSendQueuedNow={sendFirstQueuedNow}
+        onEditQueued={editLastQueued}
       />
     </div>
     </ChatCitationRevealContext>

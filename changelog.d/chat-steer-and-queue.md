@@ -1,0 +1,2 @@
+- A message you send while chat is still answering now goes straight in and cuts off that answer, keeping what it already wrote. Press Ctrl/⌘+Enter to queue it for afterwards instead.
+- Queued chat messages stay put when you switch listings, close the chat or reload, and each one can be sent now, edited or removed. Messages with images can be queued too.

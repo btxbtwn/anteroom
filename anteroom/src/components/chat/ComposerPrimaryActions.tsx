@@ -1,12 +1,12 @@
 /**
  * The composer's send and stop buttons, with T3 Code's markup: a round
  * up-arrow send that grows a little on hover, a red stop with a rounded
- * square while a run is going, and a queue button beside it when there is a
- * follow-up to hold.
+ * square while a run is going, and beside it a steer button (click sends now,
+ * modifier-click queues) or, when the run cannot take a steer, a queue button.
  *
  * Adapted from T3 Code (MIT, © 2026 T3 Tools Inc.): components/chat/ComposerPrimaryActions.tsx.
  */
-import { ListPlusIcon } from "lucide-react";
+import { CheckIcon, ListPlusIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
@@ -27,6 +27,16 @@ function SendArrow() {
   );
 }
 
+/** "⌘" on a Mac, "Ctrl" elsewhere, for the queue and steer hints. */
+export function modifierKeyLabel(): string {
+  const platform = typeof navigator === "undefined" ? "" : navigator.platform || navigator.userAgent;
+  return /mac|iphone|ipad/i.test(platform) ? "⌘" : "Ctrl";
+}
+
+function QueueIcon() {
+  return <ListPlusIcon className="size-4" aria-hidden="true" />;
+}
+
 export function ComposerPrimaryActions({
   busy,
   stopping = false,
@@ -36,32 +46,73 @@ export function ComposerPrimaryActions({
   sendLabel = "Send message",
   stopLabel = "Stop",
   queueLabel = "Queue for when the current run finishes",
+  canSteer = false,
+  editingQueued = false,
 }: {
   busy: boolean;
   stopping?: boolean;
   canSubmit: boolean;
-  onSend: () => void;
+  /** `alternate` is true for a modifier-click: queue instead of steer, or the reverse. */
+  onSend: (alternate: boolean) => void;
   onStop?: () => void;
   sendLabel?: string;
   stopLabel?: string;
   /** While busy, a follow-up queues instead; null hides the queue button. */
   queueLabel?: string | null;
+  /** The run can take a steer: a click cuts it off and sends, a modifier-click queues. */
+  canSteer?: boolean;
+  /** The box holds a queued message being edited; the button saves it back. */
+  editingQueued?: boolean;
 }) {
-  if (busy) {
+  const modifier = modifierKeyLabel();
+  const send = (event: { metaKey: boolean; ctrlKey: boolean }) => onSend(event.metaKey || event.ctrlKey);
+  if (editingQueued) {
     return (
       <div className="flex items-center justify-end gap-2">
-        {canSubmit && queueLabel ? (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button type="button" className={SEND_CLASS} {...keepFocus} onClick={onSend} aria-label="Queue message" />
-              }
+        <Tooltip>
+          <TooltipTrigger render={<span className="inline-flex" />}>
+            <button
+              type="button"
+              className={SEND_CLASS}
+              {...keepFocus}
+              onClick={send}
+              disabled={!canSubmit}
+              aria-label="Save queued message"
             >
-              <ListPlusIcon className="size-4" aria-hidden="true" />
-            </TooltipTrigger>
-            <TooltipPopup>{queueLabel}</TooltipPopup>
-          </Tooltip>
-        ) : null}
+              <CheckIcon className="size-4" aria-hidden="true" />
+            </button>
+          </TooltipTrigger>
+          <TooltipPopup>Save queued message</TooltipPopup>
+        </Tooltip>
+      </div>
+    );
+  }
+  if (busy) {
+    const followUp = canSubmit && queueLabel ? (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              className={SEND_CLASS}
+              {...keepFocus}
+              onClick={send}
+              aria-label={canSteer ? "Steer message" : "Queue message"}
+            />
+          }
+        >
+          {canSteer ? <SendArrow /> : <QueueIcon />}
+        </TooltipTrigger>
+        <TooltipPopup>
+          {canSteer
+            ? `Click to send now and cut off this reply, ${modifier}-click or ${modifier}+Enter to queue`
+            : queueLabel}
+        </TooltipPopup>
+      </Tooltip>
+    ) : null;
+    return (
+      <div className="flex items-center justify-end gap-2">
+        {followUp}
         {onStop ? (
           <Tooltip>
             <TooltipTrigger
@@ -90,7 +141,7 @@ export function ComposerPrimaryActions({
   return (
     <Tooltip>
       <TooltipTrigger render={<span className="inline-flex" />}>
-        <button type="button" className={SEND_CLASS} {...keepFocus} onClick={onSend} disabled={!canSubmit} aria-label={sendLabel}>
+        <button type="button" className={SEND_CLASS} {...keepFocus} onClick={send} disabled={!canSubmit} aria-label={sendLabel}>
           <SendArrow />
         </button>
       </TooltipTrigger>

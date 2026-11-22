@@ -33,7 +33,7 @@ vi.mock("./chat/ChatTranscript", () => ({
 vi.mock("./chat/ChatComposer", () => ({
   ChatComposer: ({ images, onSend }: ComponentProps<typeof ChatComposer>) => (
     <>
-      <button onClick={onSend}>Send</button>
+      <button onClick={() => onSend(false)}>Send</button>
       {images.error && <p role="alert">{images.error}</p>}
     </>
   ),

@@ -29,6 +29,8 @@ type LiveStream = {
   lastSendText: string;
   userCancelled: boolean;
   restoreInputOnAbort: boolean;
+  /** The answer was cut off by a steer: fold it as such and give nothing back to the composer. */
+  steered: boolean;
   /** Set by queueChatGenerate: the next attach starts a run instead of resuming one. */
   startQueued: boolean;
   /** Regenerate's wipe is in flight; the chat is empty and nothing streams yet. */
@@ -64,6 +66,7 @@ function emptyLive(): Omit<LiveStream, "listeners"> {
     lastSendText: "",
     userCancelled: false,
     restoreInputOnAbort: false,
+    steered: false,
     startQueued: false,
     resetting: false,
     workStartedAtMs: null,
@@ -82,7 +85,10 @@ let foldSeq = 0;
  * clear the live trace. Kept for the session only. A turn with no work to show
  * folds into nothing.
  */
-export function foldLiveTurn(convId: string, { cancelled = false }: { cancelled?: boolean } = {}) {
+export function foldLiveTurn(
+  convId: string,
+  { cancelled = false, steered = false }: { cancelled?: boolean; steered?: boolean } = {},
+) {
   const live = getLive(convId);
   const trace = live.streamTrace;
   const endedAtMs = live.lastWorkEndedAtMs ?? Date.now();
@@ -95,6 +101,7 @@ export function foldLiveTurn(convId: string, { cancelled = false }: { cancelled?
       startedAtMs: live.workStartedAtMs ?? live.lastWorkStartedAtMs ?? endedAtMs,
       endedAtMs: live.workStartedAtMs != null ? Date.now() : endedAtMs,
       cancelled,
+      ...(steered ? { steered } : {}),
       baseIds: live.turnBaseIds,
     };
     live.foldedTurns = [...live.foldedTurns, turn];
