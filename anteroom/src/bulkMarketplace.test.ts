@@ -85,6 +85,6 @@ describe("bulk crosslist text modes", () => {
     expect(results.map((result) => result.id)).toEqual(["a", "b", "c", "d", "e"]);
     expect(results.find((result) => result.id === "c")).toMatchObject({ ok: false, error: "MiMo stopped responding" });
     expect(results.filter((result) => result.ok && result.changed === 1)).toHaveLength(4);
-    expect(seen.at(-1)).toBe(5);
+    expect(seen[seen.length - 1]).toBe(5);
   });
 });

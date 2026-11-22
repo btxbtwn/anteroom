@@ -80,7 +80,7 @@ export type FilterableListing = {
   /** Marketplaces where the listing is still up but not for sale. */
   inactive_marketplaces?: string[];
   /** Marketplace prices that differ from the seller's pricing rules. */
-  price_drift?: { marketplace: string }[];
+  price_drift?: { marketplace: string; expected?: number; price?: number; source?: string }[];
 };
 
 export interface ListingFilters {

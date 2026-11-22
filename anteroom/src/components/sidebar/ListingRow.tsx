@@ -123,6 +123,14 @@ export const ListingRow = memo(function ListingRow({
     .map((row) => (inactive.has(row.id) ? { ...row, status: "INACTIVE" } : row));
   const drift = listing.price_drift || [];
   const missingSkuWarning = warnMissingSku && status !== "sold" && !String(listing.sku || "").trim();
+  // One short tag keeps the status readable in a narrow sidebar; its tooltip lists every warning.
+  const rowWarnings: { label: string; detail: string; tone: "info" | "warning" }[] = [
+    ...(drift.length ? [{ label: "Price check", tone: "warning" as const,
+      detail: `Price inconsistency: ${drift.map((row) => `${marketplaceName(row.marketplace)} ${row.price} (rules say ${row.expected})`).join(", ")}` }] : []),
+    ...(missingSkuWarning ? [{ label: "No SKU", tone: "warning" as const, detail: "This listing has no SKU" }] : []),
+    ...(inactive.size && status !== "sold" ? [{ label: "Inactive", tone: "info" as const,
+      detail: `Up but not for sale on ${[...inactive].map(marketplaceName).join(", ")}` }] : []),
+  ];
   const activate = () => {
     // While selecting on a phone the whole row is the checkbox, as in Mail's edit mode.
     if (selecting && !canHover()) {
@@ -252,14 +260,10 @@ export const ListingRow = memo(function ListingRow({
                 Missing sale data
               </ListingTag>
             ) : null}
-            {drift.length ? (
-              <ListingTag tone="warning" title={drift.map((row) => `${marketplaceName(row.marketplace)}: ${row.price} (rules say ${row.expected})`).join(" · ")}>
-                Price inconsistency
+            {rowWarnings.length ? (
+              <ListingTag tone={rowWarnings[0].tone} title={rowWarnings.map((warning) => warning.detail).join(" · ")}>
+                {rowWarnings[0].label}{rowWarnings.length > 1 ? ` +${rowWarnings.length - 1}` : ""}
               </ListingTag>
-            ) : null}
-            {missingSkuWarning ? <ListingTag tone="warning" title="This listing has no SKU">No SKU</ListingTag> : null}
-            {inactive.size && status !== "sold" ? (
-              <ListingTag tone="info" title={`Up but not for sale on ${[...inactive].map(marketplaceName).join(", ")}`}>Inactive</ListingTag>
             ) : null}
             {partial ? <span className="truncate text-xs text-sidebar-muted-foreground">{partial}</span> : null}
             {quantity ? <span className="shrink-0 text-xs tabular-nums text-sidebar-muted-foreground">· {quantity}</span> : null}

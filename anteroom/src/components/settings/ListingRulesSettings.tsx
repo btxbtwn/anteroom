@@ -102,8 +102,8 @@ export function PricingRulesSection() {
               const rule = data.rules[market];
               const draft = drafts[market];
               return (
-                <div key={market} className="grid min-w-0 gap-2 rounded-lg border border-border/60 p-2.5 sm:grid-cols-[9rem_5.5rem_5.5rem_minmax(9rem,1fr)] sm:items-center">
-                  <div className="flex min-w-0 items-center gap-2">
+                <div key={market} className="grid min-w-0 grid-cols-2 gap-2 rounded-lg border border-border/60 p-2.5 sm:grid-cols-[9rem_5.5rem_5.5rem_minmax(9rem,1fr)] sm:items-center">
+                  <div className="col-span-2 flex min-w-0 items-center gap-2 sm:col-span-1">
                     <MarketplaceLogo id={market} label="" size={16} />
                     <span className="min-w-0 truncate text-sm font-medium">{marketplaceName(market)}</span>
                   </div>
@@ -119,13 +119,13 @@ export function PricingRulesSection() {
                       onChange={(event) => setDrafts({ ...drafts, [market]: { percent: draft?.percent ?? String(rule.percent), fixed: event.target.value } })}
                       onBlur={() => draft && commit(market, {})} />
                   </label>
-                  <div className="grid gap-0.5 text-2xs text-muted-foreground">
+                  <div className="col-span-2 grid gap-0.5 text-2xs text-muted-foreground sm:col-span-1">
                     <span>Ending · $25 → {examplePrice(25, rule, market)}</span>
                     <SettingsSelect<PriceRounding> aria-label={`${marketplaceName(market)} price ending`} className="sm:w-full"
                       value={market === "poshmark" ? "whole" : rule.rounding} disabled={busy || market === "poshmark"}
                       onChange={(value) => commit(market, { rounding: value })} options={ROUNDING_OPTIONS} />
                   </div>
-                  <p className="text-2xs text-muted-foreground sm:col-span-4">Typical fees: {data.fees[market]}</p>
+                  <p className="col-span-2 text-2xs text-muted-foreground sm:col-span-4">Typical fees: {data.fees[market]}</p>
                 </div>
               );
             })}
