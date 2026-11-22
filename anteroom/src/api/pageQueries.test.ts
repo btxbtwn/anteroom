@@ -10,7 +10,12 @@ const { api } = vi.hoisted(() => {
     analytics: { overview: read("overview") },
     sourcing: { get: read("sourcing") },
     boxes: { list: read("boxes") },
-    automations: { list: read("automations"), approvals: read("approvals") },
+    automations: {
+      list: read("automations"),
+      approvals: read("approvals"),
+      scheduledDrafts: read("scheduled-drafts"),
+      autoRelistRules: read("auto-relist-rules"),
+    },
     errors: { list: read("gaps") },
     ebayOffers: { status: read("ebay-offers") },
     promotionAutomations: { list: read("promotions") },
@@ -21,8 +26,9 @@ const { api } = vi.hoisted(() => {
 vi.mock("./client", () => ({ api }));
 
 import {
-  automationsQuery, boxesQuery, directConnectionsQuery, ebayFinancesQuery, homeQuery, lastThirtyDays, prefetchPageReads,
-  salesLedgerQuery, salesOverviewQuery, settingsUiQuery, sourcingQuery,
+  automationsQuery, autoRelistRulesQuery, boxesQuery, directConnectionsQuery, ebayFinancesQuery, homeQuery,
+  lastThirtyDays, prefetchPageReads, salesLedgerQuery, salesOverviewQuery, scheduledDraftsQuery, settingsUiQuery,
+  sourcingQuery,
 } from "./pageQueries";
 
 const NOW = Date.parse("2026-11-08T14:24:00Z");
@@ -41,6 +47,7 @@ describe("page prefetch", () => {
     const { start, end } = lastThirtyDays(NOW);
     for (const key of [
       settingsUiQuery.queryKey, homeQuery().queryKey, sourcingQuery.queryKey, boxesQuery.queryKey, automationsQuery.queryKey,
+      scheduledDraftsQuery.queryKey, autoRelistRulesQuery.queryKey,
       directConnectionsQuery.queryKey, ebayFinancesQuery(start, end).queryKey,
       salesLedgerQuery({ start, end, q: "", attention: "all", sort: "newest" }, 1).queryKey,
       salesOverviewQuery(start, end, "all").queryKey,
@@ -54,7 +61,10 @@ describe("page prefetch", () => {
     await prefetchPageReads(client, { views: new Set(["sourcing"]), features: new Set() }, NOW);
     expect(api.sourcing.get).toHaveBeenCalledTimes(1);
     expect(api.settings.ui).toHaveBeenCalledTimes(1);
-    for (const read of [api.home.summary, api.automations.list, api.ebayOffers.status, api.promotionAutomations.list, api.salesLedger.list, api.directConnections.status, api.ebay.read]) {
+    for (const read of [
+      api.home.summary, api.automations.list, api.automations.scheduledDrafts, api.automations.autoRelistRules,
+      api.ebayOffers.status, api.promotionAutomations.list, api.salesLedger.list, api.directConnections.status, api.ebay.read,
+    ]) {
       expect(read).not.toHaveBeenCalled();
     }
   });
@@ -94,6 +104,8 @@ describe("page prefetch", () => {
     track(api.boxes.list, { read: "boxes" });
     track(api.automations.list, { read: "automations" });
     track(api.automations.approvals, { read: "approvals" });
+    track(api.automations.scheduledDrafts, { read: "scheduled-drafts" });
+    track(api.automations.autoRelistRules, { read: "auto-relist-rules" });
     track(api.errors.list, { read: "gaps" });
     track(api.ebayOffers.status, { read: "ebay-offers" });
     track(api.promotionAutomations.list, { read: "promotions" });

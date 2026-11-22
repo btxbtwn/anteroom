@@ -111,6 +111,8 @@ export async function prefetchPageReads(client: QueryClient, runtime: Runtime, n
       () => prefetch(automationsQuery),
       () => prefetch(automationApprovalsQuery),
       () => prefetch(automationGapsQuery),
+      () => prefetch(scheduledDraftsQuery),
+      () => prefetch(autoRelistRulesQuery),
     );
     if (runtime.features.has("ebay_offers")) tasks.push(() => prefetch(ebayOffersQuery));
     if (runtime.features.has("marketplace_sessions")) tasks.push(() => prefetch(promotionAutomationsQuery));
