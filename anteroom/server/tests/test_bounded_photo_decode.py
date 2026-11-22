@@ -6,6 +6,7 @@ import io
 import socket
 import threading
 import time
+import warnings
 
 import pytest
 from fastapi.testclient import TestClient
@@ -228,13 +229,17 @@ def test_image_decode_allows_two_concurrent_decodes(monkeypatch):
     from anteroom.services import image_decode
 
     assert image_decode.DEFAULT_DECODE_CONCURRENCY == 2
+    monkeypatch.setattr(image_decode, "_decode_slot", threading.Semaphore(2))
     sample = _png(64, 64, "RGB")
     real_open = image_decode.Image.open
     both_inside = threading.Barrier(2, timeout=3)
     errors: list[Exception] = []
 
+    original_filters = warnings.filters[:]
+
     def synchronized_open(fp):
         both_inside.wait()
+        assert warnings.filters == original_filters
         return real_open(fp)
 
     monkeypatch.setattr(image_decode.Image, "open", synchronized_open)
@@ -250,6 +255,7 @@ def test_image_decode_allows_two_concurrent_decodes(monkeypatch):
         t.start()
     for t in threads:
         t.join(5)
+    assert not any(t.is_alive() for t in threads)
     assert not errors
 
 

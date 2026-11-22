@@ -1,5 +1,8 @@
 import asyncio
 import os
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import make_url
@@ -143,6 +146,38 @@ def get_db():
         db.close()
 
 
+_worker_db_slots: ContextVar[asyncio.Semaphore | None] = ContextVar("worker_db_slots", default=None)
+
+
+@contextmanager
+def limit_worker_db_steps(slots: asyncio.Semaphore) -> Iterator[None]:
+    """Share a database budget among the background tasks started in this scope."""
+    token = _worker_db_slots.set(slots)
+    try:
+        yield
+    finally:
+        _worker_db_slots.reset(token)
+
+
+async def run_worker_db_step[**P, T](work: Callable[P, T], /, *args: P.args, **kwargs: P.kwargs) -> T:
+    """Run blocking database work, waiting for any scoped permit before using a thread."""
+    slots = _worker_db_slots.get()
+    if slots is None:
+        return await asyncio.to_thread(work, *args, **kwargs)
+
+    await slots.acquire()
+    step = asyncio.create_task(asyncio.to_thread(work, *args, **kwargs))
+
+    def release(done: asyncio.Task[T]) -> None:
+        slots.release()
+        if not done.cancelled():
+            done.exception()  # The caller may have been cancelled before a worker error.
+
+    # A cancelled caller must not release capacity until the worker closes its session.
+    step.add_done_callback(release)
+    return await asyncio.shield(step)
+
+
 async def in_worker_session(work, /, *args):
     """Run ``work(db, *args)`` on a worker thread, with a session of its own.
 
@@ -155,7 +190,7 @@ async def in_worker_session(work, /, *args):
     def run():
         with SessionLocal() as db:
             return work(db, *args)
-    return await asyncio.to_thread(run)
+    return await run_worker_db_step(run)
 
 
 async def claim_in_worker_session(work, undo, /, *args):

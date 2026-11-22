@@ -254,3 +254,21 @@ def test_solo_seller_still_claims_all_tasks_without_artificial_cap(storage):  # 
     claimed = [queue.claim(engine)[0] for _ in range(4)]
     assert claimed == expected
     assert queue.claim(engine) is None
+
+
+
+def test_claim_does_not_let_fresh_chat_overtake_aged_generation(storage):  # noqa: F811
+    engine, sessions, owner, other, _identity, task_id = prepare(storage)
+    with sessions(owner)() as db:
+        db.execute(update(BackgroundTask).where(BackgroundTask.id == task_id).values(
+            created_at=datetime.now(UTC) - timedelta(seconds=90),
+        ))
+        db.commit()
+    with sessions(other)() as db:
+        conversation = Conversation(title='Fresh chat')
+        db.add(conversation)
+        db.flush()
+        chat_id = queue.enqueue(db, conversation.id, 'chat', {}).id
+
+    assert queue.claim(engine)[:2] == (task_id, owner)
+    assert queue.claim(engine)[:2] == (chat_id, other)

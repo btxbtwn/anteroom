@@ -193,35 +193,58 @@ def test_mercari_preview_cooldown_is_seller_scoped(cloud, signing_keys, monkeypa
     assert second['response'].json()['rows'][0]['state'] == 'preview'
 
 
-def test_promotion_scheduler_bounds_concurrent_sellers_per_tick(monkeypatch):
+def test_promotion_scheduler_bounds_database_steps_without_blocking_sellers(monkeypatch):
     import asyncio
-    import time
-    import uuid
-    from anteroom.services import hosted_promotion_scheduler
+    import threading
+    from contextlib import nullcontext
 
-    hosted_browser_relay._relays.clear()
-    sellers = [str(uuid.uuid4()) for _ in range(6)]
-    for seller in sellers:
-        relay = hosted_browser_relay.relay_for(seller)
-        relay._capabilities = frozenset({'marketplace.actions', 'marketplace.promotions'})
-        relay._seen_at = time.monotonic()
+    from anteroom import database
+    from anteroom.services import hosted_promotion_scheduler as scheduler
 
-    active = 0
-    peak = 0
-    checked = []
+    sellers = {'alice', 'bob', 'charlie'}
+    monkeypatch.setattr(scheduler, 'ready_sellers', lambda _: sellers)
+    monkeypatch.setattr(database, 'SessionLocal', lambda: nullcontext())
 
-    async def slow_check(owner: str, _recovered: set[str]) -> None:
-        nonlocal active, peak
-        active += 1
-        peak = max(peak, active)
-        await asyncio.sleep(0.02)
-        checked.append(owner)
-        active -= 1
+    async def run():
+        loop = asyncio.get_running_loop()
+        db_busy = asyncio.Event()
+        release_db = threading.Event()
+        browser = asyncio.Event()
+        release_browser = asyncio.Event()
+        lock = threading.Lock()
+        active = peak = 0
+        entered_browser = set()
 
-    monkeypatch.setattr(hosted_promotion_scheduler, 'check_seller', slow_check)
-    try:
-        asyncio.run(hosted_promotion_scheduler.check_ready_sellers(set()))
-    finally:
-        hosted_browser_relay._relays.clear()
-    assert set(checked) == set(sellers)
-    assert peak <= hosted_promotion_scheduler.MAX_CONCURRENT_SELLERS
+        def db_step(_db):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+                if active == 2:
+                    loop.call_soon_threadsafe(db_busy.set)
+            try:
+                assert release_db.wait(5)
+            finally:
+                with lock:
+                    active -= 1
+
+        async def check(owner, _recovered):
+            await database.in_worker_session(db_step)
+            entered_browser.add(owner)
+            if entered_browser == sellers:
+                browser.set()
+            await release_browser.wait()
+
+        monkeypatch.setattr(scheduler, 'check_seller', check)
+        wave = asyncio.create_task(scheduler.check_ready_sellers(set()))
+        try:
+            await asyncio.wait_for(db_busy.wait(), 3)
+            release_db.set()
+            await asyncio.wait_for(browser.wait(), 3)
+            assert peak == 2
+        finally:
+            release_db.set()
+            release_browser.set()
+            await asyncio.wait_for(wave, 5)
+
+    asyncio.run(run())

@@ -52,7 +52,15 @@ def upgrade() -> None:
                     WHERE pending.status='queued' AND pending.kind IN ('generate', 'chat', 'assistant')
                     AND pending.user_id <> '00000000-0000-0000-0000-000000000000'
                     ORDER BY
-                        CASE WHEN pending.kind IN ('assistant', 'chat') THEN 0 ELSE 1 END,
+                        -- After a minute, claim in age order ahead of fresh work so
+                        -- later interactive submissions cannot starve old generations.
+                        CASE
+                            WHEN pending.created_at <= now() - interval '1 minute' THEN 0
+                            WHEN pending.kind IN ('assistant', 'chat') THEN 1
+                            ELSE 2
+                        END,
+                        CASE WHEN pending.created_at <= now() - interval '1 minute'
+                            THEN pending.created_at END,
                         (
                             SELECT count(*) FROM public.background_tasks AS active
                             WHERE active.user_id = pending.user_id
