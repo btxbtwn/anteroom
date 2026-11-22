@@ -130,9 +130,10 @@ def git(*args: str) -> str:
     return run("git", *args)
 
 
-def changed_paths(base: str, head: str) -> list[str]:
+def changed_paths(base: str, head: str, *, include_deleted: bool = True) -> list[str]:
     """Changed files, safe for spaces; a rename lists both its old and new path."""
-    raw = subprocess.check_output(["git", "diff", "--no-renames", "--name-only", "-z", base, head])
+    filters = [] if include_deleted else ["--diff-filter=d"]
+    raw = subprocess.check_output(["git", "diff", "--no-renames", "--name-only", "-z", *filters, base, head])
     return [os.fsdecode(p) for p in raw.split(b"\0") if p]
 
 
@@ -204,7 +205,7 @@ def finding_prompt(finding: dict) -> str:
     return f"Review comment at @{finding['path']} at line {finding['line']}:\n{finding['fix_prompt'].strip()}"
 
 
-def render_finding(finding: dict, *, outside_diff: bool = False) -> str:
+def render_finding(finding: dict) -> str:
     icon = SEVERITY_ICON.get(finding["severity"], "")
     parts = [
         FINDING_MARK,
@@ -213,18 +214,7 @@ def render_finding(finding: dict, *, outside_diff: bool = False) -> str:
         finding["body"].strip(),
         details("🤖 Prompt to fix issue", fence(f"{FIX_PREAMBLE}\n\n{finding_prompt(finding)}")),
     ]
-    if outside_diff:
-        parts[0] = f"`{finding['path']}` line {finding['line']}"
     return "\n\n".join(parts)
-
-
-def split_findings(findings: list[dict], diff: str) -> tuple[list[dict], list[dict]]:
-    """Inline findings (on a line, or on a file the diff changes) and the rest."""
-    allowed = commentable_lines(diff)
-    inline, outside = [], []
-    for finding in findings:
-        (inline if finding["path"] in allowed else outside).append(finding)
-    return inline, outside
 
 
 def review_comment(finding: dict, allowed: dict[str, set[int]]) -> dict:
@@ -246,16 +236,8 @@ def review_comment(finding: dict, allowed: dict[str, set[int]]) -> dict:
     return comment
 
 
-def render_review_body(inline: list[dict], outside: list[dict], ctx: dict) -> str:
-    findings = inline + outside
-    parts = [f"**Actionable comments posted: {len(inline)}**"]
-    if outside:
-        rendered = "\n\n---\n\n".join(render_finding(f, outside_diff=True) for f in outside)
-        parts.append(
-            "> [!CAUTION]\n> Some comments are on files this PR does not change and can't be posted inline."
-            + "\n\n"
-            + details(f"⚠️ Outside diff range comments ({len(outside)})", rendered)
-        )
+def render_review_body(findings: list[dict], ctx: dict) -> str:
+    parts = [f"**Actionable comments posted: {len(findings)}**"]
     prompt = "\n\n".join(finding_prompt(f) for f in findings)
     parts.append(details("🤖 Prompt to fix all issues", fence(f"{FIX_PREAMBLE}\n\n{prompt}")))
     parts.append(details("ℹ️ Review info", render_review_info(ctx)))
@@ -520,19 +502,22 @@ def post_review(args) -> None:
     data = json.loads(raw)
     diff = (ctx_dir / "pr.diff").read_text()
     allowed = commentable_lines(diff)
-    findings = [f for f in data.get("findings", []) if f["path"] in ctx["files"] or f["path"] in allowed]
-    inline, outside = split_findings(findings, diff)
+    # A changed file can have no new-side hunk (e.g. a mode change). Use Git's
+    # path list for eligibility, and use line ranges only for comment placement.
+    changed = set(changed_paths(ctx["merge_base"], ctx["head"], include_deleted=False))
+    eligible = changed & (set(ctx["files"]) | allowed.keys())
+    findings = [f for f in data.get("findings", []) if f["path"] in eligible]
 
     review_url = None
     if findings:
-        comments = [review_comment(f, allowed) for f in inline]
+        comments = [review_comment(f, allowed) for f in findings]
         review = api(
             f"repos/{repo()}/pulls/{ctx['pr']}/reviews",
             "POST",
             {
                 "commit_id": ctx["head"],
                 "event": "COMMENT",
-                "body": render_review_body(inline, outside, ctx),
+                "body": render_review_body(findings, ctx),
                 "comments": [c for c in comments if "subject_type" not in c],
             },
         )
@@ -560,7 +545,7 @@ def post_review(args) -> None:
         api(f"repos/{repo()}/issues/comments/{summaries[-1][0]['id']}", "PATCH", {"body": body})
     else:
         api(f"repos/{repo()}/issues/{ctx['pr']}/comments", "POST", {"body": body})
-    print(f"Posted {len(inline)} inline and {len(outside)} outside-diff findings; {len(addressed)} addressed.")
+    print(f"Posted {len(findings)} findings in review threads; {len(addressed)} addressed.")
 
 
 def prepare_autofix(args) -> None:

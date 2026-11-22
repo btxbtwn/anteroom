@@ -1,9 +1,13 @@
 """Tests for review_bot.py's formatting and decision logic. Run:
 python3 .github/review-bot/test_review_bot.py"""
 
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 import review_bot as bot  # noqa: E402
@@ -46,9 +50,6 @@ class DiffTests(unittest.TestCase):
         self.assertNotIn("gone.py", lines)
 
     def test_findings_off_the_diff_become_file_comments(self):
-        inline, outside = bot.split_findings([FINDING, FINDING | {"line": 40}, FINDING | {"path": "other.py"}], DIFF)
-        self.assertEqual([f["line"] for f in inline], [3, 40])
-        self.assertEqual([f["path"] for f in outside], ["other.py"])
         comment = bot.review_comment(FINDING | {"line": 40}, bot.commentable_lines(DIFF))
         self.assertEqual(comment["subject_type"], "file")
         self.assertNotIn("line", comment)
@@ -75,11 +76,10 @@ class RenderTests(unittest.TestCase):
         self.assertIn("🟠 Major", body)
         self.assertIn("Review comment at @app.py at line 3:\nClamp y.", body)
 
-    def test_review_body_counts_inline_and_lists_files(self):
+    def test_review_body_counts_threaded_findings(self):
         ctx = {"head": "h" * 40, "merge_base": "m" * 40, "since": "s" * 40, "files": ["app.py"]}
-        body = bot.render_review_body([FINDING], [FINDING | {"path": "other.py"}], ctx)
+        body = bot.render_review_body([FINDING], ctx)
         self.assertTrue(body.startswith("**Actionable comments posted: 1**"))
-        self.assertIn("Outside diff range comments (1)", body)
         self.assertIn(f"between {'s' * 40} and {'h' * 40}", body)
 
     def test_summary_escapes_table_cells_and_records_state(self):
@@ -102,6 +102,37 @@ class RenderTests(unittest.TestCase):
         once = bot.addressed_body("finding", "1234567890")
         self.assertTrue(once.endswith("✅ Addressed in commit 1234567"))
         self.assertEqual(bot.addressed_body(once, "999"), once)
+
+
+class PostReviewTests(unittest.TestCase):
+    def test_only_live_pr_paths_get_findings_and_each_finding_gets_a_thread(self):
+        findings = [FINDING | {"path": path} for path in ("app.py", "mode.py", "gone.py", "unchanged.py")]
+        with tempfile.TemporaryDirectory() as temp:
+            ctx = Path(temp)
+            (ctx / "context.json").write_text(json.dumps({
+                "pr": 1, "head": "head", "merge_base": "base", "since": None,
+                "files": ["app.py", "mode.py", "gone.py", "unchanged.py"],
+            }))
+            (ctx / "pr.diff").write_text(DIFF + "diff --git a/mode.py b/mode.py\nold mode 100644\nnew mode 100755\n")
+            (ctx / "open-findings.json").write_text("[]")
+            with (
+                patch.dict(bot.os.environ, {"REVIEW_OUTPUT": json.dumps({"findings": findings})}),
+                patch.object(bot.subprocess, "check_output", return_value=b"app.py\0mode.py\0") as diff_paths,
+                patch.object(bot, "repo", return_value="owner/repo"),
+                patch.object(bot, "api", return_value={}) as api,
+                patch.object(bot, "bot_issue_comments", return_value=[]),
+                patch.object(bot, "render_summary") as summary,
+            ):
+                bot.post_review(SimpleNamespace(context=temp))
+
+        review, file_comment, _ = [call.args[2] for call in api.call_args_list]
+        self.assertEqual([c["path"] for c in review["comments"]], ["app.py"])
+        self.assertEqual((file_comment["path"], file_comment["subject_type"]), ("mode.py", "file"))
+        self.assertIn(bot.FINDING_MARK, file_comment["body"])
+        self.assertNotIn("@gone.py at line", review["body"])
+        self.assertNotIn("@unchanged.py at line", review["body"])
+        self.assertEqual(summary.call_args.kwargs["posted"], 2)
+        self.assertIn("--diff-filter=d", diff_paths.call_args.args[0])
 
 
 class AutofixTests(unittest.TestCase):
