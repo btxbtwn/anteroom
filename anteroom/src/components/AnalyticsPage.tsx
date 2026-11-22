@@ -362,6 +362,8 @@ function SalesStats({ data, accountingMode }: { data: InventoryAnalytics; accoun
 
 /** The API's previous period ends where this one starts; name its last whole day. */
 function previousEnd(iso: string): string {
+  // The server sends UTC microseconds. Only exact midnight excludes this date.
+  if (!/T00:00:00(?:\.0+)?(?:Z|\+00:00)$/.test(iso)) return iso;
   const end = new Date(iso);
   end.setUTCMilliseconds(end.getUTCMilliseconds() - 1);
   return end.toISOString();

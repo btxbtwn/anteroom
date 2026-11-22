@@ -98,6 +98,32 @@ def test_csv_preview_errors_and_retry(expenses):
     assert "'=1+1" in client.get(f"{ROOT}/expenses.csv", params=PERIOD).text
 
 
+@pytest.mark.parametrize("bulk", [False, True])
+def test_context_refreshed_after_outer_commit(expenses, bulk):
+    from anteroom.models.business_expense import BusinessExpense
+    from anteroom.services.business_context import cached
+
+    client, engine = expenses
+    expense_id = client.post(ROOT, json=EXPENSE).json()["id"]
+    with Session(engine) as writer, Session(engine) as reader:
+        if bulk:
+            writer.query(BusinessExpense).filter_by(id=expense_id).update({"amount_cents": 2000})
+        else:
+            writer.get_one(BusinessExpense, expense_id).amount_cents = 2000
+            writer.flush()
+        with writer.begin_nested():
+            pass
+
+        def read_amount():
+            return reader.get_one(BusinessExpense, expense_id).amount_cents
+
+        day = date(2026, 1, 10)
+        assert cached(reader, day, read_amount) == 1200
+        reader.commit()
+        writer.commit()
+        assert cached(reader, day, read_amount) == 2000
+
+
 def test_bulk_import_inserts_across_batches_and_paginates(expenses):
     client, _ = expenses
     content = "incurred_date,amount_cents,category,description\n" + "".join(

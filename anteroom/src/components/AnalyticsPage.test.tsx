@@ -62,6 +62,13 @@ function render(payload: InventoryAnalytics) {
 }
 
 describe("InventoryAnalyticsView", () => {
+  it("includes the last date of a previous window ending just after midnight", () => {
+    const html = render({ ...data, previous: data.previous && {
+      ...data.previous, end: "2026-08-31T00:00:00.000001+00:00",
+    } });
+    expect(html).toContain("Compared with Aug 1 – Aug 31, 2026.");
+  });
+
   it("compares units listed and sell-through with the preceding period", () => {
     const html = render({
       ...data, units_listed: 4,

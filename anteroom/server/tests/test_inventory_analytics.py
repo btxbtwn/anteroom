@@ -582,6 +582,13 @@ class LoadAnalyticsTest(unittest.TestCase):
         self.assertIn("incomplete_sales", body)
         self.assertIsNone(body["previous"])
         month = client.get("/api/analytics?range=30d").json()
+        self.assertEqual(month["window_start"], month["previous"]["end"])
+        self.assertEqual(datetime.fromisoformat(month["window_end_exclusive"]),
+                         datetime.fromisoformat(month["window_end"]) + timedelta(microseconds=1))
+        for window in (month, month["previous"]):
+            self.assertIn("units_listed", window)
+            self.assertIn("units_sold", window)
+            self.assertIn("sell_through_rate", window)
         self.assertIn("fees_known", month["previous"]["sales"])
         week = client.get("/api/analytics?range=7d")
         self.assertEqual(week.status_code, 200, week.text)

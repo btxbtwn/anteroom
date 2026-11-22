@@ -97,7 +97,10 @@ def _after_flush(session: Session, _context) -> None:
 @event.listens_for(Session, "after_commit")
 @event.listens_for(Session, "after_rollback")
 def _after_transaction(session: Session) -> None:
-    if session.info.pop("business_context_dirty", False):
+    if session.info.get("business_context_dirty"):
+        # A savepoint can finish while the watched write is still uncommitted.
+        if not session.in_nested_transaction():
+            session.info.pop("business_context_dirty")
         invalidate_business_context(user_id=getattr(session, "user_id", None))
 
 
