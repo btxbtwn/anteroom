@@ -303,10 +303,10 @@ must load/reload the updated extension and refresh the page before connecting.
 See [the protocol and manual test](../../docs/cloud-extension.md).
 
 
-## Managed AI (hosted Gemini Flash via OpenRouter)
+## Managed AI (hosted OpenRouter models)
 
 Setting `ANTEROOM_MANAGED_OPENROUTER_KEY` via Fly secrets switches the hosted
-web and iOS workspace to a single platform-managed OpenRouter provider with zero
+web and iOS workspace to platform-managed OpenRouter models with zero
 per-account provider setup:
 
 ```sh
@@ -316,12 +316,15 @@ fly secrets set --config deploy/fly/fly.toml \
 
 Optional overrides:
 
-- `ANTEROOM_MANAGED_MODEL`: OpenRouter model slug (defaults to `google/gemini-3.1-flash-lite`).
-- `ANTEROOM_MANAGED_REASONING`: Optional reasoning effort (`minimal`, `low`, `medium`, `high`, `xhigh`, or `max`).
+- `ANTEROOM_MANAGED_MODEL`: Default OpenRouter model slug for photo analysis, listing generation, size tags, assistant, and sold comps (defaults to `google/gemini-3.5-flash-lite`).
+- `ANTEROOM_MANAGED_REASONING`: Reasoning effort for the default model (`minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `none`/`off` to omit; defaults to `minimal`).
+- `ANTEROOM_MANAGED_FIELD_EDIT_MODEL`: OpenRouter model slug for chat edits and automatic marketplace/Etsy field fills (defaults to `anthropic/claude-haiku-5.5`).
+- `ANTEROOM_MANAGED_MEASUREMENT_MODEL`: OpenRouter model slug for yardstick measurement reading (defaults to `openai/gpt-6.2-sol`).
 
 When `ANTEROOM_MANAGED_OPENROUTER_KEY` is set, `/api/runtime` advertises the
 `managed_ai` feature, hosted clients hide Settings → Providers and the composer
 model picker, provider/key mutation endpoints reject writes with `403`, and all
-hosted photo reading, drafting, comp search, and assistant requests use the
-managed OpenRouter provider without exposing the key. The local desktop app is
-unaffected and continues to support local provider sign-ins and API keys.
+hosted photo reading, drafting, field filling, measurement reading, comp search,
+and assistant requests use the managed OpenRouter models without exposing the
+key. The local desktop app is unaffected and continues to support local provider
+sign-ins and API keys.

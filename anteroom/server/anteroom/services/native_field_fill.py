@@ -865,9 +865,9 @@ def _category_fill_evidence(db: Session, conv_id: str) -> tuple[str, str] | None
 
 async def _fill_after_category(conv_id: str, markets: set[str]) -> None:
     from anteroom.database import in_worker_session
-    from anteroom.services.listing_provider import get_listing_provider
+    from anteroom.services.listing_provider import get_listing_provider, managed_task_provider
 
-    provider = get_listing_provider()
+    provider = managed_task_provider("field_edit") or get_listing_provider()
     if provider is None:
         return
     try:

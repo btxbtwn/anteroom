@@ -519,16 +519,18 @@ async def _finish_generation_background(
         await check_photos()
 
         async def fill_native():
+            from anteroom.services.listing_provider import managed_task_provider
             from anteroom.services.marketplaces import get_selected_marketplaces
             from anteroom.services.native_field_fill import fill_etsy_attributes, fill_native_fields
 
+            fill_provider = await asyncio.to_thread(managed_task_provider, "field_edit") or provider
             async with live_trace.agent("native-fields", "Marketplace category fields") as agent, model_slots.slot():
-                filled = await fill_native_fields(conv_id, provider, evidence=evidence,
+                filled = await fill_native_fields(conv_id, fill_provider, evidence=evidence,
                                                   expected_photo_fingerprint=expected_photo_fingerprint)
                 selected = await asyncio.to_thread(get_selected_marketplaces)
                 await check_photos()
                 if "etsy" in selected:
-                    filled = await fill_etsy_attributes(conv_id, provider, evidence=evidence,
+                    filled = await fill_etsy_attributes(conv_id, fill_provider, evidence=evidence,
                                                           photos=expected_photo_fingerprint) or filled
                 agent.result("Filled category fields" if filled else "No category fields to fill")
                 return filled

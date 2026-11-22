@@ -12,7 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from anteroom.config import MAX_PHOTO_SIZE_MB
-from anteroom.database import in_worker_session
+from anteroom.database import in_worker_session, run_worker_db_step
 from anteroom.models.conversation import Conversation, Photo
 from anteroom.repositories.queries import ConversationRepo
 from anteroom.routes.api_contract import NOT_FOUND, SIZE_TAG_READ_ERRORS, SizeTagReadResult
@@ -24,7 +24,7 @@ from anteroom.services.hosted_limits import (
     release_upload_slot,
     stream_upload_to_path,
 )
-from anteroom.services.listing_provider import get_photo_provider
+from anteroom.services.listing_provider import get_photo_provider, managed_task_provider
 from anteroom.services.photo_store import photo_store
 
 MAX_UPLOAD_FILES = 20
@@ -69,6 +69,9 @@ def _photo_provider(what: str):
 def _provider(garment: str):
     if garment not in GARMENTS:
         raise HTTPException(400, f"Garment must be one of {', '.join(GARMENTS)}")
+    managed = managed_task_provider("measurement")
+    if managed is not None:
+        return managed
     return _photo_provider("measurements")
 
 
@@ -126,7 +129,7 @@ async def _read_size_tag(provider, paths: list[Path]) -> dict:
 async def read_measurements(request: Request, files: list[UploadFile] = File(...), garment: str = Form(...)):
     """Suggest an item's measurements from photos not saved yet (bulk upload). Saves nothing."""
     limit_seller_submissions(request)
-    provider = _provider(garment)
+    provider = await run_worker_db_step(_provider, garment)
     with tempfile.TemporaryDirectory(prefix="measure-upload-") as workdir:
         paths = await _write_uploads(files, workdir)
         # Drop the upload slot once disk streaming finishes so slow vision LLM calls never hold it.
@@ -139,7 +142,7 @@ async def read_measurements(request: Request, files: list[UploadFile] = File(...
 async def read_size_tags(request: Request, files: list[UploadFile] = File(...)):
     """Suggest an item's clothing size from its size tag in photos not saved yet (bulk upload). Saves nothing."""
     limit_seller_submissions(request)
-    provider = _photo_provider("size tags")
+    provider = await run_worker_db_step(_photo_provider, "size tags")
     with tempfile.TemporaryDirectory(prefix="size-tag-upload-") as workdir:
         paths = await _write_uploads(files, workdir)
         await release_upload_slot(request)
@@ -149,7 +152,7 @@ async def read_size_tags(request: Request, files: list[UploadFile] = File(...)):
 @router.post("/api/conversations/{conv_id}/measurements/read")
 async def read_saved_measurements(conv_id: str, body: ReadSavedRequest):
     """Suggest a saved listing's measurements from its photos, in their order. Saves nothing."""
-    provider = _provider(body.garment)
+    provider = await run_worker_db_step(_provider, body.garment)
     filenames = await in_worker_session(_photo_filenames, conv_id)
     paths = await asyncio.to_thread(photo_store().local_paths, filenames)
     return await _read(provider, paths, body.garment)
@@ -192,7 +195,7 @@ async def _download_hosted_photos(workdir: str, keys: list[str], token: str) -> 
 async def read_hosted_saved_measurements(conv_id: str, body: ReadSavedRequest, request: Request):
     """The hosted read of a saved listing: its photos come from private storage. Saves nothing."""
     limit_seller_submissions(request)
-    provider = _provider(body.garment)
+    provider = await run_worker_db_step(_provider, body.garment)
     keys = await in_seller_session(request, _hosted_photo_keys, conv_id)
     token = request.headers["authorization"].partition(" ")[2]
     with tempfile.TemporaryDirectory(prefix="measure-saved-") as workdir:

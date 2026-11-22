@@ -1,0 +1,1 @@
+- Upgrade hosted managed AI to Gemini 3.5 Flash Lite (minimal reasoning) by default, Claude Haiku 5.5 for chat edits and marketplace field fills, and GPT-6.2 Sol for yardstick measurements, and recover cleanly when reasoning-only retries hit models that require reasoning.

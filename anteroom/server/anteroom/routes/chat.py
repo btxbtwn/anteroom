@@ -160,12 +160,18 @@ async def run_message(conv_id: str, body: ChatMessage, *, stored_attachments=Non
     if provider is None:
         await in_worker_session(_no_provider, conv_id)
         raise HTTPException(400, "Sign in with ChatGPT in Settings, or add a MiMo or Cursor API key.")
-    provider_name, provider_model = _provider_meta(provider)
 
     if not await in_worker_session(_start_answer, conv_id):
         # Seller answers during category discovery resume the same generation
         # pipeline; chat must not bypass the schema prerequisite.
         return await generate_listing(conv_id)
+
+    from anteroom.services.listing_provider import managed_task_provider
+
+    edit_provider = await asyncio.to_thread(managed_task_provider, "field_edit")
+    if edit_provider is not None:
+        provider = edit_provider
+    provider_name, provider_model = _provider_meta(provider)
 
     async def stream_response():
         full_text = ""

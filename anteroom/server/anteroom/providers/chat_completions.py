@@ -261,13 +261,25 @@ class ChatCompletionsProvider:
                 raise RuntimeError(f"{first} {exc}") from exc
         # A reasoning model can spend the whole reply thinking and stop before
         # writing the listing. Ask again with reasoning off so the visible answer
-        # gets the entire budget. A model that always reasons ignores the flag, so
-        # the second try can fail the same way; both reasons are then reported.
+        # gets the entire budget. Models that always reason may reject
+        # reasoning=off with HTTP 400; fall back once to minimal effort when the
+        # initial call was not already minimal, and keep both failure reasons.
         try:
             async for chunk in self._stream(messages, model, reasoning=False):
                 yield chunk
         except EmptyCompletionError as exc:
             raise RuntimeError(f"{first} Retried with reasoning off and {exc}") from exc
+        except http_retry.ProviderHTTPError as exc:
+            if exc.status == 400 and self._can_retry_minimal_reasoning(model):
+                try:
+                    async for chunk in self._stream(messages, model, reasoning={"effort": "minimal"}):
+                        yield chunk
+                    return
+                except EmptyCompletionError as fallback:
+                    raise RuntimeError(f"{first} Retried with minimal reasoning and {fallback}") from fallback
+                except Exception as fallback:
+                    raise RuntimeError(f"{first} Retrying with minimal reasoning failed: {fallback}") from fallback
+            raise RuntimeError(f"{first} Retrying with reasoning off failed: {exc}") from exc
         except Exception as exc:
             raise RuntimeError(f"{first} Retrying with reasoning off failed: {exc}") from exc
 
@@ -289,14 +301,20 @@ class ChatCompletionsProvider:
     async def quick_chat(self, messages: list[dict]):
         yield await self._complete(messages, self.listing_model)
 
-    def _body(self, messages: list[dict], model: str, *, reasoning: bool = True, **extra) -> dict:
+    def _can_retry_minimal_reasoning(self, model: str) -> bool:
+        return not (self.reasoning_effort == "minimal" and model == self.listing_model)
+
+    def _body(self, messages: list[dict], model: str, *, reasoning: bool | dict = True, **extra) -> dict:
         body = {"model": model, "messages": messages, **extra}
-        if self.spec.reasoning and not reasoning:
-            # OpenRouter's switch for a reply that does not think first. Models
-            # that always reason ignore it.
-            body["reasoning"] = {"enabled": False}
-        elif self.reasoning_effort and model == self.listing_model:
-            body["reasoning"] = {"effort": self.reasoning_effort}
+        if self.spec.reasoning:
+            if isinstance(reasoning, dict):
+                body["reasoning"] = reasoning
+            elif not reasoning:
+                # OpenRouter's switch for a reply that does not think first.
+                # Models that always reason may ignore it or reject it with HTTP 400.
+                body["reasoning"] = {"enabled": False}
+            elif self.reasoning_effort and model == self.listing_model:
+                body["reasoning"] = {"effort": self.reasoning_effort}
         return body
 
     async def _post(self, body: dict, timeout: float = 300, *, endpoint: str = "chat/completions") -> dict:
@@ -310,24 +328,35 @@ class ChatCompletionsProvider:
             call.usage(payload.get("usage"), anthropic=False)
             return payload
 
-    async def _complete(self, messages: list[dict], model: str, *, reasoning: bool = True) -> str:
+    async def _complete(self, messages: list[dict], model: str, *, reasoning: bool | dict = True) -> str:
         payload = await self._post(self._body(messages, model, reasoning=reasoning))
         text = chunk_text(payload)
         if not text.strip():
             error = EmptyCompletionError(
                 self.spec.label, model, finish_reason(payload), len(chunk_thinking(payload)),
             )
-            if reasoning and self.spec.reasoning and chunk_thinking(payload).strip():
+            if reasoning is True and self.spec.reasoning and chunk_thinking(payload).strip():
                 # Field fills and photo reads use plain completions too. Give
                 # reasoning-only replies the same bounded recovery as streams.
                 try:
                     return await self._complete(messages, model, reasoning=False)
                 except EmptyCompletionError as retry:
                     raise RuntimeError(f"{error} Retried with reasoning off and {retry}") from retry
+                except http_retry.ProviderHTTPError as retry:
+                    if retry.status == 400 and self._can_retry_minimal_reasoning(model):
+                        try:
+                            return await self._complete(messages, model, reasoning={"effort": "minimal"})
+                        except EmptyCompletionError as fallback:
+                            raise RuntimeError(f"{error} Retried with minimal reasoning and {fallback}") from fallback
+                        except Exception as fallback:
+                            raise RuntimeError(f"{error} Retrying with minimal reasoning failed: {fallback}") from fallback
+                    raise RuntimeError(f"{error} Retrying with reasoning off failed: {retry}") from retry
+                except Exception as retry:
+                    raise RuntimeError(f"{error} Retrying with reasoning off failed: {retry}") from retry
             raise error
         return text
 
-    async def _stream(self, messages: list[dict], model: str, *, reasoning: bool = True):
+    async def _stream(self, messages: list[dict], model: str, *, reasoning: bool | dict = True):
         with model_usage.observe(self.name, model) as call:
             body = self._body(messages, model, reasoning=reasoning, stream=True, stream_options={"include_usage": True})
             async with http_client() as client:
@@ -404,7 +433,7 @@ OPENROUTER_WEB_SEARCH_ENGINE = "perplexity"
 class OpenRouterProvider(ChatCompletionsProvider):
     """OpenRouter runs model-directed web searches through its server tool."""
 
-    def _body(self, messages: list[dict], model: str, *, reasoning: bool = True, **extra) -> dict:
+    def _body(self, messages: list[dict], model: str, *, reasoning: bool | dict = True, **extra) -> dict:
         # One model is served by several hosts, and default routing spreads
         # requests across them at random. A slow host turned a 1,600-token
         # field reply into an 81-second wait, so try the fastest host for the

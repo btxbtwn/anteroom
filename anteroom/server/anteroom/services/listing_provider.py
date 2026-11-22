@@ -141,6 +141,23 @@ def get_photo_provider():
     return get_listing_provider()
 
 
+def managed_task_provider(task: str):
+    """Return a task-specific hosted managed provider when active, else None.
+
+    Desktop and seller-BYOK contexts return None so callers keep using the
+    seller's configured listing or photo provider unchanged.
+    """
+    from anteroom import sandbox
+    from anteroom.services.hosted_provider import managed_ai_enabled, managed_provider
+    from anteroom.services.service_context import current
+
+    if sandbox.enabled() or current() is None or not managed_ai_enabled():
+        return None
+    if task not in ("field_edit", "measurement"):
+        raise ValueError(f"Unsupported managed task: {task}")
+    return with_deadlines(managed_provider(task))
+
+
 def provider_is_configured() -> bool:
     from anteroom import sandbox
     from anteroom.services.service_context import current
