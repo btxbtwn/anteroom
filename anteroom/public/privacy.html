@@ -51,6 +51,11 @@
       number, status and date, and the amounts: item price, shipping, refunds, marketplace
       fees and your shipping cost. Anteroom does not collect buyers' names, addresses or
       messages, and never sees card or bank details.</li>
+    <li><strong>Connected banks and cards:</strong> if you enable Plaid expense sync,
+      Anteroom receives institution and account names, masked account numbers, and
+      up to two years of transactions from authorized accounts. Anteroom uses that
+      data to import expenses into your books. Plaid handles your bank sign-in.
+      Anteroom stores the access token in macOS Keychain or Supabase Vault.</li>
     <li><strong>Interest in your listings:</strong> which of your listings were liked and
       when, the like count, and how many people an offer would reach. Not who liked them.</li>
     <li><strong>Vendoo:</strong> if you use Vendoo, your Vendoo account ID and email address,
@@ -110,8 +115,7 @@
   it with third parties except the service providers listed below.</p>
 
   <h2>Service providers</h2>
-  <p>To operate the hosted service, Anteroom uses the following infrastructure and AI
-  providers:</p>
+  <p>Anteroom uses the following service providers:</p>
   <ul>
     <li><strong>Supabase</strong> (United States): authentication, Postgres database, and
       private encrypted photo storage for myanteroom.com and iPhone accounts.</li>
@@ -119,6 +123,8 @@
       workers for myanteroom.com.</li>
     <li><strong>Cloudflare</strong>: Workers webhook relay for eBay and Etsy OAuth callbacks,
       sale notifications, and public eBay research lookups.</li>
+    <li><strong>Plaid</strong>: bank and credit card linking and transaction sync when
+      you connect an institution. See <a href="https://plaid.com/legal/#privacy-statement">Plaid's privacy statement</a>.</li>
     <li><strong>AI model providers</strong> (OpenRouter, or the AI provider you connect in
       Settings &rarr; Providers): generates listing text, reads measurements and tags from
       your photos, and powers the business assistant.</li>
@@ -133,7 +139,9 @@
   <h2>Your choices and account deletion</h2>
   <p>You can turn off sale detection, delisting after a sale, and every share or offer
   rule at any time. You can delete listings, disconnect a marketplace, or uninstall the
-  extension.</p>
+  extension. You can disconnect a bank or card in Analytics &rarr; Expenses. This
+  stops sync and removes the stored access token. Previously imported expenses stay
+  in your books until you delete them.</p>
   <p>You can permanently delete your hosted account and all Anteroom data immediately from
   <strong>Account &rarr; Delete account…</strong> on the web or
   <strong>Settings &rarr; Account &rarr; Delete account…</strong> on iPhone. Deleting your

@@ -49,6 +49,7 @@ TOPIC_BY_TABLE: dict[str, str | None] = {
     "assistant_memories": "assistant",
     "marketplace_sales": "sales",
     "business_expenses": "sales",
+    "plaid_connections": "sales",
     "sale_events": "sales",
     "sale_snapshots": "sales",
     "ad_spend": "sales",

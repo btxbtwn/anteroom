@@ -23,6 +23,7 @@ from anteroom.routes import listing_sheet as listing_sheet_route
 from anteroom.routes import ebay_offers, listing_promotions, promotion_automations
 from anteroom.routes import account_move, ebay
 from anteroom.routes import chrome_import, similar_items
+from anteroom.routes import plaid
 from anteroom.routes import ai_keys, business_expenses, sales_ledger, bulk_delete, bulk_edit, bulk_marketplace, listing_copies, listing_templates
 from anteroom.routes import automations as automations_route
 from anteroom.routes.error_reports import router as error_reports_router
@@ -145,7 +146,16 @@ async def lifespan(app: FastAPI):
 
     claude_sessions.keep_warm_on_this_loop()
     shared_http.keep_connection_on_this_loop()
-    yield
+    from anteroom.services import plaid_expenses
+    from anteroom.services.plaid_client import PlaidClient
+
+    plaid_timer = asyncio.create_task(plaid_expenses.serve()) if not offline and PlaidClient.configured() else None
+    try:
+        yield
+    finally:
+        if plaid_timer:
+            plaid_timer.cancel()
+            await asyncio.gather(plaid_timer, return_exceptions=True)
     await offer_service.stop()
     await promotion_automation_service.stop()
     try:
@@ -262,6 +272,7 @@ app.include_router(suggestions.router)
 app.include_router(analytics.router)
 app.include_router(sales_ledger.router)
 app.include_router(business_expenses.router)
+app.include_router(plaid.router)
 app.include_router(bulk_edit.router)
 app.include_router(bulk_marketplace.router)
 app.include_router(bulk_delete.router)

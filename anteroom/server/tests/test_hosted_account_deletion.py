@@ -16,6 +16,7 @@ from anteroom.models.background_task import BackgroundTask
 from anteroom.models.conversation import Conversation
 from anteroom.models.job import Job
 from anteroom.models.marketplace_listing import MarketplaceListing
+from anteroom.models.plaid import PlaidConnection, PlaidTransaction
 from anteroom.models.user_preference import UserPreference
 from anteroom.services import account_deletion
 from anteroom.services.hosted_context import VaultSecretStore
@@ -194,6 +195,15 @@ def test_vault_credentials_of_only_the_deleted_seller_go(vault_storage):  # noqa
     for owner in (ALICE, BOB):
         VaultSecretStore(sessions(owner), owner).set('marketplace-accounts', f'fixture-{owner}')
         VaultSecretStore(sessions(owner), owner).set('ai-api-keys', f'fixture-ai-{owner}')
+        with sessions(owner)() as db:
+            item = PlaidConnection(institution_id='bank', institution_name='Bank', environment='sandbox', accounts=[])
+            db.add(item)
+            db.add(PlaidTransaction(import_key='expense', imported_revision=1))
+            db.commit()
+            slot = f'plaid:{item.id}'
+        VaultSecretStore(sessions(owner), owner).set(slot, f'fixture-plaid-{owner}')
+        if owner == BOB:
+            bob_slot = slot
     from anteroom import database
     original = database.engine
     database.engine = engine
@@ -204,7 +214,9 @@ def test_vault_credentials_of_only_the_deleted_seller_go(vault_storage):  # noqa
         database.engine = original
     with engine.connect() as db:
         names = set(db.scalars(text('SELECT name FROM vault.secrets')))
-        assert names == {f'anteroom:{BOB}:marketplace-accounts', f'anteroom:{BOB}:ai-api-keys'}
+        assert names == {f'anteroom:{BOB}:marketplace-accounts', f'anteroom:{BOB}:ai-api-keys', f'anteroom:{BOB}:{bob_slot}'}
+        for table in ('plaid_connections', 'plaid_transactions'):
+            assert list(db.scalars(text(f'SELECT user_id FROM {table}'))) == [BOB]
         assert set(db.scalars(text('SELECT DISTINCT user_id FROM user_secret_references'))) == {BOB}
     assert VaultSecretStore(sessions(BOB), BOB).get('marketplace-accounts') == f'fixture-{BOB}'
     assert VaultSecretStore(sessions(ALICE), ALICE).get('marketplace-accounts') is None

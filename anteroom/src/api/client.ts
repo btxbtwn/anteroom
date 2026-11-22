@@ -1,7 +1,7 @@
 import { listingScreenRead } from "./listingScreen";
 import { reportError } from "./errorReports";
 import type { VendooDraft } from "./vendooDraft";
-import type { CsvInput, CsvResult, CurrencyReport, Expense, ExpenseInput, ExpenseUpdate, MileageAmount, MileageInput, OfferLogResponse } from "./contract.gen";
+import type { ConnectionStatus, PlaidExchange, PlaidLinkToken, PlaidStatus, CsvInput, CsvResult, CurrencyReport, Expense, ExpenseInput, ExpenseUpdate, MileageAmount, MileageInput, OfferLogResponse } from "./contract.gen";
 import { ApiRequestError, currentHostedSession, retryAfterMs, studioFetch, studioUpload, hasHostedApiSession } from "./transport";
 import { trackPhotoUpload } from "../photoUploads";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
@@ -509,6 +509,19 @@ function postHostedPhoto(convId: string, file: File, marketplace?: string): Prom
 }
 
 export const api = {
+  plaid: {
+    status: (signal: AbortSignal) => read<PlaidStatus>("/business-expenses/plaid/status", { signal }),
+    linkToken: () => request<PlaidLinkToken>("/business-expenses/plaid/link-token", { method: "POST" }),
+    exchange: (body: PlaidExchange) => request<ConnectionStatus>("/business-expenses/plaid/exchange", {
+      method: "POST", body: JSON.stringify(body),
+    }),
+    sync: (id: string) => request<ConnectionStatus>(
+      `/business-expenses/plaid/connections/${encodeURIComponent(id)}/sync`, { method: "POST" },
+    ),
+    disconnect: (id: string) => request<void>(
+      `/business-expenses/plaid/connections/${encodeURIComponent(id)}`, { method: "DELETE" },
+    ),
+  },
   businessExpenses: {
     list: (params: string, signal: AbortSignal) => read<Expense[]>(`/business-expenses?${params}`, { signal }),
     report: (params: string, signal: AbortSignal) => read<CurrencyReport[]>(`/business-expenses/profit-and-loss?${params}`, { signal }),

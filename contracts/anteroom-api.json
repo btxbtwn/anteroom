@@ -1,6 +1,46 @@
 {
   "components": {
     "schemas": {
+      "AccountSummary": {
+        "properties": {
+          "mask": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mask"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "subtype": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subtype"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type"
+        ],
+        "title": "AccountSummary",
+        "type": "object"
+      },
       "Body_read_size_tags_api_size_tags_read_post": {
         "properties": {
           "files": {
@@ -16,6 +56,73 @@
           "files"
         ],
         "title": "Body_read_size_tags_api_size_tags_read_post",
+        "type": "object"
+      },
+      "ConnectionStatus": {
+        "properties": {
+          "accounts": {
+            "items": {
+              "$ref": "#/components/schemas/AccountSummary"
+            },
+            "title": "Accounts",
+            "type": "array"
+          },
+          "has_cursor": {
+            "title": "Has Cursor",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "institution_name": {
+            "title": "Institution Name",
+            "type": "string"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error"
+          },
+          "last_synced_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Synced At"
+          },
+          "status": {
+            "enum": [
+              "waiting",
+              "current",
+              "error",
+              "disconnecting"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "institution_name",
+          "accounts",
+          "last_synced_at",
+          "last_error",
+          "has_cursor",
+          "status"
+        ],
+        "title": "ConnectionStatus",
         "type": "object"
       },
       "Conversation": {
@@ -1025,7 +1132,7 @@
             "enum": [
               "manual",
               "csv",
-              "bank"
+              "plaid"
             ],
             "title": "Import Source",
             "type": "string"
@@ -2160,6 +2267,78 @@
         "title": "PhotoEdits",
         "type": "object"
       },
+      "PlaidExchange": {
+        "properties": {
+          "institution_name": {
+            "default": "Connected institution",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Institution Name",
+            "type": "string"
+          },
+          "public_token": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Public Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "public_token"
+        ],
+        "title": "PlaidExchange",
+        "type": "object"
+      },
+      "PlaidLinkToken": {
+        "properties": {
+          "link_token": {
+            "title": "Link Token",
+            "type": "string"
+          },
+          "redirect_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Redirect Uri"
+          }
+        },
+        "required": [
+          "link_token"
+        ],
+        "title": "PlaidLinkToken",
+        "type": "object"
+      },
+      "PlaidStatus": {
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "connections": {
+            "items": {
+              "$ref": "#/components/schemas/ConnectionStatus"
+            },
+            "title": "Connections",
+            "type": "array"
+          },
+          "max_connections": {
+            "title": "Max Connections",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "configured",
+          "max_connections",
+          "connections"
+        ],
+        "title": "PlaidStatus",
+        "type": "object"
+      },
       "ReportLine": {
         "properties": {
           "amount_cents": {
@@ -2703,6 +2882,146 @@
           }
         },
         "summary": "Calculate Mileage"
+      }
+    },
+    "/api/business-expenses/plaid/connections/{connection_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Disconnect"
+      }
+    },
+    "/api/business-expenses/plaid/connections/{connection_id}/sync": {
+      "post": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "connection_id",
+            "required": true,
+            "schema": {
+              "title": "Connection Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sync"
+      }
+    },
+    "/api/business-expenses/plaid/exchange": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlaidExchange"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Exchange"
+      }
+    },
+    "/api/business-expenses/plaid/link-token": {
+      "post": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaidLinkToken"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Link Token"
+      }
+    },
+    "/api/business-expenses/plaid/status": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaidStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Status"
       }
     },
     "/api/business-expenses/profit-and-loss": {

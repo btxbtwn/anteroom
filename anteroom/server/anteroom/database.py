@@ -241,6 +241,7 @@ def load_models() -> None:
     from anteroom.models.sale_event import SaleEvent  # noqa: F401
     from anteroom.models.marketplace_sale import MarketplaceSale  # noqa: F401
     from anteroom.models.business_expense import BusinessExpense  # noqa: F401
+    from anteroom.models.plaid import PlaidConnection, PlaidTransaction  # noqa: F401
     from anteroom.models.marketplace_listing import MarketplaceListing  # noqa: F401
     from anteroom.models.ebay_offer import EbayOfferAttempt, EbayOfferPolicy, EbayOfferRule  # noqa: F401
     from anteroom.models.ebay_action import EbayAction  # noqa: F401

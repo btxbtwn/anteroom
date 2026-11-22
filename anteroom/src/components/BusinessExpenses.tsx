@@ -4,6 +4,8 @@ import { api } from "../api/client";
 import { pollMs } from "../api/polling";
 import type { CsvResult, Expense, ExpenseInput, MileageInput } from "../api/contract.gen";
 import { downloadFile } from "./downloadFile";
+import { ConnectedBanks } from "./ConnectedBanks";
+import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "./ui/select";
@@ -69,6 +71,7 @@ export function BusinessExpenses({ report, mode, setMode }: {
     queryKey: ["business-expenses", expenseParams.toString()],
     queryFn: ({ signal }) => api.businessExpenses.list(expenseParams.toString(), signal),
     enabled: valid && !report,
+    refetchInterval: () => pollMs(60_000),
   });
   const reportParams = `${dates}&mode=${mode}`;
   const pnl = useQuery({
@@ -102,6 +105,7 @@ export function BusinessExpenses({ report, mode, setMode }: {
     {downloadError && <FormError>{downloadError}</FormError>}
     {!valid && <FormError>Choose a valid date range.</FormError>}
     {!report && <>
+      <ConnectedBanks />
       {editing && <ExpenseForm key={editing === "new" ? "new" : editing.id}
         expense={editing === "new" ? undefined : editing} today={today} close={() => setEditing(null)} />}
       <ExpenseImport downloadTemplate={() => download(`${path}/template.csv`, "expense-template.csv")} />
@@ -128,6 +132,7 @@ export function BusinessExpenses({ report, mode, setMode }: {
             <p className="text-xs text-muted-foreground">{expense.incurred_date} · {CATEGORIES[expense.category]}</p>
           </div>
           <div className="flex items-center gap-2 text-sm">
+            <Badge variant="secondary">{({ manual: "Manual", csv: "CSV", plaid: "Plaid" })[expense.import_source]}</Badge>
             <span className="tabular-nums">{expenseMoney(expense.amount_cents, expense.currency ?? "USD")}</span>
             <Button variant="ghost" onClick={() => setEditing(expense)}>Edit</Button>
           </div>
@@ -238,7 +243,8 @@ function ExpenseForm({ expense, today, close }: { expense?: Expense; today: stri
         }}>Calculate mileage</Button>}
         <Button type="button" variant="outline" disabled={busy} onClick={close}>Cancel</Button>
         {expense && <Button type="button" variant="ghost" disabled={busy}
-          onClick={() => { if (window.confirm("Delete this expense?")) remove.mutate(expense); }}>Delete expense</Button>}
+          onClick={() => { if (window.confirm(expense.import_source === "plaid"
+            ? "Exclude this transaction from your expenses? Plaid will not import it again." : "Delete this expense?")) remove.mutate(expense); }}>{expense.import_source === "plaid" ? "Exclude transaction" : "Delete expense"}</Button>}
       </div>
     </form>
   </Panel>;

@@ -165,6 +165,16 @@ class VaultSecretStore:
     def delete(self, account):
         self.update(account, lambda _previous: None)
 
+    def write_in_session(self, db: SellerDatabaseSession, account: str, value: str | None) -> None:
+        """Stage a Vault write in the same transaction as related seller records."""
+        try:
+            db.execute(text('SELECT anteroom_private.secret_write(:slot, :value)'), {'slot': account, 'value': value})
+            note_changes(db, 'user_secret_references')
+        except SQLAlchemyError as exc:
+            _storage_failure('update', 'write', exc)
+            raise CredentialStorageUnavailable() from None
+        self._cache.pop(account, None)
+
     def update(self, account, mutator):
         stage = 'session'
         try:
@@ -182,10 +192,7 @@ class VaultSecretStore:
                     stage = 'close'
                     return
                 stage = 'write'
-                db.execute(text('SELECT anteroom_private.secret_write(:slot, :value)'), {'slot': account, 'value': value})
-                # The function writes outside the ORM; announce it like any settings change.
-                stage = 'change'
-                note_changes(db, 'user_secret_references')
+                self.write_in_session(db, account, value)
                 stage = 'commit'
                 db.commit()
                 self._cache[account] = value

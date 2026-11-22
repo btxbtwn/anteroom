@@ -150,10 +150,17 @@ def _build_csp(supabase_url: str) -> str:
     else:
         img_src = "'self' data: blob:"
         connect_src = "'self' https://*.supabase.co wss://*.supabase.co"
+    from anteroom.services.plaid_client import HOSTS, PlaidClient
+    plaid = PlaidClient.configured()
+    plaid_script = " https://cdn.plaid.com/link/v2/stable/link-initialize.js" if plaid else ""
+    plaid_frame = "frame-src https://cdn.plaid.com; " if plaid_script else ""
+    if plaid:
+        connect_src += f" {HOSTS[plaid.environment]}"
     # pywebview builds its native API methods with Function(). WebKit
     # applies this policy to that bootstrap as well as to page scripts.
     return (
-        "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; "
+        f"default-src 'self'; script-src 'self' 'unsafe-eval'{plaid_script}; style-src 'self' 'unsafe-inline'; "
+        f"{plaid_frame}"
         f"img-src {img_src}; connect-src {connect_src}; "
         "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
     )
@@ -365,6 +372,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
             from anteroom.services import (
                 background_worker, hosted_automation_scheduler, hosted_job_watchdog, hosted_offer_scheduler,
                 hosted_promotion_scheduler, hosted_sale_checks, hosted_sourcing_scheduler, hosted_sales_scheduler,
+                plaid_expenses,
             )
             from anteroom.services import background_tasks as queue
             from anteroom.routes.assistant import answer_task
@@ -397,6 +405,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
                 # Refreshes each seller's due buy list, as the Mac's Sourcing timer does.
                 (lambda: hosted_sourcing_scheduler.serve(engine), 'anteroom-sourcing'),
                 (lambda: hosted_sales_scheduler.serve(engine), 'anteroom-sales'),
+                (lambda: plaid_expenses.serve(hosted=True), 'anteroom-plaid'),
                 # Cloud marketplace sales and promotion schedulers run only on worker/all Machines.
                 (lambda: hosted_sale_checks.serve_cloud(engine), 'anteroom-cloud-sales'),
                 (lambda: hosted_promotion_scheduler.serve_cloud(engine), 'anteroom-cloud-promotions'),
@@ -519,9 +528,9 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     from anteroom.routes.hosted_attachments import router as attachment_router
     app.include_router(attachment_router)
     from anteroom.routes import analytics, boxes, sale_calendar, sales_ledger
-    from anteroom.routes import business_expenses, scout, sourcing
+    from anteroom.routes import business_expenses, plaid, scout, sourcing
     for shared_router in (analytics.router, boxes.router, sale_calendar.router, sales_ledger.router, sourcing.router, scout.router,
-                          business_expenses.router):
+                          business_expenses.router, plaid.router):
         app.include_router(shared_router)
     from anteroom.routes.photos import edit_router
     app.include_router(edit_router)

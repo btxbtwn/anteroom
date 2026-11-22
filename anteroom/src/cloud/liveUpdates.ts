@@ -31,7 +31,7 @@ export const TOPIC_QUERY_KEYS: Record<string, readonly string[]> = {
   ],
   assistant: ["assistant"],
   sales: ["marketplace-sales", "sales-ledger", "sale-calendar", "sale-detection", "analytics", "conversations",
-    "business-expenses", "profit-and-loss"],
+    "business-expenses", "profit-and-loss", "plaid-status"],
   automations: [
     "automations", "automation-approvals", "automation-gaps", "promotion-automations", "promotions",
     "promotion-floors", "ebay-offers", "price-drop-preview", "offer-analytics", "offer-log",
