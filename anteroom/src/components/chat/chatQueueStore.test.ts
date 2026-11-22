@@ -74,4 +74,10 @@ describe("chat queue store", () => {
     resetChatQueuesForTest();
     expect(chatQueue("assistant").map((m) => [m.text, m.threadId])).toEqual([["before the thread", "t1"]]);
   });
+
+  it("starts empty in a duplicated tab, which inherits a copy of the saved queue", () => {
+    enqueueChatMessage("k", newQueuedChatMessage("only once"));
+    resetChatQueuesForTest({ reload: false });
+    expect(chatQueue("k")).toEqual([]);
+  });
 });

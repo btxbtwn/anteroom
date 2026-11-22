@@ -6,7 +6,8 @@
  * Each tab keeps its own queue (sessionStorage), because only the tab that
  * queued a message knows whether the reply it waits for is still being
  * written; another tab, seeing the listing idle, would send it at once.
- * Closing the tab ends its queue. Images live in memory only, because their
+ * Closing the tab ends its queue, and only a reload picks a saved one back
+ * up (a duplicated tab gets a copy of sessionStorage, but starts empty). Images live in memory only, because their
  * prepared uploads are too big for browser storage, so a reload drops a
  * queued message that carries images rather than sending it without them.
  * So does a message asked before its assistant conversation existed, which
@@ -49,9 +50,26 @@ function storage(): Storage | undefined {
   }
 }
 
+/**
+ * Whether this page is a reload. Chrome copies sessionStorage into a
+ * duplicated tab, which would send the same queue from two tabs, so only a
+ * reload picks a saved queue back up.
+ */
+function reloaded(): boolean {
+  try {
+    const entry = globalThis.performance?.getEntriesByType?.("navigation")[0] as PerformanceNavigationTiming | undefined;
+    return entry?.type === "reload";
+  } catch {
+    return false;
+  }
+}
+
+let restoreSaved = reloaded;
+
 function load(): Queues {
   if (queues) return queues;
   queues = {};
+  if (!restoreSaved()) return queues;
   try {
     const raw = storage()?.getItem(STORAGE_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : null;
@@ -183,10 +201,11 @@ export function returnChatMessage(key: string, message: QueuedChatMessage) {
   write(key, [message, ...chatQueue(key).filter((item) => item.id !== message.id)]);
 }
 
-/** Tests only: forget everything, including what storage held at first read. */
-export function resetChatQueuesForTest() {
+/** Tests only: forget everything; the next read picks up what storage holds, as a reload does. */
+export function resetChatQueuesForTest({ reload = true }: { reload?: boolean } = {}) {
   queues = null;
   listeners.clear();
+  restoreSaved = () => reload;
 }
 
 /**

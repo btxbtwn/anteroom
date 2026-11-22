@@ -91,3 +91,31 @@ test("a queued follow-up can be edited and sends once the answer finishes", asyn
   await expect(page.locator('[data-message-role="assistant"]').first()).toContainText("The end.");
   await expect(streaming).toHaveCount(0, { timeout: 30_000 });
 });
+
+/** A queued follow-up survives a reload and still goes once the answer it waited for ends. */
+test("a queued follow-up is still sent after the page reloads", async ({ page, phone }) => {
+  const composer = await openAssistant(page, phone);
+  await composer.fill("Tell me something long [sandbox:slow]");
+  await composer.press("Enter");
+  const streaming = page.locator('[data-message-role="assistant"][aria-busy="true"]');
+  await expect(streaming).toContainText("Sandbox is streaming", { timeout: 15_000 });
+  await composer.fill("And the week before?");
+  await composer.press("ControlOrMeta+Enter");
+  await expect(page.locator("[data-queued-message-id]")).toHaveCount(1);
+
+  await page.reload();
+  // The assistant opens on its home screen; go back to the conversation.
+  if (phone) {
+    await page.getByRole("button", { name: "Show chat history" }).click();
+    await page.getByRole("button").filter({ hasText: "Tell me something long" }).first().click();
+  } else {
+    await page.getByRole("region", { name: "Recent chats" }).getByRole("button")
+      .filter({ hasText: "Tell me something long" }).first().click();
+  }
+  const queued = page.locator("[data-queued-message-id]");
+  // It waits for the answer still being written, then goes by itself.
+  await expect(queued).toHaveCount(0, { timeout: 45_000 });
+  await expect(page.locator('[data-message-role="user"]').last()).toContainText("And the week before?");
+  await expect(streaming).toHaveCount(0, { timeout: 30_000 });
+  await expect(page.locator('[data-message-role="assistant"]')).toHaveCount(2);
+});

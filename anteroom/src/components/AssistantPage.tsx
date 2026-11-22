@@ -472,8 +472,12 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     let dropped = false;
     let parts = emptySseParts();
     let stopped = false;
-    const show = () =>
+    // Once a newer follow owns the page (another conversation, a new chat), a
+    // late paint from this one must not put its answer back on screen.
+    const show = () => {
+      if (controller.current !== abort) return;
       setLive({ question, questionImages: shownImages, asked, startedAtMs, parts: { ...parts } });
+    };
     if (question !== null || retry) {
       scroll.pinChatToBottom();
       clearThreadError(id);
@@ -548,6 +552,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
           baseIds,
         });
       }
+      if (stopped) steeringRef.current = false;
       // Show the saved turns before dropping the live one, so the answer does not blink.
       void queryClient.invalidateQueries({ queryKey: THREADS_KEY });
       void queryClient.invalidateQueries({ queryKey: ASSISTANT_MEMORY_KEY });
@@ -623,13 +628,16 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     };
   }, [editingQueuedId, draftKey]);
 
-  // Send the oldest held follow-up of this conversation once the answer before it has ended.
+  // Send the oldest held follow-up of this conversation once the answer before
+  // it has ended. `following` ends a reattach that found nothing running, as
+  // after a reload, which never sets `live`.
   useEffect(() => {
-    if (live || controller.current || editingQueuedId) return;
+    if (live || following || controller.current || editingQueuedId) return;
     const active = followThread.current ?? threadIdRef.current;
+    // A question still waiting for its new conversation only goes from the new-chat screen.
     const next = takeNextChatMessage<AssistantQueuePayload>(
       ASSISTANT_QUEUE,
-      (message) => message.threadId === active || message.threadId == null,
+      (message) => message.threadId === active || (message.threadId == null && active === null),
     );
     if (!next) return;
     void followRef.current(
@@ -642,7 +650,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
       draftSessionRef.current,
       next.payload?.attached ?? [],
     );
-  }, [live, queuedAll, editingQueuedId]);
+  }, [live, following, queuedAll, editingQueuedId]);
 
   const ask = async (raw: string, alternate = false) => {
     const question = raw.trim();
@@ -675,7 +683,9 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
       scroll.pinChatToBottom();
       const message = queuedQuestion(question, targetThread, uploads, shown, attached);
       // While an answer is being written a follow-up steers it by default, as in T3 Code.
-      const action = resolveFollowUp({ busy: Boolean(live || controller.current), canSteer: Boolean(live), alternate });
+      // Read now, not when Enter was pressed: an image upload can outlast the answer.
+      const running = Boolean(controller.current);
+      const action = resolveFollowUp({ busy: running, canSteer: running, alternate });
       if (action === "steer") {
         steerChatMessage(ASSISTANT_QUEUE, message);
         void stop(true);
