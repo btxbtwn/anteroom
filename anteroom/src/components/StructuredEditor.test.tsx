@@ -1,16 +1,17 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { MarketplaceFormField } from "../api/types";
+import type { ListingData, MarketplaceFormField } from "../api/types";
 import { StructuredEditor } from "./ListingEditor";
 
 const { state, choices, inventories } = vi.hoisted(() => ({
-  state: { fields: [] as MarketplaceFormField[], rulesEnabled: false },
+  state: { fields: [] as MarketplaceFormField[], rulesEnabled: false, formRefetchError: false },
   choices: vi.fn(),
   inventories: vi.fn(),
 }));
 vi.mock("@tanstack/react-query", async original => ({
   ...await original<typeof import("@tanstack/react-query")>(),
   useQuery: ({ queryKey }: { queryKey: string[] }) => ({
+    isError: queryKey[0] === "native-editor-form" && state.formRefetchError,
     data: queryKey[0] === "native-editor-form"
       ? { marketplace: "mercari", native: true, fields: state.fields }
       : queryKey[0] === "settings-pricing-rules" ? { enabled: state.rulesEnabled } : undefined,
@@ -31,7 +32,7 @@ function field(path: string, extra: Partial<MarketplaceFormField> = {}): Marketp
     selection_only: false, section: "Details", ...extra };
 }
 
-function render(disabled = false, onChange = vi.fn(), listing = { title: "Original" }) {
+function render(disabled = false, onChange = vi.fn(), listing: ListingData = { title: "Original" }) {
   return renderToStaticMarkup(<StructuredEditor convId="item" listing={listing} tab="mercari"
     target={null} disabled={disabled} onChange={onChange} />);
 }
@@ -40,6 +41,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   state.fields = [];
   state.rulesEnabled = false;
+  state.formRefetchError = false;
 });
 
 describe("native row layout", () => {
@@ -55,6 +57,19 @@ describe("native row layout", () => {
     state.fields = [field("mercari_specifics.price", { label: "Mercari price", value: 24, input_type: "number" })];
     const listing = { title: "Original", price: 20, mercari_specifics: { price: 22 } };
     expect(render(false, vi.fn(), listing)).toMatch(/data-listing-field="mercari_specifics.price"[^>]*value="24"/);
+  });
+
+  it("marks a cached rule price as stale after a failed read and leaves a seller price alone", () => {
+    state.rulesEnabled = true;
+    state.formRefetchError = true;
+    state.fields = [field("mercari_specifics.price", { label: "Mercari price", value: 24, input_type: "number" })];
+    const listing = { title: "Original", price: 20, mercari_specifics: { price: 22 } };
+    const html = render(false, vi.fn(), listing);
+    expect(html).toContain("The marketplace price shown may be out of date.");
+    expect(html).toContain("Retry price refresh");
+    const overridden = render(false, vi.fn(), { ...listing, seller_fields: ["mercari_specifics.price"] });
+    expect(overridden).not.toContain("Retry price refresh");
+    expect(overridden).toMatch(/data-listing-field="mercari_specifics.price"[^>]*value="22"/);
   });
 
   it("uses native widths even for Category and preserves heading and field order", () => {

@@ -42,18 +42,18 @@ export function ListingGuardrails({ listing, drift = [], inactive = [], disabled
   inactive?: readonly string[];
   disabled: boolean;
   /** The editor's save: the same path as any field edit, with stale-edit protection. */
-  onChange: (before: ListingData, after: ListingData) => void;
+  onChange: (before: ListingData, after: ListingData, kind: "pricing" | "shipping") => void;
 }) {
   const { data: rules } = useQuery({ queryKey: ["settings-pricing-rules"], queryFn: api.settings.pricingRules });
   const { data: presets } = useQuery({ queryKey: ["settings-shipping-presets"], queryFn: api.settings.shippingPresets });
   const { data: warningSettings } = useQuery({ queryKey: ["settings-listing-warnings"], queryFn: api.settings.listingWarnings });
   const applyRules = useMutation({
     mutationFn: (before: ListingData) => api.settings.applyPricingRules(before),
-    onSuccess: (result, before) => onChange(before, result.listing),
+    onSuccess: (result, before) => onChange(before, result.listing, "pricing"),
   });
   const applyPreset = useMutation({
     mutationFn: ({ id, before }: { id: string; before: ListingData }) => api.settings.applyShippingPreset(id, before),
-    onSuccess: (result, { before }) => onChange(before, result.listing),
+    onSuccess: (result, { before }) => onChange(before, result.listing, "shipping"),
   });
   const warnings = guardrailWarnings({ listing, drift, warnMissingSku: Boolean(warningSettings?.missing_sku), inactive });
   const presetList = presets?.presets || [];

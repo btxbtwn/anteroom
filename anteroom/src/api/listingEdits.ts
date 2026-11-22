@@ -20,7 +20,7 @@ function sellerLocks(value: unknown): string[] {
 }
 
 /** Keep newer field edits while accepting the server's normalized unchanged fields. */
-function rebase(saved: unknown, before: unknown, after: unknown, checkConflicts = false, path = ""): unknown {
+function rebase(saved: unknown, before: unknown, after: unknown, conflictMessage?: (path: string) => string, path = ""): unknown {
   if (JSON.stringify(before) === JSON.stringify(after)) return saved;
   if (JSON.stringify(saved) === JSON.stringify(after)) return saved;
   if (path === "seller_fields") {
@@ -31,19 +31,23 @@ function rebase(saved: unknown, before: unknown, after: unknown, checkConflicts 
     return merged.size ? [...merged].sort() : undefined;
   }
   if (!saved || !before || !after || typeof saved !== "object" || typeof before !== "object" || typeof after !== "object" || Array.isArray(saved) || Array.isArray(before) || Array.isArray(after)) {
-    if (checkConflicts && JSON.stringify(saved) !== JSON.stringify(before)) {
-      throw new Error(`The field ${path || "listing"} also changed in the saved listing. Your edits are kept. Copy them before using Discard and reload.`);
+    if (conflictMessage && JSON.stringify(saved) !== JSON.stringify(before)) {
+      throw new Error(conflictMessage(path));
     }
     return after;
   }
   const result = { ...(saved as Record<string, unknown>) };
   for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
-    const value = rebase(result[key], (before as Record<string, unknown>)[key], (after as Record<string, unknown>)[key], checkConflicts, path ? `${path}.${key}` : key);
+    const value = rebase(result[key], (before as Record<string, unknown>)[key], (after as Record<string, unknown>)[key], conflictMessage, path ? `${path}.${key}` : key);
     if (!(key in after) && value === undefined) delete result[key];
     else result[key] = value;
   }
   return result;
 }
+
+const saveConflictMessage = (path: string) =>
+  `The field ${path || "listing"} also changed in the saved listing. Your edits are kept. Copy them before using Discard and reload.`;
+const transformConflictMessage = () => "The listing changed while this action was running. Review your edits and apply it again.";
 
 class ListingEdits {
   private state: { draft: ListingData | null; saving: boolean; error: string | null } = { draft: null, saving: false, error: null };
@@ -96,11 +100,21 @@ class ListingEdits {
     if (!this.state.saving && !this.state.error) void this.flush();
   };
 
-  applyTransform = (before: ListingData, after: ListingData) => {
-    const current = this.state.draft ?? this.client.getQueryData<ListingDocument>(["listing", this.id])?.listing;
+  applyTransform = (before: ListingData, after: ListingData, kind: "pricing" | "shipping") => {
+    // A delayed response can outlive the editor that requested it.
+    const active = queues.get(this.client)?.get(this.id) ?? this;
+    const current = active.state.draft ?? this.client.getQueryData<ListingDocument>(["listing", this.id])?.listing;
     if (!current) return;
-    const merged = rebase(current, before, after) as ListingData;
-    if (JSON.stringify(current) !== JSON.stringify(merged)) this.save(merged);
+    // Pricing depends on the item price and marketplace overrides, even if
+    // the result does not edit those inputs.
+    if (kind === "pricing" && priceInputs(current) !== priceInputs(before)) {
+      throw new Error(transformConflictMessage());
+    }
+    const merged = rebase(current, before, after, transformConflictMessage) as ListingData;
+    if (JSON.stringify(current) !== JSON.stringify(merged)) {
+      active.registry.attach(active);
+      active.save(merged);
+    }
   };
 
   retry = () => {
@@ -120,7 +134,7 @@ class ListingEdits {
     try {
       if (refresh) {
         const latest = await api.listings.get(this.id);
-        const merged = rebase(latest.listing, this.base, this.state.draft, true) as ListingData;
+        const merged = rebase(latest.listing, this.base, this.state.draft, saveConflictMessage) as ListingData;
         this.revisionId = latest.current_revision_id ?? "";
         this.base = latest.listing;
         this.update({ ...this.state, draft: merged });
@@ -135,7 +149,7 @@ class ListingEdits {
             await new Promise(resolve => setTimeout(resolve, 1000));
           }
           const latest = await api.listings.get(this.id);
-          const merged = rebase(latest.listing, this.base, this.state.draft, true) as ListingData;
+          const merged = rebase(latest.listing, this.base, this.state.draft, saveConflictMessage) as ListingData;
           this.revisionId = latest.current_revision_id ?? "";
           this.base = latest.listing;
           this.update({ ...this.state, draft: merged });

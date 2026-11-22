@@ -301,11 +301,51 @@ it("merges a delayed preset into the current draft and retains locks added durin
     .mockImplementationOnce(async (_id, listing) => result("r2", listing));
   try {
     edits.save({ ...original, title: "My newer title" });
-    edits.applyTransform(original, { ...original, weight_lb: 3, seller_fields: ["weight_lb"] });
+    edits.applyTransform(original, { ...original, weight_lb: 3, seller_fields: ["weight_lb"] }, "shipping");
     finish(result("r1", { ...original, title: "My newer title", seller_fields: ["title"] }));
     await vi.waitFor(() => expect(edits.pending).toBe(false));
     expect(update).toHaveBeenLastCalledWith("item", {
       ...original, title: "My newer title", weight_lb: 3, seller_fields: ["title", "weight_lb"],
     }, "r1");
+  } finally { client.clear(); }
+});
+
+it.each([
+  { kind: "shipping", newer: { weight_lb: 2 }, change: { weight_lb: 3 } },
+  { kind: "pricing", newer: { price: 20 }, change: { ebay_specifics: { price: 12 } } },
+] as const)("refuses a delayed $kind result when a newer edit conflicts", async ({ kind, newer, change }) => {
+  const { client, edits } = setup();
+  const original = { title: "Original", price: 10, weight_lb: 1 };
+  const edited = { ...original, ...newer };
+  let finish!: (value: ListingSaveResult) => void;
+  const update = vi.spyOn(api.listings, "update").mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  try {
+    edits.save(edited);
+    expect(() => edits.applyTransform(original, { ...original, ...change }, kind)).toThrow("The listing changed");
+    expect(edits.getSnapshot().draft).toEqual(edited);
+    finish(result("r1", edited));
+    await vi.waitFor(() => expect(edits.pending).toBe(false));
+    expect(update).toHaveBeenCalledTimes(1);
+  } finally { client.clear(); }
+});
+
+it("checks a delayed preset against edits after reopening the listing", async () => {
+  const { client, edits } = setup();
+  const original = { title: "Original", price: 10, weight_lb: 1 };
+  const edited = { ...original, weight_lb: 2 };
+  client.setQueryData<ListingDocument>(["listing", "item"], document => document && { ...document, listing: original });
+  const stop = edits.subscribe(() => {});
+  stop();
+  await vi.waitFor(() => expect(listingEditQueueCount(client)).toBe(0));
+  const reopened = listingEdits(client, "item");
+  let finish!: (value: ListingSaveResult) => void;
+  const update = vi.spyOn(api.listings, "update").mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+  try {
+    reopened.save(edited);
+    expect(() => edits.applyTransform(original, { ...original, weight_lb: 3 }, "shipping")).toThrow("The listing changed");
+    expect(reopened.getSnapshot().draft).toEqual(edited);
+    finish(result("r1", edited));
+    await vi.waitFor(() => expect(reopened.pending).toBe(false));
+    expect(update).toHaveBeenCalledTimes(1);
   } finally { client.clear(); }
 });

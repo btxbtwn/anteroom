@@ -291,3 +291,49 @@ for (const recovery of ["manual retry", "returning to the tab"]) {
     }
   });
 }
+
+test("a cached rule price is marked stale until its form read can be retried", async ({ page, request, phone }, info) => {
+  const title = `Rule price refresh ${info.project.name} ${Date.now()}`;
+  const id = await createListing(request, title);
+  try {
+    const saved = await request.put(`/api/conversations/${id}/listing`, { data: {
+      expected_revision_id: "", listing: { title, price: 20 },
+    } });
+    expect(saved.ok(), await saved.text()).toBe(true);
+    await page.route("**/api/settings/pricing-rules", route => route.fulfill({ json: { enabled: true } }));
+    let formPrice: number | null = 24;
+    await page.route(new RegExp(`/api/conversations/${id}/native-marketplaces/mercari/form(?:\\?|$)`), route =>
+      formPrice == null
+        ? route.fulfill({ status: 500, json: { detail: "Price refresh failed." } })
+        : route.fulfill({ json: { marketplace: "mercari", native: true, fields: [
+          { key: "mercari_specifics.price", path: "mercari_specifics.price", label: "Mercari price",
+            input_type: "number", value: formPrice, section: "Details" },
+        ] } }),
+    );
+    await openListing(page, phone, title);
+    await openForm(page, phone, "Mercari");
+    const form = page.getByRole("group", { name: "Mercari listing fields" });
+    const price = form.getByRole("spinbutton", { name: "Mercari price" });
+    const warning = form.getByText("The marketplace price shown may be out of date.");
+    await expect(price).toHaveValue("24");
+
+    formPrice = null;
+    if (phone) await openForm(page, phone, "General");
+    else await page.getByRole("navigation", { name: "Marketplaces" }).getByRole("button", { name: "General", exact: true }).click();
+    const generalPrice = page.locator('[data-listing-field="price"]');
+    await generalPrice.fill("25");
+    await generalPrice.blur();
+    await expect.poll(async () => (await (await request.get(`/api/conversations/${id}/listing`)).json()).listing.price).toBe(25);
+    await openForm(page, phone, "Mercari");
+    await expect(warning).toBeVisible();
+    await expect(price).toHaveValue("24");
+    await page.screenshot({ path: info.outputPath("stale-rule-price.png") });
+
+    formPrice = 30;
+    await form.getByRole("button", { name: "Retry price refresh" }).click();
+    await expect(price).toHaveValue("30");
+    await expect(warning).toHaveCount(0);
+  } finally {
+    await request.delete(`/api/conversations/${id}`);
+  }
+});

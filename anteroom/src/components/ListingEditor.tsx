@@ -933,6 +933,9 @@ export function StructuredEditor({
     : [];
   // A marketplace form that names its headings keeps them, with its order and row layout.
   const pageLayout = nativeTab && renderedFields.some((field) => field.section);
+  const staleRulePrice = nativeTab && rulesEnabled && nativeQuery.isError && renderedFields.some(
+    (field) => field.native && field.defaultValue !== undefined && marketplacePriceFollowsGeneral(listing, field, tab),
+  );
   const sections = React.useMemo(() => pageLayout ? nativeFormSections(renderedFields)
     : tab === "general" ? generalFormSections(renderedFields) : groupFieldsIntoSections(renderedFields), [pageLayout, tab, renderedFields]);
   // Only loading, errors and gaps get a line; a form that loaded fine needs none.
@@ -1178,6 +1181,11 @@ export function StructuredEditor({
         </Button>
       </div>}
       {tab !== "general" && formStatus && <p role="status" className="border-b py-3 text-xs text-muted-foreground">{formStatus}</p>}
+      {staleRulePrice && <div className="flex flex-wrap items-baseline gap-x-2 border-b py-3 text-xs text-warning-foreground">
+        <span role="status">The marketplace price shown may be out of date.</span>
+        <InlineButton type="button" disabled={saving || nativeQuery.isFetching || autoReloadingMarket !== null}
+          onClick={() => { void nativeQuery.refetch(); }}>Retry price refresh</InlineButton>
+      </div>}
       {formNotes.map((note) => <p key={note} className="py-2 text-xs text-muted-foreground">{note}</p>)}
       {formNotes.length > 0 && onAskChat && <div className="pb-2">
         <Button size="xs" variant="outline" disabled={disabled}
