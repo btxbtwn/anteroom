@@ -3,7 +3,7 @@
 Desktop sign-in terminals, filesystem utilities and machine settings are not
 mounted here. Their hosted equivalents require a registered worker.
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from anteroom.repositories.queries import ConversationRepo
 from anteroom.services.hosted_database import get_seller_db
 
@@ -107,3 +107,17 @@ def restore_all(body: settings.RestoreAllHiddenFields, db=Depends(get_seller_db,
 def restore_matching(body: settings.RestoreMatchingHiddenFields, db=Depends(get_seller_db, scope="function")):
     require_conversation(db, body.conversation_id)
     return settings.restore_matching_hidden_fields(body)
+
+
+@router.get('/agent', response_model=settings.AgentConnectionStatus)
+def hosted_agent_connection(request: Request):
+    from anteroom.services.agent_connection import describe_hosted
+
+    forwarded_proto = (request.headers.get('x-forwarded-proto') or request.url.scheme or 'https').split(',')[0].strip()
+    host = (request.headers.get('x-forwarded-host') or request.headers.get('host') or 'myanteroom.com').split(',')[0].strip()
+    return describe_hosted(f"{forwarded_proto}://{host}")
+
+
+router.add_api_route('/mcp-tokens', settings.list_mcp_tokens, methods=['GET'])
+router.add_api_route('/mcp-tokens', settings.create_mcp_token, methods=['POST'], status_code=201)
+router.add_api_route('/mcp-tokens/{token_id}', settings.revoke_mcp_token, methods=['DELETE'])

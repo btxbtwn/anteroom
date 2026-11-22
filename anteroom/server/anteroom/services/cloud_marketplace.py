@@ -1,7 +1,7 @@
-"""Server-side execution of cloud marketplace commands (Phase 1: Poshmark).
+"""Server-side execution of cloud marketplace commands.
 
-Runs each Poshmark operation inside a fresh, single-operation Node subprocess
-(``cloud_runner/run-poshmark.cjs``) with Chrome TLS impersonation (``impit``),
+Runs each marketplace operation inside a fresh, single-operation Node subprocess
+(``cloud_runner/run-<marketplace>.cjs``) with Chrome TLS impersonation (``impit``),
 per-seller cookie jar isolation (``tough-cookie``), optional sticky residential
 proxy, and write-ahead Postgres journals.
 
@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
+from io import BytesIO
 import json
 import logging
 import os
@@ -30,6 +32,7 @@ import weakref
 from typing import Any
 
 import httpx
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from anteroom.database import in_worker_session
 from anteroom.services import cloud_sessions
@@ -48,6 +51,8 @@ _MAX_PHOTO_BYTES = 20 * 1024 * 1024
 
 # Per-event-loop concurrency semaphores (M2)
 _semaphores: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = weakref.WeakKeyDictionary()
+_photo_pool: ThreadPoolExecutor | None = None
+_photo_pool_lock = threading.Lock()
 # Active subprocess registry for cancellation: (seller_id, job_id) -> Process
 _pending: dict[tuple[str, str], threading.Event] = {}
 _active_lock = threading.Lock()
@@ -73,6 +78,16 @@ def _max_concurrency() -> int:
     except ValueError:
         return _DEFAULT_MAX_CONCURRENCY
     return max(1, min(16, value))
+
+
+def _photo_executor() -> ThreadPoolExecutor:
+    # Share one pool across loops and keep the decode bound after task cancellation.
+    # Runner slots remain available while other sellers' photos are prepared.
+    global _photo_pool
+    with _photo_pool_lock:
+        if _photo_pool is None:
+            _photo_pool = ThreadPoolExecutor(max_workers=_max_concurrency(), thread_name_prefix="cloud-photos")
+        return _photo_pool
 
 
 def _loop_semaphore() -> asyncio.Semaphore:
@@ -143,6 +158,39 @@ def _load_approved_photos(approved_photos: list[dict[str, Any]] | None) -> list[
     return encoded
 
 
+def _prepare_photos(marketplace: str, photos: list[dict[str, str]]) -> list[dict[str, str]]:
+    if marketplace == "poshmark":
+        return photos
+    prepared: list[dict[str, str]] = []
+    for photo in photos:
+        try:
+            raw = base64.b64decode(photo["base64"], validate=True)
+            if len(raw) > _MAX_PHOTO_BYTES:
+                raise ValueError("Listing photo exceeds 20 MB limit.")
+            with Image.open(BytesIO(raw)) as source:
+                image = ImageOps.exif_transpose(source).convert("RGBA")
+                if marketplace == "depop":
+                    width, height = image.size
+                    if width > height:
+                        size = (1280, max(1, round(height / width * 1280)))
+                    else:
+                        size = (max(1, round(width / height * 1280)), 1280)
+                    image = image.resize(size, Image.Resampling.LANCZOS)
+                    canvas = Image.new("RGB", (1280, 1280), "white")
+                    offset = ((1280 - image.width) // 2, (1280 - image.height) // 2)
+                else:
+                    image.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
+                    canvas = Image.new("RGB", image.size, "white")
+                    offset = (0, 0)
+                canvas.paste(image, offset, image.getchannel("A"))
+                encoded = BytesIO()
+                canvas.save(encoded, format="JPEG", quality=95 if marketplace == "depop" else 92)
+        except (KeyError, ValueError, UnidentifiedImageError, OSError, Image.DecompressionBombError):
+            raise ValueError("Could not prepare an approved listing photo.") from None
+        prepared.append({**photo, "base64": base64.b64encode(encoded.getvalue()).decode("ascii"), "mime_type": "image/jpeg"})
+    return prepared
+
+
 async def _forward_to_worker(path: str, body: dict[str, Any], timeout: float, *, target: str | None = None) -> dict[str, Any]:
     base = target or worker_base_url()
     token = os.environ.get("ANTEROOM_PROCESS_TOKEN", "")
@@ -183,7 +231,7 @@ async def execute(
     credentials are never decrypted on ``web``.
     """
     market = str(marketplace or "").lower()
-    if market != "poshmark" or not cloud_sessions.is_cloud_enabled(market):
+    if not cloud_sessions.is_cloud_enabled(market):
         return {
             "ok": False,
             "safe_to_retry": True,
@@ -307,12 +355,13 @@ async def _run_subprocess(
     timeout: float,
 ) -> dict[str, Any]:
     node_bin = _node_binary()
-    if not _RUNNER_SCRIPT.is_file():
+    script = _RUNNER_SCRIPT if marketplace == "poshmark" else _RUNNER_SCRIPT.with_name(f"run-{marketplace}.cjs")
+    if marketplace not in cloud_sessions.SUPPORTED_CLOUD_MARKETPLACES or not script.is_file():
         raise CloudExecutionUnavailable("Cloud marketplace runner script is missing.")
 
     proc = await asyncio.create_subprocess_exec(
         node_bin,
-        str(_RUNNER_SCRIPT),
+        str(script),
         limit=16 * 1024 * 1024,  # NDJSON includes the full cookie bundle and operation results.
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
@@ -413,7 +462,7 @@ async def _run_subprocess(
                 "ok": False,
                 "safe_to_retry": False,
                 "error_code": "uncertain",
-                "error": "Poshmark did not finish in time.",
+                "error": f"{marketplace.title()} did not finish in time.",
             },
             "cookies_changed": False,
             "cookies": [],
@@ -478,7 +527,7 @@ async def _execute_local(
     approved_photos: list[dict[str, Any]] | None = None,
     timeout: float = _DEFAULT_TIMEOUT_S,
 ) -> dict[str, Any]:
-    """Run a single Poshmark operation locally in an isolated Node subprocess."""
+    """Run a single marketplace operation locally in an isolated Node subprocess."""
     market = str(marketplace or "").lower()
     seller = _seller_id()
 
@@ -489,7 +538,7 @@ async def _execute_local(
             "ok": False,
             "safe_to_retry": True,
             "error_code": "signed_out",
-            "error": "Poshmark cloud session is not connected. Reconnect Poshmark in Settings -> Connections.",
+            "error": f"{market.title()} cloud session is not connected. Reconnect it in Settings → Connections.",
         }
     creds, proxy_session_id, generation = creds_tuple
     cookies = creds.get("cookies") or []
@@ -516,6 +565,14 @@ async def _execute_local(
                 "error_code": "network",
                 "error": str(exc),
             }
+
+    try:
+        if photo_payloads and market != "poshmark":
+            photo_payloads = await asyncio.get_running_loop().run_in_executor(
+                _photo_executor(), _prepare_photos, market, photo_payloads,
+            )
+    except ValueError as exc:
+        return {"ok": False, "safe_to_retry": True, "error_code": "rejected", "error": str(exc)}
 
     run_payload = {
         "type": "run",
@@ -577,8 +634,39 @@ async def _execute_local(
     return result
 
 
+async def verify_upload(
+    marketplace: str,
+    cookies: list[dict[str, Any]],
+    user_agent: str,
+    proxy_session_id: str,
+) -> dict[str, Any]:
+    """Verify freshly captured cookies in memory before replacing the Vault session."""
+    if _process_role() == "web":
+        return await _forward_to_worker("/internal/cloud-marketplace/verify-upload", {
+            "user_id": _seller_id(), "marketplace": marketplace, "cookies": cookies,
+            "user_agent": user_agent, "proxy_session_id": proxy_session_id,
+        }, timeout=25.0)
+    return await verify_upload_local(marketplace, cookies, user_agent, proxy_session_id)
+
+
+async def verify_upload_local(
+    marketplace: str, cookies: list[dict[str, Any]], user_agent: str, proxy_session_id: str,
+) -> dict[str, Any]:
+    if _process_role() == "web" or not cloud_sessions.is_cloud_enabled(marketplace):
+        raise CloudExecutionUnavailable("Cloud marketplace verification is unavailable.")
+    from anteroom.services.seller_region import seller_region
+
+    region = (await asyncio.to_thread(seller_region)).country
+    async with _loop_semaphore():
+        return await _run_subprocess(marketplace, _seller_id(), "", {
+            "type": "run",
+            "command": {"type": "marketplace.verify_session", "payload": {"marketplace": marketplace, "seller_region": region}},
+            "cookies": cookies, "user_agent": user_agent, "proxy_url": cloud_sessions.proxy_url_for(proxy_session_id),
+        }, 25.0)
+
+
 async def verify_session(marketplace: str = "poshmark", timeout: float = 25.0) -> dict[str, Any]:
-    """Run a live read-only verification against Poshmark for the current seller."""
+    """Run a live read-only verification against the marketplace for the current seller."""
     from anteroom.services.seller_region import seller_region
 
     region = (await asyncio.to_thread(seller_region)).country

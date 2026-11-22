@@ -1134,6 +1134,7 @@ class AgentClientSnippet(BaseModel):
 
 
 class AgentConnectionStatus(BaseModel):
+    hosted: bool = False
     installed: bool
     on_path: bool
     path: str | None
@@ -1141,11 +1142,13 @@ class AgentConnectionStatus(BaseModel):
     version_error: str | None = None
     base_url: str
     remote_base_url: str | None
+    mcp_url: str | None = None
     login_command: str
     remote_login_command: str | None
     install_command: str | None
     hint: str | None
     clients: list[AgentClientSnippet]
+    remote_clients: list[AgentClientSnippet] = Field(default_factory=list)
 
 
 class AgentConnectionTest(BaseModel):
@@ -1153,6 +1156,11 @@ class AgentConnectionTest(BaseModel):
     detail: str
     version: str | None = None
     base_url: str | None = None
+
+
+class McpTokenCreateConfig(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    expires_in_days: int | None = Field(default=None, ge=1, le=365)
 
 
 @router.get("/agent", response_model=AgentConnectionStatus)
@@ -1168,6 +1176,33 @@ def test_agent_connection():
     from anteroom.services.agent_connection import test_connection
 
     return test_connection()
+
+
+@router.get("/mcp-tokens")
+def list_mcp_tokens(db: Session = Depends(get_db, scope="function")):
+    from anteroom.services import mcp_tokens
+
+    return {"tokens": mcp_tokens.list_tokens(db)}
+
+
+@router.post("/mcp-tokens", status_code=201)
+def create_mcp_token(body: McpTokenCreateConfig, db: Session = Depends(get_db, scope="function")):
+    from anteroom.services import mcp_tokens
+
+    try:
+        return mcp_tokens.create_token(db, name=body.name, expires_in_days=body.expires_in_days)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.delete("/mcp-tokens/{token_id}")
+def revoke_mcp_token(token_id: str, db: Session = Depends(get_db, scope="function")):
+    from anteroom.services import mcp_tokens
+
+    revoked = mcp_tokens.revoke_token(db, token_id)
+    if not revoked:
+        raise HTTPException(404, "Access token not found")
+    return {"ok": True}
 
 
 @router.get("/tailscale")

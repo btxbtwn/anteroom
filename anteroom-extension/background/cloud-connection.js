@@ -1,4 +1,4 @@
-/* Browser-local site permission, form reads, relayed commands, and opt-in Poshmark Cloud session upload. */
+/* Browser-local site permission, form reads, relayed commands, and opt-in marketplace Cloud session upload. */
 (function () {
   const ORIGIN = 'https://myanteroom.com';
   const KEY = 'anteroom_cloud_connections';
@@ -10,7 +10,8 @@
   const APPROVAL_TTL = 30 * 24 * 60 * 60 * 1000;
   const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const UPLOAD_TOKEN_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[A-Za-z0-9_-]{20,200}$/i;
-  const CLOUD_SESSION_MARKETS = new Set(['poshmark']);
+  const CLOUD_SESSION_MARKETS = new Set(['poshmark', 'mercari', 'depop']);
+  const TOKEN_COOKIES = { poshmark: 'jwt', depop: 'access_token' };
   const PAGE_ACTIONS = new Set(['status', 'connect', 'disconnect']);
   const APPROVAL_ACTIONS = new Set(['details', 'approve', 'deny']);
   const CLOUD_SESSION_APPROVAL_ACTIONS = new Set(['cloud_session_details', 'cloud_session_approve', 'cloud_session_deny']);
@@ -20,18 +21,18 @@
   // `marketplace.signed_approvals` of Bridges 0.2.56 to 0.2.67, which the server drops later.
   const RELAY_CAPABILITIES = ['marketplace.actions', 'marketplace.regions', 'marketplace.sessions', 'marketplace.sales_history', 'marketplace.promotions', 'marketplace.import', 'vendoo.drafts', 'marketplace.signed_commands', 'marketplace.cloud_connect'];
 
-  function isPoshmarkCookieDomain(domain, root) {
+  function isMarketplaceCookieDomain(domain, root) {
     const clean = String(domain || '').trim().toLowerCase().replace(/^\./, '');
-    return clean === root || clean.endsWith('.' + root);
+    return clean === root || clean.endsWith(`.${root}`);
   }
 
   async function defaultUploadCloudSession(api, { marketplace, uploadToken, sellerRegion }) {
     if (!CLOUD_SESSION_MARKETS.has(marketplace)) return { ok: false, error: 'Unsupported cloud marketplace.' };
     if (!api.cookies?.getAll) return { ok: false, error: 'Chrome cookies API is unavailable.' };
-    const domain = sellerRegion === 'CA' ? 'poshmark.ca' : 'poshmark.com';
+    const domain = marketplace === 'poshmark' && sellerRegion === 'CA' ? 'poshmark.ca' : `${marketplace}.com`;
     const rawCookies = await api.cookies.getAll({ domain });
     const cookies = (Array.isArray(rawCookies) ? rawCookies : [])
-      .filter(cookie => cookie && typeof cookie.name === 'string' && typeof cookie.value === 'string' && isPoshmarkCookieDomain(cookie.domain, domain))
+      .filter(cookie => cookie && typeof cookie.name === 'string' && typeof cookie.value === 'string' && isMarketplaceCookieDomain(cookie.domain, domain))
       .map(cookie => ({
         name: cookie.name,
         value: cookie.value,
@@ -42,14 +43,17 @@
         sameSite: cookie.sameSite || 'unspecified',
         ...(Number.isFinite(cookie.expirationDate) ? { expirationDate: cookie.expirationDate } : {}),
       }));
-    if (!cookies.some(cookie => cookie.name === 'jwt' && cookie.value)) {
-      return { ok: false, error: 'Sign in to Poshmark in Chrome first, then try again.' };
+    const tokenCookie = TOKEN_COOKIES[marketplace];
+    if (!cookies.some(cookie => cookie.value && (!tokenCookie || cookie.name === tokenCookie))) {
+      const name = marketplace[0].toUpperCase() + marketplace.slice(1);
+      return { ok: false, error: `Sign in to ${name} in Chrome first, then try again.` };
     }
     const userAgent = typeof navigator !== 'undefined' && typeof navigator.userAgent === 'string' ? navigator.userAgent : '';
     const response = await fetch(`${ORIGIN}/api/cloud-sessions/${marketplace}/upload`, {
       method: 'POST',
       credentials: 'omit',
-      signal: AbortSignal.timeout(30000),
+      redirect: 'error',
+      signal: AbortSignal.timeout(55000),
       headers: {
         'Content-Type': 'application/json',
         'X-Cloud-Upload-Token': uploadToken,

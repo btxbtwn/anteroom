@@ -1,4 +1,5 @@
 /** Browser-local transport to Anteroom Bridge. Supabase sessions never cross it. */
+import type { ExtensionSessionMarket } from "./marketplaceSessions";
 import type { MarketplaceForm } from "./types";
 import { HOSTED_ORIGIN as ORIGIN } from "../lib/macApp";
 export interface CloudConnection {
@@ -40,7 +41,7 @@ function toConnection(data: Record<string, unknown>): CloudConnection {
 export function cloudExtension(account: BrowserAccount, channel: Window = window) {
   function send(action: "status" | "connect" | "disconnect" | "poshmark_form" | "marketplace_command" | "cloud_session_connect",
     listing?: Record<string, string | number | null>, relay?: { command: RelayedCommand; photos: RelayedPhoto[] },
-    cloudSession?: { marketplace: "poshmark"; uploadToken: string; sellerRegion?: "CA" }): Promise<Record<string, unknown>> {
+    cloudSession?: { marketplace: ExtensionSessionMarket; uploadToken: string; sellerRegion?: "CA" }): Promise<Record<string, unknown>> {
     if (channel.location.origin !== ORIGIN) return Promise.resolve({ ok: false, state: "unavailable", extensionVersion: "" });
     const requestId = crypto.randomUUID();
     return new Promise(resolve => {
@@ -73,8 +74,8 @@ export function cloudExtension(account: BrowserAccount, channel: Window = window
   return {
     status, connect: async () => toConnection(await send("connect")),
     disconnect: async () => toConnection(await send("disconnect")),
-    connectCloudSession: async (marketplace: "poshmark", uploadToken: string, sellerRegion?: "US" | "CA" | "GB" | "AU"): Promise<{ ok: boolean; state: "pending" | "unavailable"; error?: string }> => {
-      const result = await send("cloud_session_connect", undefined, undefined, { marketplace, uploadToken, ...(sellerRegion === "CA" ? { sellerRegion } : {}) });
+    connectCloudSession: async (marketplace: ExtensionSessionMarket, uploadToken: string, sellerRegion?: "US" | "CA" | "GB" | "AU"): Promise<{ ok: boolean; state: "pending" | "unavailable"; error?: string }> => {
+      const result = await send("cloud_session_connect", undefined, undefined, { marketplace, uploadToken, ...(marketplace === "poshmark" && sellerRegion === "CA" ? { sellerRegion } : {}) });
       return {
         ok: result.ok === true,
         state: result.state === "pending" ? "pending" : "unavailable",

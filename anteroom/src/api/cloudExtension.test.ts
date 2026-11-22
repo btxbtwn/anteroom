@@ -82,18 +82,18 @@ describe("Poshmark form capability", () => {
   });
 });
 
-describe("Poshmark cloud session connect capability", () => {
-  it("posts upload token with account identity and omits access_token", async () => {
+describe("Marketplace cloud session connect capability", () => {
+  it.each(["poshmark", "mercari", "depop"] as const)("posts %s upload tokens without access_token", async (marketplace) => {
     const c = channel();
     const bridge = cloudExtension(ACCOUNT, c.target);
     const token = `${ACCOUNT.id}.${"b".repeat(32)}`;
-    const pending = bridge.connectCloudSession("poshmark", token);
+    const pending = bridge.connectCloudSession(marketplace, token);
     expect(c.sent[0].origin).toBe(ORIGIN);
     expect(c.sent[0].data).toMatchObject({
       action: "cloud_session_connect",
       accountId: ACCOUNT.id,
       email: ACCOUNT.email,
-      marketplace: "poshmark",
+      marketplace,
       uploadToken: token,
     });
     expect(JSON.stringify(c.sent)).not.toContain("access_token");

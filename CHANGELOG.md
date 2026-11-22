@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1140 — 2026-11-22
+
+- Connect Mercari and Depop in Cloud so listing actions, inventory imports, sales checks, and offers can run with Chrome closed.
+- Test marketplace cloud sign-ins in Connections and resume eligible automations when you reconnect.
+
 ## 0.1.1139 — 2026-11-22
 
 - Track business expenses and mileage, import expenses from a spreadsheet, and export a cash or accrual profit and loss report.

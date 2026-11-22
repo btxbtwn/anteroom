@@ -1,0 +1,2 @@
+- Add a remote and local Streamable HTTP MCP server (`/api/mcp`) with seller-scoped access tokens in Settings → Agents and copy-ready setup for Claude, ChatGPT, and Gemini.
+- Add a Today command center with today's sales and automation snapshot, configurable profit/sales/listing/sell-through goals with pacing, and a Needs Attention inbox with 7-day dismiss and restore.

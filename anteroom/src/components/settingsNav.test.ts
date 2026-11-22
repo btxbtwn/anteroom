@@ -67,11 +67,13 @@ describe("searchSettings", () => {
 });
 
 describe("settings on the web", () => {
-  it("opens every section the web sidebar offers, Connections and Help included", () => {
+  it("opens every section the web sidebar offers, Connections, Agents and Help included", () => {
     for (const id of HOSTED_SETTINGS_SECTIONS) expect(settingsSectionFor(id, true)).toBe(id);
     expect(HOSTED_SETTINGS_SECTIONS).toContain("connections");
+    expect(HOSTED_SETTINGS_SECTIONS).toContain("agents");
     expect(HOSTED_SETTINGS_SECTIONS).toContain("experimental");
     expect(HOSTED_SETTINGS_SECTIONS).toContain("help");
+    expect(searchSettings("mcp", settingsSearchItemsFor(true, true)).map((item) => item.id)).toEqual(["agent-cli"]);
     expect(searchSettings("support", settingsSearchItemsFor(true, true)).map((item) => item.id)).toContain("support");
     expect(searchSettings("how to", settingsSearchItemsFor(true, true)).map((item) => item.id)).toContain("help");
   });

@@ -18,7 +18,7 @@
       ...(relay ? ['command', 'photos'] : [])];
     if (Object.keys(data).some(key => !keys.includes(key))) return;
     if ((data.action === 'connect' || cloudSession) && (typeof data.email !== 'string' || data.email.length > 254)) return;
-    if (cloudSession && (data.marketplace !== 'poshmark' || typeof data.uploadToken !== 'string' || data.uploadToken.length > 260 || (data.sellerRegion !== undefined && data.sellerRegion !== 'CA'))) return;
+    if (cloudSession && (!['poshmark', 'mercari', 'depop'].includes(data.marketplace) || typeof data.uploadToken !== 'string' || data.uploadToken.length > 260 || (data.sellerRegion !== undefined && (data.marketplace !== 'poshmark' || data.sellerRegion !== 'CA')))) return;
     const listing = data.action === 'poshmark_form' ? CloudMarketplaceProtocol.listing(data.listing) : null;
     if (data.action === 'poshmark_form' && !listing) return;
     const command = relay ? CloudMarketplaceProtocol.command(data.command) : null;

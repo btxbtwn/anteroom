@@ -1,4 +1,5 @@
-/** Chrome sign-in for marketplaces that have no official seller API. */
+/** Sign-ins for marketplaces that have no official seller API. */
+import type { MarketplaceCloudSessions } from './contract.gen';
 
 export const EXTENSION_SESSION_MARKETS = ["depop", "poshmark", "mercari"] as const;
 
@@ -6,7 +7,7 @@ export type ExtensionSessionMarket = (typeof EXTENSION_SESSION_MARKETS)[number];
 
 export type ExtensionSessionState = "signed_in" | "expired" | "signed_out" | "unknown";
 
-export interface ExtensionSession {
+export interface ExtensionSession extends Partial<Pick<MarketplaceCloudSessions['sessions'][string], 'cloud_connected' | 'last_error'>> {
   state: ExtensionSessionState;
   /** Unix seconds, when Chrome or the token says so. */
   expires_at: number | null;
@@ -15,9 +16,7 @@ export interface ExtensionSession {
   /** Present on hosted accounts when cloud sessions are enabled for this marketplace. */
   mode?: "chrome" | "cloud";
   cloud_available?: boolean;
-  cloud_connected?: boolean;
   cloud_state?: ExtensionSessionState;
-  last_error?: string | null;
 }
 
 export interface ExtensionSessions {
