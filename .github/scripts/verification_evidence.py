@@ -10,8 +10,11 @@ import re
 import subprocess
 
 SHA = re.compile(r'[0-9a-f]{40}')
-HISTORICAL = 'fa824f9af17c7676458894df4b12c7af046b3e6c'
-CORRECTED = '5cc7fea11067baf1b93d1519b57b0fd93be2db19'
+# d19adbff (#1717) left two Alembic heads; 6d72c5e3 (#1728) joined them.
+# Push CI on d19adbff remains failure; Deploy hosted may supersede it only via
+# a pinned Descendant verification receipt (see wait-for-tested-code.py).
+HISTORICAL = 'd19adbff5a34609dd5c2b7ada19966ae4aeafce8'
+CORRECTED = '6d72c5e3d9d1ee4256f7c754c749a2e19a01818c'
 REGRESSION = 'server/tests/test_hosted_assistant.py::test_shop_snapshot_survives_calculation_longer_than_the_idle_transaction_deadline'
 WORKFLOW = '.github/workflows/verify-corrected-descendant.yml'
 # Names are the real expanded reusable CI jobs, not merely its aggregate result.
