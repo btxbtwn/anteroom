@@ -251,27 +251,28 @@ rule. Disconnecting Chrome suspends Chrome-only checks until a capable tab
 reconnects; sellers with an active Poshmark Cloud session continue running
 Poshmark sale checks and promotions on the worker while Chrome is closed.
 
-## Poshmark Cloud session connect (Bridge 0.2.84)
+## Marketplace Cloud session connect
 
-Bridge 0.2.84 adds `marketplace.cloud_connect` (`cloud_session_connect` message) so
-a seller on `https://myanteroom.com` can opt in to Poshmark Cloud execution:
+Bridge 0.2.84 introduced `marketplace.cloud_connect` for Poshmark. Bridge 0.2.85
+adds Mercari and Depop. On `https://myanteroom.com`, open Settings → Connections
+in desktop Chrome and choose **Connect in Cloud** for the marketplace.
 
-1. The web app calls `POST /api/cloud-sessions/poshmark/connect-token`, which mints
-   a 120-second single-use upload token (`<accountId>.<random>`), stores only its
+1. The web app calls `POST /api/cloud-sessions/{marketplace}/connect-token`, which mints
+   a 180-second single-use upload token (`<accountId>.<random>`), stores only its
    SHA-256 hash on the seller's `cloud_marketplace_sessions` row, and returns
-   `upload_token` and `upload_url`.
-2. The page posts `{ marketplace: "poshmark", uploadToken, uploadUrl }` to the
+   the upload token.
+2. The page posts `{ marketplace, uploadToken }` to the
    content script. The worker validates the approved connection, checks that
    `uploadToken`'s UUID prefix matches the approved `accountId`, checks that
-   `uploadUrl` targets the exact allowed hosted origin's
-   `/api/cloud-sessions/poshmark/upload` path, and opens the extension-owned
+   the marketplace is supported, and opens the extension-owned
    `cloud-session-connect.html` confirmation window.
-3. Only after the seller explicitly clicks **Connect Poshmark in Cloud** in that
-   extension popup does the worker read `poshmark.com` cookies via
-   `chrome.cookies.getAll` and upload them directly over HTTPS to `uploadUrl` with
+3. Only after the seller explicitly clicks **Connect in Cloud** in that
+   extension popup does the worker read that marketplace’s cookies via
+   `chrome.cookies.getAll` and uploads them directly to `/api/cloud-sessions/{marketplace}/upload` on the hosted origin with
    `X-Cloud-Upload-Token` and `credentials: "omit"`.
 4. Cookies never enter page JavaScript, never cross `window.postMessage`, and
    Supabase JWTs never enter the extension. The server consumes the token atomically
-   (preventing replay), strips any non-Poshmark cookies, verifies a valid unexpired
-   Poshmark `jwt` cookie, and writes the encrypted payload to Supabase Vault.
+   (preventing replay), filters cookies to the selected marketplace, and writes the
+   encrypted payload to Supabase Vault. Mercari and Depop require a successful
+   account read from the worker before the session can execute commands.
 

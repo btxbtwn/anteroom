@@ -1,5 +1,6 @@
 import Foundation
 
+
 /// Direct API marketplaces that sellers connect via OAuth from Settings → Connections.
 enum DirectConnectionMarketplace: String, CaseIterable, Identifiable, Sendable {
     case ebay

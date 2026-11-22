@@ -104,7 +104,7 @@ async def read_chrome(body: ChromeRead, authorization: str | None = Header(defau
 class CloudMarketplaceExecute(BaseModel):
     model_config = ConfigDict(extra='forbid')
     user_id: str
-    marketplace: Literal['poshmark']
+    marketplace: Literal['poshmark', 'mercari', 'depop']
     command: dict
     photos: list[dict] = Field(default_factory=list)
     approved_photos: list[dict] = Field(default_factory=list)

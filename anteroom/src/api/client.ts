@@ -1,7 +1,7 @@
 import { listingScreenRead } from "./listingScreen";
 import { reportError } from "./errorReports";
 import type { VendooDraft } from "./vendooDraft";
-import type { OfferLogResponse } from "./contract.gen";
+import type { MarketplaceCloudResult, OfferLogResponse } from "./contract.gen";
 import { ApiRequestError, currentHostedSession, retryAfterMs, studioFetch, studioUpload, hasHostedApiSession } from "./transport";
 import { trackPhotoUpload } from "../photoUploads";
 import type { ListingTemplate, TemplateSource, TemplateSave, TemplateDraft, TemplateApply, TemplateReview, TemplateApproval } from "./listingTemplates";
@@ -853,8 +853,10 @@ export const api = {
   cloudSessions: {
     connectToken: (marketplace: ExtensionSessionMarket) =>
       request<CloudConnectTokenResponse>(`/cloud-sessions/${marketplace}/connect-token`, { method: "POST" }),
+    verify: (marketplace: ExtensionSessionMarket) =>
+      request<MarketplaceCloudResult>(`/cloud-sessions/${marketplace}/verify`, { method: "POST" }),
     disconnect: (marketplace: ExtensionSessionMarket) =>
-      request<OkResponse>(`/cloud-sessions/${marketplace}`, { method: "DELETE" }),
+      request<MarketplaceCloudResult>(`/cloud-sessions/${marketplace}`, { method: "DELETE" }),
   },
   marketplaceListings: {
     get: (convId: string, options?: ReadOptions) => read<MarketplaceListings>(`/conversations/${convId}/marketplace-listings`, options),

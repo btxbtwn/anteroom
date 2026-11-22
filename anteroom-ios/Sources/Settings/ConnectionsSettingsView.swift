@@ -1,8 +1,7 @@
 import AuthenticationServices
 import SwiftUI
 
-/// Settings → Connections for direct OAuth marketplaces (eBay and Etsy),
-/// matching `ConnectionsSettings.tsx` on hosted web.
+/// Settings → Connections for direct OAuth and marketplace cloud sessions.
 struct ConnectionsSettingsView: View {
     let api: AnteroomAPI
 
@@ -24,6 +23,10 @@ struct ConnectionsSettingsView: View {
     @State private var actionErrors: [DirectConnectionMarketplace: String] = [:]
     @State private var confirmDisconnect: DirectConnectionMarketplace?
     @State private var showEbaySheet = false
+    @State private var cloudSessions: MarketplaceCloudSessions?
+    @State private var cloudBusy: String?
+    @State private var cloudMessages: [String: String] = [:]
+    @State private var cloudDisconnect: String?
 
     var body: some View {
         Form {
@@ -32,12 +35,10 @@ struct ConnectionsSettingsView: View {
                     ForEach(DirectConnectionMarketplace.allCases) { marketplace in
                         marketplaceSection(marketplace)
                     }
-                    Section {
-                        Text("Poshmark, Mercari, and Depop stay signed in through Anteroom Bridge in Chrome on your computer.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    } header: {
-                        Text("Chrome marketplaces")
+                    if let cloudSessions {
+                        ForEach(["poshmark", "mercari", "depop"].filter { cloudSessions.enabled.contains($0) }, id: \.self) { marketplace in
+                            cloudSection(marketplace, status: cloudSessions.sessions[marketplace])
+                        }
                     }
                 } else if loading {
                     Section {
@@ -86,6 +87,57 @@ struct ConnectionsSettingsView: View {
             if let target = confirmDisconnect {
                 Text("Anteroom will stop syncing sales and posting directly to \(target.name). Listings that are already live on \(target.name) stay there, and you can reconnect anytime.")
             }
+        }
+    }
+
+    private func cloudSection(_ marketplace: String, status: MarketplaceCloudStatus?) -> some View {
+        let name = marketplace.capitalized
+        return Section {
+            LabeledContent("Status", value: status?.state == "signed_in"
+                           ? "Connected in Cloud" : status?.state == "expired" ? "Cloud session expired" : "Cloud disconnected")
+            if let label = status?.label {
+                LabeledContent("Account", value: label)
+            }
+            if status?.state == "signed_in" {
+                Button("Test Cloud") { Task { await updateCloud(marketplace, disconnect: false) } }
+                    .disabled(cloudBusy != nil)
+            }
+            if status?.state == "signed_in" || status?.state == "expired" {
+                Button("Disconnect Cloud", role: .destructive) { cloudDisconnect = marketplace }
+                    .disabled(cloudBusy != nil)
+                    .confirmationDialog("Disconnect \(name) Cloud?", isPresented: Binding(
+                        get: { cloudDisconnect == marketplace },
+                        set: { if !$0 { cloudDisconnect = nil } }
+                    ), titleVisibility: .visible) {
+                        Button("Disconnect Cloud", role: .destructive) {
+                            Task { await updateCloud(marketplace, disconnect: true) }
+                        }
+                    }
+            }
+            if let message = cloudMessages[marketplace] {
+                Text(message).font(.footnote).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text(name)
+        } footer: {
+            Text("To connect or reconnect, open Anteroom Settings → Connections in desktop Chrome with Anteroom Bridge.")
+        }
+    }
+
+    private func updateCloud(_ marketplace: String, disconnect: Bool) async {
+        cloudBusy = marketplace
+        cloudMessages[marketplace] = nil
+        defer { cloudBusy = nil }
+        do {
+            if disconnect {
+                try await api.disconnectMarketplaceCloudSession(marketplace)
+            } else {
+                let result = try await api.verifyMarketplaceCloudSession(marketplace)
+                cloudMessages[marketplace] = result.ok ? "Cloud sign-in verified." : result.error ?? "Could not verify the cloud sign-in."
+            }
+            cloudSessions = try await api.marketplaceCloudSessions()
+        } catch {
+            cloudMessages[marketplace] = error.localizedDescription
         }
     }
 
@@ -193,9 +245,12 @@ struct ConnectionsSettingsView: View {
             }
         }
         do {
+            async let cloud = try? api.marketplaceCloudSessions()
             let response = try await api.marketplaceAccounts()
+            let cloudResponse = await cloud
             guard generation == loadGeneration else { return }
             accounts = response.accounts
+            cloudSessions = cloudResponse
             loadError = nil
             loaded = true
         } catch {

@@ -60,6 +60,7 @@ MAX_DAILY_SHARES = 6000
 MAX_TIMES = 6
 MAX_LISTED_ITEMS = 500
 OFFER_INTERVAL = timedelta(minutes=15)
+CLOUD_DISCONNECTED = "Paused: Reconnect the marketplace cloud session to resume."
 # Listing reads per offer check, spaced out; the rest are read in a later check.
 OFFER_READS = 60
 READ_GAP_S = 2.0
@@ -206,15 +207,42 @@ def enable(db: Session, automation_id: str) -> dict:
         raise PromotionError(409, f"Anteroom cannot send {NAMES[row.marketplace]} offers yet: its offer request still needs "
                                   "to be read from the signed-in site.")
     now = _now()
-    row.next_run_at = next_share_slot(row, now) if row.action == "share" else now + OFFER_INTERVAL
-    row.enabled, row.paused_reason = True, None
-    row.like_events_since = now
+    _schedule_enabled(row, now)
     db.commit()
     return out(db, row)
 
 
+def _schedule_enabled(row: PromotionAutomation, now: datetime) -> None:
+    row.next_run_at = next_share_slot(row, now) if row.action == "share" else now + OFFER_INTERVAL
+    row.enabled, row.paused_reason = True, None
+    row.like_events_since = now
+
+
+def pause_for_cloud_disconnect(db: Session, seller: str, marketplace: str) -> None:
+    db.execute(update(PromotionAutomation).where(
+        PromotionAutomation.user_id == seller,
+        PromotionAutomation.marketplace == marketplace,
+        PromotionAutomation.enabled.is_(True),
+    ).values(enabled=False, paused_reason=CLOUD_DISCONNECTED))
+
+
+def resume_after_cloud_reconnect(db: Session, seller: str, marketplace: str) -> int:
+    rows = db.query(PromotionAutomation).filter(
+        PromotionAutomation.user_id == seller,
+        PromotionAutomation.marketplace == marketplace,
+        PromotionAutomation.enabled.is_(False),
+        PromotionAutomation.paused_reason == CLOUD_DISCONNECTED,
+    ).with_for_update().all()
+    now = _now()
+    for row in rows:
+        _schedule_enabled(row, now)
+    return len(rows)
+
+
 def pause(db: Session, automation_id: str | None = None, reason: str | None = None) -> int:
-    query = db.query(PromotionAutomation).filter(PromotionAutomation.enabled.is_(True))
+    query = db.query(PromotionAutomation).filter(or_(
+        PromotionAutomation.enabled.is_(True), PromotionAutomation.paused_reason == CLOUD_DISCONNECTED,
+    ))
     if automation_id:
         query = query.filter(PromotionAutomation.id == automation_id)
     rows = query.all()
@@ -481,6 +509,7 @@ def _record_review_failure(
     send: ListingPromotion,
     automation_id: str,
     pause_reason: str | None,
+    signed_out: bool = False,
 ) -> str | None:
     # The draft may have been deleted while Chrome was reading.
     # Keep the listing identity, without a dangling draft reference.
@@ -491,7 +520,7 @@ def _record_review_failure(
     if pause_reason is not None:
         row = db.get(PromotionAutomation, automation_id)
         if row is not None:
-            return _pause(db, row, pause_reason)
+            return _pause(db, row, pause_reason, signed_out=signed_out)
     return None
 
 
@@ -510,11 +539,11 @@ def _mark_send_skipped(db: Session, send_id: str, exc: PromotionError) -> str:
     return _skip_reason(exc, send)
 
 
-def _pause_by_id(db: Session, automation_id: str, reason: str) -> str:
+def _pause_by_id(db: Session, automation_id: str, reason: str, signed_out: bool = False) -> str:
     row = db.get(PromotionAutomation, automation_id)
     if row is None:
         return f"Paused: {reason}"[:300]
-    return _pause(db, row, reason)
+    return _pause(db, row, reason, signed_out=signed_out)
 
 
 def _finish_round(
@@ -642,6 +671,7 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
                 send.finished_at = _now()
                 paused = await in_worker_session(
                     _record_review_failure, send, automation_id, str(exc) if exc.code in STOP_CODES else None,
+                    exc.code == "signed_out",
                 )
                 if exc.code in STOP_CODES:
                     stop_note = paused
@@ -679,6 +709,7 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
             if result.get("stop"):
                 stop_note = await in_worker_session(
                     _pause_by_id, automation_id, result.get("note") or "The marketplace asked Anteroom to stop.",
+                    result.get("error_code") == "signed_out",
                 )
                 break
             reasons[str(result.get("note") or "refused")[:120]] += 1
@@ -711,7 +742,9 @@ def _shipping_choice_for(marketplace: str, shipping_label: str | None, send: Lis
     return match["id"]
 
 
-def _pause(db: Session, row: PromotionAutomation, reason: str) -> str:
+def _pause(db: Session, row: PromotionAutomation, reason: str, *, signed_out: bool = False) -> str:
+    if signed_out and row.paused_reason == CLOUD_DISCONNECTED:
+        return CLOUD_DISCONNECTED
     note = f"Paused: {reason}"[:300]
     row.enabled, row.paused_reason = False, note
     db.commit()
@@ -906,6 +939,7 @@ async def check_new_likes(
             if answer.get("error_code") in STOP_CODES | {"schema_drift"}:
                 await in_worker_session(
                     _pause_by_id, automation_id, str(answer.get("error") or "The marketplace asked Anteroom to stop."),
+                    answer.get("error_code") == "signed_out",
                 )
             continue
         events: dict[str, datetime] = {}

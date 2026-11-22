@@ -1,4 +1,4 @@
-"""Seller-owned cloud marketplace sessions (Phase 1: Poshmark).
+"""Seller-owned cloud marketplace sessions.
 
 Encrypted session cookies live exclusively in Supabase Vault under
 ``cloud-session-<marketplace>``. ``cloud_marketplace_sessions`` holds only
@@ -33,7 +33,8 @@ from anteroom.services.service_context import current
 
 log = logging.getLogger("anteroom.cloud_sessions")
 
-SUPPORTED_CLOUD_MARKETPLACES = frozenset({"poshmark"})
+SUPPORTED_CLOUD_MARKETPLACES = frozenset({"poshmark", "mercari", "depop"})
+_COOKIE_NAMES = {"poshmark": "jwt", "depop": "access_token"}
 UPLOAD_TOKEN_TTL_S = 180
 SESSION_EXPIRING_S = 24 * 60 * 60
 MAX_COOKIES = 100
@@ -105,9 +106,10 @@ def _seller_id() -> str:
     return ctx.seller_id
 
 
-def _is_poshmark_domain(domain: str) -> bool:
-    clean = domain.strip().lower().lstrip(".")
-    return clean == "poshmark.com" or clean.endswith(".poshmark.com")
+def _marketplace_domain(marketplace: str, domain: str) -> bool:
+    clean = domain.strip().lower().removeprefix(".")
+    root = f"{marketplace}.com"
+    return clean == root or clean.endswith(f".{root}")
 
 
 def _jwt_claims(token: str) -> dict[str, Any] | None:
@@ -159,15 +161,16 @@ def validate_and_normalize_cookies(
 ) -> tuple[list[dict[str, Any]], str | None, datetime | None, str]:
     """Filter, validate, and normalize uploaded cookies for a cloud marketplace."""
     market = str(marketplace or "").lower()
-    if market != "poshmark":
-        raise CloudSessionError("Only Poshmark cloud sessions are supported.")
+    if market not in SUPPORTED_CLOUD_MARKETPLACES:
+        raise CloudSessionError("Unsupported cloud marketplace.")
     if not isinstance(raw_cookies, list) or not raw_cookies:
-        raise CloudSessionError("No Poshmark session cookies were provided.")
+        raise CloudSessionError("No marketplace session cookies were provided.")
     if len(raw_cookies) > MAX_COOKIES:
         raise CloudSessionError("Too many cookies in upload.")
 
     normalized: list[dict[str, Any]] = []
     jwt_cookie: dict[str, Any] | None = None
+    now_ts = int(utcnow().timestamp())
     for entry in raw_cookies:
         if not isinstance(entry, dict):
             continue
@@ -178,7 +181,7 @@ def validate_and_normalize_cookies(
             continue
         if _CONTROL_CHARS.search(name) or _CONTROL_CHARS.search(value):
             continue
-        if not _is_poshmark_domain(domain):
+        if not _marketplace_domain(market, domain):
             continue
         path = str(entry.get("path") or "/").strip() or "/"
         if len(path) > 512 or _CONTROL_CHARS.search(path):
@@ -186,8 +189,10 @@ def validate_and_normalize_cookies(
         session_cookie = bool(entry.get("session", False))
         exp_raw = entry.get("expirationDate")
         exp_ts: int | None = None
-        if not session_cookie and isinstance(exp_raw, (int, float)) and exp_raw > 0:
+        if not session_cookie and isinstance(exp_raw, (int, float)) and 0 < exp_raw <= 253402300799:
             exp_ts = int(exp_raw)
+            if market == "mercari" and exp_ts <= now_ts:
+                continue
         item: dict[str, Any] = {
             "name": name,
             "value": value,
@@ -203,11 +208,14 @@ def validate_and_normalize_cookies(
         if isinstance(same_site, str) and same_site.lower() in {"strict", "lax", "none", "no_restriction", "unspecified"}:
             item["sameSite"] = same_site.lower()
         normalized.append(item)
-        if name == "jwt" and value:
+        if name == _COOKIE_NAMES.get(market) and value:
             jwt_cookie = item
 
+    # Mercari starts its authenticated session via /v1/initialize rather than a JWT.
+    if market == "mercari" and normalized:
+        return normalized, None, None, _sanitize_user_agent(user_agent)
     if jwt_cookie is None:
-        raise CloudSessionError("Sign in to Poshmark in Chrome first, then try again.")
+        raise CloudSessionError(f"Sign in to {market.title()} in Chrome first, then try again.")
 
     raw_jwt = str(jwt_cookie["value"])
     try:
@@ -217,18 +225,18 @@ def validate_and_normalize_cookies(
         decoded_jwt = raw_jwt
 
     claims = _jwt_claims(decoded_jwt)
-    if not claims or not _HEX24.match(str(claims.get("user_id") or "")):
+    if market == "poshmark" and (not claims or not _HEX24.match(str(claims.get("user_id") or ""))):
         raise CloudSessionError("Poshmark session cookie is missing a valid account token.")
 
-    now_ts = int(utcnow().timestamp())
     exp_candidates: list[int] = []
     if isinstance(jwt_cookie.get("expirationDate"), int):
         exp_candidates.append(int(jwt_cookie["expirationDate"]))
-    if isinstance(claims.get("exp"), (int, float)):
-        exp_candidates.append(int(claims["exp"]))
+    claimed_exp = (claims or {}).get("exp")
+    if isinstance(claimed_exp, (int, float)) and 0 < claimed_exp <= 253402300799:
+        exp_candidates.append(int(claimed_exp))
     expires_ts = min(exp_candidates) if exp_candidates else None
     if expires_ts is not None and expires_ts <= now_ts:
-        raise CloudSessionError("Your Poshmark sign-in has expired. Sign in to Poshmark in Chrome, then reconnect.")
+        raise CloudSessionError(f"Your {market.title()} sign-in has expired. Sign in in Chrome, then reconnect.")
 
     expires_at = datetime.fromtimestamp(expires_ts, tz=UTC) if expires_ts is not None else None
     label = _sanitize_label(claims)
@@ -255,6 +263,7 @@ def _row(db: Session, marketplace: str, *, lock: bool = False) -> CloudMarketpla
 
 def serialize_session_row(marketplace: str, row: CloudMarketplaceSession | None) -> dict[str, Any]:
     now = utcnow()
+    connected_at = _as_utc(row.connected_at) if row else None
     if row is None or row.state in {"pending", "revoked"}:
         return {
             "marketplace": marketplace,
@@ -264,7 +273,7 @@ def serialize_session_row(marketplace: str, row: CloudMarketplaceSession | None)
             "label": None,
             "expires_at": None,
             "expiring": False,
-            "connected_at": None,
+            "connected_at": connected_at.isoformat() if connected_at and row and row.state == "pending" else None,
             "last_used_at": None,
             "last_error": None,
         }
@@ -281,7 +290,6 @@ def serialize_session_row(marketplace: str, row: CloudMarketplaceSession | None)
         and expires_at is not None
         and (expires_at - now).total_seconds() <= SESSION_EXPIRING_S
     )
-    connected_at = _as_utc(row.connected_at)
     last_used_at = _as_utc(row.last_used_at)
     return {
         "marketplace": marketplace,
@@ -375,6 +383,8 @@ def save_uploaded_session(
     marketplace: str,
     raw_cookies: list[dict[str, Any]],
     user_agent: str | None = None,
+    *,
+    verify_first: bool = False,
 ) -> dict[str, Any]:
     """Validate uploaded cookies, encrypt them in Vault, and mark session connected."""
     market = str(marketplace or "").lower()
@@ -396,11 +406,12 @@ def save_uploaded_session(
     if not ctx.secrets.set(vault_account(market), payload):
         raise CloudSessionError("Could not store encrypted session.")
 
+    state = "pending" if verify_first else "connected"
     if row is None:
         row = CloudMarketplaceSession(
             user_id=_seller_id(),
             marketplace=market,
-            state="connected",
+            state=state,
             account_label=label,
             expires_at=expires_at,
             connected_at=now,
@@ -413,7 +424,7 @@ def save_uploaded_session(
         )
         db.add(row)
     else:
-        row.state = "connected"
+        row.state = state
         row.account_label = label
         row.expires_at = expires_at
         row.connected_at = now
@@ -428,8 +439,41 @@ def save_uploaded_session(
     return serialize_session_row(market, row)
 
 
+def activate_verified_session(
+    db: Session, marketplace: str, generation: str | None, label: str | None,
+) -> dict[str, Any] | None:
+    from anteroom.services.promotion_automations import resume_after_cloud_reconnect
+
+    row = _row(db, marketplace, lock=True)
+    connected_at = _as_utc(row.connected_at) if row else None
+    if row is None or connected_at is None or connected_at.isoformat() != generation or row.state not in {"pending", "connected"}:
+        return None
+    row.state = "connected"
+    if label:
+        row.account_label = _sanitize_label({"name": label})
+    count = resume_after_cloud_reconnect(db, _seller_id(), marketplace)
+    if count:
+        _audit(db, marketplace, "automations_resumed", detail=f"count={count}")
+        log.info("%s cloud reconnect resumed %s automation(s)", marketplace, count)
+    db.commit()
+    return serialize_session_row(marketplace, row)
+
+
+def needs_automation_resume(db: Session, marketplace: str) -> bool:
+    from anteroom.models.promotion_automation import PromotionAutomation
+    from anteroom.services.promotion_automations import CLOUD_DISCONNECTED
+
+    return db.scalar(select(PromotionAutomation.id).where(
+        PromotionAutomation.user_id == _seller_id(),
+        PromotionAutomation.marketplace == marketplace,
+        PromotionAutomation.paused_reason == CLOUD_DISCONNECTED,
+    ).limit(1)) is not None
+
+
 def revoke_session(db: Session, marketplace: str) -> dict[str, Any]:
     """Delete encrypted cookies from Vault and mark the cloud session revoked."""
+    from anteroom.services.promotion_automations import pause_for_cloud_disconnect
+
     market = str(marketplace or "").lower()
     if market not in SUPPORTED_CLOUD_MARKETPLACES:
         raise CloudSessionError("Unsupported cloud marketplace.")
@@ -439,6 +483,8 @@ def revoke_session(db: Session, marketplace: str) -> dict[str, Any]:
         ctx.secrets.delete(vault_account(market))
     now = utcnow()
     if row is not None:
+        if row.state == "connected":
+            pause_for_cloud_disconnect(db, _seller_id(), market)
         row.state = "revoked"
         row.account_label = None
         row.expires_at = None
@@ -453,11 +499,15 @@ def revoke_session(db: Session, marketplace: str) -> dict[str, Any]:
 
 def mark_session_expired(db: Session, marketplace: str, error: str, generation: datetime | None) -> None:
     market = str(marketplace or "").lower()
+    from anteroom.services.promotion_automations import pause_for_cloud_disconnect
+
     row = _row(db, market, lock=True)
-    if row is None or row.state != "connected" or row.connected_at != generation:
+    if row is None or row.state not in {"connected", "pending"} or row.connected_at != generation:
         return
+    if row.state == "connected":
+        pause_for_cloud_disconnect(db, _seller_id(), market)
     row.state = "expired"
-    row.last_error = (error or "Poshmark asked to sign in again.")[:300]
+    row.last_error = (error or f"{market.title()} asked to sign in again.")[:300]
     row.updated_at = utcnow()
     _audit(db, market, "expired", detail=(error or "signed_out")[:200])
     db.commit()
@@ -485,11 +535,12 @@ def read_credentials_fresh(
     if not is_cloud_enabled(market):
         return None
     row = _row(db, market, lock=True)
-    if row is None or row.state != "connected":
+    states = {"connected", "pending"} if operation == "marketplace.verify_session" else {"connected"}
+    if row is None or row.state not in states:
         return None
     expires_at = _as_utc(row.expires_at)
     if expires_at is not None and expires_at <= utcnow():
-        mark_session_expired(db, market, "Your Poshmark cloud session expired.", row.connected_at)
+        mark_session_expired(db, market, f"Your {market.title()} cloud session expired.", row.connected_at)
         return None
 
     ctx = current()
@@ -497,15 +548,15 @@ def read_credentials_fresh(
     get_fresh = getattr(ctx.secrets, "get_fresh", None)
     raw = get_fresh(vault_account(market)) if callable(get_fresh) else ctx.secrets.get(vault_account(market))
     if not isinstance(raw, str) or not raw:
-        mark_session_expired(db, market, "Poshmark cloud credentials are missing. Reconnect Poshmark.", row.connected_at)
+        mark_session_expired(db, market, f"{market.title()} cloud credentials are missing. Reconnect in Settings → Connections.", row.connected_at)
         return None
     try:
         data = json.loads(raw)
     except Exception:
-        mark_session_expired(db, market, "Stored Poshmark credentials could not be read. Reconnect Poshmark.", row.connected_at)
+        mark_session_expired(db, market, f"Stored {market.title()} credentials could not be read. Reconnect in Settings → Connections.", row.connected_at)
         return None
     if not isinstance(data, dict) or not isinstance(data.get("cookies"), list):
-        mark_session_expired(db, market, "Stored Poshmark credentials are invalid. Reconnect Poshmark.", row.connected_at)
+        mark_session_expired(db, market, f"Stored {market.title()} credentials are invalid. Reconnect in Settings → Connections.", row.connected_at)
         return None
 
     now = utcnow()
@@ -528,7 +579,7 @@ def refresh_cookies(
     _assert_can_decrypt()
     market = str(marketplace or "").lower()
     row = _row(db, market, lock=True)
-    if row is None or row.state != "connected" or row.connected_at != generation:
+    if row is None or row.state not in {"connected", "pending"} or row.connected_at != generation:
         return
     try:
         cookies, label, expires_at, clean_ua = validate_and_normalize_cookies(market, updated_cookies, user_agent)

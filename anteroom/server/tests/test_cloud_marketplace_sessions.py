@@ -364,6 +364,71 @@ def test_verify_persists_live_sign_out(cloud, signing_keys, monkeypatch):  # noq
     assert client.get("/api/cloud-sessions", headers=alice).json()["sessions"]["poshmark"]["state"] == "expired"
 
 
+@pytest.mark.parametrize(("market", "cookie_name"), [("mercari", "session"), ("depop", "access_token")])
+def test_marketplace_cloud_verification_and_resume(cloud, signing_keys, monkeypatch, market, cookie_name):  # noqa: F811
+    from anteroom.models.cloud_session import CloudSessionAudit
+    from anteroom.models.promotion_automation import PromotionAutomation
+    from anteroom.services import promotion_automations
+
+    client, engine = cloud
+    vault = _patch_vault(monkeypatch)
+    monkeypatch.setenv("ANTEROOM_CLOUD_MARKETPLACES", "mercari,depop")
+    monkeypatch.setenv("ANTEROOM_PROCESS_ROLE", "worker")
+    alice = headers(signing_keys)
+    cookies = [
+        {"name": cookie_name, "value": "session-secret", "domain": f"www.{market}.com"},
+        {"name": cookie_name, "value": "foreign-secret", "domain": f"evil-{market}.com"},
+    ]
+    verified_state = "signed_in"
+
+    async def verify_market(marketplace, seller_id, job_id, run_payload, timeout):
+        assert marketplace == market
+        assert seller_id == USER_ID
+        assert run_payload["command"]["type"] == "marketplace.verify_session"
+        assert [cookie["value"] for cookie in run_payload["cookies"]] == ["session-secret"]
+        return {"result": {"ok": True, "session": {"state": verified_state, "label": "Seller"}}}
+
+    monkeypatch.setattr(cloud_marketplace, "_run_subprocess", verify_market)
+
+    def connect():
+        token = client.post(f"/api/cloud-sessions/{market}/connect-token", headers=alice).json()["token"]
+        return client.post(f"/api/cloud-sessions/{market}/upload", headers={"X-Cloud-Upload-Token": token},
+                           json={"cookies": cookies})
+
+    first = connect()
+    assert first.status_code == 200, first.text
+    assert first.json()["session"]["label"] == "Seller"
+    assert "session-secret" not in first.text
+    assert "foreign-secret" not in vault.data[(USER_ID, f"cloud-session-{market}")]
+    with Session(engine) as db:
+        for name, enabled, reason in (("enabled", True, None), ("manual", False, None), ("unknown", False, "Unconfirmed send")):
+            db.add(PromotionAutomation(user_id=USER_ID, name=name, marketplace=market, action="offer",
+                                       enabled=enabled, paused_reason=reason))
+        db.commit()
+
+    verified_state = "expired"
+    failed = client.post(f"/api/cloud-sessions/{market}/verify", headers=alice)
+    assert failed.json()["ok"] is False
+    assert failed.json()["session"]["state"] == "expired"
+    with Session(engine) as db:
+        paused = db.scalar(select(PromotionAutomation).where(PromotionAutomation.name == "enabled"))
+        assert paused is not None and not paused.enabled
+        assert paused.paused_reason == promotion_automations.CLOUD_DISCONNECTED
+
+    verified_state = "signed_in"
+    assert connect().status_code == 200
+    with Session(engine) as db:
+        rows = {row.name: row for row in db.scalars(select(PromotionAutomation))}
+        assert rows["enabled"].enabled and rows["enabled"].paused_reason is None
+        assert rows["enabled"].next_run_at is not None
+        assert not rows["manual"].enabled and not rows["unknown"].enabled
+        assert rows["unknown"].paused_reason == "Unconfirmed send"
+        assert db.scalar(select(CloudSessionAudit).where(CloudSessionAudit.event == "automations_resumed"))
+
+    assert client.delete(f"/api/cloud-sessions/{market}", headers=alice).json()["ok"]
+    assert (USER_ID, f"cloud-session-{market}") not in vault.data
+
+
 def test_execute_local_uses_fresh_vault_rotates_cookies_and_marks_expired_on_signed_out(cloud, monkeypatch):  # noqa: F811
     _, _engine = cloud
     vault = _patch_vault(monkeypatch)
