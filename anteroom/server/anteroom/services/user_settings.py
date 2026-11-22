@@ -1224,6 +1224,28 @@ def set_autodelist(enabled: bool) -> bool:
     return autodelist_enabled()
 
 
+AUTO_ADJUST_QUANTITY_KEY = "sale_auto_adjust_quantity"
+
+
+def auto_adjust_quantity_enabled(*, fresh: bool = False) -> bool:
+    """The seller opted into automatically decrementing multi-quantity stock after a sale. Off unless saved."""
+    if fresh:
+        from anteroom.services.service_context import current
+
+        context = current()
+        if context is not None:
+            return context.settings.read_fresh().get(AUTO_ADJUST_QUANTITY_KEY) is True
+    return read_settings().get(AUTO_ADJUST_QUANTITY_KEY) is True
+
+
+def set_auto_adjust_quantity(enabled: bool) -> bool:
+    def mutator(payload: dict) -> None:
+        payload[AUTO_ADJUST_QUANTITY_KEY] = bool(enabled)
+
+    update_settings(mutator)
+    return auto_adjust_quantity_enabled()
+
+
 BUSINESS_NOTE_KEY = "business_note"
 MAX_BUSINESS_NOTE_CHARS = 4000
 

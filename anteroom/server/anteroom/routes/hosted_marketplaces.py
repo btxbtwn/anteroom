@@ -28,6 +28,8 @@ for path, handler, methods in (
     ('/api/etsy/not-allowed', etsy.get_not_allowed, ['GET']),
     ('/api/marketplace-sales', marketplace_accounts.list_sales, ['GET']),
     ('/api/marketplace-sales/still-listed', marketplace_accounts.still_listed, ['GET']),
+    ('/api/marketplace-sales/tracker', marketplace_accounts.sale_detection_tracker, ['GET']),
+    ('/api/marketplace-sales/tracker/{event_id}/retry', marketplace_accounts.retry_sale_sync_event, ['POST']),
     ('/api/marketplace-sales/recover', marketplace_accounts.recover_orders, ['POST']),
     ('/api/marketplace-sales/reconcile', marketplace_accounts.reconcile_sales, ['POST']),
     ('/api/marketplace-sales/{sale_id}/dismiss', marketplace_accounts.dismiss_sale, ['POST']),

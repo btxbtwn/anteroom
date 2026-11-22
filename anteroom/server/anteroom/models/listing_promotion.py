@@ -57,6 +57,7 @@ class ListingPromotion(SellerOwned, Base):
     like_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Marketplace evidence, distinct from pre-send likes. Unknown counts stay null.
     confirmation: Mapped[str | None] = mapped_column(String, nullable=True)
+    follow_budget: Mapped[dict[str, int] | None] = mapped_column(JSON, nullable=True)
     recipient_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     state: Mapped[str] = mapped_column(String, nullable=False, default="preview")
     note: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -64,6 +65,8 @@ class ListingPromotion(SellerOwned, Base):
     job_id: Mapped[str | None] = mapped_column(String, nullable=True)
     # Set when a seller-enabled automation made this send; empty for one the seller started.
     automation_id: Mapped[str | None] = mapped_column(String, ForeignKey("promotion_automations.id", ondelete="SET NULL"), nullable=True, index=True)
+    waterfall_step: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    buyer_handle: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

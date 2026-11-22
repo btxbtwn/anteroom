@@ -200,6 +200,26 @@ def still_listed(db: Session = Depends(get_db, scope="function")):
     return {"items": sale_delist_followup.still_listed(db), "autodelist": autodelist_enabled()}
 
 
+@router.get("/api/marketplace-sales/tracker")
+def sale_detection_tracker(limit: int = 200, db: Session = Depends(get_db, scope="function")):
+    """60-day sale detection tracker with SKU, timestamps, per-marketplace outcomes, retry state, and errors."""
+    from anteroom.services import sale_quantity_sync
+
+    return sale_quantity_sync.tracker_60_days(db, limit=limit)
+
+
+@router.post("/api/marketplace-sales/tracker/{event_id}/retry")
+async def retry_sale_sync_event(event_id: str):
+    """One-click retry for a failed or pending auto-delist or auto-adjust quantity outcome."""
+    from anteroom.services import sale_quantity_sync
+
+    try:
+        outcome = await sale_quantity_sync.retry_sync_event(event_id)
+    except sale_quantity_sync.SaleSyncError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+    return {"ok": outcome["status"] == "succeeded", "outcome": outcome}
+
+
 class RecoverRequest(BaseModel):
     marketplace: Literal["ebay", "etsy"]
     start: date

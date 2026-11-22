@@ -33,6 +33,7 @@ async function runCloudRead(command) {
 async function runCloudMarketplaceCommand(command, photos) {
   if (Object.hasOwn(CLOUD_READS, command.type)) return runCloudRead(command);
   if (command.type === 'marketplace.like_events') return readMarketplaceLikes(command.payload);
+  if (command.type === 'marketplace.active_offers') return readMarketplaceActiveOffers(command.payload);
   if (['marketplace.promotion_check', 'marketplace.promote', 'marketplace.promotion_result'].includes(command.type)) {
     let result = null;
     await handleMarketplacePromotion(command, value => { result = value; });

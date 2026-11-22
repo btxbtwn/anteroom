@@ -10,16 +10,6 @@
                 }
             }
         ],
-        "./server/anteroom/services/automation_actions.py": [
-            {
-                "code": "reportArgumentType",
-                "range": {
-                    "startColumn": 42,
-                    "endColumn": 46,
-                    "lineCount": 1
-                }
-            }
-        ],
         "./server/anteroom/services/listing_promotions.py": [
             {
                 "code": "reportArgumentType",

@@ -298,7 +298,7 @@ class PromotionAutomationsTest(unittest.TestCase):
         self.bridge.assert_not_called()
 
     def test_invalid_settings_are_refused(self):
-        for body in ({**SHARE, "times": []}, {**SHARE, "times": ["25:00"]}, {**SHARE, "daily_cap": 6001},
+        for body in ({**SHARE, "times": []}, {**SHARE, "times": ["25:00"]}, {**SHARE, "daily_cap": 8001},
                      {**SHARE, "timezone": "Mars/Base"}, {**OFFER, "discount_percent": None},
                      {**OFFER, "marketplace": "mercari", "shipping_label": "-$1"}, {"marketplace": "depop", "action": "share"},
                      {**SHARE, "scope": "items", "conversation_ids": []}):

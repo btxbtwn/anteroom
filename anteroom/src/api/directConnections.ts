@@ -35,6 +35,8 @@ export interface SaleDetectionStatus {
   checks: Record<string, string>;
   /** When a sale is recorded, delist the other marketplaces. Off unless the seller turns it on. */
   autodelist: boolean;
+  /** When a multi-quantity item sells with stock remaining, decrement other marketplaces (and relist Mercari). Off by default. */
+  auto_adjust_quantity?: boolean;
 }
 
 /** A sale a marketplace reported, waiting for the seller. */
@@ -86,4 +88,51 @@ export interface StillListedResponse {
   items: StillListedItem[];
   /** The seller turned on Delist the other marketplaces: Anteroom keeps retrying. */
   autodelist: boolean;
+}
+
+export interface SaleSyncOutcome {
+  eventId: string | null;
+  marketplace: string;
+  action: "delist" | "adjust_quantity" | "mercari_relist";
+  status: "succeeded" | "failed" | "pending" | "retrying" | "skipped";
+  attempts: number;
+  error: string | null;
+  listingId: string | null;
+  newListingId: string | null;
+  previousQuantity: number | null;
+  newQuantity: number | null;
+  nextRetryAt: string | null;
+  updatedAt: string | null;
+  retryable: boolean;
+}
+
+export interface SaleTrackerEntry {
+  saleId: string;
+  conversationId: string | null;
+  title: string | null;
+  sku: string | null;
+  soldOn: string;
+  orderId: string;
+  orderStatus: "paid" | "partially_refunded" | "cancelled" | "refunded" | "cancellation_pending";
+  source: string;
+  quantity: number | null;
+  stockStatus: "remaining" | "sold_out" | "unknown";
+  remainingQuantity: number | null;
+  soldAt: string | null;
+  receivedAt: string | null;
+  outcomes: SaleSyncOutcome[];
+}
+
+export interface SaleTrackerResponse {
+  windowDays: number;
+  autodelist: boolean;
+  autoAdjustQuantity: boolean;
+  summary: {
+    totalSales: number;
+    succeeded: number;
+    failed: number;
+    pending: number;
+    skipped: number;
+  };
+  entries: SaleTrackerEntry[];
 }
