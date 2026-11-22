@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1131 — 2026-11-22
+
+- Upgrade hosted managed AI to Gemini 3.5 Flash Lite (minimal reasoning) by default, Claude Haiku 5.5 for chat edits and marketplace field fills, and GPT-6.2 Sol for yardstick measurements, and recover cleanly when reasoning-only retries hit models that require reasoning.
+
 ## 0.1.1130 — 2026-11-22
 
 - Keep bulk photo uploads and measurement reads on the active account session, cancel stale reads cleanly when you reorder photos or close the dialog, and avoid stalling on slow upload connections.
