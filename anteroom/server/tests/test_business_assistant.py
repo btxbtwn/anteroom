@@ -596,6 +596,47 @@ def test_stop_keeps_what_was_written_and_a_second_question_waits_its_turn(worksp
     assert [row.text for row in business_assistant.list_messages(db)] == ["What sold?", "Half of it "]
 
 
+@pytest.mark.parametrize("stop_while_streaming", [False, True], ids=["stop-during-close", "repeated-stop"])
+def test_stop_during_lookup_cleanup_preserves_streamed_text(workspace, monkeypatch, stop_while_streaming):
+    import threading
+
+    db, _client = workspace
+    release_close = threading.Event()
+    close = business_assistant.Shop.close
+
+    async def scenario():
+        loop = asyncio.get_running_loop()
+        closing = asyncio.Event()
+
+        def paused_close(shop):
+            loop.call_soon_threadsafe(closing.set)
+            assert release_close.wait(5), "test did not release lookup cleanup"
+            close(shop)
+
+        monkeypatch.setattr(business_assistant.Shop, "close", paused_close)
+        provider = SlowProvider()
+        await start_answer(db, provider)
+        if stop_while_streaming:
+            first_stop = asyncio.create_task(assistant_route.stop())
+        else:
+            provider.release.set()
+            first_stop = None
+        try:
+            await asyncio.wait_for(closing.wait(), 5)
+            second_stop = asyncio.create_task(assistant_route.stop())
+            # Let the Stop handler request cancellation before releasing cleanup.
+            await asyncio.sleep(0)
+        finally:
+            release_close.set()
+        assert await asyncio.wait_for(second_stop, 5) == {"ok": True}
+        if first_stop is not None:
+            assert await asyncio.wait_for(first_stop, 5) == {"ok": True}
+
+    asyncio.run(scenario())
+    expected = "Half of it " if stop_while_streaming else "Half of it done."
+    assert [row.text for row in business_assistant.list_messages(db)] == ["What sold?", expected]
+
+
 def changes_reply(*entries):
     return f"Ready to review.\n\n```changes\n{json.dumps(list(entries))}\n```"
 
