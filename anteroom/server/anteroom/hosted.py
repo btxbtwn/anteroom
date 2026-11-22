@@ -230,13 +230,35 @@ class SellerSessionMiddleware:
             if scheme.lower() != "bearer" or not token or len(token) > 16384:
                 raise InvalidSession
             state = scope["app"].state
-            # JWKS retrieval is synchronous. Keep it off the event loop, the
-            # request thread limiter and the loop's shared pool: database steps
-            # waiting for a connection and photo copies to Storage fill that
-            # pool, and must not stop the Mac and Chrome authenticating their
-            # heartbeats and replies.
-            identity = await asyncio.get_running_loop().run_in_executor(
-                state.auth_threads, state.session_verifier.verify, token)
+            from anteroom.services import mcp_tokens
+            from anteroom.services.seller_sessions import SellerIdentity
+
+            is_mcp_token = token.startswith(mcp_tokens.TOKEN_PREFIX)
+            if is_mcp_token:
+                # Personal access tokens for MCP are strictly scoped to /api/mcp.
+                # Never allow them on general workspace, publishing, or delisting routes.
+                if scope["path"] != "/api/mcp":
+                    raise InvalidSession
+                from functools import partial
+                from anteroom import database
+
+                verified = await asyncio.get_running_loop().run_in_executor(
+                    state.mcp_auth_threads,
+                    partial(mcp_tokens.authenticate_token, database.engine, token, hosted=True),
+                )
+                if verified is None:
+                    raise InvalidSession
+                identity = SellerIdentity(user_id=verified.owner_id)
+                context_token: str | None = None
+            else:
+                # JWKS retrieval is synchronous. Keep it off the event loop, the
+                # request thread limiter and the loop's shared pool: database steps
+                # waiting for a connection and photo copies to Storage fill that
+                # pool, and must not stop the Mac and Chrome authenticating their
+                # heartbeats and replies.
+                identity = await asyncio.get_running_loop().run_in_executor(
+                    state.auth_threads, state.session_verifier.verify, token)
+                context_token = token
         except InvalidSession:
             response = JSONResponse(
                 {"detail": "A valid seller session is required"}, status_code=401,
@@ -254,7 +276,7 @@ class SellerSessionMiddleware:
             scope.setdefault("state", {})["seller"] = identity
             from anteroom.services.hosted_context import for_seller
             from anteroom.services.service_context import use
-            with use(for_seller(identity.user_id, token)):
+            with use(for_seller(identity.user_id, context_token)):
                 await self.app(scope, receive, send)
             return
         await response(scope, receive, send)
@@ -444,6 +466,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
                 await asyncio.to_thread(task_signals.stop)
                 await asyncio.to_thread(uninstall_alerts)
                 await shared_http.close_connection()
+                await asyncio.to_thread(app.state.mcp_auth_threads.shutdown, wait=True, cancel_futures=True)
 
     app = FastAPI(
         title="Anteroom hosted API", version=app_version(), lifespan=lifespan,
@@ -452,6 +475,12 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.state.web_dir = web_dir
     # Threads start on first use and idle between requests; they need no shutdown.
     app.state.auth_threads = ThreadPoolExecutor(max_workers=AUTH_THREADS, thread_name_prefix="anteroom-auth")
+    # Keep token checkouts off the JWT verifier's workers. Use at most two
+    # connections and leave room in the steady-state pool whenever possible.
+    pool_size = int(os.environ.get("ANTEROOM_DB_POOL_SIZE", "8"))
+    app.state.mcp_auth_threads = ThreadPoolExecutor(
+        max_workers=max(1, min(2, pool_size - 1)), thread_name_prefix="anteroom-mcp-auth",
+    )
     app.state.process_role = os.environ.get('ANTEROOM_PROCESS_ROLE', 'all')
     # On Fly, `web` Machines serve sellers and device connections, and `worker`
     # Machines run drafts and the schedulers (deploy/fly/fly.toml). The Mac, the
@@ -518,10 +547,10 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(mac_ai_router)
     from anteroom.routes.hosted_attachments import router as attachment_router
     app.include_router(attachment_router)
-    from anteroom.routes import analytics, boxes, sale_calendar, sales_ledger
+    from anteroom.routes import analytics, boxes, home, mcp, sale_calendar, sales_ledger
     from anteroom.routes import business_expenses, scout, sourcing
-    for shared_router in (analytics.router, boxes.router, sale_calendar.router, sales_ledger.router, sourcing.router, scout.router,
-                          business_expenses.router):
+    for shared_router in (analytics.router, boxes.router, home.router, mcp.router, sale_calendar.router, sales_ledger.router,
+                          sourcing.router, scout.router, business_expenses.router):
         app.include_router(shared_router)
     from anteroom.routes.photos import edit_router
     app.include_router(edit_router)

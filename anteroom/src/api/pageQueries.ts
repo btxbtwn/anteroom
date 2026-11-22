@@ -1,6 +1,7 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import { api } from "./client";
 import type { DirectConnectionsStatus } from "./directConnections";
+import { browserTimeZone } from "./home";
 import { MAX_BACKGROUND_CONCURRENT, runInBackgroundContext } from "./requestScheduler";
 
 /**
@@ -24,6 +25,14 @@ export function lastThirtyDays(now = Date.now()) {
   return {
     start: new Date(now - 29 * DAY_MS).toISOString().slice(0, 10),
     end: new Date(now).toISOString().slice(0, 10),
+  };
+}
+
+export function homeQuery(timezone = browserTimeZone()) {
+  return {
+    queryKey: ["home", timezone] as const,
+    queryFn: () => api.home.summary(timezone),
+    gcTime: KEEP_MS,
   };
 }
 
@@ -85,6 +94,9 @@ export async function prefetchPageReads(client: QueryClient, runtime: Runtime, n
     return runInBackgroundContext(() => client.prefetchQuery(query));
   };
   const tasks: (() => Promise<unknown>)[] = [() => prefetch(settingsUiQuery)];
+  if (runtime.views.has("home")) {
+    tasks.push(() => prefetch(homeQuery()));
+  }
   if (runtime.views.has("analytics")) {
     tasks.push(() => prefetch(salesLedgerQuery({ start, end, q: "", attention: "all", sort: "newest" }, 1)));
     tasks.push(() => prefetch(salesOverviewQuery(start, end, "all")));

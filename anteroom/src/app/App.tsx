@@ -57,10 +57,11 @@ import { inventoryEmptyTitle } from "./inventoryEmpty";
 import { MarketplaceSessionNotice } from "../components/settings/MarketplaceSessionNotice";
 
 import { MobileNav, MobileNavButton, type MobileNavTarget } from "../components/MobileNav";
+import type { AttentionTarget } from "../api/home";
 import type { ListingDocument } from "../api/types";
 import { initialOpenListing, openListingReducer, phonePaneOnOpen } from "./openListing";
 import {
-  AnalyticsPage, AssistantPage, AutomationsPage, InventoryTablePage, MarketplacesPage, SettingsPage, SourcingPage,
+  AnalyticsPage, AssistantPage, AutomationsPage, HomePage, InventoryTablePage, MarketplacesPage, SettingsPage, SourcingPage,
   loadListingEditor, loadChatPanel, pageLoaders, preloadListingCode,
 } from "./pageLoaders";
 import { ListingChatPane, ListingEditorPane, pageLoading, type ListingPaneActions } from "./ListingPanes";
@@ -286,7 +287,9 @@ export function App() {
   }, [status]);
 
   const selectedListing = conversations?.find((listing: { id: string }) => listing.id === selectedConvId);
-  const workspaceTitle = activeView === "suggestions" ? "Suggestions" : activeView === "settings"
+  const workspaceTitle = activeView === "home"
+    ? "Today"
+    : activeView === "suggestions" ? "Suggestions" : activeView === "settings"
     ? SETTINGS_SECTION_LABELS[settingsSection]
     : activeView === "analytics"
       ? "Analytics"
@@ -351,8 +354,8 @@ export function App() {
     closeMobileSidebar();
   };
 
-  // Analytics, Marketplaces, Automations and Sourcing toggle back to whichever of home or inventory was open.
-  const togglePage = (view: "analytics" | "marketplaces" | "sourcing" | "automations") => {
+  // Today, Analytics, Marketplaces, Automations and Sourcing toggle back to whichever of home or inventory was open.
+  const togglePage = (view: "home" | "analytics" | "marketplaces" | "sourcing" | "automations") => {
     if (!runtime.views.has(view)) return;
     setMobilePane(runtime.hosted ? "editor" : "workspace");
     if (activeView === view) {
@@ -362,6 +365,7 @@ export function App() {
     setActiveView(view);
     closeMobileSidebar();
   };
+  const openHome = () => togglePage("home");
   const openAnalytics = () => togglePage("analytics");
   const openMarketplaces = () => togglePage("marketplaces");
   const openAssistant = () => goAssistant();
@@ -423,6 +427,29 @@ export function App() {
     }
     closeMobileSidebar();
   }, [goListings, closeMobileSidebar, queryClient, runtime.hosted, conversations]);
+
+  const navigateAttention = useCallback((target: AttentionTarget) => {
+    if (target.view === "listings" && target.conversation_id) {
+      openListing(target.conversation_id);
+      return;
+    }
+    if (target.view === "settings") {
+      if (!runtime.views.has("settings")) return;
+      if (activeView !== "settings") viewBeforeSettings.current = activeView;
+      setSettingsSection(target.settings_section ?? "connections");
+      setSettingsTargetId(target.target_id ?? null);
+      setActiveView("settings");
+      setMobilePane(runtime.hosted ? "editor" : "workspace");
+      closeMobileSidebar();
+      return;
+    }
+    if (target.view === "automations") {
+      if (!runtime.views.has("automations")) return;
+      setActiveView("automations");
+      setMobilePane(runtime.hosted ? "editor" : "workspace");
+      closeMobileSidebar();
+    }
+  }, [activeView, closeMobileSidebar, openListing, runtime.hosted, runtime.views]);
 
   const openSuggestions = () => {
     if (!runtime.features.has("suggestions")) return;
@@ -798,6 +825,7 @@ export function App() {
             onDelete={deleteListing}
             onCreate={createListing}
             creating={createConv.isPending}
+            onOpenHome={openHome}
             onOpenSettings={openSettings}
             onOpenAnalytics={openAnalytics}
             onOpenMarketplaces={openMarketplaces}
@@ -892,7 +920,11 @@ export function App() {
                 </div>
               )}
               <ErrorBoundary label="This page" resetKey={activeView === "settings" ? `settings:${settingsSection}` : activeView}>
-                {activeView === "suggestions" ? null : activeView === "settings" ? (
+                {activeView === "suggestions" ? null : activeView === "home" ? (
+                  <Suspense fallback={pageLoading}>
+                    <HomePage onNavigateAttention={navigateAttention} />
+                  </Suspense>
+                ) : activeView === "settings" ? (
                   <Suspense fallback={pageLoading}>
                     <SettingsPage
                       onOpenListing={openListing}
