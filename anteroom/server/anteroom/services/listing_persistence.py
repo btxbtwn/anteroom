@@ -170,6 +170,10 @@ def save_revision(db: Session, conv_id: str, listing_json: dict, source: str, pa
         revision.normalized_hash = normalized_listing_hash(listing_json)
 
     repo.set_current_revision(conv_id, revision.id, expected_revision_id=expected_revision_id)
+    if source not in {"native_schema", "auto_relist", "scheduled_publish", "sale_quantity_sync"}:
+        from anteroom.services.draft_scheduling import unschedule_on_edit
+
+        unschedule_on_edit(db, conv_id)
     _recheck_error_flag(db, conv_id)
     _drop_fixed_marketplace_errors(db, conv_id, before, listing_json)
 

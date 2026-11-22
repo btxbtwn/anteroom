@@ -387,6 +387,9 @@ class ListingPromotionsTest(unittest.TestCase):
         self.assertEqual(listing_promotions.mark_interrupted(self.db, "job-1"), 1)
         self.assertEqual(self.db.get(ListingPromotion, row["id"]).state, "unknown")
         history = self.client.get("/api/promotions").json()
-        self.assertEqual(history["supported"], {"poshmark": ["offer", "share"], "mercari": ["offer"], "depop": ["offer"]})
+        self.assertEqual(
+            history["supported"],
+            {"poshmark": ["bundle_offer", "follow", "offer", "share"], "mercari": ["offer"], "depop": ["offer"]},
+        )
         self.assertEqual(history["awaiting_capture"], {})
         self.assertEqual(history["history"][0]["state"], "unknown")

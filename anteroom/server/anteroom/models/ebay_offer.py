@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     DateTime,
     ForeignKey,
@@ -31,6 +33,7 @@ class EbayOfferPolicy(SellerOwned, Base):
     approval_id: Mapped[str] = mapped_column(String, nullable=False, default=new_id)
     discount_percent: Mapped[int] = mapped_column(Integer, nullable=False)
     minimum_price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    waterfall_steps: Mapped[Any] = mapped_column(JSON, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
@@ -50,6 +53,7 @@ class EbayOfferRule(SellerOwned, Base):
     conversation_id: Mapped[str | None] = mapped_column(String, ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True)
     discount_percent: Mapped[int] = mapped_column(Integer, nullable=False)
     minimum_price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    waterfall_steps: Mapped[Any] = mapped_column(JSON, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
@@ -69,6 +73,7 @@ class EbayOfferAttempt(SellerOwned, Base):
     offer_price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
     discount_percent: Mapped[int] = mapped_column(Integer, nullable=False)
     minimum_price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    waterfall_step: Mapped[int | None] = mapped_column(Integer, nullable=True)
     state: Mapped[str] = mapped_column(String, nullable=False, default="preview")
     note: Mapped[str | None] = mapped_column(String, nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -11,13 +11,15 @@ import { browserTimezone, describeActions, describeTrigger, formatRunTime } from
 import { marketplaceName } from "./marketplaceNames";
 
 /** What New automation offers, in the order the type picker lists them. */
-export type AutomationKind = "scheduled" | "ebay_offers" | "share" | "offer";
+export type AutomationKind = "scheduled" | "ebay_offers" | "share" | "offer" | "bundle_offer" | "follow";
 
 export const AUTOMATION_KINDS: readonly { kind: AutomationKind; label: string; description: string }[] = [
   { kind: "scheduled", label: "Price drop, relist or regenerate", description: "Changes save on schedule; listing, relisting and delisting need approval." },
-  { kind: "ebay_offers", label: "eBay offers", description: "Offers to buyers watching your eBay listings." },
-  { kind: "share", label: "Poshmark sharing", description: "Shares your Poshmark closet at the times you pick." },
-  { kind: "offer", label: "Offers to likers", description: "Offers to new likers on Poshmark, Mercari or Depop." },
+  { kind: "ebay_offers", label: "eBay offers", description: "Offers and waterfall sequences to buyers watching your eBay listings." },
+  { kind: "share", label: "Poshmark sharing", description: "Self, Posh Party (9a/12p/4p/7p PT), or community shares with 24-hour intensity and up to 8,000/day." },
+  { kind: "offer", label: "Offers to likers & waterfall offers", description: "Single or multi-step waterfall offers to likers on Poshmark, Mercari or Depop." },
+  { kind: "bundle_offer", label: "Poshmark private bundle offers", description: "Single- or multi-item private bundle offers after buyer like activity pauses, with optional first comment." },
+  { kind: "follow", label: "Poshmark automatic follows", description: "Reciprocal 24h follows, active-seller follows, unfollows (<= 1,000/day), and optional Live Show unsubscribe." },
 ];
 
 export interface AutomationRowView {
@@ -105,15 +107,37 @@ function clock(time: string): string {
 }
 
 export function promotionType(row: Pick<PromotionAutomation, "action" | "marketplace">): string {
-  return row.action === "share" ? `${marketplaceName(row.marketplace)} sharing` : "Offers to likers";
+  if (row.action === "share") return `${marketplaceName(row.marketplace)} sharing`;
+  if (row.action === "bundle_offer") return "Private bundle offers";
+  if (row.action === "follow") return "Poshmark follows";
+  return "Offers to likers";
 }
 
 export function promotionRow(row: PromotionAutomation): AutomationRowView {
   const timezone = row.timezone || browserTimezone();
   const scope = row.scope === "all" ? "all live listings" : `${row.conversation_ids.length} chosen listing${row.conversation_ids.length === 1 ? "" : "s"}`;
-  const when = row.action === "share"
-    ? `Every day ${row.times.map(clock).join(", ")} · ${scope}`
-    : `New likers on ${marketplaceName(row.marketplace)} · ${row.discount_percent}% off ${scope}`;
+  let when: string;
+  if (row.action === "share") {
+    const modes = row.share_modes ?? [];
+    const modePrefix = modes.includes("party") ? "Posh Parties · " : modes.includes("community") ? "Community · " : "";
+    const cadence = row.hourly_schedule ? "24h schedule" : `Every day ${row.times.map(clock).join(", ")}`;
+    when = `${modePrefix}${cadence} · ${scope}`;
+  } else if (row.action === "follow") {
+    when = `Every day ${row.times.map(clock).join(", ")} · Poshmark account`;
+  } else if (row.action === "bundle_offer") {
+    const wf = row.waterfall_steps?.length ? `${row.waterfall_steps.length}-step waterfall` : `${row.discount_percent}% off`;
+    when = `Private bundles (${row.bundle_pause_minutes ?? 5}m pause) · ${wf} · ${scope}`;
+  } else {
+    const wf = row.waterfall_steps?.length ? `${row.waterfall_steps.length}-step waterfall` : `${row.discount_percent}% off`;
+    when = `New likers on ${marketplaceName(row.marketplace)} · ${wf} ${scope}`;
+  }
+  const unavailableNoun = row.action === "share"
+    ? "sharing is"
+    : row.action === "follow"
+      ? "follows are"
+      : row.action === "bundle_offer"
+        ? "bundle offers are"
+        : "offers are";
   return {
     key: `promotion:${row.id}`,
     kind: row.action,
@@ -126,6 +150,6 @@ export function promotionRow(row: PromotionAutomation): AutomationRowView {
     on: row.enabled,
     toggleable: row.enabled || row.available,
     state: "",
-    note: row.enabled ? "" : row.paused_reason || (row.available ? "" : `${marketplaceName(row.marketplace)} offers are not available in Anteroom yet`),
+    note: row.enabled ? "" : row.paused_reason || (row.available ? "" : `${marketplaceName(row.marketplace)} ${unavailableNoun} not available in Anteroom yet`),
   };
 }

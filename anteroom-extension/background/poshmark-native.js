@@ -754,3 +754,176 @@ async function runPoshmarkApi(msg, recovery = false) {
     return result;
   }
 }
+
+const POSHMARK_MAX_DAILY_FOLLOWS = 1000;
+const POSHMARK_MAX_DAILY_UNFOLLOWS = 1000;
+
+async function poshmarkActiveParty(client) {
+  const data = await client.call('GET', '/vm-rest/parties?app_type=web&status=active', undefined, { step: 'party-list', what: 'active Posh Parties' });
+  const list = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : Array.isArray(data?.parties) ? data.parties : [];
+  const live = list.find(party => party && (party.id || party.event_id) && party.status !== 'ended');
+  return live ? String(live.id || live.event_id) : null;
+}
+
+async function poshmarkShareToParty(client, postId, partyId) {
+  await client.call('PUT', `/vm-rest/users/self/shared_posts/${postId}?event_id=${encodeURIComponent(partyId)}`, {},
+    { step: 'party-share', what: 'the Posh Party share' });
+  return { ok: true, state: 'done', share_mode: 'party', party_id: partyId };
+}
+
+async function poshmarkCommunityShares(client, account, maxShares) {
+  const limit = Math.max(1, Math.min(100, Number(maxShares) || 25));
+  const feed = await client.call('GET', `/vm-rest/users/${account.user_id}/newsfeed?type=share&app_type=web&count=${limit}`,
+    undefined, { step: 'community-feed', what: 'recent sharers' });
+  const events = Array.isArray(feed) ? feed : Array.isArray(feed?.data) ? feed.data : Array.isArray(feed?.events) ? feed.events : [];
+  const sharers = [];
+  const seen = new Set();
+  for (const event of events) {
+    const actor = String(event?.actor_id || event?.user_id || event?.user?.id || '');
+    const postId = String(event?.return_post_id || event?.target_post_id || '');
+    if (!actor || actor === account.user_id || seen.has(actor)) continue;
+    seen.add(actor);
+    sharers.push({ actor, postId });
+    if (sharers.length >= limit) break;
+  }
+  let shared = 0;
+  for (const entry of sharers) {
+    let targetPost = entry.postId;
+    if (!targetPost) {
+      const closet = await client.call('GET', `/vm-rest/users/${entry.actor}/posts?app_type=web&count=1`,
+        undefined, { step: 'community-closet', what: 'a sharer closet' });
+      const posts = Array.isArray(closet) ? closet : Array.isArray(closet?.data) ? closet.data : [];
+      targetPost = posts[0]?.id ? String(posts[0].id) : '';
+    }
+    if (!/^[a-f0-9]{24}$/.test(targetPost)) continue;
+    await client.call('PUT', `/vm-rest/users/self/shared_posts/${targetPost}`, {},
+      { step: 'community-share', what: 'the community return share' });
+    shared += 1;
+  }
+  return { ok: true, state: 'done', share_mode: 'community', recipient_count: shared };
+}
+
+async function poshmarkSendPrivateBundleOffer(client, account, payload) {
+  const listingId = String(payload.listing_id || '');
+  const offerCents = Number(payload.offer_price_cents);
+  const pauseMinutes = Math.max(1, Number(payload.bundle_pause_minutes) || 15);
+  const minItems = Math.max(1, Number(payload.bundle_min_items) || 1);
+  const bundleComment = typeof payload.bundle_comment === 'string' ? payload.bundle_comment.trim().slice(0, 500) : '';
+  const likesResp = await client.call('GET', `/vm-rest/posts/${listingId}/likes?app_type=web&count=25`,
+    undefined, { step: 'bundle-likers', what: 'recent likers' });
+  const likes = Array.isArray(likesResp) ? likesResp : Array.isArray(likesResp?.data) ? likesResp.data : [];
+  const cutoff = Date.now() - pauseMinutes * 60 * 1000;
+  const eligibleBuyers = likes.filter(item => {
+    const likedAt = Date.parse(item?.created_at || item?.liked_at || '');
+    return !Number.isFinite(likedAt) || likedAt <= cutoff;
+  });
+  if (!eligibleBuyers.length) {
+    throw marketplaceError('Waiting for buyer like activity to pause before sending a bundle offer.', { code: 'bundle_waiting' });
+  }
+  const buyer = eligibleBuyers[0];
+  const buyerId = String(buyer.user_id || buyer.id || '');
+  const buyerHandle = String(buyer.username || buyer.handle || '');
+  if (!buyerId) throw marketplaceError('Poshmark did not return a buyer for this bundle offer.');
+  const bundleResp = await client.call('POST', `/vm-rest/users/${account.user_id}/bundles`, {
+    buyer_id: buyerId,
+    post_ids: [listingId],
+  }, { step: 'bundle-create', what: 'creating the private bundle' });
+  const bundle = bundleResp?.bundle || bundleResp;
+  const bundleId = String(bundle?.id || '');
+  if (!bundleId) throw marketplaceError('Poshmark did not return a bundle ID.');
+  const itemCount = Number(bundle?.item_count ?? (Array.isArray(bundle?.posts) ? bundle.posts.length : 1));
+  if (itemCount < minItems) {
+    throw marketplaceError(`Bundle has ${itemCount} item(s), below the ${minItems}-item minimum.`);
+  }
+  const offerBody = {
+    offer_amount: { val: String(offerCents / 100), currency_code: 'USD' },
+    offer_api_version: 3,
+  };
+  if (payload.shipping_discount_id) {
+    offerBody.seller_shipping_discount = { id: String(payload.shipping_discount_id) };
+  }
+  await client.call('POST', `/vm-rest/bundles/${bundleId}/offers`, offerBody,
+    { step: 'bundle-offer', what: 'the private bundle offer' });
+  const isFirstBundle = bundle?.is_first_bundle !== false && Number(bundle?.comment_count || 0) === 0;
+  if (bundleComment && isFirstBundle) {
+    await client.call('POST', `/vm-rest/bundles/${bundleId}/comments`, { comment: bundleComment },
+      { step: 'bundle-comment', what: 'the first bundle comment' });
+  }
+  return {
+    ok: true,
+    state: 'done',
+    confirmation: 'request_accepted',
+    recipient_count: 1,
+    buyer_handle: buyerHandle || buyerId,
+    bundle_id: bundleId,
+  };
+}
+
+async function poshmarkRunFollows(client, account, config = {}) {
+  const reciprocal = Boolean(config.reciprocal_24h);
+  const newCap = Math.max(0, Math.min(POSHMARK_MAX_DAILY_FOLLOWS, Number(config.new_active_sellers_cap) || 0));
+  const unfollowCap = Math.max(0, Math.min(POSHMARK_MAX_DAILY_UNFOLLOWS, Number(config.unfollow_cap) || 0));
+  const unsubLive = Boolean(config.unsubscribe_live_shows);
+
+  let followed = 0;
+  let unfollowed = 0;
+
+  if (reciprocal) {
+    const feed = await client.call('GET', `/vm-rest/users/${account.user_id}/newsfeed?type=follow&app_type=web&count=100`,
+      undefined, { step: 'follow-feed', what: 'recent followers' });
+    const events = Array.isArray(feed) ? feed : Array.isArray(feed?.data) ? feed.data : [];
+    const since = Date.now() - 24 * 60 * 60 * 1000;
+    for (const ev of events) {
+      const uid = String(ev?.actor_id || ev?.user_id || ev?.user?.id || '');
+      const created = Date.parse(ev?.created_at || '');
+      if (!uid || uid === account.user_id || (Number.isFinite(created) && created < since)) continue;
+      if (followed >= POSHMARK_MAX_DAILY_FOLLOWS) break;
+      await client.call('PUT', `/vm-rest/users/self/followed_users/${uid}`, {},
+        { step: 'follow-reciprocal', what: 'following back a recent follower' });
+      followed += 1;
+    }
+  }
+
+  if (newCap > 0) {
+    const remaining = Math.min(newCap, POSHMARK_MAX_DAILY_FOLLOWS - followed);
+    if (remaining > 0) {
+      const active = await client.call('GET', `/vm-rest/users/active?app_type=web&count=${remaining}`,
+        undefined, { step: 'active-sellers', what: 'active Poshmark sellers' });
+      const users = Array.isArray(active) ? active : Array.isArray(active?.data) ? active.data : [];
+      for (const user of users.slice(0, remaining)) {
+        const uid = String(user?.id || user?.user_id || '');
+        if (!uid || uid === account.user_id) continue;
+        await client.call('PUT', `/vm-rest/users/self/followed_users/${uid}`, {},
+          { step: 'follow-active', what: 'following an active seller' });
+        followed += 1;
+      }
+    }
+  }
+
+  if (unfollowCap > 0) {
+    const following = await client.call('GET', `/vm-rest/users/${account.user_id}/following?app_type=web&count=${unfollowCap}`,
+      undefined, { step: 'following-list', what: 'followed accounts' });
+    const users = Array.isArray(following) ? following : Array.isArray(following?.data) ? following.data : [];
+    for (const user of users.slice(0, unfollowCap)) {
+      const uid = String(user?.id || user?.user_id || '');
+      if (!uid || uid === account.user_id) continue;
+      await client.call('DELETE', `/vm-rest/users/self/followed_users/${uid}`, undefined,
+        { step: 'unfollow', what: 'unfollowing an account' });
+      unfollowed += 1;
+    }
+  }
+
+  if (unsubLive) {
+    await client.call('PUT', '/vm-rest/users/self/notification_settings', { live_show_notifications: false },
+      { step: 'live-show-unsub', what: 'unsubscribing from Live Show notifications' });
+  }
+
+  return {
+    ok: true,
+    state: 'done',
+    followed_count: followed,
+    unfollowed_count: unfollowed,
+    unsubscribed_live_shows: unsubLive,
+  };
+}
+

@@ -270,6 +270,8 @@ async def _follow(conv_id: str, sale_id: str, targets: dict[str, str]) -> None:
 
 
 async def _follow_group(conv_id: str, sale_id: str, targets: dict[str, str]) -> None:
+    from anteroom.database import in_worker_session
+    from anteroom.services import sale_quantity_sync
     from anteroom.services.marketplace_delist import DelistError, delist
 
     names = list(targets)
@@ -282,6 +284,16 @@ async def _follow_group(conv_id: str, sale_id: str, targets: dict[str, str]) -> 
     except Exception as exc:  # noqa: BLE001 - HTTPException from listing mode and the like
         log.info("Delist after a sale could not start for item %s: %s", conv_id, exc)
         return
+    try:
+        await in_worker_session(
+            sale_quantity_sync.record_delist_outcomes,
+            [sale_id],
+            conv_id,
+            dict(targets),
+            result,
+        )
+    except Exception:  # noqa: BLE001 - tracker recording must not break follow-up loop
+        log.debug("Could not record follow-up delist outcomes for %s", sale_id, exc_info=True)
     for name in names:
         entry = result.get(name) or {}
         if entry.get("state") != "failed":

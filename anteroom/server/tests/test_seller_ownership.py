@@ -85,6 +85,16 @@ def seed_previous_release(engine):
 JOB_LEASE_DEFAULTS = {"lease_owner": None, "leased_until": None, "cancel_requested": False}
 # Revision d0e4f3a92b68: Finished items from older builds stay the seller's decision.
 CONVERSATION_SETTLEMENT_DEFAULTS = {"settled_by_seller": True}
+# Revision c2d9f4a8e103: Draft scheduling is opt-in and off by default.
+LISTING_SCHEDULE_DEFAULTS = {
+    "ready_to_list": False,
+    "scheduled_publish_at": None,
+    "scheduled_marketplaces": None,
+    "scheduled_revision_id": None,
+    "scheduled_confirmed_at": None,
+    "scheduled_status": None,
+    "scheduled_error": None,
+}
 
 
 def read_rows(engine, names):
@@ -128,7 +138,8 @@ def test_previous_release_upgrade_preserves_records_and_constraints(migration_en
                                        "category_path": None, "title": "Vintage coat", "type": None,
                                        "season": None, "material": None,
                                    }} if name == "listing_revisions" else {}), **(JOB_LEASE_DEFAULTS if name == "jobs" else {}),
-                                   **(CONVERSATION_SETTLEMENT_DEFAULTS if name == "conversations" else {})) for row in rows]
+                                   **(CONVERSATION_SETTLEMENT_DEFAULTS if name == "conversations" else {}),
+                                   **(LISTING_SCHEDULE_DEFAULTS if name == "listings" else {})) for row in rows]
 
     inspector = sa.inspect(engine)
     for table in Base.metadata.tables.values():
@@ -184,7 +195,8 @@ def test_pre_alembic_database_gets_ownership_without_losing_rows(migration_engin
                 "category_path": None, "title": "Vintage coat", "type": None,
                 "season": None, "material": None,
             }} if name == "listing_revisions" else {}), **(JOB_LEASE_DEFAULTS if name == "jobs" else {}),
-                                   **(CONVERSATION_SETTLEMENT_DEFAULTS if name == "conversations" else {})) for row in rows]
+                                   **(CONVERSATION_SETTLEMENT_DEFAULTS if name == "conversations" else {}),
+                                   **(LISTING_SCHEDULE_DEFAULTS if name == "listings" else {})) for row in rows]
     assert schema_migrations.recorded_revision(engine) == CURRENT_REVISION
     assert len(backups.list_snapshots(backups.BACKUPS_DIR)) == 1
 

@@ -136,6 +136,9 @@ async function checkPoshmarkPromotion(payload, deadline) {
 async function sharePoshmark(payload, deadline) {
   const account = await poshmarkAccount();
   const client = poshmarkClient(deadline, await poshmarkCsrf(deadline));
+  if (payload.share_mode === 'community' || payload.listing_id === '__account__') {
+    return await poshmarkCommunityShares(client, account, payload.max_shares);
+  }
   await poshmarkOwnPost(client, account, payload.listing_id);
   // Space shares the way a person would, across batches and restarts. A
   // scheduled round may ask for a slower pace, never a faster one.
@@ -144,8 +147,40 @@ async function sharePoshmark(payload, deadline) {
   const wait = last + gap + Math.floor(Math.random() * POSHMARK_SHARE_JITTER_MS) - Date.now();
   if (wait > 0) await marketplaceSleep(Math.min(wait, gap + POSHMARK_SHARE_JITTER_MS));
   await chrome.storage.local.set({ [POSHMARK_LAST_SHARE_KEY]: Date.now() });
-  await client.call('PUT', `/vm-rest/users/self/shared_posts/${payload.listing_id}`, {}, { step: 'share', what: 'the share' });
-  return { ok: true, state: 'done' };
+  const modes = Array.isArray(payload.share_modes) && payload.share_modes.length ? payload.share_modes : ['self'];
+  let sharedParty = false;
+  if (modes.includes('party') && payload.party_window) {
+    const partyId = await poshmarkActiveParty(client);
+    if (partyId) {
+      await poshmarkShareToParty(client, payload.listing_id, partyId);
+      sharedParty = true;
+    }
+  }
+  if (modes.includes('self') || !sharedParty) {
+    await client.call('PUT', `/vm-rest/users/self/shared_posts/${payload.listing_id}`, {}, { step: 'share', what: 'the share' });
+  }
+  return { ok: true, state: 'done', ...(sharedParty && !modes.includes('self') ? { share_mode: 'party' } : {}) };
+}
+
+async function bundleOfferPoshmark(payload, deadline) {
+  const offer = Number(payload.offer_price_cents);
+  const floor = Number(payload.floor_cents);
+  if (!Number.isInteger(offer) || offer <= 0 || offer % 100 || !Number.isInteger(floor) || floor <= 0 || offer < floor) {
+    throw marketplaceError('This bundle offer is below your floor or not whole dollars. Review it again.');
+  }
+  const account = await poshmarkAccount();
+  const client = poshmarkClient(deadline, await poshmarkCsrf(deadline));
+  const post = await poshmarkOwnPost(client, account, payload.listing_id);
+  if (poshmarkCents(post.price_amount) !== Number(payload.price_cents)) {
+    throw marketplaceError('The Poshmark price changed since your review. Review the bundle offer again.');
+  }
+  return await poshmarkSendPrivateBundleOffer(client, account, payload);
+}
+
+async function followPoshmark(payload, deadline) {
+  const account = await poshmarkAccount();
+  const client = poshmarkClient(deadline, await poshmarkCsrf(deadline));
+  return await poshmarkRunFollows(client, account, payload.follow_config || {});
 }
 
 async function offerPoshmark(payload, deadline) {
@@ -479,7 +514,15 @@ async function offerDepop(payload, deadline) {
 }
 
 const MARKETPLACE_PROMOTIONS = {
-  poshmark: { id: /^[a-f0-9]{24}$/, check: checkPoshmarkPromotion, share: sharePoshmark, offer: offerPoshmark },
+  poshmark: {
+    id: /^[a-f0-9]{24}$/,
+    actions: ['share', 'offer', 'bundle_offer', 'follow'],
+    check: checkPoshmarkPromotion,
+    share: sharePoshmark,
+    offer: offerPoshmark,
+    bundle_offer: bundleOfferPoshmark,
+    follow: followPoshmark,
+  },
   mercari: { id: /^m\d{6,20}$/, actions: ['offer'], check: checkMercariPromotion, offer: offerMercari },
   depop: { id: /^[a-z0-9][a-z0-9-]{2,120}$/, actions: ['offer'], check: checkDepopPromotion, offer: offerDepop },
 };
@@ -507,8 +550,12 @@ async function checkMarketplacePromotion(payload) {
 
 async function runMarketplacePromotion(payload) {
   const entry = MARKETPLACE_PROMOTIONS[payload?.marketplace];
+  const isAccountAction = payload?.marketplace === 'poshmark' && (
+    payload.action === 'follow' || (payload.action === 'share' && payload.share_mode === 'community')
+  ) && String(payload.listing_id || '') === '__account__';
   if (!entry || !(entry.actions || ['share', 'offer']).includes(payload.action) || payload.confirm !== true
-      || !entry.id.test(String(payload.listing_id || '')) || !/^[a-z0-9-]{6,64}$/i.test(String(payload.action_id || ''))) {
+      || (!isAccountAction && !entry.id.test(String(payload.listing_id || '')))
+      || !/^[a-z0-9-]{6,64}$/i.test(String(payload.action_id || ''))) {
     return marketplaceFailure(marketplaceError('Confirm a share or offer on a named marketplace listing.'), true);
   }
   try { return await entry[payload.action](payload, Date.now() + PROMOTION_DEADLINE_MS); }

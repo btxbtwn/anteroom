@@ -185,6 +185,132 @@ async def approve_listing(approval_id: str, body: ConfirmBody):
     return await asyncio.shield(in_worker_session(_settle_approval, approval_id, claimed, item, result))
 
 
+class BulkScheduleBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    conversation_ids: list[str] = Field(min_length=1, max_length=200)
+    publish_at: str = Field(min_length=1)
+    marketplaces: list[str] = Field(min_length=1, max_length=7)
+    confirm: bool = False
+
+
+class BulkUnscheduleBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    conversation_ids: list[str] = Field(min_length=1, max_length=200)
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class AutoRelistFiltersBody(BaseModel):
+    min_likes: int | None = Field(default=None, ge=0)
+    max_likes: int | None = Field(default=None, ge=0)
+    conditions: list[str] | None = None
+    min_price: float | None = Field(default=None, ge=0)
+    max_price: float | None = Field(default=None, ge=0)
+    keywords: list[str] | None = None
+    labels: list[str] | None = None
+
+
+class AutoRelistRuleBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = False
+    confirm: bool = False
+    min_age_days: int = Field(default=30, ge=1, le=365)
+    ebay_recreate_before_gtc_minutes: int | None = Field(default=30, ge=5, le=1440)
+    daily_cap: int = Field(default=25, ge=1, le=100)
+    price_adjust_mode: Literal["percent", "amount"] | None = None
+    price_adjust_value: float | None = None
+    price_floor: float | None = Field(default=None, ge=0)
+    skip_active_offers: bool = True
+    filters: AutoRelistFiltersBody | None = None
+
+
+class AutoRelistRunBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    marketplace: str | None = None
+    dry_run: bool = False
+
+
+@router.get("/scheduled-drafts")
+def list_scheduled_drafts(db: Session = Depends(get_db, scope="function")):
+    """List drafts marked ready-to-list or scheduled for future publishing."""
+    from anteroom.services import draft_scheduling
+
+    return {"drafts": draft_scheduling.list_scheduled_drafts(db)}
+
+
+@router.get("/scheduled-drafts/logs")
+def list_scheduled_draft_logs(limit: int = 100, db: Session = Depends(get_db, scope="function")):
+    """Audit log of scheduled draft publish attempts and failures."""
+    from anteroom.services import draft_scheduling
+
+    return {"logs": draft_scheduling.list_publish_logs(db, limit=min(max(limit, 1), 200))}
+
+
+@router.post("/scheduled-drafts/bulk-schedule")
+def bulk_schedule_drafts(body: BulkScheduleBody, db: Session = Depends(get_db, scope="function")):
+    """Schedule multiple validated drafts for future publishing to named marketplaces."""
+    from anteroom.services import draft_scheduling
+
+    try:
+        return draft_scheduling.bulk_schedule(
+            db,
+            body.conversation_ids,
+            publish_at=body.publish_at,
+            marketplaces=body.marketplaces,
+            confirm=body.confirm,
+        )
+    except draft_scheduling.SchedulePublishError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+
+
+@router.post("/scheduled-drafts/bulk-unschedule")
+def bulk_unschedule_drafts(body: BulkUnscheduleBody, db: Session = Depends(get_db, scope="function")):
+    """Cancel scheduled future publishes for multiple drafts."""
+    from anteroom.services import draft_scheduling
+
+    return draft_scheduling.bulk_unschedule(db, body.conversation_ids, reason=body.reason)
+
+
+@router.get("/auto-relist")
+def list_auto_relist_rules(db: Session = Depends(get_db, scope="function")):
+    """Per-marketplace unattended Auto-Relist and eBay Auto-Recreate settings (OFF by default)."""
+    from anteroom.services import auto_relist
+
+    return {"rules": auto_relist.list_rules(db)}
+
+
+@router.get("/auto-relist/logs")
+def list_auto_relist_logs(marketplace: str | None = None, limit: int = 100, db: Session = Depends(get_db, scope="function")):
+    """Audit log of unattended auto-relist and eBay recreate runs."""
+    from anteroom.services import auto_relist
+
+    return {"logs": auto_relist.list_logs(db, marketplace=marketplace, limit=min(max(limit, 1), 200))}
+
+
+@router.put("/auto-relist/{marketplace}")
+def save_auto_relist_rule(marketplace: str, body: AutoRelistRuleBody, db: Session = Depends(get_db, scope="function")):
+    """Update one marketplace's Auto-Relist / eBay Auto-Recreate rule."""
+    from anteroom.services import auto_relist
+
+    try:
+        return auto_relist.save_rule(db, marketplace, body.model_dump(exclude={"confirm"}), confirm=body.confirm)
+    except auto_relist.AutoRelistError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+
+
+@router.post("/auto-relist/run")
+async def run_auto_relist_now(body: AutoRelistRunBody | None = None):
+    """Run an immediate auto-relist pass (or dry-run preview) for enabled marketplace rules."""
+    from anteroom.services import auto_relist
+
+    marketplace = body.marketplace if body else None
+    dry_run = bool(body.dry_run) if body else False
+    try:
+        results = await auto_relist.run_auto_relist(marketplace=marketplace, dry_run=dry_run)
+    except auto_relist.AutoRelistError as exc:
+        raise HTTPException(exc.status_code, exc.detail) from exc
+    return {"ok": True, "outcomes": results, "dry_run": dry_run}
+
+
 @router.post("")
 def create_automation(body: AutomationBody, db: Session = Depends(get_db, scope="function")):
     """Save an automation. It runs only when activate is set and the task names its actions and marketplaces."""

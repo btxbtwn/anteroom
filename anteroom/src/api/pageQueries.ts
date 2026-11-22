@@ -33,6 +33,8 @@ export const boxesQuery = { queryKey: ["boxes"] as const, queryFn: api.boxes.lis
 export const automationsQuery = { queryKey: ["automations"] as const, queryFn: () => api.automations.list(), gcTime: KEEP_MS };
 export const automationApprovalsQuery = { queryKey: ["automation-approvals"] as const, queryFn: () => api.automations.approvals(), gcTime: KEEP_MS };
 export const automationGapsQuery = { queryKey: ["automation-gaps"] as const, queryFn: () => api.errors.list(), gcTime: KEEP_MS };
+export const scheduledDraftsQuery = { queryKey: ["scheduled-drafts"] as const, queryFn: () => api.automations.scheduledDrafts(), gcTime: KEEP_MS };
+export const autoRelistRulesQuery = { queryKey: ["auto-relist-rules"] as const, queryFn: () => api.automations.autoRelistRules(), gcTime: KEEP_MS };
 export const ebayOffersQuery = { queryKey: ["ebay-offers"] as const, queryFn: api.ebayOffers.status, gcTime: KEEP_MS };
 export const promotionAutomationsQuery = { queryKey: ["promotion-automations"] as const, queryFn: api.promotionAutomations.list, gcTime: KEEP_MS };
 

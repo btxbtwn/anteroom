@@ -226,6 +226,7 @@ ALLOWED_SETTINGS_KEYS = frozenset({
     'listing_formulas',
     'sale_detection',
     'sale_autodelist',
+    'sale_auto_adjust_quantity',
     'business_note',
     'marketplaces',
     'hidden_fields',

@@ -428,6 +428,12 @@ function enforcePoshmarkConfirmation(command) {
     if (p.confirm !== true) {
       return { ok: false, safe_to_retry: true, error_code: 'rejected', error: 'Confirm this Poshmark share or offer.' };
     }
+    if (p.action === 'follow') {
+      const cfg = p.follow_config || {};
+      if (Number(cfg.new_active_sellers_cap || 0) > 1000 || Number(cfg.unfollow_cap || 0) > 1000) {
+        return { ok: false, safe_to_retry: true, error_code: 'rejected', error: 'Follow and unfollow caps cannot exceed 1,000 per day.' };
+      }
+    }
   } else if (
     [
       'marketplace.sales',

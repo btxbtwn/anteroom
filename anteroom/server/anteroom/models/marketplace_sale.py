@@ -12,6 +12,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -70,3 +71,36 @@ class MarketplaceSale(SellerOwned, Base):
         or recorded amounts.
         """
         return bool(self.financials or (self.order_id and self.order_id != self.line_id))
+
+
+class SaleSyncEvent(SellerOwned, Base):
+    """Unified 60-day sale detection tracker: per-marketplace auto-delist and auto-adjust quantity outcomes."""
+
+    __tablename__ = "sale_sync_events"
+    __table_args__ = (
+        Index("ix_sale_sync_events_owner_created", "user_id", "created_at"),
+        Index("ix_sale_sync_events_sale_target", "user_id", "sale_id", "target_marketplace"),
+        ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
+            name="fk_sale_sync_events_seller_conversation_id", deferrable=True, initially="DEFERRED"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    sale_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    conversation_id: Mapped[str | None] = mapped_column(String, ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True)
+    sku: Mapped[str | None] = mapped_column(String, nullable=True)
+    sold_marketplace: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_marketplace: Mapped[str] = mapped_column(String(32), nullable=False)
+    # delist, adjust_quantity, mercari_relist
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    target_listing_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    new_listing_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    previous_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    new_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # pending, succeeded, failed, skipped, retrying
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+

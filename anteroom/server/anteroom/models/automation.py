@@ -23,10 +23,13 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    false,
+    true,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -184,3 +187,77 @@ class ItemPriceBaseline(SellerOwned, Base):
     conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True, nullable=False)
     original_price: Mapped[float] = mapped_column(Float, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+
+
+class ScheduledPublishLog(SellerOwned, Base):
+    """Audit log for opt-in scheduled draft publishing attempts and outcomes."""
+
+    __tablename__ = "scheduled_publish_logs"
+    __table_args__ = (
+        Index("ix_scheduled_publish_logs_owner_created", "user_id", "created_at"),
+        ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
+            name="fk_scheduled_publish_logs_seller_conversation_id", deferrable=True, initially="DEFERRED"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    revision_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    marketplaces: Mapped[Any] = mapped_column(JSON, nullable=False)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    # scheduled, unscheduled, publishing, published, failed
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    results: Mapped[Any] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class MarketplaceRelistRule(SellerOwned, Base):
+    """Per-marketplace unattended Auto-Relist / eBay Auto-Recreate settings (OFF by default)."""
+
+    __tablename__ = "marketplace_relist_rules"
+    __table_args__ = (
+        UniqueConstraint("user_id", "marketplace", name="uq_marketplace_relist_rules_seller_market"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    marketplace: Mapped[str] = mapped_column(String(32), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
+    # Minimum 30 days on Poshmark/Mercari/Depop; eBay recreate mode targets ~30m before monthly GTC renewal.
+    min_age_days: Mapped[int] = mapped_column(Integer, nullable=False, default=30, server_default="30")
+    ebay_recreate_before_gtc_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    daily_cap: Mapped[int] = mapped_column(Integer, nullable=False, default=25, server_default="25")
+    # None, "percent", or "amount"
+    price_adjust_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    price_adjust_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price_floor: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Filters: min_likes, max_likes, conditions, min_price, max_price, keywords, labels
+    filters: Mapped[Any] = mapped_column(JSON, nullable=False, default=dict)
+    skip_active_offers: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow, onupdate=utcnow)
+
+
+class MarketplaceRelistLog(SellerOwned, Base):
+    """Audit log of unattended auto-relist / eBay recreate attempts, daily caps, and listing ID swaps."""
+
+    __tablename__ = "marketplace_relist_logs"
+    __table_args__ = (
+        Index("ix_marketplace_relist_logs_owner_market_created", "user_id", "marketplace", "created_at"),
+        ForeignKeyConstraint(["user_id", "conversation_id"], ["conversations.user_id", "conversations.id"],
+            name="fk_marketplace_relist_logs_seller_conversation_id", deferrable=True, initially="DEFERRED"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
+    conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True)
+    marketplace: Mapped[str] = mapped_column(String(32), nullable=False)
+    old_listing_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    new_listing_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    old_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    new_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # completed, skipped_active_offer, failed, down_needs_relist
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=utcnow)
+

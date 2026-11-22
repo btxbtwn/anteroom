@@ -25,9 +25,17 @@ export function EbayOffersSettings() {
   const [scope, setScope] = useState<"selected" | "all" | null>(null);
   const [allDiscount, setAllDiscount] = useState<string | null>(null);
   const [allMinimum, setAllMinimum] = useState<string | null>(null);
+  const [waterfallDraft, setWaterfallDraft] = useState<{ discount: string; delayMinutes: string }[] | null>(null);
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["ebay-offers"] });
+  const parseWaterfallSteps = () => {
+    const steps = waterfallDraft ?? [];
+    if (!steps.length) return undefined;
+    return steps
+      .map((s) => ({ discount_percent: Number(s.discount), delay_minutes: Number(s.delayMinutes) }))
+      .filter((s) => Number.isInteger(s.discount_percent) && s.discount_percent >= 5 && s.discount_percent <= 99 && Number.isInteger(s.delay_minutes) && s.delay_minutes >= 0);
+  };
   const preview = useMutation({
-    mutationFn: (selections: EbayOfferSelection[]) => api.ebayOffers.preview(selections, Number(discount)),
+    mutationFn: (selections: EbayOfferSelection[]) => api.ebayOffers.preview(selections, Number(discount), parseWaterfallSteps()),
     retry: false,
     onSuccess: (result) => { setOffers(result.offers); setNotice(null); },
     onSettled: refresh,
@@ -67,16 +75,27 @@ export function EbayOffersSettings() {
   });
   const enableAll = useMutation({
     mutationFn: ({ discountPercent, minimumPrice }: { discountPercent: number; minimumPrice: string }) =>
-      api.ebayOffers.enableAll(discountPercent, minimumPrice),
+      api.ebayOffers.enableAll(discountPercent, minimumPrice, parseWaterfallSteps()),
     retry: false,
     onSuccess: () => setNotice("Automatic offers enabled for all current and future eBay listings in Anteroom. The next check is within 15 minutes."),
     onSettled: refresh,
   });
   const data = status.data;
+  const activeWaterfall = waterfallDraft ?? (data?.allListings.waterfallSteps ?? []).map((step) => ({
+    discount: String(step.discount_percent),
+    delayMinutes: String(step.delay_minutes),
+  }));
+  const addWaterfallStep = () => {
+    const prev = activeWaterfall[activeWaterfall.length - 1];
+    const nextDiscount = prev ? Math.min(95, (Number(prev.discount) || 10) + 5) : Number(globalDiscount) || 10;
+    const nextDelay = prev ? (Number(prev.delayMinutes) || 15) + 1440 : 15;
+    setWaterfallDraft([...activeWaterfall, { discount: String(nextDiscount), delayMinutes: String(nextDelay) }]);
+    setNotice(null);
+  };
   const globalDiscount = allDiscount ?? String(data?.allListings.discountPercent ?? 10);
   const globalMinimum = allMinimum ?? data?.allListings.minimumPrice ?? "";
   const allEnabled = data?.allListings.enabled === true;
-  const allUnchanged = allEnabled && Number(globalDiscount) === data.allListings.discountPercent
+  const allUnchanged = allEnabled && waterfallDraft === null && Number(globalDiscount) === data.allListings.discountPercent
     && (globalMinimum === "" ? data.allListings.minimumPrice === ""
       : data.allListings.minimumPrice !== "" && Number(globalMinimum) === Number(data.allListings.minimumPrice));
   const activeScope = scope ?? (data?.allListings.enabled ? "all" : "selected");
@@ -122,10 +141,37 @@ export function EbayOffersSettings() {
           </fieldset>
           {data.allListings.enabled ? <p role="status" className="text-xs text-success-foreground">
             All current and future listings: {data.allListings.discountPercent}% off
-            {data.allListings.minimumPrice ? ` · minimum $${data.allListings.minimumPrice}` : " · no minimum price"}.
+            {data.allListings.minimumPrice ? ` · minimum $${data.allListings.minimumPrice}` : " · no minimum price"}
+            {data.allListings.waterfallSteps?.length ? ` · ${data.allListings.waterfallSteps.length}-step waterfall` : ""}.
           </p> : null}
           <Button size="xs" variant="outline" disabled={busy || !(data.allListings.enabled || data.listings.some((item) => item.enabled))}
             onClick={() => pause.mutate(undefined)}>Pause all</Button>
+          <div className="space-y-2 rounded-lg border border-border/60 p-3 text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="font-medium text-foreground">Waterfall offer steps (optional)</p>
+                <p className="text-muted-foreground">Increase the discount over time if a watcher has not accepted. Respects floor prices and eBay cooldowns.</p>
+              </div>
+              {activeWaterfall.length < 5 ? (
+                <Button size="xs" variant="outline" disabled={busy} onClick={addWaterfallStep}>Add step</Button>
+              ) : null}
+            </div>
+            {activeWaterfall.map((step, idx) => (
+              <div key={idx} className="flex flex-wrap items-end gap-2 border-t border-border/50 pt-2">
+                <span className="pb-1.5 font-medium text-muted-foreground">Step {idx + 1}</span>
+                <label className="w-24 space-y-1">Discount (%)
+                  <Input type="number" min={5} max={99} step={1} value={step.discount} disabled={busy}
+                    onChange={(e) => setWaterfallDraft(activeWaterfall.map((s, i) => (i === idx ? { ...s, discount: e.target.value } : s)))} />
+                </label>
+                <label className="w-28 space-y-1">Delay (minutes)
+                  <Input type="number" min={0} step={1} value={step.delayMinutes} disabled={busy}
+                    onChange={(e) => setWaterfallDraft(activeWaterfall.map((s, i) => (i === idx ? { ...s, delayMinutes: e.target.value } : s)))} />
+                </label>
+                <Button size="xs" variant="ghost" disabled={busy}
+                  onClick={() => setWaterfallDraft(activeWaterfall.filter((_, i) => i !== idx))}>Remove</Button>
+              </div>
+            ))}
+          </div>
           {activeScope === "all" ? <div className="space-y-3 rounded-lg border border-border/60 p-3">
             <p className="text-xs text-muted-foreground">Include every current eBay listing in Anteroom and automatically include future listings as they are listed or imported. No individual selection is needed.</p>
             <div className="flex flex-wrap gap-3">
