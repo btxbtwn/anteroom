@@ -58,6 +58,10 @@ def _evidence_shape(value: dict) -> dict:
     """Unwrap ``{"evidence": {...}}`` and read numeric values as text before validating."""
     if set(value) == {"evidence"} and isinstance(value["evidence"], dict):
         value = value["evidence"]
+    # Optional fields the prompt allows omitting: models often send null instead.
+    # Leaving null fails the schema (object only) and aborts the whole read.
+    if value.get("slab_label") is None:
+        value.pop("slab_label", None)
     for name in _VALUE_FIELDS:
         if isinstance(field := value.get(name), dict) and "value" in field:
             field["value"] = _as_text(field["value"])

@@ -918,7 +918,8 @@ def test_mcp_l8_batch_cap_auth_rate_limit_and_timeout(monkeypatch):
     assert batch_resp.status_code == 400
     assert "batch" in batch_resp.json()["error"]["message"].lower()
 
-    # L8: RPC timeout returns 504.
+    # L8: RPC timeout returns 504. Keep the short deadline inside this block so
+    # later auth checks are not 504'd under a loaded Postgres worker.
     async def stall(_fn):
         import asyncio
         await asyncio.sleep(1.0)

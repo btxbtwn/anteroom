@@ -1,0 +1,1 @@
+- Fixed photo analysis failing when the AI left the optional slab label blank as null.
