@@ -8,6 +8,7 @@ workflow.
 
 | CodeRabbit did | Now | Where |
 |---|---|---|
+| Release notes in the PR description (`## Summary by CodeRabbit`) | `## Summary by Claude` upserted into the PR description on every review (and CodeRabbit's block removed) | `review_bot.py post-review` |
 | Summary comment: walkthrough table, related issues and PRs, change type, merge risk, security risk | One sticky Claude summary comment, updated on every push | `claude-review.yml` |
 | A review per push with inline findings (severity · category · effort, "Prompt to fix") and a "Prompt to fix all issues" | The same, as a `COMMENT` review from `github-actions[bot]`. A finding on a changed file but off the diff's lines becomes a file-level comment. One on a file the PR doesn't change goes in the review's "Outside diff range" section, which auto-fix doesn't track | `claude-review.yml` |
 | Incremental reviews: only what changed since the last reviewed commit | The summary comment records the reviewed commit; the next push reviews only newer changes to the PR's files. A force-push or rebase that drops that commit starts a full review | `review_bot.py prepare-review` |
@@ -21,9 +22,11 @@ workflow.
 
 1. Open or push: Codex and Claude review. Claude's review job runs
    `review_bot.py prepare-review`, then Claude reads the code and returns JSON
-   (`review-schema.json`), then `post-review` posts it. The workflow allows
-   Claude only reading tools there (no edits, commits, pushes or comment
-   commands); the job's token can still write comments, so this is a tool
+   (`review-schema.json`), then `post-review` posts it: seller-facing
+   `## Summary by Claude` bullets go in the PR description, and the sticky
+   comment keeps the walkthrough and risks. The workflow allows Claude only
+   reading tools there (no edits, commits, pushes or comment commands); the
+   job's token can still write the description and comments, so this is a tool
    restriction, not a missing credential.
 2. Auto-fix runs right after Claude's review, and again whenever Codex submits
    a review. It first pauses auto-merge, as AGENTS.md requires before pushing

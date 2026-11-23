@@ -1,9 +1,28 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["change_type", "walkthrough", "related_issues", "related_prs", "merge_risk", "security_risk", "findings", "addressed"],
+  "required": ["change_type", "summary", "walkthrough", "related_issues", "related_prs", "merge_risk", "security_risk", "findings", "addressed"],
   "properties": {
     "change_type": {"type": "string", "enum": ["Bug fix", "Feature", "Refactor", "Tests", "Documentation", "Dependencies", "CI", "Other"]},
+    "summary": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["category", "bullets"],
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": ["Bug Fixes", "New Features", "Refactor", "Documentation", "Tests", "Chores", "Style"]
+          },
+          "bullets": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1
+          }
+        }
+      }
+    },
     "walkthrough": {
       "type": "array",
       "items": {
