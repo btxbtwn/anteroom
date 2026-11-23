@@ -1,0 +1,1 @@
+- On iPhone, a seller outside the US now searches their own eBay site's categories instead of picking from eBay US's list.
