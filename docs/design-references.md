@@ -49,6 +49,8 @@ before relying on an entry, because products rename, move and archive things.
 **Cross-listing and seller tools.** The seller already knows these screens.
 Study their task flows (photo intake, bulk edit, delist, sale detection), not
 their styling.
+Their release history (store listings, changelogs) is tracked in
+[market watch](market-watch.md).
 
 | Product | Source | Where changes are recorded | Study it for |
 | --- | --- | --- | --- |
