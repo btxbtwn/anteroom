@@ -1,6 +1,7 @@
 # Marketplace API references
 
 Checked 2026-10-31. Start with the marketplace page below before changing an API call.
+Release notes, deprecations, policies and fees are listed in [market watch](../market-watch.md).
 Downloaded OpenAPI contracts live in `specs/`; `sources.json` records their original
 URLs, retrieval times, upstream versions, and SHA-256 checksums. Depop's downloaded
 credential examples are replaced with explicit placeholders; its manifest entry

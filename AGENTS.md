@@ -45,6 +45,7 @@ No other automatic publish or delist is allowed.
 - **`ANTEROOM_SPEC.md`** — Product and architecture specification for Anteroom.
 - **`DESIGN.md`** — Visual design rules and review checklist for Anteroom's web UI.
 - **`anteroom/server/anteroom/routes/api_contract.py`** — The listing API contract the web app and the iPhone app share. `contracts/anteroom-api.json`, `anteroom/src/api/contract.gen.ts` and `anteroom-ios/Sources/API/Generated/APIContract.swift` are generated from it; never edit them by hand. See [`contracts/README.md`](contracts/README.md).
+- **`docs/market-watch.md`** — Where eBay, Etsy, Depop, Poshmark, Mercari and competing cross-listing tools announce API, form, policy, fee and feature changes, and what to do when one changes.
 - Do not duplicate listing rules across components.
 
 ## Code Search (Semble)
