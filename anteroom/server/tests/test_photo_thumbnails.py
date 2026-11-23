@@ -50,14 +50,15 @@ class PhotoThumbnailTest(unittest.TestCase):
                 len(_jpeg(1200, 900)),
             )
             self.photos.append(photo)
-        # Make the second upload the cover, the way a reorder in the tray would.
-        repo.reorder_photos(self.conv.id, [self.photos[1].id, self.photos[0].id])
-
         def override_get_db():
             yield self.db
 
         app.dependency_overrides[get_db] = override_get_db
         self.client = TestClient(app)
+        # Make the second upload the cover through the tray's route.
+        response = self.client.patch(f"/api/conversations/{self.conv.id}/photos/order",
+                                     json=[self.photos[1].id, self.photos[0].id])
+        self.assertEqual(response.status_code, 200, response.text)
 
     def tearDown(self):
         app.dependency_overrides.clear()

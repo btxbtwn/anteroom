@@ -19,7 +19,7 @@ import asyncio
 import logging
 import os
 from io import BytesIO
-from typing import Literal
+from typing import Literal, cast
 
 import httpx
 from PIL import Image
@@ -162,8 +162,9 @@ def _prepare_upload(data: bytes) -> tuple[bytes, str, str]:
     img, _size = image_decode.decode(data, max_side=MAX_INPUT_SIDE)
     has_alpha = False
     if "A" in img.getbands():
-        extrema = img.convert("RGBA").getchannel("A").getextrema()
-        min_alpha = extrema[0] if isinstance(extrema, tuple) else extrema
+        alpha = img.convert("RGBA").getchannel("A")
+        # Pillow returns a single 8-bit channel in L mode.
+        min_alpha, _ = cast("tuple[int, int]", alpha.getextrema())
         has_alpha = min_alpha < 255
     buffer = BytesIO()
     if has_alpha:
@@ -175,12 +176,6 @@ def _prepare_upload(data: bytes) -> tuple[bytes, str, str]:
         img = img.convert("RGB")
     img.save(buffer, "JPEG", quality=92, optimize=True)
     return buffer.getvalue(), "photo.jpg", "image/jpeg"
-
-
-def prepare_input(data: bytes) -> bytes:
-    """The photo encoded within Photoroom's size limits, upright and flattened."""
-    payload, _filename, _mime = _prepare_upload(data)
-    return payload
 
 
 def _error_message(response: httpx.Response) -> str:

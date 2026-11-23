@@ -243,3 +243,11 @@ def delete_photo(db: Session, conv_id: str, photo_id: str) -> bool:
     _recheck_error_flag(db, conv_id)
     db.commit()
     return True
+
+
+def reorder_photos(db: Session, conv_id: str, ordered_ids: list[str]) -> None:
+    from anteroom.services.draft_scheduling import unschedule_on_edit
+
+    ConversationRepo(db).update_photo_order(conv_id, ordered_ids)
+    unschedule_on_edit(db, conv_id, reason="Photos changed after scheduling; review and reschedule before publishing.")
+    db.commit()
