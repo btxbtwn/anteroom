@@ -587,16 +587,21 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
         listing_persistence.save_revision(self.repo.db, self.conv.id, listing, "native_schema")
         reply = json.dumps({"fields": {"ebay_specifics.Rise": {"value": "High", "evidence": "high rise"}}})
         with patch.object(native_field_fill, "load_forms", AsyncMock(return_value={"ebay": form})), \
-                patch("anteroom.services.listing_generate.collect_provider_text", AsyncMock(return_value=reply)) as ask:
+                patch("anteroom.services.listing_generate.collect_provider_text", AsyncMock(side_effect=["Malformed JSON", reply])) as ask:
             updated = await fill_native_fields(self.conv.id, object(), evidence="100% cotton, high rise")
             self.assertEqual(updated["ebay_specifics"], {"Material": "Cotton", "Rise": "High"})
             self.assertEqual(native_contract.gaps(updated, "ebay"), [])
-            self.assertNotIn("ebay_specifics.Material |", ask.call_args.args[1][1]["content"])
-            self.assertIn("--- Canonical listing rules ---", ask.call_args.args[1][0]["content"])
-            self.assertIn("Rules (VIOLATION = INCORRECT LISTING)", ask.call_args.args[1][0]["content"])
-            self.assertIn("sizeType = Regular", ask.call_args.args[1][0]["content"])
-            system_prompt = ask.call_args.args[1][0]["content"]
-            self.assertIn('{"fields":{"<field path>":{"value":"<choice>","evidence":"<exact quote>"}}}', system_prompt)
+            self.assertEqual(ask.await_count, 2)
+            initial_messages = ask.await_args_list[0].args[1]
+            retry_messages = ask.await_args_list[1].args[1]
+            self.assertNotIn("ebay_specifics.Material |", initial_messages[1]["content"])
+            self.assertIn("--- Canonical listing rules ---", initial_messages[0]["content"])
+            self.assertIn("Rules (VIOLATION = INCORRECT LISTING)", initial_messages[0]["content"])
+            self.assertIn("sizeType = Regular", initial_messages[0]["content"])
+            system_prompt = initial_messages[0]["content"]
+            shape = '{"fields":{"<field path>":{"value":"<choice>","evidence":"<exact quote>"}}}'
+            self.assertIn(shape, system_prompt)
+            self.assertIn(shape, retry_messages[-1]["content"])
             self.assertIn("exact quote of at least three characters", system_prompt)
             self.assertNotIn('{"fields":{"<fieldpath>":"<choice>"', "".join(system_prompt.split()))
             ask.reset_mock()
