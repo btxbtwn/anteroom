@@ -89,6 +89,19 @@ class StudioWindowChromeTest(unittest.TestCase):
         self.assertIn('<img class="startup-logo"', page)
         self.assertIn('<h1 class="startup-title">Anteroom</h1>', page)
 
+    def test_splash_can_open_and_report_errors_without_a_valid_stylesheet(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(desktop, "resource_root", return_value=Path(root)):
+            self.assertIn("Getting things ready…", desktop.splash_html())
+
+            stylesheet = Path(root) / "src" / "styles" / "startup.css"
+            stylesheet.parent.mkdir(parents=True)
+            stylesheet.write_bytes(b"\xff")
+            page = desktop.splash_html(error="Could not start the local studio server.")
+
+        self.assertIn('role="alert"', page)
+        self.assertIn("Could not start the local studio server.", page)
+        self.assertNotIn('class="startup-spinner"', page)
+
     def test_boot_keeps_one_startup_screen_until_the_workspace_opens(self):
         window = MagicMock()
         with (

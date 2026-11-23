@@ -3,6 +3,7 @@
 (function () {
   try {
     var pref = localStorage.getItem("anteroom:theme") || localStorage.getItem("vendoo-studio:theme");
+    if (pref !== "light" && pref !== "dark") pref = "system";
     var light = pref === "light" || (pref === "system" && matchMedia("(prefers-color-scheme: light)").matches);
     document.documentElement.classList.toggle("dark", !light);
     document.documentElement.style.colorScheme = light ? "light" : "dark";
@@ -17,7 +18,7 @@
 // The ID only exists on the static shell, which React replaces when it starts.
 (function () {
   function showRecovery(failed) {
-    var shell = document.getElementById("cloud-startup");
+    var shell = document.getElementById("app-startup");
     if (!shell) return;
     var status = shell.querySelector(".startup-status");
     var reload = shell.querySelector(".startup-reload");

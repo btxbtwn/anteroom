@@ -15,7 +15,6 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from functools import lru_cache
 from pathlib import Path
 
 from anteroom.config import (
@@ -175,17 +174,23 @@ def setup_logging() -> None:
     sys.stderr = handle
 
 
-@lru_cache(maxsize=1)
 def _splash_icon_data_uri() -> str:
-    path = app_icon_path()
-    if path is None:
-        return ""
-    return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode("ascii")
+    try:
+        path = app_icon_path()
+        if path is not None:
+            return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode("ascii")
+    except OSError as exc:
+        print(f"could not load startup icon: {exc}", file=sys.stderr)
+    return ""
 
 
 def splash_html(*, error: str | None = None) -> str:
     """Render the web startup layout before the local server is available."""
-    startup_css = (resource_root() / "src" / "styles" / "startup.css").read_text(encoding="utf-8")
+    try:
+        startup_css = (resource_root() / "src" / "styles" / "startup.css").read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        print(f"could not load startup stylesheet: {exc}", file=sys.stderr)
+        startup_css = ".startup-screen { padding: 48px 24px; text-align: center; }"
     loading = error is None
     status = "Getting things ready…" if loading else error or "Could not open Anteroom."
     icon = _splash_icon_data_uri()
@@ -212,7 +217,13 @@ def splash_html(*, error: str | None = None) -> str:
       --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     }}
     * {{ box-sizing: border-box; }}
-    body {{ margin: 0; background: var(--background); -webkit-font-smoothing: antialiased; }}
+    body {{
+      margin: 0;
+      background: var(--background);
+      color: var(--foreground);
+      font-family: var(--font-sans);
+      -webkit-font-smoothing: antialiased;
+    }}
     .pywebview-drag-region {{
       position: fixed;
       top: 0;

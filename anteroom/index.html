@@ -7,32 +7,14 @@
     <meta name="color-scheme" content="dark" />
     <title>Anteroom</title>
     <link rel="icon" type="image/png" href="/favicon.png" />
-    <script>
-      (function () {
-        try {
-          var pref = localStorage.getItem("anteroom:theme") || localStorage.getItem("vendoo-studio:theme");
-          if (pref !== "light" && pref !== "dark" && pref !== "system") pref = "system";
-          var light =
-            pref === "light" ||
-            (pref === "system" && window.matchMedia("(prefers-color-scheme: light)").matches);
-          var theme = light ? "light" : "dark";
-          document.documentElement.classList.toggle("dark", !light);
-          document.documentElement.style.colorScheme = theme;
-          var color = light ? "#ffffff" : "#000000";
-          var themeMeta = document.querySelector('meta[name="theme-color"]');
-          if (themeMeta) themeMeta.setAttribute("content", color);
-          var schemeMeta = document.querySelector('meta[name="color-scheme"]');
-          if (schemeMeta) schemeMeta.setAttribute("content", theme);
-        } catch (e) {}
-      })();
-    </script>
+    <script src="/assets/theme-boot.js"></script>
     <link rel="stylesheet" href="/src/styles/app.css" />
     <link rel="stylesheet" href="/src/styles/startup.css" />
   </head>
   <body>
     <div id="root">
       <!-- Visible while the application bundle downloads; React replaces this shell. -->
-      <main class="startup-screen" aria-label="Opening Anteroom">
+      <main id="app-startup" class="startup-screen" aria-label="Opening Anteroom">
         <div class="startup-content">
           <img class="startup-logo" src="/desktop/AppIcon.png" width="48" height="48" alt="" />
           <h1 class="startup-title">Anteroom</h1>
@@ -40,7 +22,10 @@
             <span class="startup-spinner" aria-hidden="true"></span>
             <p>Getting things ready…</p>
           </div>
-          <div class="startup-recovery"></div>
+          <div class="startup-recovery">
+            <button type="button" class="startup-reload min-h-11 rounded-[var(--control-radius)] border border-input bg-popover px-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-ring" hidden>Reload Anteroom</button>
+          </div>
+          <noscript>Enable JavaScript to open Anteroom.</noscript>
         </div>
       </main>
     </div>
