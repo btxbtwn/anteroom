@@ -6,6 +6,11 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1161 — 2026-11-23
+
+- Choose what each MCP access token can do in Settings → Agents: no access, read, or read and write for listings and for Needs Attention, and read access to analytics. Changes apply to the token's next request, and new tokens start read-only.
+- An AI assistant whose token has Needs Attention set to read and write can dismiss alerts you've already handled, and bring them back. Dismissing only hides the alert in Anteroom; it never changes a listing or a marketplace.
+
 ## 0.1.1160 — 2026-11-23
 
 - Hosted AI Studio can use Anteroom's Photoroom key automatically (`ANTEROOM_MANAGED_PHOTOROOM_KEY`), with no per-account Photoroom setup.
