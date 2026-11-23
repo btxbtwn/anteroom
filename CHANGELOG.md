@@ -6,6 +6,13 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1147 — 2026-11-23
+
+- Edit photos with AI Studio, powered by Photoroom: remove the background onto white or any colour, add a natural shadow, show clothing on a ghost mannequin or as a flat lay, or put it on a virtual model with your choice of model, scene and pose. Apply it to one photo or several at once, on the Mac and on the web. Add your Photoroom API key in Settings → Providers.
+- Revert to original undoes any AI Studio edit; your upload is always kept.
+- New free photo tools: flip, one-tap filters (Vivid, Crisp, Warm, Cool, B&W, Studio clean), a border in any colour, arrows, boxes, circles and text labels to point out flaws, and blur or pixelate to hide names, addresses and barcodes.
+- Add a listing video on the web too. Videos play in the editor and go to Poshmark, eBay and Etsy when you list or update.
+
 ## 0.1.1146 — 2026-11-22
 
 - Opt-in Scheduled Draft Publishing: mark validated drafts Ready to list and schedule single or bulk publishing to named marketplaces, with automatic unscheduling on edit, failure alerts, and audit history.
