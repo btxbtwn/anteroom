@@ -1,12 +1,12 @@
 name: Claude auto-fix
 
-# Answers every open Claude and Codex review finding ("Bring PR to ready"):
-# verifies it against the current code, fixes the real ones, replies in each
-# thread and posts the round's result. Auto-merge is paused first (AGENTS.md:
-# never push to a queued PR). Claude pushes its fix with the Claude GitHub
-# App token, which starts CI and is revoked when the action ends. Auto-merge
-# stays off afterwards; whoever checks every finding queues the PR again.
-# At most three pushed rounds.
+# Answers open Claude and Codex review findings and failed product CI jobs
+# ("Bring PR to ready"): verifies them against the current code, fixes the
+# real ones, replies in each finding thread and posts the round's result.
+# Auto-merge is paused first (AGENTS.md: never push to a queued PR). Claude
+# pushes its fix with the Claude GitHub App token, which starts CI and is
+# revoked when the action ends. Auto-merge stays off afterwards; whoever
+# checks every finding queues the PR again. At most three pushed rounds.
 # Auto-fix never publishes listings or touches .github/, anteroom/VERSION
 # or CHANGELOG.md. See docs/pr-review-bots.md.
 
@@ -26,22 +26,94 @@ on:
         description: Pull request number
         type: number
         required: true
+  # Product CI finished red on a pull request: fix from the failed job logs.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
 
 permissions:
   contents: read
 
 jobs:
+  resolve:
+    name: Resolve pull request
+    if: >-
+      github.event_name == 'workflow_call' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request_review' &&
+       github.event.review.user.login == 'chatgpt-codex-connector[bot]' &&
+       github.event.pull_request.head.repo.full_name == github.repository) ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'failure' &&
+       github.event.workflow_run.event == 'pull_request' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    outputs:
+      pr: ${{ steps.out.outputs.pr }}
+      branch: ${{ steps.out.outputs.branch }}
+      open: ${{ steps.out.outputs.open }}
+      same_repo: ${{ steps.out.outputs.same_repo }}
+      ci_run_id: ${{ steps.out.outputs.ci_run_id }}
+      skip: ${{ steps.out.outputs.skip }}
+    steps:
+      - name: Resolve
+        id: out
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_PR: ${{ inputs.pr_number || github.event.pull_request.number || 0 }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || '' }}
+          CI_RUN: ${{ github.event.workflow_run.id || '' }}
+        run: |
+          set -euo pipefail
+          pr="$INPUT_PR"
+          ci_run_id=""
+          if [ "$EVENT" = "workflow_run" ]; then
+            pr="$(gh api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/pulls" \
+              --jq "map(select(.state == \"open\" and (.draft | not) and .head.sha == \"$HEAD_SHA\" and .head.repo.full_name == \"$GITHUB_REPOSITORY\")) | .[0].number // empty")"
+            ci_run_id="$CI_RUN"
+            if [ -z "$pr" ]; then
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              echo "No open same-repo pull request for $HEAD_SHA."
+              exit 0
+            fi
+          fi
+          if [ -z "$pr" ] || [ "$pr" = "0" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          meta="$(gh pr view "$pr" --repo "$GITHUB_REPOSITORY" \
+            --json headRefName,headRepository,headRepositoryOwner,isDraft,state)"
+          branch="$(printf '%s' "$meta" | jq -r .headRefName)"
+          same_repo="$(printf '%s' "$meta" | jq -r --arg repo "$GITHUB_REPOSITORY" \
+            '(.headRepositoryOwner.login + "/" + .headRepository.name) == $repo')"
+          open="$(printf '%s' "$meta" | jq -r '.state == "OPEN" and (.isDraft | not)')"
+          echo "pr=$pr" >> "$GITHUB_OUTPUT"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "same_repo=$same_repo" >> "$GITHUB_OUTPUT"
+          echo "open=$open" >> "$GITHUB_OUTPUT"
+          echo "ci_run_id=$ci_run_id" >> "$GITHUB_OUTPUT"
+          if [ "$same_repo" = "true" ] && [ "$open" = "true" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
   autofix:
     name: Claude auto-fix
-    if: >-
-      github.event_name != 'pull_request_review' ||
-      (github.event.review.user.login == 'chatgpt-codex-connector[bot]' &&
-       github.event.pull_request.head.repo.full_name == github.repository)
+    needs: resolve
+    if: needs.resolve.outputs.skip == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     # One round at a time per pull request; a newer trigger waits.
     concurrency:
-      group: claude-autofix-${{ inputs.pr_number || github.event.pull_request.number }}
+      group: claude-autofix-${{ needs.resolve.outputs.pr }}
       cancel-in-progress: false
     permissions:
       contents: write
@@ -51,25 +123,33 @@ jobs:
       actions: read
     env:
       GH_TOKEN: ${{ github.token }}
-      PR: ${{ inputs.pr_number || github.event.pull_request.number }}
+      PR: ${{ needs.resolve.outputs.pr }}
+      CI_RUN_ID: ${{ needs.resolve.outputs.ci_run_id }}
     steps:
-      - name: Read pull request
-        id: pr
-        run: |
-          gh pr view "$PR" --repo "$GITHUB_REPOSITORY" \
-            --json headRefName,headRepository,headRepositoryOwner,isDraft,state \
-            --jq '"branch=\(.headRefName)\nsame_repo=\(.headRepositoryOwner.login + "/" + .headRepository.name == env.GITHUB_REPOSITORY)\nopen=\(.state == "OPEN" and (.isDraft | not))"' \
-            >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        if: steps.pr.outputs.same_repo == 'true' && steps.pr.outputs.open == 'true'
         with:
-          ref: ${{ steps.pr.outputs.branch }}
+          ref: ${{ needs.resolve.outputs.branch }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Collect open findings
-        if: steps.pr.outputs.same_repo == 'true' && steps.pr.outputs.open == 'true'
+      # workflow_run always uses this file from the default branch; keep the
+      # bot scripts in sync with that definition so older PR heads still work.
+      # Extract outside the worktree so Claude cannot stage them into a fix.
+      - name: Load review-bot scripts
+        id: bot
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            git fetch --quiet origin "${{ github.event.repository.default_branch }}"
+            mkdir -p "$RUNNER_TEMP/review-bot-src"
+            git archive "origin/${{ github.event.repository.default_branch }}" .github/review-bot \
+              | tar -x -C "$RUNNER_TEMP/review-bot-src"
+            echo "dir=$RUNNER_TEMP/review-bot-src/.github/review-bot" >> "$GITHUB_OUTPUT"
+          else
+            echo "dir=$GITHUB_WORKSPACE/.github/review-bot" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Collect open findings and CI failures
         id: prepare
-        run: python3 .github/review-bot/review_bot.py prepare-autofix --pr "$PR" --out "$RUNNER_TEMP/claude-autofix"
+        run: python3 "${{ steps.bot.outputs.dir }}/review_bot.py" prepare-autofix --pr "$PR" --out "$RUNNER_TEMP/claude-autofix"
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         if: steps.prepare.outputs.skip == 'false'
         with:
@@ -101,7 +181,7 @@ jobs:
       - name: Load output schema
         if: steps.prepare.outputs.skip == 'false'
         id: schema
-        run: echo "json=$(jq -c . .github/review-bot/autofix-schema.json)" >> "$GITHUB_OUTPUT"
+        run: echo "json=$(jq -c . "${{ steps.bot.outputs.dir }}/autofix-schema.json")" >> "$GITHUB_OUTPUT"
       - name: Pause auto-merge
         if: steps.prepare.outputs.skip == 'false'
         id: automerge
@@ -118,7 +198,7 @@ jobs:
           allowed_bots: "chatgpt-codex-connector[bot],claude[bot],dependabot[bot]"
           allow_fork_prs: "false"
           prompt: |
-            Follow .github/review-bot/autofix-prompt.md.
+            Follow ${{ steps.bot.outputs.dir }}/autofix-prompt.md.
             Repository: ${{ github.repository }}
             Pull request: #${{ env.PR }}
             Context directory: ${{ runner.temp }}/claude-autofix
@@ -126,6 +206,7 @@ jobs:
             --model opus
             --permission-mode acceptEdits
             --add-dir ${{ runner.temp }}/claude-autofix
+            --add-dir ${{ steps.bot.outputs.dir }}
             --allowedTools "Read,Glob,Grep,Edit,Write,Bash(cd:*),Bash(ls:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(./check.sh --fast:*),Bash(.venv/bin/python -m pytest:*),Bash(anteroom/.venv/bin/python -m pytest:*),Bash(.venv/bin/ruff:*),Bash(anteroom/.venv/bin/ruff:*),Bash(npx vitest:*),Bash(npm test:*),Bash(npm run lint:*),Bash(node --test:*),Bash(gh pr view:*)"
             --disallowedTools "Edit(.github/**),Write(.github/**),Edit(anteroom/VERSION),Write(anteroom/VERSION),Edit(CHANGELOG.md),Write(CHANGELOG.md)"
             --json-schema '${{ steps.schema.outputs.json }}'
@@ -134,7 +215,7 @@ jobs:
         env:
           AUTOFIX_OUTPUT: ${{ steps.claude.outputs.structured_output }}
           WAS_QUEUED: ${{ steps.automerge.outputs.was_queued }}
-          BRANCH: ${{ steps.pr.outputs.branch }}
+          BRANCH: ${{ needs.resolve.outputs.branch }}
         run: >-
-          python3 .github/review-bot/review_bot.py post-autofix
+          python3 "${{ steps.bot.outputs.dir }}/review_bot.py" post-autofix
           --context "$RUNNER_TEMP/claude-autofix" --branch "$BRANCH"

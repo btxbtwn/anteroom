@@ -1,7 +1,7 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["results", "blocking"],
+  "required": ["results", "ci_results", "blocking"],
   "properties": {
     "results": {
       "type": "array",
@@ -11,6 +11,20 @@
         "required": ["comment_id", "outcome", "explanation", "validation"],
         "properties": {
           "comment_id": {"type": "integer"},
+          "outcome": {"type": "string", "enum": ["fixed", "already_addressed", "inapplicable", "not_fixed"]},
+          "explanation": {"type": "string"},
+          "validation": {"type": "string"}
+        }
+      }
+    },
+    "ci_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["job", "outcome", "explanation", "validation"],
+        "properties": {
+          "job": {"type": "string"},
           "outcome": {"type": "string", "enum": ["fixed", "already_addressed", "inapplicable", "not_fixed"]},
           "explanation": {"type": "string"},
           "validation": {"type": "string"}
