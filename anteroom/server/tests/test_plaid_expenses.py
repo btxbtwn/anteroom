@@ -458,12 +458,16 @@ def test_plaid_m6_503_unconfigured_m8_clothing_other_and_l7_categorized_refunds(
 
     # M8: clothing & thrift transactions default to "other", never "inventory_purchases".
     # L7: categorized negative refund imports as negative cents; uncategorized negative inflow is skipped.
-    thrift = {
-        **transaction("thrift", name="Goodwill", amount=25.0),
+    discount_store = {
+        **transaction("discount", name="Marshalls", amount=25.0),
         "personal_finance_category": {
             "primary": "GENERAL_MERCHANDISE",
             "detailed": "GENERAL_MERCHANDISE_DISCOUNT_STORES",
         },
+    }
+    thrift_vendor = {
+        **transaction("thrift", name="Goodwill", amount=15.0),
+        "personal_finance_category": None,
     }
     clothing = {
         **transaction("clothes", name="Nordstrom", amount=40.0),
@@ -483,9 +487,11 @@ def test_plaid_m6_503_unconfigured_m8_clothing_other_and_l7_categorized_refunds(
         **transaction("inflow", name="Bank Deposit", amount=-500.0),
         "personal_finance_category": None,
     }
-    pages[None] = page("p1", added=[thrift, clothing, refund, inflow])
+    pages[None] = page("p1", added=[discount_store, thrift_vendor, clothing, refund, inflow])
     connect(client)
     by_vendor = list_expenses(client)
+    assert by_vendor["Marshalls"]["category"] == "other"
+    assert by_vendor["Marshalls"]["accounting_type"] == "needs_review"
     assert by_vendor["Goodwill"]["category"] == "other"
     assert by_vendor["Goodwill"]["accounting_type"] == "needs_review"
     assert by_vendor["Nordstrom"]["category"] == "other"

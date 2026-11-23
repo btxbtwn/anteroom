@@ -556,11 +556,7 @@ def _eligible_candidates(
     conv_ids = [conv.id for conv in eligible_convs]
 
     known_by_conv = listings_for(db, eligible_convs)
-    listed_index = (
-        load_listed_index(db)
-        if any(ml is None or ml.listed_at is None for ml, _conv in eligible_rows)
-        else None
-    )
+    listed_index = None
     listings_by_conv = {row.conversation_id: row for row in db.query(Listing).filter(Listing.conversation_id.in_(conv_ids)).all()}
     rev_ids = [row.current_revision_id for row in listings_by_conv.values() if row.current_revision_id]
     revs_by_id = {row.id: row for row in db.query(ListingRevision).filter(ListingRevision.id.in_(rev_ids)).all()} if rev_ids else {}
@@ -570,11 +566,21 @@ def _eligible_candidates(
         entry = (known_by_conv.get(conv.id) or {}).get(rule.marketplace) or {}
         if entry.get("sold_here") or entry.get("state") not in (None, "live", "failed") or not entry.get("listing_id"):
             continue
-        if ml is not None and ml.listed_at is not None:
-            listed_at = ml.listed_at
+        selected_id = str(entry["listing_id"])
+        ml_id = (
+            str(ml.listing_id)
+            if (ml is not None and ml.listing_id)
+            else (extract_listing_id(rule.marketplace, ml.listing_url) if (ml is not None and ml.listing_url) else None)
+        )
+        matched_ml = ml if (ml is not None and ml_id == selected_id) else None
+        if matched_ml is not None and matched_ml.listed_at is not None:
+            listed_at = matched_ml.listed_at
         else:
-            assert listed_index is not None
-            listed_at, _src = resolve_listed_at(listed_index, conv, [ml] if ml is not None else [], {rule.marketplace})
+            if listed_index is None:
+                listed_index = load_listed_index(db)
+            listed_at, _src = resolve_listed_at(
+                listed_index, conv, [matched_ml] if matched_ml is not None else [], {rule.marketplace},
+            )
         if not is_due_for_relist(rule.marketplace, listed_at, rule, moment):
             continue
 
@@ -584,9 +590,17 @@ def _eligible_candidates(
         notes = parse_notes(conv.notes)
         raw_labels = notes.get("vendooLabels") or ""
         labels = [part.strip() for part in str(raw_labels).split(",") if part.strip()]
-        obs = ml.inventory_observation if (ml is not None and isinstance(ml.inventory_observation, dict)) else {}
+        obs = (
+            matched_ml.inventory_observation
+            if (matched_ml is not None and isinstance(matched_ml.inventory_observation, dict))
+            else {}
+        )
         likes = obs.get("likes") if isinstance(obs.get("likes"), int) else obs.get("watchers")
-        price_raw = ml.listed_price if (ml is not None and ml.listed_price is not None) else data.get("price")
+        price_raw = (
+            matched_ml.listed_price
+            if (matched_ml is not None and matched_ml.listed_price is not None)
+            else data.get("price")
+        )
         try:
             price = float(price_raw) if price_raw is not None else None
         except (TypeError, ValueError):
