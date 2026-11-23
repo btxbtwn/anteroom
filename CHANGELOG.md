@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1171 — 2026-11-23
+
+- Keep the photo and crop handles visible while a new preview renders.
+
 ## 0.1.1170 — 2026-11-23
 
 - Run due relists on phone shows a clear connection message and refreshes the auto-relist log when the request drops, while still skipping listings with known or unverified buyer offers.

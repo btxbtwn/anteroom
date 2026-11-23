@@ -1,1 +1,0 @@
-- Keep the photo and crop handles visible while a new preview renders.
