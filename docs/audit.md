@@ -78,8 +78,13 @@ These override everything below.
   the same for `node_modules`) from a worktree on the same `uv.lock` and
   `package-lock.json`, then `.venv/bin/python -m pip install --no-deps
   --no-build-isolation -e .` in the fix worktree so the editable install
-  points at its own code. Compare the lock files first; a clone of a
-  different lock tests other packages (2026-11-23).
+  points at its own code. Then rewrite the console scripts' shebangs, which
+  still name the source venv's interpreter (and so its editable install):
+  `grep -lI <source>/anteroom/.venv .venv/bin/* | xargs sed -i '' "s#<source>/anteroom/.venv#$PWD/.venv#g"`,
+  and check `head -1 .venv/bin/lint-imports` names this worktree. `check.sh`
+  runs `lint-imports` by path, so without this the import check reads the
+  other worktree's code. Compare the lock files first; a clone of a different
+  lock tests other packages (2026-11-23).
 
   Do not symlink another worktree's venv: pytest imports
   the fix worktree's `server`, but tests that start a subprocess (the
