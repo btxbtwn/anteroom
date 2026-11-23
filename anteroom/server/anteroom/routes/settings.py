@@ -1176,6 +1176,7 @@ class AgentClientSnippet(BaseModel):
     label: str
     where: str
     snippet: str
+    prompt: str
     command: str | None = None
 
 

@@ -7,9 +7,9 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import event, text
 
-from anteroom.database import SessionLocal
+from anteroom.database import SessionLocal, engine
 from anteroom.main import app
 from anteroom.models.automation import Automation, AutomationApproval, AutomationRelistGap
 from anteroom.models.cloud_session import CloudMarketplaceSession
@@ -23,7 +23,7 @@ from anteroom.models.listing_promotion import ListingPromotion
 from anteroom.models.marketplace_listing import MarketplaceListing
 from anteroom.models.marketplace_sale import MarketplaceSale
 from anteroom.models.promotion_automation import PromotionAutomation
-from anteroom.services import home_dashboard, sales_ledger
+from anteroom.services import home_dashboard, marketplace_accounts, sales_ledger
 
 
 def _add_listing(db, conv: Conversation, listing_json: dict, *, rev_id: str | None = None) -> str:
@@ -242,6 +242,88 @@ def test_home_summary_today_kpis_and_goals_crud():
         json={"period": "monthly", "metric": "sell_through_rate", "target": 150},
     )
     assert bad.status_code == 422
+
+
+@pytest.mark.parametrize("connected_at", [datetime(2026, 5, 13, 18, 30, 0, 500000, tzinfo=UTC), None])
+def test_home_sorts_marketplace_sign_in_alert_with_other_urgent_alerts(monkeypatch, connected_at):
+    monkeypatch.setattr(marketplace_accounts, "get_marketplace_accounts", lambda: {
+        "ebay": {
+            "authError": "Reconnect eBay",
+            "connectedAt": connected_at.timestamp() if connected_at else None,
+        },
+    })
+    cloud_updated_at = datetime(2026, 5, 13, 19, tzinfo=UTC)
+    with SessionLocal() as db:
+        db.add(CloudMarketplaceSession(marketplace="poshmark", state="expired", updated_at=cloud_updated_at))
+        db.commit()
+
+    response = TestClient(app).get("/api/home")
+
+    assert response.status_code == 200
+    alerts = response.json()["needs_attention"]
+    assert [(alert["key"], alert["occurred_at"]) for alert in alerts] == [
+        ("session:ebay", connected_at.isoformat() if connected_at else None),
+        ("session:poshmark", cloud_updated_at.isoformat()),
+    ]
+
+
+def test_needs_attention_reads_latest_job_status_without_listing_snapshots():
+    now = datetime.now(UTC).replace(tzinfo=None)
+    with SessionLocal() as db:
+        db.add_all([
+            Conversation(id="still-failed", title="Still failed"),
+            Conversation(id="recovered", title="Recovered"),
+        ])
+        db.flush()
+        for identity in ("still-failed", "recovered"):
+            db.add(Job(conversation_id=identity, approved_revision_id="rev", listing_snapshot={},
+                       status="failed", last_error="Old error", created_at=now - timedelta(days=1)))
+        db.add_all([
+            Job(id="latest-failure", conversation_id="still-failed", approved_revision_id="rev", listing_snapshot={},
+                status="failed", last_error="Current error", created_at=now, updated_at=now),
+            Job(conversation_id="recovered", approved_revision_id="rev", listing_snapshot={},
+                status="completed", created_at=now),
+        ])
+        db.commit()
+
+    job_reads = []
+
+    def record(_conn, _cursor, statement, _parameters, _context, _executemany):
+        if "from jobs" in statement.lower():
+            job_reads.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        response = TestClient(app).get("/api/home?timezone=UTC")
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    assert response.status_code == 200
+    failures = [item for item in response.json()["needs_attention"] if item["kind"] == "failed_job"]
+    assert [(item["key"], item["detail"]) for item in failures] == [
+        ("failed-job:still-failed:latest-failure", "Current error"),
+    ]
+    assert job_reads
+    assert all("listing_snapshot" not in statement.lower() for statement in job_reads)
+
+
+def test_needs_attention_failed_job_without_updated_at_uses_created_at():
+    created = (datetime.now(UTC) - timedelta(hours=1)).replace(tzinfo=None, microsecond=0)
+    with SessionLocal() as db:
+        db.add(Conversation(id="no-updated-at", title="No updated at"))
+        db.flush()
+        db.add(Job(id="null-updated", conversation_id="no-updated-at", approved_revision_id="rev",
+                   listing_snapshot={}, status="failed", last_error="Broke", created_at=created))
+        db.commit()
+        db.execute(text("UPDATE jobs SET updated_at = NULL WHERE id = 'null-updated'"))
+        db.commit()
+
+    response = TestClient(app).get("/api/home?timezone=UTC")
+
+    assert response.status_code == 200
+    failures = [item for item in response.json()["needs_attention"] if item["kind"] == "failed_job"]
+    assert len(failures) == 1
+    assert failures[0]["occurred_at"].startswith(created.isoformat())
 
 
 def test_needs_attention_categories_dismiss_and_seven_day_expiry():

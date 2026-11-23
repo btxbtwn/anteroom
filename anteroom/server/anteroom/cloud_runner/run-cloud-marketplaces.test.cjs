@@ -62,6 +62,31 @@ test('Mercari verifies through initialize and imports a page with its own sessio
   assert.equal(calls.length, 3);
 });
 
+test('Mercari cloud verification reports a browser check without exposing the response body', async () => {
+  const { result } = await executeMarketplaceOperation({
+    marketplace: 'mercari', cookies: [mercariCookie],
+    command: { type: 'marketplace.verify_session', payload: { marketplace: 'mercari' } },
+    httpFetch: async () => new Response('<html>captcha private-response</html>', {
+      status: 403, headers: { 'content-type': 'text/html' },
+    }),
+  });
+  assert.deepEqual(result, {
+    ok: false, error_code: 'challenge',
+    error: 'Mercari asked for a browser check during cloud sign-in. Complete any check Mercari shows in Chrome, then retry Connect in Cloud.',
+  });
+});
+
+test('Mercari cloud verification reports when initialize returns no signed-in user', async () => {
+  const { result } = await executeMarketplaceOperation({
+    marketplace: 'mercari', cookies: [mercariCookie],
+    command: { type: 'marketplace.verify_session', payload: { marketplace: 'mercari' } },
+    httpFetch: async () => json({ csrf: 'csrf' }),
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.error_code, 'signed_out');
+  assert.match(result.error, /Sign in to Mercari in Chrome/);
+});
+
 test('Depop verifies the account and polls likes with its bearer', async () => {
   const execute = (type, httpFetch) => executeMarketplaceOperation({
     marketplace: 'depop', cookies: [depopCookie, mercariCookie],
