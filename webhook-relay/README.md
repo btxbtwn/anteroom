@@ -34,7 +34,8 @@ ship: eBay's Cert ID and Etsy's shared secret.
   through the relay for the same reason. For eBay it also subscribes the seller
   to `ORDER_CONFIRMATION`.
 - **Forwards Etsy API calls** with the app's `x-api-key`, only for Etsy
-  accounts linked to the calling device. Nothing is stored.
+  accounts linked to the calling device. Request and response bodies pass
+  through without being stored.
 - **Forwards public eBay research** for linked devices: active keyword/image
   search, category suggestions, item specifics, and ad-report metadata. Requests and responses pass
   through unstored. The shared application token stays inside the relay.
@@ -65,6 +66,21 @@ ship: eBay's Cert ID and Etsy's shared secret.
 
 `/studio/*` needs `Authorization: Bearer <device token>`. An event can arrive
 twice (live, then again after an ack); dedupe by `seq`.
+
+## Etsy quota diagnostics
+
+In Worker logs, filter on `event = etsy_api_quota`. On a 429, `source = relay`
+indicates the per-device proxy limiter and `source = etsy` indicates an upstream
+response. The relay also labels 429 responses with
+`X-Anteroom-Etsy-Throttle-Source`. Log entries include numeric quota and retry
+headers when present, without account IDs, request paths, or credentials in
+the event fields.
+
+Each Worker isolate samples successful responses with Etsy quota headers at
+most once per minute. Compare the remaining counters with their reported
+limits and look at upstream 429 counts during peak usage. The daily
+counter covers a rolling 24 hours. Successful samples can miss short bursts
+and an upstream 429 may carry only `Retry-After`.
 
 ## Configuration
 

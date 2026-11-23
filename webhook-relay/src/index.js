@@ -13,6 +13,7 @@ import {
   ensureEbaySubscriptions,
 } from "./ebay.js";
 import {
+  ETSY_THROTTLE_SOURCE,
   etsyAuthorizeUrl,
   etsyCallbackUrl,
   etsyConfigured,
@@ -21,6 +22,7 @@ import {
   etsyRefresh,
   etsyShop,
   etsyUserIdFromToken,
+  logEtsyQuota,
 } from "./etsy.js";
 import { extractEbayEvent, extractEtsyEvent } from "./extract.js";
 import { Inbox } from "./inbox.js";
@@ -416,7 +418,10 @@ async function handleEtsyProxy(request, env, deviceId, path) {
   if (env.ETSY_PROXY_LIMITER) {
     const { success } = await env.ETSY_PROXY_LIMITER.limit({ key: deviceId });
     if (!success) {
-      return json({ error: "too many Etsy requests, try again shortly" }, 429, { "retry-after": "5" });
+      const response = json({ error: "too many Etsy requests, try again shortly" }, 429,
+        { "retry-after": "5", [ETSY_THROTTLE_SOURCE]: "relay" });
+      logEtsyQuota("relay", 429, response.headers);
+      return response;
     }
   }
   return etsyForward(env, request, path, etsyToken);
