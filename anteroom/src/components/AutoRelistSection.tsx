@@ -146,7 +146,11 @@ export function AutoRelistSection() {
       setNotice(`Auto-relist pass finished: ${res.outcomes.length} listing ${res.outcomes.length === 1 ? "action" : "actions"} logged.`);
       refresh();
     },
-    onError: (err: Error) => setError(err.message),
+    onError: (err: Error) => {
+      setError(err.message);
+      // Mobile Safari often drops long POSTs; the server may still have finished.
+      refresh();
+    },
   });
 
   const rules = rulesQuery.data ?? [];
