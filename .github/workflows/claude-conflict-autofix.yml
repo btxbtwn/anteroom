@@ -1,0 +1,55 @@
+name: Claude conflict auto-fix
+
+# When main moves and a ready same-repo PR has a real merge conflict (GitHub
+# mergeable_state=dirty), run Claude auto-fix to merge origin/main and resolve
+# it. PRs that are only behind main are left alone (AGENTS.md / docs/ci.md).
+# See docs/pr-review-bots.md.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  find:
+    name: Find conflicting pull requests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+    outputs:
+      prs: ${{ steps.list.outputs.prs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: List dirty PRs
+        id: list
+        run: python3 .github/review-bot/review_bot.py list-conflict-prs
+
+  autofix:
+    name: Resolve conflicts
+    needs: find
+    if: needs.find.outputs.prs != '[]' && needs.find.outputs.prs != ''
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        pr: ${{ fromJson(needs.find.outputs.prs) }}
+    uses: ./.github/workflows/claude-autofix.yml
+    with:
+      pr_number: ${{ matrix.pr }}
+    secrets: inherit
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read

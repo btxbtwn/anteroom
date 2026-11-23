@@ -1,14 +1,15 @@
 name: Claude auto-fix
 
-# Answers every open Claude and Codex review finding ("Bring PR to ready"):
-# verifies it against the current code, fixes the real ones, replies in each
-# thread and posts the round's result. Auto-merge is paused first (AGENTS.md:
-# never push to a queued PR). Claude pushes its fix with the Claude GitHub
-# App token, which starts CI and is revoked when the action ends. Auto-merge
-# stays off afterwards; whoever checks every finding queues the PR again.
-# At most three pushed rounds.
-# Auto-fix never publishes listings or touches .github/, anteroom/VERSION
-# or CHANGELOG.md. See docs/pr-review-bots.md.
+# Answers open Claude and Codex review findings and resolves real merge
+# conflicts with main ("Bring PR to ready"): verifies them against the current
+# code, fixes the real ones, replies in each finding thread and posts the
+# round's result. Auto-merge is paused first (AGENTS.md: never push to a
+# queued PR). Claude pushes its fix with the Claude GitHub App token, which
+# starts CI and is revoked when the action ends. Auto-merge stays off
+# afterwards; whoever checks every finding queues the PR again. At most three
+# pushed rounds. Auto-fix never publishes listings or touches .github/,
+# anteroom/VERSION or CHANGELOG.md (protected-path conflicts stay human).
+# See docs/pr-review-bots.md.
 
 on:
   workflow_call:
@@ -126,7 +127,7 @@ jobs:
             --model opus
             --permission-mode acceptEdits
             --add-dir ${{ runner.temp }}/claude-autofix
-            --allowedTools "Read,Glob,Grep,Edit,Write,Bash(cd:*),Bash(ls:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(./check.sh --fast:*),Bash(.venv/bin/python -m pytest:*),Bash(anteroom/.venv/bin/python -m pytest:*),Bash(.venv/bin/ruff:*),Bash(anteroom/.venv/bin/ruff:*),Bash(npx vitest:*),Bash(npm test:*),Bash(npm run lint:*),Bash(node --test:*),Bash(gh pr view:*)"
+            --allowedTools "Read,Glob,Grep,Edit,Write,Bash(cd:*),Bash(ls:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git add:*),Bash(git commit:*),Bash(git push:*),Bash(git fetch:*),Bash(git merge:*),Bash(./check.sh --fast:*),Bash(.venv/bin/python -m pytest:*),Bash(anteroom/.venv/bin/python -m pytest:*),Bash(.venv/bin/ruff:*),Bash(anteroom/.venv/bin/ruff:*),Bash(npx vitest:*),Bash(npm test:*),Bash(npm run lint:*),Bash(node --test:*),Bash(gh pr view:*)"
             --disallowedTools "Edit(.github/**),Write(.github/**),Edit(anteroom/VERSION),Write(anteroom/VERSION),Edit(CHANGELOG.md),Write(CHANGELOG.md)"
             --json-schema '${{ steps.schema.outputs.json }}'
       - name: Reply to findings

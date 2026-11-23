@@ -265,14 +265,29 @@ class AutofixTests(unittest.TestCase):
     def test_decision(self):
         self.assertEqual(bot.autofix_decision([], [], "h"), ("skip", None))
         self.assertEqual(bot.autofix_decision([], [1], "h"), ("run", None))
+        self.assertEqual(bot.autofix_decision([], [], "h", conflict_files=["app.py"]), ("run", None))
+        self.assertEqual(bot.autofix_decision([], [], "h", merge_clean=True), ("run", None))
         pushed = [{"head": f"h{i}", "pushed": True} for i in range(bot.MAX_ROUNDS)]
         self.assertEqual(bot.autofix_decision(pushed, [1], "h9"), ("skip", "max_rounds"))
+        self.assertEqual(
+            bot.autofix_decision(pushed, [], "h9", conflict_files=["app.py"]),
+            ("skip", "max_rounds"),
+        )
         stopped = pushed + [{"head": "h9", "reason": "max_rounds"}]
         self.assertEqual(bot.autofix_decision(stopped, [1], "h9"), ("skip", None))
         tried = [{"head": "h", "pushed": False, "open": [1, 2]}]
         self.assertEqual(bot.autofix_decision(tried, [1], "h"), ("skip", "same_blockers"))
         self.assertEqual(bot.autofix_decision(tried, [1, 3], "h"), ("run", None))
         self.assertEqual(bot.autofix_decision(tried, [1], "h2"), ("run", None))
+        self.assertEqual(
+            bot.autofix_decision(tried, [1], "h", conflict_files=["app.py"]),
+            ("run", None),
+        )
+        tried_conflict = [{"head": "h", "pushed": False, "open": [], "conflict_files": ["app.py"]}]
+        self.assertEqual(
+            bot.autofix_decision(tried_conflict, [], "h", conflict_files=["app.py"]),
+            ("skip", "same_blockers"),
+        )
 
     def test_reply_and_result_text(self):
         reply = bot.render_autofix_reply(
@@ -281,10 +296,15 @@ class AutofixTests(unittest.TestCase):
         self.assertIn("**Bring PR to ready — fixed**", reply)
         self.assertIn("Fixed in commit abc1234.", reply)
         self.assertEqual(bot.read_marker(bot.AUTOFIX_REPLY, reply), {"head": "abc1234567", "outcome": "fixed"})
-        result = bot.render_autofix_result({"head": "h", "round": 2}, blocking="stuck", auto_merge_disabled=True)
+        result = bot.render_autofix_result(
+            {"head": "h", "round": 2, "conflict_files": ["app.py"]},
+            blocking="stuck",
+            auto_merge_disabled=True,
+        )
         self.assertIn("Blocking condition: stuck", result)
         self.assertIn("Auto-merge was turned off", result)
         self.assertIn("Round 2 of 3", result)
+        self.assertIn("Open merge conflicts: `app.py`.", result)
 
     def test_fixed_needs_claudes_own_commit_on_the_branch(self):
         self.assertEqual(bot.classify_push("a", "fix", "fix", True), (True, None))
