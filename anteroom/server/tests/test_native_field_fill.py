@@ -595,6 +595,9 @@ class FillNativeFieldsTest(unittest.IsolatedAsyncioTestCase):
             self.assertIn("--- Canonical listing rules ---", ask.call_args.args[1][0]["content"])
             self.assertIn("Rules (VIOLATION = INCORRECT LISTING)", ask.call_args.args[1][0]["content"])
             self.assertIn("sizeType = Regular", ask.call_args.args[1][0]["content"])
+            system_prompt = ask.call_args.args[1][0]["content"]
+            self.assertIn('{"fields":{"<field path>":{"value":"<choice>","evidence":"<exact quote>"}}}', system_prompt)
+            self.assertNotIn('{"fields": {"<field path>": "<choice>"', system_prompt)
             ask.reset_mock()
             revision_id = self._current().id
             await fill_native_fields(self.conv.id, object(), evidence="100% cotton, high rise")
