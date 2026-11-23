@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1156 — 2026-11-23
+
+- Prevent scheduled drafts from publishing items that have already sold, and unschedule drafts when photos or active pricing rules change.
+- Harden auto-relist reliability with retry backoff, scheduler throttling, eBay 30-day cycle tracking, and floor-price preservation.
+- Clamp Poshmark community-share and follow delays to safe bounds and keep cloud session sign-outs from pausing Chrome-side rules.
+- Preserve Plaid connection tokens when bank revocation fails transiently, default clothing and thrift expenses to "Other", and support categorized refunds and credits.
+- Rate-limit failed MCP token attempts, cap JSON-RPC batch size and timeouts, defer hosted photo deletions outside DB sessions, stream large listing videos from disk, upload opaque AI Studio photos as JPEG, carry pricing rules and presets in account imports, and push generation feedback filtering into SQL.
+
 ## 0.1.1155 — 2026-11-23
 
 - Copy an Anteroom setup prompt for Claude, Codex, Google Antigravity, Cursor, or any other MCP client from Settings → Agents.
