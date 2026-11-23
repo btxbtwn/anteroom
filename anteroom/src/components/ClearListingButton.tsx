@@ -182,7 +182,17 @@ export function RegenerateListingButton({
     const liveKey = ["marketplace-listings", convId];
     const listings = await queryClient
       .fetchQuery({ queryKey: liveKey, queryFn: ({ signal }) => api.marketplaceListings.get(convId, { signal }) })
-      .catch(() => queryClient.getQueryData<MarketplaceListings>(liveKey) ?? {});
+      .catch(() => {
+        const cached = queryClient.getQueryData<MarketplaceListings>(liveKey);
+        if (!cached) {
+          toastManager.add({
+            type: "warning",
+            title: "Could not check where this item is live",
+            description: "The listing is still rewritten. Delist it under Marketplaces if it is still up.",
+          });
+        }
+        return cached ?? {};
+      });
     const marketplaces = await askDelistOnRegenerate(title, listings,
       (marketplace) => runtime.actionMarketplaces.has(marketplace));
     regenerate.mutate({ title, marketplaces });
