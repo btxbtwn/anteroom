@@ -3,6 +3,7 @@ export interface AgentClientSnippet {
   label: string;
   where: string;
   snippet: string;
+  prompt: string;
   command: string | null;
 }
 
@@ -31,6 +32,10 @@ export interface AgentConnectionTest {
   base_url: string | null;
 }
 
+export type McpPermissionArea = "listings" | "analytics" | "attention";
+export type McpPermissionLevel = "none" | "read" | "write";
+export type McpTokenPermissions = Record<McpPermissionArea, McpPermissionLevel>;
+
 export interface McpAccessToken {
   id: string;
   name: string;
@@ -39,6 +44,7 @@ export interface McpAccessToken {
   last_used_at: string | null;
   expires_at: string | null;
   revoked_at: string | null;
+  permissions: McpTokenPermissions;
   active: boolean;
 }
 

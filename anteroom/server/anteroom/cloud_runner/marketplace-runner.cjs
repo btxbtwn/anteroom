@@ -501,11 +501,12 @@ async function executeMarketplaceOperation({
     onJournalRemove,
   });
 
-  const stderrConsole = marketplace === 'poshmark' ? {
-    log: (...args) => process.stderr.write(`[cloud-poshmark] ${args.join(' ')}\n`),
-    info: (...args) => process.stderr.write(`[cloud-poshmark] ${args.join(' ')}\n`),
-    warn: (...args) => process.stderr.write(`[cloud-poshmark] WARN ${args.join(' ')}\n`),
-    error: (...args) => process.stderr.write(`[cloud-poshmark] ERROR ${args.join(' ')}\n`),
+  const logRequests = marketplace === 'poshmark' || (marketplace === 'mercari' && type === 'marketplace.verify_session');
+  const stderrConsole = logRequests ? {
+    log: (...args) => process.stderr.write(`[cloud-${marketplace}] ${args.join(' ')}\n`),
+    info: (...args) => process.stderr.write(`[cloud-${marketplace}] ${args.join(' ')}\n`),
+    warn: (...args) => process.stderr.write(`[cloud-${marketplace}] WARN ${args.join(' ')}\n`),
+    error: (...args) => process.stderr.write(`[cloud-${marketplace}] ERROR ${args.join(' ')}\n`),
   } : { log() {}, info() {}, warn() {}, error() {} };
 
   const sandbox = {
@@ -568,11 +569,17 @@ async function executeMarketplaceOperation({
     const summary = await context.readExtensionSession(marketplace, undefined, command.payload?.seller_region);
     result = { ok: true, sessions: { [marketplace]: summary } };
   } else if (cmdType === 'marketplace.verify_session') {
-    const summary = await context.readExtensionSession(marketplace, undefined, command.payload?.seller_region);
-    if (summary.state !== 'signed_in') {
-      result = { ok: true, session: summary };
-    } else {
-      try {
+    let summary;
+    try {
+      if (marketplace === 'mercari') {
+        // The browser's status read hides initialize errors. Cloud sign-in needs the reason.
+        const { accessToken, user } = await context.mercariInitialize(Date.now() + 10000, 'session');
+        summary = context.publicExtensionSession(true, context.soonestExpiry(null, accessToken), { name: user.name });
+        context.marketplaceLog(marketplace, 'verify_session', { state: summary.state });
+      } else {
+        summary = await context.readExtensionSession(marketplace, undefined, command.payload?.seller_region);
+      }
+      if (summary.state === 'signed_in') {
         if (marketplace === 'poshmark') await context.poshmarkCsrf(Date.now() + 15000, context.poshmarkOrigin(command.payload?.seller_region));
         if (marketplace === 'depop') {
           const me = await context.depopAccountRead('/presentation/api/v1/users/me/', 'verify', Date.now() + 15000);
@@ -581,13 +588,18 @@ async function executeMarketplaceOperation({
           }
           summary.label = context.sessionLabel({ username: me.username }) || summary.label;
         }
-        result = { ok: true, session: summary };
-      } catch (err) {
-        if (err?.code === 'signed_out') {
-          result = { ok: true, session: { ...summary, state: 'expired', expiring: false } };
-        } else {
-          result = { ok: false, error_code: err?.code || 'network', error: String(err?.message || err) };
-        }
+      }
+      result = { ok: true, session: summary };
+    } catch (err) {
+      if (summary && err?.code === 'signed_out') {
+        result = { ok: true, session: { ...summary, state: 'expired', expiring: false } };
+      } else {
+        const errorCode = err?.code || 'network';
+        if (marketplace === 'mercari') context.marketplaceLog(marketplace, 'verify_session', { error_code: errorCode });
+        const error = marketplace === 'mercari' && err?.code === 'challenge'
+          ? 'Mercari asked for a browser check during cloud sign-in. Complete any check Mercari shows in Chrome, then retry Connect in Cloud.'
+          : String(err?.message || err);
+        result = { ok: false, error_code: errorCode, error };
       }
     }
   } else if (cmdType === 'marketplace.form' && marketplace === 'poshmark') {

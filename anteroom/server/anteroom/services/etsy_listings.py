@@ -693,7 +693,9 @@ async def _sync_video(write, shop_id: str, item_id: str, snapshot: dict, binding
     instead of uploaded. An upload whose reply was lost is the one active video
     left after Anteroom removed the others, and is adopted rather than repeated.
     """
-    from anteroom.services.listing_videos import video_bytes
+    from contextlib import ExitStack
+
+    from anteroom.services.listing_videos import open_verified_video
 
     choice = _video_choice(snapshot)
     if choice is False:
@@ -726,10 +728,12 @@ async def _sync_video(write, shop_id: str, item_id: str, snapshot: dict, binding
         uploaded = await write("POST", f"shops/{shop_id}/listings/{item_id}/videos", "video", data={"video_id": known})
     else:
         await _record(record, {"etsy_video": {"checksum": choice["checksum"], "pending": True}})
-        data = await asyncio.to_thread(video_bytes, choice)
         name = f"{choice['id']}.{_VIDEO_EXTENSIONS.get(choice.get('mime_type') or '', 'mp4')}"
-        uploaded = await write("POST", f"shops/{shop_id}/listings/{item_id}/videos", "video",
-                               data={"name": name}, files={"video": (name, data, choice.get("mime_type"))}, timeout=300)
+        with ExitStack() as stack:
+            video_file = await asyncio.to_thread(stack.enter_context, open_verified_video(choice))
+            with video_file.open("rb") as handle:
+                uploaded = await write("POST", f"shops/{shop_id}/listings/{item_id}/videos", "video",
+                                       data={"name": name}, files={"video": (name, handle, choice.get("mime_type"))}, timeout=300)
     video_id = str(uploaded.get("video_id") or "") if isinstance(uploaded, dict) else ""
     if not re.fullmatch(r"[1-9]\d*", video_id):
         raise ValueError("Etsy did not confirm the video. Check the listing before another upload.")

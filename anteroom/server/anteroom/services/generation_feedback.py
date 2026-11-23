@@ -58,14 +58,15 @@ def save_feedback(db: Session, conversation_id: str, body: FeedbackInput) -> dic
 
 
 def feedback_summary(db: Session, *, recent_days: int = 30) -> dict:
-    since = datetime.now(UTC) - timedelta(days=recent_days)
+    since_iso = (datetime.now(UTC) - timedelta(days=recent_days)).isoformat()
     rows = db.scalars(select(ListingRevision.generation_feedback).where(
         ListingRevision.generation_feedback.is_not(None),
+        ListingRevision.generation_feedback["rated_at"].as_string() >= since_iso,
     ))
     ratings: Counter[str] = Counter()
     issues: Counter[str] = Counter()
     for row in rows:
-        if not row or row["rated_at"] < since.isoformat():
+        if not row or row.get("rated_at", "") < since_iso:
             continue
         ratings[row["rating"]] += 1
         if row["rating"] == "down":

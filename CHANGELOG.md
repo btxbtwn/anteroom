@@ -6,6 +6,55 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1161 — 2026-11-23
+
+- Choose what each MCP access token can do in Settings → Agents: no access, read, or read and write for listings and for Needs Attention, and read access to analytics. Changes apply to the token's next request, and new tokens start read-only.
+- An AI assistant whose token has Needs Attention set to read and write can dismiss alerts you've already handled, and bring them back. Dismissing only hides the alert in Anteroom; it never changes a listing or a marketplace.
+
+## 0.1.1160 — 2026-11-23
+
+- Hosted AI Studio can use Anteroom's Photoroom key automatically (`ANTEROOM_MANAGED_PHOTOROOM_KEY`), with no per-account Photoroom setup.
+
+## 0.1.1159 — 2026-11-23
+
+- Fix “Run due relists” showing “That automation is gone” on the web.
+
+## 0.1.1158 — 2026-11-23
+
+- Dismissing a Needs attention alert responds right away instead of waiting for the whole Today page to rebuild
+
+## 0.1.1157 — 2026-11-23
+
+- Show the same Getting things ready startup screen in the Mac app as on the web.
+
+## 0.1.1156 — 2026-11-23
+
+- Prevent scheduled drafts from publishing items that have already sold, and unschedule drafts when photos or active pricing rules change.
+- Harden auto-relist reliability with retry backoff, scheduler throttling, eBay 30-day cycle tracking, and floor-price preservation.
+- Clamp Poshmark community-share and follow delays to safe bounds and keep cloud session sign-outs from pausing Chrome-side rules.
+- Preserve Plaid connection tokens when bank revocation fails transiently, default clothing and thrift expenses to "Other", and support categorized refunds and credits.
+- Rate-limit failed MCP token attempts, cap JSON-RPC batch size and timeouts, defer hosted photo deletions outside DB sessions, stream large listing videos from disk, upload opaque AI Studio photos as JPEG, carry pricing rules and presets in account imports, and push generation feedback filtering into SQL.
+
+## 0.1.1155 — 2026-11-23
+
+- Copy an Anteroom setup prompt for Claude, Codex, Google Antigravity, Cursor, or any other MCP client from Settings → Agents.
+
+## 0.1.1154 — 2026-11-23
+
+- Fix Today failing to load when a marketplace needs you to sign in again.
+
+## 0.1.1153 — 2026-11-23
+
+- Give the hosted web app 4 GB of memory to reduce the risk of outages during memory spikes.
+
+## 0.1.1152 — 2026-11-23
+
+- Reduce the memory Today needs to show recent listing failures.
+
+## 0.1.1151 — 2026-11-23
+
+- Explain when Mercari requires a browser check during Cloud sign-in and how to retry the Cloud connection.
+
 ## 0.1.1150 — 2026-11-23
 
 - Give the model one clear format for including evidence quotes when filling marketplace fields.

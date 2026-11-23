@@ -289,6 +289,40 @@ def test_hosted_managed_ai_http_routes_and_runtime(monkeypatch):
         assert client.put('/api/settings/ai-keys/openai/models', headers=alice, json={'vision_model': 'm', 'listing_model': 'm'}).status_code == 403
 
 
+def test_hosted_managed_photoroom_http_routes_and_runtime(monkeypatch):
+    from types import SimpleNamespace
+    from fastapi.testclient import TestClient
+    from anteroom.hosted import create_app
+    from anteroom.services import category_tree, hosted_context
+    from anteroom.services.hosted_database import get_seller_db
+
+    monkeypatch.setenv('ANTEROOM_MANAGED_PHOTOROOM_KEY', 'sk_pr_managed-secret')
+    monkeypatch.delenv('ANTEROOM_MANAGED_OPENROUTER_KEY', raising=False)
+    monkeypatch.setattr(category_tree, 'categories_ready', lambda _db: False)
+    contexts = {'alice': replace(runtime('alice'), provider_factory=provider_for)}
+    monkeypatch.setattr(hosted_context, 'for_seller', lambda owner, _token: contexts[owner])
+
+    app = create_app('https://project.supabase.co')
+    app.dependency_overrides[get_seller_db] = lambda: None
+    with TestClient(app) as client:
+        client.app.state.session_verifier = SimpleNamespace(verify=lambda token: SimpleNamespace(user_id=token))
+        alice = {'Authorization': 'Bearer alice'}
+
+        rt = client.get('/api/runtime', headers=alice)
+        assert rt.status_code == 200, rt.text
+        assert 'managed_photoroom' in rt.json()['features']
+        assert 'managed_ai' not in rt.json()['features']
+
+        status = client.get('/api/settings/photoroom', headers=alice)
+        assert status.status_code == 200, status.text
+        assert status.json() == {
+            'configured': False, 'masked_key': None, 'source': 'server', 'available': True,
+        }
+        assert 'sk_pr_managed-secret' not in status.text
+        assert client.put('/api/settings/photoroom', headers=alice, json={'api_key': 'k'}).status_code == 403
+        assert client.delete('/api/settings/photoroom', headers=alice).status_code == 403
+
+
 def test_managed_ai_routes_category_refills_to_field_edit_model(monkeypatch):
     import asyncio
     from anteroom.services import native_field_fill

@@ -10,7 +10,11 @@ local MCP access tokens.
 """
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import Callable
+from threading import Event
+from time import monotonic
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -23,6 +27,23 @@ from anteroom.services.hosted_limits import read_bounded_body
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
 
 _MAX_MCP_BODY_BYTES = 2 * 1024 * 1024
+_MCP_RPC_TIMEOUT_SECONDS = 30.0
+_MCP_STORAGE_CLEANUP_TIMEOUT_SECONDS = 15.0
+_active_calls: set[asyncio.Task] = set()
+
+
+def _finish_call(worker: asyncio.Task) -> None:
+    _active_calls.discard(worker)
+    if not worker.cancelled():
+        worker.exception()
+
+
+def _client_key(request: Request, *, is_hosted: bool = False) -> str:
+    if is_hosted:
+        forwarded = (request.headers.get("fly-client-ip") or "").strip()
+        if forwarded:
+            return forwarded
+    return request.client.host if request.client and request.client.host else "unknown"
 
 
 def _extract_bearer(request: Request) -> str | None:
@@ -45,27 +66,54 @@ def _run_mcp_call(
     payload: Any,
     *,
     is_hosted: bool,
+    hosted_token_id: str | None,
     bearer_token: str | None,
+    client_key: str,
     session_id: str | None,
     protocol_version: str | None,
+    deferred_deletes: list[str],
+    expired: Callable[[], bool],
 ) -> tuple[Any | None, int, dict[str, str]]:
+    if expired():
+        raise TimeoutError
+    token_id = hosted_token_id
     if not is_hosted and bearer_token is not None:
         if not bearer_token:
+            mcp_tokens.record_auth_failure(client_key)
             raise HTTPException(401, "Invalid bearer token")
         verified = mcp_tokens.authenticate_token(db.get_bind(), bearer_token, hosted=False)
         if verified is None:
+            mcp_tokens.record_auth_failure(client_key)
             raise HTTPException(401, "Invalid or revoked MCP access token")
+        token_id = verified.token_id
+    # Read fresh on every request, so a change in Settings applies to the next call.
+    # A seller session, or loopback on the Mac without a token, reaches every tool.
+    permissions = mcp_tokens.permissions_for(db, token_id) if token_id is not None else None
     return mcp_http.handle_rpc_payload(
         db,
         payload,
         session_id=session_id,
         protocol_version=protocol_version,
         bearer_token=bearer_token,
+        permissions=permissions,
+        deferred_deletes=deferred_deletes,
+        expired=expired,
     )
 
 
 @router.post("")
 async def mcp_post(request: Request):
+    is_hosted = getattr(request.state, "seller", None) is not None or hasattr(request.app.state, "session_verifier")
+    hosted_token_id = getattr(request.state, "mcp_token_id", None) if is_hosted else None
+    bearer = _extract_bearer(request)
+    client_key = _client_key(request, is_hosted=is_hosted)
+    if not is_hosted and bearer is not None and mcp_tokens.is_auth_rate_limited(client_key):
+        return JSONResponse(
+            {"detail": "Too many failed authentication attempts. Try again shortly."},
+            status_code=429,
+            headers={"Retry-After": "60", "Cache-Control": "no-store"},
+        )
+
     raw_body = await read_bounded_body(
         request,
         _MAX_MCP_BODY_BYTES,
@@ -80,21 +128,73 @@ async def mcp_post(request: Request):
             headers={"Cache-Control": "no-store"},
         )
 
-    is_hosted = getattr(request.state, "seller", None) is not None
-    bearer = _extract_bearer(request)
     session_id = request.headers.get("mcp-session-id")
     protocol_version = request.headers.get("mcp-protocol-version")
+    deferred_deletes: list[str] = []
 
-    body, status_code, extra_headers = await in_worker_session(
-        lambda db: _run_mcp_call(
-            db,
-            payload,
-            is_hosted=is_hosted,
-            bearer_token=bearer,
-            session_id=session_id,
-            protocol_version=protocol_version,
+    deadline = monotonic() + _MCP_RPC_TIMEOUT_SECONDS
+    stopped = Event()
+
+    def expired() -> bool:
+        return stopped.is_set() or monotonic() >= deadline
+
+    result: asyncio.Future[tuple[Any | None, int, dict[str, str]]] = asyncio.get_running_loop().create_future()
+
+    async def run_and_cleanup():
+        try:
+            outcome = await in_worker_session(
+                lambda db: _run_mcp_call(
+                    db,
+                    payload,
+                    is_hosted=is_hosted,
+                    hosted_token_id=hosted_token_id,
+                    bearer_token=bearer,
+                    client_key=client_key,
+                    session_id=session_id,
+                    protocol_version=protocol_version,
+                    deferred_deletes=deferred_deletes,
+                    expired=expired,
+                )
+            )
+            if not result.done():
+                result.set_result(outcome)
+        except Exception as exc:
+            if not result.done():
+                result.set_exception(exc)
+        finally:
+            # in_worker_session returns or raises after closing its session.
+            if deferred_deletes:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.to_thread(
+                            mcp_http.delete_hosted_storage_keys,
+                            deferred_deletes,
+                            bearer_token=bearer,
+                            deadline_seconds=_MCP_STORAGE_CLEANUP_TIMEOUT_SECONDS,
+                        ),
+                        timeout=_MCP_STORAGE_CLEANUP_TIMEOUT_SECONDS,
+                    )
+                except Exception:  # noqa: BLE001 - best-effort cleanup after DB commit
+                    pass
+
+    worker = asyncio.create_task(run_and_cleanup())
+    # Keep the task alive after the request returns, and consume detached exceptions.
+    _active_calls.add(worker)
+    worker.add_done_callback(_finish_call)
+    try:
+        body, status_code, extra_headers = await asyncio.wait_for(
+            result, timeout=_MCP_RPC_TIMEOUT_SECONDS,
         )
-    )
+    except TimeoutError:
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": None, "error": {"code": -32000, "message": "MCP request timed out"}},
+            status_code=504,
+            headers={"Cache-Control": "no-store"},
+        )
+    finally:
+        stopped.set()
+
+    await asyncio.shield(worker)
     headers = {"Cache-Control": "no-store", **extra_headers}
     if body is None:
         return Response(status_code=status_code, headers=headers)

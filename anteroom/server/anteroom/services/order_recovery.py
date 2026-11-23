@@ -287,6 +287,10 @@ def _save(db: Session, marketplace: str, lines: list[OrderLine], observed: datet
             db.add(sale)
             db.flush()
             replace_stand_in(db, sale)
+            if owner is not None and line.status not in {"cancelled", "refunded"}:
+                from anteroom.services.draft_scheduling import unschedule_on_sale
+
+                unschedule_on_sale(db, owner.id)
             counts["recorded"] += 1
             continue
         if sale.listing_id and sale.listing_id != line.listing_id:
@@ -309,6 +313,10 @@ def _save(db: Session, marketplace: str, lines: list[OrderLine], observed: datet
             sale.order_updated_at = line.modified_at
         if changed or sale.order_observed_at is None:
             sale.order_observed_at = observed
+        if sale.conversation_id and line.status not in {"cancelled", "refunded"}:
+            from anteroom.services.draft_scheduling import unschedule_on_sale
+
+            unschedule_on_sale(db, sale.conversation_id)
         counts["updated" if changed else "unchanged"] += 1
     db.commit()
     return counts

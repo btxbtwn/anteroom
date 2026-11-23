@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import json
 import logging
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -25,9 +28,12 @@ from anteroom.models.automation import ScheduledPublishLog
 from anteroom.models.conversation import Conversation, Photo, new_id
 from anteroom.models.job import ACTIVE_JOB_STATUSES, Job
 from anteroom.models.listing import Listing, ListingRevision
+from anteroom.models.listing_video import ListingVideo
 from anteroom.models.marketplace_listing import MarketplaceListing
+from anteroom.models.marketplace_sale import PAID_STATUSES, MarketplaceSale
 from anteroom.services.marketplace_delist import MARKETPLACES
 from anteroom.services.validation import validate_listing
+from anteroom.services.vendoo_import import parse_notes
 
 log = logging.getLogger("anteroom.draft_scheduling")
 
@@ -35,6 +41,7 @@ SCHEDULABLE_MARKETPLACES = MARKETPLACES
 MAX_BULK_SCHEDULE = 100
 ABANDONED_PUBLISH_GRACE = timedelta(minutes=15)
 LIVE_PUBLISH_STATES = frozenset({"published", "pending_review"})
+_active_claim: ContextVar[dict[str, Any] | None] = ContextVar("scheduled_publish_claim", default=None)
 
 
 class SchedulePublishError(ValueError):
@@ -78,6 +85,267 @@ def _normalize_marketplaces(marketplaces: list[str] | None) -> list[str]:
     return seen
 
 
+def _as_utc(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        stamp = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return stamp.replace(tzinfo=UTC) if stamp.tzinfo is None else stamp.astimezone(UTC)
+    except (ValueError, TypeError):
+        return None
+
+
+def _revision_quantity(revision: ListingRevision) -> int | None:
+    from anteroom.services.ebay_variations import total_quantity
+
+    if not isinstance(revision.listing_json, dict):
+        return None
+    var_total = total_quantity(revision.listing_json)
+    if isinstance(var_total, int) and var_total >= 0:
+        return var_total
+    raw = revision.listing_json.get("quantity")
+    if type(raw) is int and raw >= 0:
+        return raw
+    return None
+
+
+def _quantity_baseline(db: Session, conv_id: str) -> tuple[int | None, datetime | None, bool]:
+    """Return ``(available_qty, baseline_at, from_quantity_sync)`` for the current listing.
+
+    Walks past private ``native_schema`` saves and non-quantity edits to the revision
+    that established the current quantity (or a ``sale_quantity_sync`` revision).
+    For an initial revision (``parent_revision_id is None``), ``baseline_at`` is ``None``
+    so all paid sales count against that starting quantity. For a subsequent
+    quantity-changing revision (seller restock or ``sale_quantity_sync``), ``baseline_at``
+    is that revision's creation time because its quantity already reflects prior sales.
+    """
+    listing = db.query(Listing).filter(Listing.conversation_id == conv_id).first()
+    if listing is None or not listing.current_revision_id:
+        return None, None, False
+    revision = db.get(ListingRevision, listing.current_revision_id)
+    seen: set[str] = set()
+    while (
+        revision is not None
+        and revision.source == "native_schema"
+        and revision.parent_revision_id
+        and revision.parent_revision_id not in seen
+    ):
+        seen.add(revision.id)
+        parent = db.get(ListingRevision, revision.parent_revision_id)
+        if parent is None:
+            break
+        revision = parent
+    if revision is None or not isinstance(revision.listing_json, dict):
+        return None, None, False
+    qty = _revision_quantity(revision)
+    effective_qty = qty if qty is not None else 1
+    while (
+        revision.source != "sale_quantity_sync"
+        and revision.parent_revision_id
+        and revision.parent_revision_id not in seen
+    ):
+        parent = db.get(ListingRevision, revision.parent_revision_id)
+        if parent is None:
+            break
+        parent_qty = _revision_quantity(parent)
+        if (parent_qty if parent_qty is not None else 1) != effective_qty:
+            break
+        seen.add(revision.id)
+        revision = parent
+    baseline_at = _as_utc(revision.created_at) if revision.parent_revision_id is not None else None
+    return qty, baseline_at, revision.source == "sale_quantity_sync"
+
+
+def _sale_timestamp(sale: MarketplaceSale) -> datetime | None:
+    stamps = [t for t in (_as_utc(sale.received_at), _as_utc(sale.order_observed_at)) if t is not None]
+    return max(stamps) if stamps else None
+
+
+def _is_sold_or_has_sale(db: Session, conv: Conversation | None) -> bool:
+    """Return True if the item is marked sold or its stock is exhausted by sales.
+
+    Multi-quantity items with stock still remaining stay schedulable/publishable:
+    - A marketplace stock observation of ``remaining > 0`` suppresses the cumulative
+      check only when it is at or after its own marketplace's paid sales and either
+      no other marketplace has paid sales, or a ``sale_quantity_sync`` revision made
+      after those sales already pushed them into that marketplace's quantity.
+    - Otherwise, paid sales occurring at or after the current quantity revision's
+      baseline (or all paid sales for an initial revision) are compared against the
+      revision's declared available quantity so neither cross-marketplace sales nor
+      seller restocks / ``sale_quantity_sync`` updates are misclassified.
+    """
+    if conv is None:
+        return False
+    if conv.status == "sold":
+        return True
+    marks = parse_notes(conv.notes).get("marketplaceMarks")
+    if isinstance(marks, dict) and any(
+        isinstance(entry, dict) and entry.get("state") == "sold"
+        for entry in marks.values()
+    ):
+        return True
+    declared_qty, baseline_at, from_quantity_sync = _quantity_baseline(db, conv.id)
+    if declared_qty == 0:
+        return True
+    sales = (
+        db.query(MarketplaceSale)
+        .filter(
+            MarketplaceSale.conversation_id == conv.id,
+            MarketplaceSale.order_status.in_((*PAID_STATUSES, "cancellation_pending")),
+        )
+        .all()
+    )
+    if not sales:
+        return False
+
+    from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
+    from anteroom.services.sale_inventory import stock_after_sale
+
+    paid_sales = [sale for sale in sales if sale.order_status in PAID_STATUSES]
+    ml_repo = MarketplaceListingRepo(db)
+
+    checked_pairs: set[tuple[str, str | None]] = set()
+    has_fresh_remaining = False
+    for sale in paid_sales:
+        pair = (sale.marketplace, sale.listing_id)
+        if pair in checked_pairs:
+            continue
+        checked_pairs.add(pair)
+        stock = stock_after_sale(db, conv.id, sale.marketplace, sale.listing_id)
+        record = ml_repo.get(conv.id, sale.marketplace) or {}
+        observed = record.get("inventory_observation") or {}
+        obs_matches = isinstance(observed, dict) and observed.get("listing_id") == sale.listing_id
+        obs_checked = _as_utc(observed.get("checked_at")) if obs_matches else None
+
+        if stock["status"] == "sold_out":
+            if obs_checked is not None:
+                if baseline_at is None or obs_checked >= baseline_at:
+                    return True
+            elif baseline_at is None and (declared_qty is None or declared_qty <= 1):
+                return True
+        if stock["status"] == "remaining" and isinstance(stock.get("remaining"), int) and stock["remaining"] > 0:
+            if obs_checked is not None:
+                other_sales = [s for s in paid_sales if s.marketplace != sale.marketplace]
+                other_stamps = [t for s in other_sales if (t := _sale_timestamp(s)) is not None]
+                same_stamps = [
+                    t for s in paid_sales if s.marketplace == sale.marketplace and (t := _sale_timestamp(s)) is not None
+                ]
+                same_ok = not same_stamps or obs_checked >= max(same_stamps)
+                # One marketplace's stock only reflects other marketplaces' sales once a
+                # quantity sync (Auto-adjust quantity) has run after them; otherwise the
+                # cumulative check below decides.
+                other_ok = not other_sales or (
+                    from_quantity_sync
+                    and baseline_at is not None
+                    and len(other_stamps) == len(other_sales)
+                    and max(other_stamps) <= baseline_at
+                    and obs_checked > max(other_stamps)
+                )
+                if same_ok and other_ok:
+                    has_fresh_remaining = True
+
+    if has_fresh_remaining:
+        return False
+
+    unaccounted_paid = sum(
+        sale.quantity if type(sale.quantity) is int and sale.quantity > 0 else 1
+        for sale in paid_sales
+        if baseline_at is None or (sale_ts := _sale_timestamp(sale)) is None or sale_ts >= baseline_at
+    )
+    if declared_qty is None:
+        return True
+    if declared_qty <= 1:
+        unaccounted_blocking = sum(
+            sale.quantity if type(sale.quantity) is int and sale.quantity > 0 else 1
+            for sale in sales
+            if baseline_at is None or (sale_ts := _sale_timestamp(sale)) is None or sale_ts >= baseline_at
+        )
+        return unaccounted_blocking >= 1
+    return unaccounted_paid >= declared_qty
+
+
+is_sold_or_has_sale = _is_sold_or_has_sale
+
+
+def _schedule_content_digest(
+    db: Session,
+    conv_id: str,
+    markets: list[str],
+    *,
+    rules: dict | None = None,
+    use_given_rules: bool = False,
+    photos: list[Photo] | None = None,
+    videos: list[ListingVideo] | None = None,
+) -> tuple[str, dict | None]:
+    """Hash photos, videos, and active pricing rules so unreviewed changes never publish."""
+    from anteroom.services.pricing_rules import active_rules
+
+    current_rules = rules if use_given_rules else active_rules()
+    if photos is None:
+        photos = _schedule_photos(db, conv_id)
+    if videos is None:
+        videos = _schedule_videos(db, conv_id)
+    payload = {
+        "markets": sorted(markets),
+        "photos": [
+            (p.id, p.marketplace, p.display_order, p.stored_filename, p.checksum, p.size_bytes, p.edits)
+            for p in photos
+        ],
+        "videos": [
+            (v.id, v.checksum, v.stored_filename)
+            for v in videos
+        ],
+        "pricing_rules": current_rules,
+    }
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+    return digest, current_rules
+
+
+def _schedule_photos(db: Session, conv_id: str) -> list[Photo]:
+    return (
+        db.query(Photo).filter(Photo.conversation_id == conv_id)
+        .order_by(Photo.display_order, Photo.created_at, Photo.id).all()
+    )
+
+
+def _schedule_videos(db: Session, conv_id: str) -> list[ListingVideo]:
+    return (
+        db.query(ListingVideo).filter(ListingVideo.conversation_id == conv_id)
+        .order_by(ListingVideo.id).all()
+    )
+
+
+def verified_scheduled_media(
+    db: Session, conv_id: str, marketplace: str,
+) -> tuple[list[Photo], list[ListingVideo]] | None:
+    """Verify the exact media rows native preflight will use for this claim."""
+    entry = _active_claim.get()
+    if entry is None or entry["conversation_id"] != conv_id:
+        return None
+    reason = "Scheduled draft changed after confirmation; review and reschedule before publishing."
+    # Serialize verification with settlement and schedule changes for this draft.
+    listing = db.get(Listing, conv_id, with_for_update=True, populate_existing=True)
+    if (
+        listing is None or listing.scheduled_status != "publishing"
+        or listing.scheduled_revision_id != entry["revision_id"]
+        or listing.current_revision_id != entry["revision_id"]
+        or listing.scheduled_publish_at != entry["scheduled_for"]
+        or listing.scheduled_confirmed_at != entry["scheduled_confirmed_at"]
+        or marketplace not in entry["marketplaces"]
+    ):
+        raise SchedulePublishError(reason, 409)
+    photos, videos = _schedule_photos(db, conv_id), _schedule_videos(db, conv_id)
+    digest, _ = _schedule_content_digest(
+        db, conv_id, entry["marketplaces"], rules=entry["pricing_rules"], use_given_rules=True,
+        photos=photos, videos=videos,
+    )
+    if digest != entry["content_digest"] or digest != listing.scheduled_content_digest:
+        _clear_schedule(db, listing, reason=reason)
+        db.commit()
+        raise SchedulePublishError(reason, 409)
+    return photos, videos
+
+
 def _validate_ready(
     db: Session,
     conv_id: str,
@@ -87,7 +355,7 @@ def _validate_ready(
     conv = db.get(Conversation, conv_id)
     if conv is None:
         raise SchedulePublishError("Listing not found.", 404)
-    if conv.status == "sold":
+    if _is_sold_or_has_sale(db, conv):
         raise SchedulePublishError("Sold items cannot be scheduled for publishing.", 409)
     listing = db.query(Listing).filter(Listing.conversation_id == conv_id).first()
     if listing is None or not listing.current_revision_id:
@@ -194,6 +462,7 @@ def _clear_schedule(db: Session, listing: Listing, *, reason: str | None = None)
     listing.scheduled_confirmed_at = None
     listing.scheduled_status = None
     listing.scheduled_error = None
+    listing.scheduled_content_digest = None
     return was_scheduled
 
 
@@ -218,6 +487,7 @@ def schedule_draft(
     if listing.scheduled_status == "publishing":
         raise SchedulePublishError("This draft is currently publishing and cannot be rescheduled yet.", 409)
     conv = db.get(Conversation, conv_id)
+    digest, _rules = _schedule_content_digest(db, conv_id, markets)
     listing.ready_to_list = True
     listing.scheduled_publish_at = when
     listing.scheduled_marketplaces = markets
@@ -225,6 +495,7 @@ def schedule_draft(
     listing.scheduled_confirmed_at = moment
     listing.scheduled_status = "scheduled"
     listing.scheduled_error = None
+    listing.scheduled_content_digest = digest
     db.add(ScheduledPublishLog(
         id=new_id(),
         conversation_id=conv_id,
@@ -254,7 +525,7 @@ def unschedule_draft(db: Session, conv_id: str, *, reason: str | None = None) ->
     return schedule_view(listing, conv)
 
 
-def unschedule_on_edit(db: Session, conv_id: str) -> bool:
+def unschedule_on_edit(db: Session, conv_id: str, *, reason: str | None = None) -> bool:
     """Automatically unschedule a pending draft when edited so unreviewed changes never publish.
 
     Does not commit: participates in the caller's save transaction.
@@ -265,7 +536,32 @@ def unschedule_on_edit(db: Session, conv_id: str) -> bool:
     return _clear_schedule(
         db,
         listing,
-        reason="Draft was edited after scheduling; review your changes and reschedule before publishing.",
+        reason=reason or "Draft was edited after scheduling; review your changes and reschedule before publishing.",
+    )
+
+
+def unschedule_on_sale(db: Session, conv_id: str | None) -> bool:
+    """Automatically unschedule a pending draft when the item sells out or is marked sold.
+
+    Acquires a row lock on the Conversation so concurrent native list/save_draft job
+    creation serializes with sale recording and observes the committed sale before
+    opening a job. Multi-quantity items with stock still remaining stay scheduled.
+    Does not commit: participates in the caller's save transaction.
+    """
+    if not conv_id:
+        return False
+    conv = db.get(Conversation, conv_id, with_for_update=True, populate_existing=True)
+    if conv is None:
+        return False
+    listing = db.query(Listing).filter(Listing.conversation_id == conv_id).first()
+    if listing is None or listing.scheduled_status != "scheduled":
+        return False
+    if not _is_sold_or_has_sale(db, conv):
+        return False
+    return _clear_schedule(
+        db,
+        listing,
+        reason="Scheduled publish cancelled because this item already sold.",
     )
 
 
@@ -333,8 +629,33 @@ def list_publish_logs(db: Session, *, limit: int = 50) -> list[dict[str, Any]]:
     return [log_view(entry, title) for entry, title in rows]
 
 
+def has_due_or_abandoned_publishes(db: Session, moment: datetime) -> bool:
+    """Return True when any scheduled draft is due or an abandoned publishing claim needs recovery."""
+    cutoff = _as_naive_utc(moment)
+    abandoned_cutoff = cutoff - ABANDONED_PUBLISH_GRACE
+    return (
+        db.query(Listing.conversation_id)
+        .filter(
+            (
+                (Listing.ready_to_list.is_(True))
+                & (Listing.scheduled_status == "scheduled")
+                & (Listing.scheduled_publish_at.isnot(None))
+                & (Listing.scheduled_publish_at <= cutoff)
+                & (Listing.scheduled_confirmed_at.isnot(None))
+            )
+            | (
+                (Listing.scheduled_status == "publishing")
+                & (Listing.updated_at.isnot(None))
+                & (Listing.updated_at <= abandoned_cutoff)
+            )
+        )
+        .first()
+        is not None
+    )
+
+
 def _claim_due_drafts(db: Session, moment: datetime) -> list[dict[str, Any]]:
-    """Atomically claim due drafts whose confirmation and revision still match."""
+    """Atomically claim due drafts whose confirmation, revision, sold state, and content digest still match."""
     candidates = (
         db.query(Listing)
         .filter(
@@ -345,19 +666,37 @@ def _claim_due_drafts(db: Session, moment: datetime) -> list[dict[str, Any]]:
             Listing.scheduled_publish_at <= moment,
         )
         .order_by(Listing.scheduled_publish_at.asc())
-        .limit(1)
+        .limit(20)
         .with_for_update(skip_locked=True)
         .all()
     )
     claimed: list[dict[str, Any]] = []
     for row in candidates:
         markets = [m for m in (row.scheduled_marketplaces or []) if m in SCHEDULABLE_MARKETPLACES]
-        # Re-check confirm, revision match, and explicit marketplace list before execution.
+        # Re-check confirm, revision match, sold state, content digest, and explicit marketplace list before execution.
         if not markets or not row.scheduled_confirmed_at or not row.scheduled_revision_id:
             _clear_schedule(db, row, reason="Scheduled publish refused: missing confirmation or marketplaces.")
             continue
+        conv = db.get(Conversation, row.conversation_id)
+        if conv is None:
+            _clear_schedule(db, row, reason="Scheduled publish refused: listing not found.")
+            continue
+        if _is_sold_or_has_sale(db, conv):
+            _clear_schedule(db, row, reason="Scheduled publish cancelled because this item already sold.")
+            continue
         if row.current_revision_id != row.scheduled_revision_id:
             _clear_schedule(db, row, reason="Draft changed after scheduling; review and reschedule before publishing.")
+            continue
+        if not row.scheduled_content_digest:
+            _clear_schedule(db, row, reason="Schedule has no verified content; review and reschedule before publishing.")
+            continue
+        digest, rules = _schedule_content_digest(db, row.conversation_id, markets)
+        if row.scheduled_content_digest != digest:
+            _clear_schedule(
+                db,
+                row,
+                reason="Photos, video, or pricing rules changed after scheduling; review and reschedule before publishing.",
+            )
             continue
         result = db.execute(
             update(Listing)
@@ -381,7 +720,10 @@ def _claim_due_drafts(db: Session, moment: datetime) -> list[dict[str, Any]]:
             "marketplaces": markets,
             "scheduled_for": row.scheduled_publish_at,
             "scheduled_confirmed_at": row.scheduled_confirmed_at,
+            "pricing_rules": rules,
+            "content_digest": digest,
         })
+        break
     db.commit()
     return claimed
 
@@ -418,7 +760,7 @@ def _settle_publish(db: Session, entry: dict[str, Any], outcome: dict[str, Any],
         conversation_id=entry["conversation_id"],
         revision_id=entry["revision_id"],
         marketplaces=entry["marketplaces"],
-        scheduled_for=entry["scheduled_for"],
+        scheduled_for=entry["scheduled_for"] or moment,
         status=status,
         results=outcome,
         error=error,
@@ -531,7 +873,7 @@ def _recover_abandoned_publishes(db: Session, moment: datetime) -> list[dict[str
             "conversation_id": row.conversation_id,
             "revision_id": row.scheduled_revision_id,
             "marketplaces": markets,
-            "scheduled_for": row.scheduled_publish_at or moment,
+            "scheduled_for": row.scheduled_publish_at,
             "scheduled_confirmed_at": row.scheduled_confirmed_at,
         }
         outcome = _inspect_marketplace_outcome(db, row.conversation_id, markets)
@@ -545,6 +887,8 @@ async def run_due_scheduled_publishes(*, now: datetime | None = None, publisher=
     Recovers any abandoned ``publishing`` claims before permitting new attempts,
     and releases DB connections before any external marketplace await.
     """
+    from anteroom.services import pricing_rules
+
     moment = _as_naive_utc(now) if now is not None else _now()
     await in_worker_session(_recover_abandoned_publishes, moment)
     if publisher is None:
@@ -560,7 +904,12 @@ async def run_due_scheduled_publishes(*, now: datetime | None = None, publisher=
         settled_done = False
         try:
             try:
-                result = await publisher(entry["conversation_id"], entry["marketplaces"], entry["revision_id"])
+                token = _active_claim.set(entry)
+                try:
+                    with pricing_rules.freeze_active_rules(entry.get("pricing_rules")):
+                        result = await publisher(entry["conversation_id"], entry["marketplaces"], entry["revision_id"])
+                finally:
+                    _active_claim.reset(token)
             except Exception as exc:  # noqa: BLE001 - isolate one draft's publish failure
                 result = {"ok": False, "error": str(exc) or "Scheduled publish failed."}
             settled = await asyncio.shield(in_worker_session(_settle_publish, entry, result, _now()))

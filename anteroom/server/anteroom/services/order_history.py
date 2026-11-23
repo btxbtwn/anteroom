@@ -217,6 +217,10 @@ def save_orders(db: Session, marketplace: str, orders: list[Order], observed: da
             if order.sold_at is not None and "sold_on" not in raw:
                 sale.sold_at = order.sold_at
             db.flush()
+            if conversation_id and order.status not in {"cancelled", "refunded"}:
+                from anteroom.services.draft_scheduling import unschedule_on_sale
+
+                unschedule_on_sale(db, conversation_id)
             for row in placeholders:
                 carry_over(sale, row)
             replaced = len(placeholders) + (fresh and replace_stand_in(db, sale) is not None)

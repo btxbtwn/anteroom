@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import html
 import json
 import multiprocessing
@@ -55,7 +56,7 @@ APP_EXECUTABLE = CHANNEL["executable"]
 WINDOW_WIDTH = 1440
 WINDOW_HEIGHT = 900
 MIN_WINDOW_SIZE = (1024, 700)
-WINDOW_BACKGROUND = "#090909"
+WINDOW_BACKGROUND = "#0a0a0a"
 # A 38pt topbar: the empty NSToolbar in AppKit's compact unified titlebar sets
 # that height and insets the traffic lights into it, which is also how the
 # buttons keep their full AppKit size and spacing; moving or resizing them by
@@ -173,22 +174,55 @@ def setup_logging() -> None:
     sys.stderr = handle
 
 
-def splash_html(message: str = f"Starting {APP_NAME}…") -> str:
+def _splash_icon_data_uri() -> str:
+    try:
+        path = app_icon_path()
+        if path is not None:
+            return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode("ascii")
+    except OSError as exc:
+        print(f"could not load startup icon: {exc}", file=sys.stderr)
+    return ""
+
+
+def splash_html(*, error: str | None = None) -> str:
+    """Render the web startup layout before the local server is available."""
+    try:
+        startup_css = (resource_root() / "src" / "styles" / "startup.css").read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        print(f"could not load startup stylesheet: {exc}", file=sys.stderr)
+        startup_css = ".startup-screen { padding: 48px 24px; text-align: center; }"
+    loading = error is None
+    status = "Getting things ready…" if loading else error or "Could not open Anteroom."
+    icon = _splash_icon_data_uri()
+    logo = (
+        f'<img class="startup-logo" src="{icon}" width="48" height="48" alt="" />'
+        if icon
+        else ""
+    )
+    spinner = '<span class="startup-spinner" aria-hidden="true"></span>' if loading else ""
+    role = "status" if loading else "alert"
     return f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
   <meta charset="utf-8" />
+  <meta name="color-scheme" content="dark" />
   <title>{APP_NAME}</title>
   <style>
-    :root {{ color-scheme: dark; }}
+    :root {{
+      color-scheme: dark;
+      --background: {WINDOW_BACKGROUND};
+      --foreground: #f5f5f5;
+      --muted-foreground: color-mix(in srgb, #737373 90%, white);
+      --border: rgba(255, 255, 255, 0.06);
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    }}
+    * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
-      min-height: 100vh;
-      display: grid;
-      place-items: center;
-      background: {WINDOW_BACKGROUND};
-      color: #E2E3E5;
-      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--background);
+      color: var(--foreground);
+      font-family: var(--font-sans);
+      -webkit-font-smoothing: antialiased;
     }}
     .pywebview-drag-region {{
       position: fixed;
@@ -196,25 +230,27 @@ def splash_html(message: str = f"Starting {APP_NAME}…") -> str:
       left: 0;
       right: 0;
       height: {TITLEBAR_HEIGHT_PX}px;
+      z-index: 1;
     }}
-    main {{ text-align: center; max-width: 28rem; padding: 2rem; }}
-    h1 {{ font-size: 1.15rem; font-weight: 600; color: #fff; margin: 0 0 .75rem; }}
-    p {{ margin: 0; color: #97979A; line-height: 1.5; }}
+    {startup_css}
   </style>
 </head>
 <body>
   <div class="pywebview-drag-region" aria-hidden="true"></div>
-  <main>
-    <h1>{html.escape(APP_NAME)}</h1>
-    <p>{html.escape(message)}</p>
+  <main class="startup-screen" aria-label="Opening Anteroom">
+    <div class="startup-content">
+      {logo}
+      <h1 class="startup-title">{html.escape(APP_NAME)}</h1>
+      <div class="startup-status" role="{role}" aria-atomic="true">
+        {spinner}
+        <p>{html.escape(status)}</p>
+      </div>
+      <div class="startup-recovery"></div>
+    </div>
   </main>
 </body>
 </html>
 """
-
-
-def error_html(message: str) -> str:
-    return splash_html(message)
 
 
 def studio_is_up() -> bool:
@@ -1199,25 +1235,24 @@ def _set_macos_app_icon() -> None:
 
 
 def _boot_window(window) -> None:
+    # create_studio_window already paints the shared startup screen; keep it
+    # until the workspace URL loads so the Mac matches hosted web startup.
     try:
-        window.load_html(splash_html("Preparing the listing workspace…"))
         if not is_frozen():
             ensure_on_channel_ref()
         ensure_frontend()
         # Unlock Keychain on the UI thread before generate can block on it.
         # Click Always Allow if macOS asks — otherwise remote generate hangs.
-        window.load_html(splash_html("Unlocking Keychain secrets…"))
         try:
             from anteroom.services.keychain import warm_keychain
             warm_keychain()
         except Exception:
             pass
-        window.load_html(splash_html("Starting the local studio server…"))
         reap_orphaned_bridges()
         start_owned_server()
         _show_first_workspace(window)
     except Exception as exc:
-        window.load_html(error_html(str(exc)))
+        window.load_html(splash_html(error=str(exc)))
 
 
 def _show_first_workspace(window) -> None:

@@ -288,7 +288,10 @@ def record_seller_sale(db: Session, conv_id: str, body: SellerSale) -> dict:
             if any(amounts[key] is not None for key in AMOUNTS):
                 sale.financials = {**amounts, "order_basis": order_basis(sale), "updated_at": _iso(utcnow()), "source": "seller"}
                 sale.financial_revision = 1
+            from anteroom.services.draft_scheduling import unschedule_on_sale
+
             db.add(sale)
+            unschedule_on_sale(db, conv_id)
             db.commit()
             existing = sale
         sale_id = existing.id

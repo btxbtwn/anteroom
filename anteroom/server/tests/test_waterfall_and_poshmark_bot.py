@@ -719,6 +719,88 @@ class WaterfallAndPoshmarkBotTest(unittest.TestCase):
         self.assertEqual(paused_ctx.exception.code, "paused")
         cloud_mock.assert_not_awaited()
 
+    def test_poshmark_gap_ms_clamped_and_cloud_signed_out_does_not_pause_rule(self):
+        # M9: SHARE_SPEEDS * INTENSITY_GAP_MULTIPLIER is clamped to [4000, 30000].
+        # M10: cloud executor signed_out stops the run without pausing the rule for Chrome.
+        import asyncio
+        from unittest.mock import AsyncMock
+        from anteroom.models.marketplace_listing import MarketplaceListing
+
+        # M9: fast (4000ms) * high (<1) clamps to 4000; slow (15000ms) * low (2.25) clamps to 30000.
+        conv = Conversation(id="conv-gap-1", title="Gap Coat", status="listed")
+        posh_id = "5f0000000000000000000401"
+        self.db.add(conv)
+        self.db.add(MarketplaceListing(
+            conversation_id=conv.id, marketplace="poshmark", state="published",
+            listing_id=posh_id, listing_url=f"https://poshmark.com/listing/{posh_id}",
+            listed_at=_now() - timedelta(days=5),
+        ))
+        fast_rule = PromotionAutomation(
+            id="posh-fast-agg", marketplace="poshmark", action="share", name="Fast Agg",
+            enabled=True, daily_cap=50, speed="fast", share_modes=["self"],
+            hourly_schedule={str(h): "high" for h in range(24)},
+            timezone="UTC", next_run_at=_now() - timedelta(minutes=1),
+        )
+        slow_rule = PromotionAutomation(
+            id="posh-slow-gentle", marketplace="poshmark", action="share", name="Slow Gentle",
+            enabled=True, daily_cap=50, speed="slow", share_modes=["self"],
+            hourly_schedule={str(h): "low" for h in range(24)},
+            timezone="UTC", next_run_at=_now() - timedelta(minutes=1),
+        )
+        follow_rule = PromotionAutomation(
+            id="posh-follow-signout", marketplace="poshmark", action="follow", name="Follow Signout",
+            enabled=True, daily_cap=50, follow_config={"source": "followers"},
+            timezone="UTC", next_run_at=_now() - timedelta(minutes=1),
+        )
+        self.db.add_all([fast_rule, slow_rule, follow_rule])
+        self.db.commit()
+
+        seen_gaps: list[int | None] = []
+
+        async def fake_review(send, _conv_id, *, new_like_at=None):
+            send.listing_id = posh_id
+            send.price_cents = 5000
+
+        async def fake_perform(_send_id, _shipping, *, new_like_at=None, gap_ms=None, extra_payload=None, include_executor=False):
+            seen_gaps.append(gap_ms)
+            return {"state": "done"}
+
+        with (
+            patch("anteroom.services.listing_promotions.require_chrome", return_value=None),
+            patch("anteroom.services.listing_promotions.review", side_effect=fake_review),
+            patch("anteroom.services.listing_promotions.perform", side_effect=fake_perform),
+            patch.dict(promotion_automations.INTENSITY_GAP_MULTIPLIER, {"high": 0.2, "low": 2.25}),
+        ):
+            asyncio.run(promotion_automations.run_round(fast_rule.id))
+            asyncio.run(promotion_automations.run_round(slow_rule.id))
+        self.assertEqual(seen_gaps, [4000, 30000])
+
+        # M10: cloud signed_out does NOT pause the follow rule.
+        cloud_signed_out = AsyncMock(return_value={
+            "state": "failed", "stop": True, "error_code": "signed_out",
+            "executor": "cloud", "note": "Sign in to Poshmark in cloud.",
+        })
+        with (
+            patch("anteroom.services.listing_promotions.require_chrome", return_value=None),
+            patch("anteroom.services.listing_promotions.perform_account_action", cloud_signed_out),
+        ):
+            asyncio.run(promotion_automations.run_round(follow_rule.id))
+        self.db.expire_all()
+        self.assertTrue(self.db.get(PromotionAutomation, follow_rule.id).enabled)
+
+        # Chrome signed_out DOES pause the follow rule.
+        chrome_signed_out = AsyncMock(return_value={
+            "state": "failed", "stop": True, "error_code": "signed_out",
+            "executor": "chrome", "note": "Sign in to Poshmark in Chrome.",
+        })
+        with (
+            patch("anteroom.services.listing_promotions.require_chrome", return_value=None),
+            patch("anteroom.services.listing_promotions.perform_account_action", chrome_signed_out),
+        ):
+            asyncio.run(promotion_automations.run_round(follow_rule.id))
+        self.db.expire_all()
+        self.assertFalse(self.db.get(PromotionAutomation, follow_rule.id).enabled)
+
 
 if __name__ == "__main__":
     unittest.main()

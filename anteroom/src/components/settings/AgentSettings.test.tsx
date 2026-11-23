@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentConnectionStatus } from "../../api/agentConnection";
+import type { AgentConnectionStatus, McpAccessToken } from "../../api/agentConnection";
 import { AgentSettings } from "./AgentSettings";
 
 const { useQuery, useMutation } = vi.hoisted(() => ({ useQuery: vi.fn(), useMutation: vi.fn() }));
@@ -31,20 +31,31 @@ const status: AgentConnectionStatus = {
       where: "Claude → Settings → Connectors → Add custom connector",
       snippet: "Server URL: http://127.0.0.1:4318/api/mcp\nHeader: Authorization: Bearer <your-token>",
       command: "claude mcp add --transport http anteroom http://127.0.0.1:4318/api/mcp --header \"Authorization: Bearer <your-token>\"",
+      prompt: "Set up Claude over Streamable HTTP.",
     },
     {
       id: "chatgpt",
-      label: "ChatGPT",
-      where: "ChatGPT → Settings → Apps & Connectors → Create",
-      snippet: "MCP Server URL: http://127.0.0.1:4318/api/mcp",
+      label: "Codex / ChatGPT",
+      where: "Merge this into the Codex config.toml.",
+      snippet: '[mcp_servers.anteroom]\nurl = "http://127.0.0.1:4318/api/mcp"',
       command: null,
+      prompt: "Set up Codex over Streamable HTTP.",
     },
     {
-      id: "gemini",
-      label: "Gemini",
-      where: "Gemini CLI (~/.gemini/settings.json)",
-      snippet: '{"mcpServers": {"anteroom": {"httpUrl": "http://127.0.0.1:4318/api/mcp"}}}',
+      id: "antigravity",
+      label: "Google Antigravity",
+      where: "Antigravity IDE → MCP Servers → Manage MCP Servers",
+      snippet: '{"mcpServers": {"anteroom": {"serverUrl": "http://127.0.0.1:4318/api/mcp"}}}',
       command: null,
+      prompt: "Set up Google Antigravity over Streamable HTTP.",
+    },
+    {
+      id: "generic",
+      label: "Other MCP clients",
+      where: "Use your client's setup format for a Streamable HTTP MCP server.",
+      snippet: "Server URL: http://127.0.0.1:4318/api/mcp",
+      command: null,
+      prompt: "Set up Anteroom over Streamable HTTP using your MCP client.",
     },
   ],
   clients: [
@@ -54,6 +65,7 @@ const status: AgentConnectionStatus = {
       where: "Cursor → Settings → MCP",
       snippet: '{\n  "mcpServers": { "anteroom": { "command": "anteroom", "args": ["mcp", "serve"] } }\n}',
       command: null,
+      prompt: "Set up Cursor over local stdio.",
     },
     {
       id: "claude-desktop",
@@ -61,6 +73,7 @@ const status: AgentConnectionStatus = {
       where: "Claude Desktop → Settings → Developer",
       snippet: '{\n  "mcpServers": { "anteroom": { "command": "anteroom", "args": ["mcp", "serve"] } }\n}',
       command: null,
+      prompt: "Set up Claude Desktop over local stdio.",
     },
     {
       id: "claude-code",
@@ -68,11 +81,12 @@ const status: AgentConnectionStatus = {
       where: "Run the command in a terminal",
       snippet: '{\n  "mcpServers": { "anteroom": { "command": "anteroom", "args": ["mcp", "serve"] } }\n}',
       command: "claude mcp add --transport stdio anteroom -- anteroom mcp serve",
+      prompt: "Set up Claude Code over local stdio.",
     },
   ],
 };
 
-function mockQueries(agentData: AgentConnectionStatus, tokens: Array<{ id: string; name: string; token_prefix: string; created_at: string | null; last_used_at: string | null; expires_at: string | null; revoked_at: string | null }> = []) {
+function mockQueries(agentData: AgentConnectionStatus, tokens: McpAccessToken[] = []) {
   useQuery.mockImplementation((opts: { queryKey?: unknown[] }) => {
     if (opts?.queryKey?.[0] === "settings-mcp-tokens") {
       return { data: { tokens }, isPending: false, error: null, refetch: vi.fn() };
@@ -93,7 +107,9 @@ describe("Agent settings", () => {
     expect(html).toContain("http://127.0.0.1:4318/api/mcp");
     expect(html).toContain("Claude");
     expect(html).toContain("ChatGPT");
-    expect(html).toContain("Gemini");
+    for (const client of [...(status.remote_clients ?? []), ...status.clients]) {
+      expect(html).toContain(`aria-label="Copy setup prompt for ${client.label}"`);
+    }
     expect(html).toContain("Access tokens");
     expect(html).toContain("anteroom command");
     expect(html).toContain("Installed and on your PATH, version 9.9.9.");
@@ -154,15 +170,30 @@ describe("Agent settings", () => {
           last_used_at: null,
           expires_at: null,
           revoked_at: null,
+          permissions: { listings: "write", analytics: "read", attention: "none" },
+          active: true,
         },
       ],
     );
     const html = renderToStaticMarkup(<AgentSettings />);
     expect(html).toContain("https://myanteroom.com/api/mcp");
+    expect(html).toContain('aria-label="Claude Desktop Listings access"');
+    expect(html).toContain("Read and write");
+    expect(html).toContain('aria-label="Claude Desktop Needs Attention access"');
+    expect(html).toContain("No access");
     expect(html).toContain("Claude Desktop");
     expect(html).toContain("arm_abc12345");
     expect(html).toContain("ChatGPT");
-    expect(html).toContain("Gemini");
-    expect(html).not.toContain("Local CLI (Mac)");
+    expect(html).toContain("Copy setup prompt for Google Antigravity");
+    expect(html).toContain("Copy setup prompt for Other MCP clients");
+    expect(html).not.toContain("Copy setup prompt for Cursor");
+  });
+
+  it("lets the seller choose a new token's access, starting at read only", () => {
+    const html = renderToStaticMarkup(<AgentSettings />);
+    expect(html).toContain('aria-label="New token Listings access"');
+    expect(html).toContain('aria-label="New token Analytics access"');
+    expect(html).toContain('aria-label="New token Needs Attention access"');
+    expect(html).not.toContain("Read and write");
   });
 });

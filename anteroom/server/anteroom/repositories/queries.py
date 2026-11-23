@@ -372,14 +372,13 @@ class ConversationRepo:
         self.db.commit()
         return photo
 
-    def reorder_photos(self, conv_id: str, ordered_ids: list[str]) -> list[Photo]:
+    def update_photo_order(self, conv_id: str, ordered_ids: list[str]) -> None:
+        """Update the item photo order in the caller's transaction."""
         for idx, photo_id in enumerate(ordered_ids):
             photo = self.db.query(Photo).filter(Photo.id == photo_id, Photo.conversation_id == conv_id,
                                                 Photo.marketplace.is_(None)).first()
             if photo:
                 photo.display_order = idx
-        self.db.commit()
-        return self.get_photos(conv_id)
 
 
 class RevisionConflict(ValueError):

@@ -307,7 +307,11 @@ async def run_auto_relist_now(body: AutoRelistRunBody | None = None):
     marketplace = body.marketplace if body else None
     dry_run = bool(body.dry_run) if body else False
     try:
-        results = await auto_relist.run_auto_relist(marketplace=marketplace, dry_run=dry_run)
+        results = await auto_relist.run_auto_relist(
+            marketplace=marketplace,
+            dry_run=dry_run,
+            respect_backoff=False,
+        )
     except auto_relist.AutoRelistError as exc:
         raise HTTPException(exc.status_code, exc.detail) from exc
     return {"ok": True, "outcomes": results, "dry_run": dry_run}

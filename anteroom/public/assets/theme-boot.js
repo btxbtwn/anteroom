@@ -3,6 +3,7 @@
 (function () {
   try {
     var pref = localStorage.getItem("anteroom:theme") || localStorage.getItem("vendoo-studio:theme");
+    if (pref !== "light" && pref !== "dark") pref = "system";
     var light = pref === "light" || (pref === "system" && matchMedia("(prefers-color-scheme: light)").matches);
     document.documentElement.classList.toggle("dark", !light);
     document.documentElement.style.colorScheme = light ? "light" : "dark";
@@ -14,7 +15,8 @@
 })();
 
 // The application cannot report errors or offer a reload until its modules run.
-// The ID only exists on the static shell, which React replaces when it starts.
+// Both static shells use the same ID. Keep it stable because the HTML and script
+// can come from different builds during a rollout.
 (function () {
   function showRecovery(failed) {
     var shell = document.getElementById("cloud-startup");

@@ -383,6 +383,7 @@ def test_marketplace_cloud_verification_and_resume(cloud, signing_keys, monkeypa
         {"name": cookie_name, "value": "foreign-secret", "domain": f"evil-{market}.com"},
     ]
     verified_state = "signed_in"
+    verification_error = None
     expected_cookie = "session-secret"
 
     async def verify_market(marketplace, seller_id, job_id, run_payload, timeout):
@@ -390,6 +391,8 @@ def test_marketplace_cloud_verification_and_resume(cloud, signing_keys, monkeypa
         assert seller_id == USER_ID
         assert run_payload["command"]["type"] == "marketplace.verify_session"
         assert [cookie["value"] for cookie in run_payload["cookies"]] == [expected_cookie]
+        if verification_error:
+            return {"result": {"ok": False, "error_code": "challenge", "error": verification_error}}
         return {"result": {"ok": True, "session": {"state": verified_state, "label": "Seller"}}}
 
     monkeypatch.setattr(cloud_marketplace, "_run_subprocess", verify_market)
@@ -411,7 +414,17 @@ def test_marketplace_cloud_verification_and_resume(cloud, signing_keys, monkeypa
     assert connect(expected_cookie).status_code == 409
     assert vault.data[(USER_ID, f"cloud-session-{market}")] == saved
     assert client.get("/api/cloud-sessions", headers=alice).json()["sessions"][market]["state"] == "signed_in"
+    verification_error = f"{market.title()} requires a browser check."
+    rejected = connect(expected_cookie)
+    assert rejected.status_code == 409
+    assert rejected.json() == {"detail": verification_error}
+    assert vault.data[(USER_ID, f"cloud-session-{market}")] == saved
     expected_cookie = "session-secret"
+    challenged = client.post(f"/api/cloud-sessions/{market}/verify", headers=alice).json()
+    assert challenged["ok"] is False
+    assert challenged["error"] == verification_error
+    assert challenged["session"]["state"] == "signed_in"
+    verification_error = None
     with Session(engine) as db:
         for name, enabled, reason in (("enabled", True, None), ("manual", False, None), ("unknown", False, "Unconfirmed send")):
             db.add(PromotionAutomation(user_id=USER_ID, name=name, marketplace=market, action="offer",

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+import threading
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -21,6 +23,70 @@ TOKEN_PREFIX = "arm_"
 MAX_ACTIVE_TOKENS = 25
 MAX_NAME_LENGTH = 80
 MAX_EXPIRY_DAYS = 365
+AUTH_FAIL_WINDOW_S = 60.0
+AUTH_FAIL_MAX = 20
+_AUTH_FAIL_MAX_KEYS = 4096
+_AUTH_FAIL_LOCK = threading.Lock()
+_AUTH_FAILURES: dict[str, list[float]] = {}
+
+
+def _prune_failures_locked(cutoff: float) -> None:
+    stale = [key for key, stamps in _AUTH_FAILURES.items() if not stamps or stamps[-1] <= cutoff]
+    for key in stale:
+        del _AUTH_FAILURES[key]
+
+
+def is_auth_rate_limited(client_key: str, *, now: float | None = None) -> bool:
+    """Return True when ``client_key`` exceeded failed MCP token attempts in the rolling window."""
+    if not client_key:
+        return False
+    clock = time.monotonic() if now is None else now
+    cutoff = clock - AUTH_FAIL_WINDOW_S
+    with _AUTH_FAIL_LOCK:
+        stamps = _AUTH_FAILURES.get(client_key)
+        if not stamps:
+            return False
+        recent = [ts for ts in stamps if ts > cutoff]
+        if recent:
+            _AUTH_FAILURES[client_key] = recent
+        else:
+            _AUTH_FAILURES.pop(client_key, None)
+        return len(recent) >= AUTH_FAIL_MAX
+
+
+def record_auth_failure(client_key: str, *, now: float | None = None) -> None:
+    """Record a failed MCP token verification attempt for ``client_key``."""
+    if not client_key:
+        return
+    clock = time.monotonic() if now is None else now
+    cutoff = clock - AUTH_FAIL_WINDOW_S
+    with _AUTH_FAIL_LOCK:
+        if len(_AUTH_FAILURES) >= _AUTH_FAIL_MAX_KEYS and client_key not in _AUTH_FAILURES:
+            _prune_failures_locked(cutoff)
+            if len(_AUTH_FAILURES) >= _AUTH_FAIL_MAX_KEYS:
+                oldest_key = min(_AUTH_FAILURES, key=lambda k: _AUTH_FAILURES[k][-1])
+                del _AUTH_FAILURES[oldest_key]
+        recent = [ts for ts in _AUTH_FAILURES.get(client_key, []) if ts > cutoff]
+        recent.append(clock)
+        _AUTH_FAILURES[client_key] = recent
+
+
+def clear_auth_failures(client_key: str | None = None) -> None:
+    """Clear recorded MCP auth failures (all keys when ``client_key`` is None)."""
+    with _AUTH_FAIL_LOCK:
+        if client_key is None:
+            _AUTH_FAILURES.clear()
+        else:
+            _AUTH_FAILURES.pop(client_key, None)
+
+# What a token may reach, per area. Each area lists its levels from least to
+# most access; a higher level includes the ones before it.
+AREA_LEVELS: dict[str, tuple[str, ...]] = {
+    "listings": ("none", "read", "write"),
+    "analytics": ("none", "read"),
+    "attention": ("none", "read", "write"),
+}
+DEFAULT_PERMISSIONS: dict[str, str] = {"listings": "read", "analytics": "read", "attention": "read"}
 
 
 class McpTokenError(ValueError):
@@ -54,6 +120,36 @@ def is_mcp_token(raw_token: str) -> bool:
     )
 
 
+def normalize_permissions(raw: Any, *, base: dict[str, str] | None = None) -> dict[str, str]:
+    """Merge seller-chosen levels over ``base`` and reject unknown areas or levels."""
+    if not isinstance(raw, dict):
+        raise McpTokenError("Permissions must name an access level for each area.")
+    merged = dict(base or DEFAULT_PERMISSIONS)
+    for area, level in raw.items():
+        levels = AREA_LEVELS.get(area)
+        if levels is None:
+            raise McpTokenError(f"Unknown permission area: {area}.")
+        if level not in levels:
+            raise McpTokenError(f"{area} access must be one of: {', '.join(levels)}.")
+        merged[area] = level
+    return merged
+
+
+def stored_permissions(raw: Any) -> dict[str, str]:
+    """Read a token's stored permissions, treating anything missing or unknown as no access."""
+    stored = raw if isinstance(raw, dict) else {}
+    return {
+        area: stored[area] if stored.get(area) in levels else "none"
+        for area, levels in AREA_LEVELS.items()
+    }
+
+
+def allows(permissions: dict[str, str], area: str, level: str) -> bool:
+    levels = AREA_LEVELS[area]
+    granted = permissions.get(area, "none")
+    return granted in levels and levels.index(granted) >= levels.index(level)
+
+
 def _serialize(row: McpAccessToken, *, now: datetime | None = None) -> dict[str, Any]:
     clock = _aware(now) or _now()
     expires = _aware(row.expires_at)
@@ -67,6 +163,7 @@ def _serialize(row: McpAccessToken, *, now: datetime | None = None) -> dict[str,
         "last_used_at": _iso(row.last_used_at),
         "revoked_at": _iso(row.revoked_at),
         "expires_at": _iso(row.expires_at),
+        "permissions": stored_permissions(row.permissions),
         "active": active,
     }
 
@@ -86,8 +183,10 @@ def create_token(
     *,
     name: str,
     expires_in_days: int | None = None,
+    permissions: dict[str, Any] | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    granted = normalize_permissions(permissions or {})
     cleaned = " ".join((name or "").split()).strip()
     if not cleaned:
         raise McpTokenError("Give this token a name so you know which app uses it.")
@@ -113,6 +212,7 @@ def create_token(
         name=cleaned,
         token_prefix=raw_token[:12],
         token_hash=digest,
+        permissions=granted,
         created_at=clock,
         expires_at=expires_at,
     )
@@ -134,6 +234,29 @@ def revoke_token(db: Session, token_id: str, *, now: datetime | None = None) -> 
         db.commit()
         db.refresh(row)
     return _serialize(row, now=clock)
+
+
+def update_permissions(
+    db: Session, token_id: str, permissions: dict[str, Any], *, now: datetime | None = None,
+) -> dict[str, Any] | None:
+    """Change what a token may reach. The next MCP request uses the new permissions."""
+    row = db.get(McpAccessToken, token_id)
+    if row is None:
+        return None
+    if row.revoked_at is not None:
+        raise McpTokenError("This token is revoked. Create a new one instead.")
+    row.permissions = normalize_permissions(permissions, base=stored_permissions(row.permissions))
+    db.commit()
+    db.refresh(row)
+    return _serialize(row, now=now)
+
+
+def permissions_for(db: Session, token_id: str) -> dict[str, str]:
+    """The current permissions of a verified token; none at all if it has since gone."""
+    row = db.get(McpAccessToken, token_id)
+    if row is None or row.revoked_at is not None:
+        return stored_permissions(None)
+    return stored_permissions(row.permissions)
 
 
 @dataclass(frozen=True)

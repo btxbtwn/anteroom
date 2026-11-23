@@ -133,24 +133,17 @@ beforeEach(() => {
   api.home.summary.mockResolvedValue(sampleHome);
   api.home.dismissAttention.mockResolvedValue({
     ok: true,
-    home: {
-      ...sampleHome,
-      needs_attention: sampleHome.needs_attention.slice(1),
-      dismissed: [
-        ...sampleHome.dismissed,
-        { ...sampleHome.needs_attention[0]!, reappears_in_days: 7 },
-      ],
-      counts: { active: 1, dismissed: 2, by_kind: { expired_session: 1 } },
+    dismissal: {
+      item_key: "still_listed:conv_1",
+      dismissed_at: "2026-11-22T12:00:00Z",
+      expires_at: "2026-11-29T12:00:00Z",
+      reappears_in_days: 7,
     },
   });
   api.home.restoreAttention.mockResolvedValue({
     ok: true,
-    home: {
-      ...sampleHome,
-      needs_attention: [...sampleHome.needs_attention, sampleHome.dismissed[0]!],
-      dismissed: [],
-      counts: { active: 3, dismissed: 0, by_kind: { still_listed: 1, expired_session: 1, unsent_edits: 1 } },
-    },
+    restored: true,
+    item_key: "unsent_edits:conv_2",
   });
 });
 
@@ -220,6 +213,7 @@ describe("HomePage", () => {
     });
     await settle();
     expect(api.home.dismissAttention).toHaveBeenCalledWith("still_listed:conv_1", "still_listed", expect.any(String));
+    expect(container.textContent).not.toContain("Vintage Wool Coat sold on eBay — still live on Poshmark");
 
     const dismissedTab = [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Dismissed");
     expect(dismissedTab).toBeDefined();
@@ -228,8 +222,11 @@ describe("HomePage", () => {
     });
     await settle();
     expect(container.textContent).toContain("Ceramic Pitcher has unsent edits");
+    expect(container.textContent).toContain("Vintage Wool Coat sold on eBay — still live on Poshmark");
 
-    const restoreBtn = [...container.querySelectorAll("button")].find((b) => b.textContent?.includes("Restore"));
+    const restoreBtn = [...container.querySelectorAll("button")].find(
+      (b) => b.getAttribute("aria-label") === "Restore Ceramic Pitcher has unsent edits",
+    );
     expect(restoreBtn).toBeDefined();
     await act(async () => {
       restoreBtn!.click();
@@ -238,33 +235,135 @@ describe("HomePage", () => {
     expect(api.home.restoreAttention).toHaveBeenCalledWith("unsent_edits:conv_2", expect.any(String));
   });
 
-  it("queues a restore behind a dismiss and refetches when the mutation has no snapshot", async () => {
-    let finishDismiss!: (result: { ok: boolean }) => void;
+  it("moves an alert out of Active as soon as Dismiss is clicked", async () => {
+    let finishDismiss!: (result: { ok: boolean; dismissal: {
+      item_key: string;
+      dismissed_at: string;
+      expires_at: string;
+      reappears_in_days: number;
+    } }) => void;
     api.home.dismissAttention.mockReturnValueOnce(new Promise((resolve) => { finishDismiss = resolve; }));
     await renderHome();
 
-    const button = (label: string) => [...container.querySelectorAll("button")]
+    expect(container.textContent).toContain("Vintage Wool Coat sold on eBay — still live on Poshmark");
+    const dismissBtn = [...container.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Dismiss");
+    await act(() => dismissBtn!.click());
+    await settle();
+
+    expect(container.textContent).not.toContain("Vintage Wool Coat sold on eBay — still live on Poshmark");
+    expect(api.home.dismissAttention).toHaveBeenCalledOnce();
+    expect(api.home.summary).toHaveBeenCalledTimes(1);
+
+    await act(() => finishDismiss({
+      ok: true,
+      dismissal: {
+        item_key: "still_listed:conv_1",
+        dismissed_at: "2026-11-22T12:00:00Z",
+        expires_at: "2026-11-29T12:00:00Z",
+        reappears_in_days: 7,
+      },
+    }));
+    await settle();
+    expect(container.textContent).not.toContain("Vintage Wool Coat sold on eBay — still live on Poshmark");
+    expect(api.home.summary).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets Restore of a different alert run while a slow Dismiss is still saving", async () => {
+    let finishDismiss!: (result: { ok: boolean; dismissal: {
+      item_key: string;
+      dismissed_at: string;
+      expires_at: string;
+      reappears_in_days: number;
+    } }) => void;
+    api.home.dismissAttention.mockReturnValueOnce(new Promise((resolve) => { finishDismiss = resolve; }));
+    await renderHome();
+
+    const byLabel = (label: string) => [...container.querySelectorAll("button")]
       .find((node) => node.textContent?.trim() === label)!;
-    await act(() => button("Dismiss").click());
+    await act(() => byLabel("Dismiss").click());
     await settle();
     expect(api.home.dismissAttention).toHaveBeenCalledOnce();
 
-    await act(() => button("Dismissed").click());
-    await act(() => button("Restore").click());
+    await act(() => byLabel("Dismissed").click());
+    const restorePitcher = [...container.querySelectorAll("button")].find(
+      (node) => node.getAttribute("aria-label") === "Restore Ceramic Pitcher has unsent edits",
+    )!;
+    await act(() => restorePitcher.click());
     await settle();
-    expect(api.home.restoreAttention).not.toHaveBeenCalled();
-
-    await act(() => finishDismiss({ ok: true }));
-    await settle();
-    expect(api.home.summary).toHaveBeenCalledTimes(2);
     expect(api.home.restoreAttention).toHaveBeenCalledOnce();
     expect(container.textContent).not.toContain("Ceramic Pitcher has unsent edits");
+
+    await act(() => finishDismiss({
+      ok: true,
+      dismissal: {
+        item_key: "still_listed:conv_1",
+        dismissed_at: "2026-11-22T12:00:00Z",
+        expires_at: "2026-11-29T12:00:00Z",
+        reappears_in_days: 7,
+      },
+    }));
+    await settle();
+    expect(api.home.summary).toHaveBeenCalledTimes(1);
   });
 
-  it.each([false, true])("keeps a newer goal form when an earlier save completes (queued: %s)", async (queued) => {
-    let finishDismiss!: (result: { ok: boolean }) => void;
+  it("keeps Restore when a slower same-alert Dismiss finishes later", async () => {
+    let finishDismiss!: (result: { ok: boolean; dismissal: {
+      item_key: string;
+      dismissed_at: string;
+      expires_at: string;
+      reappears_in_days: number;
+    } }) => void;
+    let finishRestore!: (result: { ok: boolean; restored: boolean; item_key: string }) => void;
+    api.home.dismissAttention.mockReturnValueOnce(new Promise((resolve) => { finishDismiss = resolve; }));
+    api.home.restoreAttention.mockReturnValueOnce(new Promise((resolve) => { finishRestore = resolve; }));
+    await renderHome();
+
+    const byLabel = (label: string) => [...container.querySelectorAll("button")]
+      .find((node) => node.textContent?.trim() === label)!;
+    const coat = "Vintage Wool Coat sold on eBay — still live on Poshmark";
+
+    await act(() => byLabel("Dismiss").click());
+    await settle();
+    expect(api.home.dismissAttention).toHaveBeenCalledOnce();
+    expect(container.textContent).not.toContain(coat);
+
+    await act(() => byLabel("Dismissed").click());
+    const restoreCoat = [...container.querySelectorAll("button")].find(
+      (node) => node.getAttribute("aria-label") === `Restore ${coat}`,
+    )!;
+    await act(() => restoreCoat.click());
+    await settle();
+    // Optimistic restore moves it out of Dismissed immediately; the API waits
+    // for the in-flight dismiss of the same key.
+    expect(container.textContent).not.toContain(coat);
+    expect(api.home.restoreAttention).not.toHaveBeenCalled();
+
+    await act(() => finishDismiss({
+      ok: true,
+      dismissal: {
+        item_key: "still_listed:conv_1",
+        dismissed_at: "2026-11-22T12:00:00Z",
+        expires_at: "2026-11-29T12:00:00Z",
+        reappears_in_days: 7,
+      },
+    }));
+    await settle();
+    // Stale dismiss success must not put the restored alert back under Dismissed.
+    expect(container.textContent).not.toContain(coat);
+    expect(api.home.restoreAttention).toHaveBeenCalledOnce();
+
+    await act(() => byLabel("Active").click());
+    await act(() => finishRestore({
+      ok: true,
+      restored: true,
+      item_key: "still_listed:conv_1",
+    }));
+    await settle();
+    expect(container.textContent).toContain(coat);
+  });
+
+  it("keeps a newer goal form when an earlier save completes", async () => {
     let finishSave!: (result: { ok: boolean; home: HomeSummaryResponse }) => void;
-    if (queued) api.home.dismissAttention.mockReturnValueOnce(new Promise((resolve) => { finishDismiss = resolve; }));
     api.home.updateGoal.mockReturnValueOnce(new Promise((resolve) => { finishSave = resolve; }));
     await renderHome();
 
@@ -277,22 +376,14 @@ describe("HomePage", () => {
       input.dispatchEvent(new Event("input", { bubbles: true }));
     };
 
-    if (queued) {
-      await act(() => button("Dismiss").click());
-      await settle();
-    }
     await act(() => button("Edit Monthly Profit").click());
     await act(() => setTarget("2400"));
     await act(() => button("Save changes").click());
     await settle();
-    expect(api.home.updateGoal).toHaveBeenCalledTimes(queued ? 0 : 1);
+    expect(api.home.updateGoal).toHaveBeenCalledTimes(1);
 
     await act(() => button("Edit Weekly Listings").click());
     await act(() => setTarget("28"));
-    if (queued) {
-      await act(() => finishDismiss({ ok: true }));
-      await settle();
-    }
     expect(api.home.updateGoal).toHaveBeenNthCalledWith(
       1, "goal_1", { period: "monthly", metric: "profit", target: 2400, label: null }, expect.any(String),
     );
@@ -307,6 +398,90 @@ describe("HomePage", () => {
       2, "goal_2", { period: "weekly", metric: "listings", target: 28, label: null }, expect.any(String),
     );
     expect(target()).toBeNull();
+  });
+
+  it("keeps a Dismiss when a slower goal save returns a stale Active snapshot", async () => {
+    let finishSave!: (result: { ok: boolean; home: HomeSummaryResponse }) => void;
+    api.home.updateGoal.mockReturnValueOnce(new Promise((resolve) => { finishSave = resolve; }));
+    await renderHome();
+
+    const button = (label: string) => [...container.querySelectorAll("button")]
+      .find((node) => node.getAttribute("aria-label") === label || node.textContent?.trim() === label)!;
+    const coat = "Vintage Wool Coat sold on eBay — still live on Poshmark";
+
+    await act(() => button("Edit Monthly Profit").click());
+    await act(() => {
+      const input = container.querySelector<HTMLInputElement>('[aria-label="Goal target"]')!;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "2400");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(() => button("Save changes").click());
+    await settle();
+
+    await act(() => button("Dismiss").click());
+    await settle();
+    expect(container.textContent).not.toContain(coat);
+    expect(api.home.dismissAttention).toHaveBeenCalledOnce();
+
+    await act(() => finishSave({ ok: true, home: sampleHome }));
+    await settle();
+    expect(container.textContent).not.toContain(coat);
+  });
+
+  it("lets a later goal save keep attention restored by a refetch", async () => {
+    let finishSave!: (result: { ok: boolean; home: HomeSummaryResponse }) => void;
+    const { homeQuery } = await import("../api/pageQueries");
+    const { browserTimeZone } = await import("../api/home");
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(homeQuery(browserTimeZone()).queryKey, sampleHome);
+    api.home.summary.mockResolvedValue(sampleHome);
+    api.home.updateGoal.mockReturnValueOnce(new Promise((resolve) => { finishSave = resolve; }));
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={qc}>
+          <HomePage onNavigateAttention={vi.fn()} />
+        </QueryClientProvider>,
+      );
+    });
+    await settle();
+
+    const button = (label: string) => [...container.querySelectorAll("button")]
+      .find((node) => node.getAttribute("aria-label") === label || node.textContent?.trim() === label)!;
+    const coat = "Vintage Wool Coat sold on eBay — still live on Poshmark";
+
+    await act(() => button("Dismiss").click());
+    await settle();
+    expect(container.textContent).not.toContain(coat);
+
+    // Refetch as if another device restored the alert.
+    qc.setQueryData(homeQuery(browserTimeZone()).queryKey, sampleHome);
+    await settle();
+    expect(container.textContent).toContain(coat);
+
+    await act(() => button("Edit Monthly Profit").click());
+    await act(() => {
+      const input = container.querySelector<HTMLInputElement>('[aria-label="Goal target"]')!;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "2500");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(() => button("Save changes").click());
+    await settle();
+
+    const staleWithDismissedCoat: HomeSummaryResponse = {
+      ...sampleHome,
+      today: { ...sampleHome.today, units_listed: 99 },
+      needs_attention: sampleHome.needs_attention.filter((item) => item.key !== "still_listed:conv_1"),
+      dismissed: [
+        ...sampleHome.dismissed,
+        { ...sampleHome.needs_attention[0]!, reappears_in_days: 7 },
+      ],
+      counts: { active: 1, dismissed: 2, by_kind: { expired_session: 1 } },
+    };
+    await act(() => finishSave({ ok: true, home: staleWithDismissedCoat }));
+    await settle();
+    expect(container.textContent).toContain(coat);
+    expect(container.textContent).toContain("99");
   });
 
 });

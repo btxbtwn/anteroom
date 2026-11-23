@@ -43,6 +43,16 @@ MAX_DAILY_CAP = 100
 DEFAULT_DAILY_CAP = 25
 DEFAULT_EBAY_GTC_MINUTES = 30
 EBAY_GTC_CYCLE = timedelta(days=30)
+EBAY_CYCLE_DEDUPE_WINDOW = timedelta(hours=25)
+RELIST_RETRY_BACKOFF = timedelta(hours=6)
+AUTO_RELIST_TICK_INTERVAL = timedelta(minutes=5)
+BACKOFF_STATUSES = (
+    "skipped_active_offer",
+    "skipped_offer_unverified",
+    "failed",
+    "down_needs_relist",
+)
+CAP_COUNTED_STATUSES = ("completed", "relist_pending", "failed", "down_needs_relist")
 RULE_DISABLED_AFTER_DELETE = "The relist rule was turned off after deletion. Review the listing before recreating it."
 
 
@@ -69,13 +79,29 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() + "Z" if value else None
 
 
+def has_due_relist_rules(db: Session, moment: datetime | None = None) -> bool:
+    """Return True when any enabled rule is due for a scheduled sweep."""
+    now = _as_naive_utc(moment) or _now()
+    cutoff = now - AUTO_RELIST_TICK_INTERVAL
+    return (
+        db.query(MarketplaceRelistRule.id)
+        .filter(
+            MarketplaceRelistRule.enabled.is_(True),
+            (MarketplaceRelistRule.last_run_at.is_(None))
+            | (MarketplaceRelistRule.last_run_at <= cutoff),
+        )
+        .first()
+        is not None
+    )
+
+
 def _relisted_last_24h(db: Session, marketplace: str, moment: datetime) -> int:
     since = moment - timedelta(hours=24)
     return (
         db.query(MarketplaceRelistLog)
         .filter(
             MarketplaceRelistLog.marketplace == marketplace,
-            MarketplaceRelistLog.status.in_(("completed", "relist_pending")),
+            MarketplaceRelistLog.status.in_(CAP_COUNTED_STATUSES),
             MarketplaceRelistLog.created_at >= since,
         )
         .count()
@@ -270,17 +296,19 @@ def save_rule(db: Session, marketplace: str, body: dict[str, Any], *, confirm: b
 
 
 def compute_relist_price(current_price: float | None, rule: MarketplaceRelistRule) -> float | None:
-    """Compute adjusted price respecting the seller's floor."""
+    """Compute adjusted price respecting the seller's floor without ever raising the price."""
     if current_price is None or current_price <= 0 or not rule.price_adjust_mode or not rule.price_adjust_value:
         return current_price
+    floor = float(rule.price_floor) if rule.price_floor is not None else 1.0
+    floor = max(floor, 1.0)
+    if current_price <= floor:
+        return round(current_price, 2)
     if rule.price_adjust_mode == "percent":
         next_price = current_price * (1.0 - float(rule.price_adjust_value) / 100.0)
     else:
         next_price = current_price - float(rule.price_adjust_value)
-    floor = float(rule.price_floor) if rule.price_floor is not None else 1.0
-    floor = max(floor, 1.0)
     next_price = max(next_price, floor)
-    return round(next_price, 2)
+    return round(min(next_price, current_price), 2)
 
 
 def is_due_for_relist(marketplace: str, listed_at: datetime | None, rule: MarketplaceRelistRule, now: datetime) -> bool:
@@ -288,10 +316,15 @@ def is_due_for_relist(marketplace: str, listed_at: datetime | None, rule: Market
     if stamp is None:
         return False
     age = now - stamp
+    if age < timedelta(0):
+        return False
     if marketplace == "ebay":
         before_mins = int(rule.ebay_recreate_before_gtc_minutes or DEFAULT_EBAY_GTC_MINUTES)
         threshold = EBAY_GTC_CYCLE - timedelta(minutes=before_mins)
-        return threshold <= age < EBAY_GTC_CYCLE
+        if age < threshold:
+            return False
+        # Match every 30-day GTC renewal cycle (29d23h30m, 59d23h30m, ...), not only the first cycle.
+        return (age % EBAY_GTC_CYCLE) >= threshold
     return age >= timedelta(days=max(int(rule.min_age_days or MIN_AGE_DAYS_STANDARD), MIN_AGE_DAYS_STANDARD))
 
 
@@ -424,53 +457,137 @@ def swap_tracked_listing_id(
         conv.notes = merge_notes(conv.notes, {"marketplaceDelists": delists, "marketplaceMarks": marks})
 
 
-def _eligible_candidates(db: Session, rule: MarketplaceRelistRule, moment: datetime) -> list[dict[str, Any]]:
+def _sql_age_cutoff(rule: MarketplaceRelistRule, moment: datetime) -> datetime:
+    if rule.marketplace == "ebay":
+        before_mins = int(rule.ebay_recreate_before_gtc_minutes or DEFAULT_EBAY_GTC_MINUTES)
+        return moment - (EBAY_GTC_CYCLE - timedelta(minutes=before_mins))
+    return moment - timedelta(days=max(int(rule.min_age_days or MIN_AGE_DAYS_STANDARD), MIN_AGE_DAYS_STANDARD))
+
+
+def _eligible_candidates(
+    db: Session,
+    rule: MarketplaceRelistRule,
+    moment: datetime,
+    *,
+    conv_id: str | None = None,
+    respect_backoff: bool = True,
+) -> list[dict[str, Any]]:
     done_today = _relisted_last_24h(db, rule.marketplace, moment)
     remaining = max(min(int(rule.daily_cap), MAX_DAILY_CAP) - done_today, 0)
     if remaining <= 0:
         return []
 
-    sold_convs = {
-        row[0]
+    age_cutoff = _sql_age_cutoff(rule, moment)
+    query = (
+        db.query(MarketplaceListing, Conversation)
+        .select_from(Conversation)
+        .outerjoin(
+            MarketplaceListing,
+            (MarketplaceListing.conversation_id == Conversation.id)
+            & (MarketplaceListing.marketplace == rule.marketplace),
+        )
+        .filter(
+            Conversation.status != "sold",
+            (
+                (
+                    MarketplaceListing.id.isnot(None)
+                    & MarketplaceListing.state.in_(LIVE_STATES)
+                    & (MarketplaceListing.listing_id.isnot(None) | MarketplaceListing.listing_url.isnot(None))
+                    & ((MarketplaceListing.listed_at.is_(None)) | (MarketplaceListing.listed_at <= age_cutoff))
+                )
+                | (
+                    (
+                        MarketplaceListing.id.is_(None)
+                        | (
+                            MarketplaceListing.state.in_(("not_saved", *LIVE_STATES))
+                            & MarketplaceListing.listing_id.is_(None)
+                            & MarketplaceListing.listing_url.is_(None)
+                        )
+                    )
+                    & Conversation.notes.isnot(None)
+                    & (Conversation.notes != "")
+                )
+            ),
+        )
+    )
+    if conv_id is not None:
+        query = query.filter(Conversation.id == conv_id)
+    rows = query.all()
+    if not rows:
+        return []
+
+    matched_conv_ids = [conv.id for _ml, conv in rows]
+    excluded_convs: set[str] = {
+        excluded_id
         for row in db.query(MarketplaceSale.conversation_id)
         .filter(
-            MarketplaceSale.conversation_id.isnot(None),
+            MarketplaceSale.conversation_id.in_(matched_conv_ids),
             MarketplaceSale.order_status.in_((*PAID_STATUSES, "cancellation_pending")),
         )
         .all()
+        if (excluded_id := row[0]) is not None
     }
-    convs = db.query(Conversation).filter(Conversation.status != "sold").all()
-    if not convs:
+    if respect_backoff:
+        backoff_since = moment - RELIST_RETRY_BACKOFF
+        excluded_convs.update(
+            excluded_id
+            for row in db.query(MarketplaceRelistLog.conversation_id)
+            .filter(
+                MarketplaceRelistLog.marketplace == rule.marketplace,
+                MarketplaceRelistLog.conversation_id.in_(matched_conv_ids),
+                MarketplaceRelistLog.status.in_(BACKOFF_STATUSES),
+                MarketplaceRelistLog.created_at >= backoff_since,
+            )
+            .all()
+            if (excluded_id := row[0]) is not None
+        )
+    if rule.marketplace == "ebay":
+        cycle_since = moment - EBAY_CYCLE_DEDUPE_WINDOW
+        excluded_convs.update(
+            excluded_id
+            for row in db.query(MarketplaceRelistLog.conversation_id)
+            .filter(
+                MarketplaceRelistLog.marketplace == "ebay",
+                MarketplaceRelistLog.conversation_id.in_(matched_conv_ids),
+                MarketplaceRelistLog.status == "completed",
+                MarketplaceRelistLog.created_at >= cycle_since,
+            )
+            .all()
+            if (excluded_id := row[0]) is not None
+        )
+
+    eligible_rows = [(ml, conv) for ml, conv in rows if conv.id not in excluded_convs]
+    if not eligible_rows:
         return []
-    eligible_convs = [c for c in convs if c.id not in sold_convs]
-    conv_ids = [c.id for c in eligible_convs]
-    if not conv_ids:
-        return []
+    eligible_convs = [conv for _ml, conv in eligible_rows]
+    conv_ids = [conv.id for conv in eligible_convs]
+
     known_by_conv = listings_for(db, eligible_convs)
-    listed_index = load_listed_index(db)
+    listed_index = None
     listings_by_conv = {row.conversation_id: row for row in db.query(Listing).filter(Listing.conversation_id.in_(conv_ids)).all()}
     rev_ids = [row.current_revision_id for row in listings_by_conv.values() if row.current_revision_id]
     revs_by_id = {row.id: row for row in db.query(ListingRevision).filter(ListingRevision.id.in_(rev_ids)).all()} if rev_ids else {}
-    ml_by_conv = {
-        row.conversation_id: row
-        for row in db.query(MarketplaceListing)
-        .filter(MarketplaceListing.conversation_id.in_(conv_ids), MarketplaceListing.marketplace == rule.marketplace)
-        .all()
-    }
 
     candidates: list[dict[str, Any]] = []
-    for conv in convs:
-        if conv.id not in conv_ids:
-            continue
+    for ml, conv in eligible_rows:
         entry = (known_by_conv.get(conv.id) or {}).get(rule.marketplace) or {}
         if entry.get("sold_here") or entry.get("state") not in (None, "live", "failed") or not entry.get("listing_id"):
             continue
-        ml = ml_by_conv.get(conv.id)
-        if ml is not None and ml.state not in LIVE_STATES and ml.state != "not_saved":
-            continue
-        listed_at_raw, _src = resolve_listed_at(listed_index, conv, [ml] if ml is not None else [], {rule.marketplace})
-        # Prefer marketplace_listing.listed_at when available for accurate per-marketplace relist age.
-        listed_at = ml.listed_at if (ml is not None and ml.listed_at is not None) else listed_at_raw
+        selected_id = str(entry["listing_id"])
+        ml_id = (
+            str(ml.listing_id)
+            if (ml is not None and ml.listing_id)
+            else (extract_listing_id(rule.marketplace, ml.listing_url) if (ml is not None and ml.listing_url) else None)
+        )
+        matched_ml = ml if (ml is not None and ml_id == selected_id) else None
+        if matched_ml is not None and matched_ml.listed_at is not None:
+            listed_at = matched_ml.listed_at
+        else:
+            if listed_index is None:
+                listed_index = load_listed_index(db)
+            listed_at, _src = resolve_listed_at(
+                listed_index, conv, [matched_ml] if matched_ml is not None else [], {rule.marketplace},
+            )
         if not is_due_for_relist(rule.marketplace, listed_at, rule, moment):
             continue
 
@@ -480,9 +597,17 @@ def _eligible_candidates(db: Session, rule: MarketplaceRelistRule, moment: datet
         notes = parse_notes(conv.notes)
         raw_labels = notes.get("vendooLabels") or ""
         labels = [part.strip() for part in str(raw_labels).split(",") if part.strip()]
-        obs = ml.inventory_observation if (ml and isinstance(ml.inventory_observation, dict)) else {}
+        obs = (
+            matched_ml.inventory_observation
+            if (matched_ml is not None and isinstance(matched_ml.inventory_observation, dict))
+            else {}
+        )
         likes = obs.get("likes") if isinstance(obs.get("likes"), int) else obs.get("watchers")
-        price_raw = ml.listed_price if (ml and ml.listed_price is not None) else data.get("price")
+        price_raw = (
+            matched_ml.listed_price
+            if (matched_ml is not None and matched_ml.listed_price is not None)
+            else data.get("price")
+        )
         try:
             price = float(price_raw) if price_raw is not None else None
         except (TypeError, ValueError):
@@ -672,6 +797,10 @@ def _load_enabled_rules_and_candidates(
     db: Session,
     moment: datetime,
     marketplace: str | None = None,
+    *,
+    scheduled: bool = False,
+    respect_backoff: bool = True,
+    dry_run: bool = False,
 ) -> list[dict[str, Any]]:
     query = db.query(MarketplaceRelistRule).filter(MarketplaceRelistRule.enabled.is_(True))
     market: str | None = None
@@ -680,11 +809,23 @@ def _load_enabled_rules_and_candidates(
         if market not in RELIST_MARKETPLACES:
             raise AutoRelistError("Auto-relist supports Poshmark, eBay, Mercari, and Depop.")
         query = query.filter(MarketplaceRelistRule.marketplace == market)
+    if scheduled:
+        throttle_cutoff = moment - AUTO_RELIST_TICK_INTERVAL
+        query = query.filter(
+            (MarketplaceRelistRule.last_run_at.is_(None))
+            | (MarketplaceRelistRule.last_run_at <= throttle_cutoff)
+        )
     still_pending = _reconcile_pending_relists(db, moment, market)
     rules = query.all()
+    if not rules:
+        return []
     plan: list[dict[str, Any]] = []
+    stamped = False
     for rule in rules:
-        candidates = _eligible_candidates(db, rule, moment)
+        candidates = _eligible_candidates(db, rule, moment, respect_backoff=respect_backoff)
+        if scheduled and not dry_run:
+            rule.last_run_at = moment
+            stamped = True
         for item in candidates:
             if (item["conversation_id"], rule.marketplace) in still_pending:
                 continue
@@ -698,6 +839,8 @@ def _load_enabled_rules_and_candidates(
                 "new_price": new_price,
                 **item,
             })
+    if stamped:
+        db.commit()
     return plan
 
 
@@ -814,10 +957,9 @@ def _reserve_relist_attempt(
         if done_today >= cap:
             return {"reserved": False, "outcome": None}
 
-        candidate = next(
-            (item for item in _eligible_candidates(db, rule, moment) if item["conversation_id"] == conv_id),
-            None,
-        )
+        # Re-check only this single item under the rule lock instead of scanning the catalog.
+        candidates = _eligible_candidates(db, rule, moment, conv_id=conv_id, respect_backoff=False)
+        candidate = candidates[0] if candidates else None
         if (
             candidate is None
             or candidate["listing_id"] != old_listing_id
@@ -957,6 +1099,8 @@ async def run_auto_relist(
     now: datetime | None = None,
     marketplace: str | None = None,
     dry_run: bool = False,
+    scheduled: bool = False,
+    respect_backoff: bool = True,
     delister=None,
     lister=None,
     offer_checker=None,
@@ -966,7 +1110,16 @@ async def run_auto_relist(
     Releases DB connections before every external marketplace/extension await.
     """
     moment = _as_naive_utc(now) or _now()
-    plan = await in_worker_session(_load_enabled_rules_and_candidates, moment, marketplace)
+    plan = await in_worker_session(
+        lambda db: _load_enabled_rules_and_candidates(
+            db,
+            moment,
+            marketplace,
+            scheduled=scheduled,
+            respect_backoff=respect_backoff,
+            dry_run=dry_run,
+        )
+    )
     if not plan:
         return []
     if dry_run:

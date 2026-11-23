@@ -480,9 +480,9 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
     from anteroom.services.user_settings import auto_adjust_quantity_enabled, autodelist_enabled
 
     do_delist = autodelist_enabled()
-    do_adjust = auto_adjust_quantity_enabled()
+    do_adjust = do_delist and auto_adjust_quantity_enabled()
     # While the Mac's window shows the account, the account acts on its own copy of the sale.
-    if not sale_ids or (not do_delist and not do_adjust) or account_shown():
+    if not sale_ids or not do_delist or account_shown():
         return {}
     if session_factory is None:
         from anteroom.database import SessionLocal
@@ -590,7 +590,7 @@ async def autodelist_for_sales(sale_ids: list[str], *, session_factory=None) -> 
 
 async def announce_sales(sale_ids: list[str], *, session_factory=None) -> None:
     """Tell the seller about new sales. Delist or adjust quantities only when they opted in."""
-    from anteroom.services.user_settings import auto_adjust_quantity_enabled, autodelist_enabled
+    from anteroom.services.user_settings import autodelist_enabled
 
     from anteroom.database import SessionLocal
     from anteroom.services.marketplace_inventory import read_after_sales
@@ -605,7 +605,7 @@ async def announce_sales(sale_ids: list[str], *, session_factory=None) -> None:
         notes = await autodelist_for_sales(sale_ids, session_factory=session_factory)
     except Exception:  # noqa: BLE001 - the sale is already recorded
         log.exception("could not delist or sync quantities after a sale")
-        if autodelist_enabled() or auto_adjust_quantity_enabled():
+        if autodelist_enabled():
             notes = {sale_id: "Couldn't sync other marketplaces. Check the 60-day sale tracker." for sale_id in sale_ids}
     try:
         notify = partial(_notify_sales, sale_ids, notes)

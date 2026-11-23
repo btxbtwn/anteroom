@@ -841,10 +841,17 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
                 counts["sent"] += max(int(follow_result.get("recipient_count") or 1), 1)
             else:
                 counts["failed"] += 1
-                if follow_result["state"] == "unknown" or follow_result.get("stop"):
+                if follow_result["state"] == "unknown":
                     stop_note = await in_worker_session(
                         _pause_by_id, automation_id, follow_result.get("note") or "The marketplace asked Anteroom to stop.",
                     )
+                elif follow_result.get("stop"):
+                    reason = follow_result.get("note") or "The marketplace asked Anteroom to stop."
+                    signed_out = follow_result.get("error_code") == "signed_out"
+                    if signed_out and follow_result.get("executor") == "cloud":
+                        stop_note = f"Stopped: {reason}"
+                    else:
+                        stop_note = await in_worker_session(_pause_by_id, automation_id, reason, signed_out)
                 else:
                     reasons[str(follow_result.get("note") or "refused")[:120]] += 1
             return await in_worker_session(_finish_round, run_id, counts, stop_note, reasons)
@@ -967,7 +974,7 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
                 continue
             send_id = await in_worker_session(_save_preview_send, send)
             base_gap = SHARE_SPEEDS.get(rule["speed"] or "") if action == "share" else None
-            effective_gap = int(base_gap * INTENSITY_GAP_MULTIPLIER.get(intensity, 1.0)) if base_gap else None
+            effective_gap = min(max(int(base_gap * INTENSITY_GAP_MULTIPLIER.get(intensity, 1.0)), 4000), 30000) if base_gap else None
             extra_payload: dict | None = None
             if action == "share":
                 if share_modes != ["self"]:
@@ -1028,10 +1035,17 @@ async def run_round(automation_id: str, *, expected_next_run_at: datetime | None
                 )
                 if community_result["state"] == "done":
                     counts["sent"] += max(int(community_result.get("recipient_count") or 1), 1)
-                elif community_result["state"] == "unknown" or community_result.get("stop"):
+                elif community_result["state"] == "unknown":
                     stop_note = await in_worker_session(
                         _pause_by_id, automation_id, community_result.get("note") or "The marketplace asked Anteroom to stop.",
                     )
+                elif community_result.get("stop"):
+                    reason = community_result.get("note") or "The marketplace asked Anteroom to stop."
+                    signed_out = community_result.get("error_code") == "signed_out"
+                    if signed_out and community_result.get("executor") == "cloud":
+                        stop_note = f"Stopped: {reason}"
+                    else:
+                        stop_note = await in_worker_session(_pause_by_id, automation_id, reason, signed_out)
     except PromotionError as exc:
         stop_note = str(exc)
         log.warning("%s automation %s could not finish its round: %s", marketplace, automation_id, scrub(str(exc)))

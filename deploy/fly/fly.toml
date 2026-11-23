@@ -69,12 +69,16 @@ kill_timeout = 300
   timeout = '5s'
   grace_period = '15s'
 
+# Incident mitigation 2026-11-22 (#1816): the 2 GB web Machine OOM-killed
+# twice in one evening (~1.9 GB RSS), leaving myanteroom.com with no healthy
+# candidate. Raise to 4 GB until the memory spike is fixed. Live Machine was
+# resized the same night; keep this in sync so the next deploy does not shrink it.
 [[vm]]
   processes = ['app']
-  memory = '2gb'
+  memory = '4gb'
   cpu_kind = 'performance'
   cpus = 1
-  memory_mb = 2048
+  memory_mb = 4096
 
 # Generation mostly waits on the model, and a shared CPU banks burst credit
 # while idle. Its sustained baseline is a fraction of a core, so a long run of

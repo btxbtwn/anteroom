@@ -49,8 +49,14 @@ change; a diff alone is not enough to judge a change. Use
 2. `addressed`: earlier findings in `open-findings.json` that the code at
    `head` now fixes, with the commit that fixed them (`git log` on the file).
    Only include ones you verified.
-3. The walkthrough and risks describe the **whole pull request** at `head`
-   (use `pr.diff`), not only the increment:
+3. The summary, walkthrough and risks describe the **whole pull request** at
+   `head` (use `pr.diff`), not only the increment:
+   - `summary`: short, seller-facing release notes for the PR description.
+     Group bullets under the matching categories (Bug Fixes, New Features,
+     Refactor, Documentation, Tests, Chores, Style). Write each bullet in the
+     past tense, outcome-first, in plain English — what the seller gains or
+     what no longer goes wrong — not file paths, layer names or implementation
+     detail. Skip empty categories. Prefer a few precise bullets over many.
    - `walkthrough`: one section per distinct change, each with rows that group
      files by layer ("Pass and record decrypt operation details") and say in
      one or two plain sentences what changed. Every file in `pr.diff` appears

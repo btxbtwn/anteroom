@@ -6,9 +6,10 @@ virtual models come from Photoroom's ``POST /v2/edit``
 sends one photo per call and keeps the result beside the untouched upload, so
 Reset always goes back to the original (``services/photo_edits.py``).
 
-The key is the seller's own: the Mac's Keychain, or the seller's Vault slot when
-hosted. A server-wide ``PHOTOROOM_API_KEY`` is used only when the seller has none.
-The key never reaches a log, the database in plain text, or a response.
+On the Mac the key is the seller's own (Keychain). On hosted, a platform
+``ANTEROOM_MANAGED_PHOTOROOM_KEY`` takes over when set — the same pattern as
+managed OpenRouter — and seller Vault Photoroom keys are ignored. The key never
+reaches a log, the database in plain text, or a response.
 
 Sandbox mode never calls Photoroom: ``sandbox_result`` draws a stand-in locally,
 so the editor runs end to end offline.
@@ -19,7 +20,7 @@ import asyncio
 import logging
 import os
 from io import BytesIO
-from typing import Literal
+from typing import Literal, cast
 
 import httpx
 from PIL import Image
@@ -29,7 +30,7 @@ log = logging.getLogger(__name__)
 
 ENDPOINT = "https://image-api.photoroom.com/v2/edit"
 KEY_ACCOUNT = "photoroom-api-key"
-SERVER_KEY_ENV = "PHOTOROOM_API_KEY"
+MANAGED_KEY_ENV = "ANTEROOM_MANAGED_PHOTOROOM_KEY"
 # Generative edits take tens of seconds; nothing Photoroom documents takes longer.
 CALL_DEADLINE_SEC = 120.0
 CONNECT_TIMEOUT_SEC = 10.0
@@ -135,15 +136,25 @@ class PhotoroomError(RuntimeError):
         self.status = status
 
 
+def managed_photoroom_key() -> str:
+    """Platform Photoroom key for hosted AI Studio; empty when sellers supply their own."""
+    return os.environ.get(MANAGED_KEY_ENV, "").strip()
+
+
+def managed_photoroom_enabled() -> bool:
+    """Whether hosted accounts automatically use Anteroom's Photoroom key for AI Studio."""
+    return bool(managed_photoroom_key())
+
+
 def configured_key() -> tuple[str | None, Literal["seller", "server"] | None]:
     """The key to call Photoroom with, and where it came from."""
+    managed = managed_photoroom_key()
+    if managed:
+        return managed, "server"
     from anteroom.services.keychain import read_slot
 
     key = (read_slot(KEY_ACCOUNT) or "").strip()
-    if key:
-        return key, "seller"
-    server = os.environ.get(SERVER_KEY_ENV, "").strip()
-    return (server, "server") if server else (None, None)
+    return (key, "seller") if key else (None, None)
 
 
 def _sandboxed() -> bool:
@@ -155,16 +166,23 @@ def available() -> bool:
     return _sandboxed() or configured_key()[0] is not None
 
 
-def prepare_input(data: bytes) -> bytes:
-    """The photo as a PNG within Photoroom's size limits, upright and flattened."""
+def _prepare_upload(data: bytes) -> tuple[bytes, str, str]:
+    """Encode the photo within Photoroom's size limits: JPEG for opaque photos, PNG when transparent."""
     from anteroom.services import image_decode
 
     img, _size = image_decode.decode(data, max_side=MAX_INPUT_SIDE)
-    if img.mode not in ("RGB", "RGBA"):
-        img = img.convert("RGBA" if "A" in img.getbands() else "RGB")
     buffer = BytesIO()
-    img.save(buffer, "PNG")
-    return buffer.getvalue()
+    if "A" in img.getbands() or "transparency" in img.info:
+        rgba = img.convert("RGBA")
+        # Pillow returns a single 8-bit channel in L mode.
+        min_alpha, _ = cast("tuple[int, int]", rgba.getchannel("A").getextrema())
+        if min_alpha < 255:
+            rgba.save(buffer, "PNG")
+            return buffer.getvalue(), "photo.png", "image/png"
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    img.save(buffer, "JPEG", quality=92, optimize=True)
+    return buffer.getvalue(), "photo.jpg", "image/jpeg"
 
 
 def _error_message(response: httpx.Response) -> str:
@@ -205,7 +223,7 @@ async def edit(image: bytes, options: StudioOptions) -> bytes:
     key, _source = await asyncio.to_thread(configured_key)
     if not key:
         raise PhotoroomError("Add a Photoroom API key in Settings → Providers to use AI Studio.", 400)
-    png = await asyncio.to_thread(prepare_input, image)
+    payload, filename, mime = await asyncio.to_thread(_prepare_upload, image)
     timeout = httpx.Timeout(CALL_DEADLINE_SEC, connect=CONNECT_TIMEOUT_SEC)
     try:
         async with asyncio.timeout(CALL_DEADLINE_SEC):
@@ -214,7 +232,7 @@ async def edit(image: bytes, options: StudioOptions) -> bytes:
                     ENDPOINT,
                     headers={"x-api-key": key, "Accept": "image/png, application/json"},
                     data=options.form(),
-                    files={"imageFile": ("photo.png", png, "image/png")},
+                    files={"imageFile": (filename, payload, mime)},
                 )
     except TimeoutError:
         raise PhotoroomError("Photoroom did not finish this photo in time. Try again.", 504) from None

@@ -95,7 +95,13 @@ import type {
   RelistGap, ScheduledPublishLog,
 } from "./automations";
 import type { SaleCalendarData, SaleEventStatus, SalePlan, SaleRecord } from "./saleCalendar";
-import type { AgentConnectionStatus, AgentConnectionTest, McpAccessToken, McpTokenCreateResponse } from "./agentConnection";
+import type {
+  AgentConnectionStatus,
+  AgentConnectionTest,
+  McpAccessToken,
+  McpTokenCreateResponse,
+  McpTokenPermissions,
+} from "./agentConnection";
 import { browserTimeZone, type GoalMetric, type GoalPeriod, type HomeMutationResponse, type HomeSummaryResponse } from "./home";
 import type {
   DirectConnectionsStatus, DirectMarketplace, MarketplaceSale, MarketplaceSaleState, SaleDetectionStatus,
@@ -1702,10 +1708,15 @@ export const api = {
     testAgent: () => request<AgentConnectionTest>("/settings/agent/test", { method: "POST" }),
     mcpTokens: {
       list: () => request<{ tokens: McpAccessToken[] }>("/settings/mcp-tokens"),
-      create: (body: { name: string; expires_in_days?: number | null }) =>
+      create: (body: { name: string; expires_in_days?: number | null; permissions?: McpTokenPermissions }) =>
         request<McpTokenCreateResponse>("/settings/mcp-tokens", {
           method: "POST",
           body: JSON.stringify(body),
+        }),
+      updatePermissions: ({ tokenId, permissions }: { tokenId: string; permissions: Partial<McpTokenPermissions> }) =>
+        request<McpAccessToken>(`/settings/mcp-tokens/${encodeURIComponent(tokenId)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ permissions }),
         }),
       revoke: (tokenId: string) =>
         request<{ ok: boolean }>(`/settings/mcp-tokens/${encodeURIComponent(tokenId)}`, {
@@ -1876,13 +1887,13 @@ export const api = {
         `/home/goals/${encodeURIComponent(goalId)}?timezone=${encodeURIComponent(timezone)}`,
         { method: "DELETE" },
       ),
-    dismissAttention: (itemKey: string, kind: string, timezone = browserTimeZone()) =>
-      request<HomeMutationResponse>(`/home/attention/dismiss?timezone=${encodeURIComponent(timezone)}`, {
+    dismissAttention: (itemKey: string, kind: string, _timezone = browserTimeZone()) =>
+      request<HomeMutationResponse>("/home/attention/dismiss", {
         method: "POST",
         body: JSON.stringify({ item_key: itemKey, kind }),
       }),
-    restoreAttention: (itemKey: string, timezone = browserTimeZone()) =>
-      request<HomeMutationResponse>(`/home/attention/restore?timezone=${encodeURIComponent(timezone)}`, {
+    restoreAttention: (itemKey: string, _timezone = browserTimeZone()) =>
+      request<HomeMutationResponse>("/home/attention/restore", {
         method: "POST",
         body: JSON.stringify({ item_key: itemKey }),
       }),

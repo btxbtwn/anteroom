@@ -23,7 +23,7 @@ def checked_photo_key(key: str, owner: str) -> str:
     return key
 
 
-def photo_call(method: str, key: str, data: bytes | None = None) -> bytes:
+def photo_call(method: str, key: str, data: bytes | None = None, *, timeout: float = 30) -> bytes:
     context = current()
     if context is None:
         raise RuntimeError('Background Storage requires a verified seller context')
@@ -43,7 +43,7 @@ def photo_call(method: str, key: str, data: bytes | None = None) -> bytes:
             'Content-Type': 'application/json' if method == 'DELETE' else 'image/jpeg',
             **({'x-upsert': 'true'} if method == 'POST' else {}),
         }, json={'prefixes': with_renditions(key)} if method == 'DELETE' else None,
-                                 content=None if method == 'DELETE' else data, timeout=30, follow_redirects=False)
+                                 content=None if method == 'DELETE' else data, timeout=timeout, follow_redirects=False)
     except httpx.HTTPError:
         raise HTTPException(503, 'Background photo storage is temporarily unavailable') from None
     if response.status_code == 404:

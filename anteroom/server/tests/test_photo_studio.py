@@ -53,7 +53,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr("anteroom.services.photo_store._store", LocalPhotoStore(str(tmp_path)))
     monkeypatch.setattr(database, "SessionLocal", sessions)
     monkeypatch.delenv("ANTEROOM_SANDBOX", raising=False)
-    monkeypatch.delenv(photoroom.SERVER_KEY_ENV, raising=False)
+    monkeypatch.delenv(photoroom.MANAGED_KEY_ENV, raising=False)
     repo = ConversationRepo(db)
     conv = repo.create(title="Denim jacket")
     photos = []
@@ -152,19 +152,45 @@ def test_edit_sends_the_photo_and_options_with_the_sellers_key(monkeypatch):
     assert request.headers["x-api-key"] == KEY
     body = request.content
     assert b'name="background.color"\r\n\r\n112233' in body
-    assert b'name="imageFile"; filename="photo.png"' in body
+    assert b'name="imageFile"; filename="photo.jpg"' in body
+    assert b"Content-Type: image/jpeg" in body
+
+    # Transparent PNG input preserves alpha by uploading as PNG.
+    alpha = BytesIO()
+    img = Image.new("RGBA", (32, 32), (10, 20, 30, 0))
+    img.putpixel((0, 0), (10, 20, 30, 255))
+    img.save(alpha, "PNG")
+    asyncio.run(photoroom.edit(alpha.getvalue(), StudioOptions(remove_background=True)))
+    assert b'name="imageFile"; filename="photo.png"' in seen[1].content
+    assert b"Content-Type: image/png" in seen[1].content
 
 
-def test_server_key_is_used_only_when_the_seller_has_none(monkeypatch):
+def test_palette_png_keeps_transparent_pixels():
+    palette = Image.new("P", (2, 1))
+    palette.putpalette([0, 0, 0, 255, 255, 255])
+    palette.putpixel((1, 0), 1)
+    data = BytesIO()
+    palette.save(data, "PNG", transparency=0)
+
+    contents, filename, content_type = photoroom._prepare_upload(data.getvalue())
+    assert (filename, content_type) == ("photo.png", "image/png")
+    with Image.open(BytesIO(contents)) as result:
+        assert result.getchannel("A").getextrema() == (0, 255)
+
+
+def test_managed_key_takes_over_and_ignores_seller_key(monkeypatch):
     from anteroom.services.keychain import delete_slot, write_slot
 
-    monkeypatch.setenv(photoroom.SERVER_KEY_ENV, "server-key")
-    assert photoroom.configured_key() == ("server-key", "server")
     write_slot(photoroom.KEY_ACCOUNT, KEY)
     assert photoroom.configured_key() == (KEY, "seller")
+    monkeypatch.setenv(photoroom.MANAGED_KEY_ENV, "managed-key")
+    assert photoroom.managed_photoroom_enabled() is True
+    assert photoroom.configured_key() == ("managed-key", "server")
     delete_slot(photoroom.KEY_ACCOUNT)
-    monkeypatch.delenv(photoroom.SERVER_KEY_ENV)
+    assert photoroom.configured_key() == ("managed-key", "server")
+    monkeypatch.delenv(photoroom.MANAGED_KEY_ENV)
     assert photoroom.configured_key() == (None, None)
+    assert photoroom.managed_photoroom_enabled() is False
 
 
 @pytest.mark.parametrize(("status", "body", "words"), [
@@ -287,10 +313,18 @@ def test_ai_studio_sends_what_the_seller_sees_so_redactions_never_leave(env, mon
     assert response.status_code == 200, response.text
     # The redaction was applied before sending, then starts over on the result.
     assert response.json()["photos"][0]["edits"]["redactions"] == []
-    start = sent[0].index(b"\x89PNG")
-    with Image.open(BytesIO(sent[0][start:])) as img:
-        # Exactly the redacted photo the seller sees, never the upload.
-        assert img.convert("RGB").tobytes() == redacted.tobytes()
+    start = sent[0].index(b"\xff\xd8\xff")
+    end = sent[0].rindex(b"\xff\xd9") + 2
+    with Image.open(BytesIO(sent[0][start:end])) as img:
+        uploaded = img.convert("RGB")
+        assert uploaded.size == redacted.size
+        original = Image.open(env.dir / "front.jpg").convert("RGB")
+        from PIL import ImageChops, ImageStat
+        diff_redacted = sum(ImageStat.Stat(ImageChops.difference(uploaded, redacted)).mean)
+        diff_original = sum(ImageStat.Stat(ImageChops.difference(uploaded, original)).mean)
+        # Uploaded image matches the redacted photo the seller sees, never the unredacted upload.
+        assert diff_redacted < 5.0
+        assert diff_redacted < diff_original
 
 
 def test_one_failed_photo_does_not_stop_the_others(env, monkeypatch):
@@ -357,6 +391,16 @@ def test_photoroom_key_settings_never_return_the_key(env):
     assert refused.status_code == 400 and "x" * 501 not in refused.text
     removed = env.client.delete("/api/settings/photoroom")
     assert removed.json()["configured"] is False
+
+
+def test_managed_photoroom_settings_lock_down_seller_keys(env, monkeypatch):
+    monkeypatch.setenv(photoroom.MANAGED_KEY_ENV, "managed-secret")
+    status = env.client.get("/api/settings/photoroom")
+    assert status.status_code == 200
+    assert status.json() == {"configured": False, "masked_key": None, "source": "server", "available": True}
+    assert "managed-secret" not in status.text
+    assert env.client.put("/api/settings/photoroom", json={"api_key": KEY}).status_code == 403
+    assert env.client.delete("/api/settings/photoroom").status_code == 403
 
 
 def test_a_key_removal_the_keychain_cannot_save_is_reported(env, monkeypatch):

@@ -1,8 +1,8 @@
 """Automations on the web, using the desktop handlers and services.
 
-Saving, previewing, pausing and running tasks only touch the seller's own rows
-or queue a draft regenerate. Approving a marketplace action needs web
-marketplace actions, which are not connected yet, so it is refused here.
+General automation tasks use the seller's own rows and queue marketplace
+actions for approval. The separate auto-relist run uses the seller's opt-in
+marketplace rules directly.
 """
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -10,7 +10,7 @@ from anteroom.routes import automations, errors
 from anteroom.services.hosted_limits import limit_seller_submissions
 
 router = APIRouter(prefix='/api/automations', tags=['automations'])
-_RATE_LIMITED_PATHS = {'/draft', '/{automation_id}/run'}
+_RATE_LIMITED_PATHS = {'/draft', '/auto-relist/run', '/{automation_id}/run'}
 for path, handler, methods in (
     ('', automations.list_automations, ['GET']),
     ('/draft', automations.draft_automation, ['POST']),
@@ -23,6 +23,7 @@ for path, handler, methods in (
     ('/auto-relist', automations.list_auto_relist_rules, ['GET']),
     ('/auto-relist/logs', automations.list_auto_relist_logs, ['GET']),
     ('/auto-relist/{marketplace}', automations.save_auto_relist_rule, ['PUT']),
+    ('/auto-relist/run', automations.run_auto_relist_now, ['POST']),
     ('', automations.create_automation, ['POST']),
     ('/{automation_id}', automations.update_automation, ['PATCH']),
     ('/{automation_id}/pause', automations.pause_automation, ['POST']),

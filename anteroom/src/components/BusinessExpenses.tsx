@@ -132,6 +132,7 @@ export function BusinessExpenses({ report, mode, setMode }: {
             <p className="text-xs text-muted-foreground">{expense.incurred_date} · {CATEGORIES[expense.category]}</p>
           </div>
           <div className="flex items-center gap-2 text-sm">
+            {expense.accounting_type === "needs_review" && <Badge variant="outline">Needs review</Badge>}
             <Badge variant="secondary">{({ manual: "Manual", csv: "CSV", plaid: "Plaid" })[expense.import_source]}</Badge>
             <span className="tabular-nums">{expenseMoney(expense.amount_cents, expense.currency ?? "USD")}</span>
             <Button variant="ghost" onClick={() => setEditing(expense)}>Edit</Button>
@@ -224,7 +225,7 @@ function ExpenseForm({ expense, today, close }: { expense?: Expense; today: stri
             <CanadianRegion onChange={preview.reset} />
           </>}
         </> : <>
-          <FormField label="Amount"><Input name="amount" type="number" min="0.01" step="0.01" defaultValue={expense ? expense.amount_cents / 100 : undefined} required /></FormField>
+          <FormField label="Amount"><Input name="amount" type="number" step="0.01" defaultValue={expense ? expense.amount_cents / 100 : undefined} required /></FormField>
           <FormField label="Currency"><Input name="currency" pattern="[A-Za-z]{3}" defaultValue={expense?.currency ?? "USD"} required /></FormField>
         </>}
         <FormField label="Vendor"><Input name="vendor" defaultValue={expense?.vendor} maxLength={256} /></FormField>

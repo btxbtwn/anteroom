@@ -52,6 +52,7 @@ datas = [
     *copy_metadata("httpx2"),
     *copy_metadata("httpcore2"),
     *tree(STUDIO / "dist", "dist"),
+    (str(STUDIO / "src" / "styles" / "startup.css"), "src/styles"),
     # Revision scripts are read from disk at startup, so they have to be in
     # the bundle beside the package rather than only inside the archive.
     *tree(STUDIO / "server" / "anteroom" / "migrations", "anteroom/migrations"),
