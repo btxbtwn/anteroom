@@ -14,6 +14,7 @@ import {
 import { api } from "../api/client";
 import {
   browserTimeZone,
+  mergeHomeSnapshot,
   patchHomeAfterDismiss,
   patchHomeAfterRestore,
   type AttentionItem,
@@ -154,7 +155,8 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
   const syncHome = async (next: HomeSummaryResponse | undefined) => {
     await queryClient.cancelQueries({ queryKey: queryDef.queryKey, exact: true });
     if (next) {
-      queryClient.setQueryData(queryDef.queryKey, next);
+      const local = queryClient.getQueryData<HomeSummaryResponse>(queryDef.queryKey);
+      queryClient.setQueryData(queryDef.queryKey, mergeHomeSnapshot(next, local));
     } else {
       await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
     }

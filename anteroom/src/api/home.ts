@@ -165,6 +165,34 @@ export function patchHomeAfterRestore(
   };
 }
 
+/**
+ * Keep newer local dismiss/restore patches when a slow Today snapshot arrives
+ * (goal save still rebuilds home_summary and can lag behind an optimistic alert move).
+ */
+export function mergeHomeSnapshot(
+  server: HomeSummaryResponse,
+  local: HomeSummaryResponse | undefined,
+): HomeSummaryResponse {
+  if (!local) return server;
+  let merged = server;
+  for (const item of local.dismissed) {
+    if (merged.needs_attention.some((entry) => entry.key === item.key)) {
+      merged = patchHomeAfterDismiss(merged, item, {
+        item_key: item.key,
+        dismissed_at: item.dismissed_at ?? undefined,
+        expires_at: item.expires_at ?? undefined,
+        reappears_in_days: item.reappears_in_days,
+      });
+    }
+  }
+  for (const item of local.needs_attention) {
+    if (merged.dismissed.some((entry) => entry.key === item.key)) {
+      merged = patchHomeAfterRestore(merged, item.key);
+    }
+  }
+  return merged;
+}
+
 export function browserTimeZone(): string {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";

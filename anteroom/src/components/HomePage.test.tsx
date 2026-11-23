@@ -400,4 +400,32 @@ describe("HomePage", () => {
     expect(target()).toBeNull();
   });
 
+  it("keeps a Dismiss when a slower goal save returns a stale Active snapshot", async () => {
+    let finishSave!: (result: { ok: boolean; home: HomeSummaryResponse }) => void;
+    api.home.updateGoal.mockReturnValueOnce(new Promise((resolve) => { finishSave = resolve; }));
+    await renderHome();
+
+    const button = (label: string) => [...container.querySelectorAll("button")]
+      .find((node) => node.getAttribute("aria-label") === label || node.textContent?.trim() === label)!;
+    const coat = "Vintage Wool Coat sold on eBay — still live on Poshmark";
+
+    await act(() => button("Edit Monthly Profit").click());
+    await act(() => {
+      const input = container.querySelector<HTMLInputElement>('[aria-label="Goal target"]')!;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "2400");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(() => button("Save changes").click());
+    await settle();
+
+    await act(() => button("Dismiss").click());
+    await settle();
+    expect(container.textContent).not.toContain(coat);
+    expect(api.home.dismissAttention).toHaveBeenCalledOnce();
+
+    await act(() => finishSave({ ok: true, home: sampleHome }));
+    await settle();
+    expect(container.textContent).not.toContain(coat);
+  });
+
 });
