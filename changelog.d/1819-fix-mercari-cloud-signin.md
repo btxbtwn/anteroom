@@ -1,1 +1,0 @@
-- Explain when Mercari requires a browser check during Cloud sign-in and how to retry the Cloud connection.
