@@ -1,0 +1,1 @@
+- Connect Mercari in Cloud now works when Chrome is signed in to Mercari, instead of asking you to sign in again.
