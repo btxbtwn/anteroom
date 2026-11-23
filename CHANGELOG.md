@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1183 — 2026-11-23
+
+- Drawing a mark on a photo no longer highlights text beside it, so a quick second mark is no longer dragged away and lost.
+
 ## 0.1.1182 — 2026-11-23
 
 - Checking sales on a listing that was just deleted now says it wasn't found, instead of showing a server error.
