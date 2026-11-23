@@ -1,11 +1,11 @@
 name: Claude review
 
-# Reviews every ready pull request the way CodeRabbit did: a sticky summary
-# (walkthrough, merge risk, security risk), one review per push with inline
-# findings for only what changed since the last reviewed commit, and earlier
-# findings marked "Addressed" once fixed. Then auto-fix answers the open
-# findings. Claude only reads here; .github/review-bot/review_bot.py posts.
-# See docs/pr-review-bots.md.
+# Reviews every ready pull request the way CodeRabbit did: Summary by Claude
+# in the PR description, a sticky summary (walkthrough, merge risk, security
+# risk), one review per push with inline findings for only what changed since
+# the last reviewed commit, and earlier findings marked "Addressed" once
+# fixed. Then auto-fix answers the open findings. Claude only reads here;
+# .github/review-bot/review_bot.py posts. See docs/pr-review-bots.md.
 
 on:
   pull_request:

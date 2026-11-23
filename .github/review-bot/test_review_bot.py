@@ -102,6 +102,7 @@ class RenderTests(unittest.TestCase):
     def test_summary_escapes_table_cells_and_records_state(self):
         data = {
             "change_type": "Bug fix",
+            "summary": [{"category": "Bug Fixes", "bullets": ["Stopped the leak."]}],
             "walkthrough": [{"heading": "Fix", "rows": [{"layer": "A|B", "files": ["app.py"], "summary": "x\ny"}]}],
             "related_issues": [{"number": 5, "reason": "same bug"}], "related_prs": [],
             "merge_risk": {"level": "Low", "explanation": "small"},
@@ -114,6 +115,45 @@ class RenderTests(unittest.TestCase):
         self.assertIn("No actionable comments", body)
         self.assertIn("up to <code>abcdef1</code>", body)
         self.assertIn("No architecture-level concerns identified.", body)
+
+    def test_pr_summary_matches_coderabbit_release_notes_shape(self):
+        data = {
+            "summary": [
+                {"category": "Bug Fixes", "bullets": ["Fixed Run due relists.", "Skipped open offers."]},
+                {"category": "New Features", "bullets": ["Account imports include pricing."]},
+                {"category": "Tests", "bullets": ["  ", ""]},  # skipped: no real bullets
+            ]
+        }
+        block = bot.render_pr_summary(data)
+        self.assertTrue(block.startswith(bot.PR_SUMMARY_START))
+        self.assertIn("## Summary by Claude", block)
+        self.assertIn("* **Bug Fixes**\n  * Fixed Run due relists.\n  * Skipped open offers.", block)
+        self.assertIn("* **New Features**\n  * Account imports include pricing.", block)
+        self.assertNotIn("**Tests**", block)
+        self.assertTrue(block.endswith(bot.PR_SUMMARY_END))
+        self.assertEqual(bot.render_pr_summary({"summary": []}), "")
+
+    def test_merge_pr_body_replaces_claude_and_strips_coderabbit(self):
+        author = "Closes #1\n\n## Summary\n\n- Fixed it.\n"
+        prior = author + "\n<!-- claude-summary:v1 -->\n\n## Summary by Claude\n\n* **Chores**\n  * Old.\n<!-- end of claude-summary -->\n"
+        rabbit = (
+            author
+            + "\n<!-- coderabbit-ai-generated:v1 -->\n\n## Summary by CodeRabbit\n\n"
+            + "* **Bug Fixes**\n  * Old rabbit.\n"
+            + "<!-- end of auto-generated comment: release notes by coderabbit.ai -->\n"
+        )
+        fresh = bot.render_pr_summary({"summary": [{"category": "Bug Fixes", "bullets": ["New."]}]})
+        merged = bot.merge_pr_body(prior, fresh)
+        self.assertTrue(merged.startswith(author.rstrip()))
+        self.assertIn("## Summary by Claude", merged)
+        self.assertIn("* **Bug Fixes**\n  * New.", merged)
+        self.assertNotIn("Old.", merged)
+        self.assertEqual(merged.count(bot.PR_SUMMARY_START), 1)
+        stripped = bot.merge_pr_body(rabbit, fresh)
+        self.assertNotIn("Summary by CodeRabbit", stripped)
+        self.assertNotIn("coderabbit-ai-generated", stripped)
+        self.assertIn("* **Bug Fixes**\n  * New.", stripped)
+        self.assertEqual(bot.merge_pr_body(author, ""), author if author.endswith("\n") else author + "\n")
 
     def test_addressed_is_added_once(self):
         once = bot.addressed_body("finding", "1234567890")
@@ -139,6 +179,7 @@ class PostReviewTests(unittest.TestCase):
                 patch.object(bot, "api", return_value={}) as api,
                 patch.object(bot, "bot_issue_comments", return_value=[]),
                 patch.object(bot, "render_summary") as summary,
+                patch.object(bot, "upsert_pr_body_summary") as upsert,
             ):
                 bot.post_review(SimpleNamespace(context=temp))
 
@@ -150,7 +191,39 @@ class PostReviewTests(unittest.TestCase):
         self.assertIn("`unchanged.py` line 3", review["body"])
         self.assertNotIn(bot.FINDING_MARK, review["body"])
         self.assertEqual(summary.call_args.kwargs["posted"], 2)
+        upsert.assert_called_once()
         self.assertIn("--diff-filter=d", diff_paths.call_args.args[0])
+
+    def test_upsert_pr_body_summary_patches_when_body_changes(self):
+        data = {"summary": [{"category": "Bug Fixes", "bullets": ["Fixed it."]}]}
+        calls = []
+
+        def fake_api(path, method="GET", body=None):
+            calls.append((path, method, body))
+            if method == "GET":
+                return {"body": "Closes #9\n"}
+            return {}
+
+        with patch.object(bot, "repo", return_value="owner/repo"), patch.object(bot, "api", side_effect=fake_api):
+            bot.upsert_pr_body_summary(9, data)
+
+        self.assertEqual(calls[0], ("repos/owner/repo/pulls/9", "GET", None))
+        self.assertEqual(calls[1][0:2], ("repos/owner/repo/pulls/9", "PATCH"))
+        self.assertIn("## Summary by Claude", calls[1][2]["body"])
+        self.assertIn("Closes #9", calls[1][2]["body"])
+
+        already = bot.merge_pr_body("Closes #9\n", bot.render_pr_summary(data))
+        calls.clear()
+
+        def fake_api_same(path, method="GET", body=None):
+            calls.append((path, method, body))
+            if method == "GET":
+                return {"body": already}
+            return {}
+
+        with patch.object(bot, "repo", return_value="owner/repo"), patch.object(bot, "api", side_effect=fake_api_same):
+            bot.upsert_pr_body_summary(9, data)
+        self.assertEqual(calls, [("repos/owner/repo/pulls/9", "GET", None)])
 
 
 class AutofixTests(unittest.TestCase):

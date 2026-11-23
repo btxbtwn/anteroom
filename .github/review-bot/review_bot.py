@@ -8,7 +8,8 @@ the model a write token:
 
   prepare-review   find what changed since the last reviewed commit and the
                    findings still open from earlier reviews
-  post-review      update the sticky summary comment, post one review with
+  post-review      upsert Summary by Claude into the PR description, update
+                   the sticky walkthrough comment, post one review with
                    inline findings, mark fixed findings "Addressed"
   prepare-autofix  collect open Claude and Codex findings, enforce the
                    repair-round limit
@@ -35,6 +36,17 @@ REVIEW_STATE = "claude-review-state:v1"
 AUTOFIX_STATE = "claude-autofix:v1"
 AUTOFIX_REPLY = "claude-autofix-reply:v1"
 FINDING_MARK = "<!-- claude-review-finding -->"
+PR_SUMMARY_START = "<!-- claude-summary:v1 -->"
+PR_SUMMARY_END = "<!-- end of claude-summary -->"
+PR_SUMMARY_BLOCK = re.compile(
+    rf"\n*{re.escape(PR_SUMMARY_START)}.*?{re.escape(PR_SUMMARY_END)}\n*",
+    re.DOTALL,
+)
+CODERABBIT_NOTES_BLOCK = re.compile(
+    r"\n*<!-- coderabbit-ai-generated:v1 -->.*?"
+    r"<!-- end of auto-generated comment: release notes by coderabbit\.ai -->\n*",
+    re.DOTALL,
+)
 MAX_ROUNDS = 3
 # Auto-fix never pushes changes to these; they are release and CI controls.
 PROTECTED_PATHS = (".github/", "anteroom/VERSION", "CHANGELOG.md")
@@ -314,6 +326,45 @@ def render_summary(data: dict, ctx: dict, *, posted: int, review_url: str | None
     return "\n\n".join(out)
 
 
+def render_pr_summary(data: dict) -> str:
+    """Seller-facing release notes upserted into the pull request description."""
+    sections = []
+    for section in data.get("summary") or []:
+        bullets = [b.strip() for b in section.get("bullets") or [] if str(b).strip()]
+        if not bullets:
+            continue
+        category = str(section.get("category") or "").strip()
+        if not category:
+            continue
+        lines = [f"* **{category}**", *(f"  * {b}" for b in bullets)]
+        sections.append("\n".join(lines))
+    if not sections:
+        return ""
+    return "\n".join(
+        [PR_SUMMARY_START, "", "## Summary by Claude", "", *sections, PR_SUMMARY_END]
+    )
+
+
+def merge_pr_body(body: str | None, block: str) -> str:
+    """Replace prior Claude/CodeRabbit release-notes blocks; keep author text."""
+    text = PR_SUMMARY_BLOCK.sub("\n", body or "")
+    text = CODERABBIT_NOTES_BLOCK.sub("\n", text).rstrip()
+    if not block:
+        return f"{text}\n" if text else ""
+    if text:
+        return f"{text}\n\n{block}\n"
+    return f"{block}\n"
+
+
+def upsert_pr_body_summary(pr: int, data: dict) -> None:
+    block = render_pr_summary(data)
+    current = api(f"repos/{repo()}/pulls/{pr}") or {}
+    next_body = merge_pr_body(current.get("body"), block)
+    if next_body == (current.get("body") or ""):
+        return
+    api(f"repos/{repo()}/pulls/{pr}", "PATCH", {"body": next_body})
+
+
 def addressed_body(body: str, commit: str) -> str:
     if "✅ Addressed in commit" in body:
         return body
@@ -576,6 +627,7 @@ def post_review(args) -> None:
         api(f"repos/{repo()}/issues/comments/{summaries[-1][0]['id']}", "PATCH", {"body": body})
     else:
         api(f"repos/{repo()}/issues/{ctx['pr']}/comments", "POST", {"body": body})
+    upsert_pr_body_summary(ctx["pr"], data)
     print(f"Posted {len(findings)} findings in threads and {len(outside)} outside the diff; "
           f"{len(addressed)} addressed.")
 
