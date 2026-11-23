@@ -29,7 +29,7 @@ from anteroom.models.marketplace_listing import LIVE_STATES, MarketplaceListing
 from anteroom.models.marketplace_sale import MarketplaceSale
 from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
 from anteroom.repositories.queries import ConversationRepo, ListingRepo, RevisionConflict
-from anteroom.services import boxes, home_dashboard, listing_editor
+from anteroom.services import boxes, home_dashboard, listing_editor, mcp_tokens
 from anteroom.services.background_tasks import ACTIVE as ACTIVE_TASK_STATUSES
 from anteroom.services.etsy_audit import etsy_not_allowed_live
 from anteroom.services.etsy_fields import etsy_eligible
@@ -80,6 +80,38 @@ _DELETE_ANNOTATIONS = {
     "idempotentHint": False,
     "openWorldHint": False,
 }
+
+
+# The permission area and level each tool needs (``services/mcp_tokens.py``).
+TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
+    "search_inventory": ("listings", "read"),
+    "get_listing": ("listings", "read"),
+    "create_draft_listing": ("listings", "write"),
+    "edit_listing": ("listings", "write"),
+    "manage_listing_photos": ("listings", "write"),
+    "manage_labels_and_notes": ("listings", "write"),
+    "delete_draft_listing": ("listings", "write"),
+    "get_sales_analytics": ("analytics", "read"),
+    "get_offer_activity": ("analytics", "read"),
+    "get_sourcing_roi": ("analytics", "read"),
+    "run_etsy_audit": ("analytics", "read"),
+    "get_needs_attention": ("attention", "read"),
+    "dismiss_attention_items": ("attention", "write"),
+    "restore_attention_items": ("attention", "write"),
+}
+
+MAX_ATTENTION_KEYS = 100
+
+_AREA_NAMES = {"listings": "Listings", "analytics": "Analytics", "attention": "Needs Attention"}
+_LEVEL_NAMES = {"read": "Read", "write": "Read and write"}
+
+
+def _tool_allowed(name: str, permissions: dict[str, str] | None) -> bool:
+    """``permissions`` is None for the seller's own session, which reaches every tool."""
+    if permissions is None:
+        return True
+    area, level = TOOL_PERMISSIONS[name]
+    return mcp_tokens.allows(permissions, area, level)
 
 
 class McpToolError(Exception):
@@ -211,6 +243,47 @@ def tool_definitions() -> list[dict[str, Any]]:
                 "properties": {
                     "timezone": {"type": "string", "default": "UTC", "description": "IANA timezone name, e.g. America/Chicago."},
                 },
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "dismiss_attention_items",
+            "description": (
+                "Dismiss Needs Attention items by their key (from get_needs_attention). "
+                f"A dismissed item comes back after {home_dashboard.DISMISS_TTL_DAYS} days if it "
+                "still applies. Only hides the alert in Anteroom: it never changes a listing "
+                "or anything on a marketplace."
+            ),
+            "annotations": {**_WRITE_ANNOTATIONS, "idempotentHint": True},
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "item_keys": {
+                        "type": "array",
+                        "items": {"type": "string", "maxLength": 200},
+                        "minItems": 1,
+                        "maxItems": MAX_ATTENTION_KEYS,
+                    },
+                },
+                "required": ["item_keys"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "restore_attention_items",
+            "description": "Bring dismissed Needs Attention items back into the inbox by their key.",
+            "annotations": {**_WRITE_ANNOTATIONS, "idempotentHint": True},
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "item_keys": {
+                        "type": "array",
+                        "items": {"type": "string", "maxLength": 200},
+                        "minItems": 1,
+                        "maxItems": MAX_ATTENTION_KEYS,
+                    },
+                },
+                "required": ["item_keys"],
                 "additionalProperties": False,
             },
         },
@@ -364,10 +437,14 @@ def handle_rpc_payload(
     session_id: str | None = None,
     protocol_version: str | None = None,
     bearer_token: str | None = None,
+    permissions: dict[str, str] | None = None,
     deferred_deletes: list[str] | None = None,
     expired: Callable[[], bool] | None = None,
 ) -> tuple[Any | None, int, dict[str, str]]:
     """Process a JSON-RPC 2.0 request object or batch.
+
+    ``permissions`` are the calling token's; None means the seller's own
+    session (or loopback on the Mac), which reaches every tool.
 
     Returns ``(response_body_or_none, http_status, extra_headers)``.
     When ``response_body_or_none`` is None (notifications only), HTTP 202 is returned.
@@ -397,6 +474,7 @@ def handle_rpc_payload(
                 item,
                 headers=headers,
                 bearer_token=bearer_token,
+                permissions=permissions,
                 deferred_deletes=deferred_deletes,
             )
             if negotiated:
@@ -417,6 +495,7 @@ def handle_rpc_payload(
         payload,
         headers=headers,
         bearer_token=bearer_token,
+        permissions=permissions,
         deferred_deletes=deferred_deletes,
     )
     if negotiated:
@@ -432,6 +511,7 @@ def _handle_single(
     *,
     headers: dict[str, str],
     bearer_token: str | None,
+    permissions: dict[str, str] | None,
     deferred_deletes: list[str] | None = None,
 ) -> tuple[dict[str, Any] | None, str | None]:
     if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
@@ -477,7 +557,8 @@ def _handle_single(
         return _rpc_result(msg_id, {}), None
 
     if method == "tools/list":
-        return _rpc_result(msg_id, {"tools": tool_definitions()}), None
+        tools = [tool for tool in tool_definitions() if _tool_allowed(tool["name"], permissions)]
+        return _rpc_result(msg_id, {"tools": tools}), None
 
     if method == "resources/list":
         return _rpc_result(msg_id, {"resources": []}), None
@@ -494,6 +575,13 @@ def _handle_single(
             arguments = {}
         if not isinstance(arguments, dict):
             return _rpc_error(msg_id, -32602, "Invalid params: arguments must be an object"), None
+        if name in TOOL_PERMISSIONS and not _tool_allowed(name, permissions):
+            area, level = TOOL_PERMISSIONS[name]
+            return _rpc_result(msg_id, _tool_error_result(
+                f"This access token is not allowed to use {name}. To allow it, set "
+                f"{_AREA_NAMES[area]} to {_LEVEL_NAMES[level]} for this token in "
+                "Anteroom Settings → Agents."
+            )), None
         try:
             result_data = _dispatch_tool(
                 db,
@@ -555,6 +643,8 @@ def _dispatch_tool(
         "get_sourcing_roi": _tool_get_sourcing_roi,
         "run_etsy_audit": _tool_run_etsy_audit,
         "get_needs_attention": _tool_get_needs_attention,
+        "dismiss_attention_items": _tool_dismiss_attention_items,
+        "restore_attention_items": _tool_restore_attention_items,
         "create_draft_listing": _tool_create_draft_listing,
         "edit_listing": _tool_edit_listing,
         "manage_listing_photos": _tool_manage_listing_photos,
@@ -807,6 +897,40 @@ def _tool_run_etsy_audit(db: Session, _args: dict[str, Any], **_kw: Any) -> dict
 def _tool_get_needs_attention(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str, Any]:
     tz = str(args.get("timezone") or "UTC").strip() or "UTC"
     return home_dashboard.home_summary(db, tz_name=tz)
+
+
+def _attention_keys(args: dict[str, Any]) -> list[str]:
+    raw = args.get("item_keys")
+    if not isinstance(raw, list) or not raw:
+        raise McpToolError("item_keys must list at least one Needs Attention item key.")
+    if len(raw) > MAX_ATTENTION_KEYS:
+        raise McpToolError(f"Send at most {MAX_ATTENTION_KEYS} item keys at a time.")
+    keys: list[str] = []
+    for value in raw:
+        if not isinstance(value, str) or not value.strip() or len(value.strip()) > 200:
+            raise McpToolError("Each item key must be a non-empty string of at most 200 characters.")
+        if value.strip() not in keys:
+            keys.append(value.strip())
+    return keys
+
+
+def _tool_dismiss_attention_items(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str, Any]:
+    keys = _attention_keys(args)
+    kinds = home_dashboard.attention_item_kinds(db)
+    dismissed: list[dict[str, Any]] = []
+    not_found: list[str] = []
+    for key in keys:
+        if key not in kinds:
+            not_found.append(key)
+            continue
+        dismissed.append(home_dashboard.dismiss_attention_item(db, item_key=key, kind=kinds[key]))
+    return {"dismissed": dismissed, "not_found": not_found}
+
+
+def _tool_restore_attention_items(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str, Any]:
+    keys = _attention_keys(args)
+    restored = [key for key in keys if home_dashboard.restore_attention_item(db, item_key=key)]
+    return {"restored": restored, "not_dismissed": [key for key in keys if key not in restored]}
 
 
 # ---------------------------------------------------------------------------

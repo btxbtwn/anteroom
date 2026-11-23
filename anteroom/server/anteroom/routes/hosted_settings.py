@@ -143,3 +143,4 @@ def hosted_agent_connection(request: Request):
 router.add_api_route('/mcp-tokens', settings.list_mcp_tokens, methods=['GET'])
 router.add_api_route('/mcp-tokens', settings.create_mcp_token, methods=['POST'], status_code=201)
 router.add_api_route('/mcp-tokens/{token_id}', settings.revoke_mcp_token, methods=['DELETE'])
+router.add_api_route('/mcp-tokens/{token_id}', settings.update_mcp_token_permissions, methods=['PATCH'])

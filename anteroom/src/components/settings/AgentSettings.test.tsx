@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AgentConnectionStatus } from "../../api/agentConnection";
+import type { AgentConnectionStatus, McpAccessToken } from "../../api/agentConnection";
 import { AgentSettings } from "./AgentSettings";
 
 const { useQuery, useMutation } = vi.hoisted(() => ({ useQuery: vi.fn(), useMutation: vi.fn() }));
@@ -86,7 +86,7 @@ const status: AgentConnectionStatus = {
   ],
 };
 
-function mockQueries(agentData: AgentConnectionStatus, tokens: Array<{ id: string; name: string; token_prefix: string; created_at: string | null; last_used_at: string | null; expires_at: string | null; revoked_at: string | null }> = []) {
+function mockQueries(agentData: AgentConnectionStatus, tokens: McpAccessToken[] = []) {
   useQuery.mockImplementation((opts: { queryKey?: unknown[] }) => {
     if (opts?.queryKey?.[0] === "settings-mcp-tokens") {
       return { data: { tokens }, isPending: false, error: null, refetch: vi.fn() };
@@ -170,16 +170,30 @@ describe("Agent settings", () => {
           last_used_at: null,
           expires_at: null,
           revoked_at: null,
+          permissions: { listings: "write", analytics: "read", attention: "none" },
+          active: true,
         },
       ],
     );
     const html = renderToStaticMarkup(<AgentSettings />);
     expect(html).toContain("https://myanteroom.com/api/mcp");
+    expect(html).toContain('aria-label="Claude Desktop Listings access"');
+    expect(html).toContain("Read and write");
+    expect(html).toContain('aria-label="Claude Desktop Needs Attention access"');
+    expect(html).toContain("No access");
     expect(html).toContain("Claude Desktop");
     expect(html).toContain("arm_abc12345");
     expect(html).toContain("ChatGPT");
     expect(html).toContain("Copy setup prompt for Google Antigravity");
     expect(html).toContain("Copy setup prompt for Other MCP clients");
     expect(html).not.toContain("Copy setup prompt for Cursor");
+  });
+
+  it("lets the seller choose a new token's access, starting at read only", () => {
+    const html = renderToStaticMarkup(<AgentSettings />);
+    expect(html).toContain('aria-label="New token Listings access"');
+    expect(html).toContain('aria-label="New token Analytics access"');
+    expect(html).toContain('aria-label="New token Needs Attention access"');
+    expect(html).not.toContain("Read and write");
   });
 });

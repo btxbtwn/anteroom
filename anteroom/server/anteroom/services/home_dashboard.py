@@ -762,6 +762,20 @@ def dismiss_attention_item(
     }
 
 
+def attention_item_kinds(db: Session, *, now: datetime | None = None) -> dict[str, str]:
+    """Every Needs Attention item shown right now, dismissed or not, by key."""
+    clock = _utc(now) or datetime.now(UTC)
+    now_naive = _naive_utc(clock)
+    dismissed = {
+        row.item_key
+        for row in db.query(AttentionDismissal).filter(AttentionDismissal.expires_at > now_naive).all()
+    }
+    return {
+        item["key"]: item["kind"]
+        for item in _collect_attention_items(db, now_utc=clock, dismissed_keys=dismissed)
+    }
+
+
 def restore_attention_item(db: Session, *, item_key: str) -> bool:
     cleaned_key = (item_key or "").strip()
     if not cleaned_key:

@@ -275,6 +275,8 @@ class SellerSessionMiddleware:
                     raise InvalidSession
                 identity = SellerIdentity(user_id=verified.owner_id)
                 context_token: str | None = None
+                # The MCP route reads this token's permissions in the seller's session.
+                scope.setdefault("state", {})["mcp_token_id"] = verified.token_id
             else:
                 # JWKS retrieval is synchronous. Keep it off the event loop, the
                 # request thread limiter and the loop's shared pool: database steps
