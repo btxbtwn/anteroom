@@ -7,7 +7,7 @@
  */
 import { PhotoLoadFailure, StudioImage } from "./StudioImage";
 import { FlipHorizontal2Icon, FlipVertical2Icon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Annotation, CropBox, ListingPhoto, PhotoEdits, Redaction, StudioOptions, VirtualModel } from "../api/types";
@@ -101,6 +101,7 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
   const [edits, setEdits] = useState<PhotoEdits>(saved);
   const [tab, setTab] = useState<Tab>(initialTab);
   const [aspectId, setAspectId] = useState("free");
+  const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [frameAspect, setFrameAspect] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -123,16 +124,21 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
   );
   const previewKey = JSON.stringify([previewEdits, !cropping]);
 
+  // Keep the displayed URL valid while the next preview is rendering.
+  useLayoutEffect(() => {
+    const url = previewBlob ? URL.createObjectURL(previewBlob) : null;
+    setPreviewUrl(url);
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [previewBlob]);
+
   useEffect(() => {
     const controller = new AbortController();
-    let url: string | null = null;
     setLoading(true);
     const timer = setTimeout(() => {
       api.conversations.previewPhotoEdits(convId, photo.id, previewEdits, !cropping, controller.signal)
         .then((blob) => {
           if (controller.signal.aborted) return;
-          url = URL.createObjectURL(blob);
-          setPreviewUrl(url);
+          setPreviewBlob(blob);
           setPreviewError(null);
           setLoading(false);
         })
@@ -145,7 +151,6 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
     return () => {
       clearTimeout(timer);
       controller.abort();
-      if (url) URL.revokeObjectURL(url);
     };
     // previewKey stands for previewEdits and cropping.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -153,7 +158,7 @@ export function PhotoEditorDialog({ convId, photo, index, photos, onSaved, onClo
 
   const retry = () => {
     setPreviewError(null);
-    setPreviewUrl(null);
+    setPreviewBlob(null);
     setFrameAspect(null);
     setPreviewAttempt((count) => count + 1);
   };

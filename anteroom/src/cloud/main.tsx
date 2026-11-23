@@ -25,6 +25,8 @@ import { linkOpenedElsewhere } from "./authMessages";
 import { followSellerChanges } from "./liveUpdates";
 import { StartupScreen } from "./StartupScreen";
 import { ConnectorPage } from "./ConnectorPage";
+import { AppConsentPage } from "./AppConsentPage";
+import { isConsentPage } from "./appConsent";
 import { clearImportAll } from "../importAll";
 import { DEVICE_BUSTER, DEVICE_MAX_AGE_MS, devicePersister, forgetDeviceWorkspace, keepReadsForDevice, keepsOnDevice, saveRuntime, savedRuntime } from "./deviceCache";
 import "./workspace.css";
@@ -96,6 +98,7 @@ function CloudApp() {
   }, []);
   if (!ready) return <StartupScreen/>;
   if (session && newPassword) return <SetPassword client={supabase} onDone={() => setNewPassword(false)}/>;
+  if (session && isConsentPage(window.location.pathname)) return <ConsentWorkspace key={session.user.id} session={session}/>;
   if (session && connectorMode) return <ConnectorPage email={session.user.email || "Your Anteroom account"} onSignOut={async () => {
     const { error } = await supabase.auth.signOut({ scope: "local" });
     if (error) throw error;
@@ -103,6 +106,26 @@ function CloudApp() {
   if (session) return <HostedWorkspace key={session.user.id} session={session}/>;
   if (!error && showsLanding(window.location.search, mac)) return <Landing/>;
   return <SignIn client={supabase} notice={error} sandbox={sandbox}/>;
+}
+
+function hostedApiSession(seller: string) {
+  return {
+    origin: window.location.origin,
+    seller,
+    accessToken: async () => {
+      const { data, error } = await supabase.auth.getSession();
+      if (error || data.session?.user.id !== seller) return null;
+      return data.session.access_token;
+    },
+    unauthorized: () => { void supabase.auth.signOut({ scope: "local" }); },
+  };
+}
+
+/** Approving an app (Claude, ChatGPT, Gemini) that asked to use Anteroom's MCP tools. */
+function ConsentWorkspace({ session }: { session: Session }) {
+  // The page calls Anteroom only when the seller answers, after this has run.
+  useEffect(() => installHostedApiSession(hostedApiSession(session.user.id)), [session.user.id]);
+  return <AppConsentPage client={supabase} email={session.user.email || "your Anteroom account"}/>;
 }
 
 function HostedWorkspace({ session }: { session: Session }) {
@@ -127,16 +150,7 @@ function HostedWorkspace({ session }: { session: Session }) {
     void savedRuntime<HostedRuntime>(session.user.id).then(saved => {
       if (refresh.active && saved && !refresh.fresh) { refresh.shown = true; setRuntime(saved); }
     });
-    const remove = installHostedApiSession({
-      origin: window.location.origin,
-      seller: session.user.id,
-      accessToken: async () => {
-        const { data, error } = await supabase.auth.getSession();
-        if (error || data.session?.user.id !== session.user.id) return null;
-        return data.session.access_token;
-      },
-      unauthorized: () => { void supabase.auth.signOut({ scope: "local" }); },
-    });
+    const remove = installHostedApiSession(hostedApiSession(session.user.id));
     void studioFetch("/api/runtime").then(async response => {
       if (!response.ok) throw new Error("Could not open your workspace. Reload to try again.");
       const value = await response.json();

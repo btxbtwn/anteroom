@@ -556,7 +556,10 @@ describe("Requests while the server restarts", () => {
     expect(unavailable).toMatchObject({ status: 503, retryable: true, retryAfterMs: 5000, message: "Request failed: 503" });
 
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Failed to fetch")));
-    expect(await failure(() => api.suggestions.list())).toMatchObject({ retryable: true, message: "Failed to fetch" });
+    expect(await failure(() => api.suggestions.list())).toMatchObject({
+      retryable: true,
+      message: "Could not reach the server. Check your connection and try again.",
+    });
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "Not found" }), { status: 404 })));
     expect(await failure(() => api.suggestions.list())).toMatchObject({ status: 404, retryable: false, message: "Not found" });
@@ -640,5 +643,16 @@ describe("Reloading marketplace fields", () => {
     vi.stubGlobal("fetch", fetch);
     await expect(api.nativeMarketplaces.refreshForm("item", "mercari", "r1")).resolves.toEqual({ revision_id: "r2" });
     expect(fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("Run due relists", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("replaces Safari Load failed with a clear message that points at the log", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("Load failed")));
+    await expect(api.automations.runAutoRelist()).rejects.toThrow(
+      "Could not reach the server while running due relists. Check the auto-relist log — the pass may still have finished.",
+    );
   });
 });

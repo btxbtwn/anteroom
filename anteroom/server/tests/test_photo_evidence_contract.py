@@ -57,3 +57,12 @@ def test_still_rejects_a_boolean_value():
     reply = evidence()
     reply["brand"] = {"value": True, "confidence": "low"}
     assert parse_evidence(json.dumps(reply)).get("error")
+
+
+def test_accepts_null_optional_slab_label():
+    # Gemini Flash Lite often sets optional slab_label to null on apparel.
+    reply = evidence()
+    reply["slab_label"] = None
+    result = parse_evidence(json.dumps(reply))
+    assert not result.get("error")
+    assert "slab_label" not in result["evidence"]

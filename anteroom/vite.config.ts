@@ -34,6 +34,8 @@ export default defineConfig({
         server.middlewares.use((request, _response, next) => {
           // Keep the query: sign-in links arrive as `/?code=…`.
           if (request.url === "/" || request.url?.startsWith("/?")) request.url = `/cloud.html${request.url.slice(1)}`;
+          // Where Supabase sends the seller to approve an app; the hosted API serves cloud.html there too.
+          else if (request.url === "/oauth/consent" || request.url?.startsWith("/oauth/consent?")) request.url = `/cloud.html${request.url.slice("/oauth/consent".length)}`;
           next();
         });
       },

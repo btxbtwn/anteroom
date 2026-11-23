@@ -5,6 +5,7 @@ import { api } from "../../api/client";
 import type {
   AgentClientSnippet,
   McpAccessToken,
+  McpConnection,
   McpPermissionArea,
   McpPermissionLevel,
   McpTokenCreateResponse,
@@ -43,9 +44,9 @@ const PERMISSION_AREAS: ReadonlyArray<{
   { area: "attention", label: "Needs Attention", levels: ["none", "read", "write"] },
 ];
 
-const NEW_TOKEN_PERMISSIONS: McpTokenPermissions = { listings: "read", analytics: "read", attention: "read" };
+export const NEW_TOKEN_PERMISSIONS: McpTokenPermissions = { listings: "read", analytics: "read", attention: "read" };
 
-function PermissionSelects({
+export function PermissionSelects({
   permissions,
   onChange,
   disabled,
@@ -151,6 +152,81 @@ function formatDate(iso: string | null): string {
   const parsed = new Date(iso);
   if (Number.isNaN(parsed.getTime())) return iso;
   return parsed.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+/* Apps connected by signing in (Claude, ChatGPT, Gemini). Hosted only. */
+function ConnectedApps() {
+  const connections = useQuery({ queryKey: ["settings-mcp-connections"], queryFn: api.settings.mcpConnections.list });
+  const refresh = () => { void connections.refetch?.(); };
+  const update = useMutation({ mutationFn: api.settings.mcpConnections.updatePermissions, onSuccess: refresh });
+  const disconnect = useMutation({
+    mutationFn: api.settings.mcpConnections.disconnect,
+    onSuccess: (result) => {
+      refresh();
+      if (!result.signed_out) {
+        toastManager.add({
+          type: "warning",
+          title: "Disconnected in Anteroom",
+          description: "The app can no longer use Anteroom, but its sign-in could not be ended yet. Use Finish disconnecting to try again.",
+        });
+      }
+    },
+  });
+  const rows: McpConnection[] = connections.data?.connections ?? [];
+  const busy = update.isPending || disconnect.isPending;
+  const failure = update.error ?? disconnect.error ?? connections.error;
+  return (
+    <SettingsRow
+      id="agent-mcp-connections"
+      title="Connected apps"
+      description={`In Claude, ChatGPT or Gemini, add a custom connector with the endpoint above. The app asks you to sign in to Anteroom and choose what it can do. Apps cannot publish, update live listings or delist.`}
+      status={connections.isPending ? "Loading connected apps…" : rows.length === 0 ? "No apps connected." : undefined}
+    >
+      {failure ? <SettingsNote tone="error">{failure.message}</SettingsNote> : null}
+      {rows.length > 0 ? (
+        <div className="divide-y divide-border/60 rounded-lg border border-border/60 bg-card/30">
+          {rows.map((app) => {
+            const name = app.client_name || "Connected app";
+            const active = app.revoked_at === null;
+            return (
+              <div key={app.client_id} className="flex flex-wrap items-center justify-between gap-3 px-3 py-2.5 text-xs">
+                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate font-medium text-foreground">{name}</span>
+                    <Badge variant={active ? "secondary" : "outline"} size="sm">{active ? "Connected" : "Disconnected"}</Badge>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-muted-foreground tabular-nums">
+                    <span>Connected {formatDate(app.created_at)}</span>
+                    <span>Last used {formatDate(app.last_used_at)}</span>
+                  </div>
+                </div>
+                {active ? (
+                  <Button type="button" variant="outline" size="xs" disabled={busy}
+                    onClick={() => disconnect.mutate(app.client_id)} aria-label={`Disconnect ${name}`}>
+                    <Trash2Icon />
+                    Disconnect
+                  </Button>
+                ) : app.signed_out_at === null ? (
+                  <Button type="button" variant="outline" size="xs" disabled={busy}
+                    onClick={() => disconnect.mutate(app.client_id)} aria-label={`Finish disconnecting ${name}`}>
+                    Finish disconnecting
+                  </Button>
+                ) : (
+                  <span className="text-muted-foreground">To use it again, connect it from {name}.</span>
+                )}
+                {active ? (
+                  <div className="basis-full">
+                    <PermissionSelects permissions={app.permissions} labelPrefix={name} disabled={busy}
+                      onChange={(area, level) => update.mutate({ clientId: app.client_id, permissions: { [area]: level } })} />
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </SettingsRow>
+  );
 }
 
 export function AgentSettings() {
@@ -358,6 +434,8 @@ export function AgentSettings() {
             </div>
           ) : null}
         </SettingsRow>
+
+        {isHosted ? <ConnectedApps /> : null}
       </SettingsSection>
 
       {remoteClients.length > 0 ? (

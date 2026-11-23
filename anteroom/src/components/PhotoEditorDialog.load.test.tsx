@@ -45,6 +45,29 @@ const preview = () => document.body.querySelector<HTMLImageElement>('img[alt="Ph
 const failure = () => document.body.querySelector<HTMLElement>("[data-photo-load-status]");
 const cropFrame = () => document.body.querySelector("[data-crop-frame]");
 
+it("keeps the displayed preview URL valid while a crop update is pending", async () => {
+  vi.spyOn(api.conversations, "previewPhotoEdits").mockImplementation(async () => new Blob(["jpeg"]));
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  await act(async () => root.render(<PhotoEditorDialog convId="item" photo={photo} index={0} onSaved={vi.fn()} onClose={vi.fn()} />));
+  try {
+    await settle();
+    expect(preview()?.getAttribute("src")).toBe("blob:preview-1");
+    const handle = host.querySelector('[aria-label="Resize from bottom right"]')!;
+    await act(async () => {
+      handle.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", shiftKey: true, bubbles: true }));
+    });
+    expect(preview()?.getAttribute("src")).toBe("blob:preview-1");
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+
+    await settle();
+    expect(preview()?.getAttribute("src")).toBe("blob:preview-2");
+    expect(URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith("blob:preview-1");
+  } finally { await act(async () => root.unmount()); }
+  expect(URL.revokeObjectURL).toHaveBeenLastCalledWith("blob:preview-2");
+});
+
 it("shows Retry above the crop frame when a preview cannot be shown, and Retry asks for a new preview", async () => {
   const previews = vi.spyOn(api.conversations, "previewPhotoEdits").mockResolvedValue(new Blob(["jpeg"]));
   const host = document.createElement("div");

@@ -576,6 +576,77 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         ):
             self.assertIsNone(asyncio.run(auto_relist.check_active_buyer_offer("mercari", "m123456789")))
 
+    def test_offer_gate_known_active_unknown_and_clear_with_mocks_only(self):
+        """Known active skips; unknown fails closed; only a verified-clear mock may delist."""
+        now = _now()
+        cases = (
+            ("known-active", "5f0000000000000000000a01", True, "skipped_active_offer"),
+            ("unknown", "5f0000000000000000000a02", None, "skipped_offer_unverified"),
+            ("clear", "5f0000000000000000000a03", False, "completed"),
+        )
+        conv_by_lid: dict[str, str] = {}
+        for title, lid, _offer, _status in cases:
+            conv, _listing, _rev = self._create_draft(title, price=55.0)
+            conv.status = "listed"
+            self.db.add(MarketplaceListing(
+                id=new_id(),
+                conversation_id=conv.id,
+                marketplace="poshmark",
+                state="published",
+                listing_id=lid,
+                listing_url=f"https://poshmark.com/listing/{lid}",
+                listed_at=now - timedelta(days=45),
+                listed_price=55.0,
+            ))
+            conv_by_lid[lid] = conv.id
+        auto_relist.save_rule(
+            self.db,
+            "poshmark",
+            {"enabled": True, "min_age_days": 30, "daily_cap": 10},
+            confirm=True,
+        )
+        self.db.commit()
+
+        offer_by_lid = {lid: offer for _title, lid, offer, _status in cases}
+
+        async def mock_offer_checker(marketplace: str, listing_id: str):
+            self.assertEqual(marketplace, "poshmark")
+            return offer_by_lid[listing_id]
+
+        delist_calls: list[str] = []
+
+        async def fake_delister(conv_id: str, market: str) -> dict:
+            self.assertEqual(market, "poshmark")
+            delist_calls.append(conv_id)
+            return {"ok": True}
+
+        async def fake_lister(conv_id: str, market: str, rev_id: str) -> dict:
+            return {
+                "ok": True,
+                "listing_id": "5f0000000000000000000b01",
+                "listing_url": "https://poshmark.com/listing/5f0000000000000000000b01",
+            }
+
+        outcomes = asyncio.run(auto_relist.run_auto_relist(
+            now=now,
+            marketplace="poshmark",
+            offer_checker=mock_offer_checker,
+            delister=fake_delister,
+            lister=fake_lister,
+        ))
+        by_conv = {row["conversation_id"]: row for row in outcomes}
+        for _title, lid, _offer, expected_status in cases:
+            row = by_conv[conv_by_lid[lid]]
+            self.assertEqual(row["status"], expected_status)
+            if expected_status == "skipped_active_offer":
+                self.assertIn("active incoming buyer offer", row["reason"])
+            elif expected_status == "skipped_offer_unverified":
+                self.assertIn("could not verify", row["reason"])
+            else:
+                self.assertIsNone(row["reason"])
+        # Only the verified-clear listing may be delisted.
+        self.assertEqual(delist_calls, [conv_by_lid["5f0000000000000000000a03"]])
+
     def test_settle_publish_does_not_overwrite_replacement_schedule(self):
         c1, l1, _r1 = self._create_draft("Rescheduled Draft")
         due_time = _now() - timedelta(minutes=1)

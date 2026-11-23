@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from anteroom.services import model_usage
 
+import asyncio
 import json
 import re
 from dataclasses import dataclass
@@ -58,6 +59,10 @@ def _evidence_shape(value: dict) -> dict:
     """Unwrap ``{"evidence": {...}}`` and read numeric values as text before validating."""
     if set(value) == {"evidence"} and isinstance(value["evidence"], dict):
         value = value["evidence"]
+    # Optional fields the prompt allows omitting: models often send null instead.
+    # Leaving null fails the schema (object only) and aborts the whole read.
+    if value.get("slab_label") is None:
+        value.pop("slab_label", None)
     for name in _VALUE_FIELDS:
         if isinstance(field := value.get(name), dict) and "value" in field:
             field["value"] = _as_text(field["value"])
@@ -326,6 +331,10 @@ class ChatCompletionsProvider:
                 raise self._http_error(resp)
             payload = resp.json()
             call.usage(payload.get("usage"), anthropic=False)
+            if self.name == "openrouter":
+                from anteroom.services import api_usage
+                # The ledger insert is a database round trip; keep it off the event loop.
+                await asyncio.to_thread(api_usage.note_openrouter_call, call.record, provider_request_id=payload.get("id"))
             return payload
 
     async def _complete(self, messages: list[dict], model: str, *, reasoning: bool | dict = True) -> str:
@@ -359,6 +368,7 @@ class ChatCompletionsProvider:
     async def _stream(self, messages: list[dict], model: str, *, reasoning: bool | dict = True):
         with model_usage.observe(self.name, model) as call:
             body = self._body(messages, model, reasoning=reasoning, stream=True, stream_options={"include_usage": True})
+            request_id = None
             async with http_client() as client:
                 async with http_retry.stream(
                     client, "POST", f"{self.base_url}/chat/completions", headers=self._headers(), json=body, timeout=300,
@@ -379,6 +389,8 @@ class ChatCompletionsProvider:
                             payload = json.loads(data)
                         except json.JSONDecodeError:
                             continue
+                        if request_id is None and payload.get("id"):
+                            request_id = payload.get("id")
                         call.usage(payload.get("usage"))
                         finish = finish_reason(payload) or finish
                         thinking = chunk_thinking(payload)
@@ -391,6 +403,9 @@ class ChatCompletionsProvider:
                             yield StreamChunk(text, "content")
                     if not content_chars:
                         raise EmptyCompletionError(self.spec.label, model, finish, reasoning_chars)
+            if self.name == "openrouter":
+                from anteroom.services import api_usage
+                await asyncio.to_thread(api_usage.note_openrouter_call, call.record, provider_request_id=request_id)
 
 
 def openrouter_sources(payload: dict) -> list[dict]:

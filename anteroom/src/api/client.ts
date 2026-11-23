@@ -99,6 +99,8 @@ import type {
   AgentConnectionStatus,
   AgentConnectionTest,
   McpAccessToken,
+  McpConnection,
+  McpConnectionRevoked,
   McpTokenCreateResponse,
   McpTokenPermissions,
 } from "./agentConnection";
@@ -215,8 +217,16 @@ async function rawRequest<T>(path: string, options?: RequestInit): Promise<T> {
       ...options,
     });
   } catch (error) {
-    // fetch rejects with a TypeError when the connection fails or drops.
-    if (isRead && error instanceof TypeError) throw new ApiRequestError(error.message, 0, true);
+    // fetch rejects with a TypeError when the connection fails or drops
+    // (Safari: "Load failed"; Chrome: "Failed to fetch"). Reads wrap it as a
+    // retryable ApiRequestError; writes keep TypeError so callers never auto-retry.
+    if (isRead && error instanceof TypeError) {
+      throw new ApiRequestError(
+        "Could not reach the server. Check your connection and try again.",
+        0,
+        true,
+      );
+    }
     throw error;
   }
   if (!res.ok) {
@@ -830,8 +840,23 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(body),
       }),
-    runAutoRelist: () =>
-      request<{ ok: boolean; outcomes: AutoRelistLog[] }>("/automations/auto-relist/run", { method: "POST" }),
+    runAutoRelist: async () => {
+      try {
+        return await request<{ ok: boolean; outcomes: AutoRelistLog[] }>("/automations/auto-relist/run", { method: "POST" });
+      } catch (error) {
+        if (error instanceof ApiRequestError && error.status === 0) {
+          throw new Error(
+            "Could not reach the server while running due relists. Check the auto-relist log — the pass may still have finished.",
+          );
+        }
+        if (error instanceof TypeError) {
+          throw new Error(
+            "Could not reach the server while running due relists. Check the auto-relist log — the pass may still have finished.",
+          );
+        }
+        throw error;
+      }
+    },
   },
   draftSchedule: {
     get: (convId: string) => request<DraftScheduleState>(`/conversations/${encodeURIComponent(convId)}/schedule`),
@@ -1720,6 +1745,23 @@ export const api = {
         }),
       revoke: (tokenId: string) =>
         request<{ ok: boolean }>(`/settings/mcp-tokens/${encodeURIComponent(tokenId)}`, {
+          method: "DELETE",
+        }),
+    },
+    mcpConnections: {
+      list: () => request<{ connections: McpConnection[] }>("/settings/mcp-connections"),
+      approve: ({ clientId, clientName, permissions, enable = false }: { clientId: string; clientName: string | null; permissions: McpTokenPermissions; enable?: boolean }) =>
+        request<McpConnection>(`/settings/mcp-connections/${encodeURIComponent(clientId)}`, {
+          method: "PUT",
+          body: JSON.stringify({ client_name: clientName, permissions, enable }),
+        }),
+      updatePermissions: ({ clientId, permissions }: { clientId: string; permissions: Partial<McpTokenPermissions> }) =>
+        request<McpConnection>(`/settings/mcp-connections/${encodeURIComponent(clientId)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ permissions }),
+        }),
+      disconnect: (clientId: string) =>
+        request<McpConnectionRevoked>(`/settings/mcp-connections/${encodeURIComponent(clientId)}`, {
           method: "DELETE",
         }),
     },

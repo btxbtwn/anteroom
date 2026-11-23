@@ -21,7 +21,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
 from anteroom.database import in_worker_session
-from anteroom.services import mcp_http, mcp_tokens
+from anteroom.services import mcp_http, mcp_oauth, mcp_tokens
 from anteroom.services.hosted_limits import read_bounded_body
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
@@ -67,6 +67,7 @@ def _run_mcp_call(
     *,
     is_hosted: bool,
     hosted_token_id: str | None,
+    oauth_client_id: str | None = None,
     bearer_token: str | None,
     client_key: str,
     session_id: str | None,
@@ -88,7 +89,13 @@ def _run_mcp_call(
         token_id = verified.token_id
     # Read fresh on every request, so a change in Settings applies to the next call.
     # A seller session, or loopback on the Mac without a token, reaches every tool.
-    permissions = mcp_tokens.permissions_for(db, token_id) if token_id is not None else None
+    if oauth_client_id is not None:
+        # An app connected by signing in: what the seller lets it reach, read fresh.
+        permissions = mcp_oauth.permissions_for(db, oauth_client_id)
+        if permissions is None:
+            raise HTTPException(403, "This app was disconnected in Anteroom Settings. Connect it again to use it.")
+    else:
+        permissions = mcp_tokens.permissions_for(db, token_id) if token_id is not None else None
     return mcp_http.handle_rpc_payload(
         db,
         payload,
@@ -105,6 +112,7 @@ def _run_mcp_call(
 async def mcp_post(request: Request):
     is_hosted = getattr(request.state, "seller", None) is not None or hasattr(request.app.state, "session_verifier")
     hosted_token_id = getattr(request.state, "mcp_token_id", None) if is_hosted else None
+    oauth_client_id = getattr(request.state, "mcp_oauth_client_id", None) if is_hosted else None
     bearer = _extract_bearer(request)
     client_key = _client_key(request, is_hosted=is_hosted)
     if not is_hosted and bearer is not None and mcp_tokens.is_auth_rate_limited(client_key):
@@ -148,6 +156,7 @@ async def mcp_post(request: Request):
                     payload,
                     is_hosted=is_hosted,
                     hosted_token_id=hosted_token_id,
+                    oauth_client_id=oauth_client_id,
                     bearer_token=bearer,
                     client_key=client_key,
                     session_id=session_id,
@@ -171,6 +180,7 @@ async def mcp_post(request: Request):
                             deferred_deletes,
                             bearer_token=bearer,
                             deadline_seconds=_MCP_STORAGE_CLEANUP_TIMEOUT_SECONDS,
+                            server_key=oauth_client_id is not None,
                         ),
                         timeout=_MCP_STORAGE_CLEANUP_TIMEOUT_SECONDS,
                     )

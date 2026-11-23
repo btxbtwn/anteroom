@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Anteroom Bridge",
-  "version": "0.2.88",
+  "version": "0.2.89",
   "minimum_chrome_version": "120",
   "description": "Lets Anteroom publish, update and delist your marketplace listings, save drafts, share, send offers, and read sales and likes.",
   "permissions": [
@@ -28,6 +28,8 @@
     "https://poshmark.ca/*",
     "https://mercari.com/*",
     "https://www.mercari.com/*",
+    "http://mercari.com/*",
+    "http://www.mercari.com/*",
     "https://depop.com/*",
     "https://www.depop.com/*",
     "https://webapi.depop.com/*",

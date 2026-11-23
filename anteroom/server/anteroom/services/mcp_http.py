@@ -1308,8 +1308,13 @@ def delete_hosted_storage_keys(
     *,
     bearer_token: str | None,
     deadline_seconds: float = 15.0,
+    server_key: bool = False,
 ) -> None:
-    """Best-effort delete of hosted Storage objects outside any DB session, bounded by a deadline."""
+    """Best-effort delete of hosted Storage objects outside any DB session, bounded by a deadline.
+
+    ``server_key`` is for callers whose token Storage refuses: a connected app's
+    (Claude, ChatGPT, Gemini) token never reaches Storage directly.
+    """
     import time
 
     from anteroom.services import hosted_photos, hosted_storage
@@ -1322,7 +1327,7 @@ def delete_hosted_storage_keys(
         if remaining <= 0:
             break
         try:
-            if bearer_token and bearer_token.startswith("arm_"):
+            if server_key or (bearer_token and bearer_token.startswith("arm_")):
                 hosted_storage.photo_call("DELETE", key, timeout=min(remaining, 30.0))
             elif bearer_token:
                 hosted_photos.storage_call("DELETE", key, bearer_token, timeout=min(remaining, 20.0))
