@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1160 — 2026-11-23
+
+- Hosted AI Studio can use Anteroom's Photoroom key automatically (`ANTEROOM_MANAGED_PHOTOROOM_KEY`), with no per-account Photoroom setup.
+
 ## 0.1.1159 — 2026-11-23
 
 - Fix “Run due relists” showing “That automation is gone” on the web.
