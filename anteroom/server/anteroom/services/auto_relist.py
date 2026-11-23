@@ -1295,9 +1295,13 @@ async def run_auto_relist(
         delist_res = await _run_delist(conv_id, market, old_id, rule_id)
         if not delist_res.get("ok"):
             # Nothing was relisted, so the relist price must not stay saved.
-            await in_worker_session(
-                _restore_price_revision, conv_id, revision_id, reservation["original_revision_id"],
-            )
+            try:
+                await in_worker_session(
+                    _restore_price_revision, conv_id, revision_id, reservation["original_revision_id"],
+                )
+            except Exception:  # noqa: BLE001 - record the failed delist and go on with the pass
+                log.warning("Auto-relist could not put back the prices of %s after a failed delist", conv_id,
+                            exc_info=True)
             delist_status = "skipped_rule_disabled" if delist_res.get("skipped") else "failed"
             outcomes.append(await in_worker_session(_record_log_payload, {
                 "attempt_id": attempt_id, "conv_id": conv_id,
