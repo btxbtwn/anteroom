@@ -6,8 +6,13 @@ the route that happened to need it first.
 """
 from __future__ import annotations
 
+import copy
+import functools
 import logging
+from collections.abc import Callable
+from types import SimpleNamespace
 
+from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from anteroom.models.conversation import Message, Photo as PhotoModel
@@ -19,6 +24,32 @@ from anteroom.repositories.queries import ConversationRepo
 from anteroom.services.photos import delete_photo_files
 
 log = logging.getLogger("anteroom.listing_delete")
+
+
+def remove_files_after_commit(db: Session, removals: list[Callable[[], None]]) -> None:
+    """Remove files once the session commits the rows that named them.
+
+    Deleting them first loses a photo whenever the commit is refused or fails:
+    the row stays and its file is gone. A rollback drops the removals instead.
+    """
+    if not removals:
+        return
+    pending = list(removals)
+
+    def committed(_session) -> None:
+        todo = pending[:]
+        pending.clear()
+        for remove in todo:
+            try:
+                remove()
+            except Exception:  # noqa: BLE001 - an orphaned file is safe; the commit stands
+                log.warning("Could not remove a deleted listing's file", exc_info=True)
+
+    def rolled_back(_session, _previous) -> None:
+        pending.clear()
+
+    event.listen(db, "after_commit", committed)
+    event.listen(db, "after_soft_rollback", rolled_back)
 
 
 class ListingBusy(RuntimeError):
@@ -44,15 +75,19 @@ def wipe_contents(db: Session, conv_id: str, *, keep_photos: bool = False,
     repo = ConversationRepo(db)
     photos = [] if keep_photos else repo.get_all_photos(conv_id)
     deleted_photos = len(photos)
+    removals: list[Callable[[], None]] = []
     if not keep_photos:
         from anteroom.models.listing_video import ListingVideo
         from anteroom.services.listing_videos import video_path
 
         for video in db.query(ListingVideo).filter_by(conversation_id=conv_id).all():
-            video_path(video).unlink(missing_ok=True)
+            removals.append(functools.partial(video_path(video).unlink, missing_ok=True))
             db.delete(video)
     for photo in photos:
-        delete_photo_files(photo)
+        files = SimpleNamespace(stored_filename=photo.stored_filename, source_filename=photo.source_filename,
+                                edits=copy.deepcopy(photo.edits))
+        removals.append(lambda files=files: delete_photo_files(files))
+    remove_files_after_commit(db, removals)
 
     job_ids = [row[0] for row in db.query(Job.id).filter(Job.conversation_id == conv_id).all() if row[0] not in kept_jobs]
     if job_ids:

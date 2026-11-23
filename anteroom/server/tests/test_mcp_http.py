@@ -1213,3 +1213,29 @@ def test_search_inventory_live_marketplaces_leave_out_delisted_and_sold_ones():
     assert not err and delisted["total"] == 0
     still_live, err = _call_tool(client, "search_inventory", {"marketplace": "etsy"})
     assert not err and still_live["total"] == 1
+
+
+def test_an_mcp_write_that_finishes_after_the_timeout_is_not_saved(monkeypatch):
+    import time
+
+    from anteroom.routes import mcp as mcp_route
+    from anteroom.services import listing_editor
+
+    real_save = listing_editor.save_listing_edit
+
+    def slow_save(*args, **kwargs):
+        time.sleep(0.6)  # still working when the request gives up
+        return real_save(*args, **kwargs)
+
+    monkeypatch.setattr(mcp_route, "_MCP_RPC_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(listing_editor, "save_listing_edit", slow_save)
+    with TestClient(app) as client:
+        timed_out = _rpc(client, "tools/call", {"name": "create_draft_listing", "arguments": {"title": "Late draft"}})
+        assert timed_out.status_code == 504
+        assert "not saved" in timed_out.json()["error"]["message"]
+        deadline = time.monotonic() + 5
+        while mcp_route._active_calls and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not mcp_route._active_calls
+    with SessionLocal() as db:
+        assert db.query(Conversation).filter(Conversation.title == "Late draft").count() == 0

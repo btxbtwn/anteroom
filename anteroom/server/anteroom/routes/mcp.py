@@ -19,6 +19,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
+from sqlalchemy import event
 
 from anteroom.database import in_worker_session
 from anteroom.services import mcp_http, mcp_oauth, mcp_tokens
@@ -78,6 +79,17 @@ def _run_mcp_call(
 ) -> tuple[Any | None, int, dict[str, str]]:
     if expired():
         raise TimeoutError
+
+    def refuse_late_commit(_session) -> None:
+        # The client was already told this call timed out: a change still in
+        # progress must not be saved behind its back, or a retry doubles it.
+        if expired():
+            raise TimeoutError
+
+    event.listen(db, "before_commit", refuse_late_commit)
+    # A commit flushes after before_commit, and a flush can wait on a locked
+    # database. Check again once the writes are flushed, just before COMMIT.
+    event.listen(db, "after_flush", lambda session, _context: refuse_late_commit(session))
     token_id = hosted_token_id
     if not is_hosted and bearer_token is not None:
         if not bearer_token:
@@ -206,7 +218,7 @@ async def mcp_post(request: Request):
         )
     except TimeoutError:
         return JSONResponse(
-            {"jsonrpc": "2.0", "id": None, "error": {"code": -32000, "message": "MCP request timed out"}},
+            {"jsonrpc": "2.0", "id": None, "error": {"code": -32000, "message": "MCP request timed out. Anything it had not saved by then was not saved."}},
             status_code=504,
             headers={"Cache-Control": "no-store"},
         )
