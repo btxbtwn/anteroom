@@ -1,0 +1,1 @@
+- Auto-relist no longer skips listings for unverified buyer offers, and Run due relists on phone shows a clear connection message and refreshes the log when the request drops.

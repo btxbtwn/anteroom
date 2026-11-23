@@ -1,32 +1,30 @@
 """Per-marketplace unattended Auto-Relist and eBay Auto-Recreate (OFF by default).
 
-Approved by the seller on 2026-11-22 (see AGENTS.md Invariant):
+Approved by the seller on 2026-11-22 (see AGENTS.md Invariant); buyer-offer skip
+removed 2026-11-23 because marketplaces cannot verify incoming offers reliably:
 - Per-marketplace rules for Poshmark, eBay, Mercari, and Depop are OFF by default.
 - Minimum 30-day cycle on Poshmark/Mercari/Depop; eBay recreate mode targets ~30 minutes
   before the monthly 30-day GTC renewal.
 - Enforces a seller daily cap (max 100/day/marketplace), optional price adjustment
   (% or $ step with floor), and filters (likers/watchers, condition, price range,
   keywords, labels).
-- Automatically skips listings with active incoming buyer offers.
 - Atomically swaps the old listing ID for the new listing ID across tracking tables
   so post-sale auto-delisting stays pinned.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 from typing import Any, cast
 
 from sqlalchemy.orm import Session
 
-from anteroom.database import in_worker_session, run_worker_db_step
+from anteroom.database import in_worker_session
 from anteroom.models.automation import MarketplaceRelistLog, MarketplaceRelistRule
 from anteroom.models.conversation import Conversation, new_id
-from anteroom.models.ebay_offer import EbayOfferAttempt, EbayOfferRule
+from anteroom.models.ebay_offer import EbayOfferRule
 from anteroom.models.listing import Listing, ListingRevision
-from anteroom.models.listing_promotion import ListingPromotion, MarketplaceOfferFloor
+from anteroom.models.listing_promotion import MarketplaceOfferFloor
 from anteroom.models.marketplace_listing import LIVE_STATES, MarketplaceListing
 from anteroom.models.marketplace_sale import PAID_STATUSES, MarketplaceSale
 from anteroom.services import listing_mode, listing_persistence
@@ -46,6 +44,7 @@ EBAY_GTC_CYCLE = timedelta(days=30)
 EBAY_CYCLE_DEDUPE_WINDOW = timedelta(hours=25)
 RELIST_RETRY_BACKOFF = timedelta(hours=6)
 AUTO_RELIST_TICK_INTERVAL = timedelta(minutes=5)
+# Historical offer-skip statuses stay in backoff so old log rows still cool down.
 BACKOFF_STATUSES = (
     "skipped_active_offer",
     "skipped_offer_unverified",
@@ -273,7 +272,6 @@ def save_rule(db: Session, marketplace: str, body: dict[str, Any], *, confirm: b
         price_floor = round(float(price_floor), 2) if price_floor not in (None, "") else None
 
     filters = _clean_filters(body.get("filters"))
-    # Active buyer offers must always be checked and skipped before deleting a live listing.
 
     with listing_mode.guard(db):
         row = db.query(MarketplaceRelistRule).filter_by(marketplace=market).first()
@@ -357,44 +355,6 @@ def matches_filters(item: dict[str, Any], filters: dict[str, Any]) -> bool:
         if not item_labels.intersection({str(lbl).strip().lower() for lbl in labels}):
             return False
     return True
-
-
-def has_active_buyer_offer_local(db: Session, conv_id: str, marketplace: str, listing_id: str) -> bool:
-    """Check local observations and recent active offers for pending/open buyer offers."""
-    ml = db.query(MarketplaceListing).filter_by(conversation_id=conv_id, marketplace=marketplace).first()
-    if ml is not None and isinstance(ml.inventory_observation, dict):
-        obs = ml.inventory_observation
-        if obs.get("has_active_offer") is True or (isinstance(obs.get("active_offers_count"), int) and obs["active_offers_count"] > 0):
-            return True
-    recent_cutoff = _now() - timedelta(hours=24)
-    if marketplace == "ebay":
-        active_ebay = (
-            db.query(EbayOfferAttempt.id)
-            .join(EbayOfferRule, EbayOfferRule.id == EbayOfferAttempt.rule_id)
-            .filter(
-                EbayOfferRule.listing_id == listing_id,
-                EbayOfferAttempt.state.in_(("sending", "sent", "pending")),
-                EbayOfferAttempt.created_at >= recent_cutoff,
-            )
-            .first()
-        )
-        if active_ebay is not None:
-            return True
-    else:
-        active_promo = (
-            db.query(ListingPromotion.id)
-            .filter(
-                ListingPromotion.marketplace == marketplace,
-                ListingPromotion.listing_id == listing_id,
-                ListingPromotion.action.in_(("offer", "bundle_offer")),
-                ListingPromotion.state.in_(("sending", "done")),
-                ListingPromotion.sent_at >= recent_cutoff,
-            )
-            .first()
-        )
-        if active_promo is not None:
-            return True
-    return False
 
 
 def swap_tracked_listing_id(
@@ -829,13 +789,10 @@ def _load_enabled_rules_and_candidates(
         for item in candidates:
             if (item["conversation_id"], rule.marketplace) in still_pending:
                 continue
-            # Always check local active buyer offers regardless of rule.skip_active_offers.
-            local_offer = has_active_buyer_offer_local(db, item["conversation_id"], rule.marketplace, item["listing_id"])
             new_price = compute_relist_price(item["price"], rule)
             plan.append({
                 "rule_id": rule.id,
                 "marketplace": rule.marketplace,
-                "local_active_offer": local_offer,
                 "new_price": new_price,
                 **item,
             })
@@ -1017,83 +974,6 @@ def _update_attempt_stage(
     db.commit()
 
 
-async def check_active_buyer_offer(marketplace: str, listing_id: str) -> bool | None:
-    """Verify whether ``listing_id`` has an active incoming buyer offer.
-
-    Returns:
-      - ``True``: verified active incoming buyer offer exists (must skip delist/relist)
-      - ``False``: verified NO active incoming buyer offer exists (safe to delist/relist)
-      - ``None``: could not verify (must fail closed with ``skipped_offer_unverified``)
-    """
-    market = str(marketplace or "").strip().lower()
-    lid = str(listing_id or "").strip()
-    if not lid:
-        return None
-
-    if market == "ebay":
-        from anteroom.services.ebay_client import NS, EbayClient, EbayFailure
-        from anteroom.services.marketplace_accounts import SignInRequired
-
-        try:
-            client = await EbayClient.connect()
-            result = await client.trading("GetBestOffers", {"ItemID": lid, "BestOfferStatus": "Active"})
-        except EbayFailure as exc:
-            combined = f"{exc} {exc.marketplace_message or ''}".lower()
-            if "21916260" in combined or "best offer is not enabled" in combined or "not enabled for best offer" in combined:
-                return False
-            log.warning("eBay GetBestOffers check failed for %s: %s", lid, exc)
-            return None
-        except (SignInRequired, Exception) as exc:  # noqa: BLE001 - fail closed when offer status cannot be verified
-            log.warning("eBay active offer check unavailable for %s: %s", lid, exc)
-            return None
-        root = result.get("xml")
-        if root is None:
-            return None
-        offers = root.findall(".//e:BestOfferArray/e:BestOffer", NS) or root.findall(".//e:BestOffer", NS)
-        # The request explicitly filters for active offers. A new status name
-        # must not turn a returned offer into clearance to delete the listing.
-        return bool(offers) if root.tag == f"{{{NS['e']}}}GetBestOffersResponse" else None
-
-    if market in ("poshmark", "depop", "mercari"):
-        from anteroom.services import browser_bridge, cloud_marketplace, cloud_sessions
-        from anteroom.services.extension_connection import current_extension
-        from anteroom.services.hosted_browser_relay import MARKETPLACE_PROMOTIONS, relay_for
-        from anteroom.services.service_context import current
-
-        payload = {"marketplace": market, "listing_id": lid}
-        job_id = f"offer-check-{new_id()}"
-        try:
-            use_cloud = await run_worker_db_step(cloud_sessions.has_active_session, market)
-            if use_cloud:
-                reply = await cloud_marketplace.execute(
-                    market,
-                    {"type": "marketplace.active_offers", "job_id": job_id, "payload": payload},
-                    timeout=20,
-                )
-            else:
-                ctx = current()
-                if ctx is not None:
-                    if relay_for(ctx.seller_id).refusal(MARKETPLACE_PROMOTIONS):
-                        return None
-                elif not current_extension().connected:
-                    return None
-                reply = await browser_bridge.request(
-                    SimpleNamespace(id=job_id),
-                    "marketplace.active_offers",
-                    payload,
-                    timeout=20,
-                )
-        except Exception as exc:  # noqa: BLE001 - fail closed when marketplace cannot be queried
-            log.warning("%s active offer check failed for %s: %s", market, lid, exc)
-            return None
-        if not isinstance(reply, dict) or reply.get("ok") is not True or reply.get("verified") is not True:
-            return None
-        active = reply.get("has_active_offer")
-        return active if isinstance(active, bool) else None
-
-    return None
-
-
 async def run_auto_relist(
     *,
     now: datetime | None = None,
@@ -1103,7 +983,6 @@ async def run_auto_relist(
     respect_backoff: bool = True,
     delister=None,
     lister=None,
-    offer_checker=None,
 ) -> list[dict[str, Any]]:
     """Run per-marketplace unattended auto-relist / eBay auto-recreate for opted-in marketplaces.
 
@@ -1132,8 +1011,8 @@ async def run_auto_relist(
                 "new_listing_id": None,
                 "old_price": entry["price"],
                 "new_price": entry["new_price"],
-                "status": "skipped_active_offer" if entry["local_active_offer"] else "dry_run",
-                "reason": "Active incoming buyer offer." if entry["local_active_offer"] else None,
+                "status": "dry_run",
+                "reason": None,
             }
             for entry in plan
         ]
@@ -1213,8 +1092,6 @@ async def run_auto_relist(
             "native_job_id": res.get("job_id"),
         }
 
-    active_offer_checker = offer_checker if offer_checker is not None else check_active_buyer_offer
-
     outcomes: list[dict[str, Any]] = []
     for entry in plan:
         conv_id = entry["conversation_id"]
@@ -1222,28 +1099,6 @@ async def run_auto_relist(
         old_id = entry["listing_id"]
         rule_id = entry["rule_id"]
         step_now = moment if now is not None else _now()
-
-        # Always verify no active incoming buyer offer before deleting a live listing.
-        offer_status = True if entry["local_active_offer"] else None
-        if offer_status is None:
-            try:
-                offer_status = await asyncio.wait_for(active_offer_checker(market, old_id), timeout=20)
-            except Exception:  # noqa: BLE001 - no positive clearance to delist
-                pass
-        if offer_status is not False:
-            outcomes.append(await in_worker_session(_record_log_payload, {
-                "conv_id": conv_id,
-                "marketplace": market,
-                "old_listing_id": old_id,
-                "new_listing_id": None,
-                "old_price": entry["price"],
-                "new_price": entry["price"],
-                "status": "skipped_active_offer" if offer_status is True else "skipped_offer_unverified",
-                "reason": ("Skipped because this listing has an active incoming buyer offer." if offer_status is True
-                           else "Skipped because Anteroom could not verify incoming buyer offers."),
-                "moment": step_now,
-            }))
-            continue
 
         # Atomically lock the rule, re-check rule.enabled and daily cap, prepare revision,
         # and commit a relist_pending row before dispatching either external write.

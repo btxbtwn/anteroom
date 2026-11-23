@@ -96,7 +96,9 @@ def test_web_regenerate_action_queues_the_sellers_draft_task(cloud, signing_keys
         assert [(row.conversation_id, row.kind, row.status) for row in db.query(BackgroundTask)] == [(coat, 'generate', 'queued')]
 
 
-def test_web_run_due_relists_uses_the_signed_in_sellers_opt_in_rules(cloud, signing_keys):  # noqa: F811
+def test_web_run_due_relists_uses_the_signed_in_sellers_opt_in_rules(cloud, signing_keys, monkeypatch):  # noqa: F811
+    from anteroom.services import auto_relist
+
     client, engine = cloud
     alice, bob = headers(signing_keys), headers(signing_keys, BOB)
     coat = item(client, alice, 'Alice coat', 100)
@@ -106,9 +108,31 @@ def test_web_run_due_relists_uses_the_signed_in_sellers_opt_in_rules(cloud, sign
             listing_id='5f0000000000000000000001',
             listing_url='https://poshmark.com/listing/5f0000000000000000000001',
             listed_at=utcnow() - timedelta(days=90),
-            listed_price=100, inventory_observation={'has_active_offer': True},
+            listed_price=100,
         ))
         db.commit()
+
+    async def fake_delister(conv_id: str, market: str) -> dict:
+        assert conv_id == coat
+        assert market == 'poshmark'
+        return {'ok': True}
+
+    async def fake_lister(conv_id: str, market: str, rev_id: str) -> dict:
+        assert conv_id == coat
+        return {
+            'ok': True,
+            'listing_id': '5f0000000000000000000002',
+            'listing_url': 'https://poshmark.com/listing/5f0000000000000000000002',
+        }
+
+    real_run = auto_relist.run_auto_relist
+
+    async def run_with_fakes(**kwargs):
+        kwargs.setdefault('delister', fake_delister)
+        kwargs.setdefault('lister', fake_lister)
+        return await real_run(**kwargs)
+
+    monkeypatch.setattr(auto_relist, 'run_auto_relist', run_with_fakes)
 
     run_path = '/api/automations/auto-relist/run'
     assert client.post(run_path).status_code == 401
@@ -124,10 +148,10 @@ def test_web_run_due_relists_uses_the_signed_in_sellers_opt_in_rules(cloud, sign
     assert response.status_code == 200, response.text
     (outcome,) = response.json()['outcomes']
     assert outcome['conversation_id'] == coat
-    assert outcome['status'] == 'skipped_active_offer'
+    assert outcome['status'] == 'completed'
     (log,) = client.get('/api/automations/auto-relist/logs', headers=alice).json()['logs']
     assert log['conversation_id'] == coat
-    assert log['status'] == 'skipped_active_offer'
+    assert log['status'] == 'completed'
 
     other_seller = client.post(run_path, headers=bob)
     assert other_seller.status_code == 200, other_seller.text
