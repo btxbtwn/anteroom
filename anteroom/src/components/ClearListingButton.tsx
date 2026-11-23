@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { DelistMarketplace, MarketplaceListings } from "../api/marketplaceListings";
@@ -119,6 +119,9 @@ export function RegenerateListingButton({
   const runtime = useWorkspaceRuntime();
   const busy = useChatBusy(convId);
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
+  // Held from the rewrite confirm through the delist question until the reset starts.
+  const [preparing, setPreparing] = useState(false);
+  const preparingRef = useRef(false);
   const { data: photos } = useQuery({
     queryKey: ["photos", convId],
     queryFn: ({ signal }) => api.conversations.photos(convId, undefined, { signal }),
@@ -131,12 +134,19 @@ export function RegenerateListingButton({
   const hasPrice = listingHasPrice(listingData?.listing);
 
   const regenerate = useMutation({
-    mutationFn: async (_delist: { title: string; marketplaces: DelistMarketplace[] }) => {
+    mutationFn: async (delist: { title: string; marketplaces: DelistMarketplace[] }) => {
       resetChatLive(convId);
       // The wipe can take a moment; show it as a phase in the chat instead
       // of leaving an empty panel.
       markChatResetting(convId, true);
       await api.conversations.reset(convId, { keepInputs: true });
+      // Queued only after the wipe, which cancels this item's marketplace jobs, and
+      // before the reads below, so a failed read cannot drop them. The seller
+      // approved exactly these marketplaces in the delist prompt.
+      for (const marketplace of delist.marketplaces) {
+        waitlist.add({ convId, title: delist.title, marketplace, kind: "delist", revisionId: "" });
+      }
+      if (delist.marketplaces.length) void queryClient.invalidateQueries({ queryKey: ["queue"] });
       // Chat must see the empty listing before it starts, or it reads the old
       // listing JSON as "generation already finished". Read both directly:
       // awaiting invalidateQueries also awaits any shared refetch, and one
@@ -151,13 +161,7 @@ export function RegenerateListingButton({
       queryClient.setQueryData(["messages", convId], messages);
       void refreshAfterReset(queryClient, convId);
     },
-    onSuccess: (_data, delist) => {
-      // Queued only after the wipe, which cancels this item's marketplace jobs.
-      // The seller approved exactly these marketplaces in the delist prompt.
-      for (const marketplace of delist.marketplaces) {
-        waitlist.add({ convId, title: delist.title, marketplace, kind: "delist", revisionId: "" });
-      }
-      if (delist.marketplaces.length) void queryClient.invalidateQueries({ queryKey: ["queue"] });
+    onSuccess: () => {
       // Stop during the wipe clears the phase; honour it instead of generating.
       if (!isChatResetting(convId)) return;
       // queueChatGenerate resets the live stream, which clears the wipe phase.
@@ -177,6 +181,23 @@ export function RegenerateListingButton({
   /** Asks once, after the rewrite is confirmed, whether to delist the live listings too.
       Keeping them listed still rewrites. */
   async function rewriteAskingDelist() {
+    // One rewrite per item: held from here until the reset settles, so a second
+    // Rewrite while this one asks or resets is ignored.
+    if (preparingRef.current) return;
+    const hold = (held: boolean) => {
+      preparingRef.current = held;
+      setPreparing(held);
+    };
+    hold(true);
+    try {
+      regenerate.mutate(await prepareRewrite(), { onSettled: () => hold(false) });
+    } catch (err) {
+      hold(false);
+      throw err;
+    }
+  }
+
+  async function prepareRewrite(): Promise<{ title: string; marketplaces: DelistMarketplace[] }> {
     const title = String(listingData?.listing?.title || "this item");
     // Read fresh: a listing that went live, or was delisted, since the page loaded changes the question.
     const liveKey = ["marketplace-listings", convId];
@@ -195,7 +216,7 @@ export function RegenerateListingButton({
       });
     const marketplaces = await askDelistOnRegenerate(title, listings,
       (marketplace) => runtime.actionMarketplaces.has(marketplace));
-    regenerate.mutate({ title, marketplaces });
+    return { title, marketplaces };
   }
 
   async function confirmFullRegenerate() {
@@ -213,7 +234,7 @@ export function RegenerateListingButton({
         variant={variant}
         size="xs"
         className={className}
-        disabled={regenerate.isPending || busy || !hasPhotos}
+        disabled={preparing || regenerate.isPending || busy || !hasPhotos}
         title={!hasPhotos
           ? "Add photos to generate a listing"
           : busy
