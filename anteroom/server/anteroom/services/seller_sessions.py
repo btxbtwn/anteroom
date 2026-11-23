@@ -21,6 +21,9 @@ class SessionVerificationUnavailable(Exception):
 @dataclass(frozen=True)
 class SellerIdentity:
     user_id: str
+    # Set when Supabase's OAuth server issued the token to a connected app
+    # (Claude, ChatGPT, Gemini). Such a token reaches the MCP endpoint only.
+    oauth_client_id: str | None = None
 
 
 class SessionVerifier:
@@ -61,8 +64,13 @@ class SessionVerifier:
                 raise InvalidSession
             user_id = str(UUID(claims["sub"]))
             UUID(claims["session_id"])
+            client_id = claims.get("client_id")
+            if client_id is not None and (
+                not isinstance(client_id, str) or not client_id or len(client_id) > 128
+            ):
+                raise InvalidSession
         except PyJWKClientConnectionError as exc:
             raise SessionVerificationUnavailable from exc
         except (jwt.PyJWTError, ValueError, TypeError, AttributeError):
             raise InvalidSession from None
-        return SellerIdentity(user_id=user_id)
+        return SellerIdentity(user_id=user_id, oauth_client_id=client_id)

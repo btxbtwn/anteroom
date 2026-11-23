@@ -99,6 +99,8 @@ import type {
   AgentConnectionStatus,
   AgentConnectionTest,
   McpAccessToken,
+  McpConnection,
+  McpConnectionRevoked,
   McpTokenCreateResponse,
   McpTokenPermissions,
 } from "./agentConnection";
@@ -1720,6 +1722,23 @@ export const api = {
         }),
       revoke: (tokenId: string) =>
         request<{ ok: boolean }>(`/settings/mcp-tokens/${encodeURIComponent(tokenId)}`, {
+          method: "DELETE",
+        }),
+    },
+    mcpConnections: {
+      list: () => request<{ connections: McpConnection[] }>("/settings/mcp-connections"),
+      approve: ({ clientId, clientName, permissions, enable = false }: { clientId: string; clientName: string | null; permissions: McpTokenPermissions; enable?: boolean }) =>
+        request<McpConnection>(`/settings/mcp-connections/${encodeURIComponent(clientId)}`, {
+          method: "PUT",
+          body: JSON.stringify({ client_name: clientName, permissions, enable }),
+        }),
+      updatePermissions: ({ clientId, permissions }: { clientId: string; permissions: Partial<McpTokenPermissions> }) =>
+        request<McpConnection>(`/settings/mcp-connections/${encodeURIComponent(clientId)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ permissions }),
+        }),
+      disconnect: (clientId: string) =>
+        request<McpConnectionRevoked>(`/settings/mcp-connections/${encodeURIComponent(clientId)}`, {
           method: "DELETE",
         }),
     },

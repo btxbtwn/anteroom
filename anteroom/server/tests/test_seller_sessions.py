@@ -309,3 +309,84 @@ def test_browser_leaving_before_the_page_loads_is_not_a_server_error(jwks, tmp_p
              "client": ("127.0.0.1", 1), "server": ("127.0.0.1", 443)}
     anyio.run(app, scope, receive, send)
     assert not [r for r in caplog.records if r.name == "anteroom.http" and r.levelname == "ERROR"]
+
+
+# Tokens Supabase's OAuth server issues to Claude, ChatGPT or Gemini carry a
+# ``client_id`` claim. They reach the MCP endpoint and nothing else.
+OAUTH_CLIENT_ID = str(uuid.uuid4())
+
+
+def test_connected_app_tokens_are_refused_outside_mcp(client, signing_keys):
+    token = session_token(signing_keys, client_id=OAUTH_CLIENT_ID)
+    for method, path in [
+        ("GET", "/api/account"),
+        ("GET", "/api/listings"),
+        ("GET", "/api/settings/mcp-tokens"),
+        ("GET", "/api/settings/mcp-connections"),
+        ("POST", "/api/marketplace-listings/delist"),
+    ]:
+        response = client.request(method, path, headers={"Authorization": f"Bearer {token}"})
+        assert response.status_code == 401, path
+
+
+def test_connected_app_token_reaches_mcp_with_its_client(client, signing_keys, monkeypatch):
+    from anteroom.routes import mcp as mcp_route
+
+    seen = {}
+
+    def fake_call(db, payload, **kwargs):
+        seen.update(kwargs)
+        return {"jsonrpc": "2.0", "id": 1, "result": {}}, 200, {}
+
+    async def fake_worker_session(step):
+        return step(None)
+
+    monkeypatch.setattr(mcp_route, "_run_mcp_call", fake_call)
+    monkeypatch.setattr(mcp_route, "in_worker_session", fake_worker_session)
+    token = session_token(signing_keys, client_id=OAUTH_CLIENT_ID)
+    response = client.post("/api/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "ping"},
+                           headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 200
+    assert seen["oauth_client_id"] == OAUTH_CLIENT_ID
+    assert seen["hosted_token_id"] is None
+
+
+@pytest.mark.parametrize("client_id", ["", 7, "x" * 129])
+def test_malformed_client_claim_is_refused(client, signing_keys, client_id):
+    token = session_token(signing_keys, client_id=client_id)
+    assert client.post("/api/mcp", json={}, headers={"Authorization": f"Bearer {token}"}).status_code == 401
+    assert get_account(client, token).status_code == 401
+
+
+def test_mcp_challenge_points_apps_at_the_sign_in_metadata(client):
+    response = client.post("/api/mcp", json={}, headers={"Host": "myanteroom.com"})
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == (
+        'Bearer resource_metadata="https://myanteroom.com/.well-known/oauth-protected-resource/api/mcp"'
+    )
+    # Other routes keep the plain challenge.
+    assert client.get("/api/account").headers["www-authenticate"] == "Bearer"
+
+
+@pytest.mark.parametrize("path", ["/.well-known/oauth-protected-resource",
+                                  "/.well-known/oauth-protected-resource/api/mcp"])
+def test_protected_resource_metadata_is_public(client, jwks, path):
+    response = client.get(path, headers={"Host": "myanteroom.com"})
+    assert response.status_code == 200
+    assert response.json() == {
+        "resource": "https://myanteroom.com/api/mcp",
+        "authorization_servers": [PROJECT_URL + "/auth/v1"],
+        "bearer_methods_supported": ["header"],
+        "resource_name": "Anteroom",
+    }
+    assert jwks["requests"] == []
+
+
+def test_app_approval_page_opens_without_a_session(jwks, tmp_path):
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "cloud.html").write_text("<!doctype html><title>Anteroom</title>")
+    with TestClient(create_app(PROJECT_URL, web_dir=tmp_path)) as client:
+        response = client.get("/oauth/consent?authorization_id=abc")
+    assert response.status_code == 200
+    assert "<title>Anteroom</title>" in response.text
+    assert "frame-ancestors 'none'" in response.headers["content-security-policy"]

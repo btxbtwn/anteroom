@@ -88,11 +88,11 @@ def test_background_workers_announce_through_the_seller_context(feed_engine, mon
     assert feed(feed_engine) == {(ALICE, "settings")}
 
 
-def subscriber_rows(engine, user, statement):
+def subscriber_rows(engine, user, statement, **claims):
     with engine.begin() as connection:
         connection.execute(text("SET LOCAL ROLE authenticated"))
         connection.execute(text("SELECT set_config('request.jwt.claims', :claims, true)"),
-                           {"claims": json.dumps({"sub": user, "role": "authenticated"})})
+                           {"claims": json.dumps({"sub": user, "role": "authenticated", **claims})})
         return connection.execute(text(statement)).all()
 
 
@@ -144,7 +144,7 @@ def test_a_committed_change_is_broadcast_once_on_the_sellers_private_channel(fee
     assert broadcasts(feed_engine) == [(channel, "change", "listings", True, "broadcast")] * 2
 
 
-def joinable(engine, user, channel):
+def joinable(engine, user, channel, **claims):
     """Whether Realtime would let this signed-in seller join the private channel.
 
     Realtime's own check: an admin writes a probe message on the channel, then
@@ -156,7 +156,7 @@ def joinable(engine, user, channel):
         connection.execute(text("SET LOCAL ROLE authenticated"))
         connection.execute(text("SELECT set_config('request.jwt.claims', :claims, true), "
                                 "set_config('realtime.topic', :channel, true)"),
-                           {"claims": json.dumps({"sub": user, "role": "authenticated"}), "channel": channel})
+                           {"claims": json.dumps({"sub": user, "role": "authenticated", **claims}), "channel": channel})
         readable = connection.scalar(text("SELECT count(*) FROM realtime.messages WHERE id = :id"), {"id": probe})
         connection.execute(text("RESET ROLE"))
         connection.execute(text("DELETE FROM realtime.messages WHERE id = :id"), {"id": probe})
@@ -190,6 +190,18 @@ def test_a_seller_may_receive_only_its_own_channel_and_never_send(feed_engine):
         connection.execute(text("INSERT INTO realtime.messages (topic, extension, event, payload, private) "
                                 "VALUES (:channel, 'broadcast', 'change', '{}', true)"),
                            {"channel": f"seller-changes:{ALICE}"})
+
+
+def test_a_connected_apps_token_cannot_follow_the_sellers_feed(feed_engine):
+    """Claude, ChatGPT or Gemini reach Anteroom only through /api/mcp."""
+    with SellerDatabaseSession(bind=feed_engine, user_id=ALICE) as db:
+        db.add(Conversation(id="coat", title="Coat"))
+        db.commit()
+    app = {"client_id": str(uuid.uuid4())}
+    assert subscriber_rows(feed_engine, ALICE, "SELECT topic FROM seller_changes") == [("listings",)]
+    assert subscriber_rows(feed_engine, ALICE, "SELECT topic FROM seller_changes", **app) == []
+    assert joinable(feed_engine, ALICE, f"seller-changes:{ALICE}")
+    assert not joinable(feed_engine, ALICE, f"seller-changes:{ALICE}", **app)
 
 
 # Until 2026-12-20: iPhone builds from before Broadcast still follow the table
