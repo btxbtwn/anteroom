@@ -1,0 +1,1 @@
+- Drawing a mark on a photo no longer highlights text beside it, so a quick second mark is no longer dragged away and lost.
