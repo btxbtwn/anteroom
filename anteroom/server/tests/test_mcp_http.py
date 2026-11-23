@@ -919,14 +919,13 @@ def test_mcp_l8_batch_cap_auth_rate_limit_and_timeout(monkeypatch):
     assert "batch" in batch_resp.json()["error"]["message"].lower()
 
     # L8: RPC timeout returns 504.
-    monkeypatch.setattr(mcp_route, "_MCP_RPC_TIMEOUT_SECONDS", 0.05)
-
     async def stall(_fn):
         import asyncio
         await asyncio.sleep(1.0)
         return ({}, 200, {})
 
     with monkeypatch.context() as mp:
+        mp.setattr(mcp_route, "_MCP_RPC_TIMEOUT_SECONDS", 0.05)
         mp.setattr(mcp_route, "in_worker_session", stall)
         timed_out = _rpc(client, "ping")
     assert timed_out.status_code == 504
