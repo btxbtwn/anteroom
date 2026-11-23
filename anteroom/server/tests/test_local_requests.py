@@ -199,3 +199,28 @@ def test_a_sign_in_this_mac_did_not_start_is_not_finished():
         page = TestClient(app).get("/api/marketplace-accounts/etsy/finish?state=s1&claim=c1", headers={"Sec-Fetch-Site": "cross-site"})
     assert page.status_code == 409
     assert "Etsy was not connected" in page.text
+
+
+def test_an_agent_over_tailscale_needs_its_mcp_token():
+    _serve_on()
+    remote = TestClient(app, base_url=PRIVATE)
+    owner = {"Origin": PRIVATE, "Tailscale-User-Login": "seller@example.com"}
+    rpc = {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}
+    accept = {"Accept": "application/json, text/event-stream"}
+
+    refused = remote.post("/api/mcp", json=rpc, headers={**owner, **accept})
+    assert refused.status_code == 401
+    assert refused.headers["WWW-Authenticate"] == "Bearer"
+
+    created = TestClient(app).post("/api/settings/mcp-tokens", json={"name": "Laptop agent"})
+    assert created.status_code == 201
+    bearer = {"Authorization": f"Bearer {created.json()['token']}"}
+    allowed = remote.post("/api/mcp", json=rpc, headers={**owner, **accept, **bearer})
+    assert allowed.status_code == 200, allowed.text
+    names = {tool["name"] for tool in allowed.json()["result"]["tools"]}
+    assert "create_draft_listing" not in names  # a new token only reads
+
+    # The Mac's own loopback requests keep every tool without a token.
+    local = TestClient(app).post("/api/mcp", json=rpc, headers=accept)
+    assert local.status_code == 200
+    assert "create_draft_listing" in {tool["name"] for tool in local.json()["result"]["tools"]}

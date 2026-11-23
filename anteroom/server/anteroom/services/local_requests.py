@@ -90,6 +90,11 @@ def origin_allowed(origin: str, *, extension: bool = False) -> bool:
     return origin in CORS_ORIGINS or origin == _private_origin or (extension and _trusted_extension(origin))
 
 
+def came_through_tailnet(headers: Headers) -> bool:
+    """Tailscale Serve names the tailnet user on every request it forwards; the Mac's own requests carry no such header."""
+    return _IDENTITY_HEADER in headers
+
+
 def _from_tailnet_owner(headers: Headers) -> bool:
     logins = headers.getlist(_IDENTITY_HEADER)
     return bool(_private_owner and len(logins) == 1 and logins[0].casefold() == _private_owner.casefold())

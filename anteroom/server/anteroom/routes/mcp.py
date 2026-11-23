@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse
 from anteroom.database import in_worker_session
 from anteroom.services import mcp_http, mcp_oauth, mcp_tokens
 from anteroom.services.hosted_limits import read_bounded_body
+from anteroom.services.local_requests import came_through_tailnet
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
 
@@ -115,6 +116,14 @@ async def mcp_post(request: Request):
     oauth_client_id = getattr(request.state, "mcp_oauth_client_id", None) if is_hosted else None
     bearer = _extract_bearer(request)
     client_key = _client_key(request, is_hosted=is_hosted)
+    if not is_hosted and bearer is None and came_through_tailnet(request.headers):
+        # Only the Mac itself reaches every tool without a token. An agent on
+        # another tailnet device is held to the token the seller gave it.
+        return JSONResponse(
+            {"detail": "Use an MCP access token from Settings → Agents to reach Anteroom over Tailscale."},
+            status_code=401,
+            headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"},
+        )
     if not is_hosted and bearer is not None and mcp_tokens.is_auth_rate_limited(client_key):
         return JSONResponse(
             {"detail": "Too many failed authentication attempts. Try again shortly."},
