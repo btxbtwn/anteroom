@@ -1172,6 +1172,33 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertIsNone(listing.scheduled_publish_at)
         self.assertIsNone(listing.scheduled_content_digest)
 
+    def test_open_job_rechecks_sold_state_for_list_and_save_draft(self):
+        from anteroom.models.job import Job
+        from anteroom.models.marketplace_sale import MarketplaceSale
+        from anteroom.services import approved_photos, native_marketplaces
+
+        now = _now()
+        conv, _listing, revision = self._create_draft("Sold Mid Preflight")
+        self.db.add(MarketplaceSale(
+            id=new_id(), marketplace="ebay", order_id="ord-mid-1", line_id="line-mid-1",
+            conversation_id=conv.id, quantity=1, order_status="paid",
+            sold_at=now, received_at=now, state="new",
+        ))
+        self.db.commit()
+
+        for kind, market in (("list", "poshmark"), ("save_draft", "poshmark")):
+            body = native_marketplaces.ListRequest(revision_id=revision.id, confirm=True)
+            snapshot = {**revision.listing_json, approved_photos.KEY: []}
+            with (
+                patch.object(approved_photos, "release") as release_mock,
+                self.assertRaises(native_marketplaces.NativeMarketplaceError) as ctx,
+            ):
+                native_marketplaces._open_job(self.db, conv.id, market, body, kind, snapshot, [], False)
+            self.assertEqual(ctx.exception.status_code, 409)
+            self.assertIn("sold", str(ctx.exception).lower())
+            release_mock.assert_called_once_with(snapshot)
+        self.assertEqual(self.db.query(Job).filter_by(conversation_id=conv.id).count(), 0)
+
     def test_m1_abandoned_claim_wakes_scheduler_and_recovers(self):
         from anteroom.services.automation_scheduler import _has_due_scheduled_drafts
 

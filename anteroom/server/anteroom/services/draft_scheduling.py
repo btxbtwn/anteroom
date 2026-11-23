@@ -232,6 +232,9 @@ def _is_sold_or_has_sale(db: Session, conv: Conversation | None) -> bool:
     return unaccounted_paid >= declared_qty
 
 
+is_sold_or_has_sale = _is_sold_or_has_sale
+
+
 def _schedule_content_digest(
     db: Session,
     conv_id: str,
@@ -508,15 +511,19 @@ def unschedule_on_edit(db: Session, conv_id: str, *, reason: str | None = None) 
 def unschedule_on_sale(db: Session, conv_id: str | None) -> bool:
     """Automatically unschedule a pending draft when the item sells out or is marked sold.
 
-    Multi-quantity items with stock still remaining stay scheduled.
+    Acquires a row lock on the Conversation so concurrent native list/save_draft job
+    creation serializes with sale recording and observes the committed sale before
+    opening a job. Multi-quantity items with stock still remaining stay scheduled.
     Does not commit: participates in the caller's save transaction.
     """
     if not conv_id:
         return False
+    conv = db.get(Conversation, conv_id, with_for_update=True, populate_existing=True)
+    if conv is None:
+        return False
     listing = db.query(Listing).filter(Listing.conversation_id == conv_id).first()
     if listing is None or listing.scheduled_status != "scheduled":
         return False
-    conv = db.get(Conversation, conv_id)
     if not _is_sold_or_has_sale(db, conv):
         return False
     return _clear_schedule(
