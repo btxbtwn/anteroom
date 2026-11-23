@@ -296,10 +296,15 @@ def _save_quantity_revision(db: Session, conv_id: str, new_quantity: int) -> tup
     return saved.id, prev_qty
 
 
-def _load_adjustment_plan(db: Session, sale_id: str, remaining: int) -> dict[str, Any] | None:
-    from anteroom.services.user_settings import auto_adjust_quantity_enabled
+def _auto_adjust_active(*, fresh: bool = True) -> bool:
+    """Auto-adjust quantity is a sub-option under Delist after a sale and requires both toggles on."""
+    from anteroom.services.user_settings import auto_adjust_quantity_enabled, autodelist_enabled
 
-    if not auto_adjust_quantity_enabled(fresh=True):
+    return autodelist_enabled(fresh=fresh) and auto_adjust_quantity_enabled(fresh=fresh)
+
+
+def _load_adjustment_plan(db: Session, sale_id: str, remaining: int) -> dict[str, Any] | None:
+    if not _auto_adjust_active(fresh=True):
         return None
     sale = db.get(MarketplaceSale, sale_id)
     if sale is None:
@@ -387,9 +392,7 @@ def _format_adjust_sentence(updated: list[str], relisted: list[str], failed: dic
 
 
 async def _quantity_opted_out() -> bool:
-    from anteroom.services.user_settings import auto_adjust_quantity_enabled
-
-    return not await asyncio.to_thread(auto_adjust_quantity_enabled, fresh=True)
+    return not await asyncio.to_thread(_auto_adjust_active, fresh=True)
 
 
 def _quantity_skipped() -> dict[str, Any]:
@@ -410,7 +413,6 @@ async def _default_updater(
     from anteroom.services.automation_actions import _turn
     from anteroom.services.ebay_client import EbayClient, segment
     from anteroom.services.sale_inventory import stock_after_sale
-    from anteroom.services.user_settings import auto_adjust_quantity_enabled
 
     if marketplace != "ebay":
         return {
@@ -420,7 +422,7 @@ async def _default_updater(
         }
 
     def binding() -> tuple[str | None, str | None]:
-        if require_setting and not auto_adjust_quantity_enabled(fresh=True):
+        if require_setting and not _auto_adjust_active(fresh=True):
             return None, "disabled"
         with _session_factory(session_factory)() as db:
             sale = db.get(MarketplaceSale, sale_id)
@@ -479,14 +481,13 @@ async def _default_mercari_relister(
 ) -> dict[str, Any]:
     from anteroom.services.automation_actions import _turn, wait_for_native_result
     from anteroom.services.native_marketplaces import ListRequest, list_now
-    from anteroom.services.user_settings import auto_adjust_quantity_enabled
 
     factory = _session_factory(session_factory)
 
     def check_eligibility() -> str | None:
         from anteroom.services.sale_inventory import stock_after_sale
 
-        if require_setting and not auto_adjust_quantity_enabled(fresh=True):
+        if require_setting and not _auto_adjust_active(fresh=True):
             return "disabled"
         with factory() as db:
             sale = db.get(MarketplaceSale, sale_id)
@@ -505,7 +506,7 @@ async def _default_mercari_relister(
                 return {"ok": False, "skipped": True, "error": "Skipped because auto-adjust quantity is turned off."}
             if blocked is not None:
                 return {"ok": False, "error": "The Mercari sale or remaining stock could not be verified."}
-            if await _quantity_opted_out():
+            if require_setting and await _quantity_opted_out():
                 return _quantity_skipped()
             res = await list_now(conv_id, "mercari", ListRequest(revision_id=revision_id, confirm=True))
             dispatched_job_id = res.get("job_id")
@@ -542,8 +543,6 @@ async def adjust_quantities_for_sale(
 
     Never runs for sold-out items (``remaining <= 0``) or cancelled/refunded orders.
     """
-    from anteroom.services.user_settings import auto_adjust_quantity_enabled
-
     if remaining <= 0:
         return {"sale_id": sale_id, "remaining": remaining, "events": [], "note": ""}
     factory = _session_factory(session_factory)
@@ -568,7 +567,7 @@ async def adjust_quantities_for_sale(
     recorded: list[dict[str, Any]] = []
 
     def _dispatch_block_reason() -> tuple[str | None, str]:
-        if not auto_adjust_quantity_enabled(fresh=True):
+        if not _auto_adjust_active(fresh=True):
             return "Skipped because auto-adjust quantity was turned off.", "paid"
         with factory() as db:
             sale = db.get(MarketplaceSale, sale_id)

@@ -248,6 +248,21 @@ class SellerSessionMiddleware:
                 # Never allow them on general workspace, publishing, or delisting routes.
                 if scope["path"] != "/api/mcp":
                     raise InvalidSession
+                req_headers = Headers(scope=scope)
+                client_info = scope.get("client")
+                client_ip = (
+                    (req_headers.get("fly-client-ip") or "").strip()
+                    or (str(client_info[0]) if client_info else "")
+                    or "unknown"
+                )
+                if mcp_tokens.is_auth_rate_limited(client_ip):
+                    response = JSONResponse(
+                        {"detail": "Too many failed authentication attempts. Try again shortly."},
+                        status_code=429,
+                        headers={"Retry-After": "60", "Cache-Control": "no-store"},
+                    )
+                    await response(scope, receive, send)
+                    return
                 from functools import partial
                 from anteroom import database
 
@@ -256,6 +271,7 @@ class SellerSessionMiddleware:
                     partial(mcp_tokens.authenticate_token, database.engine, token, hosted=True),
                 )
                 if verified is None:
+                    mcp_tokens.record_auth_failure(client_ip)
                     raise InvalidSession
                 identity = SellerIdentity(user_id=verified.owner_id)
                 context_token: str | None = None

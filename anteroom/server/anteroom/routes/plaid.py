@@ -38,7 +38,7 @@ async def _call[T](work: Awaitable[T]) -> T:
         raise HTTPException(404, str(exc)) from exc
     except expenses.PlaidConflict as exc:
         raise HTTPException(409, str(exc)) from exc
-    except CredentialStorageUnavailable as exc:
+    except (CredentialStorageUnavailable, expenses.PlaidUnavailable) as exc:
         raise HTTPException(503, str(exc)) from exc
     except PlaidError as exc:
         raise HTTPException(502, str(exc)) from None

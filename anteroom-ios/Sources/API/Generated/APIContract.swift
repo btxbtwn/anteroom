@@ -464,7 +464,7 @@ struct Expense: Identifiable, Codable, Hashable, Sendable {
     var originDestination: String?
     var id: String
     var revision: Int
-    /// One of: operating_expense, inventory_purchase.
+    /// One of: operating_expense, inventory_purchase, needs_review.
     var accountingType: String
     /// One of: manual, csv, plaid.
     var importSource: String

@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 import json
 import uuid
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -353,6 +354,9 @@ def tool_definitions() -> list[dict[str, Any]]:
     ]
 
 
+MAX_RPC_BATCH_SIZE = 20
+
+
 def handle_rpc_payload(
     db: Session,
     payload: Any,
@@ -360,6 +364,8 @@ def handle_rpc_payload(
     session_id: str | None = None,
     protocol_version: str | None = None,
     bearer_token: str | None = None,
+    deferred_deletes: list[str] | None = None,
+    expired: Callable[[], bool] | None = None,
 ) -> tuple[Any | None, int, dict[str, str]]:
     """Process a JSON-RPC 2.0 request object or batch.
 
@@ -376,10 +382,22 @@ def handle_rpc_payload(
     if isinstance(payload, list):
         if not payload:
             return _rpc_error(None, -32600, "Invalid Request: empty batch"), 400, headers
+        if len(payload) > MAX_RPC_BATCH_SIZE:
+            return (
+                _rpc_error(None, -32600, f"Invalid Request: batch exceeds maximum size of {MAX_RPC_BATCH_SIZE}"),
+                400,
+                headers,
+            )
         responses: list[dict[str, Any]] = []
         for item in payload:
+            if expired is not None and expired():
+                raise TimeoutError
             resp, negotiated = _handle_single(
-                db, item, headers=headers, bearer_token=bearer_token,
+                db,
+                item,
+                headers=headers,
+                bearer_token=bearer_token,
+                deferred_deletes=deferred_deletes,
             )
             if negotiated:
                 headers["MCP-Protocol-Version"] = negotiated
@@ -392,7 +410,15 @@ def handle_rpc_payload(
     if not isinstance(payload, dict):
         return _rpc_error(None, -32600, "Invalid Request: expected JSON object"), 400, headers
 
-    resp, negotiated = _handle_single(db, payload, headers=headers, bearer_token=bearer_token)
+    if expired is not None and expired():
+        raise TimeoutError
+    resp, negotiated = _handle_single(
+        db,
+        payload,
+        headers=headers,
+        bearer_token=bearer_token,
+        deferred_deletes=deferred_deletes,
+    )
     if negotiated:
         headers["MCP-Protocol-Version"] = negotiated
     if resp is None:
@@ -406,6 +432,7 @@ def _handle_single(
     *,
     headers: dict[str, str],
     bearer_token: str | None,
+    deferred_deletes: list[str] | None = None,
 ) -> tuple[dict[str, Any] | None, str | None]:
     if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
         return _rpc_error(None, -32600, "Invalid Request: jsonrpc must be '2.0'"), None
@@ -468,7 +495,13 @@ def _handle_single(
         if not isinstance(arguments, dict):
             return _rpc_error(msg_id, -32602, "Invalid params: arguments must be an object"), None
         try:
-            result_data = _dispatch_tool(db, name, arguments, bearer_token=bearer_token)
+            result_data = _dispatch_tool(
+                db,
+                name,
+                arguments,
+                bearer_token=bearer_token,
+                deferred_deletes=deferred_deletes,
+            )
         except KeyError:
             db.rollback()
             return _rpc_error(msg_id, -32602, f"Unknown tool: {name}"), None
@@ -512,6 +545,7 @@ def _dispatch_tool(
     args: dict[str, Any],
     *,
     bearer_token: str | None,
+    deferred_deletes: list[str] | None = None,
 ) -> dict[str, Any]:
     handlers = {
         "search_inventory": _tool_search_inventory,
@@ -530,7 +564,7 @@ def _dispatch_tool(
     handler = handlers.get(name)
     if handler is None:
         raise KeyError(name)
-    return handler(db, args, bearer_token=bearer_token)
+    return handler(db, args, bearer_token=bearer_token, deferred_deletes=deferred_deletes)
 
 
 # ---------------------------------------------------------------------------
@@ -910,7 +944,10 @@ def _tool_manage_listing_photos(
     args: dict[str, Any],
     *,
     bearer_token: str | None = None,
+    deferred_deletes: list[str] | None = None,
 ) -> dict[str, Any]:
+    from anteroom.services.draft_scheduling import unschedule_on_edit
+
     conv_id = _require_str(args, "conversation_id")
     action = str(args.get("action") or "").strip().lower()
     conv = ConversationRepo(db).get(conv_id)
@@ -930,6 +967,7 @@ def _tool_manage_listing_photos(
         positions = {pid: idx for idx, pid in enumerate(ordered_ids)}
         for row in rows:
             row.display_order = positions[row.id]
+        unschedule_on_edit(db, conv_id, reason="Photos changed after scheduling; review and reschedule before publishing.")
         db.commit()
         return {
             "ok": True,
@@ -950,8 +988,11 @@ def _tool_manage_listing_photos(
         source_key = photo.source_filename
         remove_photo_selections(db, conv_id, photo_id)
         db.delete(photo)
+        unschedule_on_edit(db, conv_id, reason="Photos changed after scheduling; review and reschedule before publishing.")
         db.commit()
-        _best_effort_delete_photo_files(db, stored_key, source_key, bearer_token=bearer_token)
+        _best_effort_delete_photo_files(
+            db, stored_key, source_key, bearer_token=bearer_token, deferred_deletes=deferred_deletes,
+        )
         remaining = db.scalars(
             select(Photo.id)
             .where(Photo.conversation_id == conv_id)
@@ -1058,6 +1099,7 @@ def _tool_delete_draft_listing(
     args: dict[str, Any],
     *,
     bearer_token: str | None = None,
+    deferred_deletes: list[str] | None = None,
 ) -> dict[str, Any]:
     conv_id = _require_str(args, "conversation_id")
     if args.get("confirm") is not True:
@@ -1095,7 +1137,9 @@ def _tool_delete_draft_listing(
         storage_keys = hosted_listing_delete.remove_unsent_draft(db, conv_id)
         db.commit()
         for key in storage_keys:
-            _best_effort_delete_photo_files(db, key, None, bearer_token=bearer_token)
+            _best_effort_delete_photo_files(
+                db, key, None, bearer_token=bearer_token, deferred_deletes=deferred_deletes,
+            )
     else:
         from anteroom.services.listing_delete import ListingBusy, delete_listing
 
@@ -1131,27 +1175,49 @@ def _assert_not_busy(db: Session, conv_id: str) -> None:
         raise McpToolError("Wait for the active background task to finish before editing.")
 
 
+def delete_hosted_storage_keys(
+    keys: list[str],
+    *,
+    bearer_token: str | None,
+    deadline_seconds: float = 15.0,
+) -> None:
+    """Best-effort delete of hosted Storage objects outside any DB session, bounded by a deadline."""
+    import time
+
+    from anteroom.services import hosted_photos, hosted_storage
+
+    if not keys:
+        return
+    deadline = time.monotonic() + deadline_seconds
+    for key in dict.fromkeys(k for k in keys if k):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            if bearer_token and bearer_token.startswith("arm_"):
+                hosted_storage.photo_call("DELETE", key, timeout=min(remaining, 30.0))
+            elif bearer_token:
+                hosted_photos.storage_call("DELETE", key, bearer_token, timeout=min(remaining, 20.0))
+        except Exception:
+            continue
+
+
 def _best_effort_delete_photo_files(
     db: Session,
     stored_key: str | None,
     source_key: str | None,
     *,
     bearer_token: str | None,
+    deferred_deletes: list[str] | None = None,
 ) -> None:
     keys = [k for k in (stored_key, source_key) if k]
     if not keys:
         return
     if hasattr(db, "user_id"):
-        from anteroom.services import hosted_photos, hosted_storage
-
-        for key in keys:
-            try:
-                if bearer_token and bearer_token.startswith("arm_"):
-                    hosted_storage.photo_call("DELETE", key)
-                elif bearer_token:
-                    hosted_photos.storage_call("DELETE", key, bearer_token)
-            except Exception:
-                continue
+        if deferred_deletes is not None:
+            deferred_deletes.extend(keys)
+            return
+        delete_hosted_storage_keys(keys, bearer_token=bearer_token)
         return
     from anteroom.services.photo_store import photo_store
 

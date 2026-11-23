@@ -381,18 +381,31 @@ def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequest) -
     with freeze_active_rules() as rules:
         snapshot = direct_preflight.prepare(db, conv, snapshot, marketplace)
         snapshot[SNAPSHOT_RULES] = rules
+    from anteroom.services.draft_scheduling import SchedulePublishError, verified_scheduled_media
     from anteroom.services.listing_videos import VIDEO_MARKETPLACES, selected_video
+
+    try:
+        scheduled_media = verified_scheduled_media(db, conv_id, marketplace)
+    except SchedulePublishError as exc:
+        raise NativeMarketplaceError(exc.status_code, exc.detail) from exc
 
     if marketplace in VIDEO_MARKETPLACES:
         try:
-            snapshot["_native_video"] = selected_video(db, conv_id, snapshot, marketplace)
+            if scheduled_media is None:
+                snapshot["_native_video"] = selected_video(db, conv_id, snapshot, marketplace)
+            else:
+                snapshot["_native_video"] = selected_video(db, conv_id, snapshot, marketplace, videos=scheduled_media[1])
         except ValueError as exc:
             raise NativeMarketplaceError(400, str(exc)) from exc
     if active_generation(conv_id) or activity.running(conv_id):
         raise NativeMarketplaceError(409, "Wait for generation to finish.")
     if marketplace not in API_MARKETPLACES and (refusal := marketplace_actions_refusal(marketplace)):
         raise NativeMarketplaceError(409, refusal)
-    photos, warning = _photos(db, conv_id, snapshot, marketplace)
+    if scheduled_media is None:
+        photos, warning = _photos(db, conv_id, snapshot, marketplace)
+    else:
+        all_photos = sorted(scheduled_media[0], key=lambda photo: photo.marketplace is not None)
+        photos, warning = marketplace_media.photos_for(snapshot, all_photos, marketplace)
     snapshot["_approved_photo_warning"] = warning
     return snapshot, photos
 
@@ -464,11 +477,12 @@ def _check_start(db: Session, conv_id: str, marketplace: str, body: ListRequest,
     # The seller deleted the listing this record last published, so nothing is live there.
     deleted_here = False
     if kind in {"list", "save_draft"}:
+        from anteroom.services.draft_scheduling import is_sold_or_has_sale
         from anteroom.services.marketplace_delist import listings as live_listings
 
         conv = _conversation(db, conv_id)
         listings = live_listings(db, conv_id)
-        if conv.status == "sold" or any(entry.get("sold_here") for entry in listings.values()):
+        if conv.status == "sold" or any(entry.get("sold_here") for entry in listings.values()) or is_sold_or_has_sale(db, conv):
             raise NativeMarketplaceError(409, "This item has sold. It cannot be listed again.")
         existing = listings.get(marketplace) or {}
         if existing.get("listing_id") and existing.get("state") != "deleted":
@@ -515,6 +529,22 @@ def _open_job(db: Session, conv_id: str, marketplace: str, body: ListRequest, ki
                 rule = db.get(MarketplaceRelistRule, relist_rule_id, with_for_update=True)
                 if not rule or rule.marketplace != marketplace or not rule.enabled:
                     raise NativeMarketplaceError(409, "The relist rule was turned off.", reason="relist_rule_disabled")
+            if kind in {"list", "save_draft"}:
+                from anteroom.models.conversation import Conversation
+                from anteroom.services.draft_scheduling import is_sold_or_has_sale
+                from anteroom.services.marketplace_delist import listings as live_listings
+
+                # Serialize with sale recording (which also locks Conversation in unschedule_on_sale)
+                # so a sale committed during pre-job awaits is always observed before opening the job.
+                conv = db.get(Conversation, conv_id, with_for_update=True, populate_existing=True)
+                if conv is None:
+                    raise NativeMarketplaceError(404, "Listing not found.")
+                if (
+                    conv.status == "sold"
+                    or any(entry.get("sold_here") for entry in live_listings(db, conv_id).values())
+                    or is_sold_or_has_sale(db, conv)
+                ):
+                    raise NativeMarketplaceError(409, "This item has sold. It cannot be listed again.")
             record = _record(db, conv_id, marketplace)
             if record.get("state") in UNSETTLED_STATES:
                 raise NativeMarketplaceError(409, f"Check the last {name} action first; Anteroom has not confirmed it.")

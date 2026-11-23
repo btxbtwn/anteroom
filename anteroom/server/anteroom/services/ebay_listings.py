@@ -968,7 +968,9 @@ async def _video_ids(client: EbayClient, snapshot: dict, binding: dict, record: 
     A video whose create reply was lost is never attached to anything, and eBay
     removes unused videos after 30 days, so creating it again cannot change a listing.
     """
-    from anteroom.services.listing_videos import video_bytes
+    from contextlib import ExitStack
+
+    from anteroom.services.listing_videos import open_verified_video
 
     video = _video_choice(snapshot)
     if not video:
@@ -978,21 +980,24 @@ async def _video_ids(client: EbayClient, snapshot: dict, binding: dict, record: 
         saved = {}
     video_id = str(saved.get("video_id") or "") if saved.get("checksum") == video["checksum"] else ""
     status = await _video_status(client, video_id) if video_id else None
-    data = await asyncio.to_thread(video_bytes, video) if status is None or status.get("status") == "PENDING_UPLOAD" else b""
-    if not await _is_active(active):
-        raise ValueError("The eBay listing stopped before it finished. List again to continue.")
-    if status is None:
-        # Never created for this file, or eBay removed it after 30 unused days.
-        created = await client.request("POST", "/commerce/media/v1_beta/video", body={
-            "title": ebay_title(snapshot) or "Listing video", "size": int(video["size_bytes"]), "classification": ["ITEM"]})
-        video_id = str(created.get("videoId") or created.get("receiptId") or "")
-        if not re.fullmatch(r"[A-Za-z0-9._:-]{1,200}", video_id):
-            raise EbayFailure("eBay did not confirm the video. Check the item before trying again.")
-        await _record(record, {"ebay_video": {"checksum": video["checksum"], "video_id": video_id}})
-        status = {"status": "PENDING_UPLOAD"}
-    if status.get("status") == "PENDING_UPLOAD":
-        # Upload only while eBay still waits for the file; once it has it, the status moves on.
-        await client.request("POST", f"/commerce/media/v1_beta/video/{segment(video_id)}/upload", binary=data)
+    needs_upload = status is None or status.get("status") == "PENDING_UPLOAD"
+    with ExitStack() as stack:
+        video_file = await asyncio.to_thread(stack.enter_context, open_verified_video(video)) if needs_upload else None
+        if not await _is_active(active):
+            raise ValueError("The eBay listing stopped before it finished. List again to continue.")
+        if status is None:
+            # Never created for this file, or eBay removed it after 30 unused days.
+            created = await client.request("POST", "/commerce/media/v1_beta/video", body={
+                "title": ebay_title(snapshot) or "Listing video", "size": int(video["size_bytes"]), "classification": ["ITEM"]})
+            video_id = str(created.get("videoId") or created.get("receiptId") or "")
+            if not re.fullmatch(r"[A-Za-z0-9._:-]{1,200}", video_id):
+                raise EbayFailure("eBay did not confirm the video. Check the item before trying again.")
+            await _record(record, {"ebay_video": {"checksum": video["checksum"], "video_id": video_id}})
+            status = {"status": "PENDING_UPLOAD"}
+        if status.get("status") == "PENDING_UPLOAD":
+            # Upload only while eBay still waits for the file; once it has it, the status moves on.
+            assert video_file is not None
+            await client.request("POST", f"/commerce/media/v1_beta/video/{segment(video_id)}/upload", binary=video_file)
     return [video_id]
 
 

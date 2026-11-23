@@ -35,6 +35,7 @@ class SaleQuantitySyncAndTrackerTest(unittest.TestCase):
         self.enterContext(patch("anteroom.database.SessionLocal", self.Session))
         tmp_dir = self.enterContext(tempfile.TemporaryDirectory())
         self.enterContext(patch("anteroom.services.user_settings.user_data_root", return_value=Path(tmp_dir)))
+        user_settings.set_autodelist(True)
         self.client = TestClient(app)
 
     def tearDown(self):
@@ -553,6 +554,27 @@ class SaleQuantitySyncAndTrackerTest(unittest.TestCase):
         self.assertTrue(posh_res.get("unsupported"))
         self.assertFalse(depop_res["ok"])
         self.assertTrue(depop_res.get("unsupported"))
+
+    def test_auto_adjust_quantity_requires_autodelist_enabled(self):
+        # L4: auto_adjust_quantity is a sub-setting of autodelist and must not fire when autodelist is off.
+        conv = self._create_multi_qty_item(title="Gated Socks", qty=2, sku="SKU-GATE-1")
+        self._add_live(conv.id, "ebay", "123456789777", "https://www.ebay.com/itm/123456789777")
+        self._add_live(conv.id, "poshmark", "5f0000000000000000000777", "https://poshmark.com/listing/5f0000000000000000000777")
+        sale = self._add_sale(conv.id, "ebay", order_id="ord-gate-1", listing_id="123456789777", quantity=1)
+
+        called: list[str] = []
+
+        async def fake_updater(_cid: str, market: str, _rid: str, _qty: int) -> dict:
+            called.append(market)
+            return {"ok": True}
+
+        user_settings.set_autodelist(False)
+        user_settings.set_auto_adjust_quantity(True)
+        res = asyncio.run(
+            sale_quantity_sync.adjust_quantities_for_sale(sale.id, 1, session_factory=self.Session, updater=fake_updater)
+        )
+        self.assertEqual(called, [])
+        self.assertEqual(res["events"], [])
 
 
 if __name__ == "__main__":

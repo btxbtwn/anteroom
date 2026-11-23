@@ -643,4 +643,12 @@ def test_move_photos_serializes_same_seller_upload_requests():
     assert max_in_flight == 1
 
 
+def test_account_import_copies_pricing_rules_shipping_presets_and_listing_warnings():
+    # L1: pricing_rules, shipping_presets, and listing_warnings must survive Mac -> Web account import.
+    from anteroom.services import account_import
+
+    for key in ('pricing_rules', 'shipping_presets', 'listing_warnings'):
+        assert key in account_import.ALLOWED_SETTINGS_KEYS
+
+
 
