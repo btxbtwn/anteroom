@@ -1,0 +1,1 @@
+- Connect in Cloud for Mercari and Depop now tells you right away when the cloud runner is busy, instead of checking your sign-in after the page has already given up.
