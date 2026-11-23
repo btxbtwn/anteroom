@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 
 from anteroom.database import SessionLocal, get_db, in_worker_session
 from anteroom.models.assistant import AssistantMessage, AssistantThread
+from anteroom.routes.api_contract import PreferredName, PreferredNameInput
 from anteroom.routes.attachments import AttachmentUpload, store_uploads
 from anteroom.services import assistant_changes, assistant_memory, background_tasks, business_assistant
 from anteroom.services.chat_attachments import MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, attach_to_last_user_turn
@@ -49,7 +50,6 @@ from anteroom.services.streaming import (
 )
 from anteroom.services.user_settings import (
     MAX_BUSINESS_NOTE_CHARS,
-    MAX_PREFERRED_NAME_CHARS,
     get_business_note,
     get_preferred_name,
     set_business_note,
@@ -103,11 +103,6 @@ class AssistantQuestion(BaseModel):
 
 class BusinessNote(BaseModel):
     note: str = Field(max_length=MAX_BUSINESS_NOTE_CHARS)
-
-
-class PreferredName(BaseModel):
-    # Room for surrounding spaces; set_preferred_name trims and enforces the limit.
-    name: str = Field(max_length=MAX_PREFERRED_NAME_CHARS * 4)
 
 
 @router.get("/threads")
@@ -171,14 +166,14 @@ def save_note(body: BusinessNote):
     return {"note": set_business_note(body.note)}
 
 
-@router.get("/name")
+@router.get("/name", response_model=PreferredName)
 def get_name():
     """What the seller asked to be called; the home screen greets them by it."""
     return {"name": get_preferred_name()}
 
 
-@router.put("/name")
-def save_name(body: PreferredName):
+@router.put("/name", response_model=PreferredName)
+def save_name(body: PreferredNameInput):
     try:
         return {"name": set_preferred_name(body.name)}
     except ValueError as exc:

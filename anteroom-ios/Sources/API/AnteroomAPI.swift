@@ -993,8 +993,7 @@ final class AnteroomAPI: Sendable {
 
     /// What the seller asked to be called (Settings → Assistant on the web); empty until they say.
     func assistantName() async throws -> String {
-        struct Payload: Decodable { let name: String }
-        let payload: Payload = try await decode(request("GET", "api/assistant/name"))
+        let payload: PreferredName = try await decode(request("GET", "api/assistant/name"))
         return payload.name
     }
 
