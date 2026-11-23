@@ -450,3 +450,14 @@ class MarkedSoldElsewhereTest(unittest.TestCase):
         self.assertEqual(second["recorded"], [])
         with Session() as db:
             self.assertEqual([line.marketplace for line in db.query(MarketplaceSale).all()], ["depop"])
+
+
+def test_checking_sales_on_a_missing_listing_answers_not_found():
+    from fastapi.testclient import TestClient
+
+    from anteroom.main import app
+
+    client = TestClient(app, raise_server_exceptions=False)
+    reply = client.post("/api/conversations/no-such-listing/marketplace-listings/check-sales")
+    assert reply.status_code == 404
+    assert reply.json()["detail"] == "Conversation not found"
