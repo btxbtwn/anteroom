@@ -26,9 +26,24 @@
         } catch (e) {}
       })();
     </script>
+    <link rel="stylesheet" href="/src/styles/app.css" />
+    <link rel="stylesheet" href="/src/styles/startup.css" />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Visible while the application bundle downloads; React replaces this shell. -->
+      <main class="startup-screen" aria-label="Opening Anteroom">
+        <div class="startup-content">
+          <img class="startup-logo" src="/desktop/AppIcon.png" width="48" height="48" alt="" />
+          <h1 class="startup-title">Anteroom</h1>
+          <div class="startup-status" role="status" aria-atomic="true">
+            <span class="startup-spinner" aria-hidden="true"></span>
+            <p>Getting things ready…</p>
+          </div>
+          <div class="startup-recovery"></div>
+        </div>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
