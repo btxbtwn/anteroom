@@ -1,1 +1,1 @@
-- Keep the hosted web app from going blank when the server runs out of memory.
+- Give the hosted web app 4 GB of memory to reduce the risk of outages during memory spikes.

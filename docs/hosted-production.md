@@ -80,6 +80,10 @@ core and the worker takes the shared one.
 | `app` | `web` | performance-1x, 4 GB | Seller requests, Mac and Chrome connections, direct marketplace jobs, Chrome sale checks and promotion rounds (`chrome` lease) |
 | `worker` | `worker` | shared-cpu-1x, 2 GB | Drafts, assistant answers, automations, eBay offers, the job watchdog, Sourcing and sales sync (`schedulers` lease) |
 
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:dad82965bc88235bfa5426087fbb13f386f1b4aeb56c3abc43cd5138bf81776c -->
+
 **Incident mitigation (2026-11-22, [#1816](https://github.com/btxbtwn/anteroom/issues/1816)):** the web
 Machine's Python process was OOM-killed twice the same evening at about 1.9 GB
 RSS on the approved 2 GB shape, so Fly had no healthy candidate and
@@ -87,6 +91,20 @@ myanteroom.com hung. The live web Machine was raised to 4 GB that night, and
 `deploy/fly/fly.toml` matches it so the next deploy does not shrink RAM. This
 is a temporary capacity stopgap; the root-cause memory spike still needs a fix
 before treating 4 GB as the long-term size.
+
+Remaining gaps for [#1816](https://github.com/btxbtwn/anteroom/issues/1816):
+
+- Seller approval for the 4 GB allocation is pending confirmation. The live
+  resize and recovery are recorded in the
+  [incident update](https://github.com/btxbtwn/anteroom/issues/1816#issuecomment-7089572227);
+  the documented capacity approval above covers the 2 GB shape.
+- Repeat the reconnect workload that exhausted the 2 GB Machine and record
+  web process RSS before and after the load, whether any OOM kill occurs, and
+  whether health stays passing throughout. Record sustained CPU, database
+  time, query count, and p95 latency under concurrent load. The reported health
+  check after the resize does not establish those results.
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 Chrome sale checks and promotion rounds stay on the web Machine because they
 list sellers from the Chrome tabs connected to their own process
