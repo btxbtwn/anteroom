@@ -279,8 +279,17 @@ def test_capacity_and_best_effort_disconnect_preserve_expenses(local, provider):
     path = f"{ROOT}/connections/{first['id']}"
     assert keychain.read_slot(f"plaid:{first['id']}") == "test-access-bank"
     failures["/item/remove"] = "INTERNAL_SERVER_ERROR"
-    assert client.delete(path).status_code == 204
+    assert client.delete(path).status_code == 502
     assert ("/item/remove", {"access_token": "test-access-bank"}) in calls
+    # Token and disconnecting row remain so the seller can retry revocation safely.
+    assert keychain.read_slot(f"plaid:{first['id']}") == "test-access-bank"
+    assert client.post(f"{path}/sync").status_code == 409
+    with Session(engine) as db:
+        row = db.get(PlaidConnection, first["id"])
+        assert row is not None and row.disconnecting is True
+    # Once Plaid accepts (or reports ITEM_NOT_FOUND), disconnect completes cleanly.
+    failures["/item/remove"] = "ITEM_NOT_FOUND"
+    assert client.delete(path).status_code == 204
     assert keychain.read_slot(f"plaid:{first['id']}") is None
     assert client.post(f"{path}/sync").status_code == 404
     assert "Pirate Ship" in list_expenses(client)
@@ -441,3 +450,50 @@ def test_hosted_never_checks_out_a_seller_slot_during_plaid_http(vault_storage, 
         asyncio.run(plaid_expenses.disconnect(client, result.id))
         assert alice_secrets.get(f"plaid:{result.id}") is None
     assert {"plaid_connections", "plaid_transactions"}.isdisjoint(table.name for table in imported_tables())
+
+
+def test_plaid_m6_503_unconfigured_m8_clothing_other_and_l7_categorized_refunds(local, provider, monkeypatch):
+    client, _engine = local
+    pages, _calls, _failures = provider
+
+    # M8: clothing & thrift transactions default to "other", never "inventory_purchases".
+    # L7: categorized negative refund imports as negative cents; uncategorized negative inflow is skipped.
+    thrift = {
+        **transaction("thrift", name="Goodwill", amount=25.0),
+        "personal_finance_category": {
+            "primary": "GENERAL_MERCHANDISE",
+            "detailed": "GENERAL_MERCHANDISE_THRIFT_STORES",
+        },
+    }
+    clothing = {
+        **transaction("clothes", name="Nordstrom", amount=40.0),
+        "personal_finance_category": {
+            "primary": "GENERAL_MERCHANDISE",
+            "detailed": "GENERAL_MERCHANDISE_CLOTHING_AND_ACCESSORIES",
+        },
+    }
+    refund = {
+        **transaction("refund", name="Pirate Ship Refund", amount=-8.5),
+        "personal_finance_category": {
+            "primary": "GENERAL_SERVICES",
+            "detailed": "GENERAL_SERVICES_POSTAGE_AND_SHIPPING",
+        },
+    }
+    inflow = {
+        **transaction("inflow", name="Bank Deposit", amount=-500.0),
+        "personal_finance_category": None,
+    }
+    pages[None] = page("p1", added=[thrift, clothing, refund, inflow])
+    connect(client)
+    by_vendor = list_expenses(client)
+    assert by_vendor["Goodwill"]["category"] == "other"
+    assert by_vendor["Nordstrom"]["category"] == "other"
+    assert by_vendor["Pirate Ship Refund"]["amount_cents"] == -850
+    assert by_vendor["Pirate Ship Refund"]["category"] == "shipping_labels"
+    assert "Bank Deposit" not in by_vendor
+
+    # M6: missing Plaid credentials returns HTTP 503 (PlaidUnavailable).
+    monkeypatch.delenv("PLAID_CLIENT_ID", raising=False)
+    monkeypatch.delenv("PLAID_SECRET", raising=False)
+    unconfigured = client.post(f"{ROOT}/link-token")
+    assert unconfigured.status_code == 503

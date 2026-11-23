@@ -7,9 +7,12 @@ updates with it selected.
 """
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 import hashlib
 import math
 from pathlib import Path
+import tempfile
 import uuid
 
 from fastapi import UploadFile
@@ -34,6 +37,9 @@ VIDEO_RULES: dict[str, dict] = {
              "mime_types": ["video/mp4", "video/quicktime", "video/x-flv", "video/x-msvideo", "video/3gpp", "video/mpeg"]},
 }
 VIDEO_MARKETPLACES = frozenset(VIDEO_RULES)
+ALLOWED_VIDEO_MIME_TYPES = frozenset(
+    mime for rules in VIDEO_RULES.values() for mime in rules.get("mime_types", ())
+)
 
 
 def _hosted() -> bool:
@@ -71,9 +77,11 @@ def read_video_metadata(path: Path) -> dict:
     duration = metadata.get("duration", None)
     duration = duration.total_seconds() if duration is not None else 0
     width, height = metadata.get("width", 0), metadata.get("height", 0)
-    mime = metadata.get("mime_type", "")
-    if not str(mime).startswith("video/") or not math.isfinite(duration) or duration <= 0 or min(width, height) <= 0:
+    mime = str(metadata.get("mime_type", ""))
+    if not mime.startswith("video/") or not math.isfinite(duration) or duration <= 0 or min(width, height) <= 0:
         raise ValueError("Choose a video with a readable duration and picture dimensions.")
+    if mime not in ALLOWED_VIDEO_MIME_TYPES:
+        raise ValueError("This video format is not supported. Use an MP4 or MOV file.")
     return {"duration_seconds": duration, "width": width, "height": height, "mime_type": mime}
 
 
@@ -146,6 +154,40 @@ def video_problem(row: ListingVideo, marketplace: str) -> str | None:
     if "mime_types" in rules and row.mime_type not in rules["mime_types"]:
         return f"{name} does not accept this video format. Use an MP4 or MOV file."
     return None
+
+
+def _verify_video_file(path: Path, video: dict) -> None:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            size += len(chunk)
+            digest.update(chunk)
+    if size != video.get("size_bytes") or digest.hexdigest() != video.get("checksum"):
+        raise ValueError("The listing video changed. Choose it again before listing.")
+
+
+@contextmanager
+def open_verified_video(video: dict) -> Iterator[Path]:
+    """Yield a verified local path for ``video`` without reading the full file into RAM."""
+    if _hosted():
+        from fastapi import HTTPException
+
+        from anteroom.services import hosted_videos
+        with tempfile.TemporaryDirectory(prefix="anteroom-video-read-") as folder:
+            dest = Path(folder) / "upload.video"
+            try:
+                hosted_videos.download_to_path(str(video.get("stored_filename") or ""), dest)
+            except HTTPException:
+                raise ValueError("The selected listing video is missing. Choose another video or clear it.") from None
+            _verify_video_file(dest, video)
+            yield dest
+        return
+    path = VIDEOS_DIR / Path(str(video.get("stored_filename") or "")).name
+    if not path.name or not path.is_file():
+        raise ValueError("The selected listing video is missing. Choose another video or clear it.")
+    _verify_video_file(path, video)
+    yield path
 
 
 def video_bytes(video: dict) -> bytes:

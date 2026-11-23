@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+import threading
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -21,6 +23,61 @@ TOKEN_PREFIX = "arm_"
 MAX_ACTIVE_TOKENS = 25
 MAX_NAME_LENGTH = 80
 MAX_EXPIRY_DAYS = 365
+AUTH_FAIL_WINDOW_S = 60.0
+AUTH_FAIL_MAX = 20
+_AUTH_FAIL_MAX_KEYS = 4096
+_AUTH_FAIL_LOCK = threading.Lock()
+_AUTH_FAILURES: dict[str, list[float]] = {}
+
+
+def _prune_failures_locked(cutoff: float) -> None:
+    stale = [key for key, stamps in _AUTH_FAILURES.items() if not stamps or stamps[-1] <= cutoff]
+    for key in stale:
+        del _AUTH_FAILURES[key]
+
+
+def is_auth_rate_limited(client_key: str, *, now: float | None = None) -> bool:
+    """Return True when ``client_key`` exceeded failed MCP token attempts in the rolling window."""
+    if not client_key:
+        return False
+    clock = time.monotonic() if now is None else now
+    cutoff = clock - AUTH_FAIL_WINDOW_S
+    with _AUTH_FAIL_LOCK:
+        stamps = _AUTH_FAILURES.get(client_key)
+        if not stamps:
+            return False
+        recent = [ts for ts in stamps if ts > cutoff]
+        if recent:
+            _AUTH_FAILURES[client_key] = recent
+        else:
+            _AUTH_FAILURES.pop(client_key, None)
+        return len(recent) >= AUTH_FAIL_MAX
+
+
+def record_auth_failure(client_key: str, *, now: float | None = None) -> None:
+    """Record a failed MCP token verification attempt for ``client_key``."""
+    if not client_key:
+        return
+    clock = time.monotonic() if now is None else now
+    cutoff = clock - AUTH_FAIL_WINDOW_S
+    with _AUTH_FAIL_LOCK:
+        if len(_AUTH_FAILURES) >= _AUTH_FAIL_MAX_KEYS and client_key not in _AUTH_FAILURES:
+            _prune_failures_locked(cutoff)
+            if len(_AUTH_FAILURES) >= _AUTH_FAIL_MAX_KEYS:
+                oldest_key = min(_AUTH_FAILURES, key=lambda k: _AUTH_FAILURES[k][-1])
+                del _AUTH_FAILURES[oldest_key]
+        recent = [ts for ts in _AUTH_FAILURES.get(client_key, []) if ts > cutoff]
+        recent.append(clock)
+        _AUTH_FAILURES[client_key] = recent
+
+
+def clear_auth_failures(client_key: str | None = None) -> None:
+    """Clear recorded MCP auth failures (all keys when ``client_key`` is None)."""
+    with _AUTH_FAIL_LOCK:
+        if client_key is None:
+            _AUTH_FAILURES.clear()
+        else:
+            _AUTH_FAILURES.pop(client_key, None)
 
 
 class McpTokenError(ValueError):

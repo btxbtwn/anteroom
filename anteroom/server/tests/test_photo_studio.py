@@ -152,7 +152,17 @@ def test_edit_sends_the_photo_and_options_with_the_sellers_key(monkeypatch):
     assert request.headers["x-api-key"] == KEY
     body = request.content
     assert b'name="background.color"\r\n\r\n112233' in body
-    assert b'name="imageFile"; filename="photo.png"' in body
+    assert b'name="imageFile"; filename="photo.jpg"' in body
+    assert b"Content-Type: image/jpeg" in body
+
+    # Transparent PNG input preserves alpha by uploading as PNG.
+    alpha = BytesIO()
+    img = Image.new("RGBA", (32, 32), (10, 20, 30, 0))
+    img.putpixel((0, 0), (10, 20, 30, 255))
+    img.save(alpha, "PNG")
+    asyncio.run(photoroom.edit(alpha.getvalue(), StudioOptions(remove_background=True)))
+    assert b'name="imageFile"; filename="photo.png"' in seen[1].content
+    assert b"Content-Type: image/png" in seen[1].content
 
 
 def test_server_key_is_used_only_when_the_seller_has_none(monkeypatch):
@@ -287,10 +297,18 @@ def test_ai_studio_sends_what_the_seller_sees_so_redactions_never_leave(env, mon
     assert response.status_code == 200, response.text
     # The redaction was applied before sending, then starts over on the result.
     assert response.json()["photos"][0]["edits"]["redactions"] == []
-    start = sent[0].index(b"\x89PNG")
-    with Image.open(BytesIO(sent[0][start:])) as img:
-        # Exactly the redacted photo the seller sees, never the upload.
-        assert img.convert("RGB").tobytes() == redacted.tobytes()
+    start = sent[0].index(b"\xff\xd8\xff")
+    end = sent[0].rindex(b"\xff\xd9") + 2
+    with Image.open(BytesIO(sent[0][start:end])) as img:
+        uploaded = img.convert("RGB")
+        assert uploaded.size == redacted.size
+        original = Image.open(env.dir / "front.jpg").convert("RGB")
+        from PIL import ImageChops, ImageStat
+        diff_redacted = sum(ImageStat.Stat(ImageChops.difference(uploaded, redacted)).mean)
+        diff_original = sum(ImageStat.Stat(ImageChops.difference(uploaded, original)).mean)
+        # Uploaded image matches the redacted photo the seller sees, never the unredacted upload.
+        assert diff_redacted < 5.0
+        assert diff_redacted < diff_original
 
 
 def test_one_failed_photo_does_not_stop_the_others(env, monkeypatch):

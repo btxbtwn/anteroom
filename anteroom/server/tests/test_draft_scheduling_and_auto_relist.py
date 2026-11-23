@@ -380,7 +380,10 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
                 "ok": True, "verified": True, "has_active_offer": False,
             })),
         ):
-            outcomes = asyncio.run(auto_relist.run_auto_relist(now=now, delister=fake_delister, lister=fake_lister))
+            # Advance past M3 retry backoff so c1 and c2 are evaluated again under daily_cap=2.
+            outcomes = asyncio.run(auto_relist.run_auto_relist(
+                now=now + timedelta(hours=7), delister=fake_delister, lister=fake_lister,
+            ))
         self.assertEqual(len(outcomes), 2)
         statuses = {o["conversation_id"]: o["status"] for o in outcomes}
         self.assertEqual(statuses[c2.id], "skipped_active_offer")
@@ -408,8 +411,9 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         conv, _, _ = self._create_draft("Scheduler relist")
         conv.status = "listed"
         old_id = "5f0000000000000000000081"
+        t0 = _now()
         self.db.add(MarketplaceListing(id=new_id(), conversation_id=conv.id, marketplace="poshmark",
-                                      state="published", listing_id=old_id, listed_at=_now() - timedelta(days=45),
+                                      state="published", listing_id=old_id, listed_at=t0 - timedelta(days=45),
                                       listing_url=f"https://poshmark.com/listing/{old_id}",
                                       listed_price=58.0))
         self.db.add(MarketplaceRelistRule(id=new_id(), marketplace="poshmark", enabled=True))
@@ -426,7 +430,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
                 "state": "published", "listing_id": "5f0000000000000000000082",
             })),
         ):
-            self.assertEqual(asyncio.run(_run_auto_relist(_now())), 0)
+            self.assertEqual(asyncio.run(_run_auto_relist(t0)), 0)
             delete.assert_not_awaited()
             # A seller turning the rule off during the external check revokes the planned deletion.
             def pause(*args, **kwargs):
@@ -436,13 +440,13 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
                 return {"ok": True, "verified": True, "has_active_offer": False}
 
             check.side_effect = pause
-            self.assertEqual(asyncio.run(_run_auto_relist(_now())), 0)
+            self.assertEqual(asyncio.run(_run_auto_relist(t0 + timedelta(hours=7))), 0)
             delete.assert_not_awaited()
             self.db.query(MarketplaceRelistRule).update({"enabled": True})
             self.db.commit()
             check.side_effect = None
             check.return_value = {"ok": True, "verified": True, "has_active_offer": False}
-            self.assertEqual(asyncio.run(_run_auto_relist(_now())), 1)
+            self.assertEqual(asyncio.run(_run_auto_relist(t0 + timedelta(hours=7, minutes=10))), 1)
             delete.assert_awaited_once()
         self.assertEqual(self.db.query(MarketplaceRelistLog).filter_by(status="completed").count(), 1)
 
@@ -882,6 +886,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
             offer_checker=disable_during_offer_check,
             delister=should_not_delist,
             lister=AsyncMock(return_value={"ok": True}),
+            respect_backoff=False,
         ))
         self.assertFalse(delister_called)
         self.assertEqual(disabled_res[0]["status"], "skipped_rule_disabled")
@@ -949,6 +954,208 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertEqual(observed_job_id_before_wait, ["job-prewait-1"])
         self.assertEqual(res[0]["status"], "completed")
         self.assertEqual(res[0]["new_listing_id"], "5f0000000000000000000882")
+
+    def test_h1_sold_item_is_unscheduled_and_never_published(self):
+        from unittest.mock import AsyncMock
+        from anteroom.models.marketplace_sale import MarketplaceSale
+        from anteroom.services import automation_actions
+
+        now = _now()
+        # Case 1: unschedule_on_sale clears scheduled draft immediately.
+        c1, l1, _r1 = self._create_draft("Sold Before Due")
+        draft_scheduling.schedule_draft(
+            self.db, c1.id, marketplaces=["poshmark"], publish_at=now + timedelta(hours=1), confirm=True, now=now,
+        )
+        self.assertIsNotNone(l1.scheduled_publish_at)
+        self.assertTrue(draft_scheduling.unschedule_on_sale(self.db, c1.id))
+        self.db.commit()
+        self.db.refresh(l1)
+        self.assertIsNone(l1.scheduled_publish_at)
+
+        # Case 2: even if still scheduled when status=sold or a non-cancelled sale row exists,
+        # claim refuses to publish it and clears the schedule.
+        c2, l2, r2 = self._create_draft("Sold Race Item")
+        draft_scheduling.schedule_draft(
+            self.db, c2.id, marketplaces=["poshmark"], publish_at=now + timedelta(minutes=5), confirm=True, now=now,
+        )
+        c2.status = "sold"
+        self.db.commit()
+
+        c3, l3, _r3 = self._create_draft("Sale Row Race Item")
+        draft_scheduling.schedule_draft(
+            self.db, c3.id, marketplaces=["poshmark"], publish_at=now + timedelta(minutes=5), confirm=True, now=now,
+        )
+        self.db.add(MarketplaceSale(
+            id=new_id(), marketplace="ebay", order_id="ord-h1", line_id="line-h1",
+            conversation_id=c3.id, quantity=1, order_status="paid",
+            sold_at=now, received_at=now, state="new",
+        ))
+        self.db.commit()
+
+        publisher = AsyncMock(return_value={"ok": True})
+        outcomes = asyncio.run(draft_scheduling.run_due_scheduled_publishes(
+            now=now + timedelta(minutes=10), publisher=publisher,
+        ))
+        publisher.assert_not_awaited()
+        self.assertEqual(outcomes, [])
+        self.db.expire_all()
+        self.assertIsNone(self.db.get(Listing, l2.conversation_id).scheduled_publish_at)
+        self.assertIsNone(self.db.get(Listing, l3.conversation_id).scheduled_publish_at)
+
+        # Case 3: publish_revision itself also refuses sold items without dispatching.
+        res = asyncio.run(automation_actions.publish_revision(
+            c2.id, ["poshmark"], r2.id,
+        ))
+        self.assertFalse(res["ok"])
+        self.assertIn("sold", res["error"].lower())
+
+    def test_m1_abandoned_claim_wakes_scheduler_and_recovers(self):
+        from anteroom.services.automation_scheduler import _has_due_scheduled_drafts
+
+        now = _now()
+        _c, listing, _r = self._create_draft("Stuck Claim")
+        listing.scheduled_publish_at = None
+        listing.scheduled_status = "publishing"
+        listing.updated_at = now - timedelta(minutes=25)
+        self.db.commit()
+
+        self.assertTrue(draft_scheduling.has_due_or_abandoned_publishes(self.db, now))
+        self.assertTrue(_has_due_scheduled_drafts(self.db, now))
+        asyncio.run(draft_scheduling.run_due_scheduled_publishes(now=now))
+        self.db.expire_all()
+        self.assertEqual(self.db.get(Listing, listing.conversation_id).scheduled_status, "needs_review")
+        self.assertFalse(draft_scheduling.has_due_or_abandoned_publishes(self.db, now))
+
+    def test_m2_photo_and_pricing_rule_changes_unschedule_and_l3_native_schema_advances_revision(self):
+        from unittest.mock import AsyncMock
+        from anteroom.repositories.queries import ConversationRepo
+        from anteroom.services import native_contract, pricing_rules
+
+        now = _now()
+        c, listing, r = self._create_draft("Digest Check Jacket")
+        draft_scheduling.schedule_draft(
+            self.db, c.id, marketplaces=["poshmark"], publish_at=now + timedelta(minutes=10), confirm=True, now=now,
+        )
+        self.assertIsNotNone(listing.scheduled_content_digest)
+
+        # L3: native_schema save adding only private _native_contract advances scheduled_revision_id.
+        r_schema = listing_persistence.save_revision(
+            self.db,
+            c.id,
+            {**r.listing_json, native_contract.KEY: {"poshmark": {"v": 1}}},
+            source="native_schema",
+            commit=True,
+        )
+        self.db.refresh(listing)
+        self.assertIsNotNone(listing.scheduled_publish_at)
+        self.assertEqual(listing.scheduled_revision_id, r_schema.id)
+
+        # L3: native_schema save mutating public fields DOES unschedule.
+        listing_persistence.save_revision(
+            self.db,
+            c.id,
+            {**r.listing_json, "title": "Patagonia L Vintage Fleece Jacket Black"},
+            source="native_schema",
+            commit=True,
+        )
+        self.db.refresh(listing)
+        self.assertIsNone(listing.scheduled_publish_at)
+
+        # M2: photo add/reorder/delete unschedules a scheduled draft.
+        draft_scheduling.schedule_draft(
+            self.db, c.id, marketplaces=["poshmark"], publish_at=now + timedelta(minutes=10), confirm=True, now=now,
+        )
+        p1 = listing_persistence.add_photo(
+            self.db, c.id, "a.jpg", "a-stored.jpg", "image/jpeg", 100, "chk1", 100, 100,
+        )
+        self.db.refresh(listing)
+        self.assertIsNone(listing.scheduled_publish_at)
+
+        p2 = listing_persistence.add_photo(
+            self.db, c.id, "b.jpg", "b-stored.jpg", "image/jpeg", 100, "chk2", 100, 100,
+        )
+        draft_scheduling.schedule_draft(
+            self.db, c.id, marketplaces=["poshmark"], publish_at=now + timedelta(minutes=10), confirm=True, now=now,
+        )
+        ConversationRepo(self.db).reorder_photos(c.id, [p2.id, p1.id])
+        self.db.refresh(listing)
+        self.assertIsNone(listing.scheduled_publish_at)
+
+        # M2: changing active pricing rules after scheduling causes digest mismatch and skips publish.
+        with patch.object(pricing_rules, "active_rules", return_value=None):
+            draft_scheduling.schedule_draft(
+                self.db, c.id, marketplaces=["poshmark"], publish_at=now + timedelta(minutes=10), confirm=True, now=now,
+            )
+        changed_rules = {
+            "enabled": True,
+            "anchor": "general",
+            "rules": {"poshmark": {"percent": 10.0, "fixed": 0.0, "rounding": "whole"}},
+        }
+        publisher = AsyncMock(return_value={"ok": True})
+        with patch.object(pricing_rules, "active_rules", return_value=changed_rules):
+            asyncio.run(draft_scheduling.run_due_scheduled_publishes(
+                now=now + timedelta(minutes=15), publisher=publisher,
+            ))
+        publisher.assert_not_awaited()
+        self.db.expire_all()
+        self.assertIsNone(self.db.get(Listing, listing.conversation_id).scheduled_publish_at)
+
+    def test_m3_m4_m5_l2_auto_relist_hardening(self):
+        from unittest.mock import AsyncMock
+        from anteroom.services.automation_scheduler import _run_auto_relist
+
+        now = _now()
+        # L2: compute_relist_price never raises a price already below price_floor.
+        rule_floor = MarketplaceRelistRule(
+            id=new_id(), marketplace="poshmark", enabled=True,
+            price_adjust_mode="amount", price_adjust_value=5.0, price_floor=50.0,
+        )
+        self.assertEqual(auto_relist.compute_relist_price(40.0, rule_floor), 40.0)
+        self.assertEqual(auto_relist.compute_relist_price(52.0, rule_floor), 50.0)
+
+        # M5: eBay GTC 30-day cycle triggers near end of cycle 1 (29d23h30m) and cycle 2 (59d23h30m), not day 31.
+        ebay_rule = MarketplaceRelistRule(
+            id=new_id(), marketplace="ebay", enabled=True, ebay_recreate_before_gtc_minutes=60,
+        )
+        self.assertFalse(auto_relist.is_due_for_relist("ebay", now - timedelta(days=29, hours=22), ebay_rule, now))
+        self.assertTrue(auto_relist.is_due_for_relist("ebay", now - timedelta(days=29, hours=23, minutes=30), ebay_rule, now))
+        self.assertFalse(auto_relist.is_due_for_relist("ebay", now - timedelta(days=31), ebay_rule, now))
+        self.assertTrue(auto_relist.is_due_for_relist("ebay", now - timedelta(days=59, hours=23, minutes=30), ebay_rule, now))
+
+        # M3: failed attempts consume daily_cap and trigger 6h backoff; manual run bypasses backoff.
+        c, _l, _r = self._create_draft("Failing Relist Item")
+        c.status = "listed"
+        posh_id = "5f0000000000000000000991"
+        self.db.add(MarketplaceListing(
+            id=new_id(), conversation_id=c.id, marketplace="poshmark", state="published",
+            listing_id=posh_id, listing_url=f"https://poshmark.com/listing/{posh_id}",
+            listed_at=now - timedelta(days=45), listed_price=60.0,
+        ))
+        self.db.add(MarketplaceRelistRule(
+            id=new_id(), marketplace="poshmark", enabled=True, min_age_days=30, daily_cap=1,
+        ))
+        self.db.commit()
+
+        failing_delist = AsyncMock(return_value={"ok": False, "error": "boom"})
+        first = asyncio.run(auto_relist.run_auto_relist(
+            now=now, marketplace="poshmark", offer_checker=AsyncMock(return_value=False),
+            delister=failing_delist, lister=AsyncMock(return_value={"ok": True}),
+        ))
+        self.assertEqual(first[0]["status"], "failed")
+        # Daily cap=1 is now consumed by the failed attempt (M3), so even with respect_backoff=False nothing runs today.
+        second = asyncio.run(auto_relist.run_auto_relist(
+            now=now + timedelta(minutes=1), marketplace="poshmark",
+            offer_checker=AsyncMock(return_value=False),
+            delister=failing_delist, lister=AsyncMock(return_value={"ok": True}),
+            respect_backoff=False,
+        ))
+        self.assertEqual(second, [])
+        self.assertEqual(failing_delist.await_count, 1)
+
+        # M4: scheduled run stamps last_run_at and throttles within 5 minutes.
+        asyncio.run(_run_auto_relist(now + timedelta(days=1)))
+        self.assertFalse(auto_relist.has_due_relist_rules(self.db, now + timedelta(days=1, minutes=2)))
+        self.assertTrue(auto_relist.has_due_relist_rules(self.db, now + timedelta(days=1, minutes=6)))
 
 
 if __name__ == "__main__":

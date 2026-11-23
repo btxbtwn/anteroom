@@ -1194,8 +1194,8 @@
             "type": "string"
           },
           "amount_cents": {
-            "exclusiveMinimum": 0.0,
             "maximum": 999999999999.0,
+            "minimum": -999999999999.0,
             "title": "Amount Cents",
             "type": "integer"
           },
@@ -1329,8 +1329,8 @@
       "ExpenseInput": {
         "properties": {
           "amount_cents": {
-            "exclusiveMinimum": 0.0,
             "maximum": 999999999999.0,
+            "minimum": -999999999999.0,
             "title": "Amount Cents",
             "type": "integer"
           },
@@ -1443,8 +1443,8 @@
       "ExpenseUpdate": {
         "properties": {
           "amount_cents": {
-            "exclusiveMinimum": 0.0,
             "maximum": 999999999999.0,
+            "minimum": -999999999999.0,
             "title": "Amount Cents",
             "type": "integer"
           },

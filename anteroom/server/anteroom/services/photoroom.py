@@ -155,16 +155,28 @@ def available() -> bool:
     return _sandboxed() or configured_key()[0] is not None
 
 
-def prepare_input(data: bytes) -> bytes:
-    """The photo as a PNG within Photoroom's size limits, upright and flattened."""
+def _prepare_upload(data: bytes) -> tuple[bytes, str, str]:
+    """Encode the photo within Photoroom's size limits: JPEG for opaque photos, PNG when transparent."""
     from anteroom.services import image_decode
 
     img, _size = image_decode.decode(data, max_side=MAX_INPUT_SIDE)
-    if img.mode not in ("RGB", "RGBA"):
-        img = img.convert("RGBA" if "A" in img.getbands() else "RGB")
+    has_alpha = "A" in img.getbands() and img.convert("RGBA").getchannel("A").getextrema()[0] < 255
     buffer = BytesIO()
-    img.save(buffer, "PNG")
-    return buffer.getvalue()
+    if has_alpha:
+        if img.mode != "RGBA":
+            img = img.convert("RGBA")
+        img.save(buffer, "PNG")
+        return buffer.getvalue(), "photo.png", "image/png"
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    img.save(buffer, "JPEG", quality=92, optimize=True)
+    return buffer.getvalue(), "photo.jpg", "image/jpeg"
+
+
+def prepare_input(data: bytes) -> bytes:
+    """The photo encoded within Photoroom's size limits, upright and flattened."""
+    payload, _filename, _mime = _prepare_upload(data)
+    return payload
 
 
 def _error_message(response: httpx.Response) -> str:
@@ -205,7 +217,7 @@ async def edit(image: bytes, options: StudioOptions) -> bytes:
     key, _source = await asyncio.to_thread(configured_key)
     if not key:
         raise PhotoroomError("Add a Photoroom API key in Settings → Providers to use AI Studio.", 400)
-    png = await asyncio.to_thread(prepare_input, image)
+    payload, filename, mime = await asyncio.to_thread(_prepare_upload, image)
     timeout = httpx.Timeout(CALL_DEADLINE_SEC, connect=CONNECT_TIMEOUT_SEC)
     try:
         async with asyncio.timeout(CALL_DEADLINE_SEC):
@@ -214,7 +226,7 @@ async def edit(image: bytes, options: StudioOptions) -> bytes:
                     ENDPOINT,
                     headers={"x-api-key": key, "Accept": "image/png, application/json"},
                     data=options.form(),
-                    files={"imageFile": ("photo.png", png, "image/png")},
+                    files={"imageFile": (filename, payload, mime)},
                 )
     except TimeoutError:
         raise PhotoroomError("Photoroom did not finish this photo in time. Try again.", 504) from None

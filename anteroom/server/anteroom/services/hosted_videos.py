@@ -88,6 +88,25 @@ def upload(key: str, path: Path, mime_type: str) -> None:
         raise HTTPException(503, 'Could not save the video. Try again.')
 
 
+def download_to_path(key: str, dest: Path) -> None:
+    """Stream the video from Storage to ``dest`` in chunks instead of buffering it in memory."""
+    _owned(key)
+    origin, headers = _credentials()
+    try:
+        with _storage.stream('GET', f'{origin}/storage/v1/object/{BUCKET}/{key}', headers=headers,
+                             timeout=httpx.Timeout(UPLOAD_TIMEOUT_SEC, connect=10),
+                             follow_redirects=False) as response:
+            if response.status_code in (400, 404):
+                raise ValueError('The selected listing video is missing. Choose another video or clear it.')
+            if not response.is_success:
+                raise ValueError('The listing video could not be loaded from storage. Try again.')
+            with dest.open('wb') as stream:
+                for chunk in response.iter_bytes(1024 * 1024):
+                    stream.write(chunk)
+    except httpx.HTTPError:
+        raise ValueError('The listing video could not be loaded from storage in time. Try again.') from None
+
+
 def read(key: str) -> bytes:
     """The whole video, for an eBay or Etsy upload (each at most ``MAX_BYTES``)."""
     _owned(key)

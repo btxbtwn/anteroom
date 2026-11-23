@@ -224,7 +224,7 @@ function ExpenseForm({ expense, today, close }: { expense?: Expense; today: stri
             <CanadianRegion onChange={preview.reset} />
           </>}
         </> : <>
-          <FormField label="Amount"><Input name="amount" type="number" min="0.01" step="0.01" defaultValue={expense ? expense.amount_cents / 100 : undefined} required /></FormField>
+          <FormField label="Amount"><Input name="amount" type="number" step="0.01" defaultValue={expense ? expense.amount_cents / 100 : undefined} required /></FormField>
           <FormField label="Currency"><Input name="currency" pattern="[A-Za-z]{3}" defaultValue={expense?.currency ?? "USD"} required /></FormField>
         </>}
         <FormField label="Vendor"><Input name="vendor" defaultValue={expense?.vendor} maxLength={256} /></FormField>

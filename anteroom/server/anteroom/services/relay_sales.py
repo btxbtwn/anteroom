@@ -176,6 +176,10 @@ def record_sale(
     try:
         db.flush()
         replace_stand_in(db, sale)
+        if conv is not None:
+            from anteroom.services.draft_scheduling import unschedule_on_sale
+
+            unschedule_on_sale(db, conv.id)
         db.commit()
     except IntegrityError:
         db.rollback()

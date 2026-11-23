@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import json
 import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -25,9 +27,12 @@ from anteroom.models.automation import ScheduledPublishLog
 from anteroom.models.conversation import Conversation, Photo, new_id
 from anteroom.models.job import ACTIVE_JOB_STATUSES, Job
 from anteroom.models.listing import Listing, ListingRevision
+from anteroom.models.listing_video import ListingVideo
 from anteroom.models.marketplace_listing import MarketplaceListing
+from anteroom.models.marketplace_sale import PAID_STATUSES, MarketplaceSale
 from anteroom.services.marketplace_delist import MARKETPLACES
 from anteroom.services.validation import validate_listing
+from anteroom.services.vendoo_import import parse_notes
 
 log = logging.getLogger("anteroom.draft_scheduling")
 
@@ -78,6 +83,70 @@ def _normalize_marketplaces(marketplaces: list[str] | None) -> list[str]:
     return seen
 
 
+def _is_sold_or_has_sale(db: Session, conv: Conversation | None) -> bool:
+    """Return True if the item is marked sold or has any paid/pending-cancellation sale."""
+    if conv is None:
+        return False
+    if conv.status == "sold":
+        return True
+    marks = parse_notes(conv.notes).get("marketplaceMarks")
+    if isinstance(marks, dict) and any(
+        isinstance(entry, dict) and entry.get("state") == "sold"
+        for entry in marks.values()
+    ):
+        return True
+    has_sale = (
+        db.query(MarketplaceSale.id)
+        .filter(
+            MarketplaceSale.conversation_id == conv.id,
+            MarketplaceSale.order_status.in_((*PAID_STATUSES, "cancellation_pending")),
+        )
+        .first()
+        is not None
+    )
+    return has_sale
+
+
+def _schedule_content_digest(
+    db: Session,
+    conv_id: str,
+    markets: list[str],
+    *,
+    rules: dict | None = None,
+    use_given_rules: bool = False,
+) -> tuple[str, dict | None]:
+    """Hash photos, videos, and active pricing rules so unreviewed changes never publish."""
+    from anteroom.services.pricing_rules import active_rules
+
+    current_rules = rules if use_given_rules else active_rules()
+    photos = (
+        db.query(Photo)
+        .filter(Photo.conversation_id == conv_id)
+        .order_by(Photo.display_order, Photo.created_at, Photo.id)
+        .all()
+    )
+    videos = (
+        db.query(ListingVideo)
+        .filter(ListingVideo.conversation_id == conv_id)
+        .order_by(ListingVideo.id)
+        .all()
+    )
+    payload = {
+        "markets": sorted(markets),
+        "photos": [
+            (p.id, p.marketplace, p.display_order, p.stored_filename, p.checksum, p.size_bytes, p.edits)
+            for p in photos
+        ],
+        "videos": [
+            (v.id, v.checksum, v.stored_filename)
+            for v in videos
+        ],
+        "pricing_rules": current_rules,
+    }
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+    return digest, current_rules
+
+
 def _validate_ready(
     db: Session,
     conv_id: str,
@@ -87,7 +156,7 @@ def _validate_ready(
     conv = db.get(Conversation, conv_id)
     if conv is None:
         raise SchedulePublishError("Listing not found.", 404)
-    if conv.status == "sold":
+    if _is_sold_or_has_sale(db, conv):
         raise SchedulePublishError("Sold items cannot be scheduled for publishing.", 409)
     listing = db.query(Listing).filter(Listing.conversation_id == conv_id).first()
     if listing is None or not listing.current_revision_id:
@@ -194,6 +263,7 @@ def _clear_schedule(db: Session, listing: Listing, *, reason: str | None = None)
     listing.scheduled_confirmed_at = None
     listing.scheduled_status = None
     listing.scheduled_error = None
+    listing.scheduled_content_digest = None
     return was_scheduled
 
 
@@ -218,6 +288,7 @@ def schedule_draft(
     if listing.scheduled_status == "publishing":
         raise SchedulePublishError("This draft is currently publishing and cannot be rescheduled yet.", 409)
     conv = db.get(Conversation, conv_id)
+    digest, _rules = _schedule_content_digest(db, conv_id, markets)
     listing.ready_to_list = True
     listing.scheduled_publish_at = when
     listing.scheduled_marketplaces = markets
@@ -225,6 +296,7 @@ def schedule_draft(
     listing.scheduled_confirmed_at = moment
     listing.scheduled_status = "scheduled"
     listing.scheduled_error = None
+    listing.scheduled_content_digest = digest
     db.add(ScheduledPublishLog(
         id=new_id(),
         conversation_id=conv_id,
@@ -254,7 +326,7 @@ def unschedule_draft(db: Session, conv_id: str, *, reason: str | None = None) ->
     return schedule_view(listing, conv)
 
 
-def unschedule_on_edit(db: Session, conv_id: str) -> bool:
+def unschedule_on_edit(db: Session, conv_id: str, *, reason: str | None = None) -> bool:
     """Automatically unschedule a pending draft when edited so unreviewed changes never publish.
 
     Does not commit: participates in the caller's save transaction.
@@ -265,7 +337,24 @@ def unschedule_on_edit(db: Session, conv_id: str) -> bool:
     return _clear_schedule(
         db,
         listing,
-        reason="Draft was edited after scheduling; review your changes and reschedule before publishing.",
+        reason=reason or "Draft was edited after scheduling; review your changes and reschedule before publishing.",
+    )
+
+
+def unschedule_on_sale(db: Session, conv_id: str | None) -> bool:
+    """Automatically unschedule any pending draft when a sale is recorded or item is marked sold.
+
+    Does not commit: participates in the caller's save transaction.
+    """
+    if not conv_id:
+        return False
+    listing = db.query(Listing).filter(Listing.conversation_id == conv_id).first()
+    if listing is None or listing.scheduled_status != "scheduled":
+        return False
+    return _clear_schedule(
+        db,
+        listing,
+        reason="Scheduled publish cancelled because this item already sold.",
     )
 
 
@@ -333,8 +422,33 @@ def list_publish_logs(db: Session, *, limit: int = 50) -> list[dict[str, Any]]:
     return [log_view(entry, title) for entry, title in rows]
 
 
+def has_due_or_abandoned_publishes(db: Session, moment: datetime) -> bool:
+    """Return True when any scheduled draft is due or an abandoned publishing claim needs recovery."""
+    cutoff = _as_naive_utc(moment)
+    abandoned_cutoff = cutoff - ABANDONED_PUBLISH_GRACE
+    return (
+        db.query(Listing.conversation_id)
+        .filter(
+            (
+                (Listing.ready_to_list.is_(True))
+                & (Listing.scheduled_status == "scheduled")
+                & (Listing.scheduled_publish_at.isnot(None))
+                & (Listing.scheduled_publish_at <= cutoff)
+                & (Listing.scheduled_confirmed_at.isnot(None))
+            )
+            | (
+                (Listing.scheduled_status == "publishing")
+                & (Listing.updated_at.isnot(None))
+                & (Listing.updated_at <= abandoned_cutoff)
+            )
+        )
+        .first()
+        is not None
+    )
+
+
 def _claim_due_drafts(db: Session, moment: datetime) -> list[dict[str, Any]]:
-    """Atomically claim due drafts whose confirmation and revision still match."""
+    """Atomically claim due drafts whose confirmation, revision, sold state, and content digest still match."""
     candidates = (
         db.query(Listing)
         .filter(
@@ -345,19 +459,34 @@ def _claim_due_drafts(db: Session, moment: datetime) -> list[dict[str, Any]]:
             Listing.scheduled_publish_at <= moment,
         )
         .order_by(Listing.scheduled_publish_at.asc())
-        .limit(1)
+        .limit(20)
         .with_for_update(skip_locked=True)
         .all()
     )
     claimed: list[dict[str, Any]] = []
     for row in candidates:
         markets = [m for m in (row.scheduled_marketplaces or []) if m in SCHEDULABLE_MARKETPLACES]
-        # Re-check confirm, revision match, and explicit marketplace list before execution.
+        # Re-check confirm, revision match, sold state, content digest, and explicit marketplace list before execution.
         if not markets or not row.scheduled_confirmed_at or not row.scheduled_revision_id:
             _clear_schedule(db, row, reason="Scheduled publish refused: missing confirmation or marketplaces.")
             continue
+        conv = db.get(Conversation, row.conversation_id)
+        if conv is None:
+            _clear_schedule(db, row, reason="Scheduled publish refused: listing not found.")
+            continue
+        if _is_sold_or_has_sale(db, conv):
+            _clear_schedule(db, row, reason="Scheduled publish cancelled because this item already sold.")
+            continue
         if row.current_revision_id != row.scheduled_revision_id:
             _clear_schedule(db, row, reason="Draft changed after scheduling; review and reschedule before publishing.")
+            continue
+        digest, rules = _schedule_content_digest(db, row.conversation_id, markets)
+        if row.scheduled_content_digest and row.scheduled_content_digest != digest:
+            _clear_schedule(
+                db,
+                row,
+                reason="Photos, video, or pricing rules changed after scheduling; review and reschedule before publishing.",
+            )
             continue
         result = db.execute(
             update(Listing)
@@ -381,7 +510,9 @@ def _claim_due_drafts(db: Session, moment: datetime) -> list[dict[str, Any]]:
             "marketplaces": markets,
             "scheduled_for": row.scheduled_publish_at,
             "scheduled_confirmed_at": row.scheduled_confirmed_at,
+            "pricing_rules": rules,
         })
+        break
     db.commit()
     return claimed
 
@@ -418,7 +549,7 @@ def _settle_publish(db: Session, entry: dict[str, Any], outcome: dict[str, Any],
         conversation_id=entry["conversation_id"],
         revision_id=entry["revision_id"],
         marketplaces=entry["marketplaces"],
-        scheduled_for=entry["scheduled_for"],
+        scheduled_for=entry["scheduled_for"] or moment,
         status=status,
         results=outcome,
         error=error,
@@ -531,7 +662,7 @@ def _recover_abandoned_publishes(db: Session, moment: datetime) -> list[dict[str
             "conversation_id": row.conversation_id,
             "revision_id": row.scheduled_revision_id,
             "marketplaces": markets,
-            "scheduled_for": row.scheduled_publish_at or moment,
+            "scheduled_for": row.scheduled_publish_at,
             "scheduled_confirmed_at": row.scheduled_confirmed_at,
         }
         outcome = _inspect_marketplace_outcome(db, row.conversation_id, markets)
@@ -545,6 +676,8 @@ async def run_due_scheduled_publishes(*, now: datetime | None = None, publisher=
     Recovers any abandoned ``publishing`` claims before permitting new attempts,
     and releases DB connections before any external marketplace await.
     """
+    from anteroom.services import pricing_rules
+
     moment = _as_naive_utc(now) if now is not None else _now()
     await in_worker_session(_recover_abandoned_publishes, moment)
     if publisher is None:
@@ -560,7 +693,8 @@ async def run_due_scheduled_publishes(*, now: datetime | None = None, publisher=
         settled_done = False
         try:
             try:
-                result = await publisher(entry["conversation_id"], entry["marketplaces"], entry["revision_id"])
+                with pricing_rules.freeze_active_rules(entry.get("pricing_rules")):
+                    result = await publisher(entry["conversation_id"], entry["marketplaces"], entry["revision_id"])
             except Exception as exc:  # noqa: BLE001 - isolate one draft's publish failure
                 result = {"ok": False, "error": str(exc) or "Scheduled publish failed."}
             settled = await asyncio.shield(in_worker_session(_settle_publish, entry, result, _now()))

@@ -87,16 +87,26 @@ async def _relist(conv_id: str, marketplaces: list[str], revision_id: str | None
     return await _list_remaining(conv_id, marketplaces, revision_id)
 
 
+def _is_sold(db: Session, conv_id: str) -> bool:
+    from anteroom.models.conversation import Conversation
+    from anteroom.services.draft_scheduling import _is_sold_or_has_sale
+
+    conv = db.get(Conversation, conv_id)
+    return _is_sold_or_has_sale(db, conv) if conv is not None else False
+
+
 async def publish_revision(conv_id: str, marketplaces: list[str], revision_id: str | None) -> dict:
     """List a saved revision on named marketplaces after explicit approval.
 
     An existing live listing needs a separate Relist approval; List never
-    takes it down as a side effect. Sold marketplaces are left alone.
+    takes it down as a side effect. Sold items are refused outright.
     """
     if not marketplaces:
         return {"ok": False, "error": "Name the marketplaces. An automation does not publish everywhere by default."}
     if not revision_id:
         return {"ok": False, "error": "Publish needs the listing that was just saved."}
+    if await _db_work(_is_sold, conv_id):
+        return {"ok": False, "error": "This item is already sold and cannot be published."}
     live, fresh = await _db_work(_partition, conv_id, marketplaces)
     detail: list[dict] = []
     down: list[str] = []

@@ -265,3 +265,44 @@ def test_video_cancellation_waits_for_file_ownership(monkeypatch, stage):
         assert len(rows) == 1 and rows == stored
 
     asyncio.run(run())
+
+
+def test_hosted_video_rejects_unsupported_mime_before_storage_upload_and_streams_reads(cloud, signing_keys, monkeypatch):  # noqa: F811
+    from types import SimpleNamespace
+    from anteroom.services import listing_videos, service_context
+
+    client, _engine = cloud
+    monkeypatch.setenv('SUPABASE_URL', 'https://project.supabase.co')
+    monkeypatch.setenv('SUPABASE_PUBLISHABLE_KEY', 'publishable')
+    fake = FakeStorage()
+    monkeypatch.setattr(hosted_videos, '_storage', httpx.Client(transport=httpx.MockTransport(fake)))
+    alice = headers(signing_keys)
+    identity = client.post('/api/conversations', headers=alice, json={'title': 'Mime Check'}).json()['id']
+    base = f'/api/conversations/{identity}/videos'
+
+    # L5: unsupported MIME (e.g. video/webm) fails with 400 BEFORE touching Storage.
+    class _WebmMeta:
+        def get(self, key, default=None):
+            from datetime import timedelta
+            return {'duration': timedelta(seconds=5), 'width': 640, 'height': 480, 'mime_type': 'video/webm'}.get(key, default)
+
+    with monkeypatch.context() as mp:
+        mp.setattr(listing_videos, 'extractMetadata', lambda _parser: _WebmMeta())
+        refused = client.post(base, headers=alice, files={'file': ('clip.webm', CLIP, 'video/webm')})
+    assert refused.status_code == 400
+    assert 'not supported' in refused.json()['detail'].lower()
+    assert fake.objects == {}
+
+    # Upload a real MP4, then stream-read it via open_verified_video without calling hosted_videos.read.
+    uploaded = client.post(base, headers=alice, files={'file': ('clip.mp4', CLIP, 'video/mp4')})
+    assert uploaded.status_code == 200
+    video = uploaded.json()
+    key = next(iter(fake.objects))
+    monkeypatch.setattr(hosted_videos, 'read', lambda _k: (_ for _ in ()).throw(AssertionError('must stream, not read()')))
+    import hashlib
+    video_desc = {**video, 'stored_filename': key, 'checksum': hashlib.sha256(CLIP).hexdigest()}
+    ctx = SimpleNamespace(seller_id=USER_ID, photos=SimpleNamespace(storage_token=lambda: 'tok'))
+    monkeypatch.setattr(service_context, 'current', lambda: ctx)
+    with listing_videos.open_verified_video(video_desc) as local_path:
+        assert local_path.read_bytes() == CLIP
+    assert not local_path.exists()
