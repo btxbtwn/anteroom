@@ -1601,6 +1601,38 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertLessEqual(budget, timedelta(minutes=5))
 
 
+    def test_a_short_pass_relists_the_oldest_listing_whatever_its_marketplace(self):
+        old_time = _now() - timedelta(days=40)
+        for market, age, listing_id, url in (
+            ("poshmark", timedelta(0), "5f00000000000000000000d1", "https://poshmark.com/listing/5f00000000000000000000d1"),
+            ("mercari", timedelta(days=10), "m12345678902", "https://www.mercari.com/us/item/m12345678902/"),
+        ):
+            conv, _listing, _rev = self._create_draft(f"{market} coat", price=50.0)
+            self.db.add(MarketplaceListing(
+                id=new_id(), conversation_id=conv.id, marketplace=market, state="published",
+                listing_id=listing_id, listing_url=url,
+                listed_at=old_time - age, listed_price=50.0,
+            ))
+            self.db.commit()
+            auto_relist.save_rule(self.db, market, {"enabled": True, "min_age_days": 30, "daily_cap": 10}, confirm=True)
+        delisted: list[str] = []
+
+        async def delister(conv_id: str, market: str) -> dict:
+            delisted.append(market)
+            return {"ok": True}
+
+        async def lister(conv_id: str, market: str, rev_id: str) -> dict:
+            return {"ok": True, "listing_id": f"new-{market}"}
+
+        async def no_offers(market: str, listing_id: str) -> bool:
+            return False
+
+        outcomes = asyncio.run(auto_relist.run_auto_relist(
+            now=_now(), delister=delister, lister=lister, offer_checker=no_offers, time_budget=timedelta(0),
+        ))
+        self.assertEqual(delisted, ["mercari"], outcomes)
+
+
 if __name__ == "__main__":
     unittest.main()
 
