@@ -172,3 +172,44 @@ test('defaultUploadCloudSession strips non-poshmark cookies and sends X-Cloud-Up
     global.fetch = originalFetch;
   }
 });
+
+// Chrome's cookies API returns a cookie only when the extension holds host permission for
+// the cookie's URL, and it builds that URL as http:// for a cookie without Secure
+// (extensions/api/cookies/cookies_helpers.cc, GetURLFromCanonicalCookie).
+function permittedCookies(cookies) {
+  const manifest = require('../manifest.json');
+  const granted = manifest.host_permissions.map(pattern => new RegExp(
+    `^${pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`));
+  return cookies.filter(cookie => {
+    const url = `${cookie.secure ? 'https' : 'http'}://${cookie.domain.replace(/^\./, '')}/`;
+    return granted.some(pattern => pattern.test(url));
+  });
+}
+
+test('Mercari Connect in Cloud uploads its session cookies, which are not Secure', async () => {
+  // Mercari sets _mwus and its signature on www.mercari.com without Secure. Without them
+  // the upload is a guest session and cloud sign-in says to sign in to Mercari.
+  const calls = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (url, init) => {
+    calls.push({ url, init });
+    return { ok: true, status: 200, json: async () => ({ ok: true }) };
+  };
+  try {
+    const result = await defaultUploadCloudSession({
+      cookies: {
+        getAll: async () => permittedCookies([
+          { name: '_mwus', value: 'session', domain: 'www.mercari.com', path: '/', secure: false, httpOnly: true },
+          { name: '_mwus.sig', value: 'signature', domain: 'www.mercari.com', path: '/', secure: false, httpOnly: true },
+          { name: '_s_did', value: 'device', domain: '.mercari.com', path: '/', secure: false },
+          { name: 'cf_clearance', value: 'clearance', domain: '.www.mercari.com', path: '/', secure: true, httpOnly: true },
+        ]),
+      },
+    }, { marketplace: 'mercari', uploadToken: TOKEN });
+    assert.deepEqual(result, { ok: true });
+    const body = JSON.parse(calls[0].init.body);
+    assert.deepEqual(body.cookies.map(c => c.name).sort(), ['_mwus', '_mwus.sig', '_s_did', 'cf_clearance']);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});

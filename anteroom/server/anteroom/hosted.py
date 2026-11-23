@@ -652,6 +652,8 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
     app.include_router(bulk_delete_router)
     from anteroom.routes.hosted_account import router as account_router
     app.include_router(account_router)
+    from anteroom.routes.operator_usage import router as operator_usage_router
+    app.include_router(operator_usage_router)
     from anteroom.routes.listings import apply_price_drop, preview_price_drop, stream_price_drop_comps
     from anteroom.services.hosted_limits import limit_seller_submissions
     app.add_api_route('/api/conversations/{conv_id}/price-drop/preview', preview_price_drop, methods=['POST'])

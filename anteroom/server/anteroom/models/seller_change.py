@@ -89,6 +89,7 @@ TOPIC_BY_TABLE: dict[str, str | None] = {
     "field_observations": None,
     "field_registry": None,
     "generation_timings": None,
+    "api_usage_events": None,
     "listing_corrections": None,
     "photo_fingerprints": None,
     "vendoo_draft_cache": None,
