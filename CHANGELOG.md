@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1162 — 2026-11-23
+
+- Needs Attention no longer keeps "A delist did not finish" once every marketplace it failed on has been delisted, marked not listed, or marked sold.
+
 ## 0.1.1161 — 2026-11-23
 
 - Choose what each MCP access token can do in Settings → Agents: no access, read, or read and write for listings and for Needs Attention, and read access to analytics. Changes apply to the token's next request, and new tokens start read-only.
