@@ -160,18 +160,14 @@ def _prepare_upload(data: bytes) -> tuple[bytes, str, str]:
     from anteroom.services import image_decode
 
     img, _size = image_decode.decode(data, max_side=MAX_INPUT_SIDE)
-    has_alpha = False
-    if "A" in img.getbands():
-        alpha = img.convert("RGBA").getchannel("A")
-        # Pillow returns a single 8-bit channel in L mode.
-        min_alpha, _ = cast("tuple[int, int]", alpha.getextrema())
-        has_alpha = min_alpha < 255
     buffer = BytesIO()
-    if has_alpha:
-        if img.mode != "RGBA":
-            img = img.convert("RGBA")
-        img.save(buffer, "PNG")
-        return buffer.getvalue(), "photo.png", "image/png"
+    if "A" in img.getbands() or "transparency" in img.info:
+        rgba = img.convert("RGBA")
+        # Pillow returns a single 8-bit channel in L mode.
+        min_alpha, _ = cast("tuple[int, int]", rgba.getchannel("A").getextrema())
+        if min_alpha < 255:
+            rgba.save(buffer, "PNG")
+            return buffer.getvalue(), "photo.png", "image/png"
     if img.mode != "RGB":
         img = img.convert("RGB")
     img.save(buffer, "JPEG", quality=92, optimize=True)

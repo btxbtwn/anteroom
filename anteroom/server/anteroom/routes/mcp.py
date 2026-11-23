@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
+from threading import Event
+from time import monotonic
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -26,6 +29,13 @@ router = APIRouter(prefix="/api/mcp", tags=["mcp"])
 _MAX_MCP_BODY_BYTES = 2 * 1024 * 1024
 _MCP_RPC_TIMEOUT_SECONDS = 30.0
 _MCP_STORAGE_CLEANUP_TIMEOUT_SECONDS = 15.0
+_active_calls: set[asyncio.Task] = set()
+
+
+def _finish_call(worker: asyncio.Task) -> None:
+    _active_calls.discard(worker)
+    if not worker.cancelled():
+        worker.exception()
 
 
 def _client_key(request: Request, *, is_hosted: bool = False) -> str:
@@ -61,7 +71,10 @@ def _run_mcp_call(
     session_id: str | None,
     protocol_version: str | None,
     deferred_deletes: list[str],
+    expired: Callable[[], bool],
 ) -> tuple[Any | None, int, dict[str, str]]:
+    if expired():
+        raise TimeoutError
     if not is_hosted and bearer_token is not None:
         if not bearer_token:
             mcp_tokens.record_auth_failure(client_key)
@@ -77,6 +90,7 @@ def _run_mcp_call(
         protocol_version=protocol_version,
         bearer_token=bearer_token,
         deferred_deletes=deferred_deletes,
+        expired=expired,
     )
 
 
@@ -110,9 +124,17 @@ async def mcp_post(request: Request):
     protocol_version = request.headers.get("mcp-protocol-version")
     deferred_deletes: list[str] = []
 
-    try:
-        body, status_code, extra_headers = await asyncio.wait_for(
-            in_worker_session(
+    deadline = monotonic() + _MCP_RPC_TIMEOUT_SECONDS
+    stopped = Event()
+
+    def expired() -> bool:
+        return stopped.is_set() or monotonic() >= deadline
+
+    result: asyncio.Future[tuple[Any | None, int, dict[str, str]]] = asyncio.get_running_loop().create_future()
+
+    async def run_and_cleanup():
+        try:
+            outcome = await in_worker_session(
                 lambda db: _run_mcp_call(
                     db,
                     payload,
@@ -122,9 +144,37 @@ async def mcp_post(request: Request):
                     session_id=session_id,
                     protocol_version=protocol_version,
                     deferred_deletes=deferred_deletes,
+                    expired=expired,
                 )
-            ),
-            timeout=_MCP_RPC_TIMEOUT_SECONDS,
+            )
+            if not result.done():
+                result.set_result(outcome)
+        except Exception as exc:
+            if not result.done():
+                result.set_exception(exc)
+        finally:
+            # in_worker_session returns or raises after closing its session.
+            if deferred_deletes:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.to_thread(
+                            mcp_http.delete_hosted_storage_keys,
+                            deferred_deletes,
+                            bearer_token=bearer,
+                            deadline_seconds=_MCP_STORAGE_CLEANUP_TIMEOUT_SECONDS,
+                        ),
+                        timeout=_MCP_STORAGE_CLEANUP_TIMEOUT_SECONDS,
+                    )
+                except Exception:  # noqa: BLE001 - best-effort cleanup after DB commit
+                    pass
+
+    worker = asyncio.create_task(run_and_cleanup())
+    # Keep the task alive after the request returns, and consume detached exceptions.
+    _active_calls.add(worker)
+    worker.add_done_callback(_finish_call)
+    try:
+        body, status_code, extra_headers = await asyncio.wait_for(
+            result, timeout=_MCP_RPC_TIMEOUT_SECONDS,
         )
     except TimeoutError:
         return JSONResponse(
@@ -132,22 +182,10 @@ async def mcp_post(request: Request):
             status_code=504,
             headers={"Cache-Control": "no-store"},
         )
+    finally:
+        stopped.set()
 
-    # Delete hosted Storage objects only after the database session has closed.
-    if deferred_deletes:
-        try:
-            await asyncio.wait_for(
-                asyncio.to_thread(
-                    mcp_http.delete_hosted_storage_keys,
-                    deferred_deletes,
-                    bearer_token=bearer,
-                    deadline_seconds=_MCP_STORAGE_CLEANUP_TIMEOUT_SECONDS,
-                ),
-                timeout=_MCP_STORAGE_CLEANUP_TIMEOUT_SECONDS,
-            )
-        except Exception:  # noqa: BLE001 - best-effort cleanup after DB commit
-            pass
-
+    await asyncio.shield(worker)
     headers = {"Cache-Control": "no-store", **extra_headers}
     if body is None:
         return Response(status_code=status_code, headers=headers)

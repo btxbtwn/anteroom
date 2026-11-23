@@ -16,6 +16,7 @@ import contextlib
 import hashlib
 import json
 import logging
+from contextvars import ContextVar
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -40,6 +41,7 @@ SCHEDULABLE_MARKETPLACES = MARKETPLACES
 MAX_BULK_SCHEDULE = 100
 ABANDONED_PUBLISH_GRACE = timedelta(minutes=15)
 LIVE_PUBLISH_STATES = frozenset({"published", "pending_review"})
+_active_claim: ContextVar[dict[str, Any] | None] = ContextVar("scheduled_publish_claim", default=None)
 
 
 class SchedulePublishError(ValueError):
@@ -145,14 +147,17 @@ def _is_sold_or_has_sale(db: Session, conv: Conversation | None) -> bool:
         if stock["status"] == "remaining" and isinstance(stock.get("remaining"), int) and stock["remaining"] > 0:
             has_observed_remaining = True
 
+    declared_qty = _declared_quantity(db, conv.id)
+    paid_sales = [sale for sale in sales if sale.order_status in PAID_STATUSES]
+    total_sold = sum(
+        sale.quantity if type(sale.quantity) is int and sale.quantity > 0 else 1 for sale in paid_sales
+    )
+    if declared_qty is not None and total_sold >= declared_qty:
+        return True
     if has_observed_remaining:
         return False
-
-    declared_qty = _declared_quantity(db, conv.id)
-    if declared_qty is None or declared_qty <= 1:
-        return True
-    total_sold = sum(sale.quantity if type(sale.quantity) is int and sale.quantity > 0 else 1 for sale in sales)
-    return total_sold >= declared_qty
+    # An open cancellation still blocks a single-unit or unknown-stock draft.
+    return declared_qty is None or declared_qty <= 1
 
 
 def _schedule_content_digest(
@@ -162,23 +167,17 @@ def _schedule_content_digest(
     *,
     rules: dict | None = None,
     use_given_rules: bool = False,
+    photos: list[Photo] | None = None,
+    videos: list[ListingVideo] | None = None,
 ) -> tuple[str, dict | None]:
     """Hash photos, videos, and active pricing rules so unreviewed changes never publish."""
     from anteroom.services.pricing_rules import active_rules
 
     current_rules = rules if use_given_rules else active_rules()
-    photos = (
-        db.query(Photo)
-        .filter(Photo.conversation_id == conv_id)
-        .order_by(Photo.display_order, Photo.created_at, Photo.id)
-        .all()
-    )
-    videos = (
-        db.query(ListingVideo)
-        .filter(ListingVideo.conversation_id == conv_id)
-        .order_by(ListingVideo.id)
-        .all()
-    )
+    if photos is None:
+        photos = _schedule_photos(db, conv_id)
+    if videos is None:
+        videos = _schedule_videos(db, conv_id)
     payload = {
         "markets": sorted(markets),
         "photos": [
@@ -193,6 +192,51 @@ def _schedule_content_digest(
     }
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
     return digest, current_rules
+
+
+def _schedule_photos(db: Session, conv_id: str) -> list[Photo]:
+    return (
+        db.query(Photo).filter(Photo.conversation_id == conv_id)
+        .order_by(Photo.display_order, Photo.created_at, Photo.id).all()
+    )
+
+
+def _schedule_videos(db: Session, conv_id: str) -> list[ListingVideo]:
+    return (
+        db.query(ListingVideo).filter(ListingVideo.conversation_id == conv_id)
+        .order_by(ListingVideo.id).all()
+    )
+
+
+def verified_scheduled_media(
+    db: Session, conv_id: str, marketplace: str,
+) -> tuple[list[Photo], list[ListingVideo]] | None:
+    """Verify the exact media rows native preflight will use for this claim."""
+    entry = _active_claim.get()
+    if entry is None or entry["conversation_id"] != conv_id:
+        return None
+    reason = "Scheduled draft changed after confirmation; review and reschedule before publishing."
+    # Serialize verification with settlement and schedule changes for this draft.
+    listing = db.get(Listing, conv_id, with_for_update=True, populate_existing=True)
+    if (
+        listing is None or listing.scheduled_status != "publishing"
+        or listing.scheduled_revision_id != entry["revision_id"]
+        or listing.current_revision_id != entry["revision_id"]
+        or listing.scheduled_publish_at != entry["scheduled_for"]
+        or listing.scheduled_confirmed_at != entry["scheduled_confirmed_at"]
+        or marketplace not in entry["marketplaces"]
+    ):
+        raise SchedulePublishError(reason, 409)
+    photos, videos = _schedule_photos(db, conv_id), _schedule_videos(db, conv_id)
+    digest, _ = _schedule_content_digest(
+        db, conv_id, entry["marketplaces"], rules=entry["pricing_rules"], use_given_rules=True,
+        photos=photos, videos=videos,
+    )
+    if digest != entry["content_digest"] or digest != listing.scheduled_content_digest:
+        _clear_schedule(db, listing, reason=reason)
+        db.commit()
+        raise SchedulePublishError(reason, 409)
+    return photos, videos
 
 
 def _validate_ready(
@@ -532,8 +576,11 @@ def _claim_due_drafts(db: Session, moment: datetime) -> list[dict[str, Any]]:
         if row.current_revision_id != row.scheduled_revision_id:
             _clear_schedule(db, row, reason="Draft changed after scheduling; review and reschedule before publishing.")
             continue
+        if not row.scheduled_content_digest:
+            _clear_schedule(db, row, reason="Schedule has no verified content; review and reschedule before publishing.")
+            continue
         digest, rules = _schedule_content_digest(db, row.conversation_id, markets)
-        if row.scheduled_content_digest and row.scheduled_content_digest != digest:
+        if row.scheduled_content_digest != digest:
             _clear_schedule(
                 db,
                 row,
@@ -563,6 +610,7 @@ def _claim_due_drafts(db: Session, moment: datetime) -> list[dict[str, Any]]:
             "scheduled_for": row.scheduled_publish_at,
             "scheduled_confirmed_at": row.scheduled_confirmed_at,
             "pricing_rules": rules,
+            "content_digest": digest,
         })
         break
     db.commit()
@@ -745,8 +793,12 @@ async def run_due_scheduled_publishes(*, now: datetime | None = None, publisher=
         settled_done = False
         try:
             try:
-                with pricing_rules.freeze_active_rules(entry.get("pricing_rules")):
-                    result = await publisher(entry["conversation_id"], entry["marketplaces"], entry["revision_id"])
+                token = _active_claim.set(entry)
+                try:
+                    with pricing_rules.freeze_active_rules(entry.get("pricing_rules")):
+                        result = await publisher(entry["conversation_id"], entry["marketplaces"], entry["revision_id"])
+                finally:
+                    _active_claim.reset(token)
             except Exception as exc:  # noqa: BLE001 - isolate one draft's publish failure
                 result = {"ok": False, "error": str(exc) or "Scheduled publish failed."}
             settled = await asyncio.shield(in_worker_session(_settle_publish, entry, result, _now()))

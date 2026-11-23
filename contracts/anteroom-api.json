@@ -1197,6 +1197,9 @@
           "amount_cents": {
             "maximum": 999999999999.0,
             "minimum": -999999999999.0,
+            "not": {
+              "const": 0
+            },
             "title": "Amount Cents",
             "type": "integer"
           },
@@ -1332,6 +1335,9 @@
           "amount_cents": {
             "maximum": 999999999999.0,
             "minimum": -999999999999.0,
+            "not": {
+              "const": 0
+            },
             "title": "Amount Cents",
             "type": "integer"
           },
@@ -1446,6 +1452,9 @@
           "amount_cents": {
             "maximum": 999999999999.0,
             "minimum": -999999999999.0,
+            "not": {
+              "const": 0
+            },
             "title": "Amount Cents",
             "type": "integer"
           },

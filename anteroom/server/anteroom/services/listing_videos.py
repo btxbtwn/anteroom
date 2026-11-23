@@ -126,11 +126,16 @@ def deletion_refusal(db: Session, conv_id: str, video_id: str) -> str | None:
     return None
 
 
-def selected_video(db: Session, conv_id: str, listing: dict, marketplace: str) -> dict | None:
+def selected_video(
+    db: Session, conv_id: str, listing: dict, marketplace: str, *, videos: list[ListingVideo] | None = None,
+) -> dict | None:
     video_id = (listing.get(f"{marketplace}_specifics") or {}).get("videoId")
     if not video_id:
         return None
-    row = db.query(ListingVideo).filter_by(id=str(video_id), conversation_id=conv_id).first()
+    if videos is None:
+        row = db.query(ListingVideo).filter_by(id=str(video_id), conversation_id=conv_id).first()
+    else:
+        row = next((video for video in videos if video.id == str(video_id) and video.conversation_id == conv_id), None)
     if row is None or not stored(row):
         raise ValueError("The selected listing video is missing. Choose another video or clear it.")
     problem = video_problem(row, marketplace)

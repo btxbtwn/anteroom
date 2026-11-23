@@ -165,6 +165,19 @@ def test_edit_sends_the_photo_and_options_with_the_sellers_key(monkeypatch):
     assert b"Content-Type: image/png" in seen[1].content
 
 
+def test_palette_png_keeps_transparent_pixels():
+    palette = Image.new("P", (2, 1))
+    palette.putpalette([0, 0, 0, 255, 255, 255])
+    palette.putpixel((1, 0), 1)
+    data = BytesIO()
+    palette.save(data, "PNG", transparency=0)
+
+    contents, filename, content_type = photoroom._prepare_upload(data.getvalue())
+    assert (filename, content_type) == ("photo.png", "image/png")
+    with Image.open(BytesIO(contents)) as result:
+        assert result.getchannel("A").getextrema() == (0, 255)
+
+
 def test_server_key_is_used_only_when_the_seller_has_none(monkeypatch):
     from anteroom.services.keychain import delete_slot, write_slot
 

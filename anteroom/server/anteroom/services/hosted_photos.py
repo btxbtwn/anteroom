@@ -60,7 +60,7 @@ def with_renditions(key: str) -> list[str]:
     return [key, *(rendition_key(key, size) for size in KEPT_THUMB_SIZES)]
 
 
-def storage_call(method: str, key: str, token: str, data: bytes | None = None) -> bytes:
+def storage_call(method: str, key: str, token: str, data: bytes | None = None, *, timeout: float = 20) -> bytes:
     public_key = os.environ.get('SUPABASE_PUBLISHABLE_KEY', '')
     if not public_key:
         raise HTTPException(503, 'Photo storage is not configured')
@@ -76,7 +76,7 @@ def storage_call(method: str, key: str, token: str, data: bytes | None = None) -
                                           'Content-Type': 'application/json' if method == 'DELETE' else 'image/jpeg',
                                           'Cache-Control': 'no-store'},
                                  json={'prefixes': with_renditions(key)} if method == 'DELETE' else None,
-                                 content=None if method == 'DELETE' else data, timeout=20, follow_redirects=False)
+                                 content=None if method == 'DELETE' else data, timeout=timeout, follow_redirects=False)
     except httpx.HTTPError:
         raise HTTPException(503, 'Photo storage is temporarily unavailable') from None
     if method == 'DELETE' and response.status_code == 404:

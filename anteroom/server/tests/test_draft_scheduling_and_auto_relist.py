@@ -577,15 +577,12 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
             self.assertIsNone(asyncio.run(auto_relist.check_active_buyer_offer("mercari", "m123456789")))
 
     def test_settle_publish_does_not_overwrite_replacement_schedule(self):
-        c1, l1, r1 = self._create_draft("Rescheduled Draft")
-        l1.ready_to_list = True
+        c1, l1, _r1 = self._create_draft("Rescheduled Draft")
         due_time = _now() - timedelta(minutes=1)
-        l1.scheduled_publish_at = due_time
-        l1.scheduled_marketplaces = ["poshmark"]
-        l1.scheduled_revision_id = r1.id
-        l1.scheduled_confirmed_at = due_time - timedelta(minutes=5)
-        l1.scheduled_status = "scheduled"
-        self.db.commit()
+        draft_scheduling.schedule_draft(
+            self.db, c1.id, marketplaces=["poshmark"], publish_at=due_time, confirm=True,
+            now=due_time - timedelta(minutes=5),
+        )
 
         claimed = draft_scheduling._claim_due_drafts(self.db, _now())
         self.assertEqual(len(claimed), 1)
@@ -1041,6 +1038,77 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         sold_out = asyncio.run(automation_actions.publish_revision(c4.id, ["poshmark"], r4.id))
         self.assertFalse(sold_out["ok"])
         self.assertIn("sold", sold_out["error"].lower())
+
+    def test_paid_sales_across_marketplaces_exhaust_declared_stock(self):
+        from anteroom.models.marketplace_sale import MarketplaceSale
+        from anteroom.services import automation_actions
+
+        now = _now()
+        conv, listing, revision = self._create_draft(quantity=3)
+        draft_scheduling.schedule_draft(
+            self.db, conv.id, marketplaces=["poshmark"], publish_at=now + timedelta(hours=1), confirm=True, now=now,
+        )
+        self.db.add(MarketplaceListing(
+            id=new_id(), conversation_id=conv.id, marketplace="ebay", state="published", listing_id="1234",
+            inventory_observation={"state": "active", "checked_at": now.isoformat(), "quantity": 2, "listing_id": "1234"},
+        ))
+        for market, status in (("ebay", "paid"), ("mercari", "paid"), ("poshmark", "cancellation_pending")):
+            self.db.add(MarketplaceSale(
+                id=new_id(), marketplace=market, order_id=market, line_id=market,
+                conversation_id=conv.id, listing_id="1234", quantity=1, order_status=status,
+                sold_at=now, received_at=now, state="new",
+            ))
+        self.db.commit()
+        self.assertFalse(draft_scheduling.unschedule_on_sale(self.db, conv.id))
+        self.db.query(MarketplaceSale).filter_by(marketplace="poshmark").one().order_status = "paid"
+        self.db.commit()
+        self.assertTrue(draft_scheduling.unschedule_on_sale(self.db, conv.id))
+        self.db.commit()
+        self.assertIsNone(listing.scheduled_publish_at)
+        outcome = asyncio.run(automation_actions.publish_revision(conv.id, ["poshmark"], revision.id))
+        self.assertIn("already sold", outcome["error"])
+
+    def test_due_legacy_schedule_requires_new_confirmation(self):
+        now = _now()
+        conv, listing, _revision = self._create_draft()
+        draft_scheduling.schedule_draft(
+            self.db, conv.id, marketplaces=["poshmark"], publish_at=now + timedelta(minutes=5), confirm=True, now=now,
+        )
+        listing.scheduled_content_digest = None
+        self.db.commit()
+
+        self.assertEqual(draft_scheduling._claim_due_drafts(self.db, now + timedelta(minutes=6)), [])
+        self.assertIsNone(listing.scheduled_publish_at)
+        self.assertIn("review and reschedule", self.db.query(ScheduledPublishLog).filter_by(status="unscheduled").one().error)
+
+    def test_native_preflight_refuses_media_edited_after_claim(self):
+        from anteroom.services import native_marketplaces
+
+        now = _now()
+        conv, listing, _revision = self._create_draft()
+        draft_scheduling.schedule_draft(
+            self.db, conv.id, marketplaces=["poshmark"], publish_at=now + timedelta(minutes=5), confirm=True, now=now,
+        )
+
+        async def publisher(conv_id, market, revision_id):
+            body = native_marketplaces.ListRequest(revision_id=revision_id, confirm=True)
+            with self.Session() as db:
+                with patch.object(native_marketplaces.marketplace_media, "photos_for", return_value=([], "")) as filter_photos:
+                    native_marketplaces._preflight(db, conv_id, market[0], body)
+                    self.assertEqual(filter_photos.call_args.args[1][0].stored_filename, "photo1.jpg")
+                db.query(Photo).filter_by(conversation_id=conv_id).one().stored_filename = "changed.jpg"
+                db.commit()
+                native_marketplaces._preflight(db, conv_id, market[0], body)
+            return {"ok": True}
+
+        with patch("anteroom.services.extension_connection.marketplace_actions_refusal", return_value=None):
+            outcomes = asyncio.run(draft_scheduling.run_due_scheduled_publishes(
+                now=now + timedelta(minutes=6), publisher=publisher,
+            ))
+        self.assertIn("review and reschedule", outcomes[0]["error"])
+        self.db.refresh(listing)
+        self.assertIsNone(listing.scheduled_publish_at)
+        self.assertIsNone(listing.scheduled_content_digest)
 
     def test_m1_abandoned_claim_wakes_scheduler_and_recovers(self):
         from anteroom.services.automation_scheduler import _has_due_scheduled_drafts

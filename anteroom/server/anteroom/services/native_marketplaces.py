@@ -381,18 +381,31 @@ def _preflight(db: Session, conv_id: str, marketplace: str, body: ListRequest) -
     with freeze_active_rules() as rules:
         snapshot = direct_preflight.prepare(db, conv, snapshot, marketplace)
         snapshot[SNAPSHOT_RULES] = rules
+    from anteroom.services.draft_scheduling import SchedulePublishError, verified_scheduled_media
     from anteroom.services.listing_videos import VIDEO_MARKETPLACES, selected_video
+
+    try:
+        scheduled_media = verified_scheduled_media(db, conv_id, marketplace)
+    except SchedulePublishError as exc:
+        raise NativeMarketplaceError(exc.status_code, exc.detail) from exc
 
     if marketplace in VIDEO_MARKETPLACES:
         try:
-            snapshot["_native_video"] = selected_video(db, conv_id, snapshot, marketplace)
+            if scheduled_media is None:
+                snapshot["_native_video"] = selected_video(db, conv_id, snapshot, marketplace)
+            else:
+                snapshot["_native_video"] = selected_video(db, conv_id, snapshot, marketplace, videos=scheduled_media[1])
         except ValueError as exc:
             raise NativeMarketplaceError(400, str(exc)) from exc
     if active_generation(conv_id) or activity.running(conv_id):
         raise NativeMarketplaceError(409, "Wait for generation to finish.")
     if marketplace not in API_MARKETPLACES and (refusal := marketplace_actions_refusal(marketplace)):
         raise NativeMarketplaceError(409, refusal)
-    photos, warning = _photos(db, conv_id, snapshot, marketplace)
+    if scheduled_media is None:
+        photos, warning = _photos(db, conv_id, snapshot, marketplace)
+    else:
+        all_photos = sorted(scheduled_media[0], key=lambda photo: photo.marketplace is not None)
+        photos, warning = marketplace_media.photos_for(snapshot, all_photos, marketplace)
     snapshot["_approved_photo_warning"] = warning
     return snapshot, photos
 

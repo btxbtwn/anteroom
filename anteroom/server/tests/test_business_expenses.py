@@ -259,6 +259,9 @@ def test_negative_refund_expenses_allowed_while_zero_and_negative_mileage_reject
         "incurred_date": "2026-01-12",
         "category": "mileage",
         "vendor": "Bad trip",
-        "miles": -5,
+        "amount_cents": -700,
+        "distance": "10",
+        "distance_unit": "mi",
+        "mileage_rate_cents": "70",
     })
     assert neg_miles.status_code == 422

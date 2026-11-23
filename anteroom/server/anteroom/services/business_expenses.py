@@ -18,7 +18,7 @@ DecimalText = Annotated[Decimal, WithJsonSchema({"type": "string", "description"
 
 class ExpenseInput(BaseModel):
     incurred_date: date
-    amount_cents: int = Field(ge=-999_999_999_999, le=999_999_999_999)
+    amount_cents: int = Field(ge=-999_999_999_999, le=999_999_999_999, json_schema_extra={"not": {"const": 0}})
     currency: str = Field(default="USD", pattern=r"^[A-Z]{3}$")
     category: Category
     vendor: str = Field(default="", max_length=256)
@@ -37,6 +37,8 @@ class ExpenseInput(BaseModel):
         if self.category != "mileage":
             if any(value is not None for value in (*fields, self.origin_destination)):
                 raise ValueError("Trip details belong to mileage expenses.")
+        elif self.amount_cents < 0:
+            raise ValueError("Mileage amount must be positive.")
         elif self.distance is None or self.distance_unit is None or self.mileage_rate_cents is None:
             raise ValueError("Enter the trip distance, unit and rate.")
         else:

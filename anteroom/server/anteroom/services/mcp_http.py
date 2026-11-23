@@ -13,6 +13,7 @@ from __future__ import annotations
 import copy
 import json
 import uuid
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
@@ -364,6 +365,7 @@ def handle_rpc_payload(
     protocol_version: str | None = None,
     bearer_token: str | None = None,
     deferred_deletes: list[str] | None = None,
+    expired: Callable[[], bool] | None = None,
 ) -> tuple[Any | None, int, dict[str, str]]:
     """Process a JSON-RPC 2.0 request object or batch.
 
@@ -388,6 +390,8 @@ def handle_rpc_payload(
             )
         responses: list[dict[str, Any]] = []
         for item in payload:
+            if expired is not None and expired():
+                raise TimeoutError
             resp, negotiated = _handle_single(
                 db,
                 item,
@@ -406,6 +410,8 @@ def handle_rpc_payload(
     if not isinstance(payload, dict):
         return _rpc_error(None, -32600, "Invalid Request: expected JSON object"), 400, headers
 
+    if expired is not None and expired():
+        raise TimeoutError
     resp, negotiated = _handle_single(
         db,
         payload,
@@ -1182,15 +1188,16 @@ def delete_hosted_storage_keys(
 
     if not keys:
         return
-    deadline = time.monotonic() + max(deadline_seconds, 0.1)
+    deadline = time.monotonic() + deadline_seconds
     for key in dict.fromkeys(k for k in keys if k):
-        if time.monotonic() >= deadline:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
             break
         try:
             if bearer_token and bearer_token.startswith("arm_"):
-                hosted_storage.photo_call("DELETE", key)
+                hosted_storage.photo_call("DELETE", key, timeout=min(remaining, 30.0))
             elif bearer_token:
-                hosted_photos.storage_call("DELETE", key, bearer_token)
+                hosted_photos.storage_call("DELETE", key, bearer_token, timeout=min(remaining, 20.0))
         except Exception:
             continue
 

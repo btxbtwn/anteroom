@@ -511,19 +511,19 @@ def _eligible_candidates(
 
     matched_conv_ids = [conv.id for _ml, conv in rows]
     excluded_convs: set[str] = {
-        row[0]
+        excluded_id
         for row in db.query(MarketplaceSale.conversation_id)
         .filter(
             MarketplaceSale.conversation_id.in_(matched_conv_ids),
             MarketplaceSale.order_status.in_((*PAID_STATUSES, "cancellation_pending")),
         )
         .all()
-        if row[0] is not None
+        if (excluded_id := row[0]) is not None
     }
     if respect_backoff:
         backoff_since = moment - RELIST_RETRY_BACKOFF
         excluded_convs.update(
-            row[0]
+            excluded_id
             for row in db.query(MarketplaceRelistLog.conversation_id)
             .filter(
                 MarketplaceRelistLog.marketplace == rule.marketplace,
@@ -532,12 +532,12 @@ def _eligible_candidates(
                 MarketplaceRelistLog.created_at >= backoff_since,
             )
             .all()
-            if row[0] is not None
+            if (excluded_id := row[0]) is not None
         )
     if rule.marketplace == "ebay":
         cycle_since = moment - EBAY_CYCLE_DEDUPE_WINDOW
         excluded_convs.update(
-            row[0]
+            excluded_id
             for row in db.query(MarketplaceRelistLog.conversation_id)
             .filter(
                 MarketplaceRelistLog.marketplace == "ebay",
@@ -546,7 +546,7 @@ def _eligible_candidates(
                 MarketplaceRelistLog.created_at >= cycle_since,
             )
             .all()
-            if row[0] is not None
+            if (excluded_id := row[0]) is not None
         )
 
     eligible_rows = [(ml, conv) for ml, conv in rows if conv.id not in excluded_convs]

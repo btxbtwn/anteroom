@@ -603,8 +603,8 @@ def test_hosted_pat_photo_cleanup_invokes_hosted_storage_delete(monkeypatch):
     from types import SimpleNamespace
     from anteroom.services import hosted_storage, mcp_http
 
-    calls: list[tuple[str, str]] = []
-    monkeypatch.setattr(hosted_storage, "photo_call", lambda method, key, data=None: calls.append((method, key)) or b"")
+    calls: list[tuple[str, str, float]] = []
+    monkeypatch.setattr(hosted_storage, "photo_call", lambda method, key, data=None, *, timeout=30: calls.append((method, key, timeout)) or b"")
     fake_hosted_db = SimpleNamespace(user_id=USER_ID)
     stored_key = f"{USER_ID}/conv-1/{'a' * 32}.jpg"
     source_key = f"{USER_ID}/conv-1/{'b' * 32}.jpg"
@@ -615,7 +615,8 @@ def test_hosted_pat_photo_cleanup_invokes_hosted_storage_delete(monkeypatch):
         source_key,
         bearer_token="arm_test_token_value",
     )
-    assert calls == [("DELETE", stored_key), ("DELETE", source_key)]
+    assert [(method, key) for method, key, _ in calls] == [("DELETE", stored_key), ("DELETE", source_key)]
+    assert 0 < calls[1][2] <= calls[0][2] <= 15
 
 
 def test_hosted_today_concurrent_mutations_stay_seller_scoped(cloud, signing_keys):  # noqa: F811
@@ -744,3 +745,82 @@ def test_mcp_m7_hosted_photo_delete_runs_after_db_session_closes(monkeypatch):
         "session_exit",
         f"storage_delete:user/conv/photo1.jpg:{mcp_route._MCP_STORAGE_CLEANUP_TIMEOUT_SECONDS}",
     ]
+
+
+def test_batch_does_not_dispatch_later_items_after_deadline(monkeypatch):
+    from anteroom.services import mcp_http
+
+    calls = []
+
+    def handle(_db, item, **_kwargs):
+        calls.append(item)
+        return None, None
+
+    monkeypatch.setattr(mcp_http, "_handle_single", handle)
+    with pytest.raises(TimeoutError):
+        mcp_http.handle_rpc_payload(object(), [1, 2], expired=lambda: bool(calls))
+    assert calls == [1]
+
+
+@pytest.mark.parametrize("ending", ["timeout", "exception", "cancel"])
+def test_mcp_deferred_delete_survives_abnormal_completion(monkeypatch, ending):
+    import asyncio
+    from types import SimpleNamespace
+
+    from anteroom.routes import mcp as mcp_route
+    from anteroom.services import mcp_http
+
+    async def exercise():
+        entered, release, deleted = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        events = []
+
+        async def fake_worker(fn):
+            try:
+                outcome = fn(object())
+                entered.set()
+                await release.wait()
+                if ending == "exception":
+                    raise RuntimeError("later batch item failed")
+                return outcome
+            finally:
+                events.append("session closed")
+
+        def fake_call(_db, _payload, *, deferred_deletes, **_kwargs):
+            deferred_deletes.append("seller/item/photo.jpg")
+            return {}, 200, {}
+
+        loop = asyncio.get_running_loop()
+
+        def fake_delete(keys, **_kwargs):
+            events.append(keys[0])
+            loop.call_soon_threadsafe(deleted.set)
+
+        async def fake_body(*_args, **_kwargs):
+            return b'{"jsonrpc":"2.0","id":1,"method":"ping"}'
+
+        monkeypatch.setattr(mcp_route, "in_worker_session", fake_worker)
+        monkeypatch.setattr(mcp_route, "_run_mcp_call", fake_call)
+        monkeypatch.setattr(mcp_route, "read_bounded_body", fake_body)
+        monkeypatch.setattr(mcp_http, "delete_hosted_storage_keys", fake_delete)
+        if ending == "timeout":
+            monkeypatch.setattr(mcp_route, "_MCP_RPC_TIMEOUT_SECONDS", 0.01)
+        request = SimpleNamespace(state=SimpleNamespace(), app=SimpleNamespace(state=SimpleNamespace()),
+                                  headers={}, client=None)
+        call = asyncio.create_task(mcp_route.mcp_post(request))
+        await asyncio.wait_for(entered.wait(), 2)
+        if ending == "timeout":
+            assert (await call).status_code == 504
+            release.set()
+        elif ending == "cancel":
+            call.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await call
+            release.set()
+        else:
+            release.set()
+            with pytest.raises(RuntimeError, match="later batch item failed"):
+                await call
+        await asyncio.wait_for(deleted.wait(), 2)
+        assert events == ["session closed", "seller/item/photo.jpg"]
+
+    asyncio.run(exercise())
