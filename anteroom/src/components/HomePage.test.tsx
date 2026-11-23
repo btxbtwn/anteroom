@@ -428,4 +428,60 @@ describe("HomePage", () => {
     expect(container.textContent).not.toContain(coat);
   });
 
+  it("lets a later goal save keep attention restored by a refetch", async () => {
+    let finishSave!: (result: { ok: boolean; home: HomeSummaryResponse }) => void;
+    const { homeQuery } = await import("../api/pageQueries");
+    const { browserTimeZone } = await import("../api/home");
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData(homeQuery(browserTimeZone()).queryKey, sampleHome);
+    api.home.summary.mockResolvedValue(sampleHome);
+    api.home.updateGoal.mockReturnValueOnce(new Promise((resolve) => { finishSave = resolve; }));
+
+    await act(async () => {
+      root.render(
+        <QueryClientProvider client={qc}>
+          <HomePage onNavigateAttention={vi.fn()} />
+        </QueryClientProvider>,
+      );
+    });
+    await settle();
+
+    const button = (label: string) => [...container.querySelectorAll("button")]
+      .find((node) => node.getAttribute("aria-label") === label || node.textContent?.trim() === label)!;
+    const coat = "Vintage Wool Coat sold on eBay — still live on Poshmark";
+
+    await act(() => button("Dismiss").click());
+    await settle();
+    expect(container.textContent).not.toContain(coat);
+
+    // Refetch as if another device restored the alert.
+    qc.setQueryData(homeQuery(browserTimeZone()).queryKey, sampleHome);
+    await settle();
+    expect(container.textContent).toContain(coat);
+
+    await act(() => button("Edit Monthly Profit").click());
+    await act(() => {
+      const input = container.querySelector<HTMLInputElement>('[aria-label="Goal target"]')!;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "2500");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(() => button("Save changes").click());
+    await settle();
+
+    const staleWithDismissedCoat: HomeSummaryResponse = {
+      ...sampleHome,
+      today: { ...sampleHome.today, units_listed: 99 },
+      needs_attention: sampleHome.needs_attention.filter((item) => item.key !== "still_listed:conv_1"),
+      dismissed: [
+        ...sampleHome.dismissed,
+        { ...sampleHome.needs_attention[0]!, reappears_in_days: 7 },
+      ],
+      counts: { active: 1, dismissed: 2, by_kind: { expired_session: 1 } },
+    };
+    await act(() => finishSave({ ok: true, home: staleWithDismissedCoat }));
+    await settle();
+    expect(container.textContent).toContain(coat);
+    expect(container.textContent).toContain("99");
+  });
+
 });

@@ -165,62 +165,20 @@ export function patchHomeAfterRestore(
   };
 }
 
-export type PendingAttentionOp =
-  | {
-      op: "dismiss";
-      item: AttentionItem;
-      dismissal?: Partial<AttentionDismissalResult> | null;
-    }
-  | { op: "restore" };
-
 /**
- * Apply a Today snapshot from a slow goal save without wiping in-flight alert
- * moves. Only pending dismiss/restore keys are patched; every other alert takes
- * the server state so cross-device and expired dismissals can show up.
- * Confirmed keys are removed from `pending`.
+ * Goal mutations still rebuild home_summary for progress bars, but must not
+ * replace Needs attention — that scan can lag an optimistic Dismiss/Restore.
  */
-export function mergeHomeSnapshot(
+export function applyGoalHomeSnapshot(
   server: HomeSummaryResponse,
-  pending: ReadonlyMap<string, PendingAttentionOp>,
+  local: HomeSummaryResponse | undefined,
 ): HomeSummaryResponse {
-  if (pending.size === 0) return server;
-  let merged = server;
-  for (const [key, action] of pending) {
-    if (action.op === "dismiss") {
-      const active = merged.needs_attention.find((entry) => entry.key === key);
-      if (active) {
-        merged = patchHomeAfterDismiss(
-          merged,
-          active,
-          action.dismissal ?? {
-            item_key: key,
-            dismissed_at: action.item.dismissed_at ?? undefined,
-            expires_at: action.item.expires_at ?? undefined,
-            reappears_in_days: action.item.reappears_in_days,
-          },
-        );
-      }
-      continue;
-    }
-    if (merged.dismissed.some((entry) => entry.key === key)) {
-      merged = patchHomeAfterRestore(merged, key);
-    }
-  }
-  return merged;
-}
-
-/** Drop pending ops the server snapshot already reflects. */
-export function settlePendingAttention(
-  pending: Map<string, PendingAttentionOp>,
-  server: HomeSummaryResponse,
-): void {
-  for (const [key, action] of [...pending.entries()]) {
-    if (action.op === "dismiss") {
-      if (server.dismissed.some((entry) => entry.key === key)) pending.delete(key);
-      continue;
-    }
-    if (!server.dismissed.some((entry) => entry.key === key)) pending.delete(key);
-  }
+  if (!local) return server;
+  return {
+    ...local,
+    today: server.today,
+    goals: server.goals,
+  };
 }
 
 export function browserTimeZone(): string {

@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  mergeHomeSnapshot,
+  applyGoalHomeSnapshot,
   patchHomeAfterDismiss,
   patchHomeAfterRestore,
-  settlePendingAttention,
   type AttentionItem,
   type HomeSummaryResponse,
-  type PendingAttentionOp,
 } from "./home";
 
 const baseItem = (key: string, kind: AttentionItem["kind"] = "failed_job"): AttentionItem => ({
@@ -62,42 +60,45 @@ describe("patchHomeAfterDismiss / restore", () => {
     expect(restored.counts.active).toBe(2);
     expect(restored.needs_attention.find((item) => item.key === "a")?.reappears_in_days).toBeUndefined();
   });
+});
 
-  it("re-applies only pending dismissals onto a stale server snapshot", () => {
-    const pending = new Map<string, PendingAttentionOp>([
-      ["a", {
-        op: "dismiss",
-        item: sample.needs_attention[0]!,
-        dismissal: {
-          item_key: "a",
-          dismissed_at: "2026-11-22T12:00:00Z",
-          expires_at: "2026-11-29T12:00:00Z",
-          reappears_in_days: 7,
-        },
+describe("applyGoalHomeSnapshot", () => {
+  it("keeps local attention when a goal snapshot is stale", () => {
+    const local = patchHomeAfterDismiss(sample, sample.needs_attention[0]!);
+    const server: HomeSummaryResponse = {
+      ...sample,
+      today: { ...sample.today, units_listed: 9 },
+      goals: [{
+        id: "goal_1",
+        period: "monthly",
+        metric: "profit",
+        label: "Monthly Profit",
+        custom_label: null,
+        target: 2000,
+        current: 1500,
+        remaining: 500,
+        progress_percent: 75,
+        expected_percent: 70,
+        pace: "ahead",
+        window_start: "2026-11-01",
+        window_end: "2026-11-30",
+        days_elapsed: 22,
+        days_total: 30,
+        days_remaining: 8,
+        unit: "currency",
+        note: null,
       }],
-    ]);
-    const merged = mergeHomeSnapshot(sample, pending);
+    };
+    const merged = applyGoalHomeSnapshot(server, local);
+    expect(merged.today.units_listed).toBe(9);
+    expect(merged.goals).toHaveLength(1);
     expect(merged.needs_attention.map((item) => item.key)).toEqual(["b"]);
     expect(merged.dismissed.map((item) => item.key)).toEqual(["a"]);
   });
 
-  it("takes the server Active state when a local dismiss is not pending", () => {
-    const pending = new Map<string, PendingAttentionOp>();
-    const merged = mergeHomeSnapshot(sample, pending);
+  it("takes the server Active list when local already matches the server", () => {
+    const merged = applyGoalHomeSnapshot(sample, sample);
     expect(merged.needs_attention.map((item) => item.key)).toEqual(["a", "b"]);
     expect(merged.dismissed).toEqual([]);
-  });
-
-  it("drops pending dismissals once the server snapshot confirms them", () => {
-    const pending = new Map<string, PendingAttentionOp>([
-      ["a", { op: "dismiss", item: sample.needs_attention[0]! }],
-    ]);
-    const confirmed = patchHomeAfterDismiss(sample, sample.needs_attention[0]!);
-    settlePendingAttention(pending, confirmed);
-    expect(pending.size).toBe(0);
-
-    pending.set("a", { op: "dismiss", item: sample.needs_attention[0]! });
-    settlePendingAttention(pending, sample);
-    expect(pending.has("a")).toBe(true);
   });
 });

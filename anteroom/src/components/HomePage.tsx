@@ -13,11 +13,10 @@ import {
 } from "lucide-react";
 import { api } from "../api/client";
 import {
+  applyGoalHomeSnapshot,
   browserTimeZone,
-  mergeHomeSnapshot,
   patchHomeAfterDismiss,
   patchHomeAfterRestore,
-  settlePendingAttention,
   type AttentionItem,
   type AttentionKind,
   type AttentionTarget,
@@ -25,7 +24,6 @@ import {
   type GoalPace,
   type GoalPeriod,
   type HomeSummaryResponse,
-  type PendingAttentionOp,
   type SellerGoalProgress,
 } from "../api/home";
 import { homeQuery } from "../api/pageQueries";
@@ -154,12 +152,11 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
   const [goalLabel, setGoalLabel] = useState("");
   const [goalFormError, setGoalFormError] = useState<string | null>(null);
 
-  const syncHome = async (next: HomeSummaryResponse | undefined) => {
+  const syncGoalsHome = async (next: HomeSummaryResponse | undefined) => {
     await queryClient.cancelQueries({ queryKey: queryDef.queryKey, exact: true });
     if (next) {
-      const merged = mergeHomeSnapshot(next, pendingAttention.current);
-      settlePendingAttention(pendingAttention.current, next);
-      queryClient.setQueryData(queryDef.queryKey, merged);
+      const local = queryClient.getQueryData<HomeSummaryResponse>(queryDef.queryKey);
+      queryClient.setQueryData(queryDef.queryKey, applyGoalHomeSnapshot(next, local));
     } else {
       await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
     }
@@ -177,10 +174,10 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
   // stay off that queue and patch the cache immediately — a full Today rebuild
   // used to stall every Dismiss on large inventories. Same-alert dismiss then
   // restore still runs in order so a late dismiss cannot undo a newer restore.
+  // Goal responses only refresh today/goals so they cannot wipe those patches.
   const goalMutationScope = { id: "today-goals" };
   const attentionQueues = useRef(new Map<string, Promise<unknown>>());
   const attentionEpoch = useRef(new Map<string, number>());
-  const pendingAttention = useRef(new Map<string, PendingAttentionOp>());
 
   const bumpAttentionEpoch = (key: string) => {
     const next = (attentionEpoch.current.get(key) ?? 0) + 1;
@@ -206,7 +203,7 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
       formVersion: number;
     }) => id ? api.home.updateGoal(id, body, timezone) : api.home.upsertGoal(body, timezone),
     onSuccess: async (res, { formVersion }) => {
-      await syncHome(res.home);
+      await syncGoalsHome(res.home);
       if (goalFormVersion.current !== formVersion) return;
       setGoalFormOpen(false);
       setEditingGoalId(null);
@@ -223,7 +220,7 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
   const removeGoal = useMutation({
     scope: goalMutationScope,
     mutationFn: (goalId: string) => api.home.deleteGoal(goalId, timezone),
-    onSuccess: (res) => syncHome(res.home),
+    onSuccess: (res) => syncGoalsHome(res.home),
   });
 
   const dismissItem = useMutation({
@@ -232,28 +229,15 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
     onMutate: async (item) => {
       await queryClient.cancelQueries({ queryKey: queryDef.queryKey, exact: true });
       const epoch = bumpAttentionEpoch(item.key);
-      pendingAttention.current.set(item.key, { op: "dismiss", item });
       patchHomeCache((current) => patchHomeAfterDismiss(current, item));
       return { key: item.key, epoch };
     },
     onSuccess: (res, item, ctx) => {
       if (!attentionOpIsCurrent(item.key, ctx?.epoch)) return;
-      pendingAttention.current.set(item.key, {
-        op: "dismiss",
-        item,
-        dismissal: res.dismissal,
-      });
-      if (res.home) {
-        const merged = mergeHomeSnapshot(res.home, pendingAttention.current);
-        settlePendingAttention(pendingAttention.current, res.home);
-        queryClient.setQueryData(queryDef.queryKey, merged);
-        return;
-      }
       patchHomeCache((current) => patchHomeAfterDismiss(current, item, res.dismissal));
     },
     onError: async (_err, item, ctx) => {
       if (!attentionOpIsCurrent(item.key, ctx?.epoch)) return;
-      pendingAttention.current.delete(item.key);
       await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
     },
   });
@@ -264,24 +248,15 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
     onMutate: async (itemKey) => {
       await queryClient.cancelQueries({ queryKey: queryDef.queryKey, exact: true });
       const epoch = bumpAttentionEpoch(itemKey);
-      pendingAttention.current.set(itemKey, { op: "restore" });
       patchHomeCache((current) => patchHomeAfterRestore(current, itemKey));
       return { key: itemKey, epoch };
     },
     onSuccess: (res, itemKey, ctx) => {
       if (!attentionOpIsCurrent(itemKey, ctx?.epoch)) return;
-      pendingAttention.current.set(itemKey, { op: "restore" });
-      if (res.home) {
-        const merged = mergeHomeSnapshot(res.home, pendingAttention.current);
-        settlePendingAttention(pendingAttention.current, res.home);
-        queryClient.setQueryData(queryDef.queryKey, merged);
-        return;
-      }
       patchHomeCache((current) => patchHomeAfterRestore(current, res.item_key ?? itemKey));
     },
     onError: async (_err, itemKey, ctx) => {
       if (!attentionOpIsCurrent(itemKey, ctx?.epoch)) return;
-      pendingAttention.current.delete(itemKey);
       await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
     },
   });
