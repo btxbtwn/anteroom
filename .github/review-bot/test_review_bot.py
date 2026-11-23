@@ -211,23 +211,25 @@ class PostReviewTests(unittest.TestCase):
         upsert.assert_called_once()
         self.assertIn("--diff-filter=d", diff_paths.call_args.args[0])
 
-    def _post_review_with_addressed(self, temp, graphql):
-        """Run post_review with two addressed findings; return the API calls made."""
+    def _post_review_with_addressed(self, temp, graphql, *, addressed=(11, 22), pending=(), resolved=()):
+        """Run post_review on two finding threads; return the API calls made."""
         ctx = Path(temp)
         (ctx / "context.json").write_text(json.dumps({
             "pr": 1, "head": "head", "merge_base": "base", "since": None, "files": [],
+            "pending_unresolved": list(pending), "pending_reason": "earlier reason" if pending else None,
         }))
         (ctx / "pr.diff").write_text("")
         (ctx / "open-findings.json").write_text(json.dumps([{"comment_id": 11}, {"comment_id": 22}]))
         threads = [
-            {"id": f"T{cid}", "comments": {"nodes": [{"databaseId": cid, "body": "finding"}]}}
+            {"id": f"T{cid}", "isResolved": f"T{cid}" in resolved,
+             "comments": {"nodes": [{"databaseId": cid, "body": "finding"}]}}
             for cid in (11, 22)
         ]
         output = {
             "change_type": "Bug fix", "summary": [], "walkthrough": [], "related_issues": [], "related_prs": [],
             "merge_risk": {"level": "Low", "explanation": "small"},
             "security_risk": {"level": "Minimal", "explanation": "none", "concerns": []},
-            "findings": [], "addressed": [{"comment_id": 11, "commit": "c1"}, {"comment_id": 22, "commit": "c2"}],
+            "findings": [], "addressed": [{"comment_id": cid, "commit": f"c{cid}"} for cid in addressed],
         }
         with (
             patch.dict(bot.os.environ, {"REVIEW_OUTPUT": json.dumps(output)}),
@@ -258,7 +260,11 @@ class PostReviewTests(unittest.TestCase):
         summary = [c.args[2]["body"] for c in calls if c.args[0] == "repos/owner/repo/issues/1/comments"]
         self.assertEqual(len(summary), 1)
         # The reviewed commit is recorded, so the next review stays incremental.
-        self.assertEqual(bot.read_marker(bot.REVIEW_STATE, summary[0]), {"reviewed_sha": "head"})
+        self.assertEqual(
+            bot.read_marker(bot.REVIEW_STATE, summary[0]),
+            {"reviewed_sha": "head", "unresolved_threads": ["T11", "T22"],
+             "unresolved_reason": "gh: Resource not accessible by integration"},
+        )
         self.assertIn("Could not resolve 2 addressed thread(s)", summary[0])
         self.assertIn("Resource not accessible by integration", summary[0])
         upsert.assert_called_once()
@@ -273,7 +279,46 @@ class PostReviewTests(unittest.TestCase):
         self.assertIsNone(exit_reason)
         summary = [c.args[2]["body"] for c in calls if c.args[0] == "repos/owner/repo/issues/1/comments"]
         self.assertNotIn("Could not resolve", summary[0])
+        self.assertEqual(bot.read_marker(bot.REVIEW_STATE, summary[0]), {"reviewed_sha": "head"})
         upsert.assert_called_once()
+
+    def test_threads_an_earlier_run_could_not_resolve_keep_the_review_failing(self):
+        with tempfile.TemporaryDirectory() as temp:
+            calls, _, exit_reason = self._post_review_with_addressed(
+                temp, lambda query, **v: {}, addressed=(), pending=["T11"])
+        self.assertEqual(exit_reason, "Could not resolve 1 addressed thread(s): earlier reason")
+        summary = [c.args[2]["body"] for c in calls if c.args[0] == "repos/owner/repo/issues/1/comments"]
+        self.assertEqual(bot.read_marker(bot.REVIEW_STATE, summary[0])["unresolved_threads"], ["T11"])
+        # Once a person resolves it, the next review passes.
+        with tempfile.TemporaryDirectory() as temp:
+            _, _, exit_reason = self._post_review_with_addressed(
+                temp, lambda query, **v: {}, addressed=(), pending=["T11"], resolved=["T11"])
+        self.assertIsNone(exit_reason)
+
+    def _prepare_same_head(self, state, threads):
+        outputs = {}
+        with tempfile.TemporaryDirectory() as out, (
+            patch.object(bot, "git", side_effect=lambda *a: "head\n" if a[0] == "rev-parse" else "base\n")
+        ), (
+            patch.object(bot, "bot_issue_comments", return_value=[({"id": 1}, state)])
+        ), (
+            patch.object(bot, "review_threads", return_value=threads)
+        ), patch.object(bot, "set_output", side_effect=outputs.update):
+            try:
+                bot.prepare_review(SimpleNamespace(pr=1, base="main", out=out))
+            except SystemExit as stop:
+                return outputs, stop.code
+        return outputs, None
+
+    def test_rerunning_the_same_commit_does_not_pass_while_threads_stay_unresolved(self):
+        state = {"reviewed_sha": "head", "unresolved_threads": ["T11"], "unresolved_reason": "gh: refused"}
+        outputs, exit_reason = self._prepare_same_head(state, [{"id": "T11", "isResolved": False}])
+        self.assertEqual(outputs, {"skip": "true"})
+        self.assertIn("Could not resolve 1 addressed thread(s): gh: refused", exit_reason)
+        outputs, exit_reason = self._prepare_same_head(state, [{"id": "T11", "isResolved": True}])
+        self.assertEqual((outputs, exit_reason), ({"skip": "true"}, None))
+        outputs, exit_reason = self._prepare_same_head({"reviewed_sha": "head"}, [])
+        self.assertEqual((outputs, exit_reason), ({"skip": "true"}, None))
 
     def test_command_errors_carry_a_short_redacted_reason(self):
         failed = bot.subprocess.CompletedProcess(

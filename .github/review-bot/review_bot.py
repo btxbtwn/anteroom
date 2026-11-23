@@ -314,9 +314,15 @@ def render_review_info(ctx: dict) -> str:
     )
 
 
-def render_summary(data: dict, ctx: dict, *, posted: int, review_url: str | None) -> str:
+def render_summary(
+    data: dict, ctx: dict, *, posted: int, review_url: str | None, unresolved: dict | None = None
+) -> str:
     head7 = ctx["head"][:7]
-    out = [marker(REVIEW_STATE, {"reviewed_sha": ctx["head"]}), "## Claude review"]
+    state: dict = {"reviewed_sha": ctx["head"]}
+    if unresolved:
+        # Threads GitHub would not resolve keep the check red on reruns of this commit.
+        state |= {"unresolved_threads": unresolved["ids"], "unresolved_reason": unresolved["reason"]}
+    out = [marker(REVIEW_STATE, state), "## Claude review"]
     if posted:
         link = f" in the [latest review]({review_url})" if review_url else ""
         out.append(f"**Actionable comments posted: {posted}**{link}")
@@ -625,15 +631,39 @@ def review_scope(pr_files: list[str], new_paths: list[str] | None, open_paths: l
     return sorted(pr & new), sorted((set(open_paths) & new) - pr)
 
 
+def unresolved_failure(count: int, reason: str) -> str:
+    return f"Could not resolve {count} addressed thread(s): {reason}"
+
+
+def still_open(thread_ids: list[str], threads: list[dict]) -> list[str]:
+    """The given threads that are still unresolved on the pull request."""
+    open_now = {t["id"] for t in threads if not t["isResolved"]}
+    return [tid for tid in thread_ids if tid in open_now]
+
+
 def prepare_review(args) -> None:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     head = git("rev-parse", "HEAD").strip()
     merge_base = git("merge-base", f"origin/{args.base}", head).strip()
     summaries = bot_issue_comments(args.pr, REVIEW_STATE)
-    reviewed = summaries[-1][1].get("reviewed_sha") if summaries else None
-    if reviewed == head:
+    state = summaries[-1][1] if summaries else {}
+    reviewed = state.get("reviewed_sha")
+    pending_ids = list(state.get("unresolved_threads") or [])
+    threads = review_threads(args.pr) if pending_ids else None
+    pending = still_open(pending_ids, threads) if threads is not None else []
+    pending_reason = sanitize_reason(str(state.get("unresolved_reason") or "")) or "unknown"
+
+    def skip() -> None:
         set_output(skip="true")
+        # Skipping must not turn a check that failed on unresolved threads green.
+        if pending:
+            failure = unresolved_failure(len(pending), pending_reason)
+            print(f"::error title=Claude review::{failure}")
+            sys.exit(f"{failure}. Resolve them by hand after checking.")
+
+    if reviewed == head:
+        skip()
         return
     since = None
     if reviewed and subprocess.run(["git", "cat-file", "-e", reviewed]).returncode == 0 and is_ancestor(reviewed, head):
@@ -645,7 +675,7 @@ def prepare_review(args) -> None:
             "line": t["line"],
             "body": t["comments"]["nodes"][0]["body"],
         }
-        for t in review_threads(args.pr)
+        for t in (threads if threads is not None else review_threads(args.pr))
         if not t["isResolved"] and t["comments"]["nodes"] and is_claude_finding(t["comments"]["nodes"][0])
     ]
     files, restored = review_scope(
@@ -655,7 +685,7 @@ def prepare_review(args) -> None:
     )
     if not files and not restored:
         # Only a merge from the base branch: nothing new of this PR's to review.
-        set_output(skip="true")
+        skip()
         return
     (out / "pr.diff").write_text(git("diff", "--no-color", "--no-ext-diff", merge_base, head))
     increment = git(
@@ -663,7 +693,10 @@ def prepare_review(args) -> None:
     )
     (out / "increment.diff").write_text(increment)
     (out / "open-findings.json").write_text(json.dumps(open_findings, indent=2))
-    ctx = {"pr": args.pr, "head": head, "merge_base": merge_base, "since": since, "files": files, "restored": restored}
+    ctx = {
+        "pr": args.pr, "head": head, "merge_base": merge_base, "since": since, "files": files, "restored": restored,
+        "pending_unresolved": pending, "pending_reason": pending_reason if pending else None,
+    }
     (out / "context.json").write_text(json.dumps(ctx, indent=2))
     set_output(skip="false", files=len(files), incremental="true" if since else "false")
 
@@ -706,9 +739,15 @@ def post_review(args) -> None:
     addressed = {a["comment_id"]: a["commit"] for a in data.get("addressed", []) if a["comment_id"] in open_ids}
     # A thread that cannot be resolved must not stop the summary and the
     # reviewed-commit record from posting; the job still fails at the end.
-    unresolved: list[str] = []
-    if addressed:
-        for thread in review_threads(ctx["pr"]):
+    # Threads an earlier run could not resolve keep failing until they are.
+    pending = list(ctx.get("pending_unresolved") or [])
+    failed_ids: list[str] = []
+    reasons: list[str] = []
+    resolved_ids: set[str] = set()
+    carried: list[str] = []
+    if addressed or pending:
+        threads = review_threads(ctx["pr"])
+        for thread in threads:
             root = thread["comments"]["nodes"][0] if thread["comments"]["nodes"] else None
             if root and root["databaseId"] in addressed:
                 api(
@@ -718,16 +757,23 @@ def post_review(args) -> None:
                 )
                 try:
                     resolve_thread(thread["id"])
+                    resolved_ids.add(thread["id"])
                 except (subprocess.CalledProcessError, RuntimeError) as error:
                     reason = error.reason if isinstance(error, CommandError) else sanitize_reason(str(error))
                     print(f"Could not resolve thread {thread['id']}: {reason}", file=sys.stderr)
-                    unresolved.append(reason)
+                    failed_ids.append(thread["id"])
+                    reasons.append(reason)
+        carried = [tid for tid in still_open(pending, threads) if tid not in resolved_ids and tid not in failed_ids]
+        if carried:
+            reasons.append(ctx.get("pending_reason") or "unknown")
+    unresolved_ids = failed_ids + carried
     failure = None
-    if unresolved:
-        reasons = "; ".join(dict.fromkeys(unresolved))
-        failure = f"Could not resolve {len(unresolved)} addressed thread(s): {reasons}"
+    unresolved = None
+    if unresolved_ids:
+        unresolved = {"ids": unresolved_ids, "reason": "; ".join(dict.fromkeys(reasons))}
+        failure = unresolved_failure(len(unresolved_ids), unresolved["reason"])
 
-    body = render_summary(data, ctx, posted=len(findings), review_url=review_url)
+    body = render_summary(data, ctx, posted=len(findings), review_url=review_url, unresolved=unresolved)
     if failure:
         body += f"\n\n> ⚠️ {failure}. They are marked addressed; resolve them by hand after checking."
     summaries = bot_issue_comments(ctx["pr"], REVIEW_STATE)
