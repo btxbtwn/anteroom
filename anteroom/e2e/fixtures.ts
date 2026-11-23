@@ -27,15 +27,15 @@ export const test = base.extend<{ phone: boolean; createConversation: (data: { t
     await use(isMobile);
   },
   // Any uncaught error in the page fails the test, so a broken screen cannot pass quietly.
-  page: async ({ page }, use) => {
+  page: async ({ page, baseURL }, use) => {
     const errors: string[] = [];
+    // WebKit logs a same-origin API read cut off by a reload or navigation (polls,
+    // page prefetches) as an access-control failure, even when the app handles it,
+    // and Playwright reports that log as a page error. A same-origin request cannot
+    // fail a real access-control check, so only that message is ignored.
+    const cancelledRead = new RegExp(`/${new URL(baseURL!).host.replace(/\./g, "\\.")}/api/\\S* due to access control checks\\.?$`, "i");
     page.on("pageerror", (error) => {
-      // WebKit reports same-origin polls cancelled by a reload or navigation as
-      // access-control failures. Extension status is polled from Settings and
-      // Connect Chrome; routing the URL alone does not stop the pageerror.
-      if (/\/api\/extension\/status due to access control checks\.?$/i.test(error.message)) {
-        return;
-      }
+      if (cancelledRead.test(error.message)) return;
       errors.push(error.message);
     });
     await use(page);
