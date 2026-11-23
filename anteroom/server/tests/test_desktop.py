@@ -68,6 +68,56 @@ class StudioWindowChromeTest(unittest.TestCase):
         # used to sign marketplaces out on each launch.
         self.assertFalse(kwargs["private_mode"])
 
+    def test_splash_matches_the_web_startup_screen(self):
+        page = desktop.splash_html()
+        stylesheet = desktop.resource_root() / "src" / "styles" / "startup.css"
+        self.assertIn(stylesheet.read_text(encoding="utf-8"), page)
+        self.assertIn('aria-label="Opening Anteroom"', page)
+        self.assertIn('<img class="startup-logo" src="data:image/png;base64,', page)
+        self.assertIn('<h1 class="startup-title">Anteroom</h1>', page)
+        self.assertIn('<span class="startup-spinner" aria-hidden="true">', page)
+        self.assertIn("Getting things ready…", page)
+        self.assertIn('role="status"', page)
+        self.assertIn('<div class="startup-recovery"></div>', page)
+        self.assertIn("pywebview-drag-region", page)
+
+    def test_error_splash_keeps_the_shell_and_drops_the_spinner(self):
+        page = desktop.splash_html(error="Could not start the local studio server.")
+        self.assertIn('role="alert"', page)
+        self.assertIn("Could not start the local studio server.", page)
+        self.assertNotIn('class="startup-spinner"', page)
+        self.assertIn('<img class="startup-logo"', page)
+        self.assertIn('<h1 class="startup-title">Anteroom</h1>', page)
+
+    def test_splash_can_open_and_report_errors_without_a_valid_stylesheet(self):
+        with tempfile.TemporaryDirectory() as root, patch.object(desktop, "resource_root", return_value=Path(root)):
+            self.assertIn("Getting things ready…", desktop.splash_html())
+
+            stylesheet = Path(root) / "src" / "styles" / "startup.css"
+            stylesheet.parent.mkdir(parents=True)
+            stylesheet.write_bytes(b"\xff")
+            page = desktop.splash_html(error="Could not start the local studio server.")
+
+        self.assertIn('role="alert"', page)
+        self.assertIn("Could not start the local studio server.", page)
+        self.assertNotIn('class="startup-spinner"', page)
+
+    def test_boot_keeps_one_startup_screen_until_the_workspace_opens(self):
+        window = MagicMock()
+        with (
+            patch.object(desktop, "_window", None),
+            patch.object(desktop, "_pending_url", None),
+            patch.object(desktop, "ensure_frontend"),
+            patch.object(desktop, "start_owned_server"),
+            patch.object(desktop, "reap_orphaned_bridges"),
+            patch.object(desktop, "is_frozen", return_value=True),
+            patch.object(desktop, "saved_workspace_url", return_value=desktop.APP_URL),
+            patch.dict(sys.modules, {"anteroom.services.keychain": SimpleNamespace(warm_keychain=lambda: None)}),
+        ):
+            desktop._boot_window(window)
+        window.load_html.assert_not_called()
+        window.load_url.assert_called_once_with(desktop.APP_URL)
+
     def test_studio_app_menu_includes_update_actions(self):
         menu_mod = SimpleNamespace(
             Menu=lambda title, items=None: SimpleNamespace(title=title, items=items or []),

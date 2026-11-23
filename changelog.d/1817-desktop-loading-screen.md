@@ -1,0 +1,1 @@
+- Show the same Getting things ready startup screen in the Mac app as on the web.
