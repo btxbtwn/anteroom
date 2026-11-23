@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { confirmDialog } from "../ui/confirmDialog";
+import type { DelistMarketplace, MarketplaceListings } from "../api/marketplaceListings";
+import { useWorkspaceRuntime } from "../app/runtime";
+import { confirmDialog, whenConfirmDialogIdle } from "../ui/confirmDialog";
 import { toastManager } from "./ui/toast";
 import {
   isChatResetting,
@@ -11,6 +13,8 @@ import {
   useChatBusy,
 } from "./chat/liveChatStore";
 import { RefreshCwIcon } from "lucide-react";
+import { waitlist } from "./MarketplaceActivity";
+import { delistPrompt, delistTargets } from "./marketplaceDelist";
 import { RegeneratePriceDialog } from "./RegeneratePriceDialog";
 import { Button } from "./ui/button";
 
@@ -23,6 +27,39 @@ const REGENERATE_WARNING = [
   "Rewrite this listing from scratch?",
   "Chat and every generated field are discarded, then the listing is written again from your photos and item details. Measurements, flaws, COG, labels and notes are kept.",
 ].join("\n");
+
+const REGENERATE_DELIST_LEAD = "The listing will be rewritten in Anteroom. Live listings keep the old copy unless you delist or update them.";
+
+/** Items with a rewrite between its confirm and the end of its reset. Shared by every
+    Regenerate button, since the editor rail and the empty chat can both show one for an item. */
+const rewriting = new Set<string>();
+
+/** Takes the item's rewrite hold; false when another rewrite of it already holds it. */
+export function holdRewrite(convId: string): boolean {
+  if (rewriting.has(convId)) return false;
+  rewriting.add(convId);
+  return true;
+}
+
+export function releaseRewrite(convId: string): void {
+  rewriting.delete(convId);
+}
+
+/** After the seller confirms Regenerate: the marketplaces they also chose to delist from.
+    Nothing live there means no question; "Keep them listed" means none. */
+export async function askDelistOnRegenerate(
+  title: string,
+  listings: MarketplaceListings,
+  canAct: (marketplace: string) => boolean,
+): Promise<DelistMarketplace[]> {
+  const targets = delistTargets(listings, canAct);
+  if (!targets.length) return [];
+  // The Rewrite prompt is still closing; a second click on it must not land on Delist.
+  await whenConfirmDialogIdle();
+  const { message, confirmLabel } = delistPrompt(title, targets, REGENERATE_DELIST_LEAD);
+  const approved = await confirmDialog(message, { variant: "destructive", confirmLabel, cancelLabel: "Keep them listed" });
+  return approved ? targets : [];
+}
 
 export async function refreshAfterReset(queryClient: QueryClient, convId: string) {
   queryClient.invalidateQueries({ queryKey: ["conversations"] });
@@ -80,7 +117,8 @@ function listingHasPrice(listing: Record<string, unknown> | undefined): boolean 
 }
 
 /** When the listing has a price, opens the comps/percent drop chooser, which
- *  offers the rewrite itself. Otherwise a single confirm precedes the rewrite. */
+ *  offers the rewrite itself. Otherwise a single confirm precedes the rewrite.
+ *  Either way, an item still live somewhere is then asked whether to delist it too. */
 export function RegenerateListingButton({
   convId,
   className,
@@ -93,8 +131,12 @@ export function RegenerateListingButton({
   onRegenerated?: () => void;
 }) {
   const queryClient = useQueryClient();
+  const runtime = useWorkspaceRuntime();
   const busy = useChatBusy(convId);
   const [priceDialogOpen, setPriceDialogOpen] = useState(false);
+  // Held from the rewrite confirm through the delist question until the reset starts.
+  const [preparing, setPreparing] = useState(false);
+
   const { data: photos } = useQuery({
     queryKey: ["photos", convId],
     queryFn: ({ signal }) => api.conversations.photos(convId, undefined, { signal }),
@@ -107,12 +149,19 @@ export function RegenerateListingButton({
   const hasPrice = listingHasPrice(listingData?.listing);
 
   const regenerate = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (delist: { title: string; marketplaces: DelistMarketplace[] }) => {
       resetChatLive(convId);
       // The wipe can take a moment; show it as a phase in the chat instead
       // of leaving an empty panel.
       markChatResetting(convId, true);
       await api.conversations.reset(convId, { keepInputs: true });
+      // Queued only after the wipe, which cancels this item's marketplace jobs, and
+      // before the reads below, so a failed read cannot drop them. The seller
+      // approved exactly these marketplaces in the delist prompt.
+      for (const marketplace of delist.marketplaces) {
+        waitlist.add({ convId, title: delist.title, marketplace, kind: "delist", revisionId: "" });
+      }
+      if (delist.marketplaces.length) void queryClient.invalidateQueries({ queryKey: ["queue"] });
       // Chat must see the empty listing before it starts, or it reads the old
       // listing JSON as "generation already finished". Read both directly:
       // awaiting invalidateQueries also awaits any shared refetch, and one
@@ -144,13 +193,53 @@ export function RegenerateListingButton({
     },
   });
 
+  /** Asks once, after the rewrite is confirmed, whether to delist the live listings too.
+      Keeping them listed still rewrites. */
+  async function rewriteAskingDelist() {
+    // One rewrite per item: held from here until the reset settles, so a second
+    // Rewrite while this one asks or resets is ignored.
+    if (!holdRewrite(convId)) return;
+    setPreparing(true);
+    try {
+      await regenerate.mutateAsync(await prepareRewrite()).catch(() => {
+        // The mutation's onError shows the failure.
+      });
+    } finally {
+      // The shared hold must be released even if this button has unmounted.
+      releaseRewrite(convId);
+      setPreparing(false);
+    }
+  }
+
+  async function prepareRewrite(): Promise<{ title: string; marketplaces: DelistMarketplace[] }> {
+    const title = String(listingData?.listing?.title || "this item");
+    // Read fresh: a listing that went live, or was delisted, since the page loaded changes the question.
+    const liveKey = ["marketplace-listings", convId];
+    const listings = await queryClient
+      .fetchQuery({ queryKey: liveKey, queryFn: ({ signal }) => api.marketplaceListings.get(convId, { signal }) })
+      .catch(() => {
+        const cached = queryClient.getQueryData<MarketplaceListings>(liveKey);
+        if (!cached) {
+          toastManager.add({
+            type: "warning",
+            title: "Could not check where this item is live",
+            description: "The listing is still rewritten. Delist it under Marketplaces if it is still up.",
+          });
+        }
+        return cached ?? {};
+      });
+    const marketplaces = await askDelistOnRegenerate(title, listings,
+      (marketplace) => runtime.actionMarketplaces.has(marketplace));
+    return { title, marketplaces };
+  }
+
   async function confirmFullRegenerate() {
     const confirmed = await confirmDialog(REGENERATE_WARNING, {
       variant: "destructive",
       confirmLabel: "Rewrite",
     });
     if (!confirmed) return;
-    regenerate.mutate();
+    await rewriteAskingDelist();
   }
 
   return (
@@ -159,7 +248,7 @@ export function RegenerateListingButton({
         variant={variant}
         size="xs"
         className={className}
-        disabled={regenerate.isPending || busy || !hasPhotos}
+        disabled={preparing || regenerate.isPending || busy || !hasPhotos}
         title={!hasPhotos
           ? "Add photos to generate a listing"
           : busy
@@ -184,7 +273,7 @@ export function RegenerateListingButton({
         open={priceDialogOpen}
         onClose={() => setPriceDialogOpen(false)}
         onRewrite={() => {
-          regenerate.mutate();
+          void rewriteAskingDelist();
         }}
       />
     </>

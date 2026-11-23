@@ -16,6 +16,7 @@ import { ListEverywhereDialog, type ListChoice } from "./ListEverywhereDialog";
 import { waitlist } from "./MarketplaceActivity";
 import { MarketplaceLogo } from "./MarketplaceLogo";
 import { MarkSoldForm } from "./MarkSoldForm";
+import { deletable, delistPrompt, delistTargets } from "./marketplaceDelist";
 import { marketplaceName } from "./marketplaceNames";
 import { missingDetail, needsText } from "./readiness";
 import { Button } from "./ui/button";
@@ -28,11 +29,6 @@ import { MarketplaceMessagesContext, uniqueMarketplaceMessages } from "./marketp
 type Marketplace = DelistMarketplace;
 const ORDER: Marketplace[] = ["ebay", "etsy", "poshmark", "mercari", "depop"];
 const REMOTE_DRAFT = new Set<Marketplace>(["ebay", "mercari", "depop", "etsy", "poshmark"]);
-// What Delist does on each marketplace in the confirm dialog: eBay has no delete.
-// The rail itself always says "Delisted" once the listing is gone.
-const REMOVED: Record<Marketplace, string> = {
-  ebay: "Ended", etsy: "Deleted", poshmark: "Deleted", mercari: "Deleted", depop: "Deleted",
-};
 
 type Tone = "live" | "sold" | "neutral" | "busy" | "waiting" | "attention" | "failed" | "idle";
 type Status = { tone: Tone; label: string; href?: string; hrefLabel?: string; detail?: string | null; said?: string | null };
@@ -171,10 +167,6 @@ function HeldWhileChecking({ checking, holdKey, children }: { checking: boolean;
       {children}
     </div>
   );
-}
-
-export function deletable(entry: MarketplaceListing | undefined): boolean {
-  return Boolean(entry?.listing_id && !entry.sold_here && entry.state !== "deleted" && entry.state !== "deleting");
 }
 
 /** One status per marketplace. A live listing wins. Anything else is not listed; Anteroom holds the listing. */
@@ -556,11 +548,8 @@ export function MarketplacesLayout({
   // List everywhere's picker; List starts only on the marketplaces the seller picks there.
   const [picking, setPicking] = useState(false);
   async function runDelist(marketplaces: Marketplace[], lead?: string) {
-    const names = marketplaces.map(marketplaceName);
-    const lines = marketplaces.map((marketplace) => `• ${marketplaceName(marketplace)}: ${REMOVED[marketplace].toLowerCase()}`).join("\n");
-    const question = `Delist “${title}” from ${names.length === 1 ? names[0] : `${names.length} marketplaces`}?`;
-    const approved = await confirmDialog(`${lead ? `${lead}\n` : ""}${question}\n${lines}\nA deleted listing can't be restored; listing again creates a new one.`,
-      { variant: "destructive", confirmLabel: names.length === 1 ? `Delist from ${names[0]}` : `Delist from ${names.length}` });
+    const { message, confirmLabel } = delistPrompt(title, marketplaces, lead);
+    const approved = await confirmDialog(message, { variant: "destructive", confirmLabel });
     if (approved) delist.mutate(marketplaces);
   }
 
@@ -576,7 +565,7 @@ export function MarketplacesLayout({
     return item ? waitingStatus(item, waitlist.ahead(item))
       : rowStatus(marketplace, listings[marketplace], drafts[marketplace], revisionId, etsyEligible);
   });
-  const removable = ORDER.filter((marketplace) => canAct(marketplace) && deletable(listings[marketplace]));
+  const removable = delistTargets(listings, canAct);
   const soldSomewhere = ORDER.some((marketplace) => listings[marketplace]?.sold_here);
 
   const running = (marketplace: Marketplace) => isRunning(drafts[marketplace as NativeMarketplace]);

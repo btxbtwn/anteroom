@@ -1,0 +1,1 @@
+- Regenerate now asks whether to delist the item from the marketplaces where it's live, and delists only if you say so.
