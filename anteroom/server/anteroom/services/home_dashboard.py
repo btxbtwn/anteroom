@@ -397,6 +397,7 @@ def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: 
             error = info.get("error")
             if error and market not in seen_session_markets:
                 seen_session_markets.add(market)
+                connected_at = info.get("connectedAt")
                 items.append({
                     "key": f"session:{market}",
                     "kind": "expired_session",
@@ -405,7 +406,11 @@ def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: 
                     "detail": str(error),
                     "action_label": "Open Connections",
                     "target": {"view": "settings", "settings_section": "connections"},
-                    "occurred_at": info.get("connectedAt"),
+                    "occurred_at": (
+                        datetime.fromtimestamp(connected_at, UTC).isoformat()
+                        if isinstance(connected_at, (int, float))
+                        else None
+                    ),
                 })
     except Exception:
         pass
