@@ -6,6 +6,14 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1152 — 2026-11-23
+
+- Reduce the memory Today needs to show recent listing failures.
+
+## 0.1.1151 — 2026-11-23
+
+- Explain when Mercari requires a browser check during Cloud sign-in and how to retry the Cloud connection.
+
 ## 0.1.1150 — 2026-11-23
 
 - Give the model one clear format for including evidence quotes when filling marketplace fields.
