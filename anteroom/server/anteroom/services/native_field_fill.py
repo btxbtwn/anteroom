@@ -37,8 +37,7 @@ FILL_RULES = (
     "choices are suggestions: custom text is allowed within the field's limits. Answer only when "
     "the photos analysis, listing or notes show it. Complete required fields first. For a required free-text field, "
     "use a short supported description when the suggestions do not fit. Leave out any field you cannot tell. Never guess a measurement, material "
-    "or fit that the evidence does not show. Reply with one JSON object and nothing else: "
-    '{"fields": {"<field path>": "<choice>" or ["<choice>", ...]}}. '
+    "or fit that the evidence does not show. "
     "Use a list only where a field allows more than one choice, and never more than its limit. "
     "Depop's Source, Age and Style describe what kind of item it is, its era and its look: always answer "
     "them with the closest listed choices, quoting the words they rest on (a decade, vintage, preloved, "
@@ -543,16 +542,20 @@ async def _ask(conv_id: str, provider, rows_by_market: dict[str, list[dict]], fo
         "secondaryColor", "material", "condition") if not _empty(listing.get(key))}
     query = " ".join([*rows, str(summary.get("category_path") or "")])
     rules = await asyncio.to_thread(relevant_skill_rules, None, query, max_chars=40000)
+    shape = ('{"fields":{"<field path>":{"value":"<choice>","evidence":"<exact quote>"}}}'
+             if strict else '{"fields":{"<field path>":"<choice>"}}')
     messages = [
         {"role": "system", "content": f"--- Canonical listing rules ---\n{rules}\n\n"
             "The native fields and choices below override generic marketplace templates. " + FILL_RULES + (
             " Category is required on every form. Choose the most specific supported category for each item "
             "from the listed choices; do not skip it or ask the seller to choose. If none fits, leave it "
             "unresolved so listing remains blocked." if categories else "") + (
-            ' For every answered field, return {"value": <value or list>, "evidence": "<exact quote from Evidence>"}. '
+            ' Copy each exact quote of at least three characters from the Evidence block. '
+            ' For fields that accept multiple choices, use a list in "value". '
             "Recheck every listed field, including existing values. Omit unsupported answers; they will be cleared. "
             "Use only the Evidence block as factual support. The existing listing is context, not evidence. "
-            "Sold comps support price only, never this item's product facts." if strict else "")},
+            "Sold comps support price only, never this item's product facts." if strict else "")
+            + f" Reply with one JSON object in this format: {shape}."},
         {"role": "user", "content": (
             f"--- Fields to fill ---\n{forms_prompt(rows_by_market, forms)}\n\n"
             f"--- Evidence ---\n{evidence}\n\n"
@@ -573,8 +576,6 @@ async def _ask(conv_id: str, provider, rows_by_market: dict[str, list[dict]], fo
             if isinstance(reply, dict) and isinstance(reply.get("fields"), dict):
                 break
             if not attempt:
-                shape = ('{"fields":{"<field path>":{"value":"<choice>","evidence":"<exact quote>"}}}'
-                         if strict else '{"fields":{"<field path>":"<choice>"}}')
                 messages = [*messages, {"role": "assistant", "content": text}, {"role": "user", "content": (
                     f"Return only valid JSON in this format: {shape}. "
                     'Use {"fields":{}} if no answer is supported. Do not invent facts or choices.'

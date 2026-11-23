@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1150 — 2026-11-23
+
+- Give the model one clear format for including evidence quotes when filling marketplace fields.
+
 ## 0.1.1149 — 2026-11-23
 
 - Regenerate now asks whether to delist the item from the marketplaces where it's live, and delists only if you say so.

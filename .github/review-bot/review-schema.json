@@ -1,0 +1,99 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["change_type", "walkthrough", "related_issues", "related_prs", "merge_risk", "security_risk", "findings", "addressed"],
+  "properties": {
+    "change_type": {"type": "string", "enum": ["Bug fix", "Feature", "Refactor", "Tests", "Documentation", "Dependencies", "CI", "Other"]},
+    "walkthrough": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["heading", "rows"],
+        "properties": {
+          "heading": {"type": "string"},
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["layer", "files", "summary"],
+              "properties": {
+                "layer": {"type": "string"},
+                "files": {"type": "array", "items": {"type": "string"}},
+                "summary": {"type": "string"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "related_issues": {"$ref": "#/$defs/related"},
+    "related_prs": {"$ref": "#/$defs/related"},
+    "merge_risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "explanation"],
+      "properties": {
+        "level": {"$ref": "#/$defs/level"},
+        "explanation": {"type": "string"}
+      }
+    },
+    "security_risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "explanation", "concerns"],
+      "properties": {
+        "level": {"$ref": "#/$defs/level"},
+        "explanation": {"type": "string"},
+        "concerns": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "line", "start_line", "severity", "category", "effort", "title", "body", "fix_prompt"],
+        "properties": {
+          "path": {"type": "string"},
+          "line": {"type": "integer", "minimum": 1},
+          "start_line": {"type": ["integer", "null"]},
+          "severity": {"type": "string", "enum": ["Critical", "Major", "Minor"]},
+          "category": {"type": "string", "enum": ["Functional Correctness", "Security", "Data Integrity", "Concurrency", "Performance", "Reliability", "Repository Rules", "Tests"]},
+          "effort": {"type": "string", "enum": ["Quick win", "Moderate", "Involved"]},
+          "title": {"type": "string"},
+          "body": {"type": "string"},
+          "fix_prompt": {"type": "string"}
+        }
+      }
+    },
+    "addressed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["comment_id", "commit"],
+        "properties": {
+          "comment_id": {"type": "integer"},
+          "commit": {"type": "string"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "level": {"type": "string", "enum": ["Minimal", "Low", "Moderate", "High", "Critical"]},
+    "related": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["number", "reason"],
+        "properties": {
+          "number": {"type": "integer"},
+          "reason": {"type": "string"}
+        }
+      }
+    }
+  }
+}
