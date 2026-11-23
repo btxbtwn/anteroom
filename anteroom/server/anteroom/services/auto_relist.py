@@ -842,6 +842,9 @@ def _load_enabled_rules_and_candidates(
             })
     if stamped:
         db.commit()
+    # Oldest first across marketplaces, so one marketplace's backlog cannot use
+    # every pass's time budget while another's listings wait.
+    plan.sort(key=lambda entry: entry["listed_at"] or datetime.min)
     return plan
 
 
