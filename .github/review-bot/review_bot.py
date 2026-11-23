@@ -69,11 +69,36 @@ OUTCOME_LABEL = {
 
 # --- GitHub and git ---------------------------------------------------------
 
+# A failure reason shown in logs and on the PR: enough to diagnose, never a dump.
+REASON_CHARS = 300
+SECRET_TEXT = re.compile(
+    r"gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}|(?i:\b(?:bearer|token)\s+)[^\s)\]'\"]+"
+)
+
+
+def sanitize_reason(text: str) -> str:
+    """One line of the error, without credentials, cut to REASON_CHARS."""
+    flat = " ".join(SECRET_TEXT.sub("[redacted]", text or "").split())
+    return flat if len(flat) <= REASON_CHARS else flat[:REASON_CHARS] + "…"
+
+
+class CommandError(subprocess.CalledProcessError):
+    """A failed command with the sanitized reason it printed (never its input)."""
+
+    def __init__(self, cmd: list[str], returncode: int, stderr: str | None):
+        super().__init__(returncode, cmd, stderr=stderr)
+        self.reason = sanitize_reason(stderr or "") or f"exit status {returncode}"
+
+    def __str__(self) -> str:
+        return f"{' '.join(self.cmd[:3])} failed: {self.reason}"
+
 
 def run(*args: str, input: str | None = None, env: dict | None = None) -> str:
     result = subprocess.run(
-        list(args), check=True, capture_output=True, text=True, input=input, env=env
+        list(args), check=False, capture_output=True, text=True, input=input, env=env
     )
+    if result.returncode:
+        raise CommandError(list(args), result.returncode, result.stderr)
     return result.stdout
 
 
@@ -98,7 +123,8 @@ def graphql(query: str, **variables):
     body = json.dumps({"query": query, "variables": variables})
     out = json.loads(run("gh", "api", "graphql", "--input", "-", input=body))
     if out.get("errors"):
-        raise RuntimeError(f"GraphQL error: {out['errors']}")
+        messages = "; ".join(str(e.get("message", "")) for e in out["errors"] if isinstance(e, dict))
+        raise RuntimeError(f"GraphQL error: {sanitize_reason(messages) or 'unknown'}")
     return out["data"]
 
 
@@ -678,6 +704,9 @@ def post_review(args) -> None:
 
     open_ids = {f["comment_id"] for f in json.loads((ctx_dir / "open-findings.json").read_text())}
     addressed = {a["comment_id"]: a["commit"] for a in data.get("addressed", []) if a["comment_id"] in open_ids}
+    # A thread that cannot be resolved must not stop the summary and the
+    # reviewed-commit record from posting; the job still fails at the end.
+    unresolved: list[str] = []
     if addressed:
         for thread in review_threads(ctx["pr"]):
             root = thread["comments"]["nodes"][0] if thread["comments"]["nodes"] else None
@@ -687,9 +716,20 @@ def post_review(args) -> None:
                     "PATCH",
                     {"body": addressed_body(root["body"], addressed[root["databaseId"]] or ctx["head"])},
                 )
-                resolve_thread(thread["id"])
+                try:
+                    resolve_thread(thread["id"])
+                except (subprocess.CalledProcessError, RuntimeError) as error:
+                    reason = error.reason if isinstance(error, CommandError) else sanitize_reason(str(error))
+                    print(f"Could not resolve thread {thread['id']}: {reason}", file=sys.stderr)
+                    unresolved.append(reason)
+    failure = None
+    if unresolved:
+        reasons = "; ".join(dict.fromkeys(unresolved))
+        failure = f"Could not resolve {len(unresolved)} addressed thread(s): {reasons}"
 
     body = render_summary(data, ctx, posted=len(findings), review_url=review_url)
+    if failure:
+        body += f"\n\n> ⚠️ {failure}. They are marked addressed; resolve them by hand after checking."
     summaries = bot_issue_comments(ctx["pr"], REVIEW_STATE)
     if summaries:
         api(f"repos/{repo()}/issues/comments/{summaries[-1][0]['id']}", "PATCH", {"body": body})
@@ -698,6 +738,9 @@ def post_review(args) -> None:
     upsert_pr_body_summary(ctx["pr"], data)
     print(f"Posted {len(findings)} findings in threads and {len(outside)} outside the diff; "
           f"{len(addressed)} addressed.")
+    if failure:
+        print(f"::error title=Claude review::{failure}")
+        sys.exit(failure)
 
 
 def prepare_autofix(args) -> None:

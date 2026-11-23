@@ -211,6 +211,93 @@ class PostReviewTests(unittest.TestCase):
         upsert.assert_called_once()
         self.assertIn("--diff-filter=d", diff_paths.call_args.args[0])
 
+    def _post_review_with_addressed(self, temp, graphql):
+        """Run post_review with two addressed findings; return the API calls made."""
+        ctx = Path(temp)
+        (ctx / "context.json").write_text(json.dumps({
+            "pr": 1, "head": "head", "merge_base": "base", "since": None, "files": [],
+        }))
+        (ctx / "pr.diff").write_text("")
+        (ctx / "open-findings.json").write_text(json.dumps([{"comment_id": 11}, {"comment_id": 22}]))
+        threads = [
+            {"id": f"T{cid}", "comments": {"nodes": [{"databaseId": cid, "body": "finding"}]}}
+            for cid in (11, 22)
+        ]
+        output = {
+            "change_type": "Bug fix", "summary": [], "walkthrough": [], "related_issues": [], "related_prs": [],
+            "merge_risk": {"level": "Low", "explanation": "small"},
+            "security_risk": {"level": "Minimal", "explanation": "none", "concerns": []},
+            "findings": [], "addressed": [{"comment_id": 11, "commit": "c1"}, {"comment_id": 22, "commit": "c2"}],
+        }
+        with (
+            patch.dict(bot.os.environ, {"REVIEW_OUTPUT": json.dumps(output)}),
+            patch.object(bot.subprocess, "check_output", return_value=b""),
+            patch.object(bot, "repo", return_value="owner/repo"),
+            patch.object(bot, "api", return_value={}) as api,
+            patch.object(bot, "review_threads", return_value=threads),
+            patch.object(bot, "graphql", side_effect=graphql),
+            patch.object(bot, "bot_issue_comments", return_value=[]),
+            patch.object(bot, "upsert_pr_body_summary") as upsert,
+        ):
+            try:
+                bot.post_review(SimpleNamespace(context=temp))
+                exit_reason = None
+            except SystemExit as stop:
+                exit_reason = stop.code
+        return api.call_args_list, upsert, exit_reason
+
+    def test_a_failed_thread_resolve_still_posts_everything_then_fails_the_review(self):
+        def refuse(query, **variables):
+            raise bot.CommandError(["gh", "api", "graphql"], 1, "gh: Resource not accessible by integration")
+
+        with tempfile.TemporaryDirectory() as temp:
+            calls, upsert, exit_reason = self._post_review_with_addressed(temp, refuse)
+        patched = [c.args[0] for c in calls if c.args[1] == "PATCH"]
+        # Both findings are marked addressed, even though neither thread could be resolved.
+        self.assertEqual(patched, ["repos/owner/repo/pulls/comments/11", "repos/owner/repo/pulls/comments/22"])
+        summary = [c.args[2]["body"] for c in calls if c.args[0] == "repos/owner/repo/issues/1/comments"]
+        self.assertEqual(len(summary), 1)
+        # The reviewed commit is recorded, so the next review stays incremental.
+        self.assertEqual(bot.read_marker(bot.REVIEW_STATE, summary[0]), {"reviewed_sha": "head"})
+        self.assertIn("Could not resolve 2 addressed thread(s)", summary[0])
+        self.assertIn("Resource not accessible by integration", summary[0])
+        upsert.assert_called_once()
+        # The job still fails, with the reason, instead of passing as a clean review.
+        self.assertIsInstance(exit_reason, str)
+        self.assertIn("Could not resolve 2 addressed thread(s)", exit_reason)
+        self.assertIn("Resource not accessible by integration", exit_reason)
+
+    def test_resolved_threads_pass_without_a_failure_note(self):
+        with tempfile.TemporaryDirectory() as temp:
+            calls, upsert, exit_reason = self._post_review_with_addressed(temp, lambda query, **v: {})
+        self.assertIsNone(exit_reason)
+        summary = [c.args[2]["body"] for c in calls if c.args[0] == "repos/owner/repo/issues/1/comments"]
+        self.assertNotIn("Could not resolve", summary[0])
+        upsert.assert_called_once()
+
+    def test_command_errors_carry_a_short_redacted_reason(self):
+        failed = bot.subprocess.CompletedProcess(
+            ["gh"], 1, stdout="",
+            stderr="gh: Bad credentials ghs_abcdefghijklmnopqrstuvwxyz0123456789 Authorization: Bearer abc.def\n"
+                   + "x" * 2000,
+        )
+        with patch.object(bot.subprocess, "run", return_value=failed), self.assertRaises(bot.CommandError) as raised:
+            bot.run("gh", "api", "graphql", "--input", "-", input='{"query": "secret body"}')
+        reason = raised.exception.reason
+        self.assertIn("Bad credentials", reason)
+        self.assertNotIn("ghs_abcdefghijklmnop", reason)
+        self.assertNotIn("abc.def", reason)
+        self.assertNotIn("secret body", str(raised.exception))
+        self.assertLessEqual(len(reason), bot.REASON_CHARS + 1)
+        self.assertIn("gh api graphql", str(raised.exception))
+        self.assertIsInstance(raised.exception, bot.subprocess.CalledProcessError)
+
+    def test_graphql_errors_carry_only_their_messages(self):
+        out = json.dumps({"data": None, "errors": [{"type": "FORBIDDEN", "message": "Resource not accessible", "path": ["x"]}]})
+        with patch.object(bot, "run", return_value=out), self.assertRaises(RuntimeError) as raised:
+            bot.graphql("mutation { x }")
+        self.assertEqual(str(raised.exception), "GraphQL error: Resource not accessible")
+
     def test_upsert_pr_body_summary_patches_when_body_changes(self):
         data = {"summary": [{"category": "Bug Fixes", "bullets": ["Fixed it."]}]}
         calls = []
