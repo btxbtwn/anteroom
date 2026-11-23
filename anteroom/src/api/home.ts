@@ -79,10 +79,90 @@ export interface HomeSummaryResponse {
   };
 }
 
+export interface AttentionDismissalResult {
+  item_key: string;
+  dismissed_at: string;
+  expires_at: string;
+  reappears_in_days: number;
+}
+
 export interface HomeMutationResponse {
   ok: boolean;
   goal_id?: string;
   home?: HomeSummaryResponse;
+  dismissal?: AttentionDismissalResult;
+  restored?: boolean;
+  item_key?: string;
+}
+
+const ATTENTION_DISMISS_DAYS = 7;
+
+function recountAttention(home: Pick<HomeSummaryResponse, "needs_attention" | "dismissed">): HomeSummaryResponse["counts"] {
+  const by_kind: Record<string, number> = {};
+  for (const item of home.needs_attention) {
+    by_kind[item.kind] = (by_kind[item.kind] ?? 0) + 1;
+  }
+  return {
+    active: home.needs_attention.length,
+    dismissed: home.dismissed.length,
+    by_kind,
+  };
+}
+
+/** Move one alert into Dismissed without waiting for a full Today rebuild. */
+export function patchHomeAfterDismiss(
+  home: HomeSummaryResponse,
+  item: AttentionItem,
+  dismissal?: Partial<AttentionDismissalResult> | null,
+): HomeSummaryResponse {
+  const dismissed_at = dismissal?.dismissed_at ?? new Date().toISOString();
+  const expires_at =
+    dismissal?.expires_at
+    ?? new Date(Date.now() + ATTENTION_DISMISS_DAYS * 86_400_000).toISOString();
+  const reappears_in_days = dismissal?.reappears_in_days ?? ATTENTION_DISMISS_DAYS;
+  const needs_attention = home.needs_attention.filter((entry) => entry.key !== item.key);
+  const dismissedItem: AttentionItem = {
+    ...item,
+    dismissed_at,
+    expires_at,
+    reappears_in_days,
+  };
+  const dismissed = [
+    dismissedItem,
+    ...home.dismissed.filter((entry) => entry.key !== item.key),
+  ];
+  return {
+    ...home,
+    needs_attention,
+    dismissed,
+    counts: recountAttention({ needs_attention, dismissed }),
+  };
+}
+
+/** Move one alert back to Active after Restore. */
+export function patchHomeAfterRestore(
+  home: HomeSummaryResponse,
+  itemKey: string,
+): HomeSummaryResponse {
+  const item = home.dismissed.find((entry) => entry.key === itemKey);
+  if (!item) return home;
+  const {
+    dismissed_at: _dismissedAt,
+    expires_at: _expiresAt,
+    reappears_in_days: _reappears,
+    ...activeItem
+  } = item;
+  const needs_attention = [
+    activeItem,
+    ...home.needs_attention.filter((entry) => entry.key !== itemKey),
+  ];
+  const dismissed = home.dismissed.filter((entry) => entry.key !== itemKey);
+  return {
+    ...home,
+    needs_attention,
+    dismissed,
+    counts: recountAttention({ needs_attention, dismissed }),
+  };
 }
 
 export function browserTimeZone(): string {

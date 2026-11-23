@@ -120,21 +120,23 @@ def delete_goal(
 @router.post("/attention/dismiss")
 def dismiss_attention(
     body: AttentionDismissInput,
-    timezone: str = Query("UTC", max_length=100),
     db: Session = Depends(get_db, scope="function"),
 ):
+    # Skip home_summary: rebuilding Today scans every listing/job and stalls
+    # dismiss on large inventories. The client patches from `dismissal`.
     try:
-        home_dashboard.dismiss_attention_item(db, item_key=body.item_key, kind=body.kind)
+        dismissal = home_dashboard.dismiss_attention_item(
+            db, item_key=body.item_key, kind=body.kind,
+        )
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return _mutation_result(db, timezone)
+    return {"ok": True, "dismissal": dismissal}
 
 
 @router.post("/attention/restore")
 def restore_attention(
     body: AttentionRestoreInput,
-    timezone: str = Query("UTC", max_length=100),
     db: Session = Depends(get_db, scope="function"),
 ):
-    home_dashboard.restore_attention_item(db, item_key=body.item_key)
-    return _mutation_result(db, timezone)
+    restored = home_dashboard.restore_attention_item(db, item_key=body.item_key)
+    return {"ok": True, "restored": restored, "item_key": body.item_key}

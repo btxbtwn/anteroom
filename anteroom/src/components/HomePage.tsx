@@ -14,6 +14,8 @@ import {
 import { api } from "../api/client";
 import {
   browserTimeZone,
+  patchHomeAfterDismiss,
+  patchHomeAfterRestore,
   type AttentionItem,
   type AttentionKind,
   type AttentionTarget,
@@ -158,10 +160,21 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
     }
   };
 
-  const mutationScope = { id: "today-dashboard" };
+  const patchHomeCache = (patch: (current: HomeSummaryResponse) => HomeSummaryResponse) => {
+    const current = queryClient.getQueryData<HomeSummaryResponse>(queryDef.queryKey);
+    if (!current) return undefined;
+    const next = patch(current);
+    queryClient.setQueryData(queryDef.queryKey, next);
+    return current;
+  };
+
+  // Goals share one queue so overlapping edits stay ordered. Dismiss/restore
+  // stay off that queue and patch the cache immediately — a full Today rebuild
+  // used to stall every Dismiss on large inventories.
+  const goalMutationScope = { id: "today-goals" };
 
   const saveGoal = useMutation({
-    scope: mutationScope,
+    scope: goalMutationScope,
     mutationFn: ({ id, body }: {
       id: string | null;
       body: Parameters<typeof api.home.upsertGoal>[0];
@@ -183,21 +196,47 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
   });
 
   const removeGoal = useMutation({
-    scope: mutationScope,
+    scope: goalMutationScope,
     mutationFn: (goalId: string) => api.home.deleteGoal(goalId, timezone),
     onSuccess: (res) => syncHome(res.home),
   });
 
   const dismissItem = useMutation({
-    scope: mutationScope,
     mutationFn: (item: AttentionItem) => api.home.dismissAttention(item.key, item.kind, timezone),
-    onSuccess: (res) => syncHome(res.home),
+    onMutate: async (item) => {
+      await queryClient.cancelQueries({ queryKey: queryDef.queryKey, exact: true });
+      patchHomeCache((current) => patchHomeAfterDismiss(current, item));
+    },
+    onSuccess: (res, item) => {
+      if (res.home) {
+        queryClient.setQueryData(queryDef.queryKey, res.home);
+        return;
+      }
+      patchHomeCache((current) => patchHomeAfterDismiss(current, item, res.dismissal));
+    },
+    onError: async () => {
+      // Refetch instead of rolling back a snapshot: another dismiss/restore may
+      // have patched the same cache while this request was in flight.
+      await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
+    },
   });
 
   const restoreItem = useMutation({
-    scope: mutationScope,
     mutationFn: (itemKey: string) => api.home.restoreAttention(itemKey, timezone),
-    onSuccess: (res) => syncHome(res.home),
+    onMutate: async (itemKey) => {
+      await queryClient.cancelQueries({ queryKey: queryDef.queryKey, exact: true });
+      patchHomeCache((current) => patchHomeAfterRestore(current, itemKey));
+    },
+    onSuccess: (res, itemKey) => {
+      if (res.home) {
+        queryClient.setQueryData(queryDef.queryKey, res.home);
+        return;
+      }
+      patchHomeCache((current) => patchHomeAfterRestore(current, res.item_key ?? itemKey));
+    },
+    onError: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
+    },
   });
 
   const openNewGoalForm = () => {
@@ -581,7 +620,6 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
                         type="button"
                         variant="ghost"
                         size="xs"
-                        disabled={dismissItem.isPending}
                         onClick={() => dismissItem.mutate(item)}
                         aria-label={`Dismiss ${item.title} for 7 days`}
                       >
@@ -628,7 +666,6 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
                       type="button"
                       variant="ghost"
                       size="xs"
-                      disabled={restoreItem.isPending}
                       onClick={() => restoreItem.mutate(item.key)}
                       aria-label={`Restore ${item.title}`}
                     >
