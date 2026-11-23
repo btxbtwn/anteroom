@@ -496,7 +496,7 @@ def _eligible_candidates(
         return []
 
     matched_conv_ids = [conv.id for _ml, conv in rows]
-    sold_convs = {
+    excluded_convs = {
         row[0]
         for row in db.query(MarketplaceSale.conversation_id)
         .filter(
@@ -505,7 +505,6 @@ def _eligible_candidates(
         )
         .all()
     }
-    excluded_convs: set[str] = set(sold_convs)
     if respect_backoff:
         backoff_since = moment - RELIST_RETRY_BACKOFF
         excluded_convs.update(

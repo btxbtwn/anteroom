@@ -1028,7 +1028,6 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
 
     def test_m2_photo_and_pricing_rule_changes_unschedule_and_l3_native_schema_advances_revision(self):
         from unittest.mock import AsyncMock
-        from anteroom.repositories.queries import ConversationRepo
         from anteroom.services import native_contract, pricing_rules
 
         now = _now()
@@ -1077,9 +1076,10 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         draft_scheduling.schedule_draft(
             self.db, c.id, marketplaces=["poshmark"], publish_at=now + timedelta(minutes=10), confirm=True, now=now,
         )
-        ConversationRepo(self.db).reorder_photos(c.id, [p2.id, p1.id])
+        listing_persistence.reorder_photos(self.db, c.id, [p2.id, p1.id])
         self.db.refresh(listing)
         self.assertIsNone(listing.scheduled_publish_at)
+        self.assertEqual((p2.display_order, p1.display_order), (0, 1))
 
         # M2: changing active pricing rules after scheduling causes digest mismatch and skips publish.
         with patch.object(pricing_rules, "active_rules", return_value=None):
