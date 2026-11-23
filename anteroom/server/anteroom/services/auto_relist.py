@@ -492,7 +492,7 @@ def _eligible_candidates(
                 (
                     MarketplaceListing.id.isnot(None)
                     & MarketplaceListing.state.in_(LIVE_STATES)
-                    & MarketplaceListing.listing_id.isnot(None)
+                    & (MarketplaceListing.listing_id.isnot(None) | MarketplaceListing.listing_url.isnot(None))
                     & ((MarketplaceListing.listed_at.is_(None)) | (MarketplaceListing.listed_at <= age_cutoff))
                 )
                 | (

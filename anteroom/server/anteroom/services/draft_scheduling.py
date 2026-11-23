@@ -85,29 +85,74 @@ def _normalize_marketplaces(marketplaces: list[str] | None) -> list[str]:
     return seen
 
 
-def _declared_quantity(db: Session, conv_id: str) -> int | None:
-    """Return the listing's declared stock count (including eBay variation totals), or None."""
+def _as_utc(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    try:
+        stamp = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return stamp.replace(tzinfo=UTC) if stamp.tzinfo is None else stamp.astimezone(UTC)
+    except (ValueError, TypeError):
+        return None
+
+
+def _quantity_baseline(db: Session, conv_id: str) -> tuple[int | None, datetime | None, bool]:
+    """Return ``(available_qty, baseline_at, from_quantity_sync)`` for the current listing.
+
+    Walks past private ``native_schema`` saves to the revision that established the
+    current quantity. For an initial revision (``parent_revision_id is None``),
+    ``baseline_at`` is ``None`` so all paid sales count against that starting quantity.
+    For a subsequent revision (seller restock/edit or ``sale_quantity_sync``),
+    ``baseline_at`` is that revision's creation time because its quantity already
+    reflects prior sales.
+    """
     from anteroom.services.ebay_variations import total_quantity
 
     listing = db.query(Listing).filter(Listing.conversation_id == conv_id).first()
     if listing is None or not listing.current_revision_id:
-        return None
+        return None, None, False
     revision = db.get(ListingRevision, listing.current_revision_id)
+    seen: set[str] = set()
+    while (
+        revision is not None
+        and revision.source == "native_schema"
+        and revision.parent_revision_id
+        and revision.parent_revision_id not in seen
+    ):
+        seen.add(revision.id)
+        parent = db.get(ListingRevision, revision.parent_revision_id)
+        if parent is None:
+            break
+        revision = parent
     if revision is None or not isinstance(revision.listing_json, dict):
-        return None
+        return None, None, False
+    qty: int | None = None
     var_total = total_quantity(revision.listing_json)
-    if isinstance(var_total, int) and var_total > 0:
-        return var_total
-    raw = revision.listing_json.get("quantity")
-    if type(raw) is int and raw > 0:
-        return raw
-    return None
+    if isinstance(var_total, int) and var_total >= 0:
+        qty = var_total
+    else:
+        raw = revision.listing_json.get("quantity")
+        if type(raw) is int and raw >= 0:
+            qty = raw
+    baseline_at = _as_utc(revision.created_at) if revision.parent_revision_id is not None else None
+    return qty, baseline_at, revision.source == "sale_quantity_sync"
+
+
+def _sale_timestamp(sale: MarketplaceSale) -> datetime | None:
+    stamps = [t for t in (_as_utc(sale.received_at), _as_utc(sale.order_observed_at)) if t is not None]
+    return max(stamps) if stamps else None
 
 
 def _is_sold_or_has_sale(db: Session, conv: Conversation | None) -> bool:
     """Return True if the item is marked sold or its stock is exhausted by sales.
 
-    Multi-quantity items with stock still remaining are not treated as sold.
+    Multi-quantity items with stock still remaining stay schedulable/publishable:
+    - A marketplace stock observation of ``remaining > 0`` suppresses the cumulative
+      check only when it is fresher than paid sales across all marketplaces (newer
+      than every other marketplace's paid sales, and at or after its own).
+    - Otherwise, paid sales occurring at or after the current quantity revision's
+      baseline (or all paid sales for an initial revision) are compared against the
+      revision's declared available quantity so neither cross-marketplace sales nor
+      seller restocks / ``sale_quantity_sync`` updates are misclassified.
     """
     if conv is None:
         return False
@@ -118,6 +163,9 @@ def _is_sold_or_has_sale(db: Session, conv: Conversation | None) -> bool:
         isinstance(entry, dict) and entry.get("state") == "sold"
         for entry in marks.values()
     ):
+        return True
+    declared_qty, baseline_at, from_quantity_sync = _quantity_baseline(db, conv.id)
+    if declared_qty == 0:
         return True
     sales = (
         db.query(MarketplaceSale)
@@ -130,34 +178,58 @@ def _is_sold_or_has_sale(db: Session, conv: Conversation | None) -> bool:
     if not sales:
         return False
 
+    from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
     from anteroom.services.sale_inventory import stock_after_sale
 
+    paid_sales = [sale for sale in sales if sale.order_status in PAID_STATUSES]
+    ml_repo = MarketplaceListingRepo(db)
+
     checked_pairs: set[tuple[str, str | None]] = set()
-    has_observed_remaining = False
-    for sale in sales:
-        if sale.order_status not in PAID_STATUSES:
-            continue
+    has_fresh_remaining = False
+    for sale in paid_sales:
         pair = (sale.marketplace, sale.listing_id)
         if pair in checked_pairs:
             continue
         checked_pairs.add(pair)
         stock = stock_after_sale(db, conv.id, sale.marketplace, sale.listing_id)
-        if stock["status"] == "sold_out":
-            return True
-        if stock["status"] == "remaining" and isinstance(stock.get("remaining"), int) and stock["remaining"] > 0:
-            has_observed_remaining = True
+        record = ml_repo.get(conv.id, sale.marketplace) or {}
+        observed = record.get("inventory_observation") or {}
+        obs_matches = isinstance(observed, dict) and observed.get("listing_id") == sale.listing_id
+        obs_checked = _as_utc(observed.get("checked_at")) if obs_matches else None
 
-    declared_qty = _declared_quantity(db, conv.id)
-    paid_sales = [sale for sale in sales if sale.order_status in PAID_STATUSES]
-    total_sold = sum(
-        sale.quantity if type(sale.quantity) is int and sale.quantity > 0 else 1 for sale in paid_sales
-    )
-    if declared_qty is not None and total_sold >= declared_qty:
-        return True
-    if has_observed_remaining:
+        if stock["status"] == "sold_out":
+            if obs_checked is not None:
+                if baseline_at is None or obs_checked >= baseline_at:
+                    return True
+            elif not from_quantity_sync and (declared_qty is None or declared_qty <= 1):
+                return True
+        if stock["status"] == "remaining" and isinstance(stock.get("remaining"), int) and stock["remaining"] > 0:
+            if obs_checked is not None:
+                other_sales = [s for s in paid_sales if s.marketplace != sale.marketplace]
+                other_stamps = [t for s in other_sales if (t := _sale_timestamp(s)) is not None]
+                same_stamps = [
+                    t for s in paid_sales if s.marketplace == sale.marketplace and (t := _sale_timestamp(s)) is not None
+                ]
+                same_ok = not same_stamps or obs_checked >= max(same_stamps)
+                other_ok = not other_sales or (
+                    len(other_stamps) == len(other_sales) and obs_checked > max(other_stamps)
+                )
+                if same_ok and other_ok:
+                    has_fresh_remaining = True
+
+    if has_fresh_remaining:
         return False
-    # An open cancellation still blocks a single-unit or unknown-stock draft.
-    return declared_qty is None or declared_qty <= 1
+
+    unaccounted_paid = sum(
+        sale.quantity if type(sale.quantity) is int and sale.quantity > 0 else 1
+        for sale in paid_sales
+        if baseline_at is None or (sale_ts := _sale_timestamp(sale)) is None or sale_ts >= baseline_at
+    )
+    if declared_qty is None or declared_qty <= 1:
+        if from_quantity_sync and declared_qty == 1:
+            return unaccounted_paid >= 1
+        return True
+    return unaccounted_paid >= declared_qty
 
 
 def _schedule_content_digest(

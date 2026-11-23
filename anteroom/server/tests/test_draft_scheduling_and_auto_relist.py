@@ -1068,6 +1068,68 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         outcome = asyncio.run(automation_actions.publish_revision(conv.id, ["poshmark"], revision.id))
         self.assertIn("already sold", outcome["error"])
 
+    def test_restock_and_cross_marketplace_observation_freshness(self):
+        from anteroom.models.marketplace_sale import MarketplaceSale
+
+        now = _now()
+        # Observation strictly newer than all cross-marketplace paid sales proves remaining stock.
+        c_obs, _l_obs, _r_obs = self._create_draft("Fresh Obs Multi Shirt", quantity=2)
+        self.db.add(MarketplaceListing(
+            id=new_id(), conversation_id=c_obs.id, marketplace="ebay", state="published",
+            listing_id="eb-fresh-1", listing_url="https://www.ebay.com/itm/eb-fresh-1",
+            listed_at=now - timedelta(days=2),
+            inventory_observation={
+                "listing_id": "eb-fresh-1",
+                "state": "active",
+                "quantity": 1,
+                "checked_at": (now + timedelta(minutes=5)).isoformat(),
+            },
+        ))
+        self.db.add(MarketplaceSale(
+            id=new_id(), marketplace="ebay", order_id="ord-f1", line_id="l-f1",
+            listing_id="eb-fresh-1", conversation_id=c_obs.id, quantity=1, order_status="paid",
+            sold_at=now + timedelta(minutes=1), received_at=now + timedelta(minutes=1), state="new",
+        ))
+        self.db.add(MarketplaceSale(
+            id=new_id(), marketplace="etsy", order_id="ord-f2", line_id="l-f2",
+            conversation_id=c_obs.id, quantity=1, order_status="paid",
+            sold_at=now + timedelta(minutes=2), received_at=now + timedelta(minutes=2), state="new",
+        ))
+        self.db.commit()
+        self.assertFalse(draft_scheduling._is_sold_or_has_sale(self.db, c_obs))
+
+        # Seller restock revision and sale_quantity_sync revision establish a new quantity baseline.
+        c_res, _l_res, r_res = self._create_draft("Restocked Multi Shirt", quantity=3)
+        past = now - timedelta(hours=2)
+        self.db.add(MarketplaceSale(
+            id=new_id(), marketplace="ebay", order_id="ord-restock-1", line_id="line-restock-1",
+            conversation_id=c_res.id, quantity=3, order_status="paid",
+            sold_at=past, received_at=past, state="new",
+        ))
+        self.db.commit()
+        self.assertTrue(draft_scheduling._is_sold_or_has_sale(self.db, c_res))
+        r_restocked = listing_persistence.save_revision(
+            self.db, c_res.id, {**r_res.listing_json, "quantity": 3},
+            source="manual", parent_revision_id=r_res.id, commit=True,
+        )
+        r_restocked.created_at = now
+        self.db.commit()
+        self.assertFalse(draft_scheduling._is_sold_or_has_sale(self.db, c_res))
+        r_synced = listing_persistence.save_revision(
+            self.db, c_res.id, {**r_restocked.listing_json, "quantity": 1},
+            source="sale_quantity_sync", parent_revision_id=r_restocked.id, commit=True,
+        )
+        r_synced.created_at = now + timedelta(minutes=5)
+        self.db.commit()
+        self.assertFalse(draft_scheduling._is_sold_or_has_sale(self.db, c_res))
+        self.db.add(MarketplaceSale(
+            id=new_id(), marketplace="poshmark", order_id="ord-restock-2", line_id="line-restock-2",
+            conversation_id=c_res.id, quantity=1, order_status="paid",
+            sold_at=now + timedelta(minutes=6), received_at=now + timedelta(minutes=6), state="new",
+        ))
+        self.db.commit()
+        self.assertTrue(draft_scheduling._is_sold_or_has_sale(self.db, c_res))
+
     def test_due_legacy_schedule_requires_new_confirmation(self):
         now = _now()
         conv, listing, _revision = self._create_draft()
@@ -1284,6 +1346,22 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         )
         self.assertEqual([item["conversation_id"] for item in found], [c_imp.id])
         self.assertEqual(found[0]["listing_id"], imported_id)
+
+        # Published MarketplaceListing row with null listing_id and valid listing_url is also discovered.
+        url_only_id = "5f0000000000000000000993"
+        c_url, _l_url, _r_url = self._create_draft("URL Only Listing Coat")
+        c_url.status = "listed"
+        self.db.add(MarketplaceListing(
+            id=new_id(), conversation_id=c_url.id, marketplace="poshmark", state="published",
+            listing_id=None, listing_url=f"https://poshmark.com/listing/url-only-{url_only_id}",
+            listed_at=now - timedelta(days=45), listed_price=55.0,
+        ))
+        self.db.commit()
+        found_url = auto_relist._eligible_candidates(
+            self.db, posh_rule, now + timedelta(days=2), conv_id=c_url.id,
+        )
+        self.assertEqual([item["conversation_id"] for item in found_url], [c_url.id])
+        self.assertEqual(found_url[0]["listing_id"], url_only_id)
 
 
 if __name__ == "__main__":

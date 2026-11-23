@@ -462,7 +462,7 @@ def test_plaid_m6_503_unconfigured_m8_clothing_other_and_l7_categorized_refunds(
         **transaction("thrift", name="Goodwill", amount=25.0),
         "personal_finance_category": {
             "primary": "GENERAL_MERCHANDISE",
-            "detailed": "GENERAL_MERCHANDISE_THRIFT_STORES",
+            "detailed": "GENERAL_MERCHANDISE_DISCOUNT_STORES",
         },
     }
     clothing = {

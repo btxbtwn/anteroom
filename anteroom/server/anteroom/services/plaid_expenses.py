@@ -375,13 +375,33 @@ def _import_key(environment: str, transaction_id: str) -> str:
     return sha256(f"plaid:{environment}:{transaction_id}".encode()).hexdigest()
 
 
+_NEEDS_REVIEW_PLAID_DETAILED = frozenset({
+    "GENERAL_MERCHANDISE_CLOTHING_AND_ACCESSORIES",
+    "GENERAL_MERCHANDISE_DISCOUNT_STORES",
+})
+_THRIFT_VENDOR_KEYWORDS = (
+    "goodwill",
+    "salvation army",
+    "savers",
+    "value village",
+    "thrift",
+    "buffalo exchange",
+    "plato's closet",
+    "crossroads trading",
+    "deseret industries",
+    "st. vincent de paul",
+)
+
+
 def _needs_review_row(row: dict | None) -> bool:
+    """Flag clothing, discount-store, and thrift sourcing charges for seller classification."""
     if not row:
         return False
     detail = (row.get("personal_finance_category") or {}).get("detailed") or ""
-    return detail.startswith("GENERAL_MERCHANDISE_") and detail.endswith(
-        ("_CLOTHING_AND_ACCESSORIES", "_THRIFT_STORES"),
-    )
+    if detail in _NEEDS_REVIEW_PLAID_DETAILED:
+        return True
+    vendor = str(row.get("merchant_name") or row.get("name") or "").casefold()
+    return any(keyword in vendor for keyword in _THRIFT_VENDOR_KEYWORDS)
 
 
 def _reconcile(db: Session, environment: str, delta: Delta) -> None:
