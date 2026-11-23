@@ -53,7 +53,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr("anteroom.services.photo_store._store", LocalPhotoStore(str(tmp_path)))
     monkeypatch.setattr(database, "SessionLocal", sessions)
     monkeypatch.delenv("ANTEROOM_SANDBOX", raising=False)
-    monkeypatch.delenv(photoroom.SERVER_KEY_ENV, raising=False)
+    monkeypatch.delenv(photoroom.MANAGED_KEY_ENV, raising=False)
     repo = ConversationRepo(db)
     conv = repo.create(title="Denim jacket")
     photos = []
@@ -155,16 +155,19 @@ def test_edit_sends_the_photo_and_options_with_the_sellers_key(monkeypatch):
     assert b'name="imageFile"; filename="photo.png"' in body
 
 
-def test_server_key_is_used_only_when_the_seller_has_none(monkeypatch):
+def test_managed_key_takes_over_and_ignores_seller_key(monkeypatch):
     from anteroom.services.keychain import delete_slot, write_slot
 
-    monkeypatch.setenv(photoroom.SERVER_KEY_ENV, "server-key")
-    assert photoroom.configured_key() == ("server-key", "server")
     write_slot(photoroom.KEY_ACCOUNT, KEY)
     assert photoroom.configured_key() == (KEY, "seller")
+    monkeypatch.setenv(photoroom.MANAGED_KEY_ENV, "managed-key")
+    assert photoroom.managed_photoroom_enabled() is True
+    assert photoroom.configured_key() == ("managed-key", "server")
     delete_slot(photoroom.KEY_ACCOUNT)
-    monkeypatch.delenv(photoroom.SERVER_KEY_ENV)
+    assert photoroom.configured_key() == ("managed-key", "server")
+    monkeypatch.delenv(photoroom.MANAGED_KEY_ENV)
     assert photoroom.configured_key() == (None, None)
+    assert photoroom.managed_photoroom_enabled() is False
 
 
 @pytest.mark.parametrize(("status", "body", "words"), [
@@ -357,6 +360,16 @@ def test_photoroom_key_settings_never_return_the_key(env):
     assert refused.status_code == 400 and "x" * 501 not in refused.text
     removed = env.client.delete("/api/settings/photoroom")
     assert removed.json()["configured"] is False
+
+
+def test_managed_photoroom_settings_lock_down_seller_keys(env, monkeypatch):
+    monkeypatch.setenv(photoroom.MANAGED_KEY_ENV, "managed-secret")
+    status = env.client.get("/api/settings/photoroom")
+    assert status.status_code == 200
+    assert status.json() == {"configured": False, "masked_key": None, "source": "server", "available": True}
+    assert "managed-secret" not in status.text
+    assert env.client.put("/api/settings/photoroom", json={"api_key": KEY}).status_code == 403
+    assert env.client.delete("/api/settings/photoroom").status_code == 403
 
 
 def test_a_key_removal_the_keychain_cannot_save_is_reported(env, monkeypatch):

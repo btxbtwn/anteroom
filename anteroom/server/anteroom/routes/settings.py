@@ -930,12 +930,21 @@ class PhotoroomConfig(BaseModel):
     api_key: str
 
 
+def _guard_managed_photoroom() -> None:
+    from anteroom.services.photoroom import managed_photoroom_enabled
+
+    if managed_photoroom_enabled():
+        raise HTTPException(403, "AI Studio is managed automatically for hosted accounts.")
+
+
 def _photoroom_payload() -> dict:
     """Whether AI Studio can run, and whose Photoroom key it uses; never the key itself."""
     from anteroom import sandbox
     from anteroom.services.keychain import mask_secret, read_slot
-    from anteroom.services.photoroom import KEY_ACCOUNT, configured_key
+    from anteroom.services.photoroom import KEY_ACCOUNT, configured_key, managed_photoroom_enabled
 
+    if managed_photoroom_enabled():
+        return {"configured": False, "masked_key": None, "source": "server", "available": True}
     own = read_slot(KEY_ACCOUNT)
     _key, source = configured_key()
     if source is None and sandbox.enabled():
@@ -953,6 +962,7 @@ def set_photoroom(config: PhotoroomConfig):
     from anteroom.services.keychain import write_slot
     from anteroom.services.photoroom import KEY_ACCOUNT
 
+    _guard_managed_photoroom()
     key = config.api_key.strip()
     if not key or len(key) > 500 or any(ch.isspace() for ch in key):
         raise HTTPException(400, "Paste the Photoroom API key without spaces.")
@@ -966,6 +976,7 @@ def delete_photoroom():
     from anteroom.services.keychain import delete_slot
     from anteroom.services.photoroom import KEY_ACCOUNT
 
+    _guard_managed_photoroom()
     if not delete_slot(KEY_ACCOUNT):
         raise HTTPException(503, "The key could not be removed. Try again.")
     return {"ok": True, **_photoroom_payload()}

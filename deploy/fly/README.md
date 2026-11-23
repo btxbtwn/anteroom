@@ -264,9 +264,11 @@ Revision `3f6a9d2c7b14` lets the same bucket take listing videos
 formats Etsy accepts) up to 150 MB, eBay's limit. Raise the Supabase project's
 global upload limit (Storage settings) to at least 150 MB as well.
 
-AI Studio calls Photoroom's Image Editing API with the seller's own key, kept
-in their Vault slot (`photoroom-api-key`). An optional `PHOTOROOM_API_KEY` Fly
-secret is used only for sellers who have none, and is billed to that account.
+AI Studio calls Photoroom's Image Editing API. On hosted, set
+`ANTEROOM_MANAGED_PHOTOROOM_KEY` (see **Managed Photoroom** below) so accounts
+use Anteroom's Photoroom key with no per-seller setup. Without that secret,
+sellers paste their own key into Settings → Providers (Vault slot
+`photoroom-api-key`). The desktop Mac app always uses the seller's Keychain key.
 
 Uploads are streamed with a 10 MB limit and accept JPEG, PNG and WebP up to
 25 megapixels. The server normalizes orientation, strips metadata and resizes
@@ -337,3 +339,20 @@ hosted photo reading, drafting, field filling, measurement reading, comp search,
 and assistant requests use the managed OpenRouter models without exposing the
 key. The local desktop app is unaffected and continues to support local provider
 sign-ins and API keys.
+
+
+## Managed Photoroom (hosted AI Studio)
+
+Setting `ANTEROOM_MANAGED_PHOTOROOM_KEY` via Fly secrets switches hosted AI
+Studio to Anteroom's Photoroom account with zero per-seller Photoroom setup:
+
+```sh
+fly secrets set --config deploy/fly/fly.toml \
+  ANTEROOM_MANAGED_PHOTOROOM_KEY="<photoroom-api-key>"
+```
+
+When that secret is set, `/api/runtime` advertises `managed_photoroom`, AI Studio
+always uses the platform key (seller Vault Photoroom keys are ignored),
+PUT/DELETE `/api/settings/photoroom` return `403`, and Settings does not offer a
+Photoroom key field. The desktop Mac app is unaffected and keeps Keychain BYOK.
+Edits are billed to the Photoroom account behind the managed key.

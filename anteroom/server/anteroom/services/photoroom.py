@@ -6,9 +6,10 @@ virtual models come from Photoroom's ``POST /v2/edit``
 sends one photo per call and keeps the result beside the untouched upload, so
 Reset always goes back to the original (``services/photo_edits.py``).
 
-The key is the seller's own: the Mac's Keychain, or the seller's Vault slot when
-hosted. A server-wide ``PHOTOROOM_API_KEY`` is used only when the seller has none.
-The key never reaches a log, the database in plain text, or a response.
+On the Mac the key is the seller's own (Keychain). On hosted, a platform
+``ANTEROOM_MANAGED_PHOTOROOM_KEY`` takes over when set — the same pattern as
+managed OpenRouter — and seller Vault Photoroom keys are ignored. The key never
+reaches a log, the database in plain text, or a response.
 
 Sandbox mode never calls Photoroom: ``sandbox_result`` draws a stand-in locally,
 so the editor runs end to end offline.
@@ -29,7 +30,7 @@ log = logging.getLogger(__name__)
 
 ENDPOINT = "https://image-api.photoroom.com/v2/edit"
 KEY_ACCOUNT = "photoroom-api-key"
-SERVER_KEY_ENV = "PHOTOROOM_API_KEY"
+MANAGED_KEY_ENV = "ANTEROOM_MANAGED_PHOTOROOM_KEY"
 # Generative edits take tens of seconds; nothing Photoroom documents takes longer.
 CALL_DEADLINE_SEC = 120.0
 CONNECT_TIMEOUT_SEC = 10.0
@@ -135,15 +136,25 @@ class PhotoroomError(RuntimeError):
         self.status = status
 
 
+def managed_photoroom_key() -> str:
+    """Platform Photoroom key for hosted AI Studio; empty when sellers supply their own."""
+    return os.environ.get(MANAGED_KEY_ENV, "").strip()
+
+
+def managed_photoroom_enabled() -> bool:
+    """Whether hosted accounts automatically use Anteroom's Photoroom key for AI Studio."""
+    return bool(managed_photoroom_key())
+
+
 def configured_key() -> tuple[str | None, Literal["seller", "server"] | None]:
     """The key to call Photoroom with, and where it came from."""
+    managed = managed_photoroom_key()
+    if managed:
+        return managed, "server"
     from anteroom.services.keychain import read_slot
 
     key = (read_slot(KEY_ACCOUNT) or "").strip()
-    if key:
-        return key, "seller"
-    server = os.environ.get(SERVER_KEY_ENV, "").strip()
-    return (server, "server") if server else (None, None)
+    return (key, "seller") if key else (None, None)
 
 
 def _sandboxed() -> bool:

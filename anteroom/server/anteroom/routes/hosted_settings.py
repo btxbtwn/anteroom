@@ -17,7 +17,14 @@ def require_seller_providers():
         raise HTTPException(403, 'AI is managed automatically for hosted accounts.')
 
 
+def require_seller_photoroom():
+    from anteroom.services.photoroom import managed_photoroom_enabled
+    if managed_photoroom_enabled():
+        raise HTTPException(403, 'AI Studio is managed automatically for hosted accounts.')
+
+
 _seller_provider_route = [Depends(require_seller_providers)]
+_seller_photoroom_route = [Depends(require_seller_photoroom)]
 
 router.add_api_route('/provider', settings.get_provider, methods=['GET'])
 router.add_api_route('/usage-limits', settings.usage_limits, methods=['GET'])
@@ -70,10 +77,8 @@ for path, handler, methods in (
     ('/formulas', settings.put_listing_formulas, ['PUT']),
     ('/sale-detection', settings.get_sale_detection_route, ['GET']),
     ('/sale-detection', settings.put_sale_detection, ['PUT']),
-    # AI Studio's Photoroom key, kept in the seller's Vault slot.
+    # AI Studio's Photoroom key (seller Vault when unmanaged).
     ('/photoroom', settings.get_photoroom, ['GET']),
-    ('/photoroom', settings.set_photoroom, ['PUT']),
-    ('/photoroom', settings.delete_photoroom, ['DELETE']),
     ('/pricing-rules', settings.get_pricing_rules, ['GET']),
     ('/pricing-rules', settings.put_pricing_rules, ['PUT']),
     ('/pricing-rules/apply', settings.apply_pricing_rules, ['POST']),
@@ -86,6 +91,9 @@ for path, handler, methods in (
     ('/listing-warnings', settings.put_listing_warnings, ['PUT']),
 ):
     router.add_api_route(path, handler, methods=methods)
+
+router.add_api_route('/photoroom', settings.set_photoroom, methods=['PUT'], dependencies=_seller_photoroom_route)
+router.add_api_route('/photoroom', settings.delete_photoroom, methods=['DELETE'], dependencies=_seller_photoroom_route)
 
 
 def require_conversation(db, identity):

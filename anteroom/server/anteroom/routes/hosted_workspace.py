@@ -112,10 +112,12 @@ def listing_response(db, identity, *, conv=None, photo_count=None):
 def runtime(request: Request, db=Depends(get_seller_db, scope="function")):
     from anteroom.services.category_tree import categories_ready
     from anteroom.services.hosted_provider import managed_ai_enabled
+    from anteroom.services.photoroom import managed_photoroom_enabled
     from anteroom.routes.hosted_tasks import drafts_run, schedules_run
     generation, scheduled = drafts_run(request.app), schedules_run(request.app)
     return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits', 'photo_studio', 'listing_videos', 'bulk_actions', 'bulk_edit', 'bulk_copy', 'bulk_delete', 'bulk_markdowns', 'suggestions', 'assistant', 'account_deletion']
             + (['managed_ai'] if managed_ai_enabled() else [])
+            + (['managed_photoroom'] if managed_photoroom_enabled() else [])
             + (['marketplace_sessions'] if scheduled else [])
             + (['generation', 'chat_attachments', 'bulk_regenerate'] if generation else [])
             + (['catalog_categories'] if categories_ready(db) else [])

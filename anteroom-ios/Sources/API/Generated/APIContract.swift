@@ -1167,7 +1167,7 @@ extension VirtualModel {
 struct WorkspaceRuntime: Codable, Hashable, Sendable {
     /// One of: hosted.
     var mode: String
-    /// One of: inventory, listing_fields, photos, preferences, generation, assistant, suggestions, marketplace_actions, marketplace_sessions, photo_edits, photo_background, chat_attachments, bulk_actions, bulk_edit, bulk_copy, bulk_delete, bulk_regenerate, bulk_markdowns, catalog_categories, ebay_offers, account_deletion, managed_ai, photo_studio, listing_videos.
+    /// One of: inventory, listing_fields, photos, preferences, generation, assistant, suggestions, marketplace_actions, marketplace_sessions, photo_edits, photo_background, chat_attachments, bulk_actions, bulk_edit, bulk_copy, bulk_delete, bulk_regenerate, bulk_markdowns, catalog_categories, ebay_offers, account_deletion, managed_ai, managed_photoroom, photo_studio, listing_videos.
     var features: [String]
     var views: [String]
     /// Marketplaces whose native form the editor can show.
