@@ -23,7 +23,7 @@ from anteroom.models.listing_promotion import ListingPromotion
 from anteroom.models.marketplace_listing import MarketplaceListing
 from anteroom.models.marketplace_sale import MarketplaceSale
 from anteroom.models.promotion_automation import PromotionAutomation
-from anteroom.services import home_dashboard, sales_ledger
+from anteroom.services import home_dashboard, marketplace_accounts, sales_ledger
 
 
 def _add_listing(db, conv: Conversation, listing_json: dict, *, rev_id: str | None = None) -> str:
@@ -242,6 +242,29 @@ def test_home_summary_today_kpis_and_goals_crud():
         json={"period": "monthly", "metric": "sell_through_rate", "target": 150},
     )
     assert bad.status_code == 422
+
+
+@pytest.mark.parametrize("connected_at", [datetime(2026, 5, 13, 18, 30, 0, 500000, tzinfo=UTC), None])
+def test_home_sorts_marketplace_sign_in_alert_with_other_urgent_alerts(monkeypatch, connected_at):
+    monkeypatch.setattr(marketplace_accounts, "get_marketplace_accounts", lambda: {
+        "ebay": {
+            "authError": "Reconnect eBay",
+            "connectedAt": connected_at.timestamp() if connected_at else None,
+        },
+    })
+    cloud_updated_at = datetime(2026, 5, 13, 19, tzinfo=UTC)
+    with SessionLocal() as db:
+        db.add(CloudMarketplaceSession(marketplace="poshmark", state="expired", updated_at=cloud_updated_at))
+        db.commit()
+
+    response = TestClient(app).get("/api/home")
+
+    assert response.status_code == 200
+    alerts = response.json()["needs_attention"]
+    assert [(alert["key"], alert["occurred_at"]) for alert in alerts] == [
+        ("session:ebay", connected_at.isoformat() if connected_at else None),
+        ("session:poshmark", cloud_updated_at.isoformat()),
+    ]
 
 
 def test_needs_attention_categories_dismiss_and_seven_day_expiry():
