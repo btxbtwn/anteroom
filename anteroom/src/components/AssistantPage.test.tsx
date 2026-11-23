@@ -50,10 +50,22 @@ describe("AssistantPage", () => {
   });
 
   it("greets by the time of day", () => {
-    const at = (hour: number) => greeting(new Date(2026, 10, 7, hour));
+    const at = (hour: number) => greeting("", new Date(2026, 10, 7, hour));
     expect([at(4), at(5), at(11), at(12), at(17), at(18), at(23)]).toEqual([
       "Good evening", "Good morning", "Good morning", "Good afternoon", "Good afternoon", "Good evening", "Good evening",
     ]);
+  });
+
+  it("greets the seller by the name they asked to be called", () => {
+    const evening = new Date(2026, 10, 7, 20);
+    expect(greeting("Cristian", evening)).toBe("Good evening, Cristian");
+    expect(greeting("  ", evening)).toBe("Good evening");
+    useQuery.mockImplementation(({ queryKey }: { queryKey: readonly string[] }) => ({
+      data: queryKey[1] === "name" ? { name: "Cristian" } : [], isLoading: false, isError: false, error: null,
+    }));
+    const html = renderToStaticMarkup(<AssistantPage onOpenProviders={vi.fn()} onOpenListing={vi.fn()} />);
+    useQuery.mockReset();
+    expect(html).toContain(`>${greeting("Cristian")}</h1>`);
   });
 
   it("shows the saved conversation; threads, not a clear button, start over", () => {

@@ -59,6 +59,8 @@ CONTRACT_OPERATIONS: tuple[tuple[str, str], ...] = (
     ("get", "/api/conversations/{identity}/photos"),
     ("get", "/api/listing-sheet"),
     ("post", "/api/conversations/{conv_id}/photos/studio"),
+    ("get", "/api/assistant/name"),
+    ("put", "/api/assistant/name"),
 )
 HOSTED_ONLY_OPERATIONS = {
     ("get", "/api/runtime"),
@@ -412,6 +414,16 @@ class OfferLogResponse(ContractModel):
     entries: list[OfferLogEntry]
     next_before: str | None
     """Pass as ``before`` for the next, older page; null on the last page."""
+
+
+class PreferredName(ContractModel):
+    name: str
+    """What the seller asked Anteroom to call them; empty until they say. The Assistant home greets them by it."""
+
+
+class PreferredNameInput(ContractModel):
+    name: str = Field(max_length=160)
+    """Trimmed and collapsed to single spaces, then at most 40 characters; empty clears it."""
 
 
 class ListingSheetMissing(ContractModel):

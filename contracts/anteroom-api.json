@@ -2759,6 +2759,35 @@
         "title": "PlaidStatus",
         "type": "object"
       },
+      "PreferredName": {
+        "properties": {
+          "name": {
+            "description": "What the seller asked Anteroom to call them; empty until they say. The Assistant home greets them by it.",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "PreferredName",
+        "type": "object"
+      },
+      "PreferredNameInput": {
+        "properties": {
+          "name": {
+            "description": "Trimmed and collapsed to single spaces, then at most 40 characters; empty clears it.",
+            "maxLength": 160,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "PreferredNameInput",
+        "type": "object"
+      },
       "PriceDrift": {
         "description": "A marketplace price that is not what the seller's pricing rules give.",
         "properties": {
@@ -3294,6 +3323,59 @@
           }
         },
         "summary": "Get Offer Log"
+      }
+    },
+    "/api/assistant/name": {
+      "get": {
+        "description": "What the seller asked to be called; the home screen greets them by it.",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreferredName"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Name"
+      },
+      "put": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreferredNameInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreferredName"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Name"
       }
     },
     "/api/business-expenses": {
