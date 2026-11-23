@@ -1123,7 +1123,7 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.db.commit()
         self.assertFalse(draft_scheduling._is_sold_or_has_sale(self.db, c_same))
 
-        # Seller restock revision and sale_quantity_sync revision establish a new quantity baseline.
+        # Seller restock revision (quantity change) and sale_quantity_sync establish a new quantity baseline.
         c_res, _l_res, r_res = self._create_draft("Restocked Multi Shirt", quantity=3)
         past = now - timedelta(hours=2)
         self.db.add(MarketplaceSale(
@@ -1133,9 +1133,16 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         ))
         self.db.commit()
         self.assertTrue(draft_scheduling._is_sold_or_has_sale(self.db, c_res))
+        r_res_zero = listing_persistence.save_revision(
+            self.db, c_res.id, {**r_res.listing_json, "quantity": 0},
+            source="sale_quantity_sync", parent_revision_id=r_res.id, commit=True,
+        )
+        r_res_zero.created_at = past + timedelta(minutes=1)
+        self.db.commit()
+        self.assertTrue(draft_scheduling._is_sold_or_has_sale(self.db, c_res))
         r_restocked = listing_persistence.save_revision(
-            self.db, c_res.id, {**r_res.listing_json, "quantity": 3},
-            source="manual", parent_revision_id=r_res.id, commit=True,
+            self.db, c_res.id, {**r_res_zero.listing_json, "quantity": 3},
+            source="manual", parent_revision_id=r_res_zero.id, commit=True,
         )
         r_restocked.created_at = now
         self.db.commit()
@@ -1155,7 +1162,8 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.db.commit()
         self.assertTrue(draft_scheduling._is_sold_or_has_sale(self.db, c_res))
 
-        # Manual restock to 1 unit (without an inventory observation) also resets the baseline.
+        # Manual edit that only changes title on a sold 1-unit item must keep it sold;
+        # a genuine restock from 0 to 1 resets the baseline.
         c_one, _l_one, r_one = self._create_draft("Manual Restock One Unit", quantity=1)
         self.db.add(MarketplaceSale(
             id=new_id(), marketplace="ebay", order_id="ord-one-1", line_id="line-one-1",
@@ -1164,9 +1172,22 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         ))
         self.db.commit()
         self.assertTrue(draft_scheduling._is_sold_or_has_sale(self.db, c_one))
-        r_one_restocked = listing_persistence.save_revision(
-            self.db, c_one.id, {**r_one.listing_json, "quantity": 1},
+        r_one_typo = listing_persistence.save_revision(
+            self.db, c_one.id, {**r_one.listing_json, "title": "Patagonia L Vintage Edited Title Gray"},
             source="manual", parent_revision_id=r_one.id, commit=True,
+        )
+        r_one_typo.created_at = now - timedelta(minutes=30)
+        self.db.commit()
+        self.assertTrue(draft_scheduling._is_sold_or_has_sale(self.db, c_one))
+        r_one_zero = listing_persistence.save_revision(
+            self.db, c_one.id, {**r_one_typo.listing_json, "quantity": 0},
+            source="sale_quantity_sync", parent_revision_id=r_one_typo.id, commit=True,
+        )
+        r_one_zero.created_at = now - timedelta(minutes=10)
+        self.db.commit()
+        r_one_restocked = listing_persistence.save_revision(
+            self.db, c_one.id, {**r_one_zero.listing_json, "quantity": 1},
+            source="manual", parent_revision_id=r_one_zero.id, commit=True,
         )
         r_one_restocked.created_at = now
         self.db.commit()
@@ -1176,6 +1197,13 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
             conversation_id=c_one.id, quantity=1, order_status="paid",
             sold_at=now + timedelta(minutes=1), received_at=now + timedelta(minutes=1), state="new",
         ))
+        self.db.commit()
+        self.assertTrue(draft_scheduling._is_sold_or_has_sale(self.db, c_one))
+        r_one_post_sale_edit = listing_persistence.save_revision(
+            self.db, c_one.id, {**r_one_restocked.listing_json, "title": "Patagonia L Vintage Post Sale Title Gray"},
+            source="manual", parent_revision_id=r_one_restocked.id, commit=True,
+        )
+        r_one_post_sale_edit.created_at = now + timedelta(minutes=2)
         self.db.commit()
         self.assertTrue(draft_scheduling._is_sold_or_has_sale(self.db, c_one))
 

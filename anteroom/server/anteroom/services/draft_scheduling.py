@@ -95,18 +95,30 @@ def _as_utc(value: Any) -> datetime | None:
         return None
 
 
+def _revision_quantity(revision: ListingRevision) -> int | None:
+    from anteroom.services.ebay_variations import total_quantity
+
+    if not isinstance(revision.listing_json, dict):
+        return None
+    var_total = total_quantity(revision.listing_json)
+    if isinstance(var_total, int) and var_total >= 0:
+        return var_total
+    raw = revision.listing_json.get("quantity")
+    if type(raw) is int and raw >= 0:
+        return raw
+    return None
+
+
 def _quantity_baseline(db: Session, conv_id: str) -> tuple[int | None, datetime | None, bool]:
     """Return ``(available_qty, baseline_at, from_quantity_sync)`` for the current listing.
 
-    Walks past private ``native_schema`` saves to the revision that established the
-    current quantity. For an initial revision (``parent_revision_id is None``),
-    ``baseline_at`` is ``None`` so all paid sales count against that starting quantity.
-    For a subsequent revision (seller restock/edit or ``sale_quantity_sync``),
-    ``baseline_at`` is that revision's creation time because its quantity already
-    reflects prior sales.
+    Walks past private ``native_schema`` saves and non-quantity edits to the revision
+    that established the current quantity (or a ``sale_quantity_sync`` revision).
+    For an initial revision (``parent_revision_id is None``), ``baseline_at`` is ``None``
+    so all paid sales count against that starting quantity. For a subsequent
+    quantity-changing revision (seller restock or ``sale_quantity_sync``), ``baseline_at``
+    is that revision's creation time because its quantity already reflects prior sales.
     """
-    from anteroom.services.ebay_variations import total_quantity
-
     listing = db.query(Listing).filter(Listing.conversation_id == conv_id).first()
     if listing is None or not listing.current_revision_id:
         return None, None, False
@@ -125,14 +137,21 @@ def _quantity_baseline(db: Session, conv_id: str) -> tuple[int | None, datetime 
         revision = parent
     if revision is None or not isinstance(revision.listing_json, dict):
         return None, None, False
-    qty: int | None = None
-    var_total = total_quantity(revision.listing_json)
-    if isinstance(var_total, int) and var_total >= 0:
-        qty = var_total
-    else:
-        raw = revision.listing_json.get("quantity")
-        if type(raw) is int and raw >= 0:
-            qty = raw
+    qty = _revision_quantity(revision)
+    effective_qty = qty if qty is not None else 1
+    while (
+        revision.source != "sale_quantity_sync"
+        and revision.parent_revision_id
+        and revision.parent_revision_id not in seen
+    ):
+        parent = db.get(ListingRevision, revision.parent_revision_id)
+        if parent is None:
+            break
+        parent_qty = _revision_quantity(parent)
+        if (parent_qty if parent_qty is not None else 1) != effective_qty:
+            break
+        seen.add(revision.id)
+        revision = parent
     baseline_at = _as_utc(revision.created_at) if revision.parent_revision_id is not None else None
     return qty, baseline_at, revision.source == "sale_quantity_sync"
 
