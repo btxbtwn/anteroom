@@ -503,21 +503,24 @@ def test_plaid_m6_503_unconfigured_m8_clothing_other_and_l7_categorized_refunds(
 
     # Unreviewed thrift/clothing charges are excluded from both accrual and cash P&L until seller review.
     from datetime import date
+    from anteroom.models.sourcing import SourceBox
     from anteroom.services import profit_and_loss
 
     with Session(_engine) as db:
+        db.add(SourceBox(store="Goodwill", title="Thrift box", price=15.0, bought_at=datetime.fromisoformat(DATE)))
+        db.commit()
         for mode in ("accrual", "cash"):
             reports = profit_and_loss.report(db, date(2026, 1, 1), date(2026, 1, 31), mode, sales=[])
             lines = {line.label: line.amount_cents for line in reports[0].lines}
             assert lines["Operating Expenses"] == -850
             assert lines.get("Other", 0) == 0
             if mode == "cash":
-                assert lines["Inventory Purchases"] == 0
+                assert lines["Inventory Purchases"] == 1500
 
-    # Once the seller reviews and classifies Goodwill as inventory_purchases, it enters cash P&L (not accrual operating).
-    goodwill = by_vendor["Goodwill"]
-    updated = client.put(f"{EXPENSES}/{goodwill['id']}", json={
-        **goodwill, "category": "inventory_purchases", "expected_revision": goodwill["revision"],
+    # Once the seller reviews and classifies the separate Marshalls charge as inventory_purchases, it enters cash P&L (not accrual operating).
+    reviewed = by_vendor["Marshalls"]
+    updated = client.put(f"{EXPENSES}/{reviewed['id']}", json={
+        **reviewed, "category": "inventory_purchases", "expected_revision": reviewed["revision"],
     })
     assert updated.status_code == 200
     assert updated.json()["accounting_type"] == "inventory_purchase"
@@ -525,7 +528,7 @@ def test_plaid_m6_503_unconfigured_m8_clothing_other_and_l7_categorized_refunds(
         accrual = {line.label: line.amount_cents for line in profit_and_loss.report(db, date(2026, 1, 1), date(2026, 1, 31), "accrual", sales=[])[0].lines}
         cash = {line.label: line.amount_cents for line in profit_and_loss.report(db, date(2026, 1, 1), date(2026, 1, 31), "cash", sales=[])[0].lines}
         assert accrual["Operating Expenses"] == -850
-        assert cash["Inventory Purchases"] == 2500
+        assert cash["Inventory Purchases"] == 1500 + 2500
         assert cash["Operating Expenses"] == -850
 
     # M6: missing Plaid credentials returns HTTP 503 (PlaidUnavailable).

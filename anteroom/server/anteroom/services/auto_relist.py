@@ -496,7 +496,14 @@ def _eligible_candidates(
                     & ((MarketplaceListing.listed_at.is_(None)) | (MarketplaceListing.listed_at <= age_cutoff))
                 )
                 | (
-                    MarketplaceListing.id.is_(None)
+                    (
+                        MarketplaceListing.id.is_(None)
+                        | (
+                            MarketplaceListing.state.in_(("not_saved", *LIVE_STATES))
+                            & MarketplaceListing.listing_id.is_(None)
+                            & MarketplaceListing.listing_url.is_(None)
+                        )
+                    )
                     & Conversation.notes.isnot(None)
                     & (Conversation.notes != "")
                 )

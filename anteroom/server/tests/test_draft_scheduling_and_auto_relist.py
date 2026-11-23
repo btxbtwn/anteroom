@@ -1423,6 +1423,18 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.assertEqual([item["conversation_id"] for item in found], [c_imp.id])
         self.assertEqual(found[0]["listing_id"], imported_id)
 
+        # An empty native tracking row must not hide the imported listing.
+        tracking = MarketplaceListing(conversation_id=c_imp.id, marketplace="poshmark")
+        self.db.add(tracking)
+        for state, expected_ids in (("not_saved", [imported_id]), ("published", [imported_id]), ("publishing", [])):
+            with self.subTest(state=state):
+                tracking.state = state
+                self.db.commit()
+                found = auto_relist._eligible_candidates(
+                    self.db, posh_rule, now + timedelta(days=2), conv_id=c_imp.id,
+                )
+                self.assertEqual([item["listing_id"] for item in found], expected_ids)
+
         # Published MarketplaceListing row with null listing_id and valid listing_url is also discovered.
         url_only_id = "5f0000000000000000000993"
         c_url, _l_url, _r_url = self._create_draft("URL Only Listing Coat")
