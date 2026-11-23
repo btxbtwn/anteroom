@@ -114,7 +114,7 @@ def runtime(request: Request, db=Depends(get_seller_db, scope="function")):
     from anteroom.services.hosted_provider import managed_ai_enabled
     from anteroom.routes.hosted_tasks import drafts_run, schedules_run
     generation, scheduled = drafts_run(request.app), schedules_run(request.app)
-    return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits', 'bulk_actions', 'bulk_edit', 'bulk_copy', 'bulk_delete', 'bulk_markdowns', 'suggestions', 'assistant', 'account_deletion']
+    return {'mode': 'hosted', 'features': ['inventory', 'listing_fields', 'photos', 'preferences', 'photo_edits', 'photo_studio', 'listing_videos', 'bulk_actions', 'bulk_edit', 'bulk_copy', 'bulk_delete', 'bulk_markdowns', 'suggestions', 'assistant', 'account_deletion']
             + (['managed_ai'] if managed_ai_enabled() else [])
             + (['marketplace_sessions'] if scheduled else [])
             + (['generation', 'chat_attachments', 'bulk_regenerate'] if generation else [])
@@ -571,10 +571,12 @@ def delete_photo(identity: str, photo_id: str, request: Request, db=Depends(get_
     conversation(db, identity, lock=True)
     assert_idle(db, identity)
     row = owned_photo(db, identity, photo_id)
+    from anteroom.services.photo_edits import studio_key
     keys = {row.stored_filename}
-    if row.source_filename:
-        check_key(row.source_filename, db.user_id, identity)
-        keys.add(row.source_filename)
+    for kept in (row.source_filename, studio_key(row.edits)):
+        if kept:
+            check_key(kept, db.user_id, identity)
+            keys.add(kept)
     from anteroom.services.hosted_listing_contract import remove_photo_selections
     remove_photo_selections(db, identity, photo_id)
     db.delete(row)

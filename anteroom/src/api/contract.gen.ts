@@ -8,6 +8,22 @@ export interface AccountSummary {
   subtype?: string | null;
 }
 
+/** An arrow, box, ellipse or text label drawn on the finished frame, from (x1, y1) to (x2, y2). */
+export interface Annotation {
+  kind: "arrow" | "rectangle" | "ellipse" | "text";
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  color?: string;
+  text?: string | null;
+}
+
+export interface Border {
+  width: number;
+  color?: string;
+}
+
 export interface ConnectionStatus {
   id: string;
   institution_name: string;
@@ -475,6 +491,31 @@ export interface PhotoEdits {
   brightness?: number;
   contrast?: number;
   background?: string | null;
+  flip_horizontal?: boolean;
+  flip_vertical?: boolean;
+  filter?: "vivid" | "crisp" | "warm" | "cool" | "bw" | "studio" | null;
+  redactions?: Redaction[];
+  annotations?: Annotation[];
+  border?: Border | null;
+  studio?: StudioEdit | null;
+}
+
+export interface PhotoStudioFailure {
+  photo_id: string;
+  /** Why this photo was not changed, for the seller; the others still saved. */
+  detail: string;
+}
+
+/** AI Studio (Photoroom) on one or more of a listing's photos, all with the same options. */
+export interface PhotoStudioRequest {
+  photo_ids: string[];
+  options: StudioOptions;
+}
+
+export interface PhotoStudioResult {
+  /** The photos AI Studio changed, each with its new ``url`` and ``edits.studio``. */
+  photos: ListingPhoto[];
+  errors: PhotoStudioFailure[];
 }
 
 export interface PlaidExchange {
@@ -504,6 +545,15 @@ export interface PriceDrift {
   source: "override" | "live";
 }
 
+/** A region hidden on the finished frame, such as a name, address or barcode. */
+export interface Redaction {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  style?: "pixelate" | "blur";
+}
+
 export interface ReportLine {
   label: string;
   amount_cents: number;
@@ -519,6 +569,22 @@ export interface SizeTagReadResult {
   sizes: string[];
 }
 
+/** Photoroom's result for this photo, kept beside the upload; edits render from it. */
+export interface StudioEdit {
+  key: string;
+  options: StudioOptions;
+}
+
+/** One AI Studio edit. Photoroom does the work; these are the seller's choices. */
+export interface StudioOptions {
+  remove_background?: boolean;
+  background?: string;
+  ghost_mannequin?: boolean;
+  flat_lay?: boolean;
+  shadow?: boolean;
+  virtual_model?: VirtualModel | null;
+}
+
 export interface ValidationError {
   loc: (string | number)[];
   msg: string;
@@ -527,10 +593,16 @@ export interface ValidationError {
   ctx?: Record<string, unknown>;
 }
 
+export interface VirtualModel {
+  model?: "auto" | "avery" | "sam" | "taylor" | "kendall" | "jordan" | "casey" | "maya" | "reece" | "lena" | "julia" | "jackson" | "sophia" | "emma" | "ava" | "zoe" | "fiona";
+  scene?: "auto" | "street" | "bedroom" | "sunset" | "factory" | "studio" | "coloredstudio" | "concretestudio" | "beach" | "tropical" | "library" | "forest" | "businessdistrict" | "countryside" | "flowers" | "goldenlight" | "mountain" | "pool" | "latincity" | "cafe" | "asiancity" | "nightlights" | "desert";
+  pose?: "auto" | "standing" | "34turn" | "powerstance" | "walkingforward" | "handinpocket" | "crossedarms" | "back" | "overtheshoulder" | "seated" | "adjustingclothing" | "playfulspin";
+}
+
 /** What this hosted server offers the signed-in seller. */
 export interface WorkspaceRuntime {
   mode: "hosted";
-  features: ("inventory" | "listing_fields" | "photos" | "preferences" | "generation" | "assistant" | "suggestions" | "marketplace_actions" | "marketplace_sessions" | "photo_edits" | "photo_background" | "chat_attachments" | "bulk_actions" | "bulk_edit" | "bulk_copy" | "bulk_delete" | "bulk_regenerate" | "bulk_markdowns" | "catalog_categories" | "ebay_offers" | "account_deletion" | "managed_ai")[];
+  features: ("inventory" | "listing_fields" | "photos" | "preferences" | "generation" | "assistant" | "suggestions" | "marketplace_actions" | "marketplace_sessions" | "photo_edits" | "photo_background" | "chat_attachments" | "bulk_actions" | "bulk_edit" | "bulk_copy" | "bulk_delete" | "bulk_regenerate" | "bulk_markdowns" | "catalog_categories" | "ebay_offers" | "account_deletion" | "managed_ai" | "photo_studio" | "listing_videos")[];
   views: string[];
   /** Marketplaces whose native form the editor can show. */
   marketplace_forms: string[];

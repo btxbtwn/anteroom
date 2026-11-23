@@ -16,6 +16,7 @@ from anteroom.models.schema import ListingSchema
 from anteroom.services.validation import validate_listing
 from anteroom.repositories.queries import ConversationRepo, ListingRepo
 from anteroom.services import photos
+from anteroom.services.photo_edits import studio_key
 from anteroom.services.photo_store import photo_store
 from anteroom.services.api_job_lock import start_gate
 from anteroom.services.native_marketplaces import running_marketplace
@@ -202,6 +203,9 @@ def create_copy(db: Session, conv_id: str, body: CopyRequest) -> str:
                     # The copy keeps the original under its edits, so it can be reset too.
                     meta["source_filename"] = _copy_file(image.source_filename, image.mime_type, created_files, target_id)["stored_filename"]
                     meta["edits"] = copy.deepcopy(image.edits)
+                    if studio := studio_key(image.edits):
+                        # The AI Studio result its edits render from comes along too.
+                        meta["edits"]["studio"]["key"] = _copy_file(studio, image.mime_type, created_files, target_id)["stored_filename"]
                 meta["original_filename"] = image.original_filename
                 copied_images.append(meta)
             new_id = add_draft(db, body.title, notes, data, copied_images, "copy", identity=target_id)

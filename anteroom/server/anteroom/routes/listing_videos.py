@@ -5,9 +5,8 @@ from sqlalchemy.orm import Session
 
 from anteroom.database import get_db
 from anteroom.models.conversation import Conversation
-from anteroom.models.job import ACTIVE_JOB_STATUSES, Job
+from anteroom.models.job import Job
 from anteroom.models.listing_video import ListingVideo
-from anteroom.repositories.queries import ListingRepo
 from anteroom.services import listing_videos as videos
 
 router = APIRouter(tags=["listing-videos"])
@@ -64,13 +63,8 @@ def delete(conv_id: str, video_id: str, db: Session = Depends(get_db)):
     row = db.query(ListingVideo).filter_by(id=video_id, conversation_id=conv_id).first()
     if not row:
         raise HTTPException(404, "Video not found")
-    if db.query(Job).filter(Job.conversation_id == conv_id, Job.status.in_(ACTIVE_JOB_STATUSES)).first():
-        raise HTTPException(409, "Wait for this item's marketplace action to finish before removing a video.")
-    current = ListingRepo(db).get_current(conv_id)
-    revision = ListingRepo(db).get_revision(current.current_revision_id) if current else None
-    listing = revision.listing_json if revision else {}
-    if any(isinstance(value, dict) and value.get("videoId") == video_id for value in listing.values()):
-        raise HTTPException(409, "Remove this video from every marketplace form before deleting it.")
+    if refusal := videos.deletion_refusal(db, conv_id, video_id):
+        raise HTTPException(409, refusal)
     path = videos.video_path(row)
     db.delete(row)
     db.commit()

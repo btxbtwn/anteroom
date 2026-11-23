@@ -145,9 +145,11 @@ def _build_csp(supabase_url: str) -> str:
         http_origin = f"{parsed.scheme}://{parsed.netloc}"
         ws_scheme = "wss" if parsed.scheme == "https" else "ws"
         ws_origin = f"{ws_scheme}://{parsed.netloc}"
+        media_src = f"'self' {http_origin}"
         img_src = f"'self' data: blob: {http_origin}"
         connect_src = f"'self' {http_origin} {ws_origin}"
     else:
+        media_src = "'self'"
         img_src = "'self' data: blob:"
         connect_src = "'self' https://*.supabase.co wss://*.supabase.co"
     from anteroom.services.plaid_client import HOSTS, PlaidClient
@@ -161,7 +163,7 @@ def _build_csp(supabase_url: str) -> str:
     return (
         f"default-src 'self'; script-src 'self' 'unsafe-eval'{plaid_script}; style-src 'self' 'unsafe-inline'; "
         f"{plaid_frame}"
-        f"img-src {img_src}; connect-src {connect_src}; "
+        f"img-src {img_src}; media-src {media_src}; connect-src {connect_src}; "
         "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
     )
 
@@ -563,6 +565,9 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         app.include_router(shared_router)
     from anteroom.routes.photos import edit_router
     app.include_router(edit_router)
+    from anteroom.routes.hosted_listing_videos import router as videos_router, upload_router as video_upload_router
+    app.include_router(videos_router)
+    app.include_router(video_upload_router)
     # Bulk listing reads photos not uploaded yet; a saved listing reads its photos from private storage.
     from anteroom.routes import measurements
     app.include_router(measurements.hosted_router)

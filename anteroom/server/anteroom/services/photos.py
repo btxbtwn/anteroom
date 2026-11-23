@@ -159,7 +159,9 @@ def delete_photo_files(photo) -> None:
     """Remove a photo's served file, its kept upload, and what was derived from them."""
     from anteroom.services.photo_edits import mask_path
 
-    names = [name for name in (photo.stored_filename, photo.source_filename) if name]
+    from anteroom.services.photo_edits import studio_key
+
+    names = [name for name in (photo.stored_filename, photo.source_filename, studio_key(photo.edits)) if name]
     for name in names:
         photo_store().delete(name)
         delete_thumbnails(name)

@@ -213,6 +213,10 @@ class HostedPhotoStore:
         self._temporary = None
         self._lock = threading.RLock()
 
+    def storage_token(self):
+        """The seller's session token for Storage, or None for durable work on the server key."""
+        return self._token
+
     def _root(self):
         if self._temporary is None:
             self._temporary = tempfile.TemporaryDirectory(prefix='anteroom-photos-')

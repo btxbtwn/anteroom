@@ -378,3 +378,32 @@ test('final journal save failure still delivers marketplace reply and releases l
   assert.equal(s.replies[0].state, 'draft');
   assert.equal(call(s.context, 'nativeOperationsRunning'), false);
 });
+
+test('a hosted listing video is read only through a signed link to the private photo bucket', async () => {
+  const c = loadWorker();
+  const signed = 'https://abcdefgh.supabase.co/storage/v1/object/sign/anteroom-photos/u/l/0123.video?token=t';
+  assert.equal(call(c, 'nativeVideoLink', signed), signed);
+  assert.equal(call(c, 'nativeVideoLink', 'http://127.0.0.1:54321/storage/v1/object/sign/anteroom-photos/u/l/v.video?token=t'),
+    'http://127.0.0.1:54321/storage/v1/object/sign/anteroom-photos/u/l/v.video?token=t');
+  for (const url of ['https://evil.example/storage/v1/object/sign/anteroom-photos/x', 'http://abcdefgh.supabase.co/storage/v1/object/sign/anteroom-photos/x',
+    'https://abcdefgh.supabase.co/storage/v1/object/public/anteroom-photos/x', 'https://abcdefgh.supabase.co.evil.example/storage/v1/object/sign/anteroom-photos/x', 'not a url']) {
+    assert.equal(call(c, 'nativeVideoLink', url), null, url);
+  }
+  const fetched = [];
+  c.fetch = async (url, options) => {
+    fetched.push([url, options.credentials, options.redirect]);
+    return { ok: true, blob: async () => ({ size: 4, type: 'video/mp4' }) };
+  };
+  const video = { id: 'abc-123', size_bytes: 4, url: '/api/videos/abc-123', download_url: signed };
+  const load = value => {
+    c.__args = ['job-1', value, Date.now() + 5000];
+    return vm.runInContext('nativeVideo(...__args)', c);
+  };
+  assert.equal((await load(video)).size, 4);
+  assert.deepEqual(fetched, [[signed, 'omit', 'error']]);
+  await assert.rejects(load({ ...video, download_url: 'https://evil.example/x.video' }), /Could not load the video/);
+  assert.equal(fetched.length, 1);
+  // The Mac's own preview address never replaces its job-scoped loopback download.
+  await load({ id: 'abc-123', size_bytes: 4, url: '/api/videos/abc-123' });
+  assert.match(fetched[1][0], /\/api\/jobs\/job-1\/videos\/abc-123$/);
+});

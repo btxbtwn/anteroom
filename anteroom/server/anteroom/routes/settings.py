@@ -925,6 +925,52 @@ async def test_brave():
     return {"ok": ok, "error": error}
 
 
+class PhotoroomConfig(BaseModel):
+    # Checked in the handler: a validation error would echo the rejected key.
+    api_key: str
+
+
+def _photoroom_payload() -> dict:
+    """Whether AI Studio can run, and whose Photoroom key it uses; never the key itself."""
+    from anteroom import sandbox
+    from anteroom.services.keychain import mask_secret, read_slot
+    from anteroom.services.photoroom import KEY_ACCOUNT, configured_key
+
+    own = read_slot(KEY_ACCOUNT)
+    _key, source = configured_key()
+    if source is None and sandbox.enabled():
+        source = "sandbox"
+    return {"configured": bool(own), "masked_key": mask_secret(own), "source": source, "available": source is not None}
+
+
+@router.get("/photoroom")
+def get_photoroom():
+    return _photoroom_payload()
+
+
+@router.put("/photoroom")
+def set_photoroom(config: PhotoroomConfig):
+    from anteroom.services.keychain import write_slot
+    from anteroom.services.photoroom import KEY_ACCOUNT
+
+    key = config.api_key.strip()
+    if not key or len(key) > 500 or any(ch.isspace() for ch in key):
+        raise HTTPException(400, "Paste the Photoroom API key without spaces.")
+    if not write_slot(KEY_ACCOUNT, key):
+        raise HTTPException(503, "The key could not be saved. Try again.")
+    return {"ok": True, **_photoroom_payload()}
+
+
+@router.delete("/photoroom")
+def delete_photoroom():
+    from anteroom.services.keychain import delete_slot
+    from anteroom.services.photoroom import KEY_ACCOUNT
+
+    if not delete_slot(KEY_ACCOUNT):
+        raise HTTPException(503, "The key could not be removed. Try again.")
+    return {"ok": True, **_photoroom_payload()}
+
+
 @router.get("/cursor")
 def get_cursor():
     return _cursor_payload()

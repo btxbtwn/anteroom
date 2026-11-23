@@ -18,7 +18,7 @@ import { COVER_LIMIT, formPhotos, isVideoFile, pastSlots, pickedIds, videoRuleTe
 import { dragHasFiles, isImageFile, moveItem } from "../photoDrop";
 import { InspectorSection } from "./ListingFormControls";
 import { marketplaceName } from "./marketplaceNames";
-import { PhotoCropDialog } from "./PhotoCropDialog";
+import { PhotoEditorDialog } from "./PhotoEditorDialog";
 import { PhotoLightbox, PhotoStrip, PhotoThumb } from "./PhotoThumbs";
 import { SortablePhoto, SortablePhotos } from "./SortablePhotos";
 import { useListingSessionActive } from "./listingSession";
@@ -45,13 +45,14 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
   const [dropping, setDropping] = React.useState(false);
   const [previewId, setPreviewId] = React.useState<string | null>(null);
   const [editingId, setEditingId] = React.useState<string | null>(null);
+  const [editingTab, setEditingTab] = React.useState<"crop" | "studio">("crop");
   const [adjustingPhoto, setAdjustingPhoto] = React.useState(false);
   const name = marketplaceName(marketplace);
   const ownKey = ["photos", convId, marketplace];
   const { data: item = [] } = useQuery({ queryKey: ["photos", convId], queryFn: ({ signal }) => api.conversations.photos(convId, undefined, { signal }) });
   const { data: own = [] } = useQuery({ queryKey: ownKey, queryFn: ({ signal }) => api.conversations.photos(convId, marketplace, { signal }) });
   const { data: rules } = useQuery({ queryKey: ["marketplace-media"], queryFn: api.marketplaceMedia.rules, staleTime: Infinity });
-  const videoRules = runtime.hosted ? undefined : rules?.video_rules?.[marketplace];
+  const videoRules = runtime.features.has("listing_videos") ? rules?.video_rules?.[marketplace] : undefined;
   const { data: library } = useQuery({
     queryKey: ["listing-videos", convId], queryFn: () => api.listingVideos.list(convId), enabled: Boolean(videoRules),
   });
@@ -293,7 +294,8 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
       error={error}
       rotating={adjustingPhoto}
       onRotate={runtime.features.has("photo_edits") ? (degrees) => void adjustPhoto(all[previewIndex].id, degrees) : undefined}
-      onCrop={runtime.features.has("photo_edits") ? () => { setEditingId(all[previewIndex].id); setPreviewId(null); } : undefined}
+      onEdit={runtime.features.has("photo_edits") ? () => { setEditingTab("crop"); setEditingId(all[previewIndex].id); setPreviewId(null); } : undefined}
+      onStudio={runtime.features.has("photo_studio") ? () => { setEditingTab("studio"); setEditingId(all[previewIndex].id); setPreviewId(null); } : undefined}
       onRevert={runtime.features.has("photo_edits") && all[previewIndex].edits ? () => void adjustPhoto(all[previewIndex].id, null) : undefined}
       onMove={previewIndex < picked.length && !locked ? (delta) => movePick(previewIndex, previewIndex + delta) : undefined}
       // A touch screen hides the tiles' remove buttons; the viewer offers it instead.
@@ -304,7 +306,8 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
       removeLabel={`Leave off ${name}`}
       onClose={() => setPreviewId(null)}
     />}
-    {editing && <PhotoCropDialog key={editing.id} convId={convId} photo={editing} index={all.indexOf(editing)}
+    {editing && <PhotoEditorDialog key={editing.id} convId={convId} photo={editing} index={all.indexOf(editing)}
+      photos={all} initialTab={editingTab}
       onSaved={() => void refreshPhotos()}
       onClose={() => { setPreviewId(editing.id); setEditingId(null); }} />}
   </>;
@@ -382,6 +385,24 @@ export function MarketplaceMedia({ convId, marketplace, listing, disabled, onCha
   );
 }
 
+/**
+ * Where the player reads a video. On the Mac that is Anteroom's own address; on
+ * the web the video sits in the seller's private storage, which a <video> tag
+ * cannot sign in to, so it plays from a short-lived link.
+ */
+function useVideoSource(video: ListingVideo): string | undefined {
+  const runtime = useWorkspaceRuntime();
+  const { data } = useQuery({
+    queryKey: ["listing-video-link", video.id],
+    queryFn: ({ signal }) => api.listingVideos.link(video.id, signal),
+    enabled: runtime.hosted,
+    // The link lasts 15 minutes; fetch a fresh one well before then.
+    staleTime: 10 * 60_000,
+    refetchInterval: 10 * 60_000,
+  });
+  return runtime.hosted ? data?.url : video.url;
+}
+
 function VideoTile({ video, label, problem, muted, onAdd, onRemove, removeLabel }: {
   video: ListingVideo;
   label: string;
@@ -391,10 +412,11 @@ function VideoTile({ video, label, problem, muted, onAdd, onRemove, removeLabel 
   onRemove?: () => void;
   removeLabel?: string;
 }) {
+  const source = useVideoSource(video);
   return (
     <div className={cn("group/thumb relative size-16 shrink-0 overflow-hidden rounded-lg border bg-muted", (muted || problem) && "opacity-60")}
       title={problem || `${video.original_filename} · ${video.duration_seconds.toFixed(1)} seconds`}>
-      <video src={video.url} preload="metadata" muted playsInline aria-label={label} className="size-full object-cover" />
+      <video src={source} preload="metadata" muted playsInline aria-label={label} className="size-full object-cover" />
       <span className="pointer-events-none absolute bottom-0.5 left-0.5 flex items-center gap-0.5 rounded-sm bg-black/60 px-1 text-[9px] text-white/90 leading-3.5 tabular-nums">
         <PlayIcon className="size-2" />
         {video.duration_seconds.toFixed(0)}s

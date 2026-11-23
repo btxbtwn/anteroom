@@ -32,6 +32,9 @@ LOGO_FILES = {
     "src/components/MarketplaceLogo.tsx",
     "src/components/providerIcons.tsx",
 }
+# Colours a seller paints into a photo (annotations, a frame, an AI Studio backdrop)
+# are image content, not interface chrome.
+PHOTO_CONTENT_COLOR_FILES = {"src/photoColors.ts"}
 # NativeSelect: the one native <select>, kept on purpose for long marketplace option
 # lists so phones show their own picker. Other code uses it instead of a raw <select>.
 NATIVE_SELECT_FILES = {"src/components/ListingFormControls.tsx"}
@@ -91,6 +94,8 @@ def measure() -> dict[str, dict[str, int]]:
             if rel in TOKEN_FILES and rule in {"hardcoded-color", "heavy-weight"}:
                 continue
             if rel in LOGO_FILES and rule == "hardcoded-color":
+                continue
+            if rel in PHOTO_CONTENT_COLOR_FILES and rule == "hardcoded-color":
                 continue
             if rel in NATIVE_SELECT_FILES and rule == "native-control":
                 continue

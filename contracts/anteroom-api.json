@@ -41,6 +41,73 @@
         "title": "AccountSummary",
         "type": "object"
       },
+      "Annotation": {
+        "additionalProperties": false,
+        "description": "An arrow, box, ellipse or text label drawn on the finished frame, from (x1, y1) to (x2, y2).",
+        "properties": {
+          "color": {
+            "default": "#E5484D",
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "title": "Color",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "arrow",
+              "rectangle",
+              "ellipse",
+              "text"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "x1": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "X1",
+            "type": "number"
+          },
+          "x2": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "X2",
+            "type": "number"
+          },
+          "y1": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Y1",
+            "type": "number"
+          },
+          "y2": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Y2",
+            "type": "number"
+          }
+        },
+        "required": [
+          "kind",
+          "x1",
+          "y1",
+          "x2",
+          "y2"
+        ],
+        "title": "Annotation",
+        "type": "object"
+      },
       "Body_read_size_tags_api_size_tags_read_post": {
         "properties": {
           "files": {
@@ -56,6 +123,28 @@
           "files"
         ],
         "title": "Body_read_size_tags_api_size_tags_read_post",
+        "type": "object"
+      },
+      "Border": {
+        "additionalProperties": false,
+        "properties": {
+          "color": {
+            "default": "#FFFFFF",
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "title": "Color",
+            "type": "string"
+          },
+          "width": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 0.25,
+            "title": "Width",
+            "type": "number"
+          }
+        },
+        "required": [
+          "width"
+        ],
+        "title": "Border",
         "type": "object"
       },
       "ConnectionStatus": {
@@ -2390,6 +2479,14 @@
       "PhotoEdits": {
         "additionalProperties": false,
         "properties": {
+          "annotations": {
+            "items": {
+              "$ref": "#/components/schemas/Annotation"
+            },
+            "maxItems": 30,
+            "title": "Annotations",
+            "type": "array"
+          },
           "background": {
             "anyOf": [
               {
@@ -2401,6 +2498,16 @@
               }
             ],
             "title": "Background"
+          },
+          "border": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Border"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "brightness": {
             "default": 0,
@@ -2433,6 +2540,43 @@
             "title": "Exposure",
             "type": "number"
           },
+          "filter": {
+            "anyOf": [
+              {
+                "enum": [
+                  "vivid",
+                  "crisp",
+                  "warm",
+                  "cool",
+                  "bw",
+                  "studio"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter"
+          },
+          "flip_horizontal": {
+            "default": false,
+            "title": "Flip Horizontal",
+            "type": "boolean"
+          },
+          "flip_vertical": {
+            "default": false,
+            "title": "Flip Vertical",
+            "type": "boolean"
+          },
+          "redactions": {
+            "items": {
+              "$ref": "#/components/schemas/Redaction"
+            },
+            "maxItems": 30,
+            "title": "Redactions",
+            "type": "array"
+          },
           "rotate": {
             "default": 0,
             "enum": [
@@ -2450,9 +2594,87 @@
             "minimum": -45.0,
             "title": "Straighten",
             "type": "number"
+          },
+          "studio": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StudioEdit"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "title": "PhotoEdits",
+        "type": "object"
+      },
+      "PhotoStudioFailure": {
+        "properties": {
+          "detail": {
+            "description": "Why this photo was not changed, for the seller; the others still saved.",
+            "title": "Detail",
+            "type": "string"
+          },
+          "photo_id": {
+            "title": "Photo Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "photo_id",
+          "detail"
+        ],
+        "title": "PhotoStudioFailure",
+        "type": "object"
+      },
+      "PhotoStudioRequest": {
+        "additionalProperties": false,
+        "description": "AI Studio (Photoroom) on one or more of a listing's photos, all with the same options.",
+        "properties": {
+          "options": {
+            "$ref": "#/components/schemas/StudioOptions"
+          },
+          "photo_ids": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Photo Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "photo_ids",
+          "options"
+        ],
+        "title": "PhotoStudioRequest",
+        "type": "object"
+      },
+      "PhotoStudioResult": {
+        "properties": {
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/PhotoStudioFailure"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "photos": {
+            "description": "The photos AI Studio changed, each with its new ``url`` and ``edits.studio``.",
+            "items": {
+              "$ref": "#/components/schemas/ListingPhoto"
+            },
+            "title": "Photos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "photos",
+          "errors"
+        ],
+        "title": "PhotoStudioResult",
         "type": "object"
       },
       "PlaidExchange": {
@@ -2563,6 +2785,53 @@
         "title": "PriceDrift",
         "type": "object"
       },
+      "Redaction": {
+        "additionalProperties": false,
+        "description": "A region hidden on the finished frame, such as a name, address or barcode.",
+        "properties": {
+          "height": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1.0,
+            "title": "Height",
+            "type": "number"
+          },
+          "style": {
+            "default": "pixelate",
+            "enum": [
+              "pixelate",
+              "blur"
+            ],
+            "title": "Style",
+            "type": "string"
+          },
+          "width": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 1.0,
+            "title": "Width",
+            "type": "number"
+          },
+          "x": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "width",
+          "height"
+        ],
+        "title": "Redaction",
+        "type": "object"
+      },
       "ReportLine": {
         "properties": {
           "amount_cents": {
@@ -2628,6 +2897,71 @@
         "title": "SizeTagReadResult",
         "type": "object"
       },
+      "StudioEdit": {
+        "additionalProperties": false,
+        "description": "Photoroom's result for this photo, kept beside the upload; edits render from it.",
+        "properties": {
+          "key": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          },
+          "options": {
+            "$ref": "#/components/schemas/StudioOptions"
+          }
+        },
+        "required": [
+          "key",
+          "options"
+        ],
+        "title": "StudioEdit",
+        "type": "object"
+      },
+      "StudioOptions": {
+        "additionalProperties": false,
+        "description": "One AI Studio edit. Photoroom does the work; these are the seller's choices.",
+        "properties": {
+          "background": {
+            "default": "#FFFFFF",
+            "pattern": "^#[0-9a-fA-F]{6}$",
+            "title": "Background",
+            "type": "string"
+          },
+          "flat_lay": {
+            "default": false,
+            "title": "Flat Lay",
+            "type": "boolean"
+          },
+          "ghost_mannequin": {
+            "default": false,
+            "title": "Ghost Mannequin",
+            "type": "boolean"
+          },
+          "remove_background": {
+            "default": false,
+            "title": "Remove Background",
+            "type": "boolean"
+          },
+          "shadow": {
+            "default": false,
+            "title": "Shadow",
+            "type": "boolean"
+          },
+          "virtual_model": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VirtualModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "StudioOptions",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -2668,6 +3002,86 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "VirtualModel": {
+        "additionalProperties": false,
+        "properties": {
+          "model": {
+            "default": "auto",
+            "enum": [
+              "auto",
+              "avery",
+              "sam",
+              "taylor",
+              "kendall",
+              "jordan",
+              "casey",
+              "maya",
+              "reece",
+              "lena",
+              "julia",
+              "jackson",
+              "sophia",
+              "emma",
+              "ava",
+              "zoe",
+              "fiona"
+            ],
+            "title": "Model",
+            "type": "string"
+          },
+          "pose": {
+            "default": "auto",
+            "enum": [
+              "auto",
+              "standing",
+              "34turn",
+              "powerstance",
+              "walkingforward",
+              "handinpocket",
+              "crossedarms",
+              "back",
+              "overtheshoulder",
+              "seated",
+              "adjustingclothing",
+              "playfulspin"
+            ],
+            "title": "Pose",
+            "type": "string"
+          },
+          "scene": {
+            "default": "auto",
+            "enum": [
+              "auto",
+              "street",
+              "bedroom",
+              "sunset",
+              "factory",
+              "studio",
+              "coloredstudio",
+              "concretestudio",
+              "beach",
+              "tropical",
+              "library",
+              "forest",
+              "businessdistrict",
+              "countryside",
+              "flowers",
+              "goldenlight",
+              "mountain",
+              "pool",
+              "latincity",
+              "cafe",
+              "asiancity",
+              "nightlights",
+              "desert"
+            ],
+            "title": "Scene",
+            "type": "string"
+          }
+        },
+        "title": "VirtualModel",
+        "type": "object"
+      },
       "WorkspaceRuntime": {
         "description": "What this hosted server offers the signed-in seller.",
         "properties": {
@@ -2703,7 +3117,9 @@
                 "catalog_categories",
                 "ebay_offers",
                 "account_deletion",
-                "managed_ai"
+                "managed_ai",
+                "photo_studio",
+                "listing_videos"
               ],
               "type": "string"
             },
@@ -3619,6 +4035,95 @@
           }
         },
         "summary": "Create Conversation"
+      }
+    },
+    "/api/conversations/{conv_id}/photos/studio": {
+      "post": {
+        "description": "AI Studio (Photoroom) on the chosen photos. Each keeps its upload, so Reset returns to it.\n\nOnly this listing's photos change; nothing reaches a marketplace until the seller lists or updates.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conv_id",
+            "required": true,
+            "schema": {
+              "title": "Conv Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PhotoStudioRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoStudioResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The change was refused, such as an empty title or a busy listing."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "The listing does not exist for this seller."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "Photoroom failed or could not be reached."
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              }
+            },
+            "description": "Photoroom did not answer in time."
+          }
+        },
+        "summary": "Photo Studio"
       }
     },
     "/api/conversations/{identity}": {

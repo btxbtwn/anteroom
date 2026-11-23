@@ -259,6 +259,15 @@ Storage calls use that public key and the request's verified seller JWT.
 No elevated storage token is used. Objects live at
 `<verified-user-id>/<server-created-draft-id>/<random-id>.jpg`.
 
+Revision `3f6a9d2c7b14` lets the same bucket take listing videos
+(`<verified-user-id>/<draft-id>/<random-id>.video`, MP4, MOV and the other
+formats Etsy accepts) up to 150 MB, eBay's limit. Raise the Supabase project's
+global upload limit (Storage settings) to at least 150 MB as well.
+
+AI Studio calls Photoroom's Image Editing API with the seller's own key, kept
+in their Vault slot (`photoroom-api-key`). An optional `PHOTOROOM_API_KEY` Fly
+secret is used only for sellers who have none, and is billed to that account.
+
 Uploads are streamed with a 10 MB limit and accept JPEG, PNG and WebP up to
 25 megapixels. The server normalizes orientation, strips metadata and resizes
 to at most 2400 pixels before storing a JPEG. Each draft accepts 30 photos.

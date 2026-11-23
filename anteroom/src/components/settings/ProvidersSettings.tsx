@@ -338,6 +338,67 @@ function BraveSearchSection({ chatgptSignedIn }: { chatgptSignedIn: boolean }) {
   );
 }
 
+/** AI Studio's Photoroom key: on the Mac it lives in Keychain, on the web in the account's vault. */
+function PhotoroomSection({ hosted }: { hosted: boolean }) {
+  const queryClient = useQueryClient();
+  const { data: photoroom } = useQuery({ queryKey: ["settings-photoroom"], queryFn: api.settings.photoroom });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["settings-photoroom"] });
+  const setKeyMutation = useMutation({ mutationFn: (key: string) => api.settings.setPhotoroom(key), onSuccess: refresh });
+  const deleteKeyMutation = useMutation({ mutationFn: () => api.settings.deletePhotoroom(), onSuccess: refresh });
+  const configured = Boolean(photoroom?.configured);
+  const failure = (setKeyMutation.error ?? deleteKeyMutation.error) as Error | null;
+  const status = failure ? (
+    <span className="text-destructive-foreground">{failure.message}</span>
+  ) : configured ? (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="size-1.5 rounded-full bg-success" aria-hidden />
+      AI Studio ready · <SettingsCode>{photoroom?.masked_key}</SettingsCode>
+    </span>
+  ) : photoroom?.source === "server" ? (
+    "AI Studio uses Anteroom's Photoroom account"
+  ) : photoroom?.source === "sandbox" ? (
+    "Sandbox: AI Studio draws a stand-in and never calls Photoroom"
+  ) : (
+    "Not configured — AI Studio is off"
+  );
+
+  return (
+    <SettingsSection id="photoroom" title="Photoroom (AI Studio)">
+      <SettingsRow
+        id="photoroom-api-key"
+        title="API key"
+        description={
+          <>
+            Powers AI Studio in the photo editor: background removal, shadows, ghost mannequin, flat lay and virtual
+            models. Get a key at{" "}
+            <a className="text-foreground underline-offset-4 hover:underline" href="https://www.photoroom.com/api" target="_blank" rel="noreferrer">
+              photoroom.com/api
+            </a>
+            . {hosted ? "Stored encrypted in your account's vault" : "Stored in macOS Keychain"} and never sent to the browser.
+          </>
+        }
+        status={status}
+        control={
+          configured ? (
+            <Button size="xs" variant="ghost-destructive" disabled={setKeyMutation.isPending || deleteKeyMutation.isPending}
+              onClick={() => { setKeyMutation.reset(); deleteKeyMutation.mutate(); }}>
+              <Trash2Icon />
+              Remove
+            </Button>
+          ) : null
+        }
+      >
+        <ApiKeyField
+          label="Photoroom API key"
+          placeholder="sk_pr_..."
+          saving={setKeyMutation.isPending || deleteKeyMutation.isPending}
+          onSave={(key) => { deleteKeyMutation.reset(); setKeyMutation.mutate(key); }}
+        />
+      </SettingsRow>
+    </SettingsSection>
+  );
+}
+
 type ProviderSummary = { tone: StatusTone; headline: string; detail?: string };
 
 function summarizeProvider(
@@ -1254,6 +1315,7 @@ export function ProvidersSettings() {
       </SettingsSection>
 
       {!hosted && <BraveSearchSection chatgptSignedIn={chatgptSignedIn} />}
+      <PhotoroomSection hosted={hosted} />
     </>
   );
 }

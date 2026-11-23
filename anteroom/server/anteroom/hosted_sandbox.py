@@ -82,6 +82,9 @@ class LocalSupabase:
         # `/?code=recovery-<name>` the way the real link would.
         self.recovery_codes: dict[str, str] = {}
         self.objects: dict[str, bytes] = {}
+        self.types: dict[str, str] = {}
+        # Signed links, by token: (key, expiry). Supabase signs them; the sandbox remembers them.
+        self.signed: dict[str, tuple[str, float]] = {}
         self.app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
         self.app.add_api_route('/auth/v1/token', self.token, methods=['POST'])
         self.app.add_api_route('/auth/v1/user', self.user, methods=['GET'])
@@ -91,6 +94,8 @@ class LocalSupabase:
         self.app.add_api_route('/auth/v1/logout', self.logout, methods=['POST'])
         self.app.add_api_route('/storage/v1/object/anteroom-photos/{key:path}', self.storage, methods=['GET', 'POST', 'PUT'])
         self.app.add_api_route('/storage/v1/object/anteroom-photos', self.delete, methods=['DELETE'])
+        self.app.add_api_route('/storage/v1/object/sign/anteroom-photos/{key:path}', self.sign, methods=['POST'])
+        self.app.add_api_route('/storage/v1/object/sign/anteroom-photos/{key:path}', self.signed_read, methods=['GET'])
 
     def session(self, email: str):
         now = int(time.time())
@@ -166,19 +171,38 @@ class LocalSupabase:
         if request.method == 'GET':
             if key not in self.objects:
                 raise HTTPException(404, 'Photo not found')
-            return Response(self.objects[key], media_type='image/jpeg')
+            return Response(self.objects[key], media_type=self.types.get(key, 'image/jpeg'))
+        # The bucket's limit: eBay's 150 MB, for listing videos.
         data = bytearray()
         async for chunk in request.stream():
             data.extend(chunk)
-            if len(data) > 20 * 1024 * 1024:
-                raise HTTPException(413, 'Sandbox photo is too large')
+            if len(data) > 157_286_400:
+                raise HTTPException(413, 'Sandbox object is too large')
         self.objects[key] = bytes(data)
+        self.types[key] = request.headers.get('content-type', 'image/jpeg').split(';')[0]
         return {'Key': key}
+
+    async def sign(self, key: str, request: Request):
+        self.check_storage_key(key, request)
+        if key not in self.objects:
+            raise HTTPException(404, 'Object not found')
+        seconds = int((await request.json()).get('expiresIn') or 60)
+        token = secrets.token_urlsafe(24)
+        self.signed[token] = (key, time.time() + seconds)
+        return {'signedURL': f'/object/sign/anteroom-photos/{key}?token={token}'}
+
+    def signed_read(self, key: str, token: str = ''):
+        signed_key, expires = self.signed.get(token, ('', 0.0))
+        if signed_key != key or expires < time.time() or key not in self.objects:
+            raise HTTPException(400, 'Invalid signature')
+        return Response(self.objects[key], media_type=self.types.get(key, 'application/octet-stream'),
+                        headers={'Access-Control-Allow-Origin': '*'})
 
     async def delete(self, request: Request):
         for key in (await request.json()).get('prefixes', []):
             self.check_storage_key(key, request)
             self.objects.pop(key, None)
+            self.types.pop(key, None)
         return []
 
 

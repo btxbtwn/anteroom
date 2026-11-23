@@ -114,10 +114,12 @@ def read_photo(draft_id: str, photo_id: str, request: Request, db=Depends(get_se
 def delete_photo(draft_id: str, photo_id: str, request: Request, db=Depends(get_seller_db, scope="function")):
     require_draft(db, draft_id, lock=True)
     photo = get_photo(db, draft_id, photo_id)
+    from anteroom.services.photo_edits import studio_key
     keys = {photo.stored_filename}
-    if photo.source_filename:
-        photos.check_key(photo.source_filename, db.user_id, draft_id)
-        keys.add(photo.source_filename)
+    for kept in (photo.source_filename, studio_key(photo.edits)):
+        if kept:
+            photos.check_key(kept, db.user_id, draft_id)
+            keys.add(kept)
     from anteroom.services.hosted_listing_contract import remove_photo_selections
     remove_photo_selections(db, draft_id, photo_id)
     db.delete(photo)

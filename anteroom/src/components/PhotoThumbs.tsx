@@ -5,7 +5,7 @@ import { PhotoLoadFailure, StudioImage } from "./StudioImage";
  * (MIT, (c) 2026 T3 Tools Inc.): a media dialog with corner close, side
  * navigation and a caption line under the image.
  */
-import { ArrowLeftIcon, ArrowRightIcon, ChevronLeftIcon, ChevronRightIcon, CropIcon, PlusIcon, RotateCcwIcon, RotateCwIcon, Trash2Icon, Undo2Icon, XIcon } from "lucide-react";
+import { ArrowLeftIcon, ArrowRightIcon, ChevronLeftIcon, ChevronRightIcon, PlusIcon, RotateCcwIcon, RotateCwIcon, SlidersHorizontalIcon, SparklesIcon, Trash2Icon, Undo2Icon, XIcon } from "lucide-react";
 import { useState, type ComponentProps, type KeyboardEvent } from "react";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
@@ -192,7 +192,8 @@ export function PhotoLightbox({
   turns = 0,
   rotating = false,
   onRotate,
-  onCrop,
+  onEdit,
+  onStudio,
   onRevert,
   error,
   onStep,
@@ -207,7 +208,10 @@ export function PhotoLightbox({
   turns?: number;
   rotating?: boolean;
   onRotate?: (degrees: 90 | -90) => void;
-  onCrop?: () => void;
+  /** Opens the editor: crop, adjust, markup. */
+  onEdit?: () => void;
+  /** Opens the editor on AI Studio. */
+  onStudio?: () => void;
   /** Restores the kept upload for a photo with saved changes. */
   onRevert?: () => void;
   /** Keep operation failures visible while the modal hides the photo tray. */
@@ -290,10 +294,16 @@ export function PhotoLightbox({
             {onRotate && <Button variant="overlay" size="icon-micro" onClick={() => onRotate(90)} disabled={rotating} aria-label="Rotate right" title="Rotate right">
               <RotateCwIcon />
             </Button>}
-            {onCrop && (
-              <Button variant="overlay" size="icon-micro" className="ms-2" onClick={onCrop} disabled={rotating}
-                aria-label="Crop photo" title="Crop photo">
-                <CropIcon />
+            {onEdit && (
+              <Button variant="overlay" size="icon-micro" className="ms-2" onClick={onEdit} disabled={rotating}
+                aria-label="Edit photo" title="Edit photo">
+                <SlidersHorizontalIcon />
+              </Button>
+            )}
+            {onStudio && (
+              <Button variant="overlay" size="icon-micro" className="ms-2" onClick={onStudio} disabled={rotating}
+                aria-label="AI Studio" title="AI Studio">
+                <SparklesIcon />
               </Button>
             )}
             {onRevert && (

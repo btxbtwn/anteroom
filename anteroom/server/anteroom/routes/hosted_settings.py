@@ -70,6 +70,10 @@ for path, handler, methods in (
     ('/formulas', settings.put_listing_formulas, ['PUT']),
     ('/sale-detection', settings.get_sale_detection_route, ['GET']),
     ('/sale-detection', settings.put_sale_detection, ['PUT']),
+    # AI Studio's Photoroom key, kept in the seller's Vault slot.
+    ('/photoroom', settings.get_photoroom, ['GET']),
+    ('/photoroom', settings.set_photoroom, ['PUT']),
+    ('/photoroom', settings.delete_photoroom, ['DELETE']),
     ('/pricing-rules', settings.get_pricing_rules, ['GET']),
     ('/pricing-rules', settings.put_pricing_rules, ['PUT']),
     ('/pricing-rules/apply', settings.apply_pricing_rules, ['POST']),

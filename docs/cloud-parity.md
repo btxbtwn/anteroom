@@ -8,10 +8,17 @@ explicit seller request naming the marketplaces and carrying confirmation.
 
 ## Agreed scope
 
-On 2026-10-30 the seller explicitly chose to skip video in the web version.
-Desktop video support stays intact. Web parity work excludes video upload,
-playback and marketplace video selection; no Supabase plan upgrade is needed
-for that feature. Keep video controls hidden in the hosted runtime.
+Listing videos on the web (seller request, 2026-11-22; this replaces the
+2026-10-30 decision to skip them). A hosted video is an object in the seller's
+own folder of the private `anteroom-photos` bucket
+(`services/hosted_videos.py`), so the owner-only policies, the deletion fence
+and account deletion cover it. The web app plays it through a 15-minute signed
+link, eBay and Etsy uploads read it with the seller's token (or the server key
+for durable work), and a Poshmark command relayed to the Bridge carries a
+signed link minted as the page takes it. Depop and Mercari take no video.
+Hosted `/api/runtime` declares `listing_videos`. The bucket accepts videos up
+to 150 MB (eBay's limit); Supabase's project-wide upload limit (Storage
+settings) must be at least that, or larger uploads answer 413.
 
 ## Work in progress
 
@@ -87,7 +94,7 @@ All reads still require the seller's connected Chrome; sign-ins stay there.
 Imports only save the seller's inventory. Shares/offers require explicit manual
 confirmation or a seller-enabled rule and never publish or delist.
 retains the desktop order-response limitation described above. Facebook,
-Grailed and Vendoo stay excluded, and video remains desktop-only. No deployment
+Grailed and Vendoo stay excluded. No deployment
 or extension publication is implied by these PRs.
 
 On `feat/hosted-marketplace-sessions`, the imports, sale checks and promotion
