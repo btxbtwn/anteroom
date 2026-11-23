@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, Integer, String
+from sqlalchemy import DateTime, Float, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from anteroom.database import Base
@@ -21,6 +21,9 @@ class ApiUsageEvent(SellerOwned, Base):
     """
 
     __tablename__ = "api_usage_events"
+    __table_args__ = (
+        Index("ix_api_usage_events_owner_created", "user_id", "created_at", "id"),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_id, nullable=False)
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
