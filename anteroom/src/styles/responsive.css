@@ -1,11 +1,6 @@
 /* ── Responsive ── */
 
 @media (max-width: 900px) {
-  html:root.dark {
-    --background: var(--mobile-canvas);
-    --color-paper: var(--mobile-canvas);
-  }
-
   .app-content {
     flex-direction: column;
     position: relative;
