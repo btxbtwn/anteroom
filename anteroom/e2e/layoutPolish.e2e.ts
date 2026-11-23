@@ -103,3 +103,42 @@ test("phone screens after the layout fixes", async ({ page, phone }, info) => {
     await page.screenshot({ path: `e2e/results/layout/${name.toLowerCase()}-${info.project.name}.png` });
   }
 });
+
+// Safari paints the page canvas under its status bar and behind its floating
+// toolbar, so the header, the page and that canvas must be one color.
+test("a phone page is one color from the status bar to the toolbar", async ({ page, phone }) => {
+  test.skip(!phone, "Phone browser chrome");
+  for (const scheme of ["dark", "light"] as const) {
+    await page.emulateMedia({ colorScheme: scheme });
+    await openPage(page, "Automations", true);
+    await expect(page.getByRole("main")).toBeVisible();
+    const surfaces = await page.evaluate(() => {
+      // Paint backgrounds bottom-up onto one pixel, so translucent layers blend as on screen.
+      const paint = (colors: string[]) => {
+        const context = document.createElement("canvas").getContext("2d")!;
+        for (const color of colors) {
+          context.fillStyle = color;
+          context.fillRect(0, 0, 1, 1);
+        }
+        return Array.from(context.getImageData(0, 0, 1, 1).data.slice(0, 3)).join(",");
+      };
+      // The color the seller sees at a point: every background under it.
+      const seen = (x: number, y: number) => {
+        const layers: string[] = [];
+        for (let element = document.elementFromPoint(x, y); element; element = element.parentElement) {
+          layers.unshift(getComputedStyle(element).backgroundColor);
+        }
+        return paint(layers);
+      };
+      const header = document.querySelector(".mobile-workspace-bar")!.getBoundingClientRect();
+      return {
+        canvas: paint([getComputedStyle(document.documentElement).backgroundColor]),
+        header: seen(header.left + 2, header.top + 2),
+        // The page's left margin halfway down, clear of any card.
+        page: seen(2, Math.round(window.innerHeight / 2)),
+      };
+    });
+    expect(surfaces.header, scheme).toBe(surfaces.canvas);
+    expect(surfaces.page, scheme).toBe(surfaces.canvas);
+  }
+});

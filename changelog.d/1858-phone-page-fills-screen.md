@@ -1,0 +1,1 @@
+- On iPhone and other phones, pages fill the screen in one color, without the darker bands above the header and behind the browser's toolbar.
