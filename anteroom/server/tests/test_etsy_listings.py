@@ -8,7 +8,7 @@ import unittest
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 from fastapi.testclient import TestClient
@@ -22,7 +22,7 @@ from anteroom.database import Base, get_db
 from anteroom.main import app
 from anteroom.repositories.marketplace_listings import MarketplaceListingRepo
 from anteroom.repositories.queries import ConversationRepo, JobRepo
-from anteroom.services import etsy_listings, native_marketplaces, relay_client
+from anteroom.services import etsy_listings, native_marketplaces, relay_client, service_context
 
 LISTING = {"title": "Private api check - do not publish", "description": "Private draft check.", "price": 12,
            "direct_category_ids": {"etsy": "482"}, "etsy_specifics": {
@@ -508,6 +508,125 @@ class EtsyListingsTest(unittest.TestCase):
                                     "processing": [{"id": "88", "title": "Ready to ship · 1-2 days"}],
                                     "returns": [{"id": "77", "title": "Returns within 30 days"}]})
         self.assertNotIn("never-expose", r.text)
+
+    def test_listing_profile_rate_limit_is_reported_as_throttling(self):
+        def throttled(method, path):
+            request = httpx.Request(method, "https://example.invalid/")
+            response = httpx.Response(429, request=request, headers={"Retry-After": "17"})
+            return httpx.HTTPStatusError("Rate limit", request=request, response=response)
+
+        self.failure = throttled
+        with patch("anteroom.services.user_settings.set_etsy_listing_defaults") as save:
+            for method, path, options in (
+                ("GET", "/api/etsy/listing-profiles", {}),
+                ("PUT", "/api/etsy/listing-defaults", {"json": {
+                    "shipping_profile_id": "99", "readiness_state_id": "88", "return_policy_id": "77",
+                }}),
+            ):
+                with self.subTest(method=method):
+                    response = self.client.request(method, path, **options)
+                    self.assertEqual(response.status_code, 429)
+                    self.assertEqual(response.headers["retry-after"], "17")
+                    self.assertIn("Wait", response.json()["detail"])
+            save.assert_not_called()
+
+    def test_listing_profiles_share_reads_only_within_one_seller_connection(self):
+        account = {"etsy": {"accountId": "123", "accessToken": "test", "connectedAt": 1.0}}
+        callers = []
+
+        async def request(method, path, **kwargs):
+            context = service_context.current()
+            assert context is not None
+            callers.append(context.seller_id)
+            return await self.request(method, path, **kwargs)
+
+        async def check():
+            async def seller_read(seller_id, *, fresh=False):
+                context = service_context.ServiceContext(
+                    seller_id=seller_id, session_factory=self.sessions,
+                    settings=MagicMock(), secrets=MagicMock(), photos=None,
+                )
+                with service_context.use(context):
+                    return await etsy_listings.listing_profiles(fresh=fresh)
+
+            seller_a, duplicate, seller_b = await asyncio.gather(
+                seller_read("a"), seller_read("a"), seller_read("b"),
+            )
+            self.assertEqual(seller_a, duplicate)
+            self.assertEqual(seller_a, seller_b)
+            self.assertCountEqual(callers, ["a"] * 3 + ["b"] * 3)
+            await seller_read("a")
+            self.assertEqual(self.api.await_count, 6)
+            await seller_read("a", fresh=True)
+            self.assertEqual(self.api.await_count, 9)
+            account["etsy"]["connectedAt"] = 2.0
+            await seller_read("a")
+            self.assertEqual(self.api.await_count, 12)
+            with patch.object(etsy_listings, "_PROFILE_TTL_SECONDS", 0):
+                await seller_read("a")
+            self.assertEqual(self.api.await_count, 15)
+
+        self.api.side_effect = request
+        with patch.object(etsy_listings, "get_marketplace_accounts", return_value=account):
+            asyncio.run(check())
+
+    def test_failed_profile_fetch_is_not_cached(self):
+        account = {"etsy": {"accountId": "123", "accessToken": "test", "connectedAt": 1.0}}
+
+        async def check():
+            self.failure = lambda _method, _path: httpx.ConnectError("Etsy unavailable")
+            with self.assertRaises(httpx.ConnectError):
+                await etsy_listings.listing_profiles()
+            self.failure = None
+            profiles = await etsy_listings.listing_profiles()
+            self.assertEqual(profiles["shipping"][0]["id"], "99")
+            self.assertEqual(self.api.await_count, 6)
+
+        with patch.object(etsy_listings, "get_marketplace_accounts", return_value=account):
+            asyncio.run(check())
+
+    def test_reconnecting_during_profile_load_rejects_old_connection(self):
+        account = {"etsy": {"accountId": "123", "accessToken": "test", "connectedAt": 1.0}}
+
+        async def request(method, path, **kwargs):
+            account["etsy"]["connectedAt"] = 2.0
+            return await self.request(method, path, **kwargs)
+
+        async def check():
+            with self.assertRaisesRegex(ValueError, "connected Etsy shop changed"):
+                await etsy_listings.listing_profiles()
+            await etsy_listings.listing_profiles()
+            self.assertEqual(self.api.await_count, 6)
+
+        self.api.side_effect = request
+        with patch.object(etsy_listings, "get_marketplace_accounts", return_value=account):
+            asyncio.run(check())
+
+    def test_cancelling_a_profile_reader_does_not_cancel_shared_fetch(self):
+        account = {"etsy": {"accountId": "123", "accessToken": "test", "connectedAt": 1.0}}
+
+        async def check():
+            started = asyncio.Event()
+            release = asyncio.Event()
+
+            async def request(method, path, **kwargs):
+                started.set()
+                await release.wait()
+                return await self.request(method, path, **kwargs)
+
+            self.api.side_effect = request
+            reader = asyncio.create_task(etsy_listings.listing_profiles())
+            await asyncio.wait_for(started.wait(), timeout=5)
+            reader.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await reader
+            release.set()
+            profiles = await asyncio.wait_for(etsy_listings.listing_profiles(), timeout=5)
+            self.assertEqual(profiles["shipping"][0]["id"], "99")
+            self.assertEqual(self.api.await_count, 3)
+
+        with patch.object(etsy_listings, "get_marketplace_accounts", return_value=account):
+            asyncio.run(check())
 
     def test_another_shops_shipping_profile_is_validated_by_etsy(self):
 

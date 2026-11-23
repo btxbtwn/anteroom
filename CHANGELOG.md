@@ -6,6 +6,30 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1167 — 2026-11-23
+
+- Fixed photo analysis failing when the AI left the optional slab label blank as null.
+
+## 0.1.1166 — 2026-11-23
+
+- Keep a simulated timeout from interrupting MCP authentication checks in CI.
+
+## 0.1.1165 — 2026-11-23
+
+- Retry hosted deployments when a short-lived database lock interrupts a schema update.
+
+## 0.1.1164 — 2026-11-23
+
+- Etsy listing settings reuse recent profile reads to reduce repeat requests and tell you when to wait and try again if requests are rate limited.
+
+## 0.1.1163 — 2026-11-23
+
+- Assistants connected to Anteroom (MCP) no longer see marketplaces you already delisted, marked not listed or sold on as live.
+
+## 0.1.1162 — 2026-11-23
+
+- Needs Attention no longer keeps "A delist did not finish" once every marketplace it failed on has been delisted, marked not listed, or marked sold.
+
 ## 0.1.1161 — 2026-11-23
 
 - Choose what each MCP access token can do in Settings → Agents: no access, read, or read and write for listings and for Needs Attention, and read access to analytics. Changes apply to the token's next request, and new tokens start read-only.

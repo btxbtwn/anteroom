@@ -326,6 +326,35 @@ def compute_goal_progress(
     }
 
 
+def _delist_resolved(current_step: str | None, last_error: str | None, raw_notes: str | None) -> bool:
+    """Whether a failed delist has since been resolved on every marketplace it failed on.
+
+    That delist recorded each failure in ``marketplaceDelists``. A later delete
+    records the marketplace deleted, marking it listed or not listed clears its
+    record, and marking it sold says the sale ended that listing. A delist that
+    stopped before recording its failures stays an alert.
+    """
+    from anteroom.services.marketplace_delist import DELIST_INCOMPLETE
+    from anteroom.services.vendoo_import import parse_notes
+
+    if current_step != "native_delist" or last_error != DELIST_INCOMPLETE:
+        return False
+    notes = parse_notes(raw_notes)
+    delists = notes.get("marketplaceDelists")
+    marks = notes.get("marketplaceMarks")
+    if not isinstance(delists, dict):
+        delists = {}
+    if not isinstance(marks, dict):
+        marks = {}
+    for marketplace, record in delists.items():
+        if not isinstance(record, dict) or record.get("state") not in {"failed", "deleting"}:
+            continue
+        mark = marks.get(marketplace)
+        if not (isinstance(mark, dict) and mark.get("state") == "sold"):
+            return False
+    return True
+
+
 def _duplicate_key(first: str, second: str) -> str:
     a, b = sorted((first, second))
     return f"duplicate:{a}:{b}"
@@ -418,11 +447,11 @@ def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: 
     conversations = db.query(Conversation).all()
     conv_by_id = {conv.id: conv for conv in conversations}
 
-    # 3. Failed jobs / listing publish errors. Job snapshots can be megabytes
-    # each, and the inbox only needs the latest status and error text.
+    # 3. Failed jobs / listing publish errors. Read job metadata only because
+    # listing snapshots can be megabytes each.
     seen_failed_convs: set[str] = set()
     latest_jobs = (
-        db.query(Job.id, Job.conversation_id, Job.status, Job.last_error, Job.updated_at, Job.created_at)
+        db.query(Job.id, Job.conversation_id, Job.status, Job.current_step, Job.last_error, Job.updated_at, Job.created_at)
         .order_by(Job.created_at.desc())
     )
     latest_job_by_conv = {}
@@ -431,8 +460,10 @@ def _collect_attention_items(db: Session, *, now_utc: datetime, dismissed_keys: 
             latest_job_by_conv[job.conversation_id] = job
     for conv_id, job in latest_job_by_conv.items():
         if job.status == "failed" and conv_id in conv_by_id:
-            seen_failed_convs.add(conv_id)
             conv = conv_by_id[conv_id]
+            if _delist_resolved(job.current_step, job.last_error, conv.notes):
+                continue
+            seen_failed_convs.add(conv_id)
             detail = (job.last_error or "A recent listing job failed.").strip()
             items.append({
                 "key": f"failed-job:{conv_id}:{job.id}",

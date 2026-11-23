@@ -168,7 +168,7 @@ jobs:
             echo "Database not reachable (attempt $attempt); retrying in 30s."
             sleep 30
           done
-          python -m alembic upgrade head
+          python -m alembic -x retry_lock_timeouts=1 upgrade head
           python -m alembic current
 
       - name: Refresh category trees when the seed changed

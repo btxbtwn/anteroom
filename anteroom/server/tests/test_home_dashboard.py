@@ -624,3 +624,38 @@ def test_repeated_goal_and_dismissal_saves_replace_existing_values():
         row = db.query(AttentionDismissal).one()
         assert row.kind == "new"
         assert row.expires_at.replace(tzinfo=UTC).isoformat() == latest["expires_at"]
+
+
+def test_failed_delist_alert_clears_once_every_marketplace_is_resolved():
+    """A failed delist stays in Needs Attention only while a delist is still unresolved (#1824)."""
+    client = TestClient(app)
+    failed = {"state": "failed", "error": "The marketplace did not confirm the delete.", "listing_id": "1"}
+    deleted = {"state": "deleted", "error": None, "listing_id": "2"}
+    items = {
+        # Anteroom deleted the listing on a later delist.
+        "conv-delist-redone": {"marketplaceDelists": {"ebay": deleted, "poshmark": deleted}},
+        # The seller marked the marketplace not listed, which clears its delist record.
+        "conv-delist-marked": {"marketplaceDelists": {"etsy": deleted},
+                               "marketplaceMarks": {"ebay": {"state": "not_listed", "listing_id": "1"}}},
+        # The seller marked the marketplace that refused the delete as where it sold.
+        "conv-delist-sold-there": {"marketplaceDelists": {"poshmark": failed},
+                                   "marketplaceMarks": {"poshmark": {"state": "sold"}}},
+        # Still failed on Mercari: the seller still has something to check.
+        "conv-delist-open": {"marketplaceDelists": {"ebay": deleted, "mercari": failed}},
+        # Left mid-delete: the delete may or may not have happened.
+        "conv-delist-deleting": {"marketplaceDelists": {"depop": {"state": "deleting", "listing_id": "3"}}},
+        # Stopped before recording any marketplace: nothing says it was resolved.
+        "conv-delist-stopped": {},
+    }
+    with SessionLocal() as db:
+        for conv_id, notes in items.items():
+            db.add(Conversation(id=conv_id, title=conv_id, status="sold", notes=json.dumps(notes)))
+            db.flush()
+            error = "The delist stopped before it finished." if conv_id == "conv-delist-stopped" else "A delist did not finish."
+            db.add(Job(conversation_id=conv_id, approved_revision_id="rev-1", listing_snapshot={},
+                       status="failed", current_step="native_delist", last_error=error))
+        db.commit()
+
+    body = client.get("/api/home?timezone=UTC").json()
+    alerted = {item["target"]["conversation_id"] for item in body["needs_attention"] if item["kind"] == "failed_job"}
+    assert alerted == {"conv-delist-open", "conv-delist-deleting", "conv-delist-stopped"}

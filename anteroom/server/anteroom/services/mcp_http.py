@@ -41,6 +41,7 @@ from anteroom.services.hosted_listing_contract import (
     stored_listing_fields,
 )
 from anteroom.services.inventory_analytics import inventory_analytics
+from anteroom.services.marketplace_delist import removed_marketplaces
 from anteroom.services.offer_analytics import offer_analytics, offer_log
 from anteroom.services.photos import cover_thumb_url
 from anteroom.services.unsent_edits import unsent_edits
@@ -709,18 +710,21 @@ def _tool_search_inventory(db: Session, args: dict[str, Any], **_kw: Any) -> dic
         notes = parse_notes(conv.notes)
         labels = list(doc.get("labels") or []) if isinstance(doc.get("labels"), list) else split_vendoo_labels(notes.get("vendooLabels"))
         direct = direct_summaries.get(conv.id) or {}
+        sold = {m for m, rec in direct.items() if rec.get("state") == "sold"} | {
+            str(m).lower()
+            for m, when in ((notes.get("vendooDates") or {}).get("soldByMarketplace") or {}).items()
+            if when
+        }
+        # As the web app reads it: the import's marketplaces less the ones Anteroom
+        # delisted or the seller marked not listed, plus Anteroom's own live
+        # listings, less the marketplaces the item sold on.
+        removed = set(removed_marketplaces(notes, {
+            m: str(rec["listing_url"]) for m, rec in direct.items() if rec.get("listing_url")}))
+        imported = {str(m).lower() for m in (notes.get("vendooMarketplaces") or []) if isinstance(m, str)}
         live_markets = sorted(
-            {m for m, rec in direct.items() if rec.get("state") in LIVE_STATES}
-            | {str(m).lower() for m in (notes.get("vendooMarketplaces") or []) if isinstance(m, str)}
+            ({m for m, rec in direct.items() if rec.get("state") in LIVE_STATES} | (imported - removed)) - sold
         )
-        sold_markets = sorted(
-            {m for m, rec in direct.items() if rec.get("state") == "sold"}
-            | {
-                str(m).lower()
-                for m, when in ((notes.get("vendooDates") or {}).get("soldByMarketplace") or {}).items()
-                if when
-            }
-        )
+        sold_markets = sorted(sold)
         has_unsent = conv.id in unsent_ids
 
         if marketplace_filter and marketplace_filter not in live_markets:

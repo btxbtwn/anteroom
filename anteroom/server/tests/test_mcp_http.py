@@ -970,15 +970,15 @@ def test_mcp_l8_batch_cap_auth_rate_limit_and_timeout(monkeypatch):
     assert batch_resp.status_code == 400
     assert "batch" in batch_resp.json()["error"]["message"].lower()
 
-    # L8: RPC timeout returns 504.
-    monkeypatch.setattr(mcp_route, "_MCP_RPC_TIMEOUT_SECONDS", 0.05)
-
+    # L8: RPC timeout returns 504. Keep the short deadline inside this block so
+    # later auth checks are not 504'd under a loaded Postgres worker.
     async def stall(_fn):
         import asyncio
         await asyncio.sleep(1.0)
         return ({}, 200, {})
 
     with monkeypatch.context() as mp:
+        mp.setattr(mcp_route, "_MCP_RPC_TIMEOUT_SECONDS", 0.05)
         mp.setattr(mcp_route, "in_worker_session", stall)
         timed_out = _rpc(client, "ping")
     assert timed_out.status_code == 504
@@ -1186,3 +1186,30 @@ def test_connected_app_photo_cleanup_uses_the_server_key(monkeypatch):
     mcp_http.delete_hosted_storage_keys(["u/a.jpg"], bearer_token="eyJ.app.token", server_key=True)
     mcp_http.delete_hosted_storage_keys(["u/b.jpg"], bearer_token="eyJ.seller.token")
     assert calls == [("server", "u/a.jpg"), ("seller", "u/b.jpg")]
+
+
+def test_search_inventory_live_marketplaces_leave_out_delisted_and_sold_ones():
+    """Imported marketplaces Anteroom delisted, marked not listed or sold on are not live (#1825)."""
+    client = TestClient(app)
+    notes = {
+        "vendooMarketplaces": ["depop", "ebay", "etsy", "mercari", "poshmark"],
+        "vendooListingUrls": {"ebay": "https://www.ebay.com/itm/111", "mercari": "https://www.mercari.com/us/item/m222/"},
+        "marketplaceDelists": {"ebay": {"state": "deleted", "listing_id": "111", "url": "https://www.ebay.com/itm/111"}},
+        "marketplaceMarks": {"mercari": {"state": "not_listed", "listing_id": "m222",
+                                         "url": "https://www.mercari.com/us/item/m222/"}},
+        "vendooDates": {"soldByMarketplace": {"poshmark": "2026-11-01T00:00:00Z"}},
+    }
+    with SessionLocal() as db:
+        db.add(Conversation(id="conv-imported", title="Baroque Blouse", status="sold", notes=json.dumps(notes)))
+        db.commit()
+
+    inv, err = _call_tool(client, "search_inventory", {"query": "Baroque"})
+    assert not err
+    item = inv["items"][0]
+    assert item["live_marketplaces"] == ["depop", "etsy"]
+    assert item["sold_marketplaces"] == ["poshmark"]
+
+    delisted, err = _call_tool(client, "search_inventory", {"marketplace": "ebay"})
+    assert not err and delisted["total"] == 0
+    still_live, err = _call_tool(client, "search_inventory", {"marketplace": "etsy"})
+    assert not err and still_live["total"] == 1

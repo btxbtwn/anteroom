@@ -84,7 +84,25 @@ export async function etsyShop(env, accessToken) {
 }
 
 const FORWARDED_REQUEST_HEADERS = ["content-type", "accept", "if-none-match"];
-const FORWARDED_RESPONSE_HEADERS = ["content-type", "etag", "x-remaining-this-second", "x-remaining-today", "retry-after"];
+const QUOTA_HEADERS = ["x-limit-per-second", "x-remaining-this-second", "x-remaining-this-secon", "x-limit-per-day", "x-remaining-today"];
+const FORWARDED_RESPONSE_HEADERS = ["content-type", "etag", ...QUOTA_HEADERS, "retry-after"];
+export const ETSY_THROTTLE_SOURCE = "x-anteroom-etsy-throttle-source";
+let nextQuotaSample = 0;
+
+export function logEtsyQuota(source, status, headers) {
+  const now = Date.now();
+  if (status !== 429 && (status < 200 || status >= 300 || now < nextQuotaSample)) return;
+  const quota = {};
+  for (const name of [...QUOTA_HEADERS, "retry-after"]) {
+    const value = headers.get(name);
+    if (/^\d{1,10}$/.test(value ?? "")) quota[name] = Number(value);
+  }
+  if (status !== 429) {
+    if (!QUOTA_HEADERS.some((name) => Object.hasOwn(quota, name))) return;
+    nextQuotaSample = now + 60_000;
+  }
+  console.info({ event: "etsy_api_quota", source, status, ...quota });
+}
 
 // Forwards one call to api.etsy.com/v3/application/... with the app key.
 export async function etsyForward(env, request, path, etsyToken) {
@@ -122,6 +140,8 @@ export async function etsyForward(env, request, path, etsyToken) {
     const value = upstream.headers.get(name);
     if (value) responseHeaders.set(name, value);
   }
+  if (upstream.status === 429) responseHeaders.set(ETSY_THROTTLE_SOURCE, "etsy");
+  logEtsyQuota("etsy", upstream.status, responseHeaders);
   const responseBody = upstream.status === 204 || upstream.status === 304 ? null : upstream.body;
   return new Response(responseBody, { status: upstream.status, headers: responseHeaders });
 }
