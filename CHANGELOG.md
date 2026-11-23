@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1155 — 2026-11-23
+
+- Copy an Anteroom setup prompt for Claude, Codex, Google Antigravity, Cursor, or any other MCP client from Settings → Agents.
+
 ## 0.1.1154 — 2026-11-23
 
 - Fix Today failing to load when a marketplace needs you to sign in again.
