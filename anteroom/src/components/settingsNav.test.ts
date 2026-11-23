@@ -96,3 +96,11 @@ describe("settings on the web", () => {
     expect(searchSettings("theme", settingsSearchItemsFor(true, true)).map((item) => item.id)).toEqual(["appearance"]);
   });
 });
+
+describe("connected apps search", () => {
+  it("is found on the web, where apps sign in, and not on the Mac", () => {
+    expect(searchSettings("connected apps", settingsSearchItemsFor(true)).map((item) => item.id)).toEqual(["agent-mcp-connections"]);
+    expect(searchSettings("gemini", settingsSearchItemsFor(true)).map((item) => item.id)).toContain("agent-mcp-connections");
+    expect(searchSettings("connected apps", settingsSearchItemsFor(false))).toEqual([]);
+  });
+});

@@ -62,7 +62,7 @@ export function settingsSectionFor(section: SettingsSectionId, hosted: boolean, 
 
 /** Settings search entries available in the current runtime. */
 export function settingsSearchItemsFor(hosted: boolean, managedAI = false): readonly SettingsSearchItem[] {
-  if (!hosted) return SETTINGS_SEARCH_ITEMS;
+  if (!hosted) return SETTINGS_SEARCH_ITEMS.filter((item) => item.id !== "agent-mcp-connections");
   return SETTINGS_SEARCH_ITEMS.filter(
     (item) =>
       (item.section === "general" && item.id !== "setup-guide") ||
@@ -293,6 +293,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     section: "agents",
     targetId: "agent-remote-mcp",
     searchTerms: ["anteroom", "cli", "command line", "mcp", "remote mcp", "access token", "claude", "chatgpt", "codex", "antigravity", "cursor", "claude desktop", "claude code", "agent", "setup prompt"],
+  },
+  {
+    id: "agent-mcp-connections",
+    title: "Connected apps",
+    section: "agents",
+    targetId: "agent-mcp-connections",
+    searchTerms: ["connected apps", "connector", "custom connector", "claude", "chatgpt", "gemini", "sign in", "disconnect"],
   },
   {
     id: "tailscale-https",

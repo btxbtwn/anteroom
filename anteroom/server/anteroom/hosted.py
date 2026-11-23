@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from sqlalchemy import event
 from starlette.datastructures import Headers, MutableHeaders
 from anteroom import app_module_path
+from anteroom.services import mcp_oauth
 from anteroom.services.request_timing import RequestTimingMiddleware
 
 from anteroom.services.seller_sessions import (
@@ -203,6 +204,11 @@ class ResponseHeadersMiddleware:
         await self.app(scope, receive, with_headers)
 
 
+# Supabase's OAuth server sends the seller here (its Authorization Path) to
+# approve an app such as Claude, ChatGPT or Gemini.
+OAUTH_CONSENT_PATH = "/oauth/consent"
+
+
 class SellerSessionMiddleware:
     def __init__(self, app):
         self.app = app
@@ -219,6 +225,8 @@ class SellerSessionMiddleware:
             return
         if scope["type"] != "http" or (
             (scope["path"] in {"/api/health", "/api/ready", "/api/auth-config"} and scope["method"] == "GET")
+            # Where apps (Claude, ChatGPT, Gemini) sign in to the MCP endpoint.
+            or (scope["path"] in mcp_oauth.METADATA_PATHS and scope["method"] in {"GET", "HEAD"})
             or (
                 scope["method"] == "POST"
                 and scope["path"].startswith("/api/cloud-sessions/")
@@ -227,7 +235,7 @@ class SellerSessionMiddleware:
             )
             or scope["path"].startswith("/internal/")
             or (scope["method"] in {"GET", "HEAD"} and scope["app"].state.web_dir is not None
-                and (scope["path"] in {"/", "/favicon.png", "/privacy", "/terms", "/robots.txt"} or scope["path"].startswith("/assets/")))
+                and (scope["path"] in {"/", OAUTH_CONSENT_PATH, "/favicon.png", "/privacy", "/terms", "/robots.txt"} or scope["path"].startswith("/assets/")))
         ):
             await self.app(scope, receive, send)
             return
@@ -286,10 +294,24 @@ class SellerSessionMiddleware:
                 identity = await asyncio.get_running_loop().run_in_executor(
                     state.auth_threads, state.session_verifier.verify, token)
                 context_token = token
+                oauth_client_id = getattr(identity, "oauth_client_id", None)
+                if oauth_client_id is not None:
+                    # A connected app's token reaches the MCP endpoint and
+                    # nothing else: not Settings, publishing or delisting.
+                    if scope["path"] != mcp_oauth.MCP_PATH:
+                        raise InvalidSession
+                    scope.setdefault("state", {})["mcp_oauth_client_id"] = oauth_client_id
+                    # Storage and Realtime refuse a connected app's token, so its
+                    # photo work runs on the server key, scoped to this seller.
+                    context_token = None
         except InvalidSession:
+            challenge = (
+                mcp_oauth.challenge(Headers(scope=scope).get("host"))
+                if scope["path"] == mcp_oauth.MCP_PATH else "Bearer"
+            )
             response = JSONResponse(
                 {"detail": "A valid seller session is required"}, status_code=401,
-                headers={"WWW-Authenticate": "Bearer", "Cache-Control": "no-store"},
+                headers={"WWW-Authenticate": challenge, "Cache-Control": "no-store"},
             )
         except SessionVerificationUnavailable as exc:
             from anteroom.services.error_alerts import note_cause
@@ -655,6 +677,7 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         app.mount("/assets", StaticFiles(directory=web_dir / "assets"), name="cloud-assets")
 
         @app.get("/", include_in_schema=False)
+        @app.get(OAUTH_CONSENT_PATH, include_in_schema=False)
         def web_index():
             return FileResponse(web_dir / "cloud.html")
 
@@ -674,6 +697,18 @@ def create_app(supabase_url: str | None = None, *, web_dir: Path | None = None, 
         @app.get("/robots.txt", include_in_schema=False)
         def web_robots():
             return FileResponse(web_dir / "robots.txt", media_type="text/plain")
+
+    @app.get(mcp_oauth.METADATA_PATH, include_in_schema=False)
+    @app.get(mcp_oauth.METADATA_PATH + mcp_oauth.MCP_PATH, include_in_schema=False)
+    def mcp_resource_metadata(request: Request):
+        # RFC 9728: tells an app which sign-in server issues tokens for /api/mcp.
+        origin = mcp_oauth.public_origin(request.headers.get("host"))
+        if origin is None:
+            return JSONResponse({"detail": "Not Found"}, status_code=404)
+        return JSONResponse(
+            mcp_oauth.resource_metadata(origin, app.state.session_verifier.issuer),
+            headers={"Cache-Control": "public, max-age=3600"},
+        )
 
     @app.get("/api/auth-config")
     def auth_config():

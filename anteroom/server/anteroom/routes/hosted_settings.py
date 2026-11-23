@@ -4,6 +4,7 @@ Desktop sign-in terminals, filesystem utilities and machine settings are not
 mounted here. Their hosted equivalents require a registered worker.
 """
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
 from anteroom.repositories.queries import ConversationRepo
 from anteroom.services.hosted_database import get_seller_db
 
@@ -144,3 +145,65 @@ router.add_api_route('/mcp-tokens', settings.list_mcp_tokens, methods=['GET'])
 router.add_api_route('/mcp-tokens', settings.create_mcp_token, methods=['POST'], status_code=201)
 router.add_api_route('/mcp-tokens/{token_id}', settings.revoke_mcp_token, methods=['DELETE'])
 router.add_api_route('/mcp-tokens/{token_id}', settings.update_mcp_token_permissions, methods=['PATCH'])
+
+
+# Apps connected by signing in (Claude, ChatGPT, Gemini). Hosted only: Supabase
+# runs their sign-in. A connected app's own token never reaches these routes.
+class McpConnectionApproval(BaseModel):
+    client_name: str | None = Field(default=None, max_length=200)
+    permissions: dict[str, str] | None = None
+    # Turns a disconnected app back on; sent once Supabase accepted the approval.
+    enable: bool = False
+
+
+@router.get('/mcp-connections')
+def list_mcp_connections(db=Depends(get_seller_db, scope="function")):
+    from anteroom.services import mcp_oauth
+
+    return {"connections": mcp_oauth.list_connections(db)}
+
+
+@router.put('/mcp-connections/{client_id}')
+def approve_mcp_connection(client_id: str, body: McpConnectionApproval,
+                           db=Depends(get_seller_db, scope="function")):
+    from anteroom.services import mcp_oauth
+
+    try:
+        return mcp_oauth.approve(db, client_id, client_name=body.client_name, permissions=body.permissions,
+                                 enable=body.enable)
+    except mcp_oauth.McpConnectionError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.patch('/mcp-connections/{client_id}')
+def update_mcp_connection(client_id: str, body: settings.McpTokenPermissionsConfig,
+                          db=Depends(get_seller_db, scope="function")):
+    from anteroom.services import mcp_oauth
+
+    try:
+        updated = mcp_oauth.update_permissions(db, client_id, body.permissions)
+    except mcp_oauth.McpConnectionError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if updated is None:
+        raise HTTPException(404, "Connected app not found")
+    return updated
+
+
+@router.delete('/mcp-connections/{client_id}')
+async def revoke_mcp_connection(client_id: str, request: Request):
+    from anteroom.services import mcp_oauth
+    from anteroom.services.hosted_database import in_seller_session
+
+    # Off in Anteroom first: the app's next MCP call is refused whatever Supabase says.
+    try:
+        revoked = await in_seller_session(request, mcp_oauth.revoke, client_id)
+    except mcp_oauth.McpConnectionError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    if revoked is None:
+        raise HTTPException(404, "Connected app not found")
+    # Then end the app's sign-in with Supabase, so its saved sign-in stops working too.
+    signed_out = await mcp_oauth.end_supabase_grant(request.headers.get("authorization"), revoked["client_id"])
+    if signed_out:
+        revoked = await in_seller_session(request, mcp_oauth.mark_signed_out, client_id) or revoked
+    # Not confirmed: Settings offers to finish disconnecting, which repeats this.
+    return {**revoked, "signed_out": signed_out}

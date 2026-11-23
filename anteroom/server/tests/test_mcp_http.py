@@ -25,9 +25,9 @@ from anteroom.models.job import Job
 from anteroom.models.listing import Listing, ListingRevision
 from anteroom.models.marketplace_listing import MarketplaceListing
 from anteroom.models.marketplace_sale import MarketplaceSale
-from anteroom.models.mcp_token import McpAccessToken
+from anteroom.models.mcp_token import McpAccessToken, McpOAuthConnection
 from anteroom.models.sourcing import SourceBox
-from anteroom.services import mcp_http, sales_ledger
+from anteroom.services import mcp_http, mcp_oauth, sales_ledger
 
 
 def _rpc(client: TestClient, method: str, params: dict | None = None, req_id: int | None = 1, extra_headers: dict | None = None):
@@ -59,6 +59,7 @@ def _clean_mcp_tables():
     with SessionLocal() as db:
         for model in (
             McpAccessToken,
+            McpOAuthConnection,
             BackgroundTask,
             ListingCorrection,
             SaleSnapshot,
@@ -790,6 +791,57 @@ def test_hosted_mcp_token_permissions_are_enforced_and_seller_scoped(cloud, sign
     assert _tool_names(client, alice) == ALL_TOOLS
 
 
+def test_hosted_connected_app_permissions_are_seller_scoped_and_can_be_turned_off(cloud, signing_keys, monkeypatch):  # noqa: F811
+    from test_seller_sessions import session_token
+
+    client, _ = cloud
+    app_id = str(uuid.uuid4())
+    alice, bob = headers(signing_keys, USER_ID), headers(signing_keys, BOB)
+    alice_app = {"Authorization": "Bearer " + session_token(signing_keys, client_id=app_id)}
+    bob_app = {"Authorization": "Bearer " + session_token(signing_keys, sub=BOB, client_id=app_id)}
+
+    # Connected before Anteroom saw its approval: read-only until the seller chooses more.
+    assert _tool_names(client, alice_app) == READ_TOOLS
+    _, is_error = _call_tool(client, "create_draft_listing", {"title": "Blocked"}, extra_headers=alice_app)
+    assert is_error
+
+    approved = client.put(f"/api/settings/mcp-connections/{app_id}", headers=alice,
+                          json={"client_name": "Claude", "permissions": {"listings": "write"}})
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["client_name"] == "Claude"
+    draft, is_error = _call_tool(client, "create_draft_listing", {"title": "Allowed"}, extra_headers=alice_app)
+    assert not is_error, draft
+
+    # Bob's grant of the same app is his own; he cannot see or change Alice's.
+    assert _tool_names(client, bob_app) == READ_TOOLS
+    assert [c["client_name"] for c in client.get("/api/settings/mcp-connections", headers=bob).json()["connections"]] == [None]
+    assert client.get("/api/settings/mcp-connections", headers=alice).json()["connections"][0]["permissions"]["listings"] == "write"
+
+    # The app cannot reach Settings to widen its own access.
+    assert client.patch(f"/api/settings/mcp-connections/{app_id}", headers=alice_app,
+                        json={"permissions": {"attention": "write"}}).status_code == 401
+
+    # Turned off: refused on its next call until the seller approves it again.
+    ended = []
+    monkeypatch.setattr(mcp_oauth, "_delete_grant", lambda authorization, client_id: ended.append(
+        (authorization, client_id)) or True)
+    turned_off = client.delete(f"/api/settings/mcp-connections/{app_id}", headers=alice)
+    assert turned_off.status_code == 200
+    assert turned_off.json()["signed_out"] is True
+    assert turned_off.json()["signed_out_at"] is not None
+    # Supabase is asked with the seller's own session, never the app's.
+    assert ended == [(alice["Authorization"], app_id)]
+    refused = _rpc(client, "tools/list", extra_headers=alice_app)
+    assert refused.status_code == 403
+    assert _tool_names(client, bob_app) == READ_TOOLS
+    # Saving its permissions on the approval page does not turn it back on; only
+    # the approval Supabase accepted does.
+    assert client.put(f"/api/settings/mcp-connections/{app_id}", headers=alice, json={}).status_code == 200
+    assert _rpc(client, "tools/list", extra_headers=alice_app).status_code == 403
+    assert client.put(f"/api/settings/mcp-connections/{app_id}", headers=alice, json={"enable": True}).status_code == 200
+    assert _tool_names(client, alice_app) == READ_TOOLS
+
+
 def test_existing_mcp_tokens_keep_full_access_after_migration(migration_engine):  # noqa: F811
     from alembic import command
 
@@ -976,7 +1028,7 @@ def test_mcp_m7_hosted_photo_delete_runs_after_db_session_closes(monkeypatch):
         deferred_deletes.append("user/conv/photo1.jpg")
         return {"jsonrpc": "2.0", "id": 1, "result": {"ok": True}}, 200, {}
 
-    def fake_delete(keys, *, bearer_token=None, deadline_seconds=15.0):
+    def fake_delete(keys, *, bearer_token=None, deadline_seconds=15.0, server_key=False):
         events.append(f"storage_delete:{','.join(keys)}:{deadline_seconds}")
 
     monkeypatch.setattr(mcp_route, "in_worker_session", fake_in_worker)
@@ -1070,6 +1122,72 @@ def test_mcp_deferred_delete_survives_abnormal_completion(monkeypatch, ending):
         assert events == ["session closed", "seller/item/photo.jpg"]
 
     asyncio.run(exercise())
+
+
+def test_supabase_sign_out_of_a_connected_app_has_a_deadline(monkeypatch):
+    import asyncio
+    import time as clock
+
+    monkeypatch.setattr(mcp_oauth, "GRANT_REVOKE_TIMEOUT_SECONDS", 0)
+    monkeypatch.setattr(mcp_oauth, "_delete_grant", lambda *_: clock.sleep(3) or True)
+
+    async def timed():
+        started = clock.monotonic()
+        outcome = await mcp_oauth.end_supabase_grant("Bearer seller", "app")
+        return outcome, clock.monotonic() - started
+
+    outcome, waited = asyncio.run(timed())
+    assert outcome is False
+    assert waited < 2.9
+    assert asyncio.run(mcp_oauth.end_supabase_grant(None, "app")) is False
+
+
+def test_connected_app_starts_read_only_and_stays_off_once_turned_off():
+    with SessionLocal() as db:
+        assert mcp_oauth.permissions_for(db, "app-1") == {"listings": "read", "analytics": "read", "attention": "read"}
+        mcp_oauth.revoke(db, "app-1")
+        assert mcp_oauth.permissions_for(db, "app-1") is None
+        assert mcp_oauth.mark_signed_out(db, "app-1")["signed_out_at"] is not None
+        pending = mcp_oauth.approve(db, "app-1", client_name="ChatGPT", permissions={"attention": "write"})
+        assert pending["revoked_at"] is not None
+        assert mcp_oauth.permissions_for(db, "app-1") is None
+        approved = mcp_oauth.approve(db, "app-1", client_name="ChatGPT", permissions={"attention": "write"}, enable=True)
+        assert approved["revoked_at"] is None and approved["signed_out_at"] is None
+        assert mcp_oauth.permissions_for(db, "app-1")["attention"] == "write"
+        with pytest.raises(mcp_oauth.McpConnectionError):
+            mcp_oauth.approve(db, "app-1", client_name=None, permissions={"publishing": "write"})
+        with pytest.raises(mcp_oauth.McpConnectionError):
+            mcp_oauth.approve(db, "", client_name=None, permissions={})
+
+
+def test_connected_app_calls_do_not_refresh_settings_on_every_device():
+    from datetime import timedelta
+
+    with SessionLocal() as db:
+        mcp_oauth.permissions_for(db, "app-2")
+        first = db.query(McpOAuthConnection).filter_by(client_id="app-2").one().last_used_at
+        mcp_oauth.permissions_for(db, "app-2")
+        assert db.query(McpOAuthConnection).filter_by(client_id="app-2").one().last_used_at == first
+        assert "quiet_changes" not in db.info
+        row = db.query(McpOAuthConnection).filter_by(client_id="app-2").one()
+        row.last_used_at = first - timedelta(minutes=5)
+        db.commit()
+        mcp_oauth.permissions_for(db, "app-2")
+        assert db.query(McpOAuthConnection).filter_by(client_id="app-2").one().last_used_at > first - timedelta(minutes=5)
+
+
+def test_connected_app_photo_cleanup_uses_the_server_key(monkeypatch):
+    """Storage refuses a connected app's token, so its deletions run on the server key."""
+    from anteroom.services import hosted_photos, hosted_storage
+
+    calls = []
+    monkeypatch.setattr(hosted_storage, "photo_call", lambda method, key, **_: calls.append(("server", key)))
+    monkeypatch.setattr(hosted_photos, "storage_call", lambda method, key, token, **_: calls.append(("seller", key)))
+    mcp_http.delete_hosted_storage_keys(["u/a.jpg"], bearer_token="eyJ.app.token", server_key=True)
+    mcp_http.delete_hosted_storage_keys(["u/b.jpg"], bearer_token="eyJ.seller.token")
+    assert calls == [("server", "u/a.jpg"), ("seller", "u/b.jpg")]
+
+
 def test_search_inventory_live_marketplaces_leave_out_delisted_and_sold_ones():
     """Imported marketplaces Anteroom delisted, marked not listed or sold on are not live (#1825)."""
     client = TestClient(app)

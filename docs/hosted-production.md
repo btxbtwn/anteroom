@@ -542,6 +542,41 @@ the API with the new secret first, then release the Bridge promptly. Without the
 secret the API logs a warning for each command and sends it unsigned, which a
 current Bridge refuses.
 
+## 7. App sign-in for MCP (Claude, ChatGPT, Gemini)
+
+Apps connect to `https://myanteroom.com/api/mcp` by signing in through Supabase
+Auth's OAuth 2.1 server (beta, all plans). Anteroom is only the protected
+resource: `/.well-known/oauth-protected-resource` names the Supabase project as
+the authorization server, and an unauthenticated `/api/mcp` answers `401` with
+a `WWW-Authenticate: Bearer resource_metadata="…"` challenge. Supabase issues the
+app ordinary project JWTs with an extra `client_id` claim. The API accepts those
+on `/api/mcp` only, and `mcp_oauth_connections` holds what each app may reach
+and whether the seller turned it off.
+
+Supabase settings (dashboard, or `[auth.oauth_server]` in `config.toml`):
+
+1. **Authentication → URL Configuration → Site URL**: `https://myanteroom.com`.
+2. **Authentication → OAuth Server**: turn on the OAuth 2.1 server, set the
+   **Authorization Path** to `/oauth/consent`, and allow **dynamic client
+   registration** (Claude, ChatGPT and Gemini register themselves).
+3. The project must sign with asymmetric keys (ES256 or RS256), as the hosted
+   API already requires.
+4. **Authentication → Providers → Email**: keep **Secure email change** on and
+   turn on **Secure password change**. A connected app's token is an ordinary
+   session token to Supabase Auth itself; these make a password or email change
+   need the seller's recent sign-in or email confirmation, so an app cannot take
+   over the account.
+
+Storage, Realtime and the change feed refuse any JWT with a `client_id` claim
+(restrictive policies in revision `138d3602d2e2`), so an app cannot read or
+delete photos directly. Its photo work through `/api/mcp` runs on the server key.
+
+Roll out in this order: deploy the API first, so a token carrying `client_id`
+is already refused everywhere but `/api/mcp`, then turn on the OAuth server. Try
+it on Anteroom Staging before production. Turning the OAuth server off stops new
+sign-ins; apps already signed in keep their tokens until they expire (an hour),
+unless the seller disconnects them in Settings → Agents.
+
 ## Audit
 
 | Priority | State on 2026-11-03 | Still required |

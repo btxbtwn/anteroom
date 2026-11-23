@@ -39,6 +39,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from anteroom.services.seller_sessions import InvalidSession, SessionVerifier
 
 ISSUER = 'https://sandbox.invalid/auth/v1'
+# The OAuth client id Supabase would give Claude, for the sandbox's app sign-in.
+SANDBOX_APP_ID = 'c1a0de00-5a4d-4b0c-8000-000000000001'
 SELLER_NAMES = ('alice', 'bob', *(f'seller{number}' for number in range(3, int(os.environ.get('ANTEROOM_SANDBOX_SELLERS') or 2) + 1)))
 ACCOUNTS = {name + '@sandbox.test': str(uuid.uuid5(uuid.NAMESPACE_DNS, 'anteroom-sandbox-' + name))
             for name in SELLER_NAMES}
@@ -92,6 +94,18 @@ class LocalSupabase:
         self.app.add_api_route('/auth/v1/signup', self.signup, methods=['POST'])
         self.app.add_api_route('/auth/v1/recover', self.recover, methods=['POST'])
         self.app.add_api_route('/auth/v1/logout', self.logout, methods=['POST'])
+        # Supabase's OAuth 2.1 server, for apps such as Claude signing in to /api/mcp.
+        # A pending request per sandbox app: tests open `/oauth/consent?authorization_id=sandbox-<app>`.
+        self.authorizations: dict[str, dict[str, str]] = {
+            'sandbox-claude': {'client_id': SANDBOX_APP_ID, 'name': 'Claude',
+                               'redirect_uri': 'https://claude.invalid/oauth/callback', 'state': 'sandbox'},
+        }
+        self.oauth_codes: dict[str, tuple[str, str]] = {}
+        self.grants: set[tuple[str, str]] = set()
+        self.app.add_api_route('/auth/v1/oauth/authorizations/{authorization_id}', self.authorization, methods=['GET'])
+        self.app.add_api_route('/auth/v1/oauth/authorizations/{authorization_id}/consent', self.consent, methods=['POST'])
+        self.app.add_api_route('/auth/v1/oauth/token', self.oauth_token, methods=['POST'])
+        self.app.add_api_route('/auth/v1/user/oauth/grants', self.revoke_grant, methods=['DELETE'])
         self.app.add_api_route('/storage/v1/object/anteroom-photos/{key:path}', self.storage, methods=['GET', 'POST', 'PUT'])
         self.app.add_api_route('/storage/v1/object/anteroom-photos', self.delete, methods=['DELETE'])
         self.app.add_api_route('/storage/v1/object/sign/anteroom-photos/{key:path}', self.sign, methods=['POST'])
@@ -158,6 +172,45 @@ class LocalSupabase:
     def logout(self, request: Request):
         owner = self.owner(request)
         self.refresh_tokens = {token: email for token, email in self.refresh_tokens.items() if ACCOUNTS[email] != owner}
+        return Response(status_code=204)
+
+    def authorization(self, authorization_id: str, request: Request):
+        owner = self.owner(request)
+        pending = self.authorizations.get(authorization_id)
+        if pending is None:
+            return auth_error(404, 'oauth_authorization_not_found', 'Authorization not found')
+        email = next(email for email, user_id in ACCOUNTS.items() if user_id == owner)
+        return {'authorization_id': authorization_id, 'redirect_uri': pending['redirect_uri'],
+                'client': {'id': pending['client_id'], 'name': pending['name'], 'uri': '', 'logo_uri': ''},
+                'user': {'id': owner, 'email': email}, 'scope': 'email'}
+
+    async def consent(self, authorization_id: str, request: Request):
+        owner = self.owner(request)
+        pending = self.authorizations.get(authorization_id)
+        if pending is None:
+            return auth_error(404, 'oauth_authorization_not_found', 'Authorization not found')
+        if (await request.json()).get('action') != 'approve':
+            return {'redirect_url': f"{pending['redirect_uri']}?error=access_denied&state={pending['state']}"}
+        code = secrets.token_urlsafe(24)
+        self.oauth_codes[code] = (owner, pending['client_id'])
+        self.grants.add((owner, pending['client_id']))
+        return {'redirect_url': f"{pending['redirect_uri']}?code={code}&state={pending['state']}"}
+
+    async def oauth_token(self, request: Request):
+        """The app trades its code for a token that carries its ``client_id``."""
+        form = await request.form()
+        owner, client_id = self.oauth_codes.pop(str(form.get('code', '')), ('', ''))
+        if not owner:
+            return auth_error(400, 'invalid_grant', 'Invalid or used authorization code')
+        now = int(time.time())
+        claims = {'sub': owner, 'aud': 'authenticated', 'role': 'authenticated', 'iss': ISSUER, 'iat': now,
+                  'exp': now + 3600, 'session_id': str(uuid.uuid4()), 'is_anonymous': False, 'client_id': client_id}
+        token = jwt.encode(claims, self.key, algorithm='ES256', headers={'kid': 'sandbox'})
+        return {'access_token': token, 'token_type': 'bearer', 'expires_in': 3600}
+
+    def revoke_grant(self, request: Request, client_id: str = ''):
+        owner = self.owner(request)
+        self.grants.discard((owner, client_id))
         return Response(status_code=204)
 
     def check_storage_key(self, key: str, request: Request):
