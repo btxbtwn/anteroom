@@ -1,0 +1,1 @@
+- Behind the scenes: two assistant chat checks that sometimes failed for no real reason no longer hold up updates.
