@@ -69,28 +69,70 @@ OUTCOME_LABEL = {
 
 # --- GitHub and git ---------------------------------------------------------
 
-# A failure reason shown in logs and on the PR: enough to diagnose, never a dump.
-REASON_CHARS = 300
-SECRET_TEXT = re.compile(
-    r"gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}|(?i:\b(?:bearer|token)\s+)[^\s)\]'\"]+"
-)
+# A failed GitHub or git call is reported only as one of these fixed
+# categories under a fixed operation name. The command's own output and its
+# arguments can carry anything, so they never reach logs, comments or state.
+FAILURE_CATEGORIES = ("permission denied", "not found", "rate limited", "unknown")
+GRAPHQL_ERROR_CATEGORY = {
+    "FORBIDDEN": "permission denied",
+    "INSUFFICIENT_SCOPES": "permission denied",
+    "NOT_FOUND": "not found",
+    "RATE_LIMITED": "rate limited",
+}
+HTTP_STATUS_CATEGORY = {401: "permission denied", 403: "permission denied", 404: "not found", 429: "rate limited"}
+HTTP_STATUS = re.compile(r"\(HTTP (\d{3})\)")
+OPERATION = {"gh": "GitHub CLI call", "git": "git command"}
 
 
-def sanitize_reason(text: str) -> str:
-    """One line of the error, without credentials, cut to REASON_CHARS."""
-    flat = " ".join(SECRET_TEXT.sub("[redacted]", text or "").split())
-    return flat if len(flat) <= REASON_CHARS else flat[:REASON_CHARS] + "…"
+def graphql_error_category(errors: object) -> str:
+    """Category from GraphQL error type codes only; messages are never read."""
+    types = {e.get("type") for e in errors if isinstance(e, dict)} if isinstance(errors, list) else set()
+    for code, category in GRAPHQL_ERROR_CATEGORY.items():
+        if code in types:
+            return category
+    return "unknown"
+
+
+def failure_category(stdout: str, stderr: str) -> str:
+    """Classify a failed gh call by GraphQL error types or gh's HTTP status line."""
+    try:
+        errors = json.loads(stdout).get("errors") if stdout.strip() else None
+    except (ValueError, AttributeError):
+        errors = None
+    if errors:
+        category = graphql_error_category(errors)
+        if category != "unknown":
+            return category
+    if "rate limit" in (stderr or "").lower():
+        return "rate limited"
+    for status in HTTP_STATUS.findall(stderr or ""):
+        if int(status) in HTTP_STATUS_CATEGORY:
+            return HTTP_STATUS_CATEGORY[int(status)]
+    return "unknown"
+
+
+def known_category(value: object) -> str:
+    return value if value in FAILURE_CATEGORIES else "unknown"
 
 
 class CommandError(subprocess.CalledProcessError):
-    """A failed command with the sanitized reason it printed (never its input)."""
+    """A failed command: fixed operation name, exit status and category only."""
 
-    def __init__(self, cmd: list[str], returncode: int, stderr: str | None):
-        super().__init__(returncode, cmd, stderr=stderr)
-        self.reason = sanitize_reason(stderr or "") or f"exit status {returncode}"
+    def __init__(self, operation: str, returncode: int, category: str):
+        super().__init__(returncode, [operation])
+        self.operation = operation
+        self.category = known_category(category)
 
     def __str__(self) -> str:
-        return f"{' '.join(self.cmd[:3])} failed: {self.reason}"
+        return f"{self.operation} failed ({self.category}, exit status {self.returncode})"
+
+
+class GraphQLError(RuntimeError):
+    """GraphQL errors in a successful response, reported by category only."""
+
+    def __init__(self, category: str):
+        self.category = known_category(category)
+        super().__init__(f"GitHub GraphQL request failed ({self.category})")
 
 
 def run(*args: str, input: str | None = None, env: dict | None = None) -> str:
@@ -98,7 +140,8 @@ def run(*args: str, input: str | None = None, env: dict | None = None) -> str:
         list(args), check=False, capture_output=True, text=True, input=input, env=env
     )
     if result.returncode:
-        raise CommandError(list(args), result.returncode, result.stderr)
+        category = failure_category(result.stdout or "", result.stderr or "") if args[0] == "gh" else "unknown"
+        raise CommandError(OPERATION.get(args[0], "command"), result.returncode, category)
     return result.stdout
 
 
@@ -123,8 +166,7 @@ def graphql(query: str, **variables):
     body = json.dumps({"query": query, "variables": variables})
     out = json.loads(run("gh", "api", "graphql", "--input", "-", input=body))
     if out.get("errors"):
-        messages = "; ".join(str(e.get("message", "")) for e in out["errors"] if isinstance(e, dict))
-        raise RuntimeError(f"GraphQL error: {sanitize_reason(messages) or 'unknown'}")
+        raise GraphQLError(graphql_error_category(out["errors"]))
     return out["data"]
 
 
@@ -321,7 +363,7 @@ def render_summary(
     state: dict = {"reviewed_sha": ctx["head"]}
     if unresolved:
         # Threads GitHub would not resolve keep the check red on reruns of this commit.
-        state |= {"unresolved_threads": unresolved["ids"], "unresolved_reason": unresolved["reason"]}
+        state |= {"unresolved_threads": unresolved["ids"], "unresolved_categories": unresolved["categories"]}
     out = [marker(REVIEW_STATE, state), "## Claude review"]
     if posted:
         link = f" in the [latest review]({review_url})" if review_url else ""
@@ -631,8 +673,8 @@ def review_scope(pr_files: list[str], new_paths: list[str] | None, open_paths: l
     return sorted(pr & new), sorted((set(open_paths) & new) - pr)
 
 
-def unresolved_failure(count: int, reason: str) -> str:
-    return f"Could not resolve {count} addressed thread(s): {reason}"
+def unresolved_failure(count: int, categories: list[str]) -> str:
+    return f"Could not resolve {count} addressed thread(s): {', '.join(categories)}"
 
 
 def still_open(thread_ids: list[str], threads: list[dict]) -> list[str]:
@@ -652,13 +694,15 @@ def prepare_review(args) -> None:
     pending_ids = list(state.get("unresolved_threads") or [])
     threads = review_threads(args.pr) if pending_ids else None
     pending = still_open(pending_ids, threads) if threads is not None else []
-    pending_reason = sanitize_reason(str(state.get("unresolved_reason") or "")) or "unknown"
+    stored = state.get("unresolved_categories")
+    pending_categories = list(dict.fromkeys(known_category(c) for c in stored)) if isinstance(stored, list) else []
+    pending_categories = pending_categories or ["unknown"]
 
     def skip() -> None:
         set_output(skip="true")
         # Skipping must not turn a check that failed on unresolved threads green.
         if pending:
-            failure = unresolved_failure(len(pending), pending_reason)
+            failure = unresolved_failure(len(pending), pending_categories)
             print(f"::error title=Claude review::{failure}")
             sys.exit(f"{failure}. Resolve them by hand after checking.")
 
@@ -695,7 +739,7 @@ def prepare_review(args) -> None:
     (out / "open-findings.json").write_text(json.dumps(open_findings, indent=2))
     ctx = {
         "pr": args.pr, "head": head, "merge_base": merge_base, "since": since, "files": files, "restored": restored,
-        "pending_unresolved": pending, "pending_reason": pending_reason if pending else None,
+        "pending_unresolved": pending, "pending_categories": pending_categories if pending else [],
     }
     (out / "context.json").write_text(json.dumps(ctx, indent=2))
     set_output(skip="false", files=len(files), incremental="true" if since else "false")
@@ -742,7 +786,7 @@ def post_review(args) -> None:
     # Threads an earlier run could not resolve keep failing until they are.
     pending = list(ctx.get("pending_unresolved") or [])
     failed_ids: list[str] = []
-    reasons: list[str] = []
+    categories: list[str] = []
     resolved_ids: set[str] = set()
     carried: list[str] = []
     if addressed or pending:
@@ -759,19 +803,19 @@ def post_review(args) -> None:
                     resolve_thread(thread["id"])
                     resolved_ids.add(thread["id"])
                 except (subprocess.CalledProcessError, RuntimeError) as error:
-                    reason = error.reason if isinstance(error, CommandError) else sanitize_reason(str(error))
-                    print(f"Could not resolve thread {thread['id']}: {reason}", file=sys.stderr)
+                    category = known_category(getattr(error, "category", "unknown"))
+                    print(f"Could not resolve thread {thread['id']}: {category}", file=sys.stderr)
                     failed_ids.append(thread["id"])
-                    reasons.append(reason)
+                    categories.append(category)
         carried = [tid for tid in still_open(pending, threads) if tid not in resolved_ids and tid not in failed_ids]
         if carried:
-            reasons.append(ctx.get("pending_reason") or "unknown")
+            categories += [known_category(c) for c in ctx.get("pending_categories") or ["unknown"]]
     unresolved_ids = failed_ids + carried
     failure = None
     unresolved = None
     if unresolved_ids:
-        unresolved = {"ids": unresolved_ids, "reason": "; ".join(dict.fromkeys(reasons))}
-        failure = unresolved_failure(len(unresolved_ids), unresolved["reason"])
+        unresolved = {"ids": unresolved_ids, "categories": list(dict.fromkeys(categories))}
+        failure = unresolved_failure(len(unresolved_ids), unresolved["categories"])
 
     body = render_summary(data, ctx, posted=len(findings), review_url=review_url, unresolved=unresolved)
     if failure:

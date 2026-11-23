@@ -1,9 +1,12 @@
 """Tests for review_bot.py's formatting and decision logic. Run:
 python3 .github/review-bot/test_review_bot.py"""
 
+import contextlib
+import io
 import json
 import sys
 import tempfile
+import traceback
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -211,12 +214,17 @@ class PostReviewTests(unittest.TestCase):
         upsert.assert_called_once()
         self.assertIn("--diff-filter=d", diff_paths.call_args.args[0])
 
-    def _post_review_with_addressed(self, temp, graphql, *, addressed=(11, 22), pending=(), resolved=()):
-        """Run post_review on two finding threads; return the API calls made."""
+    # Arbitrary, non-secret text a failing command might print. None of it may
+    # leave the process: not in comments, annotations, exit messages or state.
+    PROBE = "PROBE-7f3a <b>markup</b> /home/runner/path line\nsecond line"
+
+    def _post_review_with_addressed(self, temp, graphql, *, addressed=(11, 22), pending=(), resolved=(),
+                                    pending_categories=("permission denied",)):
+        """Run post_review on two finding threads; return API calls, upsert, exit code and stderr."""
         ctx = Path(temp)
         (ctx / "context.json").write_text(json.dumps({
             "pr": 1, "head": "head", "merge_base": "base", "since": None, "files": [],
-            "pending_unresolved": list(pending), "pending_reason": "earlier reason" if pending else None,
+            "pending_unresolved": list(pending), "pending_categories": list(pending_categories) if pending else [],
         }))
         (ctx / "pr.diff").write_text("")
         (ctx / "open-findings.json").write_text(json.dumps([{"comment_id": 11}, {"comment_id": 22}]))
@@ -231,6 +239,7 @@ class PostReviewTests(unittest.TestCase):
             "security_risk": {"level": "Minimal", "explanation": "none", "concerns": []},
             "findings": [], "addressed": [{"comment_id": cid, "commit": f"c{cid}"} for cid in addressed],
         }
+        stderr, stdout = io.StringIO(), io.StringIO()
         with (
             patch.dict(bot.os.environ, {"REVIEW_OUTPUT": json.dumps(output)}),
             patch.object(bot.subprocess, "check_output", return_value=b""),
@@ -240,42 +249,49 @@ class PostReviewTests(unittest.TestCase):
             patch.object(bot, "graphql", side_effect=graphql),
             patch.object(bot, "bot_issue_comments", return_value=[]),
             patch.object(bot, "upsert_pr_body_summary") as upsert,
+            contextlib.redirect_stderr(stderr), contextlib.redirect_stdout(stdout),
         ):
             try:
                 bot.post_review(SimpleNamespace(context=temp))
                 exit_reason = None
             except SystemExit as stop:
                 exit_reason = stop.code
-        return api.call_args_list, upsert, exit_reason
+        return api.call_args_list, upsert, exit_reason, stderr.getvalue() + stdout.getvalue()
+
+    def _refused(self, stderr):
+        """resolve_thread failing the way run() reports a refused gh call."""
+        def refuse(query, **variables):
+            with patch.object(bot.subprocess, "run", return_value=bot.subprocess.CompletedProcess(
+                    ["gh"], 1, stdout="", stderr=stderr)):
+                bot.run("gh", "api", "graphql", "--input", "-", "PROBE-ARGUMENT-TEXT", input="PROBE-INPUT-TEXT")
+        return refuse
 
     def test_a_failed_thread_resolve_still_posts_everything_then_fails_the_review(self):
-        def refuse(query, **variables):
-            raise bot.CommandError(["gh", "api", "graphql"], 1, "gh: Resource not accessible by integration")
-
+        refuse = self._refused(f"gh: {self.PROBE} (HTTP 403)")
         with tempfile.TemporaryDirectory() as temp:
-            calls, upsert, exit_reason = self._post_review_with_addressed(temp, refuse)
+            calls, upsert, exit_reason, logs = self._post_review_with_addressed(temp, refuse)
         patched = [c.args[0] for c in calls if c.args[1] == "PATCH"]
         # Both findings are marked addressed, even though neither thread could be resolved.
         self.assertEqual(patched, ["repos/owner/repo/pulls/comments/11", "repos/owner/repo/pulls/comments/22"])
         summary = [c.args[2]["body"] for c in calls if c.args[0] == "repos/owner/repo/issues/1/comments"]
         self.assertEqual(len(summary), 1)
-        # The reviewed commit is recorded, so the next review stays incremental.
+        # The reviewed commit is recorded with the open threads and their category only.
         self.assertEqual(
             bot.read_marker(bot.REVIEW_STATE, summary[0]),
             {"reviewed_sha": "head", "unresolved_threads": ["T11", "T22"],
-             "unresolved_reason": "gh: Resource not accessible by integration"},
+             "unresolved_categories": ["permission denied"]},
         )
-        self.assertIn("Could not resolve 2 addressed thread(s)", summary[0])
-        self.assertIn("Resource not accessible by integration", summary[0])
+        self.assertIn("Could not resolve 2 addressed thread(s): permission denied", summary[0])
         upsert.assert_called_once()
-        # The job still fails, with the reason, instead of passing as a clean review.
-        self.assertIsInstance(exit_reason, str)
-        self.assertIn("Could not resolve 2 addressed thread(s)", exit_reason)
-        self.assertIn("Resource not accessible by integration", exit_reason)
+        # The job still fails, with the category, instead of passing as a clean review.
+        self.assertEqual(exit_reason, "Could not resolve 2 addressed thread(s): permission denied")
+        for text in (summary[0], exit_reason, logs):
+            for probe in ("PROBE", "markup", "/home/runner", "second line"):
+                self.assertNotIn(probe, text)
 
     def test_resolved_threads_pass_without_a_failure_note(self):
         with tempfile.TemporaryDirectory() as temp:
-            calls, upsert, exit_reason = self._post_review_with_addressed(temp, lambda query, **v: {})
+            calls, upsert, exit_reason, _ = self._post_review_with_addressed(temp, lambda query, **v: {})
         self.assertIsNone(exit_reason)
         summary = [c.args[2]["body"] for c in calls if c.args[0] == "repos/owner/repo/issues/1/comments"]
         self.assertNotIn("Could not resolve", summary[0])
@@ -284,64 +300,97 @@ class PostReviewTests(unittest.TestCase):
 
     def test_threads_an_earlier_run_could_not_resolve_keep_the_review_failing(self):
         with tempfile.TemporaryDirectory() as temp:
-            calls, _, exit_reason = self._post_review_with_addressed(
+            calls, _, exit_reason, _ = self._post_review_with_addressed(
                 temp, lambda query, **v: {}, addressed=(), pending=["T11"])
-        self.assertEqual(exit_reason, "Could not resolve 1 addressed thread(s): earlier reason")
+        self.assertEqual(exit_reason, "Could not resolve 1 addressed thread(s): permission denied")
         summary = [c.args[2]["body"] for c in calls if c.args[0] == "repos/owner/repo/issues/1/comments"]
         self.assertEqual(bot.read_marker(bot.REVIEW_STATE, summary[0])["unresolved_threads"], ["T11"])
+        # A category that is not on the allowlist is reported as unknown, never echoed.
+        with tempfile.TemporaryDirectory() as temp:
+            _, _, exit_reason, _ = self._post_review_with_addressed(
+                temp, lambda query, **v: {}, addressed=(), pending=["T11"], pending_categories=[self.PROBE])
+        self.assertEqual(exit_reason, "Could not resolve 1 addressed thread(s): unknown")
         # Once a person resolves it, the next review passes.
         with tempfile.TemporaryDirectory() as temp:
-            _, _, exit_reason = self._post_review_with_addressed(
+            _, _, exit_reason, _ = self._post_review_with_addressed(
                 temp, lambda query, **v: {}, addressed=(), pending=["T11"], resolved=["T11"])
         self.assertIsNone(exit_reason)
 
     def _prepare_same_head(self, state, threads):
-        outputs = {}
+        outputs, logs = {}, io.StringIO()
         with tempfile.TemporaryDirectory() as out, (
             patch.object(bot, "git", side_effect=lambda *a: "head\n" if a[0] == "rev-parse" else "base\n")
         ), (
             patch.object(bot, "bot_issue_comments", return_value=[({"id": 1}, state)])
         ), (
             patch.object(bot, "review_threads", return_value=threads)
-        ), patch.object(bot, "set_output", side_effect=outputs.update):
+        ), patch.object(bot, "set_output", side_effect=outputs.update), contextlib.redirect_stdout(logs):
             try:
                 bot.prepare_review(SimpleNamespace(pr=1, base="main", out=out))
             except SystemExit as stop:
-                return outputs, stop.code
-        return outputs, None
+                return outputs, stop.code, logs.getvalue()
+        return outputs, None, logs.getvalue()
 
     def test_rerunning_the_same_commit_does_not_pass_while_threads_stay_unresolved(self):
-        state = {"reviewed_sha": "head", "unresolved_threads": ["T11"], "unresolved_reason": "gh: refused"}
-        outputs, exit_reason = self._prepare_same_head(state, [{"id": "T11", "isResolved": False}])
+        state = {"reviewed_sha": "head", "unresolved_threads": ["T11"], "unresolved_categories": ["rate limited"]}
+        outputs, exit_reason, _ = self._prepare_same_head(state, [{"id": "T11", "isResolved": False}])
         self.assertEqual(outputs, {"skip": "true"})
-        self.assertIn("Could not resolve 1 addressed thread(s): gh: refused", exit_reason)
-        outputs, exit_reason = self._prepare_same_head(state, [{"id": "T11", "isResolved": True}])
+        self.assertEqual(exit_reason, "Could not resolve 1 addressed thread(s): rate limited. "
+                                      "Resolve them by hand after checking.")
+        outputs, exit_reason, _ = self._prepare_same_head(state, [{"id": "T11", "isResolved": True}])
         self.assertEqual((outputs, exit_reason), ({"skip": "true"}, None))
-        outputs, exit_reason = self._prepare_same_head({"reviewed_sha": "head"}, [])
+        outputs, exit_reason, _ = self._prepare_same_head({"reviewed_sha": "head"}, [])
         self.assertEqual((outputs, exit_reason), ({"skip": "true"}, None))
+        # An edited marker cannot put arbitrary text into the annotation or exit message.
+        tampered = {"reviewed_sha": "head", "unresolved_threads": ["T11"], "unresolved_categories": [self.PROBE]}
+        _, exit_reason, logs = self._prepare_same_head(tampered, [{"id": "T11", "isResolved": False}])
+        self.assertIn("Could not resolve 1 addressed thread(s): unknown", exit_reason)
+        self.assertNotIn("PROBE", exit_reason + logs)
 
-    def test_command_errors_carry_a_short_redacted_reason(self):
-        failed = bot.subprocess.CompletedProcess(
-            ["gh"], 1, stdout="",
-            stderr="gh: Bad credentials ghs_abcdefghijklmnopqrstuvwxyz0123456789 Authorization: Bearer abc.def\n"
-                   + "x" * 2000,
-        )
+    def test_failures_are_classified_by_status_and_type_never_echoed(self):
+        cases = [
+            ("", f"gh: {self.PROBE} (HTTP 403)", "permission denied"),
+            ("", f"gh: {self.PROBE} (HTTP 401)", "permission denied"),
+            ("", f"gh: {self.PROBE} (HTTP 404)", "not found"),
+            ("", f"gh: {self.PROBE} (HTTP 429)", "rate limited"),
+            ("", "gh: API rate limit exceeded for installation (HTTP 403)", "rate limited"),
+            (json.dumps({"errors": [{"type": "FORBIDDEN", "message": self.PROBE}]}), f"gh: {self.PROBE}",
+             "permission denied"),
+            (json.dumps({"errors": [{"type": "NOT_FOUND", "message": self.PROBE}]}), "", "not found"),
+            ("not json " + self.PROBE, f"gh: {self.PROBE} (HTTP 500)", "unknown"),
+            ("", self.PROBE, "unknown"),
+        ]
+        for stdout, stderr, category in cases:
+            failed = bot.subprocess.CompletedProcess(["gh"], 1, stdout=stdout, stderr=stderr)
+            with self.subTest(stderr=stderr[:40]), patch.object(bot.subprocess, "run", return_value=failed), \
+                    self.assertRaises(bot.CommandError) as raised:
+                bot.run("gh", "api", "PROBE-ARGUMENT-TEXT", "--input", "-", input="PROBE-INPUT-TEXT")
+            error = raised.exception
+            self.assertEqual(error.category, category)
+            self.assertEqual(error.returncode, 1)
+            self.assertIsInstance(error, bot.subprocess.CalledProcessError)
+            shown = str(error) + repr(error.cmd) + repr(error.stderr) + repr(error.output) + "".join(
+                traceback.format_exception(error))
+            self.assertEqual(str(error), f"GitHub CLI call failed ({category}, exit status 1)")
+            for probe in ("PROBE", "markup", "/home/runner", "second line", "ARGUMENT-TEXT", "INPUT-TEXT"):
+                self.assertNotIn(probe, shown)
+        failed = bot.subprocess.CompletedProcess(["git"], 128, stdout="", stderr=f"fatal: {self.PROBE}")
         with patch.object(bot.subprocess, "run", return_value=failed), self.assertRaises(bot.CommandError) as raised:
-            bot.run("gh", "api", "graphql", "--input", "-", input='{"query": "secret body"}')
-        reason = raised.exception.reason
-        self.assertIn("Bad credentials", reason)
-        self.assertNotIn("ghs_abcdefghijklmnop", reason)
-        self.assertNotIn("abc.def", reason)
-        self.assertNotIn("secret body", str(raised.exception))
-        self.assertLessEqual(len(reason), bot.REASON_CHARS + 1)
-        self.assertIn("gh api graphql", str(raised.exception))
-        self.assertIsInstance(raised.exception, bot.subprocess.CalledProcessError)
+            bot.run("git", "PROBE-ARGUMENT-TEXT")
+        self.assertEqual(str(raised.exception), "git command failed (unknown, exit status 128)")
 
-    def test_graphql_errors_carry_only_their_messages(self):
-        out = json.dumps({"data": None, "errors": [{"type": "FORBIDDEN", "message": "Resource not accessible", "path": ["x"]}]})
-        with patch.object(bot, "run", return_value=out), self.assertRaises(RuntimeError) as raised:
-            bot.graphql("mutation { x }")
-        self.assertEqual(str(raised.exception), "GraphQL error: Resource not accessible")
+    def test_graphql_errors_report_only_their_category(self):
+        for errors, category in (
+            ([{"type": "FORBIDDEN", "message": self.PROBE}], "permission denied"),
+            ([{"type": "RATE_LIMITED", "message": self.PROBE}], "rate limited"),
+            ([{"type": self.PROBE, "message": self.PROBE}], "unknown"),
+            ([self.PROBE], "unknown"),
+        ):
+            with patch.object(bot, "run", return_value=json.dumps({"data": None, "errors": errors})), \
+                    self.assertRaises(bot.GraphQLError) as raised:
+                bot.graphql("mutation { x }")
+            self.assertEqual(raised.exception.category, category)
+            self.assertEqual(str(raised.exception), f"GitHub GraphQL request failed ({category})")
 
     def test_upsert_pr_body_summary_patches_when_body_changes(self):
         data = {"summary": [{"category": "Bug Fixes", "bullets": ["Fixed it."]}]}
