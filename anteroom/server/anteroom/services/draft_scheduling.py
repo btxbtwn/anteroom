@@ -202,7 +202,7 @@ def _is_sold_or_has_sale(db: Session, conv: Conversation | None) -> bool:
             if obs_checked is not None:
                 if baseline_at is None or obs_checked >= baseline_at:
                     return True
-            elif not from_quantity_sync and (declared_qty is None or declared_qty <= 1):
+            elif baseline_at is None and (declared_qty is None or declared_qty <= 1):
                 return True
         if stock["status"] == "remaining" and isinstance(stock.get("remaining"), int) and stock["remaining"] > 0:
             if obs_checked is not None:
@@ -233,10 +233,15 @@ def _is_sold_or_has_sale(db: Session, conv: Conversation | None) -> bool:
         for sale in paid_sales
         if baseline_at is None or (sale_ts := _sale_timestamp(sale)) is None or sale_ts >= baseline_at
     )
-    if declared_qty is None or declared_qty <= 1:
-        if from_quantity_sync and declared_qty == 1:
-            return unaccounted_paid >= 1
+    if declared_qty is None:
         return True
+    if declared_qty <= 1:
+        unaccounted_blocking = sum(
+            sale.quantity if type(sale.quantity) is int and sale.quantity > 0 else 1
+            for sale in sales
+            if baseline_at is None or (sale_ts := _sale_timestamp(sale)) is None or sale_ts >= baseline_at
+        )
+        return unaccounted_blocking >= 1
     return unaccounted_paid >= declared_qty
 
 

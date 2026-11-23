@@ -1155,6 +1155,30 @@ class DraftSchedulingAndAutoRelistTest(unittest.TestCase):
         self.db.commit()
         self.assertTrue(draft_scheduling._is_sold_or_has_sale(self.db, c_res))
 
+        # Manual restock to 1 unit (without an inventory observation) also resets the baseline.
+        c_one, _l_one, r_one = self._create_draft("Manual Restock One Unit", quantity=1)
+        self.db.add(MarketplaceSale(
+            id=new_id(), marketplace="ebay", order_id="ord-one-1", line_id="line-one-1",
+            conversation_id=c_one.id, quantity=1, order_status="paid",
+            sold_at=past, received_at=past, state="new",
+        ))
+        self.db.commit()
+        self.assertTrue(draft_scheduling._is_sold_or_has_sale(self.db, c_one))
+        r_one_restocked = listing_persistence.save_revision(
+            self.db, c_one.id, {**r_one.listing_json, "quantity": 1},
+            source="manual", parent_revision_id=r_one.id, commit=True,
+        )
+        r_one_restocked.created_at = now
+        self.db.commit()
+        self.assertFalse(draft_scheduling._is_sold_or_has_sale(self.db, c_one))
+        self.db.add(MarketplaceSale(
+            id=new_id(), marketplace="poshmark", order_id="ord-one-2", line_id="line-one-2",
+            conversation_id=c_one.id, quantity=1, order_status="paid",
+            sold_at=now + timedelta(minutes=1), received_at=now + timedelta(minutes=1), state="new",
+        ))
+        self.db.commit()
+        self.assertTrue(draft_scheduling._is_sold_or_has_sale(self.db, c_one))
+
     def test_due_legacy_schedule_requires_new_confirmation(self):
         now = _now()
         conv, listing, _revision = self._create_draft()
