@@ -220,7 +220,7 @@ async def edit(image: bytes, options: StudioOptions) -> bytes:
     if _sandboxed():
         return await asyncio.to_thread(sandbox_result, image, options)
     # Hosted, the key is a Vault read: a blocking database query, kept off the event loop.
-    key, _source = await asyncio.to_thread(configured_key)
+    key, source = await asyncio.to_thread(configured_key)
     if not key:
         raise PhotoroomError("Add a Photoroom API key in Settings → Providers to use AI Studio.", 400)
     payload, filename, mime = await asyncio.to_thread(_prepare_upload, image)
@@ -247,6 +247,9 @@ async def edit(image: bytes, options: StudioOptions) -> bytes:
         raise PhotoroomError(_error_message(response), 400 if response.status_code in (401, 402, 403) else 502)
     if not response.content.startswith((b"\x89PNG", b"\xff\xd8", b"RIFF")):
         raise PhotoroomError("Photoroom answered without an image. Try again.")
+    if source == "server":
+        from anteroom.services import api_usage
+        api_usage.record_photoroom(edit_label=options.label())
     return response.content
 
 

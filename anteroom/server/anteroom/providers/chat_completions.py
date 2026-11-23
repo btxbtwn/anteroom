@@ -326,6 +326,9 @@ class ChatCompletionsProvider:
                 raise self._http_error(resp)
             payload = resp.json()
             call.usage(payload.get("usage"), anthropic=False)
+            if self.name == "openrouter":
+                from anteroom.services import api_usage
+                api_usage.note_openrouter_call(call.record, provider_request_id=payload.get("id"))
             return payload
 
     async def _complete(self, messages: list[dict], model: str, *, reasoning: bool | dict = True) -> str:
@@ -359,6 +362,7 @@ class ChatCompletionsProvider:
     async def _stream(self, messages: list[dict], model: str, *, reasoning: bool | dict = True):
         with model_usage.observe(self.name, model) as call:
             body = self._body(messages, model, reasoning=reasoning, stream=True, stream_options={"include_usage": True})
+            request_id = None
             async with http_client() as client:
                 async with http_retry.stream(
                     client, "POST", f"{self.base_url}/chat/completions", headers=self._headers(), json=body, timeout=300,
@@ -379,6 +383,8 @@ class ChatCompletionsProvider:
                             payload = json.loads(data)
                         except json.JSONDecodeError:
                             continue
+                        if request_id is None and payload.get("id"):
+                            request_id = payload.get("id")
                         call.usage(payload.get("usage"))
                         finish = finish_reason(payload) or finish
                         thinking = chunk_thinking(payload)
@@ -391,6 +397,9 @@ class ChatCompletionsProvider:
                             yield StreamChunk(text, "content")
                     if not content_chars:
                         raise EmptyCompletionError(self.spec.label, model, finish, reasoning_chars)
+            if self.name == "openrouter":
+                from anteroom.services import api_usage
+                api_usage.note_openrouter_call(call.record, provider_request_id=request_id)
 
 
 def openrouter_sources(payload: dict) -> list[dict]:
