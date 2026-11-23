@@ -14,8 +14,9 @@ workflow.
 | Incremental reviews: only what changed since the last reviewed commit | The summary comment records the reviewed commit; the next push reviews only newer changes to the PR's files. A force-push or rebase that drops that commit starts a full review | `review_bot.py prepare-review` |
 | "✅ Addressed in commit …" on fixed findings | Claude checks its open findings on each push, marks the fixed ones and resolves their threads | `review_bot.py post-review` |
 | Auto-fix PRs / "Bring PR to ready" replies to its own and Codex's findings | Claude answers every open Claude and Codex finding (fixed, already addressed, inapplicable, not fixed) with what it checked, pushes one fix commit, and posts the round's result | `claude-autofix.yml` |
+| (new) Failed product CI on a pull request | When the `CI` workflow finishes red on a ready same-repo PR, Claude collects the failed job logs and runs the same auto-fix path (shared 3-round cap). Claude review / auto-fix job failures are not treated as CI | `claude-autofix.yml` `workflow_run` |
 | (new) Real merge conflicts with `main` | When `main` advances and a ready same-repo PR is `dirty` (conflicts), Claude merges `origin/main` (merge commit, not rebase), resolves non-protected paths, and pushes. Merely-behind PRs are left alone | `claude-conflict-autofix.yml` |
-| Repair-round limit, "same blockers remain" | At most 3 pushed rounds per PR; the same open findings or conflicted files at the same commit are not retried | `review_bot.py autofix_decision` |
+| Repair-round limit, "same blockers remain" | At most 3 pushed rounds per PR; the same open findings, CI jobs or conflicted files at the same commit are not retried | `review_bot.py autofix_decision` |
 | `@coderabbitai` chat | `@claude` in any PR comment, review or review comment | `claude.yml` |
 | Codex review | Unchanged: Codex reviews automatically and reads the same guidelines | Codex settings |
 
@@ -30,21 +31,28 @@ workflow.
    job's token can still write the description and comments, so this is a tool
    restriction, not a missing credential.
 2. Auto-fix runs right after Claude's review, again whenever Codex submits a
-   review, and again when a push to `main` leaves a ready PR with real merge
-   conflicts. It first pauses auto-merge, as AGENTS.md requires before pushing
-   to a queued PR, and never turns it back on. Claude verifies each open
-   finding and, when GitHub reports `mergeable_state=dirty`, merges
+   review, again when product `CI` finishes red on the PR, and again when a
+   push to `main` leaves a ready PR with real merge conflicts. It first pauses
+   auto-merge, as AGENTS.md requires before pushing to a queued PR, and never
+   turns it back on: another review can arrive on the same commit at any time,
+   so whoever has checked every finding queues the PR again. Claude verifies
+   each open finding and each failed CI job (from the failed-job log), fixes
+   the real ones and, when GitHub reports `mergeable_state=dirty`, merges
    `origin/main` and resolves conflict markers (never for a PR that is only
-   behind). It runs the narrowest tests, commits and pushes with the Claude
-   GitHub App token so CI restarts. Claude cannot edit `.github/`,
+   behind). It runs the narrowest tests, commits and pushes. Its push uses
+   the Claude GitHub App token, so CI and the review run on the new commit (a
+   push with the workflow token would start no CI), and the action's wrapper
+   only pushes to the PR's branch. Claude cannot edit `.github/`,
    `anteroom/VERSION` or `CHANGELOG.md`; conflicts only in those paths stay
    human. `post-autofix` then:
-   - counts a finding or merge as fixed only when Claude's own commit is on
-     the branch;
-   - flags a pushed change to a protected path as blocking;
-   - replies in every finding's thread and posts the round's result.
-3. The fix commit starts the next review, which marks addressed findings and
-   may lead to another auto-fix round, up to the limit.
+   - counts a finding, CI job or merge as fixed only when Claude's own commit
+     is on the branch;
+   - flags a pushed change to a protected path as blocking (changes the merge
+     brings in from `main` are not counted);
+   - replies in every finding's thread and posts the round's result (including
+     any still-open CI job names and conflicted files).
+3. The fix commit starts the next review and CI, which may lead to another
+   auto-fix round, up to the limit.
 
 Answered threads stay open for you to resolve, like CodeRabbit's. Auto-fix
 never merges, never queues auto-merge and never publishes or delists
