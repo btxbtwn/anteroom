@@ -225,7 +225,7 @@ def _hint(*, installed: bool, on_path: bool) -> str | None:
 
 
 def _with_setup_prompts(
-    clients: list[dict[str, Any]], transport: str, guidance: str
+    clients: list[dict[str, Any]], transport: str, guidance: str, *, verification: str
 ) -> list[dict[str, Any]]:
     for client in clients:
         parts = [
@@ -238,8 +238,9 @@ def _with_setup_prompts(
         parts.extend([
             f"Configuration\n```\n{client['snippet']}\n```",
             "Preserve my other MCP servers and settings. If you can't change the settings yourself, "
-            "walk me through the steps I need to take. Verify the connection by listing the Anteroom tools "
-            "and tell me what worked or what blocked setup. Keep my listing data unchanged during setup.",
+            "walk me through the steps I need to take. "
+            f"{verification} Tell me the result and report setup as blocked if any check fails. "
+            "Keep my listing data unchanged during setup.",
         ])
         client["prompt"] = "\n\n".join(parts)
     return clients
@@ -284,6 +285,7 @@ def _clients(command: str, base_url: str) -> list[dict[str, Any]]:
         f"Run the server on the Mac running Anteroom. Use the executable in the configuration below. "
         f"Set ANTEROOM_BASE_URL to {base_url} in the MCP server's environment to target this app. "
         "If the anteroom command is missing, help me install it from Anteroom's Agents settings first.",
+        verification="List the Anteroom tools, then call `anteroom_auth_whoami` to check that the app responds.",
     )
 
 
@@ -364,7 +366,9 @@ def _remote_clients(mcp_url: str, *, require_token: bool) -> list[dict[str, Any]
         else "This loopback endpoint is for a client running on the same Mac as Anteroom. "
         "It needs no access token. If your client runs elsewhere, tell me it needs a reachable endpoint."
     )
-    return _with_setup_prompts(clients, "Streamable HTTP", guidance)
+    return _with_setup_prompts(
+        clients, "Streamable HTTP", guidance, verification="List the Anteroom tools to verify the connection."
+    )
 
 
 def _parse_stdout(text: str) -> dict[str, Any] | None:

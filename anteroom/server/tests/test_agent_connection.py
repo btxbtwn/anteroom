@@ -47,6 +47,8 @@ def test_agent_status_describes_a_found_command(monkeypatch, tmp_path):
         assert client["snippet"] in client["prompt"]
         assert body["base_url"] in client["prompt"]
         assert "stdio" in client["prompt"]
+        assert "anteroom_auth_whoami" in client["prompt"]
+        assert "report setup as blocked" in client["prompt"]
     claude = next(client for client in body["clients"] if client["id"] == "claude-code")
     assert claude["command"].startswith("claude mcp add --transport stdio anteroom -- ")
     assert "mcp serve" in claude["command"]
@@ -126,6 +128,7 @@ def test_http_setup_prompts_use_the_served_url_and_authentication():
             assert url in client["prompt"]
             assert "Streamable HTTP" in client["prompt"]
             assert client["snippet"] in client["prompt"]
+            assert "anteroom_auth_whoami" not in client["prompt"]
             assert ("Create token" in client["prompt"]) is require_token
         antigravity = json.loads(clients["antigravity"]["snippet"])["mcpServers"]["anteroom"]
         assert antigravity == {
