@@ -1,6 +1,11 @@
 /* ── Responsive ── */
 
 @media (max-width: 900px) {
+  /* Phones navigate from MobileNav. */
+  .nav-rail {
+    display: none;
+  }
+
   .app-content {
     flex-direction: column;
     position: relative;

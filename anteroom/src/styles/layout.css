@@ -12,6 +12,11 @@
   padding-left: env(safe-area-inset-left, 0px);
   padding-right: env(safe-area-inset-right, 0px);
   --sidebar-column-width: clamp(var(--sidebar-min-width), var(--sidebar-width), 30vw);
+  --nav-rail-width: 48px;
+}
+
+.app-shell:has(.nav-rail[data-pinned="true"]) {
+  --nav-rail-width: 13rem;
 }
 
 /* Seamless titlebar, as T3 Code: the topbar floats transparent over the
@@ -38,7 +43,46 @@
   overflow-y: auto;
 }
 
-/* App sets --sidebar-width and --sidebar-min-width from the footer's button row. */
+/* The page links down the left edge (NavRail). The column runs under the
+   transparent titlebar in the sidebar colour; the panel starts below it, so
+   the titlebar's controls stay clickable, and widens over the listings when a
+   mouse rests on it. Pinned, the column itself is wide and the page moves over. */
+.nav-rail {
+  position: relative;
+  flex-shrink: 0;
+  width: var(--nav-rail-width);
+  background: var(--sidebar);
+}
+
+.nav-rail-panel {
+  position: absolute;
+  top: var(--workspace-topbar-height);
+  bottom: 0;
+  left: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 4px 8px 8px;
+  overflow: hidden;
+  background: var(--sidebar);
+  border-right: 1px solid var(--color-ink-border);
+  transition: width 150ms ease;
+}
+
+.nav-rail[data-expanded="true"][data-pinned="false"] .nav-rail-panel {
+  width: 13rem;
+  border-top: 1px solid var(--color-ink-border);
+  border-top-right-radius: var(--control-radius);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-rail-panel {
+    transition: none;
+  }
+}
+
+/* App sets --sidebar-width and --sidebar-min-width. */
 .sidebar {
   width: var(--sidebar-column-width);
   flex-shrink: 0;

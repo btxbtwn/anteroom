@@ -7,7 +7,6 @@ import { ListingSidebar } from "./ListingSidebar";
 import type { ListingFilters } from "./ListingFilters";
 import type { VirtualListingList } from "./sidebar/VirtualListingList";
 vi.mock("@tanstack/react-query", () => ({ useQuery: () => ({ data: undefined }) }));
-vi.mock("./sidebar/SidebarFooter", () => ({ SidebarFooter: () => null }));
 vi.mock("./sidebar/BulkSelection", () => ({ BulkActionBar: () => null, BulkSelectionDialogs: () => null }));
 vi.mock("./sidebar/VirtualListingList", () => ({ VirtualListingList: ({ rows, children }: ComponentProps<typeof VirtualListingList>) => <div>{rows.map(row => <span key={row.id}>{row.id}</span>)}{children}</div> }));
 vi.mock("./ListingFilters", () => ({ ListingFilters: (p: ComponentProps<typeof ListingFilters>) => <div>
@@ -21,8 +20,7 @@ let root = createRoot(container);
 afterEach(async () => { await act(() => root.unmount()); root = createRoot(container); });
 const base: ComponentProps<typeof ListingSidebar> = {
   conversations: [], selectedConvId: "one", activeView: "listings", settingsSection: "general", creating: false,
-  onSelect: noop, onDelete: noop, onCreate: noop, onOpenHome: noop, onOpenSettings: noop, onOpenAnalytics: noop,
-  onOpenMarketplaces: noop, onOpenAutomations: noop, onOpenAssistant: noop, onOpenSourcing: noop,
+  onSelect: noop, onDelete: noop, onCreate: noop,
   onOpenSuggestions: noop, onToggleInventoryTable: noop, onCloseSettings: noop,
   onSettingsSectionChange: noop, onSettingsSearchResult: noop,
   bulk: { running: false } as ComponentProps<typeof ListingSidebar>["bulk"],
