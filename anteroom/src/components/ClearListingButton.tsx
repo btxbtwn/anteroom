@@ -199,16 +199,15 @@ export function RegenerateListingButton({
     // One rewrite per item: held from here until the reset settles, so a second
     // Rewrite while this one asks or resets is ignored.
     if (!holdRewrite(convId)) return;
-    const hold = (held: boolean) => {
-      if (!held) releaseRewrite(convId);
-      setPreparing(held);
-    };
-    hold(true);
+    setPreparing(true);
     try {
-      regenerate.mutate(await prepareRewrite(), { onSettled: () => hold(false) });
-    } catch (err) {
-      hold(false);
-      throw err;
+      await regenerate.mutateAsync(await prepareRewrite()).catch(() => {
+        // The mutation's onError shows the failure.
+      });
+    } finally {
+      // The shared hold must be released even if this button has unmounted.
+      releaseRewrite(convId);
+      setPreparing(false);
     }
   }
 
