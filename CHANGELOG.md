@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1175 — 2026-11-23
+
+- A Pixelate, blur, arrow or other mark drawn quickly on a photo is no longer sometimes lost when you let go.
+
 ## 0.1.1174 — 2026-11-23
 
 - Move the page buttons (Today, Assistant, Sourcing, Analytics, Marketplaces, Automations, Settings) out of the bottom of the listings sidebar into a slim rail on the left edge. Rest the mouse on it to see page names, or pin it open with the pin button or the [ key, and the page moves over to make room.
