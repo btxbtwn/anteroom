@@ -1,0 +1,1 @@
+- Auto-Relist works through a long backlog a little at a time, so scheduled listings and automations no longer wait hours behind it.
