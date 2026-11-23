@@ -145,6 +145,8 @@ def test_mcp_tools_list_and_read_write_lifecycle_respects_safety_invariant():
         "manage_listing_photos",
         "manage_labels_and_notes",
         "delete_draft_listing",
+        "dismiss_attention_items",
+        "restore_attention_items",
     }
     assert expected_tools.issubset(tool_names)
     for forbidden in ("publish", "delist", "push_live", "send_to_marketplace"):
@@ -671,6 +673,8 @@ LISTING_WRITE_TOOLS = {
     "create_draft_listing", "edit_listing", "manage_listing_photos",
     "manage_labels_and_notes", "delete_draft_listing",
 }
+ATTENTION_WRITE_TOOLS = {"dismiss_attention_items", "restore_attention_items"}
+ALL_TOOLS = READ_TOOLS | LISTING_WRITE_TOOLS | ATTENTION_WRITE_TOOLS
 
 
 def _tool_names(client: TestClient, extra_headers: dict | None = None) -> set[str]:
@@ -721,7 +725,7 @@ def test_desktop_mcp_token_permissions_limit_tools_and_apply_on_the_next_call():
     assert is_error
 
     # The Mac's own loopback requests without a token keep every tool.
-    assert _tool_names(client) == READ_TOOLS | LISTING_WRITE_TOOLS
+    assert _tool_names(client) == ALL_TOOLS
 
     # Unknown areas and levels are refused; a revoked token cannot be changed.
     assert client.patch(
@@ -780,7 +784,7 @@ def test_hosted_mcp_token_permissions_are_enforced_and_seller_scoped(cloud, sign
     assert client.patch(
         f"/api/settings/mcp-tokens/{token['id']}", headers=bearer, json={"permissions": {"analytics": "none"}},
     ).status_code == 401
-    assert _tool_names(client, alice) == READ_TOOLS | LISTING_WRITE_TOOLS
+    assert _tool_names(client, alice) == ALL_TOOLS
 
 
 def test_existing_mcp_tokens_keep_full_access_after_migration(migration_engine):  # noqa: F811
@@ -805,3 +809,96 @@ def test_existing_mcp_tokens_keep_full_access_after_migration(migration_engine):
         """)).scalar() if engine.dialect.name == "postgresql" else None
     assert stored == {"listings": "write", "analytics": "read", "attention": "read"}
     assert default is None
+
+
+def _seed_failed_job(db, conv_id: str, title: str, **owner) -> str:
+    conv = Conversation(id=conv_id, title=title, status="draft", **owner)
+    db.add(conv)
+    db.flush()
+    job = Job(
+        conversation_id=conv_id, approved_revision_id="rev-1", listing_snapshot={"title": title},
+        status="failed", last_error="A delist did not finish.", **owner,
+    )
+    db.add(job)
+    db.flush()
+    return f"failed-job:{conv_id}:{job.id}"
+
+
+def _attention_keys(client: TestClient, extra_headers: dict) -> set[str]:
+    summary, is_error = _call_tool(client, "get_needs_attention", {}, extra_headers=extra_headers)
+    assert not is_error, summary
+    return {item["key"] for item in summary["needs_attention"]}
+
+
+def test_mcp_token_with_needs_attention_write_dismisses_and_restores_alerts():
+    client = TestClient(app)
+    with SessionLocal() as db:
+        key = _seed_failed_job(db, "conv-stale-delist", "Polo Quarter-Zip")
+        db.commit()
+    created = client.post("/api/settings/mcp-tokens", json={"name": "Triage"}).json()
+    bearer = {"Authorization": f"Bearer {created['token']}"}
+
+    # Read access sees the alert but cannot dismiss it.
+    assert key in _attention_keys(client, bearer)
+    assert ATTENTION_WRITE_TOOLS.isdisjoint(_tool_names(client, bearer))
+    refused, is_error = _call_tool(client, "dismiss_attention_items", {"item_keys": [key]}, extra_headers=bearer)
+    assert is_error and "Needs Attention to Read and write" in refused["error"]
+    assert key in _attention_keys(client, bearer)
+
+    client.patch(f"/api/settings/mcp-tokens/{created['id']}", json={"permissions": {"attention": "write"}})
+    result, is_error = _call_tool(
+        client, "dismiss_attention_items", {"item_keys": [key, "failed-job:gone:gone"]}, extra_headers=bearer,
+    )
+    assert not is_error, result
+    assert [row["item_key"] for row in result["dismissed"]] == [key]
+    assert result["dismissed"][0]["reappears_in_days"] == 7
+    assert result["not_found"] == ["failed-job:gone:gone"]
+    assert key not in _attention_keys(client, bearer)
+    # The app's own Home view hides it too.
+    home = client.get("/api/home?timezone=UTC")
+    assert home.status_code == 200, home.text
+    assert key not in {item["key"] for item in home.json()["needs_attention"]}
+
+    restored, is_error = _call_tool(
+        client, "restore_attention_items", {"item_keys": [key, "never-dismissed"]}, extra_headers=bearer,
+    )
+    assert not is_error, restored
+    assert restored == {"restored": [key], "not_dismissed": ["never-dismissed"]}
+    assert key in _attention_keys(client, bearer)
+
+    _, is_error = _call_tool(client, "dismiss_attention_items", {"item_keys": []}, extra_headers=bearer)
+    assert is_error
+    _, is_error = _call_tool(
+        client, "dismiss_attention_items", {"item_keys": ["k"] * 101}, extra_headers=bearer,
+    )
+    assert is_error
+
+
+def test_hosted_mcp_dismissal_belongs_to_the_tokens_seller(cloud, signing_keys):  # noqa: F811
+    from anteroom.models.home import AttentionDismissal
+
+    client, engine = cloud
+    alice = headers(signing_keys, USER_ID)
+    bob = headers(signing_keys, BOB)
+    with Session(engine) as db:
+        alice_key = _seed_failed_job(db, "alice-stale", "Alice Tee", user_id=USER_ID)
+        bob_key = _seed_failed_job(db, "bob-stale", "Bob Tee", user_id=BOB)
+        db.commit()
+    created = client.post(
+        "/api/settings/mcp-tokens", headers=alice, json={"name": "Alice triage", "permissions": {"attention": "write"}},
+    ).json()
+    bearer = {"Authorization": f"Bearer {created['token']}"}
+
+    result, is_error = _call_tool(
+        client, "dismiss_attention_items", {"item_keys": [alice_key, bob_key]}, extra_headers=bearer,
+    )
+    assert not is_error, result
+    assert [row["item_key"] for row in result["dismissed"]] == [alice_key]
+    assert result["not_found"] == [bob_key]
+    with Session(engine) as db:
+        rows = db.execute(select(AttentionDismissal.user_id, AttentionDismissal.item_key)).all()
+    assert [(row.user_id, row.item_key) for row in rows] == [(USER_ID, alice_key)]
+    bob_token = client.post(
+        "/api/settings/mcp-tokens", headers=bob, json={"name": "Bob", "permissions": {"attention": "read"}},
+    ).json()
+    assert bob_key in _attention_keys(client, {"Authorization": f"Bearer {bob_token['token']}"})

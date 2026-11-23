@@ -1,1 +1,2 @@
-- Choose what each MCP access token can do in Settings → Agents: no access, read, or read and write for listings, and read access to analytics and Needs Attention. Changes apply to the token's next request, and new tokens start read-only.
+- Choose what each MCP access token can do in Settings → Agents: no access, read, or read and write for listings and for Needs Attention, and read access to analytics. Changes apply to the token's next request, and new tokens start read-only.
+- An AI assistant whose token has Needs Attention set to read and write can dismiss alerts you've already handled, and bring them back. Dismissing only hides the alert in Anteroom; it never changes a listing or a marketplace.

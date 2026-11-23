@@ -95,7 +95,11 @@ TOOL_PERMISSIONS: dict[str, tuple[str, str]] = {
     "get_sourcing_roi": ("analytics", "read"),
     "run_etsy_audit": ("analytics", "read"),
     "get_needs_attention": ("attention", "read"),
+    "dismiss_attention_items": ("attention", "write"),
+    "restore_attention_items": ("attention", "write"),
 }
+
+MAX_ATTENTION_KEYS = 100
 
 _AREA_NAMES = {"listings": "Listings", "analytics": "Analytics", "attention": "Needs Attention"}
 _LEVEL_NAMES = {"read": "Read", "write": "Read and write"}
@@ -238,6 +242,47 @@ def tool_definitions() -> list[dict[str, Any]]:
                 "properties": {
                     "timezone": {"type": "string", "default": "UTC", "description": "IANA timezone name, e.g. America/Chicago."},
                 },
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "dismiss_attention_items",
+            "description": (
+                "Dismiss Needs Attention items by their key (from get_needs_attention). "
+                f"A dismissed item comes back after {home_dashboard.DISMISS_TTL_DAYS} days if it "
+                "still applies. Only hides the alert in Anteroom: it never changes a listing "
+                "or anything on a marketplace."
+            ),
+            "annotations": {**_WRITE_ANNOTATIONS, "idempotentHint": True},
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "item_keys": {
+                        "type": "array",
+                        "items": {"type": "string", "maxLength": 200},
+                        "minItems": 1,
+                        "maxItems": MAX_ATTENTION_KEYS,
+                    },
+                },
+                "required": ["item_keys"],
+                "additionalProperties": False,
+            },
+        },
+        {
+            "name": "restore_attention_items",
+            "description": "Bring dismissed Needs Attention items back into the inbox by their key.",
+            "annotations": {**_WRITE_ANNOTATIONS, "idempotentHint": True},
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "item_keys": {
+                        "type": "array",
+                        "items": {"type": "string", "maxLength": 200},
+                        "minItems": 1,
+                        "maxItems": MAX_ATTENTION_KEYS,
+                    },
+                },
+                "required": ["item_keys"],
                 "additionalProperties": False,
             },
         },
@@ -564,6 +609,8 @@ def _dispatch_tool(
         "get_sourcing_roi": _tool_get_sourcing_roi,
         "run_etsy_audit": _tool_run_etsy_audit,
         "get_needs_attention": _tool_get_needs_attention,
+        "dismiss_attention_items": _tool_dismiss_attention_items,
+        "restore_attention_items": _tool_restore_attention_items,
         "create_draft_listing": _tool_create_draft_listing,
         "edit_listing": _tool_edit_listing,
         "manage_listing_photos": _tool_manage_listing_photos,
@@ -816,6 +863,40 @@ def _tool_run_etsy_audit(db: Session, _args: dict[str, Any], **_kw: Any) -> dict
 def _tool_get_needs_attention(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str, Any]:
     tz = str(args.get("timezone") or "UTC").strip() or "UTC"
     return home_dashboard.home_summary(db, tz_name=tz)
+
+
+def _attention_keys(args: dict[str, Any]) -> list[str]:
+    raw = args.get("item_keys")
+    if not isinstance(raw, list) or not raw:
+        raise McpToolError("item_keys must list at least one Needs Attention item key.")
+    if len(raw) > MAX_ATTENTION_KEYS:
+        raise McpToolError(f"Send at most {MAX_ATTENTION_KEYS} item keys at a time.")
+    keys: list[str] = []
+    for value in raw:
+        if not isinstance(value, str) or not value.strip() or len(value.strip()) > 200:
+            raise McpToolError("Each item key must be a non-empty string of at most 200 characters.")
+        if value.strip() not in keys:
+            keys.append(value.strip())
+    return keys
+
+
+def _tool_dismiss_attention_items(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str, Any]:
+    keys = _attention_keys(args)
+    kinds = home_dashboard.attention_item_kinds(db)
+    dismissed: list[dict[str, Any]] = []
+    not_found: list[str] = []
+    for key in keys:
+        if key not in kinds:
+            not_found.append(key)
+            continue
+        dismissed.append(home_dashboard.dismiss_attention_item(db, item_key=key, kind=kinds[key]))
+    return {"dismissed": dismissed, "not_found": not_found}
+
+
+def _tool_restore_attention_items(db: Session, args: dict[str, Any], **_kw: Any) -> dict[str, Any]:
+    keys = _attention_keys(args)
+    restored = [key for key in keys if home_dashboard.restore_attention_item(db, item_key=key)]
+    return {"restored": restored, "not_dismissed": [key for key in keys if key not in restored]}
 
 
 # ---------------------------------------------------------------------------

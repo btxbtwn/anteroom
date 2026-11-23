@@ -38,7 +38,7 @@ const PERMISSION_AREAS: ReadonlyArray<{
 }> = [
   { area: "listings", label: "Listings", levels: ["none", "read", "write"] },
   { area: "analytics", label: "Analytics", levels: ["none", "read"] },
-  { area: "attention", label: "Needs Attention", levels: ["none", "read"] },
+  { area: "attention", label: "Needs Attention", levels: ["none", "read", "write"] },
 ];
 
 const NEW_TOKEN_PERMISSIONS: McpTokenPermissions = { listings: "read", analytics: "read", attention: "read" };

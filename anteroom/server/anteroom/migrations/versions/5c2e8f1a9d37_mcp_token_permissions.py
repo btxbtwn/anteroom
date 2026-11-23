@@ -25,6 +25,11 @@ EXISTING_TOKEN_ACCESS = '{"listings": "write", "analytics": "read", "attention":
 
 
 def upgrade() -> None:
+    # A database adopted from before migrations is built from the current models
+    # and already has the column.
+    columns = {column["name"] for column in sa.inspect(op.get_bind()).get_columns('mcp_access_tokens')}
+    if 'permissions' in columns:
+        return
     with op.batch_alter_table('mcp_access_tokens', schema=None) as batch_op:
         batch_op.add_column(sa.Column(
             'permissions', sa.JSON(), nullable=False, server_default=EXISTING_TOKEN_ACCESS,

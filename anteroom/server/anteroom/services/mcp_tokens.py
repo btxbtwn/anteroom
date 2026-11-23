@@ -27,7 +27,7 @@ MAX_EXPIRY_DAYS = 365
 AREA_LEVELS: dict[str, tuple[str, ...]] = {
     "listings": ("none", "read", "write"),
     "analytics": ("none", "read"),
-    "attention": ("none", "read"),
+    "attention": ("none", "read", "write"),
 }
 DEFAULT_PERMISSIONS: dict[str, str] = {"listings": "read", "analytics": "read", "attention": "read"}
 
