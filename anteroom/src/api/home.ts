@@ -189,12 +189,16 @@ export function mergeHomeSnapshot(
     if (action.op === "dismiss") {
       const active = merged.needs_attention.find((entry) => entry.key === key);
       if (active) {
-        merged = patchHomeAfterDismiss(merged, active, action.dismissal ?? {
-          item_key: key,
-          dismissed_at: action.item.dismissed_at,
-          expires_at: action.item.expires_at,
-          reappears_in_days: action.item.reappears_in_days,
-        });
+        merged = patchHomeAfterDismiss(
+          merged,
+          active,
+          action.dismissal ?? {
+            item_key: key,
+            dismissed_at: action.item.dismissed_at ?? undefined,
+            expires_at: action.item.expires_at ?? undefined,
+            reappears_in_days: action.item.reappears_in_days,
+          },
+        );
       }
       continue;
     }
