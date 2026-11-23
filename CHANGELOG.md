@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1163 — 2026-11-23
+
+- Assistants connected to Anteroom (MCP) no longer see marketplaces you already delisted, marked not listed or sold on as live.
+
 ## 0.1.1162 — 2026-11-23
 
 - Needs Attention no longer keeps "A delist did not finish" once every marketplace it failed on has been delisted, marked not listed, or marked sold.

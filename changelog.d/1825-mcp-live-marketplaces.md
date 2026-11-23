@@ -1,1 +1,0 @@
-- Assistants connected to Anteroom (MCP) no longer see marketplaces you already delisted, marked not listed or sold on as live.
