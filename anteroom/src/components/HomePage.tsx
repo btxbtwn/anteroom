@@ -13,7 +13,10 @@ import {
 } from "lucide-react";
 import { api } from "../api/client";
 import {
+  applyGoalHomeSnapshot,
   browserTimeZone,
+  patchHomeAfterDismiss,
+  patchHomeAfterRestore,
   type AttentionItem,
   type AttentionKind,
   type AttentionTarget,
@@ -149,26 +152,58 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
   const [goalLabel, setGoalLabel] = useState("");
   const [goalFormError, setGoalFormError] = useState<string | null>(null);
 
-  const syncHome = async (next: HomeSummaryResponse | undefined) => {
+  const syncGoalsHome = async (next: HomeSummaryResponse | undefined) => {
     await queryClient.cancelQueries({ queryKey: queryDef.queryKey, exact: true });
     if (next) {
-      queryClient.setQueryData(queryDef.queryKey, next);
+      const local = queryClient.getQueryData<HomeSummaryResponse>(queryDef.queryKey);
+      queryClient.setQueryData(queryDef.queryKey, applyGoalHomeSnapshot(next, local));
     } else {
       await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
     }
   };
 
-  const mutationScope = { id: "today-dashboard" };
+  const patchHomeCache = (patch: (current: HomeSummaryResponse) => HomeSummaryResponse) => {
+    const current = queryClient.getQueryData<HomeSummaryResponse>(queryDef.queryKey);
+    if (!current) return undefined;
+    const next = patch(current);
+    queryClient.setQueryData(queryDef.queryKey, next);
+    return current;
+  };
+
+  // Goals share one queue so overlapping edits stay ordered. Dismiss/restore
+  // stay off that queue and patch the cache immediately — a full Today rebuild
+  // used to stall every Dismiss on large inventories. Same-alert dismiss then
+  // restore still runs in order so a late dismiss cannot undo a newer restore.
+  // Goal responses only refresh today/goals so they cannot wipe those patches.
+  const goalMutationScope = { id: "today-goals" };
+  const attentionQueues = useRef(new Map<string, Promise<unknown>>());
+  const attentionEpoch = useRef(new Map<string, number>());
+
+  const bumpAttentionEpoch = (key: string) => {
+    const next = (attentionEpoch.current.get(key) ?? 0) + 1;
+    attentionEpoch.current.set(key, next);
+    return next;
+  };
+
+  const runAttentionOp = <T,>(key: string, op: () => Promise<T>): Promise<T> => {
+    const prior = attentionQueues.current.get(key) ?? Promise.resolve();
+    const next = prior.catch(() => undefined).then(op);
+    attentionQueues.current.set(key, next.then(() => undefined, () => undefined));
+    return next;
+  };
+
+  const attentionOpIsCurrent = (key: string, epoch: number | undefined) =>
+    epoch != null && attentionEpoch.current.get(key) === epoch;
 
   const saveGoal = useMutation({
-    scope: mutationScope,
+    scope: goalMutationScope,
     mutationFn: ({ id, body }: {
       id: string | null;
       body: Parameters<typeof api.home.upsertGoal>[0];
       formVersion: number;
     }) => id ? api.home.updateGoal(id, body, timezone) : api.home.upsertGoal(body, timezone),
     onSuccess: async (res, { formVersion }) => {
-      await syncHome(res.home);
+      await syncGoalsHome(res.home);
       if (goalFormVersion.current !== formVersion) return;
       setGoalFormOpen(false);
       setEditingGoalId(null);
@@ -183,21 +218,47 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
   });
 
   const removeGoal = useMutation({
-    scope: mutationScope,
+    scope: goalMutationScope,
     mutationFn: (goalId: string) => api.home.deleteGoal(goalId, timezone),
-    onSuccess: (res) => syncHome(res.home),
+    onSuccess: (res) => syncGoalsHome(res.home),
   });
 
   const dismissItem = useMutation({
-    scope: mutationScope,
-    mutationFn: (item: AttentionItem) => api.home.dismissAttention(item.key, item.kind, timezone),
-    onSuccess: (res) => syncHome(res.home),
+    mutationFn: (item: AttentionItem) =>
+      runAttentionOp(item.key, () => api.home.dismissAttention(item.key, item.kind, timezone)),
+    onMutate: async (item) => {
+      await queryClient.cancelQueries({ queryKey: queryDef.queryKey, exact: true });
+      const epoch = bumpAttentionEpoch(item.key);
+      patchHomeCache((current) => patchHomeAfterDismiss(current, item));
+      return { key: item.key, epoch };
+    },
+    onSuccess: (res, item, ctx) => {
+      if (!attentionOpIsCurrent(item.key, ctx?.epoch)) return;
+      patchHomeCache((current) => patchHomeAfterDismiss(current, item, res.dismissal));
+    },
+    onError: async (_err, item, ctx) => {
+      if (!attentionOpIsCurrent(item.key, ctx?.epoch)) return;
+      await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
+    },
   });
 
   const restoreItem = useMutation({
-    scope: mutationScope,
-    mutationFn: (itemKey: string) => api.home.restoreAttention(itemKey, timezone),
-    onSuccess: (res) => syncHome(res.home),
+    mutationFn: (itemKey: string) =>
+      runAttentionOp(itemKey, () => api.home.restoreAttention(itemKey, timezone)),
+    onMutate: async (itemKey) => {
+      await queryClient.cancelQueries({ queryKey: queryDef.queryKey, exact: true });
+      const epoch = bumpAttentionEpoch(itemKey);
+      patchHomeCache((current) => patchHomeAfterRestore(current, itemKey));
+      return { key: itemKey, epoch };
+    },
+    onSuccess: (res, itemKey, ctx) => {
+      if (!attentionOpIsCurrent(itemKey, ctx?.epoch)) return;
+      patchHomeCache((current) => patchHomeAfterRestore(current, res.item_key ?? itemKey));
+    },
+    onError: async (_err, itemKey, ctx) => {
+      if (!attentionOpIsCurrent(itemKey, ctx?.epoch)) return;
+      await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
+    },
   });
 
   const openNewGoalForm = () => {
@@ -581,7 +642,6 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
                         type="button"
                         variant="ghost"
                         size="xs"
-                        disabled={dismissItem.isPending}
                         onClick={() => dismissItem.mutate(item)}
                         aria-label={`Dismiss ${item.title} for 7 days`}
                       >
@@ -628,7 +688,6 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
                       type="button"
                       variant="ghost"
                       size="xs"
-                      disabled={restoreItem.isPending}
                       onClick={() => restoreItem.mutate(item.key)}
                       aria-label={`Restore ${item.title}`}
                     >

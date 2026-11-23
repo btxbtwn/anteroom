@@ -1876,13 +1876,13 @@ export const api = {
         `/home/goals/${encodeURIComponent(goalId)}?timezone=${encodeURIComponent(timezone)}`,
         { method: "DELETE" },
       ),
-    dismissAttention: (itemKey: string, kind: string, timezone = browserTimeZone()) =>
-      request<HomeMutationResponse>(`/home/attention/dismiss?timezone=${encodeURIComponent(timezone)}`, {
+    dismissAttention: (itemKey: string, kind: string, _timezone = browserTimeZone()) =>
+      request<HomeMutationResponse>("/home/attention/dismiss", {
         method: "POST",
         body: JSON.stringify({ item_key: itemKey, kind }),
       }),
-    restoreAttention: (itemKey: string, timezone = browserTimeZone()) =>
-      request<HomeMutationResponse>(`/home/attention/restore?timezone=${encodeURIComponent(timezone)}`, {
+    restoreAttention: (itemKey: string, _timezone = browserTimeZone()) =>
+      request<HomeMutationResponse>("/home/attention/restore", {
         method: "POST",
         body: JSON.stringify({ item_key: itemKey }),
       }),

@@ -1,0 +1,1 @@
+- Dismissing a Needs attention alert responds right away instead of waiting for the whole Today page to rebuild

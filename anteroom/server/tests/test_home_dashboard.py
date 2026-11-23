@@ -476,14 +476,18 @@ def test_needs_attention_categories_dismiss_and_seven_day_expiry():
     assert "relist_gap" in kinds
     assert "duplicate_listing" in kinds
 
-    # Dismiss one item -> moves from needs_attention to dismissed
+    # Dismiss one item -> persists without rebuilding the full dashboard
     target_item = next(i for i in body["needs_attention"] if i["kind"] == "failed_job")
     dismissed_resp = client.post(
-        "/api/home/attention/dismiss?timezone=UTC",
+        "/api/home/attention/dismiss",
         json={"item_key": target_item["key"], "kind": target_item["kind"]},
     )
     assert dismissed_resp.status_code == 200
-    after_dismiss = dismissed_resp.json()["home"]
+    dismissed_body = dismissed_resp.json()
+    assert dismissed_body["ok"] is True
+    assert dismissed_body["dismissal"]["item_key"] == target_item["key"]
+    assert "home" not in dismissed_body
+    after_dismiss = client.get("/api/home?timezone=UTC").json()
     assert all(i["key"] != target_item["key"] for i in after_dismiss["needs_attention"])
     assert any(i["key"] == target_item["key"] for i in after_dismiss["dismissed"])
 
@@ -499,15 +503,20 @@ def test_needs_attention_categories_dismiss_and_seven_day_expiry():
 
     # Dismiss again, then explicitly restore
     client.post(
-        "/api/home/attention/dismiss?timezone=UTC",
+        "/api/home/attention/dismiss",
         json={"item_key": target_item["key"], "kind": target_item["kind"]},
     )
     restored = client.post(
-        "/api/home/attention/restore?timezone=UTC",
+        "/api/home/attention/restore",
         json={"item_key": target_item["key"]},
     )
     assert restored.status_code == 200
-    assert any(i["key"] == target_item["key"] for i in restored.json()["home"]["needs_attention"])
+    restored_body = restored.json()
+    assert restored_body == {"ok": True, "restored": True, "item_key": target_item["key"]}
+    assert any(
+        i["key"] == target_item["key"]
+        for i in client.get("/api/home?timezone=UTC").json()["needs_attention"]
+    )
 
 
 def test_duplicate_limit_keeps_all_unresolved_dismissals():
@@ -563,6 +572,39 @@ def test_saved_delete_succeeds_if_dashboard_refresh_fails(monkeypatch):
     assert result.json() == {"ok": True}
     with SessionLocal() as db:
         assert db.get(SellerGoal, goal_id) is None
+
+
+def test_dismiss_and_restore_skip_home_summary_rebuild(monkeypatch):
+    client = TestClient(app)
+    calls = {"n": 0}
+
+    def counting_summary(*_args, **_kwargs):
+        calls["n"] += 1
+        raise AssertionError("home_summary must not run on dismiss or restore")
+
+    monkeypatch.setattr(home_dashboard, "home_summary", counting_summary)
+    dismissed = client.post(
+        "/api/home/attention/dismiss",
+        json={"item_key": "publish-error:conv-1:ebay", "kind": "failed_job"},
+    )
+    assert dismissed.status_code == 200
+    body = dismissed.json()
+    assert body["ok"] is True
+    assert body["dismissal"]["item_key"] == "publish-error:conv-1:ebay"
+    assert body["dismissal"]["reappears_in_days"] == 7
+    assert "home" not in body
+
+    restored = client.post(
+        "/api/home/attention/restore",
+        json={"item_key": "publish-error:conv-1:ebay"},
+    )
+    assert restored.status_code == 200
+    assert restored.json() == {
+        "ok": True,
+        "restored": True,
+        "item_key": "publish-error:conv-1:ebay",
+    }
+    assert calls["n"] == 0
 
 
 def test_repeated_goal_and_dismissal_saves_replace_existing_values():
