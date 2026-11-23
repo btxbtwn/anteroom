@@ -1,1 +1,0 @@
-- Give the hosted web app 4 GB of memory to reduce the risk of outages during memory spikes.
