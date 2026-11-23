@@ -1,0 +1,1 @@
+- Needs Attention no longer keeps "A delist did not finish" once every marketplace it failed on has been delisted, marked not listed, or marked sold.
