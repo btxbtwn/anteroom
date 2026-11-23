@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1167 — 2026-11-23
+
+- Fixed photo analysis failing when the AI left the optional slab label blank as null.
+
 ## 0.1.1166 — 2026-11-23
 
 - Keep a simulated timeout from interrupting MCP authentication checks in CI.
