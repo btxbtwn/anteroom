@@ -170,8 +170,27 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
 
   // Goals share one queue so overlapping edits stay ordered. Dismiss/restore
   // stay off that queue and patch the cache immediately — a full Today rebuild
-  // used to stall every Dismiss on large inventories.
+  // used to stall every Dismiss on large inventories. Same-alert dismiss then
+  // restore still runs in order so a late dismiss cannot undo a newer restore.
   const goalMutationScope = { id: "today-goals" };
+  const attentionQueues = useRef(new Map<string, Promise<unknown>>());
+  const attentionEpoch = useRef(new Map<string, number>());
+
+  const bumpAttentionEpoch = (key: string) => {
+    const next = (attentionEpoch.current.get(key) ?? 0) + 1;
+    attentionEpoch.current.set(key, next);
+    return next;
+  };
+
+  const runAttentionOp = <T,>(key: string, op: () => Promise<T>): Promise<T> => {
+    const prior = attentionQueues.current.get(key) ?? Promise.resolve();
+    const next = prior.catch(() => undefined).then(op);
+    attentionQueues.current.set(key, next.then(() => undefined, () => undefined));
+    return next;
+  };
+
+  const attentionOpIsCurrent = (key: string, epoch: number | undefined) =>
+    epoch != null && attentionEpoch.current.get(key) === epoch;
 
   const saveGoal = useMutation({
     scope: goalMutationScope,
@@ -202,39 +221,47 @@ export function HomePage({ onNavigateAttention }: HomePageProps) {
   });
 
   const dismissItem = useMutation({
-    mutationFn: (item: AttentionItem) => api.home.dismissAttention(item.key, item.kind, timezone),
+    mutationFn: (item: AttentionItem) =>
+      runAttentionOp(item.key, () => api.home.dismissAttention(item.key, item.kind, timezone)),
     onMutate: async (item) => {
       await queryClient.cancelQueries({ queryKey: queryDef.queryKey, exact: true });
+      const epoch = bumpAttentionEpoch(item.key);
       patchHomeCache((current) => patchHomeAfterDismiss(current, item));
+      return { key: item.key, epoch };
     },
-    onSuccess: (res, item) => {
+    onSuccess: (res, item, ctx) => {
+      if (!attentionOpIsCurrent(item.key, ctx?.epoch)) return;
       if (res.home) {
         queryClient.setQueryData(queryDef.queryKey, res.home);
         return;
       }
       patchHomeCache((current) => patchHomeAfterDismiss(current, item, res.dismissal));
     },
-    onError: async () => {
-      // Refetch instead of rolling back a snapshot: another dismiss/restore may
-      // have patched the same cache while this request was in flight.
+    onError: async (_err, item, ctx) => {
+      if (!attentionOpIsCurrent(item.key, ctx?.epoch)) return;
       await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
     },
   });
 
   const restoreItem = useMutation({
-    mutationFn: (itemKey: string) => api.home.restoreAttention(itemKey, timezone),
+    mutationFn: (itemKey: string) =>
+      runAttentionOp(itemKey, () => api.home.restoreAttention(itemKey, timezone)),
     onMutate: async (itemKey) => {
       await queryClient.cancelQueries({ queryKey: queryDef.queryKey, exact: true });
+      const epoch = bumpAttentionEpoch(itemKey);
       patchHomeCache((current) => patchHomeAfterRestore(current, itemKey));
+      return { key: itemKey, epoch };
     },
-    onSuccess: (res, itemKey) => {
+    onSuccess: (res, itemKey, ctx) => {
+      if (!attentionOpIsCurrent(itemKey, ctx?.epoch)) return;
       if (res.home) {
         queryClient.setQueryData(queryDef.queryKey, res.home);
         return;
       }
       patchHomeCache((current) => patchHomeAfterRestore(current, res.item_key ?? itemKey));
     },
-    onError: async () => {
+    onError: async (_err, itemKey, ctx) => {
+      if (!attentionOpIsCurrent(itemKey, ctx?.epoch)) return;
       await queryClient.invalidateQueries({ queryKey: queryDef.queryKey, exact: true });
     },
   });

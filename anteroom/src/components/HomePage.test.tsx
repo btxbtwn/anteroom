@@ -268,7 +268,7 @@ describe("HomePage", () => {
     expect(api.home.summary).toHaveBeenCalledTimes(1);
   });
 
-  it("lets Restore run while a slow Dismiss is still saving", async () => {
+  it("lets Restore of a different alert run while a slow Dismiss is still saving", async () => {
     let finishDismiss!: (result: { ok: boolean; dismissal: {
       item_key: string;
       dismissed_at: string;
@@ -304,6 +304,62 @@ describe("HomePage", () => {
     }));
     await settle();
     expect(api.home.summary).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Restore when a slower same-alert Dismiss finishes later", async () => {
+    let finishDismiss!: (result: { ok: boolean; dismissal: {
+      item_key: string;
+      dismissed_at: string;
+      expires_at: string;
+      reappears_in_days: number;
+    } }) => void;
+    let finishRestore!: (result: { ok: boolean; restored: boolean; item_key: string }) => void;
+    api.home.dismissAttention.mockReturnValueOnce(new Promise((resolve) => { finishDismiss = resolve; }));
+    api.home.restoreAttention.mockReturnValueOnce(new Promise((resolve) => { finishRestore = resolve; }));
+    await renderHome();
+
+    const byLabel = (label: string) => [...container.querySelectorAll("button")]
+      .find((node) => node.textContent?.trim() === label)!;
+    const coat = "Vintage Wool Coat sold on eBay — still live on Poshmark";
+
+    await act(() => byLabel("Dismiss").click());
+    await settle();
+    expect(api.home.dismissAttention).toHaveBeenCalledOnce();
+    expect(container.textContent).not.toContain(coat);
+
+    await act(() => byLabel("Dismissed").click());
+    const restoreCoat = [...container.querySelectorAll("button")].find(
+      (node) => node.getAttribute("aria-label") === `Restore ${coat}`,
+    )!;
+    await act(() => restoreCoat.click());
+    await settle();
+    // Optimistic restore moves it out of Dismissed immediately; the API waits
+    // for the in-flight dismiss of the same key.
+    expect(container.textContent).not.toContain(coat);
+    expect(api.home.restoreAttention).not.toHaveBeenCalled();
+
+    await act(() => finishDismiss({
+      ok: true,
+      dismissal: {
+        item_key: "still_listed:conv_1",
+        dismissed_at: "2026-11-22T12:00:00Z",
+        expires_at: "2026-11-29T12:00:00Z",
+        reappears_in_days: 7,
+      },
+    }));
+    await settle();
+    // Stale dismiss success must not put the restored alert back under Dismissed.
+    expect(container.textContent).not.toContain(coat);
+    expect(api.home.restoreAttention).toHaveBeenCalledOnce();
+
+    await act(() => byLabel("Active").click());
+    await act(() => finishRestore({
+      ok: true,
+      restored: true,
+      item_key: "still_listed:conv_1",
+    }));
+    await settle();
+    expect(container.textContent).toContain(coat);
   });
 
   it("keeps a newer goal form when an earlier save completes", async () => {
