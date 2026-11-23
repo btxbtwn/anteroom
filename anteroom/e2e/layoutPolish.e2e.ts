@@ -106,7 +106,7 @@ test("phone screens after the layout fixes", async ({ page, phone }, info) => {
 
 // Safari paints the page canvas under its status bar and behind its floating
 // toolbar, so the header, the page and that canvas must be one color.
-test("a phone page is one color from the status bar to the toolbar", async ({ page, phone }) => {
+test("a phone page is one color from the status bar to the toolbar", async ({ page, phone }, info) => {
   test.skip(!phone, "Phone browser chrome");
   for (const scheme of ["dark", "light"] as const) {
     await page.emulateMedia({ colorScheme: scheme });
@@ -140,5 +140,6 @@ test("a phone page is one color from the status bar to the toolbar", async ({ pa
     });
     expect(surfaces.header, scheme).toBe(surfaces.canvas);
     expect(surfaces.page, scheme).toBe(surfaces.canvas);
+    await page.screenshot({ path: `e2e/results/layout/phone-canvas-${scheme}-${info.project.name}.png` });
   }
 });
