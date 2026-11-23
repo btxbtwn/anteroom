@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1181 — 2026-11-23
+
+- The Assistant greets you by name: set what Anteroom should call you in Settings → Assistant, and it says "Good evening, <name>" on the web and iPhone.
+
 ## 0.1.1180 — 2026-11-23
 
 - When an agent's change to Anteroom times out, it is no longer saved afterwards, so trying again doesn't make a second draft.

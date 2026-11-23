@@ -1,1 +1,0 @@
-- The Assistant greets you by name: set what Anteroom should call you in Settings → Assistant, and it says "Good evening, <name>" on the web and iPhone.
