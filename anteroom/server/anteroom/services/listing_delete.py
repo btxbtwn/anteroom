@@ -7,6 +7,7 @@ the route that happened to need it first.
 from __future__ import annotations
 
 import copy
+import functools
 import logging
 from collections.abc import Callable
 from types import SimpleNamespace
@@ -80,7 +81,7 @@ def wipe_contents(db: Session, conv_id: str, *, keep_photos: bool = False,
         from anteroom.services.listing_videos import video_path
 
         for video in db.query(ListingVideo).filter_by(conversation_id=conv_id).all():
-            removals.append(lambda path=video_path(video): path.unlink(missing_ok=True))
+            removals.append(functools.partial(video_path(video).unlink, missing_ok=True))
             db.delete(video)
     for photo in photos:
         files = SimpleNamespace(stored_filename=photo.stored_filename, source_filename=photo.source_filename,
