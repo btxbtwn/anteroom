@@ -31,20 +31,31 @@ const status: AgentConnectionStatus = {
       where: "Claude → Settings → Connectors → Add custom connector",
       snippet: "Server URL: http://127.0.0.1:4318/api/mcp\nHeader: Authorization: Bearer <your-token>",
       command: "claude mcp add --transport http anteroom http://127.0.0.1:4318/api/mcp --header \"Authorization: Bearer <your-token>\"",
+      prompt: "Set up Claude over Streamable HTTP.",
     },
     {
       id: "chatgpt",
-      label: "ChatGPT",
-      where: "ChatGPT → Settings → Apps & Connectors → Create",
-      snippet: "MCP Server URL: http://127.0.0.1:4318/api/mcp",
+      label: "Codex / ChatGPT",
+      where: "Merge this into the Codex config.toml.",
+      snippet: '[mcp_servers.anteroom]\nurl = "http://127.0.0.1:4318/api/mcp"',
       command: null,
+      prompt: "Set up Codex over Streamable HTTP.",
     },
     {
-      id: "gemini",
-      label: "Gemini",
-      where: "Gemini CLI (~/.gemini/settings.json)",
-      snippet: '{"mcpServers": {"anteroom": {"httpUrl": "http://127.0.0.1:4318/api/mcp"}}}',
+      id: "antigravity",
+      label: "Google Antigravity",
+      where: "Antigravity IDE → MCP Servers → Manage MCP Servers",
+      snippet: '{"mcpServers": {"anteroom": {"serverUrl": "http://127.0.0.1:4318/api/mcp"}}}',
       command: null,
+      prompt: "Set up Google Antigravity over Streamable HTTP.",
+    },
+    {
+      id: "generic",
+      label: "Other MCP clients",
+      where: "Use your client's setup format for a Streamable HTTP MCP server.",
+      snippet: "Server URL: http://127.0.0.1:4318/api/mcp",
+      command: null,
+      prompt: "Set up Anteroom over Streamable HTTP using your MCP client.",
     },
   ],
   clients: [
@@ -54,6 +65,7 @@ const status: AgentConnectionStatus = {
       where: "Cursor → Settings → MCP",
       snippet: '{\n  "mcpServers": { "anteroom": { "command": "anteroom", "args": ["mcp", "serve"] } }\n}',
       command: null,
+      prompt: "Set up Cursor over local stdio.",
     },
     {
       id: "claude-desktop",
@@ -61,6 +73,7 @@ const status: AgentConnectionStatus = {
       where: "Claude Desktop → Settings → Developer",
       snippet: '{\n  "mcpServers": { "anteroom": { "command": "anteroom", "args": ["mcp", "serve"] } }\n}',
       command: null,
+      prompt: "Set up Claude Desktop over local stdio.",
     },
     {
       id: "claude-code",
@@ -68,6 +81,7 @@ const status: AgentConnectionStatus = {
       where: "Run the command in a terminal",
       snippet: '{\n  "mcpServers": { "anteroom": { "command": "anteroom", "args": ["mcp", "serve"] } }\n}',
       command: "claude mcp add --transport stdio anteroom -- anteroom mcp serve",
+      prompt: "Set up Claude Code over local stdio.",
     },
   ],
 };
@@ -93,7 +107,9 @@ describe("Agent settings", () => {
     expect(html).toContain("http://127.0.0.1:4318/api/mcp");
     expect(html).toContain("Claude");
     expect(html).toContain("ChatGPT");
-    expect(html).toContain("Gemini");
+    for (const client of [...(status.remote_clients ?? []), ...status.clients]) {
+      expect(html).toContain(`aria-label="Copy setup prompt for ${client.label}"`);
+    }
     expect(html).toContain("Access tokens");
     expect(html).toContain("anteroom command");
     expect(html).toContain("Installed and on your PATH, version 9.9.9.");
@@ -162,7 +178,8 @@ describe("Agent settings", () => {
     expect(html).toContain("Claude Desktop");
     expect(html).toContain("arm_abc12345");
     expect(html).toContain("ChatGPT");
-    expect(html).toContain("Gemini");
-    expect(html).not.toContain("Local CLI (Mac)");
+    expect(html).toContain("Copy setup prompt for Google Antigravity");
+    expect(html).toContain("Copy setup prompt for Other MCP clients");
+    expect(html).not.toContain("Copy setup prompt for Cursor");
   });
 });

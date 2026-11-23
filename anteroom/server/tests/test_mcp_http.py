@@ -427,13 +427,15 @@ def test_hosted_mcp_enforces_seller_isolation_and_blocks_non_mcp_routes(cloud, s
     alice_headers = headers(signing_keys, USER_ID)
     bob_headers = headers(signing_keys, BOB)
 
-    # Hosted /api/settings/agent exposes remote MCP URL + Claude/ChatGPT/Gemini setup
+    # Hosted /api/settings/agent exposes the remote MCP URL and setup prompts.
     agent_info = client.get("/api/settings/agent", headers=alice_headers)
     assert agent_info.status_code == 200
     agent_body = agent_info.json()
     assert agent_body["hosted"] is True
     assert agent_body["mcp_url"].endswith("/api/mcp")
-    assert {c["id"] for c in agent_body["remote_clients"]} == {"claude", "chatgpt", "gemini"}
+    assert {c["id"] for c in agent_body["remote_clients"]} == {"claude", "chatgpt", "antigravity", "generic"}
+    for mcp_client in agent_body["remote_clients"]:
+        assert agent_body["mcp_url"] in mcp_client["prompt"]
 
     # Alice and Bob each mint their own MCP access token
     alice_tok_resp = client.post("/api/settings/mcp-tokens", headers=alice_headers, json={"name": "Alice Claude"})

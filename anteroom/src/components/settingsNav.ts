@@ -292,7 +292,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     title: "Connect an agent",
     section: "agents",
     targetId: "agent-remote-mcp",
-    searchTerms: ["anteroom", "cli", "command line", "mcp", "remote mcp", "access token", "claude", "chatgpt", "gemini", "cursor", "claude desktop", "claude code", "agent"],
+    searchTerms: ["anteroom", "cli", "command line", "mcp", "remote mcp", "access token", "claude", "chatgpt", "codex", "antigravity", "cursor", "claude desktop", "claude code", "agent", "setup prompt"],
   },
   {
     id: "tailscale-https",
