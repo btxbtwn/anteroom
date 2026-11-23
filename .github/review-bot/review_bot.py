@@ -347,8 +347,8 @@ def render_pr_summary(data: dict) -> str:
 
 def merge_pr_body(body: str | None, block: str) -> str:
     """Replace prior Claude/CodeRabbit release-notes blocks; keep author text."""
-    text = PR_SUMMARY_BLOCK.sub("\n", body or "")
-    text = CODERABBIT_NOTES_BLOCK.sub("\n", text).rstrip()
+    text = PR_SUMMARY_BLOCK.sub("\n\n", body or "")
+    text = CODERABBIT_NOTES_BLOCK.sub("\n\n", text).rstrip()
     if not block:
         return f"{text}\n" if text else ""
     if text:

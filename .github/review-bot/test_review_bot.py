@@ -155,6 +155,23 @@ class RenderTests(unittest.TestCase):
         self.assertIn("* **Bug Fixes**\n  * New.", stripped)
         self.assertEqual(bot.merge_pr_body(author, ""), author if author.endswith("\n") else author + "\n")
 
+    def test_merge_pr_body_preserves_paragraphs_around_removed_summary(self):
+        fresh = bot.render_pr_summary({"summary": [{"category": "Bug Fixes", "bullets": ["New."]}]})
+        markers = (
+            (bot.PR_SUMMARY_START, bot.PR_SUMMARY_END),
+            (
+                "<!-- coderabbit-ai-generated:v1 -->",
+                "<!-- end of auto-generated comment: release notes by coderabbit.ai -->",
+            ),
+        )
+        for start, end in markers:
+            with self.subTest(start=start):
+                body = f"Fixed it.\n\n{start}\nOld summary.\n{end}\n\nScreenshots follow."
+                self.assertEqual(
+                    bot.merge_pr_body(body, fresh),
+                    f"Fixed it.\n\nScreenshots follow.\n\n{fresh}\n",
+                )
+
     def test_addressed_is_added_once(self):
         once = bot.addressed_body("finding", "1234567890")
         self.assertTrue(once.endswith("✅ Addressed in commit 1234567"))
