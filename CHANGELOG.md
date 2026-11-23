@@ -6,6 +6,10 @@ file: Settings → General → About → What's new.
 
 Entry format: `## <version> — <YYYY-MM-DD>` followed by bullets.
 
+## 0.1.1154 — 2026-11-23
+
+- Fix Today failing to load when a marketplace needs you to sign in again.
+
 ## 0.1.1153 — 2026-11-23
 
 - Give the hosted web app 4 GB of memory to reduce the risk of outages during memory spikes.
