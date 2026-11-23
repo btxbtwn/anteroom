@@ -74,7 +74,12 @@ For a main merge (`conflict-files.json` or `merge_clean`):
 3. Never edit `.github/`, `anteroom/VERSION` or `CHANGELOG.md` to resolve
    conflicts — if those are the only conflicts, leave them and set
    `conflict_result.outcome` to `not_fixed`.
-4. Validate with the narrowest checks for the touched files.
+4. Validate with the narrowest checks for the touched files. When
+   `context.json` has `dependencies_installed: false`, a lockfile
+   (`anteroom/package-lock.json` or `anteroom/uv.lock`) is conflicted and the
+   test environment was not installed: resolve it by keeping both sides'
+   entries consistent with the merged `package.json` / `pyproject.toml`, and
+   say in `validation` that tests could not run.
 
 When all fixes pass, finish the merge commit if needed, commit the other fixes
 once (if any) with a message that names the findings or CI jobs fixed, then

@@ -53,6 +53,8 @@ CODERABBIT_NOTES_BLOCK = re.compile(
 MAX_ROUNDS = 3
 # Failed CI log kept for the model; enough for the failure, not the whole run.
 CI_LOG_CHARS = 80_000
+# The auto-fix job installs from these; with conflict markers it cannot.
+LOCKFILES = ("anteroom/package-lock.json", "anteroom/uv.lock")
 # Auto-fix never pushes changes to these; they are release and CI controls.
 PROTECTED_PATHS = (".github/", "anteroom/VERSION", "CHANGELOG.md")
 SEVERITY_ICON = {"Critical": "🔴", "Major": "🟠", "Minor": "🟡"}
@@ -513,6 +515,10 @@ def begin_main_merge(pr: int) -> tuple[bool, list[str], str]:
     )
 
 
+def lockfile_conflict(conflict_files: list[str]) -> bool:
+    return any(path in LOCKFILES for path in conflict_files)
+
+
 def expected_merge_tree(head_before: str, main_sha: str) -> str:
     """Tree git itself produces merging main into head_before (conflicted paths keep markers)."""
     result = subprocess.run(
@@ -867,6 +873,7 @@ def prepare_autofix(args) -> None:
                 "merge_clean": merge_clean,
                 "conflict_files": conflict_files,
                 "main_sha": main_sha,
+                "dependencies_installed": not lockfile_conflict(conflict_files),
             },
             indent=2,
         )
@@ -878,6 +885,7 @@ def prepare_autofix(args) -> None:
         ci_failures=len(ci_failures),
         conflicts=len(conflict_files),
         merge_clean=str(merge_clean).lower(),
+        lockfile_conflict=str(lockfile_conflict(conflict_files)).lower(),
     )
 
 

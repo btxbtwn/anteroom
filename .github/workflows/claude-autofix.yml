@@ -38,9 +38,11 @@ permissions:
 jobs:
   resolve:
     name: Resolve pull request
+    # In a called workflow github.event_name is the caller's event (push from
+    # claude-conflict-autofix.yml, pull_request from claude-review.yml), so
+    # workflow_call and workflow_dispatch are recognised by their PR input.
     if: >-
-      github.event_name == 'workflow_call' ||
-      github.event_name == 'workflow_dispatch' ||
+      inputs.pr_number > 0 ||
       (github.event_name == 'pull_request_review' &&
        github.event.review.user.login == 'chatgpt-codex-connector[bot]' &&
        github.event.pull_request.head.repo.full_name == github.repository) ||
@@ -137,14 +139,15 @@ jobs:
         run: |
           git config user.name "claude[bot]"
           git config user.email "41898282+claude[bot]@users.noreply.github.com"
-      # workflow_run always uses this file from the default branch; keep the
-      # bot scripts in sync with that definition so older PR heads still work.
-      # Extract outside the worktree so Claude cannot stage them into a fix.
+      # workflow_run always uses this file from the default branch, and the
+      # push-triggered conflict caller runs from main too; keep the bot scripts
+      # in sync with that definition so older PR heads still work. Extract
+      # outside the worktree so Claude cannot stage them into a fix.
       - name: Load review-bot scripts
         id: bot
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+          if [ "${{ github.event_name }}" = "workflow_run" ] || [ "${{ github.event_name }}" = "push" ]; then
             git fetch --quiet origin "${{ github.event.repository.default_branch }}"
             mkdir -p "$RUNNER_TEMP/review-bot-src"
             git archive "origin/${{ github.event.repository.default_branch }}" .github/review-bot \
@@ -172,8 +175,10 @@ jobs:
         if: steps.prepare.outputs.skip == 'false'
         with:
           version: "0.12.13"
+      # A conflicted lockfile has markers in it and cannot install; Claude
+      # resolves it without the test environment.
       - name: Install dependencies so Claude can run tests
-        if: steps.prepare.outputs.skip == 'false'
+        if: steps.prepare.outputs.skip == 'false' && steps.prepare.outputs.lockfile_conflict != 'true'
         working-directory: anteroom
         run: |
           python -m venv .venv

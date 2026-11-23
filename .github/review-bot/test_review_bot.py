@@ -317,6 +317,12 @@ class AutofixTests(unittest.TestCase):
         self.assertTrue(bot.truncate_log("x" * 10, limit=4).startswith("...(truncated"))
         self.assertEqual(bot.truncate_log("short", limit=100), "short")
 
+    def test_lockfile_conflicts_skip_the_dependency_install(self):
+        self.assertTrue(bot.lockfile_conflict(["app.py", "anteroom/package-lock.json"]))
+        self.assertTrue(bot.lockfile_conflict(["anteroom/uv.lock"]))
+        self.assertFalse(bot.lockfile_conflict(["anteroom/package.json", "uv.lock"]))
+        self.assertFalse(bot.lockfile_conflict([]))
+
     def test_protected_conflict_note_posts_once_per_head(self):
         files = [".github/workflows/ci.yml"]
         self.assertTrue(bot.protected_conflict_note_needed([], "h", files))
