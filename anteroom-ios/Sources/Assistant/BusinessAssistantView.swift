@@ -61,6 +61,7 @@ struct BusinessAssistantView: View {
                 return .handled
             })
             .task { await model.loadThreads() }
+            .task { await model.loadName() }
             // One haptic and one announcement per answer, never per word (Apple HIG).
             .sensoryFeedback(.success, trigger: model.answersFinished)
             .sensoryFeedback(.error, trigger: model.answersFailed)
@@ -69,7 +70,7 @@ struct BusinessAssistantView: View {
             .onChange(of: model.answersFailed) { AccessibilityNotification.Announcement("The answer stopped with an error").post() }
             // Pick an answer back up after locking the phone or leaving the app.
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { Task { await model.refresh() } }
+                if phase == .active { Task { await model.refresh(); await model.loadName() } }
             }
         }
     }
@@ -82,7 +83,7 @@ struct BusinessAssistantView: View {
         GeometryReader { geometry in
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text(AssistantFormat.greeting())
+                    Text(AssistantFormat.greeting(name: model.preferredName))
                         .font(.title2.weight(.semibold))
                         .frame(maxWidth: .infinity)
                         .multilineTextAlignment(.center)

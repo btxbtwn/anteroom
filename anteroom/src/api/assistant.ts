@@ -5,6 +5,7 @@ export type { AssistantAutomation };
 
 /** Query keys for what the seller told the assistant and what it remembers (Settings → Assistant). */
 export const ASSISTANT_NOTE_KEY = ["assistant", "note"] as const;
+export const ASSISTANT_NAME_KEY = ["assistant", "name"] as const;
 export const ASSISTANT_MEMORY_KEY = ["assistant", "memory"] as const;
 
 /** One fact the assistant keeps about the shop, across every conversation. */

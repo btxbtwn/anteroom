@@ -746,6 +746,9 @@ export const api = {
     /** What the seller told the assistant about how they run the shop. */
     note: () => request<{ note: string }>("/assistant/note"),
     saveNote: (note: string) => request<{ note: string }>("/assistant/note", { method: "PUT", body: JSON.stringify({ note }) }),
+    /** What the seller asked to be called; the home screen greets them by it. */
+    name: () => request<{ name: string }>("/assistant/name"),
+    saveName: (name: string) => request<{ name: string }>("/assistant/name", { method: "PUT", body: JSON.stringify({ name }) }),
     /** Facts the assistant learned in chat and keeps after a conversation is cleared. */
     memory: () => request<{ memories: AssistantMemory[] }>("/assistant/memory"),
     forget: (id: string) =>

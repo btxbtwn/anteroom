@@ -246,6 +246,19 @@ def test_the_brief_stays_small_however_big_the_shop_grows(workspace):
     assert len(big.brief) < len(small.brief) + 16_000
     for shop in (small, big):
         shop.lookups.close()
+
+
+def test_the_seller_sets_the_name_the_home_screen_greets_them_by(workspace):
+    _db, client = workspace
+    assert client.get("/api/assistant/name").json() == {"name": ""}
+    assert client.put("/api/assistant/name", json={"name": "  Cristian   Ariel "}).json() == {"name": "Cristian Ariel"}
+    assert client.get("/api/assistant/name").json() == {"name": "Cristian Ariel"}
+    assert client.put("/api/assistant/name", json={"name": "x" * 41}).status_code == 422
+    assert client.get("/api/assistant/name").json() == {"name": "Cristian Ariel"}
+    assert client.put("/api/assistant/name", json={"name": ""}).json() == {"name": ""}
+    assert client.get("/api/assistant/name").json() == {"name": ""}
+
+
 def test_the_sellers_note_about_the_business_leads_the_brief(workspace, monkeypatch):
     db, client = workspace
     assert client.get("/api/assistant/note").json() == {"note": ""}

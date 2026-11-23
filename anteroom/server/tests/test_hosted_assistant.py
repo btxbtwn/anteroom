@@ -46,6 +46,8 @@ def test_assistant_answers_privately_per_seller_without_reading_local_sourcing(w
 
     assert client.put('/api/assistant/note', headers=alice, json={'note': 'Alice sells coats'}).status_code == 200
     assert client.get('/api/assistant/note', headers=bob).json()['note'] != 'Alice sells coats'
+    assert client.put('/api/assistant/name', headers=alice, json={'name': 'Alice'}).json() == {'name': 'Alice'}
+    assert client.get('/api/assistant/name', headers=bob).json() == {'name': ''}
     thread = client.post('/api/assistant/threads', headers=alice).json()['id']
     image = io.BytesIO()
     Image.new('RGB', (8, 6), 'blue').save(image, 'PNG')

@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type Mouse
 import { ArrowUpRightIcon, CircleAlertIcon, HourglassIcon, PercentIcon, TagIcon, TrendingUpIcon, type LucideIcon } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
-import { ASSISTANT_MEMORY_KEY, AssistantRefused, type AssistantMessage, type AssistantThread } from "../api/assistant";
+import { ASSISTANT_MEMORY_KEY, ASSISTANT_NAME_KEY, AssistantRefused, type AssistantMessage, type AssistantThread } from "../api/assistant";
 import type { ChatAttachment, ChatAttachmentUpload } from "../api/types";
 import { useWorkspaceRuntime } from "../app/runtime";
 import { invalidateTopics } from "../cloud/liveUpdates";
@@ -51,12 +51,12 @@ export const ASSISTANT_STARTERS: readonly { text: string; icon: LucideIcon }[] =
   { text: "Mark down everything listed over 90 days by 15%.", icon: PercentIcon },
 ];
 
-/** The home screen's greeting, by the seller's local time. */
-export function greeting(now = new Date()): string {
+/** The home screen's greeting, by the seller's local time, with the name they asked to be called. */
+export function greeting(name = "", now = new Date()): string {
   const hour = now.getHours();
-  if (hour >= 5 && hour < 12) return "Good morning";
-  if (hour >= 12 && hour < 18) return "Good afternoon";
-  return "Good evening";
+  const salutation = hour >= 5 && hour < 12 ? "Good morning" : hour >= 12 && hour < 18 ? "Good afternoon" : "Good evening";
+  const called = name.trim();
+  return called ? `${salutation}, ${called}` : salutation;
 }
 
 /** How many past chats the home screen offers to pick back up, as Gemini's "Recent". */
@@ -214,6 +214,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
     queryKey: THREADS_KEY,
     queryFn: ({ signal }) => api.assistant.threads({ signal }),
   });
+  const name = useQuery({ queryKey: ASSISTANT_NAME_KEY, queryFn: api.assistant.name });
   const bucketKey = threadId ?? "__new__";
   const draftKey = `assistant:${bucketKey}`;
   const [input, setInput] = useComposerDraftText(draftKey);
@@ -906,7 +907,7 @@ export function AssistantPage({ onOpenProviders, onOpenListing, threadId = null,
         <div className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-4">
           {/* Centered a little above the middle, as wide as the composer's surface so the questions line up with it. */}
           <div className="my-auto flex w-full max-w-[calc(var(--chat-content-max-width)+2rem)] flex-col pt-8 pb-[12vh] max-[900px]:pb-6">
-            <h1 className="mx-3 mb-5 text-center font-semibold sm:mx-4 text-2xl tracking-tight text-foreground">{greeting()}</h1>
+            <h1 className="mx-3 mb-5 text-center font-semibold sm:mx-4 text-2xl tracking-tight text-foreground">{greeting(name.data?.name)}</h1>
             {showStandaloneError ? (
               <Alert variant="error" className="mx-3 mb-3 sm:mx-4">
                 <CircleAlertIcon />

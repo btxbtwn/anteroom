@@ -49,8 +49,11 @@ from anteroom.services.streaming import (
 )
 from anteroom.services.user_settings import (
     MAX_BUSINESS_NOTE_CHARS,
+    MAX_PREFERRED_NAME_CHARS,
     get_business_note,
+    get_preferred_name,
     set_business_note,
+    set_preferred_name,
 )
 
 log = logging.getLogger("anteroom.assistant")
@@ -100,6 +103,11 @@ class AssistantQuestion(BaseModel):
 
 class BusinessNote(BaseModel):
     note: str = Field(max_length=MAX_BUSINESS_NOTE_CHARS)
+
+
+class PreferredName(BaseModel):
+    # Room for surrounding spaces; set_preferred_name trims and enforces the limit.
+    name: str = Field(max_length=MAX_PREFERRED_NAME_CHARS * 4)
 
 
 @router.get("/threads")
@@ -161,6 +169,20 @@ def get_note():
 @router.put("/note")
 def save_note(body: BusinessNote):
     return {"note": set_business_note(body.note)}
+
+
+@router.get("/name")
+def get_name():
+    """What the seller asked to be called; the home screen greets them by it."""
+    return {"name": get_preferred_name()}
+
+
+@router.put("/name")
+def save_name(body: PreferredName):
+    try:
+        return {"name": set_preferred_name(body.name)}
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.get("/memory")
