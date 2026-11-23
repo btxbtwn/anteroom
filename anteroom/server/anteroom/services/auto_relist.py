@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any, cast
@@ -1104,10 +1105,13 @@ async def run_auto_relist(
     delister=None,
     lister=None,
     offer_checker=None,
+    time_budget: timedelta | None = None,
 ) -> list[dict[str, Any]]:
     """Run per-marketplace unattended auto-relist / eBay auto-recreate for opted-in marketplaces.
 
     Releases DB connections before every external marketplace/extension await.
+    Once ``time_budget`` is spent, no further relist starts; the next pass takes
+    the rest, oldest first.
     """
     moment = _as_naive_utc(now) or _now()
     plan = await in_worker_session(
@@ -1216,7 +1220,11 @@ async def run_auto_relist(
     active_offer_checker = offer_checker if offer_checker is not None else check_active_buyer_offer
 
     outcomes: list[dict[str, Any]] = []
-    for entry in plan:
+    started = time.monotonic()
+    for index, entry in enumerate(plan):
+        if time_budget is not None and index and time.monotonic() - started >= time_budget.total_seconds():
+            log.info("Auto-relist pass used its %s; %d due listings wait for the next pass.", time_budget, len(plan) - index)
+            break
         conv_id = entry["conversation_id"]
         market = entry["marketplace"]
         old_id = entry["listing_id"]
