@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["results", "blocking"],
+  "properties": {
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["comment_id", "outcome", "explanation", "validation"],
+        "properties": {
+          "comment_id": {"type": "integer"},
+          "outcome": {"type": "string", "enum": ["fixed", "already_addressed", "inapplicable", "not_fixed"]},
+          "explanation": {"type": "string"},
+          "validation": {"type": "string"}
+        }
+      }
+    },
+    "blocking": {"type": ["string", "null"]}
+  }
+}
